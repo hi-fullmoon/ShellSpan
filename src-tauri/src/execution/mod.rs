@@ -26,6 +26,7 @@ mod redaction;
 mod request;
 mod result;
 mod ssh;
+mod sudo_runner;
 mod target;
 
 #[cfg(test)]
@@ -49,3 +50,4 @@ pub(crate) use result::ReviewedSshExecutionResult;
 pub(crate) use ssh::execute_reviewed_ssh_command;
 pub(crate) use ssh::open_ssh_execution_session;
 pub(crate) use ssh::start_ssh_exec_channel;
+pub(crate) use sudo_runner::{execute_restricted_sudo, RunnerOutcome};

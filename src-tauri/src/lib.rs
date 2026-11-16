@@ -30,6 +30,7 @@ mod remote_health;
 mod runbook;
 mod session;
 mod sftp_pool;
+mod sudo_policy;
 pub mod terminal_broker;
 mod terminal_command;
 pub(crate) mod terminal_display_origin;
@@ -461,6 +462,7 @@ pub fn run() {
             agent_runtime::agent_runtime_resume,
             agent_runtime::agent_runtime_retry_model,
             agent_runtime::agent_runtime_approve_tool,
+            agent_runtime::agent_runtime_respond_sudo,
             agent_runtime::agent_runtime_reject_tool,
             agent_runtime::agent_runtime_get_pending_approval_arguments,
             agent_runtime::agent_runtime_get_session,
@@ -565,6 +567,8 @@ pub fn run() {
             commands::add_profile,
             commands::update_profile,
             commands::remove_profile,
+            commands::get_profile_sudo_policy,
+            commands::save_profile_sudo_policy,
             commands::load_preferences,
             commands::save_preferences,
             frontend_storage::load_ui_preferences,

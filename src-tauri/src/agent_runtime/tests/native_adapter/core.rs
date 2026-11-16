@@ -94,6 +94,95 @@
     }
 
     #[test]
+    fn configured_sudo_resolution_requires_the_exact_host_operation_and_current_revision() {
+        use crate::models::{ProfileAuthMethod, ProfileRow};
+        use crate::sudo_policy::{SaveProfileSudoPolicy, SudoOperation, SudoRunner};
+        let temp = tempfile::tempdir().unwrap();
+        let database = Database::open(&temp.path().join("db")).unwrap();
+        let target = target_native(&remote_target()).unwrap();
+        let profile = ProfileRow {
+            id: "profile-remote".into(),
+            name: "Remote".into(),
+            host: "fixture.example".into(),
+            port: 22,
+            username: "tester".into(),
+            auth_method: ProfileAuthMethod::Password,
+            keychain_key_id: None,
+            jump_host_config: None,
+            organization_json: None,
+            created_at: 1,
+            updated_at: 1,
+        };
+        database.insert_profile(&profile).unwrap();
+        let other = ProfileRow {
+            id: "other".into(),
+            ..profile.clone()
+        };
+        database.insert_profile(&other).unwrap();
+        let input = json!({"sudoOperationId":"check-backup","explanation":"Verify backup"});
+        assert!(normalize_sudo_operation(&database, &input, &target).is_err());
+        let policy = database.profile_sudo_policy(&profile.id).unwrap();
+        database
+            .save_profile_sudo_policy(
+                &profile.id,
+                SaveProfileSudoPolicy {
+                    profile_binding: policy.profile_binding,
+                    revision: policy.revision,
+                    runner: Some(SudoRunner {
+                        port: 2223,
+                        username: "shellspan-runner".into(),
+                        host_key_sha256: "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                            .into(),
+                    }),
+                    operations: vec![SudoOperation {
+                        id: "check-backup".into(),
+                        label: "Check backups".into(),
+                        command: "/usr/local/sbin/check-backup 'weekly primary'".into(),
+                    }],
+                },
+            )
+            .unwrap();
+        let mut injection = input.clone();
+        injection["command"] = json!("/usr/bin/id");
+        assert!(normalize_sudo_operation(&database, &injection, &target).is_err());
+        let mut unconfigured = remote_target();
+        unconfigured.profile_id = Some(other.id);
+        assert!(normalize_sudo_operation(
+            &database,
+            &input,
+            &target_native(&unconfigured).unwrap()
+        )
+        .is_err());
+
+        let resolved = normalize_sudo_operation(&database, &input, &target).unwrap();
+        assert_eq!(
+            resolved["command"],
+            "/usr/local/sbin/check-backup 'weekly primary'"
+        );
+        let grant: crate::agent_runtime::ExecCommandArgumentsNative =
+            serde_json::from_value(resolved).unwrap();
+        crate::sudo_policy::verify_grant(&database, &target, &grant).unwrap();
+        let mut forged = grant.clone();
+        forged.command = "/usr/bin/id".into();
+        assert!(crate::sudo_policy::verify_grant(&database, &target, &forged).is_err());
+
+        let saved = database.profile_sudo_policy(&profile.id).unwrap();
+        database
+            .save_profile_sudo_policy(
+                &profile.id,
+                SaveProfileSudoPolicy {
+                    profile_binding: saved.profile_binding,
+                    revision: saved.revision,
+                    runner: saved.runner,
+                    operations: vec![],
+                },
+            )
+            .unwrap();
+        assert!(crate::sudo_policy::verify_grant(&database, &target, &grant).is_err());
+        assert!(normalize_sudo_operation(&database, &input, &target).is_err());
+    }
+
+    #[test]
     fn terminal_alias_is_strict_and_cannot_supply_effect_or_execution_policy() {
         let target = target_native(&local_target()).unwrap();
         let (name, arguments) = normalize_arguments(

@@ -69,6 +69,12 @@ pub(super) fn validate_question(args: &QuestionArguments, q: &Question) -> Resul
     for action in q.user_action.iter().chain(actions) {
         text(&action.instructions, 8192)?;
         text(&action.verification_command, 8192)?;
+        if [&action.instructions, &action.verification_command]
+            .into_iter()
+            .any(|text| super::super::sudo_policy_reference(text))
+        {
+            return Err(super::super::SUDO_POLICY_DENIED.into());
+        }
         if action.verification_command.contains(['\n', '\r', '\0']) {
             return Err("verification_command must be one bounded non-interactive command".into());
         }

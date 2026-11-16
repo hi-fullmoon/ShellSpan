@@ -8,14 +8,15 @@ use crate::models::{
     ClosedReasonKind, ConnectionError, ConnectionPreflightRequest, ConnectionPreflightResult,
     CopyLocalPathsRequest, CopyRemotePathRequest, CopyRemoteToRemoteRequest,
     CreateRemoteEntryRequest, CreateSessionError, DeleteRemotePathRequest,
-    DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult, KeyCredentialSummary,
-    KnownHostEntry, LocalDirectoryListing, LocalFileEntry, LocalTerminalProfile, LogFileInfo,
-    ManagedSession, OpenRemoteFileRequest, PortForwardStartRequest, PreflightCancellationRegistry,
-    ProfileRow, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest,
-    RemoteDirectoryListing, RemoteDirectoryRequest, RemoteEntryOwners, RemoteEntryOwnersRequest,
-    RemoteFileKind, RemoteFileReadCancellationRegistry, RemoteFsError, RenameRemotePathRequest,
-    SessionCommand, SessionCommandSender, SessionCreateRequest, SessionIdentity, SessionStatus,
-    SessionSummary, SessionTerminalKind, SftpBookmarkRow, TransferBatchResult, TrustHostRequest,
+    DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult, JumpHostConfig,
+    KeyCredentialSummary, KnownHostEntry, LocalDirectoryListing, LocalFileEntry,
+    LocalTerminalProfile, LogFileInfo, ManagedSession, OpenRemoteFileRequest,
+    PortForwardStartRequest, PreflightCancellationRegistry, ProfileRow, ReadRemoteFileRequest,
+    ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
+    RemoteDirectoryRequest, RemoteEntryOwners, RemoteEntryOwnersRequest, RemoteFileKind,
+    RemoteFileReadCancellationRegistry, RemoteFsError, RenameRemotePathRequest, SessionCommand,
+    SessionCommandSender, SessionCreateRequest, SessionIdentity, SessionStatus, SessionSummary,
+    SessionTerminalKind, SftpBookmarkRow, TransferBatchResult, TrustHostRequest,
     UpdateRemotePermissionsRequest, UploadLocalPathsRequest, REMOTE_FILE_READ_CANCELLED_MESSAGE,
 };
 use crate::sftp_pool::SftpPool;
@@ -3508,10 +3509,18 @@ pub(crate) fn resolve_keychain_key_for_remote(
         }
     }
     if let Some(ref mut jump) = request.jump_host {
-        if let Some(key_id) = jump.keychain_key_id.as_deref() {
-            if jump.private_key_data.is_none() {
-                jump.private_key_data = Some(load_keychain_private_key(credentials, key_id)?);
-            }
+        resolve_keychain_key_for_jump_host(credentials, jump)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn resolve_keychain_key_for_jump_host(
+    credentials: &crate::keychain::CredentialManager,
+    jump: &mut JumpHostConfig,
+) -> Result<(), String> {
+    if let Some(key_id) = jump.keychain_key_id.as_deref() {
+        if jump.private_key_data.is_none() {
+            jump.private_key_data = Some(load_keychain_private_key(credentials, key_id)?);
         }
     }
     Ok(())
@@ -4307,6 +4316,42 @@ pub(crate) fn update_profile(
 #[tauri::command]
 pub(crate) fn remove_profile(db: State<'_, Database>, id: String) -> Result<(), String> {
     db.delete_profile(&id)
+}
+
+#[tauri::command]
+pub(crate) async fn get_profile_sudo_policy(
+    db: State<'_, Database>,
+    profile_id: String,
+) -> Result<crate::sudo_policy::ProfileSudoPolicy, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || db.profile_sudo_policy(&profile_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn save_profile_sudo_policy(
+    db: State<'_, Database>,
+    sessions: State<'_, SessionManager>,
+    profile_id: String,
+    input: crate::sudo_policy::SaveProfileSudoPolicy,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    let sessions = sessions.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let current = db.profile_sudo_policy(&profile_id)?;
+        if let Some(runner) = &input.runner {
+            if current.runner.as_ref() != Some(runner)
+                && (sessions.has_remote_account(&current.host, current.port, &current.username)?
+                    || sessions.has_remote_account(&current.host, runner.port, &runner.username)?)
+            {
+                return Err("AGENT_SUDO_RUNNER_REQUIRES_DISCONNECT".into());
+            }
+        }
+        db.save_profile_sudo_policy(&profile_id, input)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

@@ -669,6 +669,14 @@ impl AgentRuntime {
 
     pub(crate) fn configure_native(&self, app: tauri::AppHandle) -> Result<(), String> {
         self.native_engine.reconcile_remote_visible_rollout()?;
+        let sudo_emitter = app.clone();
+        self.native_engine
+            .sudo_prompts
+            .set_publisher(Arc::new(move |event| {
+                sudo_emitter
+                    .emit(super::AGENT_SUDO_PROMPT_EVENT, event)
+                    .map_err(|_| "failed to open the sudo password prompt".into())
+            }))?;
         let emitter = app.clone();
         self.native_engine
             .set_terminal_lease_publisher(Arc::new(move |event| {
@@ -683,6 +691,14 @@ impl AgentRuntime {
             )?))?;
         }
         Ok(())
+    }
+
+    pub(crate) fn respond_to_sudo_prompt(
+        &self,
+        prompt_id: uuid::Uuid,
+        password: Option<zeroize::Zeroizing<String>>,
+    ) -> Result<(), String> {
+        self.native_engine.sudo_prompts.respond(prompt_id, password)
     }
 
     pub(crate) fn observe_terminal_output(&self, session_id: &str, chunk: &str) -> String {

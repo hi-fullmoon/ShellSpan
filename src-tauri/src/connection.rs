@@ -518,7 +518,7 @@ pub(crate) fn open_authenticated_session(
     Ok(session)
 }
 
-fn open_handshaken_session(
+pub(crate) fn open_handshaken_session(
     tcp: TcpStream,
     host: &str,
     port: u16,
@@ -630,22 +630,8 @@ pub(crate) fn connect_through_jump_host(
         jump.host, jump.port, target_host, target_port
     );
 
-    // 1. Connect to jump host
-    let jump_tcp = connect_tcp_stream(&jump.host, jump.port)
-        .map_err(|message| ConnectionError::Other { message })?;
-    let jump_session = open_authenticated_session(
-        jump_tcp,
-        &jump.username,
-        jump.auth_method,
-        jump.password.as_deref(),
-        jump.private_key_data.as_deref(),
-        jump.passphrase.as_deref(),
-        &jump.host,
-        jump.port,
-        known_hosts_path,
-    )?;
-
-    let client_stream = open_jump_bridge(&jump_session, target_host, target_port)?;
+    let (jump_session, client_stream) =
+        connect_jump_tcp_stream(jump, target_host, target_port, known_hosts_path)?;
 
     // Open authenticated session on the client side of the bridge.
     let target_session = open_authenticated_session(
@@ -662,6 +648,32 @@ pub(crate) fn connect_through_jump_host(
 
     debug!("Connected to target through jump host successfully");
     Ok((jump_session, target_session))
+}
+
+/// Authorize the jump host and open a TCP stream without authenticating to the
+/// destination. Callers must verify the destination key independently.
+pub(crate) fn connect_jump_tcp_stream(
+    jump: &JumpHostConfig,
+    target_host: &str,
+    target_port: u16,
+    known_hosts_path: Option<&Path>,
+) -> Result<(Session, TcpStream), ConnectionError> {
+    let jump_tcp = connect_tcp_stream(&jump.host, jump.port)
+        .map_err(|message| ConnectionError::Other { message })?;
+    let jump_session = open_authenticated_session(
+        jump_tcp,
+        &jump.username,
+        jump.auth_method,
+        jump.password.as_deref(),
+        jump.private_key_data.as_deref(),
+        jump.passphrase.as_deref(),
+        &jump.host,
+        jump.port,
+        known_hosts_path,
+    )?;
+
+    let client_stream = open_jump_bridge(&jump_session, target_host, target_port)?;
+    Ok((jump_session, client_stream))
 }
 
 fn open_jump_bridge(

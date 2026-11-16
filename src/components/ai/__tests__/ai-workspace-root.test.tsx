@@ -13,9 +13,13 @@ import { withOptimisticConversationNodes, withRetainedFailedSubmissions } from '
 import type { AiSessionView } from '@/lib/ai/session-adapter';
 import { initI18n, t } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
+import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
 import { agentSessionEventFixture } from '@/tests/fixtures/agent-session';
 import { agentSessionBaselineScenarios } from '@/tests/fixtures/agent-session-baseline';
 import { taskTokenBudgetView } from '@/tests/fixtures/task-token-budget';
+import readRecoveryCapture from '@/tests/fixtures/tool-result-read-recovery.json';
+import type { AgentSessionEvent } from '@/types/agent-session';
+import { questionKey, type AnswerQuestionInput } from '@/types/agent-question';
 
 function runningHierarchyView(): AiSessionView {
   const base = agentView('running');
@@ -243,9 +247,17 @@ describe('AiWorkspaceRoot conversation structure', () => {
   it('preserves expanded tools and the draft after returning from tool details', async () => {
     const user = userEvent.setup();
     const base = agentView();
+    const read = projectAgentChatNodes(readRecoveryCapture as readonly AgentSessionEvent[])
+      .flatMap((node) => node.kind === 'turnProcess' ? node.children : [])
+      .find((node) => node.kind === 'tool' && node.state === 'failed');
+    if (read?.kind !== 'tool') throw new Error('Recorded read failure is missing');
     const view = {
       ...base,
-      nodes: base.nodes.map((node) => node.kind === 'turnProcess' ? { ...node, sessionId: 'tool-details-return-test' } : node),
+      nodes: base.nodes.map((node) => node.kind === 'turnProcess' ? {
+        ...node,
+        sessionId: 'tool-details-return-test',
+        children: [...node.children, { ...read, sessionId: base.summary.id }],
+      } : node),
     };
     function DetailsWorkspace() {
       const [navigation, setNavigation] = useState(createAiWorkspaceNavigationState(view.summary.id));
@@ -263,14 +275,18 @@ describe('AiWorkspaceRoot conversation structure', () => {
         />
       );
     }
-    render(<DetailsWorkspace />);
+    const { container } = render(<DetailsWorkspace />);
     const process = screen.getByRole('button', { name: 'Process complete' });
     if (process.getAttribute('aria-expanded') === 'false') await user.click(process);
     const tool = screen.getByRole('button', { name: /^Command:/u });
     await user.click(tool);
     const command = screen.getByRole('button', { name: 'Show full command' });
     await user.click(command);
-    await user.click(screen.getByRole('button', { name: 'Open details for run_terminal_command' }));
+    await user.click(screen.getByRole('button', { name: /^Read:/u }));
+    await user.click(screen.getByRole('button', { name: `Open details for ${read.name}` }));
+    const detail = container.querySelector('[data-slot="ai-tool-details"]');
+    expect(detail).toBeVisible();
+    expect(detail).toHaveTextContent(read.summary);
     expect(tool).not.toBeVisible();
     expect(screen.queryByRole('textbox')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Back' }));
@@ -747,14 +763,15 @@ describe('AiWorkspaceRoot conversation structure', () => {
     expect(onOpen).toHaveBeenCalledWith(base.summary);
   });
 
-  it('keeps the question actionable outside process and preserves ordinary draft', async () => {
+  it('keeps question submission visible briefly after a fast commit and preserves the composer draft', async () => {
     const base = agentView();
     const pendingQuestion: NonNullable<AiSessionView['pendingQuestion']> = {
       identity: { sessionId: 'session-fixture', turnId: 'turn-01', stepId: 'step-01', requestId: 'request-01', callId: 'q', questionRequestId: 'workspace-question' },
       questions: [{ id: 'text', question: 'What next?', multi_select: false }],
       answers: [], status: 'pending', firstSeq: 1, lastSeq: 1, timestamp: '2026-09-04T00:00:00Z',
     };
-    const onAnswerQuestion = vi.fn(async () => undefined);
+    const submitted: AnswerQuestionInput[] = [];
+    const onAnswerQuestion = async (input: AnswerQuestionInput) => { submitted.push(input); };
     const onSubmit = vi.fn();
     const props = { scope: 'workbench' as const, canStartAgent: true, defaultDraft: 'ordinary unsent draft', onAnswerQuestion, onSubmit };
     const view = { ...base, pendingQuestion, status: 'waiting' as const };
@@ -766,10 +783,19 @@ describe('AiWorkspaceRoot conversation structure', () => {
     expect(screen.getByTestId('ai-workspace-composer').textContent).toBe('ordinary unsent draft');
     expect(screen.getByTestId('ai-workspace-composer')).toHaveAttribute('contenteditable', 'true');
     fireEvent.change(within(panel as HTMLElement).getByRole('textbox'), { target: { value: 'Continue' } });
-    await userEvent.click(screen.getByRole('button', { name: 'Submit' }));
-    expect(onAnswerQuestion).toHaveBeenCalledOnce();
+    const button = screen.getByRole('button', { name: 'Submit' });
+    fireEvent.click(button);
+    expect(submitted.map((input) => input.answers)).toEqual([[{ id: 'text', selected: [], custom: 'Continue' }]]);
     expect(onSubmit).not.toHaveBeenCalled();
     rerender(<AiWorkspaceRoot {...props} view={{ ...base, pendingQuestion: null }} />);
+    act(() => useAgentQuestionStore.getState().clear(questionKey(pendingQuestion.identity)));
+    expect(panel).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Saving answers…' })).toBe(button);
+    expect(button.querySelector('[data-slot="spinner"]')).toBeVisible();
+    expect(button).toBeDisabled();
+    expect(within(panel as HTMLElement).getByRole('textbox')).toHaveValue('Continue');
+    await waitFor(() => expect(panel).not.toBeInTheDocument());
+    expect(submitted).toHaveLength(1);
     expect(screen.getByTestId('ai-workspace-composer').textContent).toBe('ordinary unsent draft');
     expect(screen.getByTestId('ai-workspace-composer')).toHaveAttribute('contenteditable', 'true');
   });

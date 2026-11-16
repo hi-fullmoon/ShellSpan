@@ -249,6 +249,9 @@ pub(crate) fn execute_ssh_channel(
             })
         }
     };
+    if let Some(outcome) = observed_terminal_or_deadline(cancellation, deadline) {
+        return outcome;
+    }
     if let Err(error) = start_ssh_exec_channel(&mut channel, command) {
         return SshChannelExecutionOutcome::Failed(SshExecutionFailure {
             category: ExecutionErrorCategory::CommandStartFailed,

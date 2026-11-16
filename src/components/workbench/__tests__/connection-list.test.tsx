@@ -695,10 +695,12 @@ describe('ConnectionList', () => {
 
     for (const name of menuActionNames) {
       const item = screen.getByRole('menuitem', { name });
-      expect(item).toHaveClass('items-center', 'gap-1', "[&_svg:not([class*='size-'])]:size-3.5", '[&>svg]:self-center', '[&>svg]:translate-y-px');
+      expect(item).toHaveClass('items-center', 'gap-1', "[&_svg:not([class*='size-'])]:size-3.5", '[&>svg]:self-center');
+      expect(item).toHaveClass(name === 'common.delete' ? '[&>svg]:translate-y-[0.5px]' : '[&>svg]:translate-y-px');
       expect(item.querySelectorAll(':scope > svg')).toHaveLength(1);
       expect(item.querySelector(':scope > span')).toHaveClass('relative', 'top-px');
     }
+    expect(screen.getByRole('menuitem', { name: 'common.delete' })).toHaveAttribute('data-variant', 'destructive');
     expect(screen.queryByRole('menuitem', { name: 'deployment.openForHost' })).not.toBeInTheDocument();
   });
 });

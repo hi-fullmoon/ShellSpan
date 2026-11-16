@@ -23,7 +23,14 @@ const server = await createServer({
   cacheDir: join(screenshots, 'vite-cache'),
   resolve: { alias: { '@': `${root}src` } },
   esbuild: { jsx: 'automatic' },
-  optimizeDeps: { include: ['react', 'react-dom/client'] },
+  optimizeDeps: {
+    entries: [
+      'src/components/ai/__tests__/agent-content-surfaces.browser-runtime.ts',
+      'src/components/ai/workspace/ai-tool-presentation.tsx',
+      'src/lib/ai/conversation-projection.ts',
+    ],
+    include: ['react', 'react-dom/client'],
+  },
   server: { host: '127.0.0.1', port: 0 },
   plugins: [tailwindcss(), {
     name: 'tool-surface-colors',
@@ -57,12 +64,13 @@ try {
     createRoot(document.getElementById('root')).render(React.createElement(React.Fragment, null,
       React.createElement(AiToolRow, { onInspect: () => {}, node: { ...shared, name: 'exec_command', input: { command: commandText, cwd: '~' }, output: commandOutput } }),
       React.createElement(AiToolRow, { onInspect: () => {}, node: { ...shared, name: 'read_file', input: { path }, output: fileOutput } }),
-      React.createElement(AiToolExpandedContent, { node: failure }),
+      React.createElement(AiToolRow, { onInspect: () => {}, node: failure }),
       React.createElement(AiToolExpandedContent, { node: { ...shared, name: 'git', input: { command: commandText }, output: commandOutput } }),
     ));
   }, { path, commandText, commandOutput, fileOutput, capture });
   await page.locator('.ai-tool-row').first().click();
   await page.locator('.ai-tool-row').nth(1).click();
+  await page.locator('.ai-tool-row').nth(2).click();
   await page.locator('[data-ai-tool-view="read"]').waitFor();
   for (const theme of ['light', 'dark']) {
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
@@ -135,9 +143,11 @@ try {
       await viewport.evaluate(element => element.scrollTo({ top: 0, behavior: 'instant' }));
       for (const selector of ['.ai-terminal-block', '.ai-read-block']) {
         const surface = page.locator(selector === '.ai-read-block' ? '[data-ai-tool-view="read"]' : selector);
-        const details = surface.locator('..').locator('.ai-tool-inspect');
-        assert.equal((await details.boundingBox()).x, (await surface.boundingBox()).x,
-          `${theme}/${width}: details action must align with the card's left edge`);
+        const body = surface.locator('..');
+        assert.equal(await body.getByText('查看详情', { exact: true }).count(), 0,
+          `${theme}/${width}/${selector}: visible results must not show a details action`);
+        assert.equal((await body.boundingBox()).height, (await surface.boundingBox()).height + 8,
+          `${theme}/${width}/${selector}: the result should only retain the card's vertical margins`);
         const copy = surface.getByRole('button', { name: selector === '.ai-terminal-block' ? '复制命令' : '复制输入', exact: true });
         assert.equal(await copy.count(), 1);
         const command = surface.locator('.ai-terminal-command');
@@ -216,17 +226,23 @@ try {
           await page.waitForFunction(() => !document.querySelector('button[aria-label="已复制"]'));
         }
       }
+      const error = page.locator('[data-ai-tool-view="error"]');
+      const errorDetails = error.locator('..').getByText('查看详情', { exact: true });
+      assert.equal(await errorDetails.isVisible(), true, `${theme}/${width}: error-only cards must retain the details action`);
+      assert.equal((await errorDetails.boundingBox()).x, (await error.boundingBox()).x,
+        `${theme}/${width}: the error details action must align with the card`);
       const geometry = await page.locator('.ai-tool-surface-header').evaluateAll(headers => headers.map(header => {
         const box = header.getBoundingClientRect();
         const label = header.firstElementChild.getBoundingClientRect();
         const style = getComputedStyle(header);
-        return { height: box.height,
+        return { height: box.height, labelHeight: label.height, minHeight: parseFloat(style.minHeight),
           font: style.font, color: style.color, labelRight: label.right,
           right: box.right };
       }));
-      assert.ok(geometry.length >= 6, 'Shell, file, error and input/output headings must all be measured');
+      assert.equal(geometry.length, 4, 'Measure the Shell, file, input and output headings');
       for (const heading of geometry) {
-        assert.equal(heading.height, geometry[0].height, 'All tool headings must have equal heights');
+        assert.equal(heading.minHeight, geometry[0].minHeight, 'Tool headings must share a minimum height');
+        assert.equal(heading.height, Math.max(heading.minHeight, heading.labelHeight), 'Headings must fit wrapped labels');
         assert.equal(heading.font, geometry[0].font, 'Heading typography must match');
         assert.equal(heading.color, geometry[0].color, 'Heading colors must match');
         assert.ok(heading.labelRight <= heading.right && heading.right <= width,

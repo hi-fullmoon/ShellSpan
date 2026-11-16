@@ -1,4 +1,17 @@
+import type { AiPendingApproval } from './session-adapter';
+
 export type ApprovalDecision = 'approve' | 'reject';
+
+export function approvalIdentityKey(approval: AiPendingApproval): string {
+  return JSON.stringify([
+    approval.sessionId,
+    approval.turnId,
+    approval.stepId,
+    approval.requestId,
+    approval.callId,
+    approval.approvalId,
+  ]);
+}
 
 export interface ApprovalDecisionRequest {
   readonly context: object;

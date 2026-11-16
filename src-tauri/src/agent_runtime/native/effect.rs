@@ -20,7 +20,17 @@ pub(crate) fn assess_effect_native(
             let arguments =
                 serde_json::from_value::<ExecCommandArgumentsNative>(call.arguments.clone())
                     .map_err(|_| "exec_command arguments cannot be classified".to_string())?;
-            classify_command_effect(&arguments.command)
+            let effect = classify_command_effect(&arguments.command);
+            if arguments.elevated == Some(true)
+                && matches!(
+                    effect,
+                    AgentEffectKindNative::ReadOnly | AgentEffectKindNative::SensitiveRead
+                )
+            {
+                AgentEffectKindNative::StateChange
+            } else {
+                effect
+            }
         }
         ToolEffectModeNative::NativeClassifier if call.tool_name == "terminal_execute" => {
             let arguments =

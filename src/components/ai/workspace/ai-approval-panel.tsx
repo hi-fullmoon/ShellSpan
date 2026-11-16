@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ShieldAlertIcon } from 'lucide-react';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -16,6 +16,7 @@ import {
 import { Spinner } from '@/components/ui/empty-state';
 import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { useI18n } from '@/hooks/useI18n';
+import { approvalIdentityKey, type ApprovalDecision } from '@/lib/ai/approval-decision';
 import { aiErrorMessage } from '@/lib/ai/error-message';
 import { cn } from '@/lib/utils';
 import type { AiPendingApproval } from '@/lib/ai/session-adapter';
@@ -24,17 +25,69 @@ import type { AgentSessionEffect } from '@/types/agent-session';
 import { AiErrorNotice } from './ai-error-notice';
 import { AiToolCopyButton } from './ai-tool-presentation';
 import { AiContentTitle } from './ai-content-title';
+import { AiSubmissionButtonLabel, submissionFeedbackMs } from './ai-submission-button-label';
 import { AI_CONTENT_CODE_CLASS } from './ai-style-classes';
 
 export interface AiApprovalPanelProps {
   readonly approval: AiPendingApproval;
-  readonly decision: 'approve' | 'reject' | null;
+  readonly decision: ApprovalDecision | null;
   readonly error: string | null;
   readonly argumentsLoading?: boolean;
   readonly argumentsError?: string | null;
   readonly onApprove: () => void;
   readonly onReject: () => void;
-  readonly onOpenDetails: () => void;
+  readonly onOpenDetails?: () => void;
+}
+
+export function AiApprovalSeat({ approval, decision, error, argumentsLoading, argumentsError,
+  onApprove, onReject, onOpenDetails }: Omit<AiApprovalPanelProps, 'approval' | 'onApprove' | 'onReject'> & {
+  readonly approval?: AiPendingApproval | null;
+  readonly onApprove?: () => void;
+  readonly onReject?: () => void;
+}): React.ReactNode {
+  const [feedback, setFeedback] = useState<(Pick<AiApprovalPanelProps, 'approval' | 'argumentsLoading' | 'argumentsError'> & {
+    readonly key: string;
+    readonly decision: ApprovalDecision;
+  }) | null>(null);
+  const currentKey = approval ? approvalIdentityKey(approval) : null;
+  const failed = feedback !== null && feedback.key === currentKey && error !== null && decision === null;
+  const retained = failed ? null : feedback;
+
+  useEffect(() => {
+    if (!feedback) return;
+    if (failed) {
+      setFeedback(null);
+      return;
+    }
+    const timeout = setTimeout(() => setFeedback(null), submissionFeedbackMs);
+    return () => clearTimeout(timeout);
+  }, [feedback, failed]);
+
+  const displayed = retained?.approval ?? approval;
+  if (!displayed) return null;
+
+  const submit = (choice: ApprovalDecision, run?: () => void) => {
+    if (!approval || !currentKey || !run || retained || decision) return;
+    // Keep this card mounted if a committed event clears the approval immediately.
+    setFeedback({ key: currentKey, approval, decision: choice, argumentsLoading, argumentsError });
+    run();
+  };
+  const displayedKey = retained?.key ?? currentKey;
+
+  return <div
+    data-slot="ai-approval-overlay"
+    className="min-h-0 min-w-0 [&>[data-slot=ai-approval-panel]]:max-h-[min(600px,45dvh)]"
+  >
+    <AiApprovalPanel key={displayedKey} approval={displayed}
+      decision={retained?.decision ?? decision}
+      error={displayedKey === currentKey ? error : null}
+      argumentsLoading={retained ? retained.argumentsLoading : argumentsLoading}
+      argumentsError={retained ? retained.argumentsError : argumentsError}
+      onApprove={() => submit('approve', onApprove)}
+      onReject={() => submit('reject', onReject)}
+      onOpenDetails={displayedKey === currentKey ? onOpenDetails : undefined}
+    />
+  </div>;
 }
 
 function targetLabel(approval: AiPendingApproval): string {
@@ -153,6 +206,18 @@ export function AiApprovalPanel({
     && !Array.isArray(approval.arguments)
     ? approval.arguments as Record<string, unknown>
     : null;
+  const elevated = command !== null && argumentRecord?.elevated === true;
+  const target = approval.target;
+  const runner = argumentRecord?.sudoOperation && typeof argumentRecord.sudoOperation === 'object'
+    ? argumentRecord.sudoOperation as Record<string, unknown> : null;
+  const username = typeof runner?.runnerUsername === 'string' ? runner.runnerUsername : target?.username;
+  const port = typeof runner?.runnerPort === 'number' ? runner.runnerPort : target?.port;
+  const targetDescription = elevated && username && target?.host
+    ? `${username}@${target.host.includes(':') ? `[${target.host}]` : target.host}:${port ?? 22}`
+    : targetLabel(approval);
+  const approveLabel = t(approval.toolName === 'trash_file'
+    ? 'ai.workspace.approval.action.trashFile'
+    : elevated ? 'ai.workspace.approval.approveAndRun' : 'ai.workspace.approval.approveOnce');
   const volatileArgumentsRequired = argumentRecord?.contentPersisted === false && (
     approval.toolName === 'write_terminal_input'
       ? inputKind === 'text' || inputKind === 'paste'
@@ -166,7 +231,7 @@ export function AiApprovalPanel({
     ?? (volatileArgumentsMissing && !argumentsLoading
       ? t('ai.workspace.approval.previewUnavailable')
       : null);
-  const exactValue = command ?? terminalInput ?? terminalMatch;
+  const exactValue = elevated ? `sudo -- ${command}` : command ?? terminalInput ?? terminalMatch;
   const action = t(APPROVAL_ACTION_KEYS[approval.toolName] ?? 'ai.workspace.approval.action.tool', {
     tool: approval.toolName,
   });
@@ -210,7 +275,7 @@ export function AiApprovalPanel({
               </h3>
             </CardTitle>
             <CardDescription id="ai-approval-description" className="break-words">
-              <AiContentTitle>{t(descriptionKey, { target: targetLabel(approval) })}</AiContentTitle>
+              <AiContentTitle>{t(descriptionKey, { target: targetDescription })}</AiContentTitle>
             </CardDescription>
           </div>
         </div>
@@ -282,11 +347,11 @@ export function AiApprovalPanel({
               <AlertDescription className="flex flex-wrap items-center gap-x-1">
                 <span className="font-medium">{t('ai.workspace.approval.impact')}</span>
                 <span>{t(approval.toolName === 'trash_file' ? 'ai.workspace.approval.trashImpact' : riskKeys.description)}</span>
-                {command && <span>{t('ai.workspace.approval.unsandboxedImpact')}</span>}
+                {command && <span>{t(elevated ? 'ai.workspace.approval.sudoImpact' : 'ai.workspace.approval.unsandboxedImpact')}</span>}
               </AlertDescription>
             </Alert>
 
-            <Button variant="ghost" size="xs" className="self-start" onClick={onOpenDetails}>
+            <Button variant="ghost" size="xs" className="self-start" disabled={!onOpenDetails} onClick={onOpenDetails}>
               {t('ai.workspace.approval.fullParameters')}
             </Button>
 
@@ -300,11 +365,11 @@ export function AiApprovalPanel({
       </ScrollArea>
 
       <CardFooter className="ai-approval-panel-footer shrink-0 justify-end gap-2 px-4 pt-2 pb-3">
-        <Button size="sm" variant="outline" disabled={pending} onClick={onReject} aria-label={t('ai.workspace.approval.reject')}>
-          {t('ai.workspace.approval.reject')}
+        <Button size="sm" variant="outline" disabled={pending} aria-busy={decision === 'reject' || undefined} onClick={onReject} aria-label={t('ai.workspace.approval.reject')}>
+          <AiSubmissionButtonLabel label={t('ai.workspace.approval.reject')} busy={decision === 'reject'} />
         </Button>
-        <Button size="sm" variant="warning" disabled={pending || volatileArgumentsMissing} aria-busy={argumentsLoading || undefined} onClick={onApprove} aria-label={t(approval.toolName === 'trash_file' ? 'ai.workspace.approval.action.trashFile' : 'ai.workspace.approval.approveOnce')}>
-          {t(approval.toolName === 'trash_file' ? 'ai.workspace.approval.action.trashFile' : 'ai.workspace.approval.approveOnce')}
+        <Button size="sm" variant="warning" disabled={pending || volatileArgumentsMissing} aria-busy={decision === 'approve' || argumentsLoading || undefined} onClick={onApprove} aria-label={approveLabel}>
+          <AiSubmissionButtonLabel label={approveLabel} busy={decision === 'approve'} />
         </Button>
       </CardFooter>
       <span className="sr-only" aria-live="polite">

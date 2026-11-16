@@ -343,6 +343,38 @@ describe('AI workspace workflows', () => {
     expect(screen.getByRole('button', { name: 'Allow once' })).toBeDisabled();
   });
 
+  it.each([['Allow once', 'approve'], ['Cancel', 'reject']] as const)(
+    'briefly retains the approval card after %s is committed', async (label, choice) => {
+      const composer = createAiComposerState({
+        phase: 'waitingApproval', runtimeStatus: 'waiting', waitingApproval: true, sessionId: 'agent-workflow',
+      });
+      const decisions: string[] = [];
+      const props = {
+        scope: 'terminal' as const,
+        onApprove: () => { decisions.push('approve'); },
+        onReject: () => { decisions.push('reject'); },
+      };
+      const { rerender } = render(<AiWorkspaceRoot {...props} view={agentView(pendingApproval)} composerState={composer} />);
+      const card = screen.getByRole('group', { name: /Allow this command/ });
+      const button = within(card).getByRole('button', { name: label });
+      fireEvent.click(button);
+      expect(decisions).toEqual([choice]);
+
+      rerender(<AiWorkspaceRoot {...props} view={agentView()} composerState={createAiComposerState({
+        ...composer, phase: 'running', runtimeStatus: 'running', waitingApproval: false,
+      })} />);
+      expect(card).toBeVisible();
+      expect(button.querySelector('[data-slot="spinner"]')).toBeVisible();
+      expect(button).toHaveAttribute('aria-busy', 'true');
+      const other = within(card).getByRole('button', { name: choice === 'approve' ? 'Cancel' : 'Allow once' });
+      expect(other).toBeDisabled();
+      expect(other.querySelector('[data-slot="spinner"]')).toBeNull();
+      fireEvent.click(other);
+      expect(decisions).toEqual([choice]);
+      await waitFor(() => expect(card).not.toBeInTheDocument());
+    },
+  );
+
   it('shows approval pending and failure without reporting an approved result', () => {
     const composer = createAiComposerState({
       phase: 'waitingApproval', runtimeStatus: 'waiting', waitingApproval: true,
@@ -351,9 +383,10 @@ describe('AI workspace workflows', () => {
     const { rerender } = render(
       <AiWorkspaceRoot
         view={agentView(pendingApproval)} scope="terminal" composerState={composer}
-        approvalDecision="approve"
+        onApprove={() => undefined}
       />,
     );
+    fireEvent.click(screen.getByRole('button', { name: 'Allow once' }));
     expect(screen.getByRole('button', { name: 'Allow once' })).toBeDisabled();
     expect(screen.getByText('Submitting approval decision')).toBeInTheDocument();
 
@@ -365,6 +398,7 @@ describe('AI workspace workflows', () => {
     );
     expect(screen.getByRole('alert')).toHaveTextContent('Runtime refused the decision');
     expect(screen.getByRole('button', { name: 'Allow once' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Allow once' }).querySelector('[data-slot="spinner"]')).toBeNull();
     expect(screen.getByRole('group', { name: /Allow this command/ })).toBeVisible();
   });
 

@@ -64,7 +64,7 @@ export const ConnectionCardGrid = ({ children }: { children: React.ReactNode }) 
 );
 const CONNECTION_MENU_ITEM_CLASS =
   "gap-1 px-2.5 py-1.5 text-xs [&_svg:not([class*='size-'])]:size-3.5 [&>svg]:self-center [&>svg]:translate-y-px text-app-text focus:bg-app-primary/10 focus:text-app-primary [&_svg]:text-muted-foreground focus:[&_svg]:text-app-primary";
-const CONNECTION_MENU_DESTRUCTIVE_ITEM_CLASS = "gap-1 px-2.5 py-1.5 text-xs [&_svg:not([class*='size-'])]:size-3.5 [&>svg]:self-center [&>svg]:translate-y-px";
+const CONNECTION_MENU_DESTRUCTIVE_ITEM_CLASS = "gap-1 px-2.5 py-1.5 text-xs [&_svg:not([class*='size-'])]:size-3.5 [&>svg]:self-center [&>svg]:translate-y-[0.5px]";
 
 export interface ConnectionListProps {
   profiles: ConnectionProfile[];

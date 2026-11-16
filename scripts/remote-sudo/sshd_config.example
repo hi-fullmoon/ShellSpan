@@ -1,0 +1,17 @@
+# Use a separate server instance and a dedicated host key.
+Port 2222
+HostKey /etc/ssh/shellspan_runner_ed25519_key
+PidFile /run/shellspan-runner-sshd.pid
+AllowUsers shellspan-runner
+PermitRootLogin no
+PasswordAuthentication yes
+AuthenticationMethods password
+KbdInteractiveAuthentication no
+UseDNS no
+DisableForwarding yes
+PermitTTY no
+PermitUserRC no
+PermitUserEnvironment no
+MaxSessions 1
+Subsystem shellspan-sudo-v1 /usr/local/libexec/shellspan-sudo-runner
+ForceCommand /usr/local/libexec/shellspan-sudo-runner

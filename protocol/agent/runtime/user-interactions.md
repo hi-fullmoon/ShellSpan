@@ -5,10 +5,56 @@ optional; free text is supported. A selection is not missing text, an operation
 completion, a credential, or a native tool approval. Passwords, private keys,
 API keys, tokens and recovery codes must never be requested through this tool
 or ordinary chat. `input_kind`, when supplied, accepts only `non_sensitive`.
-The Agent has no generic password-entry or sudo credential tool. Existing native
-credential-backed capabilities remain authoritative. When no suitable secure
-operation is supplied, hand the sensitive operation to the user instead of
-collecting a secret or constructing a password-bearing command/script.
+Existing native credential-backed capabilities remain authoritative. When no
+suitable secure operation is supplied, hand the sensitive operation to the user.
+
+## Approved remote sudo
+
+`run_terminal_command` accepts `sudoOperationId` for a frozen remote SSH
+target with a credential-backed profile and explicitly configured operations.
+The administrator of the saved connection manages named operations in the
+connection editor. Each operation defines an absolute executable path and
+fixed literal arguments. ShellSpan offers the current profile's operation IDs
+to the model. The model supplies an ID, an explanation and optionally a timeout.
+The approval card displays the target account and exact resolved command.
+Every elevated call requires explicit human approval, including in full-access
+mode. Ordinary Agent shell calls reject explicit privilege tool invocations.
+Dependent steps must wait for a confirmed successful exit.
+
+Policies start empty, are local to the saved connection, and are revoked when
+the profile's connection identity changes. Every policy edit replaces its
+revision. The runtime checks the revision before approval and before prompting
+for the dedicated account's credential. It serializes the durable dispatch
+journal and each nonblocking authorization-frame write with local policy
+updates. A policy edit completed before the first admitted write prevents
+dispatch. Once a write has been admitted, an unconfirmed outcome is uncertain.
+
+The managed connection requires an independent restricted SSH service on the
+same host, with a different port and dedicated account. The runtime checks its
+administrator-supplied host key fingerprint before prompting. Passwords go to
+SSH user authentication before any remote session channel opens. The runtime
+then opens only the `shellspan-sudo-v1` subsystem. It does not invoke a general
+SSH exec command or use the ordinary connection's credentials on this path.
+If the saved connection uses a jump host, the runtime reuses that profile's
+jump settings and known-host policy solely for the outer TCP tunnel. The
+runner's host key is checked independently inside the tunnel. A jump failure
+does not cause a direct connection or a password prompt.
+
+The administrator-installed subsystem checks the requested operation against a
+root-owned policy and validates ownership of the job and its declared inputs.
+It revalidates their contents before dispatch and calls `sudo -n` for the exact
+job and arguments using closed stdin. A regular Agent shell, file, or process
+call cannot use the managed connection or the runner identity. The remote
+administrator must keep ordinary accounts unprivileged and protect the
+runner and job dependencies. See [runner deployment](../../../docs/remote-sudo-runner.md).
+
+The result includes redacted stdout/stderr and a confirmed exit status. A
+signal exit is a failure. Cancellation before dispatch prevents the command
+from starting. A timeout, disconnect, or cancellation after dispatch without
+a confirmed exit enters the existing uncertain-execution workflow, which
+requires reconciliation before further writes. Approvals without a durable
+dispatch journal are cancelled on restart. A host that refuses noninteractive
+sudo for the exact restricted job returns that failure and keeps its policy.
 
 ## Decisions
 

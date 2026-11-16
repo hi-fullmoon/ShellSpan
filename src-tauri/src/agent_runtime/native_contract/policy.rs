@@ -515,8 +515,16 @@ pub fn validate_tool_arguments_native(
             {
                 return Err("invalid exec_command arguments".into());
             }
-            if let Some(cwd) = value.cwd {
-                validate_path(&cwd)?;
+            if let Some(cwd) = value.cwd.as_deref() {
+                validate_path(cwd)?;
+            }
+            if value.elevated == Some(true)
+                && (value.background == Some(true) || value.cwd.is_some())
+            {
+                return Err("secure sudo requires foreground execution in the remote account default directory".into());
+            }
+            if value.sudo_operation.is_some() != (value.elevated == Some(true)) {
+                return Err("secure sudo requires a configured operation grant".into());
             }
         }
         "terminal_execute" => {

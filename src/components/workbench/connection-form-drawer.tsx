@@ -28,6 +28,7 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { FieldGroup } from '@/components/ui/field';
 import { FormRow } from './shared';
+import { ConnectionSudoPolicyDialog } from './connection-sudo-policy-dialog';
 import {
   invokeCancelConnectionPreflight,
   invokePickPrivateKeyFile,
@@ -593,6 +594,10 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
                 </>
               )}
             </FormSection>
+
+            {initial && <FormSection icon={KeyRound} title={t('connection.sudo.section')}>
+              <ConnectionSudoPolicyDialog key={initial.id} profileId={initial.id} />
+            </FormSection>}
 
             <FormSection icon={TagsIcon} title={t('connection.form.section.organization')}>
               <div className="grid grid-cols-2 gap-2">

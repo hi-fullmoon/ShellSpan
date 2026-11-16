@@ -195,6 +195,28 @@ export interface ConnectionProfile {
   updatedAt: number;
 }
 
+export interface SudoOperation {
+  id: string;
+  label: string;
+  command: string;
+}
+
+export interface ProfileSudoPolicy {
+  profileBinding: string;
+  host: string;
+  port: number;
+  username: string;
+  revision: string | null;
+  runner: SudoRunner | null;
+  operations: SudoOperation[];
+}
+
+export interface SudoRunner {
+  port: number;
+  username: string;
+  hostKeySha256: string;
+}
+
 export interface SessionSummary {
   sessionId: string;
   title: string;

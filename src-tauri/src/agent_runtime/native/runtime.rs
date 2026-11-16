@@ -146,6 +146,7 @@ pub(crate) struct NativeToolEngine {
     checkpoints: CheckpointStoreNative,
     file_operations: FileOperationRegistryNative,
     checkpoint_root: Arc<Mutex<Option<PathBuf>>>,
+    pub(crate) sudo_prompts: Arc<super::SudoPrompts>,
 }
 
 impl Default for NativeToolEngine {
@@ -260,6 +261,7 @@ impl NativeToolEngine {
             checkpoints: CheckpointStoreNative::default(),
             file_operations: FileOperationRegistryNative::default(),
             checkpoint_root: Arc::new(Mutex::new(None)),
+            sudo_prompts: Arc::default(),
         }
     }
 }
@@ -756,6 +758,13 @@ impl NativeToolEngine {
             target: input.target,
             capability_id: "pending-native-capability".into(),
         };
+        if call.tool_name == "exec_command" && call.arguments["elevated"] == json!(true) {
+            let arguments: ExecCommandArgumentsNative =
+                serde_json::from_value(call.arguments.clone()).map_err(|e| e.to_string())?;
+            crate::sudo_policy::verify_grant(database, &call.target, &arguments)?;
+        } else {
+            ensure_unmanaged_call(database, &context, &call)?;
+        }
         self.revalidate_target(&context, &call.target, sessions, database)?;
         let mut effect = assess_effect_native(&tool.descriptor, &call)?;
         let scope = inspect_call_policy_scope_native(&call)?;
@@ -1006,6 +1015,7 @@ impl NativeToolEngine {
         credentials: &CredentialManager,
         known_hosts_path: &Path,
         cancellation: &CancellationToken,
+        runner_journal: Option<crate::agent_runtime::RunnerDispatchJournal>,
     ) -> Result<AgentToolResultNative, String> {
         context.validate()?;
         if call.request_id != context.request.request_id
@@ -1022,6 +1032,9 @@ impl NativeToolEngine {
             .executable(&call.tool_name)
             .map_err(registry_error_message)?;
         self.revalidate_target(context, &call.target, sessions, database)?;
+        if !(call.tool_name == "exec_command" && call.arguments["elevated"] == json!(true)) {
+            ensure_unmanaged_call(database, context, &call)?;
+        }
         let effect = assess_effect_native(&tool.descriptor, &call)?;
         if !matches!(
             effect.kind,
@@ -1102,6 +1115,8 @@ impl NativeToolEngine {
                 tool.descriptor.default_timeout_ms,
                 tool.descriptor.max_concurrency,
                 reviewed_command.as_ref(),
+                cancellation,
+                runner_journal,
             ),
             "terminal_execute" => self.execute_terminal_command(
                 context,
@@ -1688,18 +1703,138 @@ impl NativeToolEngine {
         context: &NativeExecutionContext,
         call: &AgentToolCallNative,
         effect: &AgentObservedEffectNative,
-        _sessions: &SessionManager,
+        sessions: &SessionManager,
         database: &Database,
         credentials: &CredentialManager,
         known_hosts_path: &Path,
         default_timeout_ms: u64,
         max_concurrency: u16,
         reviewed_command: Option<&super::ReviewedReadCommand>,
+        cancellation: &CancellationToken,
+        runner_journal: Option<crate::agent_runtime::RunnerDispatchJournal>,
     ) -> Result<AgentToolResultNative, String> {
         let arguments: ExecCommandArgumentsNative = serde_json::from_value(call.arguments.clone())
             .map_err(|error| format!("Invalid exec_command arguments: {error}"))?;
-        if arguments.elevated.unwrap_or(false) {
-            return Err("Elevated execution is unavailable in the native kernel".into());
+        if arguments.elevated == Some(true) {
+            let mut runner_journal = Some(
+                runner_journal.ok_or("Restricted runner dispatch requires a durable journal")?,
+            );
+            let revalidate_sudo_operation = || {
+                self.revalidate_target(context, &call.target, sessions, database)?;
+                crate::sudo_policy::verify_grant(database, &call.target, &arguments)
+            };
+            revalidate_sudo_operation()?;
+            let policy = crate::sudo_policy::policy_for_target(database, &call.target)?;
+            let AgentToolTargetNative::Remote {
+                profile_id: Some(profile_id),
+                ..
+            } = &call.target
+            else {
+                return Err("A saved SSH profile is required for the restricted runner".into());
+            };
+            let mut jump = resolve_profile_jump_host(
+                profile_id,
+                policy.jump_host_config.as_deref(),
+                credentials,
+            )?;
+            if let Some(jump) = jump.as_mut() {
+                crate::commands::resolve_keychain_key_for_jump_host(credentials, jump)?;
+            }
+            let runner = policy
+                .runner
+                .ok_or("A trusted restricted SSH runner is required")?;
+            let operation = arguments
+                .sudo_operation
+                .as_ref()
+                .ok_or("A configured operation is required")?;
+            let command = super::literal_sudo_command(&arguments.command)?;
+            let deadline =
+                Instant::now() + Duration::from_millis(arguments.timeout_ms.unwrap_or(120_000));
+            use crate::execution::{execute_restricted_sudo, RunnerOutcome};
+            use std::io::Write;
+            let mut result = completed_result(
+                &context.request,
+                call,
+                effect,
+                "Remote sudo command exited.",
+                json!({ "channel": "direct", "state": "exited", "stdout": "", "stderr": "", "truncated": false }),
+                false,
+            );
+            let outcome = execute_restricted_sudo(
+                &policy.host,
+                &runner,
+                jump.as_ref().map(|jump| (jump, known_hosts_path)),
+                &operation.id,
+                &command,
+                cancellation,
+                deadline,
+                || {
+                    revalidate_sudo_operation()?;
+                    let reply = self.sudo_prompts.request(
+                        &policy.host,
+                        &runner,
+                        &command,
+                        cancellation,
+                        deadline,
+                    )?;
+                    if reply.is_some() {
+                        revalidate_sudo_operation()?;
+                    }
+                    Ok(reply)
+                },
+                |channel, bytes| {
+                    self.revalidate_target(context, &call.target, sessions, database)?;
+                    database.with_sudo_dispatch(&call.target, &arguments, || {
+                        if cancellation.is_cancelled() || Instant::now() >= deadline {
+                            return Err("Restricted runner was cancelled before dispatch".into());
+                        }
+                        if let Some(journal) = runner_journal.take() {
+                            journal()?;
+                        }
+                        if cancellation.is_cancelled() || Instant::now() >= deadline {
+                            return Err("Restricted runner was cancelled before sending".into());
+                        }
+                        Ok(channel.write(bytes))
+                    })?
+                },
+            );
+            match outcome {
+                RunnerOutcome::Completed {
+                    exit_code,
+                    stdout,
+                    stderr,
+                    truncated,
+                } => {
+                    result.status = if exit_code == 0 {
+                        AgentToolResultStatusNative::Completed
+                    } else {
+                        AgentToolResultStatusNative::Failed
+                    };
+                    result.summary = format!("Remote sudo command exited with status {exit_code}.");
+                    result.data = Some(json!({
+                        "channel": "direct", "state": "exited", "terminationConfirmed": true,
+                        "stdout": stdout, "stderr": stderr, "exitCode": exit_code,
+                        "truncated": truncated,
+                    }));
+                    result.truncated = Some(truncated);
+                }
+                RunnerOutcome::Cancelled => {
+                    result.status = AgentToolResultStatusNative::Cancelled;
+                    result.summary = "Remote sudo was cancelled before command dispatch.".into();
+                    result.data = None;
+                }
+                RunnerOutcome::Uncertain => {
+                    result.status = AgentToolResultStatusNative::Uncertain;
+                    result.summary = "Remote sudo may have executed without a confirmed result. Reconcile the operation before continuing.".into();
+                    result.data = None;
+                }
+                RunnerOutcome::NotStarted(message) => {
+                    result.status = AgentToolResultStatusNative::Failed;
+                    result.summary = message;
+                    result.data = None;
+                }
+            }
+            return Ok(result);
         }
         let timeout = Duration::from_millis(arguments.timeout_ms.unwrap_or(default_timeout_ms));
         let timeout = if reviewed_command.is_some() {
@@ -2271,6 +2406,16 @@ impl NativeToolEngine {
         if process_handle(&call.target)?.starts_with("job-") {
             return Err("TERMINAL_JOB_STDIN_UNSUPPORTED: native background jobs share the terminal; per-job stdin is unavailable".into());
         }
+        if let AgentToolTargetNative::Process {
+            owner_target_id, ..
+        } = &call.target
+        {
+            if context.request.targets.iter().any(|target| {
+                matches!(target, AgentToolTargetNative::Remote { target_id, .. } if target_id == owner_target_id)
+            }) {
+                super::shell_guard::reject_remote_privilege_command(&arguments.input)?;
+            }
+        }
         let accepted = self
             .processes
             .get(process_handle(&call.target)?)?
@@ -2779,6 +2924,26 @@ fn terminal_command_wire_state(
     }
 }
 
+fn ensure_unmanaged_call(
+    database: &Database,
+    context: &NativeExecutionContext,
+    call: &AgentToolCallNative,
+) -> Result<(), String> {
+    if let AgentToolTargetNative::Process {
+        owner_target_id, ..
+    } = &call.target
+    {
+        let owner = context
+            .request
+            .targets
+            .iter()
+            .find(|target| target.target_id() == owner_target_id)
+            .ok_or("Native process owner is not on the frozen request")?;
+        return crate::sudo_policy::require_ordinary_remote_account(database, owner);
+    }
+    crate::sudo_policy::require_ordinary_remote_account(database, &call.target)
+}
+
 pub(crate) fn connection_for_remote_target(
     target: &AgentToolTargetNative,
     database: &Database,
@@ -2804,27 +2969,8 @@ pub(crate) fn connection_for_remote_target(
         ProfileAuthMethod::Password => AuthMethod::Password,
         ProfileAuthMethod::Key => AuthMethod::Key,
     };
-    let mut jump_host = profile
-        .jump_host_config
-        .as_deref()
-        .map(serde_json::from_str::<JumpHostConfig>)
-        .transpose()
-        .map_err(|error| format!("Stored jump-host identity is invalid: {error}"))?;
-    if let Some(jump) = jump_host.as_mut() {
-        match jump.auth_method {
-            AuthMethod::Password => {
-                jump.password = credentials
-                    .retrieve_profile_secret(profile_id, ProfileSecretKind::JumpPassword)?;
-                if jump.password.is_none() {
-                    return Err("jump-host password is unavailable".into());
-                }
-            }
-            AuthMethod::Key => {
-                jump.passphrase = credentials
-                    .retrieve_profile_secret(profile_id, ProfileSecretKind::JumpPassphrase)?;
-            }
-        }
-    }
+    let jump_host =
+        resolve_profile_jump_host(profile_id, profile.jump_host_config.as_deref(), credentials)?;
     let mut connection = RemoteConnectionRequest {
         host: profile.host,
         port: profile.port,
@@ -2852,6 +2998,32 @@ pub(crate) fn connection_for_remote_target(
         return Err("Remote profile private key is unavailable".into());
     }
     Ok(connection)
+}
+
+fn resolve_profile_jump_host(
+    profile_id: &str,
+    config: Option<&str>,
+    credentials: &CredentialManager,
+) -> Result<Option<JumpHostConfig>, String> {
+    let Some(config) = config else {
+        return Ok(None);
+    };
+    let mut jump: JumpHostConfig =
+        serde_json::from_str(config).map_err(|_| "Stored jump-host identity is invalid")?;
+    match jump.auth_method {
+        AuthMethod::Password => {
+            jump.password = Some(
+                credentials
+                    .retrieve_profile_secret(profile_id, ProfileSecretKind::JumpPassword)?
+                    .ok_or("jump-host password is unavailable")?,
+            );
+        }
+        AuthMethod::Key => {
+            jump.passphrase = credentials
+                .retrieve_profile_secret(profile_id, ProfileSecretKind::JumpPassphrase)?;
+        }
+    }
+    Ok(Some(jump))
 }
 
 fn exec_process_result(
@@ -2987,6 +3159,7 @@ mod tests {
             checkpoints: CheckpointStoreNative::default(),
             file_operations: FileOperationRegistryNative::default(),
             checkpoint_root: Arc::new(Mutex::new(None)),
+            sudo_prompts: Arc::default(),
         }
     }
 
@@ -3466,6 +3639,8 @@ mod tests {
                 &directory.path().join("known_hosts"),
                 5_000,
                 1,
+                None,
+                &CancellationToken::new(),
                 None,
             )
             .unwrap();

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Assert that this real privileged child does not receive SSH input.
+if IFS= read -r ignored; then
+    exit 13
+fi
+exec /usr/bin/id -u

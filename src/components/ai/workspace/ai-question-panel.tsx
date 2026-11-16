@@ -40,6 +40,7 @@ import {
 } from '@/components/ui/collapsible';
 import { useI18n } from '@/hooks/useI18n';
 import { AiContentTitle } from './ai-content-title';
+import { AiSubmissionButtonLabel, submissionFeedbackMs } from './ai-submission-button-label';
 import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
 import { cn } from '@/lib/utils';
 import { questionIssue, questionIssueMessageKey, questionSubmissionIssue, type QuestionSubmissionIssue } from '@/lib/ai/question-submission';
@@ -68,6 +69,7 @@ export interface AiQuestionPanelProps {
 }
 
 const recommendedSuffix = /\s+\(Recommended\)$/i;
+type SubmitAction = 'answer' | 'decline' | 'retry' | UserActionResponse;
 
 function isAnswerInvalid(answer: QuestionAnswer): boolean {
   return (!answer.selected.length && !answer.custom?.trim()) ||
@@ -86,6 +88,45 @@ function RecoveryButtonLabel({ label, busyLabel, busy }: {
   </span>;
 }
 
+function SubmitButtonLabel({ label, busy }: { readonly label: string; readonly busy: boolean }): React.ReactNode {
+  const { t } = useI18n();
+  return <AiSubmissionButtonLabel label={label} busy={busy} busyLabel={t('ai.workspace.question.submitting')} />;
+}
+
+export function AiQuestionSeat({ question, onAnswer, ...props }: Omit<AiQuestionPanelProps, 'question'> & {
+  readonly question?: AgentQuestionView | null;
+}): React.ReactNode {
+  const [submittingQuestion, setSubmittingQuestion] = useState<AgentQuestionView | null>(null);
+  const displayed = (onAnswer ? submittingQuestion : null) ?? question;
+  if (!displayed) return null;
+
+  const panelKey = questionKey(displayed.identity) + (pendingUserAction(displayed) ? ':action' : '');
+  return <AiQuestionPanel {...props} key={panelKey} question={displayed}
+    onAnswer={onAnswer && (async (input) => {
+      setSubmittingQuestion(displayed);
+      // Committed events can replace the card before the answer promise settles.
+      // Keep the clicked button visible briefly while sending the answer immediately.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const release = () => {
+        clearTimeout(timer);
+        setSubmittingQuestion((current) => current === displayed ? null : current);
+      };
+      const feedback = new Promise<void>((resolve) => {
+        timer = setTimeout(() => {
+          release();
+          resolve();
+        }, submissionFeedbackMs);
+      });
+      try {
+        await Promise.all([onAnswer(input), feedback]);
+      } catch (error) {
+        release();
+        throw error;
+      }
+    })}
+  />;
+}
+
 export function AiQuestionPanel({
   question,
   onAnswer,
@@ -96,14 +137,16 @@ export function AiQuestionPanel({
   const userAction = pendingUserAction(question);
   const key = questionKey(question.identity) + (userAction ? ':action' : '');
   const draft = useAgentQuestionStore((state) => state.drafts[key]);
-  const [operation, setOperation] = useState<{
-    readonly kind: 'submit' | 'refresh';
-    readonly issue: QuestionSubmissionIssue | null;
-  } | null>(null);
+  const [operation, setOperation] = useState<(
+    { readonly kind: 'submit'; readonly action: SubmitAction; readonly answers: readonly QuestionAnswer[] }
+    | { readonly kind: 'refresh' }
+  ) & { readonly issue: QuestionSubmissionIssue | null } | null>(null);
   const busy = useRef(false);
   const content = useRef<HTMLDivElement>(null);
   const focusNextQuestion = useRef(false);
   const pending = operation !== null;
+  const submitting = operation?.kind === 'submit' ? operation.action : null;
+  const showRecovery = submitting === 'retry' || (draft?.submission && !submitting);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
   useEffect(() => {
@@ -123,13 +166,13 @@ export function AiQuestionPanel({
   // Keep the exact operation retryable until committed state removes the form.
   const editingLocked = pending || !!draft?.submission;
   // Retain the displayed issue, including a restored submission's fallback, during recovery.
-  const submissionIssue = draft?.submission
-    ? draft.issue ?? (operation ? operation.issue : questionIssue('unconfirmed')) : null;
+  const submissionIssue = operation ? operation.issue
+    : draft?.submission ? draft.issue ?? questionIssue('unconfirmed') : null;
   useEffect(() => {
     if (submissionIssue && content.current) content.current.scrollTop = content.current.scrollHeight;
   }, [submissionIssue?.reason, submissionIssue?.detail]);
   const answers: readonly QuestionAnswer[] =
-    draft?.answers ??
+    (operation?.kind === 'submit' ? operation.answers : draft?.answers) ??
     question.questions.map((q) => ({ id: q.id, selected: [] }));
   const currentQuestion = question.questions[currentIndex];
   const currentAnswer = answers.find((answer) => answer.id === currentQuestion.id) ?? { id: currentQuestion.id, selected: [] };
@@ -163,7 +206,8 @@ export function AiQuestionPanel({
       setCurrentIndex((index) => index + 1);
     }
   };
-  const submit = async (nextAnswers = answers, action?: UserActionResponse): Promise<void> => {
+  const submit = async (trigger: SubmitAction, nextAnswers = answers): Promise<void> => {
+    const action = trigger === 'answer' || trigger === 'decline' || trigger === 'retry' ? undefined : trigger;
     const retained = useAgentQuestionStore.getState().drafts[key];
     if (busy.current || (!action && nextAnswers.some(isAnswerInvalid)) || !onAnswer
       || (retained?.issue && !retained.issue.retry)) return;
@@ -177,7 +221,7 @@ export function AiQuestionPanel({
       .getState()
       .setDraft(key, { answers: input.answers, submission: input, issue: retained?.issue });
     busy.current = true;
-    setOperation({ kind: 'submit', issue: submissionIssue });
+    setOperation({ kind: 'submit', action: trigger, answers: input.answers, issue: submissionIssue });
     try {
       await onAnswer(input);
       useAgentQuestionStore.getState().clear(key);
@@ -219,7 +263,7 @@ export function AiQuestionPanel({
       : answer);
     const nextIndex = nextAnswers.findIndex(isAnswerInvalid);
     if (nextIndex < 0) {
-      void submit(nextAnswers);
+      void submit('decline', nextAnswers);
     } else {
       useAgentQuestionStore.getState().setDraft(key, { answers: nextAnswers });
       setCurrentIndex(nextIndex);
@@ -410,7 +454,7 @@ export function AiQuestionPanel({
             </div>}
             <div className="ai-question-footer-message min-w-0 flex-1" />
             <div className={cn('ai-question-footer-actions flex shrink-0 items-center gap-1.5', userAction && 'min-w-0 max-w-full flex-wrap justify-end')}>
-              {draft?.submission ? <>
+              {showRecovery ? <>
                 {onRefresh && <Button type="button" variant={submissionIssue && !submissionIssue.retry && !submissionIssue.editable ? 'default' : 'outline'} size="sm" disabled={pending} onClick={() => void refresh()}>
                   <RecoveryButtonLabel label={t('ai.workspace.question.refresh')} busyLabel={t('ai.workspace.question.refreshing')} busy={operation?.kind === 'refresh'} />
                 </Button>}
@@ -419,16 +463,22 @@ export function AiQuestionPanel({
                 </Button>}
                 {submissionIssue?.editable ? <Button type="button" size="sm" disabled={pending} onClick={edit}>
                   {t('ai.workspace.question.edit')}
-                </Button> : (!submissionIssue || submissionIssue.retry) && <Button type="button" size="sm" disabled={pending || !onAnswer} onClick={() => void submit()}>
-                  <RecoveryButtonLabel label={t('ai.workspace.question.retry')} busyLabel={t('ai.workspace.question.submitting')} busy={operation?.kind === 'submit'} />
+                </Button> : (!submissionIssue || submissionIssue.retry) && <Button type="button" size="sm" disabled={pending || !onAnswer} onClick={() => void submit('retry')}>
+                  <SubmitButtonLabel label={t('ai.workspace.question.retry')} busy={submitting === 'retry'} />
                 </Button>}
               </> : userAction ? <>
                 <Button type="button" variant="outline" size="sm" disabled={pending || !onAnswer}
-                  onClick={() => void submit(question.answers, 'cancelled')}>{t('ai.workspace.question.actionCancel')}</Button>
+                  onClick={() => void submit('cancelled', question.answers)}>
+                  <SubmitButtonLabel label={t('ai.workspace.question.actionCancel')} busy={submitting === 'cancelled'} />
+                </Button>
                 <Button type="button" variant="outline" size="sm" disabled={pending || !onAnswer}
-                  onClick={() => void submit(question.answers, 'change_plan')}>{t('ai.workspace.question.actionChangePlan')}</Button>
+                  onClick={() => void submit('change_plan', question.answers)}>
+                  <SubmitButtonLabel label={t('ai.workspace.question.actionChangePlan')} busy={submitting === 'change_plan'} />
+                </Button>
                 <Button type="button" size="sm" disabled={pending || !onAnswer}
-                  onClick={() => void submit(question.answers, 'completed')}>{t('ai.workspace.question.actionComplete')}</Button>
+                  onClick={() => void submit('completed', question.answers)}>
+                  <SubmitButtonLabel label={t('ai.workspace.question.actionComplete')} busy={submitting === 'completed'} />
+                </Button>
               </> : <>
               <Button
                 className="min-w-[68px] @max-[421px]/ai-workspace:min-w-auto"
@@ -438,20 +488,16 @@ export function AiQuestionPanel({
                 disabled={pending || !onAnswer || !!draft?.submission}
                 onClick={decline}
               >
-                {t('ai.workspace.question.decline')}
+                <SubmitButtonLabel label={t('ai.workspace.question.decline')} busy={submitting === 'decline'} />
               </Button>
               <Button
                 className="min-w-[68px] @max-[421px]/ai-workspace:min-w-auto"
                 type="button"
                 size="sm"
                 disabled={pending || invalid || !onAnswer}
-                onClick={() => void submit()}
+                onClick={() => void submit('answer')}
               >
-                {t(
-                  pending
-                    ? 'ai.workspace.question.submitting'
-                    : 'ai.workspace.question.submit',
-                )}
+                <SubmitButtonLabel label={t('ai.workspace.question.submit')} busy={submitting === 'answer'} />
               </Button>
               </>}
             </div>

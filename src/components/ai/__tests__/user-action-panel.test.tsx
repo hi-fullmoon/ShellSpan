@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AiQuestionPanel } from '../workspace/ai-question-panel';
@@ -28,7 +28,6 @@ describe('user operation within the existing question card', () => {
     await initI18n(locale);
     useAppStore.setState({ locale });
     const submissions: AnswerQuestionInput[] = [];
-    const user = userEvent.setup();
     const { container } = render(<AiQuestionPanel question={question} onAnswer={async input => { submissions.push(input); }} />);
     expect(submissions).toHaveLength(0);
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
@@ -38,16 +37,25 @@ describe('user operation within the existing question card', () => {
     expect(container.querySelector('.ai-question-panel-header [data-slot="card-action"]')).toBeInTheDocument();
     expect(container.querySelector('.ai-question-panel-content')).toHaveClass('min-h-0', 'overflow-y-auto');
     expect(container.querySelector('.ai-question-panel-footer')).toHaveClass('shrink-0');
-    await user.click(screen.getByRole('button', { name: locale === 'en-US' ? 'I have completed it' : '我已完成操作' }));
+    const complete = screen.getByRole('button', { name: locale === 'en-US' ? 'I have completed it' : '我已完成操作' });
+    fireEvent.click(complete);
+    expect(screen.getByRole('button', { name: locale === 'en-US' ? 'Saving answers…' : '正在保存答案…' })).toBe(complete);
+    expect(complete.querySelector('[data-slot="spinner"]')).toBeVisible();
+    expect(complete).toBeDisabled();
     expect(submissions).toHaveLength(1);
     expect(submissions[0]).toMatchObject({ identity: question.identity, answers: question.answers, action: 'completed' });
+    await waitFor(() => expect(complete).toBeEnabled());
   });
 
   it.each([['Cancel', 'cancelled'], ['Change plan', 'change_plan']] as const)('submits %s without changing the committed selection', async (label, response) => {
     const submissions: AnswerQuestionInput[] = [];
     render(<AiQuestionPanel question={question} onAnswer={async input => { submissions.push(input); }} />);
-    await userEvent.setup().click(screen.getByRole('button', { name: label }));
+    const button = screen.getByRole('button', { name: label });
+    fireEvent.click(button);
+    expect(screen.getByRole('button', { name: 'Saving answers…' })).toBe(button);
+    expect(button.querySelector('[data-slot="spinner"]')).toBeVisible();
     expect(submissions[0]).toMatchObject({ action: response, answers: question.answers });
+    await waitFor(() => expect(button).toBeEnabled());
   });
 
   it('submits standalone completion with no question text or credentials', async () => {

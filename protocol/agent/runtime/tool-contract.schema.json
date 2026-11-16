@@ -171,8 +171,25 @@
         "cwd": { "$ref": "#/$defs/path" },
         "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 3600000 },
         "background": { "type": "boolean" },
-        "elevated": { "type": "boolean" }
-      }
+        "elevated": { "type": "boolean" },
+        "sudoOperation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "revision", "runnerUsername", "runnerPort"],
+          "properties": {
+            "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+            "revision": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "runnerUsername": { "type": "string", "minLength": 1, "maxLength": 32 },
+            "runnerPort": { "type": "integer", "minimum": 1, "maximum": 65535 }
+          }
+        }
+      },
+      "if": { "required": ["elevated"], "properties": { "elevated": { "const": true } } },
+      "then": {
+        "required": ["sudoOperation"],
+        "properties": { "sudoOperation": true, "cwd": false, "background": { "const": false } }
+      },
+      "else": { "properties": { "sudoOperation": false } }
     },
     "terminalExecuteArguments": {
       "type": "object",

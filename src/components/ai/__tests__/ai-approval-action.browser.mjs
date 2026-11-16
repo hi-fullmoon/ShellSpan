@@ -8,8 +8,9 @@ import { chromium, webkit } from 'playwright';
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const entry = '/src/components/ai/__tests__/ai-approval-action.browser-entry.tsx';
 const server = await createServer({ root, configFile: false, appType: 'custom',
+  optimizeDeps: { entries: [entry.slice(1)] },
   plugins: [react(), tailwindcss()], resolve: { alias: { '@': `${root}src/` } },
-  server: { host: '127.0.0.1', port: 0 } });
+  server: { host: '127.0.0.1', port: 0, hmr: false, watch: null } });
 server.middlewares.use('/approval', async (_request, response) => {
   response.setHeader('Content-Type', 'text/html');
   response.end(await server.transformIndexHtml('/approval', `<html><body><div id="root"></div><script type="module" src="${entry}"></script></body></html>`));
@@ -87,6 +88,35 @@ try {
         assert.equal(await action.count(), 0);
         assert.ok(await page.getByText('pwd', { exact: true }).isVisible());
         assert.ok(await page.getByText('此命令尚无沙箱隔离，将以当前账户权限执行，可能影响工作目录之外的数据。', { exact: true }).isVisible());
+        for (const [locale, approvalLabel, title, passwordLabel, submitLabel] of [
+          ['zh-CN', '批准并执行', '需要提权执行器认证', '执行器 SSH 密码', '认证并继续'],
+          ['en-US', 'Approve and run', 'Elevation runner authentication required', 'Runner SSH password', 'Authenticate and continue'],
+        ]) {
+          const sudoApproval = { ...approval, toolName: 'run_terminal_command', risk: 'stateChange',
+            target: { ...approval.target, host: '127.0.0.1', port: 22222, username: 'shellspan' },
+            arguments: { command: '/usr/local/libexec/shellspan-sudo-jobs/effective-user', elevated: true,
+              sudoOperation: { id: 'effective-user', runnerUsername: 'shellspan-runner', runnerPort: 22225 } } };
+          await page.evaluate(async ({ entry, sudoApproval, locale }) => {
+            const { showSudo } = await import(entry);
+            await showSudo(sudoApproval, locale);
+          }, { entry, sudoApproval, locale });
+          const approve = page.getByRole('button', { name: approvalLabel, exact: true });
+          assert.ok(await page.getByText('sudo -- /usr/local/libexec/shellspan-sudo-jobs/effective-user', { exact: true }).isVisible());
+          assert.ok(await page.getByText(/shellspan-runner@127\.0\.0\.1:22225/).isVisible());
+          await approve.click();
+          const dialog = page.getByRole('dialog', { name: title });
+          const password = dialog.getByLabel(passwordLabel, { exact: true });
+          await password.waitFor();
+          assert.equal(await password.getAttribute('type'), 'password');
+          assert.ok(await dialog.getByText(/shellspan-runner@127\.0\.0\.1:22225/).isVisible());
+          await page.waitForFunction(el => el === document.activeElement, await password.elementHandle());
+          assert.ok(await dialog.getByRole('button', { name: submitLabel, exact: true }).isVisible());
+          const box = await dialog.boundingBox();
+          assert.ok(box.x >= 0 && box.x + box.width <= width && box.y + box.height <= 720);
+          await password.press('Escape');
+          await dialog.waitFor({ state: 'hidden' });
+          assert.equal(await page.locator('body').getAttribute('data-action'), 'approval:cancel');
+        }
         await show({ toolName: 'trash_file', risk: 'destructive', effect: 'destructive',
           target: { kind: 'local', targetId: 'local', sessionId: 'terminal', label: '本机' },
           arguments: { path: '/workspace/old-config.json', expectedSha256: 'a'.repeat(64) } });
@@ -162,8 +192,20 @@ try {
               height: c.clientHeight, box: c.getBoundingClientRect().toJSON() })) };
         });
         assert.ok(hit.clickable, JSON.stringify({ hit, viewportGeometry }));
-        await page.getByRole('button', { name: '取消', exact: true }).click();
-        assert.equal(await page.locator('body').getAttribute('data-action'), 'reject');
+        for (const [label, decision] of [['取消', 'reject'], ['允许执行一次', 'approve']]) {
+          const button = page.getByRole('button', { name: label, exact: true });
+          await button.scrollIntoViewIfNeeded();
+          const before = await button.boundingBox();
+          await button.click();
+          await button.locator('[data-slot="spinner"]').waitFor();
+          const during = await button.boundingBox();
+          const spinner = await button.locator('[data-slot="spinner"]').boundingBox();
+          assert.deepEqual(during, before, 'Loading must preserve the clicked button bounds');
+          assert.ok(Math.abs(spinner.x + spinner.width / 2 - during.x - during.width / 2) < 1);
+          assert.ok(Math.abs(spinner.y + spinner.height / 2 - during.y - during.height / 2) < 1);
+          assert.equal(await page.locator('body').getAttribute('data-action'), decision);
+          await button.locator('[data-slot="spinner"]').waitFor({ state: 'hidden' });
+        }
         assert.equal(await page.locator('[data-composer-editor]').textContent(), multilineDraft);
         await page.setViewportSize({ width, height: 300 });
         const compactGeometry = await page.locator('[data-composer-seat]').evaluate(el => ({

@@ -13,16 +13,124 @@ pub(super) fn reject_destructive(script: &str, cwd: Option<&str>) -> Result<(), 
     if script.len() > 8192 {
         return Err("native command exceeds the inspection limit".into());
     }
+    if sudo_policy_reference(script) {
+        return Err(SUDO_POLICY_DENIED.into());
+    }
+    let tree = parse_shell(script)?;
+    let initial = vec![cwd.and_then(|path| resolve_path(path, None))];
+    inspect(tree.root_node(), script, initial, 0)?;
+    Ok(())
+}
+
+pub(crate) const SUDO_POLICY_DENIED: &str =
+    "AGENT_SUDO_POLICY_DENIED: sudoers and visudo are reserved for the host administrator; do not change or request changes to sudo policy as a workaround";
+
+pub(crate) fn sudo_policy_reference(value: &str) -> bool {
+    value
+        .split(|c: char| !(c.is_alphanumeric() || matches!(c, '.' | '_' | '-')))
+        .any(|part| matches!(part, "sudoers" | "sudoers.d" | "visudo"))
+}
+
+fn parse_shell(script: &str) -> Result<tree_sitter::Tree, String> {
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_bash::LANGUAGE.into())
         .map_err(|_| "native command parser is unavailable".to_string())?;
-    let tree = parser
+    parser
         .parse(script, None)
-        .ok_or("native command parser is unavailable")?;
-    let initial = vec![cwd.and_then(|path| resolve_path(path, None))];
-    inspect(tree.root_node(), script, initial, 0)?;
-    Ok(())
+        .ok_or_else(|| "native command parser is unavailable".into())
+}
+
+pub(crate) fn literal_sudo_command(script: &str) -> Result<String, String> {
+    const INVALID: &str =
+        "AGENT_SUDO_INVALID_COMMAND: use one absolute executable path with literal arguments";
+    if script.len() > 2048 || script.chars().any(char::is_control) {
+        return Err(INVALID.into());
+    }
+    let tree = parse_shell(script)?;
+    let root = tree.root_node();
+    let command = root
+        .child(0)
+        .filter(|node| !root.has_error() && root.child_count() == 1 && node.kind() == "command")
+        .ok_or(INVALID)?;
+    let words = command
+        .children(&mut command.walk())
+        .map(|node| static_word(node, script).ok_or(INVALID))
+        .collect::<Result<Vec<_>, _>>()?;
+    let executable = words.first().ok_or(INVALID)?;
+    if !executable
+        .strip_prefix('/')
+        .is_some_and(|path| path.split('/').all(|part| !matches!(part, "" | "." | "..")))
+        || privilege_program(executable)
+    {
+        return Err(INVALID.into());
+    }
+    let canonical = shlex::try_join(words.iter().map(String::as_str)).map_err(|_| INVALID)?;
+    if canonical.len() > 2048 {
+        return Err(INVALID.into());
+    }
+    reject_destructive(&canonical, None)?;
+    reject_remote_privilege_command(&canonical)?;
+    Ok(canonical)
+}
+
+pub(super) const REMOTE_PRIVILEGE_DENIED: &str =
+    "AGENT_REMOTE_PRIVILEGE_DENIED: use a sudoOperationId configured for this SSH profile; ordinary Agent shell calls and input cannot start privilege tools";
+
+fn privilege_program(word: &str) -> bool {
+    matches!(
+        word.rsplit('/').next(),
+        Some("sudo" | "sudoedit" | "su" | "doas" | "pkexec" | "runuser")
+    )
+}
+
+pub(super) fn reject_remote_privilege_command(script: &str) -> Result<(), String> {
+    fn inspect(node: Node<'_>, script: &str, depth: usize) -> Result<(), String> {
+        check_depth(depth)?;
+        if node.kind() == "command" {
+            let words: Vec<_> = node
+                .named_children(&mut node.walk())
+                .filter(|child| child.kind() != "variable_assignment")
+                .map(|child| static_word(child, script))
+                .collect();
+            let borrowed: Vec<_> = words
+                .iter()
+                .map(|word| word.as_deref().unwrap_or("<dynamic>"))
+                .collect();
+            let index =
+                super::effect::segment_executable_index(&borrowed).unwrap_or(borrowed.len());
+            if borrowed
+                .iter()
+                .take(index.saturating_add(1))
+                .any(|word| privilege_program(word))
+            {
+                return Err(REMOTE_PRIVILEGE_DENIED.into());
+            }
+            if borrowed.get(index).is_some_and(|word| {
+                matches!(
+                    word.rsplit('/').next(),
+                    Some("sh" | "bash" | "zsh" | "dash" | "ksh")
+                )
+            }) {
+                for pair in borrowed[index + 1..].windows(2) {
+                    if pair[0].strip_prefix('-').is_some_and(|options| {
+                        options.contains('c')
+                            && options.bytes().all(|byte| byte.is_ascii_alphabetic())
+                    }) {
+                        let tree = parse_shell(pair[1])?;
+                        inspect(tree.root_node(), pair[1], depth + 1)?;
+                        break;
+                    }
+                }
+            }
+        }
+        for child in node.named_children(&mut node.walk()) {
+            inspect(child, script, depth + 1)?;
+        }
+        Ok(())
+    }
+    let tree = parse_shell(script)?;
+    inspect(tree.root_node(), script, 0)
 }
 
 fn inspect(node: Node<'_>, script: &str, input: Cwds, depth: usize) -> Result<Flow, String> {
@@ -138,6 +246,13 @@ fn inspect(node: Node<'_>, script: &str, input: Cwds, depth: usize) -> Result<Fl
                 .filter(|child| child.kind() != "variable_assignment")
                 .map(|child| static_word(*child, script))
                 .collect();
+            if words
+                .iter()
+                .flatten()
+                .any(|word| sudo_policy_reference(word))
+            {
+                return Err(SUDO_POLICY_DENIED.into());
+            }
             let borrowed: Vec<_> = words
                 .iter()
                 .map(|word| word.as_deref().unwrap_or("<dynamic>"))
@@ -307,6 +422,65 @@ fn resolve_path(value: &str, cwd: Option<&Path>) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn administrator_can_configure_an_absolute_program_with_literal_arguments() {
+        let command = "/usr/local/sbin/check-backup 'weekly primary'";
+        let canonical = literal_sudo_command(command).unwrap();
+        assert_eq!(
+            shlex::split(&canonical).unwrap(),
+            ["/usr/local/sbin/check-backup", "weekly primary"]
+        );
+        for command in [
+            "check-backup weekly",
+            "/usr/bin/sudo /usr/local/sbin/check-backup",
+            "/usr/local/sbin/check-backup && /bin/pwd",
+            "/usr/local/sbin/check-backup >test.log",
+            "/usr/local/sbin/check-backup $(pwd)",
+            "/usr/local/sbin/check-backup /var/backups/*",
+            "LANG=C /usr/local/sbin/check-backup",
+            "/usr/local/sbin/check-backup &",
+            "/usr/local/../bin/check-backup",
+            "/usr/bin/install /tmp/rule /etc/sudoers.d/rule",
+        ] {
+            assert!(literal_sudo_command(command).is_err(), "{command}");
+        }
+    }
+
+    #[test]
+    fn ordinary_remote_commands_cannot_invoke_privilege_programs() {
+        for command in [
+            "sudo -n systemctl restart nginx",
+            "/usr/bin/sudo nginx -t",
+            "env LC_ALL=C sudo nginx -t",
+            "sh -c 'sudo nginx -t'",
+            "bash -ec 'sudo nginx -t'",
+            "echo ok; doas nginx -t",
+        ] {
+            assert_eq!(
+                reject_remote_privilege_command(command).unwrap_err(),
+                REMOTE_PRIVILEGE_DENIED
+            );
+        }
+        assert!(reject_remote_privilege_command("rg sudo /var/log/messages").is_ok());
+        assert!(reject_remote_privilege_command("systemctl is-active nginx").is_ok());
+    }
+
+    #[test]
+    fn explicit_sudo_policy_edits_are_rejected() {
+        for command in [
+            "sudo /usr/sbin/visudo",
+            "printf 'rule' | sudo tee /etc/sudoers.d/temporary",
+            "rm /etc/su\"do\"ers",
+            "sudo sh -c 'printf rule >> /etc/sudoers'",
+        ] {
+            assert_eq!(
+                reject_destructive(command, None).unwrap_err(),
+                SUDO_POLICY_DENIED
+            );
+        }
+        assert!(reject_destructive("sudo -n systemctl restart nginx", None).is_ok());
+    }
 
     #[test]
     fn quoted_escaped_and_relative_resources_follow_normal_approval() {

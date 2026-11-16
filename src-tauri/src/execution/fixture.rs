@@ -19,6 +19,236 @@ use std::net::{IpAddr, TcpListener};
 use std::path::PathBuf;
 use std::time::Duration;
 
+#[test]
+#[ignore = "requires the isolated, restricted SSH runner fixture"]
+fn isolated_restricted_sudo_runner_enforces_its_own_policy() {
+    use super::{execute_restricted_sudo, RunnerOutcome};
+    use crate::agent_runtime::{AgentToolTargetNative, ExecCommandArgumentsNative};
+    use crate::sudo_policy::{SaveProfileSudoPolicy, SudoOperation, SudoRunner};
+    use serde_json::json;
+    use std::io::{Read, Write};
+    use std::time::Instant;
+    use tokio_util::sync::CancellationToken;
+    use zeroize::Zeroizing;
+
+    let host = required_loopback_fixture_host("SHELLSPAN_E2E_SUDO_RUNNER_HOST");
+    let runner = SudoRunner {
+        port: required_fixture_port("SHELLSPAN_E2E_SUDO_RUNNER_PORT"),
+        username: "shellspan-runner".into(),
+        host_key_sha256: required_fixture_env("SHELLSPAN_E2E_SUDO_RUNNER_KEY"),
+    };
+    let password = required_fixture_env("SHELLSPAN_E2E_SUDO_RUNNER_PASSWORD");
+    let command = "/usr/local/libexec/shellspan-sudo-jobs/effective-user";
+    let temporary = tempfile::tempdir().unwrap();
+    let db = Database::open(&temporary.path().join("profiles")).unwrap();
+    let ordinary_port = if runner.port == 22 { 2223 } else { 22 };
+    let profile = ProfileRow {
+        id: FIXTURE_PROFILE_ID.into(),
+        name: "Restricted runner acceptance".into(),
+        host: host.clone(),
+        port: ordinary_port,
+        username: "shellspan".into(),
+        auth_method: ProfileAuthMethod::Password,
+        keychain_key_id: None,
+        jump_host_config: None,
+        organization_json: None,
+        created_at: 1,
+        updated_at: 1,
+    };
+    db.insert_profile(&profile).unwrap();
+    let blank = db.profile_sudo_policy(&profile.id).unwrap();
+    db.save_profile_sudo_policy(
+        &profile.id,
+        SaveProfileSudoPolicy {
+            profile_binding: blank.profile_binding,
+            revision: blank.revision,
+            runner: Some(runner.clone()),
+            operations: vec![SudoOperation {
+                id: "effective-user".into(),
+                label: "Read effective user".into(),
+                command: command.into(),
+            }],
+        },
+    )
+    .unwrap();
+    let target = AgentToolTargetNative::Remote {
+        target_id: "restricted-runner-acceptance".into(),
+        session_id: "ssh-fixture".into(),
+        profile_id: Some(profile.id.clone()),
+        host: host.clone(),
+        port: ordinary_port,
+        username: profile.username.clone(),
+        root_path: None,
+        local_root: None,
+    };
+    assert!(crate::sudo_policy::require_ordinary_remote_account(&db, &target).is_err());
+    assert!(db
+        .is_managed_sudo_account(&host, runner.port, &runner.username)
+        .unwrap());
+    let installed = db.profile_sudo_policy(&profile.id).unwrap();
+    let arguments: ExecCommandArgumentsNative = serde_json::from_value(json!({
+        "command":command, "channel":"direct","explanation":"Read effective user","elevated":true,
+        "sudoOperation":{"id":"effective-user","revision":installed.revision,"runnerUsername":runner.username,"runnerPort":runner.port}
+    })).unwrap();
+    let execute =
+        |runner: &SudoRunner,
+         operation: &str,
+         command: &str,
+         revoke_before_send: bool,
+         prompt: &mut dyn FnMut() -> Result<Option<Zeroizing<String>>, String>| {
+            let mut revoke = revoke_before_send;
+            execute_restricted_sudo(
+                &host,
+                runner,
+                None,
+                operation,
+                command,
+                &CancellationToken::new(),
+                Instant::now() + Duration::from_secs(10),
+                prompt,
+                |channel, frame| {
+                    if revoke {
+                        revoke = false;
+                        let current = db.profile_sudo_policy(&profile.id)?;
+                        db.save_profile_sudo_policy(
+                            &profile.id,
+                            SaveProfileSudoPolicy {
+                                profile_binding: current.profile_binding,
+                                revision: current.revision,
+                                runner: current.runner,
+                                operations: Vec::new(),
+                            },
+                        )?;
+                    }
+                    db.with_sudo_dispatch(&target, &arguments, || channel.write(frame))
+                },
+            )
+        };
+    let mut authenticate = || Ok(Some(Zeroizing::new(password.clone())));
+    let success = execute(&runner, "effective-user", command, false, &mut authenticate);
+    assert!(
+        matches!(&success, RunnerOutcome::Completed { exit_code: 0, stdout, .. }
+        if stdout.trim() == "0"),
+        "{success:?}"
+    );
+    let forged = execute(
+        &runner,
+        "effective-user",
+        "/usr/bin/id -u",
+        false,
+        &mut authenticate,
+    );
+    assert!(matches!(forged, RunnerOutcome::NotStarted(_)));
+    let unsafe_job = execute(&runner, "unsafe-user", command, false, &mut authenticate);
+    assert!(
+        matches!(unsafe_job, RunnerOutcome::NotStarted(message) if message.contains("restricted runner denied"))
+    );
+    let cancelled = execute(&runner, "effective-user", command, false, &mut || Ok(None));
+    assert!(matches!(cancelled, RunnerOutcome::Cancelled));
+    let wrong = execute(&runner, "effective-user", command, false, &mut || {
+        Ok(Some(Zeroizing::new(format!("{password}!"))))
+    });
+    assert!(matches!(wrong, RunnerOutcome::NotStarted(_)));
+    let mut untrusted = runner.clone();
+    untrusted.host_key_sha256 = "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into();
+    let denied = execute(&untrusted, "effective-user", command, false, &mut || {
+        panic!("unverified host must not solicit credentials")
+    });
+    assert!(matches!(denied, RunnerOutcome::NotStarted(_)));
+    // The runner account cannot be used as a normal SSH command channel.
+    let mut shell = ssh2::Session::new().unwrap();
+    shell.set_timeout(5_000);
+    shell.set_tcp_stream(crate::connection::connect_tcp_stream(&host, runner.port).unwrap());
+    shell.handshake().unwrap();
+    shell
+        .userauth_password(&runner.username, &password)
+        .unwrap();
+    let mut channel = shell.channel_session().unwrap();
+    channel.exec("printf unrestricted-shell").unwrap();
+    let mut ordinary_output = String::new();
+    channel.read_to_string(&mut ordinary_output).unwrap();
+    channel.wait_close().unwrap();
+    assert!(ordinary_output.is_empty());
+    assert_ne!(channel.exit_status().unwrap(), 0);
+    let revoked = execute(&runner, "effective-user", command, true, &mut authenticate);
+    assert!(
+        matches!(revoked, RunnerOutcome::NotStarted(message) if message.starts_with("AGENT_SUDO_POLICY_CHANGED"))
+    );
+}
+
+#[test]
+#[ignore = "requires the isolated runner and its ordinary SSH jump fixture"]
+fn isolated_restricted_sudo_runner_uses_verified_jump_host() {
+    use super::{execute_restricted_sudo, RunnerOutcome};
+    use crate::sudo_policy::SudoRunner;
+    use std::io::Write;
+    use std::time::Instant;
+    use tokio_util::sync::CancellationToken;
+    use zeroize::Zeroizing;
+
+    let host = required_loopback_fixture_host("SHELLSPAN_E2E_SUDO_RUNNER_HOST");
+    let jump = JumpHostConfig {
+        host: host.clone(),
+        port: required_fixture_port("SHELLSPAN_E2E_SUDO_JUMP_PORT"),
+        username: "shellspan".into(),
+        auth_method: AuthMethod::Password,
+        password: Some(required_fixture_env("SHELLSPAN_E2E_SUDO_JUMP_PASSWORD")),
+        private_key_data: None,
+        keychain_key_id: None,
+        passphrase: None,
+    };
+    let runner = SudoRunner {
+        port: required_fixture_port("SHELLSPAN_E2E_SUDO_RUNNER_INTERNAL_PORT"),
+        username: "shellspan-runner".into(),
+        host_key_sha256: required_fixture_env("SHELLSPAN_E2E_SUDO_RUNNER_KEY"),
+    };
+    let password = required_fixture_env("SHELLSPAN_E2E_SUDO_RUNNER_PASSWORD");
+    let (_trusted_dir, trusted_jump) =
+        crate::connection::trusted_known_hosts_fixture(&jump.host, jump.port);
+    let execute =
+        |runner: &SudoRunner,
+         known: &std::path::Path,
+         prompt: &mut dyn FnMut() -> Result<Option<Zeroizing<String>>, String>| {
+            execute_restricted_sudo(
+                &host,
+                runner,
+                Some((&jump, known)),
+                "effective-user",
+                "/usr/local/libexec/shellspan-sudo-jobs/effective-user",
+                &CancellationToken::new(),
+                Instant::now() + Duration::from_secs(10),
+                prompt,
+                |channel, frame| Ok(channel.write(frame)),
+            )
+        };
+    // The only reachable published ports are the jump daemon and a random
+    // direct test port. This specific endpoint is reached inside the bridge.
+    let completed = execute(&runner, &trusted_jump, &mut || {
+        Ok(Some(Zeroizing::new(password.clone())))
+    });
+    assert!(
+        matches!(&completed, RunnerOutcome::Completed { exit_code: 0, stdout, .. } if stdout.trim() == "0"),
+        "{completed:?}"
+    );
+
+    let unfamiliar = tempfile::tempdir().unwrap();
+    let denied = execute(&runner, &unfamiliar.path().join("known_hosts"), &mut || {
+        panic!("an untrusted jump must not prompt for the runner password")
+    });
+    assert!(
+        matches!(denied, RunnerOutcome::NotStarted(message) if message.contains("jump host key is not trusted"))
+    );
+
+    let mut mismatched_runner = runner;
+    mismatched_runner.host_key_sha256 = "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into();
+    let denied = execute(&mismatched_runner, &trusted_jump, &mut || {
+        panic!("a trusted jump must not bypass verification of the runner")
+    });
+    assert!(
+        matches!(denied, RunnerOutcome::NotStarted(message) if message.contains("runner host key does not match"))
+    );
+}
+
 const FIXTURE_OPT_IN_ENV: &str = "SHELLSPAN_E2E_SSH_FIXTURE";
 const FIXTURE_HOST_ENV: &str = "SHELLSPAN_E2E_SSH_HOST";
 const FIXTURE_PORT_ENV: &str = "SHELLSPAN_E2E_SSH_PORT";

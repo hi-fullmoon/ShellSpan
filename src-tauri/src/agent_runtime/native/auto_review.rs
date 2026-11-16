@@ -40,6 +40,26 @@ pub(crate) fn review_call(
     effect: &AgentObservedEffectNative,
     scope: &CallPolicyScopeNative,
 ) -> ApprovalReview {
+    if call.tool_name == "exec_command"
+        && matches!(
+            &call.target,
+            AgentToolTargetNative::Remote {
+                profile_id: Some(_),
+                ..
+            }
+        )
+        && call
+            .arguments
+            .get("elevated")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+    {
+        return ApprovalReview {
+            requires_approval: true,
+            reason: "remote_sudo_requires_human_approval",
+            command: None,
+        };
+    }
     let fallback = super::requires_call_confirmation_native(
         mode,
         &call.tool_name,
@@ -342,6 +362,31 @@ mod tests {
         .unwrap();
         let scope = inspect_call_policy_scope_native(call).unwrap();
         review_call(mode, call, &effect, &scope)
+    }
+
+    #[test]
+    fn elevated_remote_command_requires_explicit_approval_in_full_access() {
+        let call = AgentToolCallNative {
+            request_id: "fixture".into(),
+            call_id: "check-id".into(),
+            tool_name: "exec_command".into(),
+            arguments: json!({
+                "command": "/usr/sbin/nginx -t", "explanation": "Validate Nginx configuration",
+                "channel": "direct", "elevated": true
+            }),
+            target: AgentToolTargetNative::Remote {
+                target_id: "remote".into(),
+                session_id: "terminal".into(),
+                profile_id: Some("profile".into()),
+                host: "127.0.0.1".into(),
+                port: 22,
+                username: "shellspan".into(),
+                root_path: None,
+                local_root: None,
+            },
+            capability_id: "pending".into(),
+        };
+        assert!(review(AgentPermissionModeNative::Operator, &call).requires_approval);
     }
 
     #[cfg(unix)]

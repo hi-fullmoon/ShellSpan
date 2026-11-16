@@ -26,6 +26,7 @@ import { shouldRunStartupUpdateCheck } from '@/lib/update';
 import { createLogger } from '@/lib/logger';
 import { useAppShortcuts } from '@/hooks/useAppShortcuts';
 import { CredentialPromptDialog } from '@/components/terminal/credential-prompt-dialog';
+import { AiSudoDialogHost } from '@/components/ai/workspace/ai-sudo-dialog';
 import { KeychainKeyPromptDialog } from '@/components/terminal/keychain-key-prompt-dialog';
 import { HostKeyDialogHost } from '@/components/terminal/host-key-dialog-host';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
@@ -287,6 +288,7 @@ export const App: React.FC = () => {
       />
 
       <CredentialPromptDialog />
+      <AiSudoDialogHost />
       <KeychainKeyPromptDialog />
       <HostKeyDialogHost />
       <CommandPalette />

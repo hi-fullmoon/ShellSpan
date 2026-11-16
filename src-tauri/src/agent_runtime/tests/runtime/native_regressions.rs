@@ -26,6 +26,106 @@ use std::time::{Duration, Instant};
 
 const TERMINAL: &str = "native-regression-terminal";
 
+#[test]
+fn recovery_closes_restricted_sudo_only_before_its_durable_send() {
+    use crate::agent_runtime::{
+        AgentRecoveryStatus, AgentSessionEffect, AgentToolExecutionStatus, RecordedToolCall,
+    };
+    let scenario = Scenario::new(TerminalShellKind::Bash);
+    for (session, sent) in [
+        ("sudo-restart-before-send", false),
+        ("sudo-restart-after-send", true),
+    ] {
+        let target = serde_json::from_value(json!({
+            "kind": "remote", "targetId": "frozen-runner-host", "sessionId": TERMINAL,
+            "profileId": "removed-profile", "host": "127.0.0.1", "port": 22, "username": "operator"
+        }))
+        .unwrap();
+        let entry = scenario.root_for_target(
+            session,
+            AgentExecutionSurface::Direct,
+            AgentSessionPermissionMode::Operator,
+            target,
+        );
+        scenario.start(&entry, "runner-turn", "runner-step");
+        let raw = RecordedToolCall {
+            call_id: "configured-operation".into(),
+            provider_call_id: None,
+            name: "run_terminal_command".into(),
+            native_name: None,
+            arguments: json!({"sudoOperationId":"check-service","explanation":"Check service"}),
+            title: None,
+            effect: None,
+            target: None,
+        };
+        let append = |event| {
+            scenario
+                .runtime
+                .sessions
+                .append(
+                    session,
+                    Some("runner-turn".into()),
+                    Some("runner-step".into()),
+                    event,
+                )
+                .unwrap()
+        };
+        append(AgentSessionEventPayload::ToolCall {
+            call: RecordedToolCall {
+                native_name: Some("exec_command".into()),
+                arguments: json!({"command":"/usr/local/libexec/shellspan-sudo-jobs/check-service","elevated":true,
+                "sudoOperation":{"id":"check-service","revision":"revoked-revision","runnerUsername":"runner","runnerPort":2222}}),
+                effect: Some(AgentSessionEffect::StateChange),
+                ..raw
+            },
+        });
+        for status in [
+            AgentToolApprovalStatus::Requested,
+            AgentToolApprovalStatus::Approved,
+        ] {
+            append(AgentSessionEventPayload::ToolApproval {
+                request_id: "runner-request".into(),
+                call_id: "configured-operation".into(),
+                approval_id: Some("runner-approval".into()),
+                status,
+                risk: Some(AgentSessionEffect::StateChange),
+                reason: None,
+                expires_at_unix_ms: Some(
+                    crate::agent_runtime::driver::current_unix_ms().unwrap() + 60_000,
+                ),
+                prompt: None,
+            });
+        }
+        if sent {
+            append(AgentSessionEventPayload::ToolExecution {
+                call_id: "configured-operation".into(),
+                status: AgentToolExecutionStatus::Dispatched,
+                idempotency: "no".into(),
+            });
+        }
+        assert_eq!(
+            scenario.runtime.tools.recover_waiting(&entry).unwrap(),
+            !sent
+        );
+        let events = scenario.runtime.sessions.all_events(session).unwrap();
+        assert_eq!(events.iter().any(|event| matches!(&event.payload,
+            AgentSessionEventPayload::ToolApproval { status: AgentToolApprovalStatus::Cancelled, reason: Some(reason), .. }
+            if reason == "sudoApprovalCancelledAfterRestart"
+        )), !sent);
+        assert_eq!(
+            scenario
+                .runtime
+                .sessions
+                .snapshot(session)
+                .unwrap()
+                .recovery
+                .status
+                == AgentRecoveryStatus::Required,
+            sent
+        );
+    }
+}
+
 #[path = "scratch_execution.rs"]
 mod scratch_execution;
 

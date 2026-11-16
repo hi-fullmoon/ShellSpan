@@ -130,6 +130,13 @@ pub(crate) struct NativeToolPreparation {
     pub(crate) exclusive: bool,
 }
 
+pub(crate) type RunnerDispatchJournal = Box<dyn FnOnce() -> Result<(), String> + Send>;
+
+fn is_restricted_sudo(preparation: &NativeToolPreparation) -> bool {
+    preparation.call.native_name.as_deref() == Some("exec_command")
+        && preparation.call.arguments["elevated"] == serde_json::json!(true)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct NativeToolArtifact {
     pub(crate) artifact_id: String,
@@ -265,6 +272,13 @@ impl EphemeralTerminalResultStore {
 }
 
 pub(crate) trait NativeToolRuntime: Send + Sync {
+    fn configured_sudo_operations(
+        &self,
+        _target: &AgentSessionTarget,
+    ) -> Vec<crate::sudo_policy::SudoOperation> {
+        Vec::new()
+    }
+
     fn terminal_execution_capabilities(
         &self,
         _transport_session_id: &str,
@@ -298,6 +312,19 @@ pub(crate) trait NativeToolRuntime: Send + Sync {
         approved: bool,
         cancellation: CancellationToken,
     ) -> Result<NativeToolResult, String>;
+
+    fn execute_with_runner_journal(
+        &self,
+        token: &str,
+        approved: bool,
+        cancellation: CancellationToken,
+        journal: Option<RunnerDispatchJournal>,
+    ) -> Result<NativeToolResult, String> {
+        if journal.is_some() {
+            return Err("The native tool adapter cannot journal restricted runner dispatch".into());
+        }
+        self.execute(token, approved, cancellation)
+    }
 
     fn abandon(&self, token: &str);
 
@@ -479,6 +506,25 @@ impl NativeToolRuntimeSlot {
 }
 
 impl NativeToolRuntime for NativeToolRuntimeSlot {
+    fn execute_with_runner_journal(
+        &self,
+        token: &str,
+        approved: bool,
+        cancellation: CancellationToken,
+        journal: Option<RunnerDispatchJournal>,
+    ) -> Result<NativeToolResult, String> {
+        self.runtime()?
+            .execute_with_runner_journal(token, approved, cancellation, journal)
+    }
+    fn configured_sudo_operations(
+        &self,
+        target: &AgentSessionTarget,
+    ) -> Vec<crate::sudo_policy::SudoOperation> {
+        self.runtime()
+            .map(|runtime| runtime.configured_sudo_operations(target))
+            .unwrap_or_default()
+    }
+
     fn terminal_execution_capabilities(
         &self,
         transport_session_id: &str,
@@ -730,6 +776,10 @@ impl AgentToolPipeline {
         header: &super::AgentSessionHeader,
         assembly: &mut super::prompt::ModelInputAssembly,
     ) -> Result<(), String> {
+        if let Some(target) = &header.target {
+            let operations = self.native.configured_sudo_operations(target);
+            super::prompt::apply_sudo_operations(&mut assembly.tools, &operations);
+        }
         let observation_only = self
             .sessions
             .execution_observation_only(&header.session_id)?;
@@ -2067,7 +2117,7 @@ impl AgentToolPipeline {
         self.append_auto_approved_call(&request, &preparation)?;
         self.append_execution_dispatch(&request, &preparation)?;
         let result = self
-            .execute_native(&preparation, true, entry.cancellation())
+            .execute_native(&request, &preparation, true, entry.cancellation())
             .await;
         self.finish_native(&request, &preparation, result)?;
         Ok(ToolPipelineSettlement::Completed)
@@ -2301,6 +2351,7 @@ impl AgentToolPipeline {
 
     async fn execute_native(
         &self,
+        request: &NativeToolRequest,
         preparation: &NativeToolPreparation,
         approved: bool,
         cancellation: CancellationToken,
@@ -2308,9 +2359,16 @@ impl AgentToolPipeline {
         let native = Arc::clone(&self.native);
         let token = preparation.token.clone();
         let lease = PreparedLease::new(native.clone(), &token);
+        let journal: Option<RunnerDispatchJournal> = is_restricted_sudo(preparation).then(|| {
+            let pipeline = self.clone();
+            let request = request.clone();
+            let preparation = preparation.clone();
+            Box::new(move || pipeline.append_execution_dispatch(&request, &preparation))
+                as RunnerDispatchJournal
+        });
         tokio::task::spawn_blocking(move || {
             let _lease = lease;
-            native.execute(&token, approved, cancellation)
+            native.execute_with_runner_journal(&token, approved, cancellation, journal)
         })
         .await
         .map_err(|error| format!("Native tool worker failed: {error}"))
@@ -2633,9 +2691,16 @@ impl AgentToolPipeline {
                 prompt: None,
             },
         )?;
-        self.append_execution_dispatch(&pending.request, &pending.preparation)?;
+        if !is_restricted_sudo(&pending.preparation) {
+            self.append_execution_dispatch(&pending.request, &pending.preparation)?;
+        }
         let result = self
-            .execute_native(&pending.preparation, true, entry.cancellation())
+            .execute_native(
+                &pending.request,
+                &pending.preparation,
+                true,
+                entry.cancellation(),
+            )
             .await;
         drop(refreshed_lease);
         let still_executing = self
@@ -2708,6 +2773,17 @@ impl AgentToolPipeline {
         entry: &Arc<AgentEntry>,
         pending: &PendingTool,
     ) -> Result<ToolPipelineSettlement, String> {
+        let calls = if pending.preparation.call.native_name.as_deref() == Some("exec_command")
+            && pending.preparation.call.arguments["elevated"] == serde_json::json!(true)
+        {
+            self.commit_pending_not_started(
+                pending,
+                "Wait for the approved sudo command's result and decide the next step in a fresh model request",
+            )?;
+            Vec::new()
+        } else {
+            pending.remaining_calls.clone()
+        };
         self.resume_after_tool(entry)?;
         let outcome = self
             .process_model_calls(
@@ -2715,7 +2791,7 @@ impl AgentToolPipeline {
                 &pending.request.turn_id,
                 &pending.request.step_id,
                 &pending.request.request_id,
-                pending.remaining_calls.clone(),
+                calls,
             )
             .await;
         if let Err(error) = &outcome {
@@ -3085,6 +3161,8 @@ impl AgentToolPipeline {
                 snapshot.header.target.clone().ok_or_else(|| {
                     "Recovered tool call has no frozen Session target".to_string()
                 })?;
+            let restricted_sudo = call.native_name.as_deref() == Some("exec_command")
+                && call.arguments["elevated"] == serde_json::json!(true);
             let raw_calls = events
                 .iter()
                 .filter(|event| event.step_id.as_deref() == Some(&step_id))
@@ -3098,6 +3176,9 @@ impl AgentToolPipeline {
                     }
                     _ => None,
                 })
+                // Cancelling an unsent elevation needs only its durable
+                // approval and native call. It must not recover stale inputs.
+                .or_else(|| restricted_sudo.then(|| vec![call.clone()]))
                 .ok_or_else(|| {
                     "Recovery found no model call for the durable native call".to_string()
                 })?;
@@ -3141,8 +3222,17 @@ impl AgentToolPipeline {
                     .ok_or_else(|| "Recovered tool call has no Rust permission mode".to_string())?,
                 execution_surface: snapshot.header.execution_surface,
             };
-            if super::model::recorded_tool_call_omits_replay(call) {
-                let reason = if status == AgentToolApprovalStatus::Approved {
+            // A restricted runner has no resumable authorization before the
+            // durable send boundary. Request a new approval after restart.
+            if restricted_sudo || super::model::recorded_tool_call_omits_replay(call) {
+                let reason_code = if restricted_sudo {
+                    "sudoApprovalCancelledAfterRestart"
+                } else {
+                    "ephemeralArgumentsUnavailableAfterRestart"
+                };
+                let reason = if restricted_sudo {
+                    "The remote sudo approval was closed after restart. Request the current operation for fresh approval."
+                } else if status == AgentToolApprovalStatus::Approved {
                     "An ephemeral tool call was authorized but not dispatched before restart; it was cancelled because its private arguments were not persisted."
                 } else {
                     "An ephemeral tool call approval was cancelled after restart because its private arguments were not persisted."
@@ -3159,7 +3249,7 @@ impl AgentToolPipeline {
                                 approval_id: (!approval_id.is_empty()).then(|| approval_id.clone()),
                                 status: AgentToolApprovalStatus::Cancelled,
                                 risk: call.effect,
-                                reason: Some("ephemeralArgumentsUnavailableAfterRestart".into()),
+                                reason: Some(reason_code.into()),
                                 expires_at_unix_ms: Some(expires_at),
                                 prompt: None,
                             },
@@ -3174,7 +3264,7 @@ impl AgentToolPipeline {
                                 summary: reason.into(),
                                 data: Some(serde_json::json!({
                                     "recovery": "notRestartable",
-                                    "reason": "ephemeralArgumentsUnavailableAfterRestart"
+                                    "reason": reason_code
                                 })),
                                 duration_ms: None,
                                 evidence_refs: Vec::new(),
@@ -3185,10 +3275,7 @@ impl AgentToolPipeline {
                 for remaining in &remaining_calls {
                     let mut remaining_request = request.clone();
                     remaining_request.model_call = remaining.clone();
-                    self.commit_not_started(
-                        &remaining_request,
-                        "ephemeralArgumentsUnavailableAfterRestart",
-                    )?;
+                    self.commit_not_started(&remaining_request, reason_code)?;
                 }
                 resumable = true;
                 continue;
@@ -3353,9 +3440,16 @@ impl AgentToolPipeline {
             &pending.request.target.target_id,
         )?;
         self.validate_preparation(&pending.request, &pending.preparation)?;
-        self.append_execution_dispatch(&pending.request, &pending.preparation)?;
+        if !is_restricted_sudo(&pending.preparation) {
+            self.append_execution_dispatch(&pending.request, &pending.preparation)?;
+        }
         let result = self
-            .execute_native(&pending.preparation, true, entry.cancellation())
+            .execute_native(
+                &pending.request,
+                &pending.preparation,
+                true,
+                entry.cancellation(),
+            )
             .await;
         if let Err(error) = self.finish_native(&pending.request, &pending.preparation, result) {
             if is_terminal_call_blocked(&error) {

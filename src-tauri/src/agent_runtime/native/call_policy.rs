@@ -251,6 +251,20 @@ pub(crate) fn enforce_native_call_policy_native(
     effect: &AgentObservedEffectNative,
     scope: &CallPolicyScopeNative,
 ) -> Result<(), String> {
+    let sudo_policy_write = match call.tool_name.as_str() {
+        "transfer_file" => scope
+            .paths
+            .get(1)
+            .is_some_and(|path| super::shell_guard::sudo_policy_reference(path)),
+        "write_file" | "edit_file" | "apply_patch" | "trash_file" => scope
+            .paths
+            .iter()
+            .any(|path| super::shell_guard::sudo_policy_reference(path)),
+        _ => false,
+    };
+    if sudo_policy_write {
+        return Err(super::shell_guard::SUDO_POLICY_DENIED.into());
+    }
     if matches!(call.tool_name.as_str(), "exec_command" | "terminal_execute") {
         if let Some(command) = call.arguments.get("command").and_then(Value::as_str) {
             let cwd = match (&call.target, call.tool_name.as_str()) {
@@ -263,6 +277,34 @@ pub(crate) fn enforce_native_call_policy_native(
                 _ => None,
             };
             super::shell_guard::reject_destructive(command, cwd)?;
+            if matches!(
+                call.target,
+                crate::agent_runtime::AgentToolTargetNative::Remote { .. }
+            ) {
+                super::shell_guard::reject_remote_privilege_command(command)?;
+            }
+        }
+    }
+    // Terminal input and process stdin are never a route for sudo policy edits.
+    if matches!(
+        call.tool_name.as_str(),
+        "write_terminal_input" | "write_stdin"
+    ) && ["text", "input"].iter().any(|key| {
+        call.arguments
+            .get(key)
+            .and_then(Value::as_str)
+            .is_some_and(super::shell_guard::sudo_policy_reference)
+    }) {
+        return Err(super::shell_guard::SUDO_POLICY_DENIED.into());
+    }
+    if call.tool_name == "write_terminal_input"
+        && matches!(
+            call.target,
+            crate::agent_runtime::AgentToolTargetNative::Remote { .. }
+        )
+    {
+        if let Some(text) = call.arguments.get("text").and_then(Value::as_str) {
+            super::shell_guard::reject_remote_privilege_command(text)?;
         }
     }
     let critical_write = if call.tool_name == "transfer_file" {

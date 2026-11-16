@@ -442,6 +442,22 @@ pub(crate) fn reject_omitted_input_replay(
 }
 
 fn model_history_tool_arguments(call: &RecordedToolCall) -> serde_json::Value {
+    if call.name == "run_terminal_command" {
+        if let Some(id) = call
+            .arguments
+            .pointer("/sudoOperation/id")
+            .and_then(serde_json::Value::as_str)
+        {
+            let mut arguments = serde_json::json!({
+                "sudoOperationId": id,
+                "explanation": call.arguments["explanation"],
+            });
+            if let Some(timeout) = call.arguments.get("timeoutMs") {
+                arguments["timeoutMs"] = timeout.clone();
+            }
+            return arguments;
+        }
+    }
     if !recorded_tool_call_omits_replay(call)
         && reject_omitted_input_replay(&call.name, &call.arguments).is_ok()
     {

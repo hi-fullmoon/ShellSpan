@@ -19,7 +19,10 @@ const diagnostics = [
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
   resolve: { alias: { '@': `${root}src` } }, esbuild: { jsx: 'automatic' },
-  optimizeDeps: { include: ['react', 'react-dom', 'react-dom/client'] },
+  optimizeDeps: {
+    entries: ['src/components/ai/workspace/ai-question-panel.tsx', 'src/lib/ai/agent-session-adapter.ts', 'src/locales/index.ts'],
+    include: ['react', 'react-dom', 'react-dom/client'],
+  },
   server: { host: '127.0.0.1', port: 0 },
   plugins: [tailwindcss(), {
     name: 'question-submission-recovery',
@@ -101,6 +104,7 @@ try {
                 const action = buttons[operation === 'refresh' ? 0 : 1];
                 action.focus({ preventScroll: true });
                 let during;
+                let spinnerCentered = false;
                 let retainedAlert = false;
                 // Observe actual pending and settled commits of the unavailable native operation.
                 await new Promise((resolve, reject) => {
@@ -108,6 +112,10 @@ try {
                   const observer = new MutationObserver(() => {
                     if (action.disabled) {
                       during = measure();
+                      const spinner = action.querySelector('[data-slot="spinner"]')?.getBoundingClientRect();
+                      const button = action.getBoundingClientRect();
+                      spinnerCentered = Boolean(spinner?.width) && Math.abs(spinner.x + spinner.width / 2 - button.x - button.width / 2) < 1
+                        && Math.abs(spinner.y + spinner.height / 2 - button.y - button.height / 2) < 1;
                       retainedAlert = host.querySelector('[role="alert"]') === alert;
                     } else if (during) {
                       observer.disconnect(); clearTimeout(timeout); resolve();
@@ -116,7 +124,7 @@ try {
                   observer.observe(host, { subtree: true, attributes: true, childList: true });
                   action.click();
                 });
-                return { before, during, retainedAlert, nativeRetryDetected,
+                return { before, during, retainedAlert, nativeRetryDetected, spinnerCentered,
                   retainedOperation: useAgentQuestionStore.getState().drafts[questionKey(question.identity)]?.submission === submission };
               } finally { adapter.dispose(); }
             };
@@ -180,6 +188,7 @@ try {
             assert.ok(result.during, `${context}: recovery must enter its pending state`);
             assert.ok(result.retainedAlert, `${context}: pending recovery must retain the mounted error details`);
             assert.deepEqual(result.during, result.before, `${context}: recovery must preserve panel/footer geometry and body scroll`);
+            if (operation === 'submit') assert.ok(result.spinnerCentered, `${context}: the spinner must be centered in the clicked button`);
             assert.ok(result.retainedOperation, `${context}: unavailable IPC must retain the exact answer operation`);
             assert.ok(result.nativeRetryDetected, `${context}: the native test must recognize the retry button despite its hidden label`);
             await page.screenshot({ path: join(screenshots, `${engine.name()}-${locale}-${width}-${operation}-${withIssue ? 'failure' : 'unconfirmed'}-stable.png`) });

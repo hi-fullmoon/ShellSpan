@@ -28,7 +28,7 @@ fn test_profile(id: &str, name: &str) -> ProfileRow {
 }
 
 #[test]
-fn initializes_empty_database_to_version_one() {
+fn initializes_empty_database_to_current_version() {
     let db = test_db();
     let conn = db.conn.lock().unwrap();
     let version: i32 = conn
@@ -37,7 +37,6 @@ fn initializes_empty_database_to_version_one() {
         })
         .unwrap();
     assert_eq!(version, CURRENT_SCHEMA_VERSION);
-    assert_eq!(version, 1);
     let tables = conn
         .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
         .unwrap()
@@ -50,6 +49,7 @@ fn initializes_empty_database_to_version_one() {
         [
             "key_credentials",
             "preferences",
+            "profile_sudo_policy",
             "profiles",
             "recent_profiles",
             "schema_version",
@@ -96,6 +96,149 @@ fn initializes_empty_database_to_version_one() {
         .unwrap()
         .any(|name| name.as_deref() == Ok("organization_json"));
     assert!(has_organization_column);
+}
+
+#[test]
+fn migrates_existing_profiles_with_no_implicit_sudo_operations() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(SCHEMA_VERSION_TABLE).unwrap();
+    conn.execute_batch(SCHEMA_INITIAL).unwrap();
+    conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])
+        .unwrap();
+    let db = Database {
+        conn: Arc::new(Mutex::new(conn)),
+    };
+    db.insert_profile(&test_profile("existing", "Existing SSH profile"))
+        .unwrap();
+
+    db.initialize_or_validate_schema().unwrap();
+
+    assert_eq!(
+        db.get_profile("existing").unwrap().unwrap().name,
+        "Existing SSH profile"
+    );
+    let policy = db.profile_sudo_policy("existing").unwrap();
+    assert!(policy.operations.is_empty());
+    assert!(policy.revision.is_none());
+}
+
+#[test]
+fn migrates_version_two_sudo_lists_as_pending_without_dropping_ssh_configuration() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(SCHEMA_VERSION_TABLE).unwrap();
+    conn.execute_batch(SCHEMA_INITIAL).unwrap();
+    conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])
+        .unwrap();
+    conn.execute_batch(SCHEMA_PROFILE_SUDO_POLICY).unwrap();
+    let db = Database {
+        conn: Arc::new(Mutex::new(conn)),
+    };
+    let mut profile = test_profile("legacy-policy", "Managed before upgrade");
+    profile.jump_host_config = Some(
+        r#"{"host":"bastion.example","port":2222,"username":"jumper","authMethod":"key","keychainKeyId":"jump-key"}"#
+            .into(),
+    );
+    db.insert_profile(&profile).unwrap();
+    let mut standalone = test_profile("ordinary", "Ordinary SSH");
+    standalone.host = "ordinary.example".into();
+    db.insert_profile(&standalone).unwrap();
+    db.with_connection(|conn| {
+        conn.execute(
+            "INSERT INTO profile_sudo_policy (profile_id, revision, operations_json) VALUES (?1, ?2, ?3)",
+            params![
+                profile.id,
+                "legacy-revision",
+                r#"[{"id":"check-service","label":"Check service","command":"/usr/sbin/nginx -t"}]"#,
+            ],
+        ).map(|_| ()).map_err(|error| error.to_string())
+    }).unwrap();
+
+    db.initialize_or_validate_schema().unwrap();
+
+    let loaded = db.profile_sudo_policy(&profile.id).unwrap();
+    assert_eq!(loaded.revision.as_deref(), Some("legacy-revision"));
+    assert_eq!(loaded.operations[0].command, "/usr/sbin/nginx -t");
+    assert!(loaded.runner.is_none());
+    assert_eq!(loaded.jump_host_config, profile.jump_host_config);
+    assert!(serde_json::to_value(loaded)
+        .unwrap()
+        .get("jumpHostConfig")
+        .is_none());
+    assert!(db
+        .is_managed_sudo_account(&profile.host, profile.port, &profile.username)
+        .unwrap());
+    assert!(!db
+        .is_managed_sudo_account(&standalone.host, standalone.port, &standalone.username)
+        .unwrap());
+    assert_eq!(
+        db.get_profile(&standalone.id).unwrap().unwrap().name,
+        standalone.name
+    );
+}
+
+#[test]
+fn sudo_policy_edits_are_scoped_and_revoked_on_profile_identity_change() {
+    use crate::sudo_policy::{SaveProfileSudoPolicy, SudoOperation};
+    let db = test_db();
+    let mut profile = test_profile("policy-host", "Policy host");
+    db.insert_profile(&profile).unwrap();
+    db.insert_profile(&test_profile("another", "Another SSH profile"))
+        .unwrap();
+    let baseline = db.profile_sudo_policy(&profile.id).unwrap();
+    let operation = SudoOperation {
+        id: "check-backup".into(),
+        label: "Check backups".into(),
+        command: "/usr/local/sbin/check-backup 'weekly primary'".into(),
+    };
+    let write = || SaveProfileSudoPolicy {
+        profile_binding: baseline.profile_binding.clone(),
+        revision: baseline.revision.clone(),
+        runner: None,
+        operations: vec![operation.clone()],
+    };
+    db.save_profile_sudo_policy(&profile.id, write()).unwrap();
+    assert_eq!(
+        db.save_profile_sudo_policy(&profile.id, write())
+            .unwrap_err(),
+        "AGENT_SUDO_POLICY_CHANGED"
+    );
+    let saved = db.profile_sudo_policy(&profile.id).unwrap();
+    assert_eq!(saved.operations, [operation]);
+    assert!(db
+        .is_managed_sudo_account(&profile.host, profile.port, &profile.username)
+        .unwrap());
+    assert!(db
+        .profile_sudo_policy("another")
+        .unwrap()
+        .operations
+        .is_empty());
+
+    profile.name = "Renamed".into();
+    db.update_profile(&profile.id, &profile).unwrap();
+    assert_eq!(
+        db.profile_sudo_policy(&profile.id).unwrap().revision,
+        saved.revision
+    );
+    profile.username = "backup-admin".into();
+    db.update_profile(&profile.id, &profile).unwrap();
+    assert!(db
+        .profile_sudo_policy(&profile.id)
+        .unwrap()
+        .operations
+        .is_empty());
+    assert_eq!(
+        db.save_profile_sudo_policy(
+            &profile.id,
+            SaveProfileSudoPolicy {
+                profile_binding: saved.profile_binding,
+                revision: saved.revision,
+                runner: None,
+                operations: saved.operations,
+            }
+        )
+        .unwrap_err(),
+        "AGENT_SUDO_POLICY_CHANGED"
+    );
 }
 #[test]
 fn repeated_open_is_idempotent() {
@@ -204,7 +347,10 @@ fn rejects_invalid_database_version() {
 
     let error = db.initialize_or_validate_schema().unwrap_err();
 
-    assert_eq!(error, "invalid database schema version: expected version 1");
+    assert_eq!(
+        error,
+        format!("invalid database schema version: expected version {CURRENT_SCHEMA_VERSION}")
+    );
     let conn = db.conn.lock().unwrap();
     assert_eq!(
         conn.query_row(

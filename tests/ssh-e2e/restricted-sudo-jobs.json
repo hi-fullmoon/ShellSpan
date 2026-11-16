@@ -1,0 +1,13 @@
+{
+  "runnerUser": "shellspan-runner",
+  "operations": {
+    "effective-user": {
+      "argv": ["/usr/local/libexec/shellspan-sudo-jobs/effective-user"],
+      "trustedInputs": []
+    },
+    "unsafe-user": {
+      "argv": ["/usr/local/libexec/shellspan-sudo-jobs/effective-user"],
+      "trustedInputs": ["/tmp"]
+    }
+  }
+}

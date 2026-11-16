@@ -24,13 +24,17 @@ it.each([
   const tool = nodes.flatMap(node => node.kind === 'turnProcess' ? node.children : [])
     .find((node): node is AiConversationNodeOf<'tool'> => node.kind === 'tool');
   expect(tool?.state).toBe('uncertain');
-  const { container } = render(<AiToolRow node={tool!} />);
+  const inspected: AiConversationNodeOf<'tool'>[] = [];
+  const { container } = render(<AiToolRow node={tool!} onInspect={(node) => inspected.push(node)} />);
   const row = screen.getByRole('button', { name: new RegExp(label) });
   expect(row).toHaveTextContent(label);
   expect(container.querySelector('[data-tool-state="uncertain"]')).toBeInTheDocument();
   expect(container.querySelector('.ai-state-dot[data-state="failed"]')).toBeNull();
   expect(screen.queryByRole('dialog')).toBeNull();
   await userEvent.setup().click(row);
+  const details = screen.getByRole('button', { name: locale === 'zh-CN' ? /^打开 .* 的详情$/u : /^Open details for /u });
+  await userEvent.setup().click(details);
+  expect(inspected).toEqual([tool]);
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 

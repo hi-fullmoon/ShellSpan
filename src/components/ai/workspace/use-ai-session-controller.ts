@@ -6,7 +6,7 @@ import { canSwitchFocusTarget } from '@/lib/ai/focus-target';
 import { toast } from 'sonner';
 import { latestFailureRecovery } from '@/lib/ai/failure-recovery';
 import { aiErrorMessage } from '@/lib/ai/error-message';
-import { ApprovalDecisionGuard } from '@/lib/ai/approval-decision';
+import { ApprovalDecisionGuard, approvalIdentityKey } from '@/lib/ai/approval-decision';
 
 import { sharedAgentSessionAdapter, submissionMemoryFor, type AiSubmissionContext } from '@/lib/ai/submission-memory';
 import { AiSubmissionQueue } from '@/lib/ai/submission-queue';
@@ -240,17 +240,6 @@ function permissionModeForUi(mode: AgentSessionPermissionMode | undefined): Agen
   if (mode === 'scopedAutopilot') return 'autoApproveReadOnly';
   if (mode === 'operator') return 'fullAccess';
   return 'requestApproval';
-}
-
-function approvalIdentityKey(approval: AiPendingApproval): string {
-  return JSON.stringify([
-    approval.sessionId,
-    approval.turnId,
-    approval.stepId,
-    approval.requestId,
-    approval.callId,
-    approval.approvalId,
-  ]);
 }
 
 function needsVolatileApprovalArguments(approval: AiPendingApproval): boolean {

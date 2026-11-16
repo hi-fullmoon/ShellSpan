@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-const CURRENT_SCHEMA_VERSION: i32 = 1;
+const CURRENT_SCHEMA_VERSION: i32 = 3;
 pub(crate) const DATABASE_FILE_NAME: &str = "shellspan-main.db";
 const TERMINAL_WORKSPACE_VERSION: u64 = 1;
 const MAX_TERMINAL_WORKSPACE_BYTES: usize = 1024 * 1024;
@@ -100,6 +100,30 @@ CREATE TABLE key_credentials (
 );
 ";
 
+const SCHEMA_PROFILE_SUDO_POLICY: &str = "
+CREATE TABLE profile_sudo_policy (
+    profile_id TEXT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+    revision TEXT NOT NULL,
+    operations_json TEXT NOT NULL
+);
+
+CREATE TRIGGER revoke_sudo_policy_on_profile_identity_change
+AFTER UPDATE OF host, port, username, auth_method, keychain_key_id, jump_host_config ON profiles
+WHEN OLD.host IS NOT NEW.host OR OLD.port IS NOT NEW.port
+  OR OLD.username IS NOT NEW.username OR OLD.auth_method IS NOT NEW.auth_method
+  OR OLD.keychain_key_id IS NOT NEW.keychain_key_id OR OLD.jump_host_config IS NOT NEW.jump_host_config
+BEGIN
+    DELETE FROM profile_sudo_policy WHERE profile_id = NEW.id;
+END;
+
+INSERT INTO schema_version (version) VALUES (2);
+";
+
+const SCHEMA_RESTRICTED_SUDO_RUNNER: &str = "
+ALTER TABLE profile_sudo_policy ADD COLUMN runner_json TEXT;
+INSERT INTO schema_version (version) VALUES (3);
+";
+
 #[derive(Clone)]
 pub(crate) struct Database {
     conn: Arc<Mutex<Connection>>,
@@ -190,12 +214,10 @@ impl Database {
                 .map_err(|e| format!("failed to start database initialization: {e}"))?;
             tx.execute_batch(SCHEMA_VERSION_TABLE)
                 .and_then(|_| tx.execute_batch(SCHEMA_INITIAL))
+                .and_then(|_| tx.execute_batch("INSERT INTO schema_version (version) VALUES (1);"))
+                .and_then(|_| tx.execute_batch(SCHEMA_PROFILE_SUDO_POLICY))
+                .and_then(|_| tx.execute_batch(SCHEMA_RESTRICTED_SUDO_RUNNER))
                 .map_err(|e| format!("failed to initialize database schema: {e}"))?;
-            tx.execute(
-                "INSERT INTO schema_version (version) VALUES (?1)",
-                [CURRENT_SCHEMA_VERSION],
-            )
-            .map_err(|e| format!("failed to record database schema version: {e}"))?;
             return tx
                 .commit()
                 .map_err(|e| format!("failed to commit database initialization: {e}"));
@@ -216,7 +238,17 @@ impl Database {
                 "unsupported database schema version {version}; latest supported version is {CURRENT_SCHEMA_VERSION}"
             ));
         }
-        if versions != [CURRENT_SCHEMA_VERSION] {
+        if versions == [1] || versions == [1, 2] {
+            let tx = conn.transaction().map_err(|e| e.to_string())?;
+            if versions == [1] {
+                tx.execute_batch(SCHEMA_PROFILE_SUDO_POLICY)
+                    .map_err(|e| e.to_string())?;
+            }
+            tx.execute_batch(SCHEMA_RESTRICTED_SUDO_RUNNER)
+                .map_err(|e| e.to_string())?;
+            return tx.commit().map_err(|e| e.to_string());
+        }
+        if versions != [1, 2, CURRENT_SCHEMA_VERSION] {
             return Err(format!(
                 "invalid database schema version: expected version {CURRENT_SCHEMA_VERSION}"
             ));
@@ -237,6 +269,126 @@ impl Database {
     }
 
     // --- Profiles ---
+
+    fn read_sudo_policy(
+        conn: &Connection,
+        profile_id: &str,
+    ) -> Result<crate::sudo_policy::ProfileSudoPolicy, String> {
+        use crate::sudo_policy::ProfileSudoPolicy;
+        use sha2::{Digest, Sha256};
+        let (host, port, username, auth, key, jump, revision, operations, runner) = conn
+            .query_row(
+                "SELECT host, port, username, auth_method, keychain_key_id, jump_host_config, revision, operations_json, runner_json
+                 FROM profiles LEFT JOIN profile_sudo_policy ON profiles.id = profile_sudo_policy.profile_id
+                 WHERE profiles.id=?1",
+                [profile_id],
+                |row| Ok((
+                    row.get::<_, String>(0)?, row.get::<_, u16>(1)?, row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?, row.get::<_, Option<String>>(4)?, row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?, row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                )),
+            ).optional().map_err(|e| e.to_string())?.ok_or("SSH profile no longer exists")?;
+        let binding = serde_json::to_vec(&(profile_id, &host, port, &username, auth, key, &jump))
+            .map_err(|e| e.to_string())?;
+        Ok(ProfileSudoPolicy {
+            profile_binding: hex::encode(Sha256::digest(binding)),
+            host,
+            port,
+            username,
+            jump_host_config: jump,
+            revision,
+            runner: runner
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .map_err(|_| "SSH elevation runner is invalid")?,
+            operations: operations
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .map_err(|_| "SSH elevation policy is invalid")?
+                .unwrap_or_default(),
+        })
+    }
+
+    pub(crate) fn profile_sudo_policy(
+        &self,
+        profile_id: &str,
+    ) -> Result<crate::sudo_policy::ProfileSudoPolicy, String> {
+        let conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
+        Self::read_sudo_policy(&conn, profile_id)
+    }
+
+    pub(crate) fn save_profile_sudo_policy(
+        &self,
+        profile_id: &str,
+        input: crate::sudo_policy::SaveProfileSudoPolicy,
+    ) -> Result<(), String> {
+        let operations = crate::sudo_policy::validate_operations(input.operations)?;
+        let operations_json = serde_json::to_string(&operations).map_err(|e| e.to_string())?;
+        let mut conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|e| e.to_string())?;
+        let current = Self::read_sudo_policy(&tx, profile_id)?;
+        if current.profile_binding != input.profile_binding || current.revision != input.revision {
+            return Err("AGENT_SUDO_POLICY_CHANGED".into());
+        }
+        if let Some(runner) = &input.runner {
+            runner.validate(&current)?;
+        }
+        let runner_json = input
+            .runner
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        tx.execute(
+            "INSERT INTO profile_sudo_policy (profile_id, revision, operations_json, runner_json) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(profile_id) DO UPDATE SET revision=excluded.revision, operations_json=excluded.operations_json, runner_json=excluded.runner_json",
+            params![profile_id, uuid::Uuid::new_v4().to_string(), operations_json, runner_json],
+        ).map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())
+    }
+
+    pub(crate) fn with_sudo_dispatch<T>(
+        &self,
+        target: &crate::agent_runtime::AgentToolTargetNative,
+        arguments: &crate::agent_runtime::ExecCommandArgumentsNative,
+        send: impl FnOnce() -> T,
+    ) -> Result<T, String> {
+        let crate::agent_runtime::AgentToolTargetNative::Remote {
+            profile_id: Some(id),
+            ..
+        } = target
+        else {
+            return Err("AGENT_SUDO_UNAVAILABLE".into());
+        };
+        // The mutex is held only during a nonblocking write attempt. Profile
+        // edits and the dispatch frame's terminating byte are ordered here.
+        let conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
+        let policy = Self::read_sudo_policy(&conn, id)?;
+        crate::sudo_policy::verify_policy(&policy, target, arguments)?;
+        Ok(send())
+    }
+
+    pub(crate) fn is_managed_sudo_account(
+        &self,
+        host: &str,
+        port: u16,
+        username: &str,
+    ) -> Result<bool, String> {
+        let conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM profiles p JOIN profile_sudo_policy s ON p.id=s.profile_id
+             WHERE lower(p.host)=lower(?1)
+             AND (s.runner_json IS NOT NULL OR json_array_length(s.operations_json) > 0)
+             AND ((p.port=?2 AND p.username=?3) OR
+                 (json_extract(s.runner_json,'$.port')=?2 AND json_extract(s.runner_json,'$.username')=?3)))",
+            params![host, port, username], |row| row.get(0),
+        ).map_err(|e| e.to_string())
+    }
 
     pub(crate) fn list_profiles(&self) -> Result<Vec<crate::models::ProfileRow>, String> {
         let conn = self

@@ -9,6 +9,7 @@ import '../styles/styles.css';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
 import { createAiComposerState } from '@/lib/ai/composer-machine';
 import { AgentTerminalBusyNotice } from '../agent-terminal-busy-notice';
+import { AiSudoDialog } from '../workspace/ai-sudo-dialog';
 
 const root = createRoot(document.getElementById('root')!);
 
@@ -45,4 +46,28 @@ export async function showComposer(approval: AiApprovalPanelProps['approval']) {
       </div>
     </main>,
   ));
+}
+
+export async function showSudo(approval: AiApprovalPanelProps['approval'], locale: Locale) {
+  useAppStore.setState({ locale });
+  await initI18n(locale);
+  const { host } = approval.target!;
+  const { command, sudoOperation } = approval.arguments as {
+    command: string;
+    sudoOperation: { runnerUsername: string; runnerPort: number };
+  };
+  delete document.body.dataset.action;
+  const render = (authenticating: boolean) => root.render(
+    <main className="ai-panel-shell @container/ai-workspace min-h-dvh min-w-0 p-3" data-ai-scope="workbench">
+      <AiApprovalPanel approval={approval} decision={authenticating ? 'approve' : null} error={null}
+        onApprove={() => render(true)} onReject={() => render(false)} onOpenDetails={() => {}} />
+      {authenticating && <AiSudoDialog request={{ state: 'requested', promptId: approval.approvalId,
+        host: host!, port: sudoOperation.runnerPort, username: sudoOperation.runnerUsername, command }}
+        onRespond={async (id, password) => {
+          document.body.dataset.action = `${id}:${password === null ? 'cancel' : 'authenticate'}`;
+          render(false);
+        }} />}
+    </main>,
+  );
+  flushSync(() => render(false));
 }

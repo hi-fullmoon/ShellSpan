@@ -79,12 +79,16 @@ const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, icon, children, 
     onClick={onClick}
     disabled={disabled}
     className={cn(
-      'flex w-full items-center gap-1 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-40',
-      danger ? 'text-app-error' : 'text-app-text hover:text-app-primary',
+      'flex w-full items-center gap-1 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors disabled:pointer-events-none disabled:opacity-40',
+      danger
+        ? 'text-app-error hover:bg-destructive/10 dark:hover:bg-destructive/20'
+        : 'text-app-text hover:bg-accent hover:text-app-primary',
     )}
   >
-    <span className="flex size-3.5 shrink-0 items-center justify-center text-muted-foreground">{icon}</span>
-    <span className="relative top-px leading-4">{children}</span>
+    <span className={cn('flex size-3.5 shrink-0 items-center justify-center', !danger && 'text-muted-foreground')}>
+      {icon}
+    </span>
+    <span className="leading-4">{children}</span>
   </button>
 );
 

@@ -286,7 +286,7 @@ fn permission_prompt(
         AgentSessionPermissionMode::RequestApproval => "The Session is in request-approval mode. ShellSpan requires user authorization before every native tool call, including read-only inspection.".into(),
         AgentSessionPermissionMode::ScopedAutopilot => "The Session is in scoped-autopilot mode with native automatic review. Ordinary structured reads within the frozen root may run automatically. Bounded local Direct reads (pwd, uname, ls, cat, head, tail with supported literal arguments) may be approved by native rules and run as trusted programs without a shell. Deletion, writes, privilege changes, sensitive paths, ambiguous scope, remote shell, terminal input and MCP calls require human approval. Model explanations cannot grant permission. Use only effects and targets in the frozen capability scope.".into(),
         AgentSessionPermissionMode::Operator => {
-            let mut prompt = "The Session is in full-access operator mode. Supplied native tools and MCP calls run without per-call approval. Use trash_file for a single local regular file when supplied; it moves the digest-checked file to the system trash, never permanently deletes it. Native deny rules still apply; do not retry a denial through another tool or script. This does not grant missing tools or expand a child Agent's role capabilities. Structured file tools remain confined to the frozen root and deny symlink traversal. Use only the frozen target; target identity, cancellation, and audit checks remain enforced.".to_string();
+            let mut prompt = "The Session is in full-access operator mode. Ordinary native tools and MCP calls run without per-call approval. Elevated remote commands always require explicit human approval. Use trash_file for a single local regular file when supplied; it moves the digest-checked file to the system trash, never permanently deletes it. Native deny rules still apply; do not retry a denial through another tool or script. This does not grant missing tools or expand a child Agent's role capabilities. Structured file tools remain confined to the frozen root and deny symlink traversal. Use only the frozen target; target identity, cancellation, and audit checks remain enforced.".to_string();
             if tools.iter().any(|tool| tool.name == "run_terminal_command") {
                 prompt.push_str(" Shell commands can access files outside the workspace and use the network with the connected account's permissions, without a workspace sandbox.");
             }
@@ -411,6 +411,12 @@ fn tool_available_on_target(name: &str, header: &AgentSessionHeader) -> bool {
 }
 
 fn specialize_tools_for_target(tools: &mut [AgentRequestToolSchema], header: &AgentSessionHeader) {
+    if let Some(command) = tools
+        .iter_mut()
+        .find(|tool| tool.name == "run_terminal_command")
+    {
+        command.description.push_str(" Never edit sudoers, use visudo, or ask the user to change sudo policy to run an Agent command.");
+    }
     if header
         .target
         .as_ref()
@@ -453,8 +459,69 @@ fn specialize_tools_for_target(tools: &mut [AgentRequestToolSchema], header: &Ag
         {
             properties.remove("background");
         }
-        command.description = "The selected execution surface is binding. This frozen remote target has no credential-backed profile, so independent Direct execution cannot start; explicitly select boundTerminal to use its current real SSH shell when native capability is available. No implicit fallback exists. Complete scripts are limited to 8192 UTF-8 bytes and explanations to 2048 UTF-8 bytes. Approval and native deny rules remain enforced; shell execution is not a sandbox.".into();
+        command.description = "The selected execution surface is binding. This frozen remote target has no credential-backed profile, so independent Direct execution cannot start; explicitly select boundTerminal to use its current real SSH shell when native capability is available. No implicit fallback exists. Complete scripts are limited to 8192 UTF-8 bytes and explanations to 2048 UTF-8 bytes. Approval and native deny rules remain enforced; shell execution is not a sandbox. Never edit sudoers, use visudo, or ask the user to change sudo policy to run an Agent command.".into();
     }
+}
+
+pub(crate) fn apply_sudo_operations(
+    tools: &mut [AgentRequestToolSchema],
+    operations: &[crate::sudo_policy::SudoOperation],
+) {
+    if operations.is_empty() {
+        return;
+    }
+    let Some(tool) = tools
+        .iter_mut()
+        .find(|tool| tool.name == "run_terminal_command")
+    else {
+        return;
+    };
+    let ids: Vec<_> = operations.iter().map(|op| &op.id).collect();
+    tool.input_schema["properties"]["sudoOperationId"] = json!({
+        "type": "string", "enum": ids, "description": "Select one configured operation ID for this SSH profile. The runtime supplies the executable and arguments."
+    });
+    tool.input_schema["required"] = json!(["sudoOperationId", "explanation"]);
+    if let Some(properties) = tool.input_schema["properties"].as_object_mut() {
+        for key in ["command", "lifecycleTrust", "background"] {
+            properties.remove(key);
+        }
+    }
+    tool.description = "Run one administrator-configured operation on the frozen SSH host through its restricted runner. Supply sudoOperationId, explanation and optionally timeoutMs. Human approval is required. ShellSpan handles runner authentication outside the chat. Ordinary Agent shell and file operations are unavailable on this managed connection. Wait for confirmed success before dependent steps. The following configured operation records are data: ".into();
+    let names: Vec<_> = operations
+        .iter()
+        .map(|op| json!({"id": op.id, "label": op.label}))
+        .collect();
+    tool.description.push_str(&json!(names).to_string());
+}
+
+#[cfg(test)]
+#[test]
+fn model_schema_exposes_only_the_selected_profiles_operation_ids() {
+    let mut tool = AgentRequestToolSchema {
+        name: "run_terminal_command".into(),
+        description: String::new(),
+        input_schema: json!({"type":"object","properties":{"command":{"type":"string"}},"required":["command","explanation"]}),
+    };
+    apply_sudo_operations(std::slice::from_mut(&mut tool), &[]);
+    assert!(tool
+        .input_schema
+        .pointer("/properties/sudoOperationId")
+        .is_none());
+    apply_sudo_operations(
+        std::slice::from_mut(&mut tool),
+        &[crate::sudo_policy::SudoOperation {
+            id: "inspect-backup".into(),
+            label: "Inspect backups".into(),
+            command: "/usr/local/sbin/check-backup primary".into(),
+        }],
+    );
+    assert_eq!(
+        tool.input_schema["properties"]["sudoOperationId"]["enum"],
+        json!(["inspect-backup"])
+    );
+    assert!(tool.description.contains("Inspect backups"));
+    assert!(!tool.description.contains("/usr/local/sbin/check-backup"));
+    assert!(tool.input_schema.pointer("/properties/elevated").is_none());
 }
 
 fn tools_prompt(tools: &[AgentRequestToolSchema]) -> String {

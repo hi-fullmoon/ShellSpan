@@ -640,6 +640,15 @@ pub(crate) async fn agent_runtime_approve_tool(
 }
 
 #[tauri::command]
+pub(crate) fn agent_runtime_respond_sudo(
+    runtime: State<'_, AgentRuntime>,
+    prompt_id: uuid::Uuid,
+    password: Option<String>,
+) -> Result<(), String> {
+    runtime.respond_to_sudo_prompt(prompt_id, password.map(zeroize::Zeroizing::new))
+}
+
+#[tauri::command]
 pub(crate) async fn agent_runtime_reject_tool(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,

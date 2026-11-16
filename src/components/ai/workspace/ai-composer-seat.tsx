@@ -44,9 +44,8 @@ import type { AiSessionStatus } from '@/lib/ai/conversation-node';
 import type { AiContextUsage, AiInboxItem, AiPendingApproval } from '@/lib/ai/session-adapter';
 import type { LocaleKey } from '@/locales';
 import type { AgentSessionPlanStep } from '@/types/agent-session';
-import { AiApprovalPanel } from './ai-approval-panel';
-import { AiQuestionPanel } from './ai-question-panel';
-import { questionKey } from '@/types/agent-question';
+import { AiApprovalSeat } from './ai-approval-panel';
+import { AiQuestionSeat } from './ai-question-panel';
 import { AiContextMeter } from './ai-context-meter';
 import { AiQueueDock } from './ai-queue-dock';
 import { useDocumentImport } from './use-document-import';
@@ -492,27 +491,19 @@ export function AiComposerSeat({
         />}
         {statusNotices}
         {mode === 'agent' && executionSurfaceNotice}
-        {pendingQuestion && <AiQuestionPanel key={questionKey(pendingQuestion.identity)} question={pendingQuestion} onAnswer={onAnswerQuestion} onRefresh={onRefreshQuestionAnswer} onOpenSettings={onOpenModel} />}
-        {waitingApproval && pendingApproval && (
-          <div
-            data-slot="ai-approval-overlay"
-            className="min-h-0 min-w-0 [&>[data-slot=ai-approval-panel]]:max-h-[min(600px,45dvh)]"
-          >
-            <AiApprovalPanel
-              approval={{
-                ...pendingApproval,
-                arguments: approvalArguments ?? pendingApproval.arguments,
-              }}
-              decision={approvalDecision}
-              error={approvalError}
-              argumentsLoading={approvalArgumentsLoading}
-              argumentsError={approvalArgumentsError}
-              onApprove={() => onApprove?.()}
-              onReject={() => onReject?.()}
-              onOpenDetails={() => onOpenApprovalDetails?.()}
-            />
-          </div>
-        )}
+        <AiQuestionSeat key={currentSessionId} question={pendingQuestion} onAnswer={onAnswerQuestion} onRefresh={onRefreshQuestionAnswer} onOpenSettings={onOpenModel} />
+        {mode === 'agent' && <AiApprovalSeat key={`approval:${currentSessionId ?? composerState?.sessionId ?? ''}`}
+          approval={waitingApproval && pendingApproval ? {
+            ...pendingApproval, arguments: approvalArguments ?? pendingApproval.arguments,
+          } : null}
+          decision={approvalDecision}
+          error={approvalError}
+          argumentsLoading={approvalArgumentsLoading}
+          argumentsError={approvalArgumentsError}
+          onApprove={onApprove}
+          onReject={onReject}
+          onOpenDetails={onOpenApprovalDetails}
+        />}
       </div>
       {inputExpanded && inputMode === 'supplement' && unavailableReason && (
         <Alert id={availabilityHintId} variant="info" size="sm" role="status">

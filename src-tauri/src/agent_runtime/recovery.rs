@@ -171,10 +171,11 @@ pub(super) fn unresolved_execution(
         kind: AgentRecoveryCheckpointKind::ExecutionInFlight,
         status: AgentRecoveryStatus::Required,
         summary: if uncertain {
-            "The visible terminal reported an explicit uncertain outcome; reconcile it before continuing."
+            "The command has an explicit uncertain outcome; reconcile it before continuing."
         } else {
             "A native call was dispatched without a durable result; its outcome is uncertain."
-        }.into(),
+        }
+        .into(),
         last_committed_seq: events.last().map_or(0, |event| event.seq),
         turn_id: dispatch.turn_id.clone(),
         step_id: dispatch.step_id.clone(),
@@ -183,7 +184,11 @@ pub(super) fn unresolved_execution(
                 return None;
             }
             match &event.payload {
-                AgentSessionEventPayload::ToolApproval { request_id, call_id: approved, .. } if approved == call_id => Some(request_id.clone()),
+                AgentSessionEventPayload::ToolApproval {
+                    request_id,
+                    call_id: approved,
+                    ..
+                } if approved == call_id => Some(request_id.clone()),
                 _ => None,
             }
         }),
@@ -191,7 +196,8 @@ pub(super) fn unresolved_execution(
         effect: call.and_then(|call| call.effect),
         idempotency: Some(idempotency.clone()),
         tool_name: call.map(|call| call.name.clone()),
-        command: call.and_then(|call| call.arguments.get("command")?.as_str())
+        command: call
+            .and_then(|call| call.arguments.get("command")?.as_str())
             .map(crate::redaction::redact_sensitive_text),
     })
 }
@@ -498,7 +504,7 @@ pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentR
                     AgentRecoveryCheckpointKind::ExecutionInFlight,
                     AgentRecoveryStatus::Required,
                     if boundary.uncertain_result {
-                        "The visible terminal reported an explicit uncertain outcome; reconcile it before continuing."
+                        "The command has an explicit uncertain outcome; reconcile it before continuing."
                     } else {
                         "A native call was dispatched without a durable result; its outcome is uncertain."
                     },

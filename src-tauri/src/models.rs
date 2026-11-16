@@ -1912,6 +1912,24 @@ impl SessionManager {
         })
     }
 
+    pub(crate) fn has_remote_account(
+        &self,
+        host: &str,
+        port: u16,
+        username: &str,
+    ) -> Result<bool, String> {
+        let guard = self
+            .registry
+            .lock()
+            .map_err(|_| "session registry poisoned")?;
+        Ok(guard.sessions.values().any(|session| {
+            session.terminal_kind == SessionTerminalKind::Remote
+                && session.identity.host.eq_ignore_ascii_case(host)
+                && session.identity.port == port
+                && session.identity.username == username
+        }))
+    }
+
     /// Keep close/status changes from racing the durable conversation rebind.
     /// Missing predecessors are expected after restart; registry failures are not.
     pub(crate) fn with_reconnect_targets<T>(

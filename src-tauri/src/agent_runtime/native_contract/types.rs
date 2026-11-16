@@ -198,6 +198,8 @@ pub struct ExecCommandArgumentsNative {
     pub background: Option<bool>,
     #[serde(default)]
     pub elevated: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sudo_operation: Option<crate::sudo_policy::SudoOperationGrant>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

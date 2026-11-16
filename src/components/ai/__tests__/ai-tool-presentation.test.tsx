@@ -61,11 +61,14 @@ describe('AI tool presentation', () => {
     expect(sections[1].querySelectorAll('.ai-tool-copy-button')).toHaveLength(1);
     expect(screen.getByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy Output' })).toBeVisible();
 
-    rerender(<AiToolExpandedContent node={plan!} />);
+    const opened: AiConversationNodeOf<'tool'>[] = [];
+    rerender(<AiToolRow node={plan!} onInspect={(tool) => opened.push(tool)} />);
+    await userEvent.setup().click(screen.getByRole('button'));
     const inline = container.querySelectorAll('.ai-io-section');
     expect(inline).toHaveLength(2);
     expect(inline[0].querySelector('pre')?.textContent).toBe(JSON.stringify(plan!.input, null, 2));
     expect(inline[1].querySelector('pre')?.textContent).toBe(JSON.stringify(plan!.output, null, 2));
+    expect(screen.queryByText(locale === 'zh-CN' ? '查看详情' : 'View details')).not.toBeInTheDocument();
   });
 
   it('shows a real generic tool result without repeating its input in the details output', () => {
@@ -100,6 +103,8 @@ describe('AI tool presentation', () => {
       { name: 'web_fetch', input: { url: new URL(`file://${path}`).href }, output: file, result: file, selector: '.ai-web-content pre' },
       { name: 'trash_file', input: { path }, state: 'uncertain' as const, output: { path }, result: JSON.stringify({ path }, null, 2), selector: '.ai-io-output pre' },
     ];
+    const opened: AiConversationNodeOf<'tool'>[] = [];
+    const user = userEvent.setup();
     for (const entry of cases) {
       const tool = { ...node, ...entry };
       const { container, rerender, unmount } = render(<AiToolDetails node={tool} onBack={() => undefined} />);
@@ -115,11 +120,14 @@ describe('AI tool presentation', () => {
       } else expect(result?.textContent, entry.name).toBe(entry.result);
       expect(output.querySelectorAll('.ai-tool-copy-button'), entry.name).toHaveLength(1);
 
-      rerender(<AiToolExpandedContent node={tool} />);
+      rerender(<AiToolRow node={tool} onInspect={(inspected) => opened.push(inspected)} />);
+      await user.click(screen.getByRole('button'));
       if (entry.name === 'run_terminal_command') expect(container.querySelector('.ai-terminal-command-row')).toHaveTextContent(`node ${codePath}`);
       else if (entry.name === 'run_code') expect(container.querySelector('.ai-code-content pre')?.textContent).toBe(code);
       else if (entry.name === 'trash_file') expect(container.querySelector('.ai-io-input')).toBeInTheDocument();
       else expect(container.querySelector('.ai-tool-surface-header')).toBeInTheDocument();
+      expect(container.querySelector(entry.selector), entry.name).toBeVisible();
+      expect(screen.queryByText(locale === 'zh-CN' ? '查看详情' : 'View details'), entry.name).not.toBeInTheDocument();
       unmount();
     }
   });
@@ -428,20 +436,29 @@ describe('AI tool presentation', () => {
     expect(screen.getByRole('button', { name: /no ordinary shell fallback was run/u })).toBeVisible();
   });
   it.each([
-    { locale: 'zh-CN' as const, label: '查看详情', accessibleName: '打开 run_terminal_command 的详情' },
-    { locale: 'en-US' as const, label: 'View details', accessibleName: 'Open details for run_terminal_command' },
-  ])('labels the tool details action clearly in $locale', async ({ locale, label, accessibleName }) => {
+    { locale: 'zh-CN' as const, label: '查看详情', copyCommand: '复制命令', copyOutput: '复制输出' },
+    { locale: 'en-US' as const, label: 'View details', copyCommand: 'Copy command', copyOutput: 'Copy output' },
+  ])('keeps completed command output inline without the details action in $locale', async ({ locale, label, copyCommand, copyOutput }) => {
     useAppStore.setState({ locale });
     await initI18n(locale);
+    const execution = spawnSync('git', ['--version'], { encoding: 'utf8' });
+    expect(execution.status).toBe(0);
     const opened: AiConversationNodeOf<'tool'>[] = [];
-    render(<AiToolRow node={node} onInspect={(tool) => opened.push(tool)} />);
+    const result = {
+      ...node,
+      input: { command: 'git --version', description: 'Report the Git version' },
+      output: { execution: 'completed', stdout: execution.stdout, exitCode: execution.status },
+    };
+    render(<AiToolRow node={result} onInspect={(tool) => opened.push(tool)} />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button'));
-    const details = screen.getByRole('button', { name: accessibleName });
-    expect(details).toHaveTextContent(label);
-    expect(details).toHaveClass('ml-1', 'self-start');
-    await user.click(details);
-    expect(opened).toEqual([node]);
+    const row = screen.getByRole('button');
+    row.focus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByText('git --version')).toBeVisible();
+    expect(screen.getByText(execution.stdout.trim())).toBeVisible();
+    expect(screen.getByRole('button', { name: copyCommand })).toBeVisible();
+    expect(screen.getByRole('button', { name: copyOutput })).toBeVisible();
+    expect(screen.queryByText(label)).not.toBeInTheDocument();
   });
 
   it.each(['zh-CN', 'en-US'] as const)('explains rejected historical input with structured output in %s', async (locale) => {
@@ -581,7 +598,7 @@ describe('AI tool presentation', () => {
     expect(container.querySelector('.ai-tool-copy-button')).not.toBeInTheDocument();
   });
 
-  it('keeps diff headers outside the horizontal scrolling body', () => {
+  it('keeps diff headers outside the horizontal scrolling body and shows changes inline', async () => {
     const path = 'src/components/ai/workspace/ai-tool-presentation.tsx';
     // Use a real Git diff of owned files, without depending on repository
     // discovery, commit objects or the caller's mutable working tree.
@@ -596,7 +613,10 @@ describe('AI tool presentation', () => {
     expect(result.status).toBe(1); // Git reports an actual difference with exit 1.
     expect(result.stdout).not.toBe('');
     const patchNode = { ...node, name: 'apply_patch', input: { patch: result.stdout }, output: { diff: result.stdout } };
-    const { container, rerender } = render(<AiToolExpandedContent node={patchNode} />);
+    const opened: AiConversationNodeOf<'tool'>[] = [];
+    const { container, rerender } = render(<AiToolRow node={patchNode} onInspect={(tool) => opened.push(tool)} />);
+    await userEvent.setup().click(screen.getByRole('button'));
+    expect(screen.queryByText('View details')).not.toBeInTheDocument();
     const viewport = container.querySelector('.ai-diff-block [data-slot="scroll-area-viewport"]');
     expect(viewport?.closest('.ai-diff-content')).toHaveClass('max-h-65');
     for (const body of container.querySelectorAll('.ai-diff-body')) {
@@ -625,17 +645,18 @@ describe('AI tool presentation', () => {
     expect(output.querySelector('.ai-diff-content')).not.toHaveAttribute('data-slot', 'scroll-area');
   });
 
-  it('shows a leading icon on the inspect action and still opens tool details', async () => {
+  it('keeps the details action and its leading icon for an error-only card', async () => {
     const user = userEvent.setup();
     const onInspect = vi.fn();
-    render(<AiToolRow node={node} onInspect={onInspect} />);
+    const read = capturedRead(true);
+    render(<AiToolRow node={read} onInspect={onInspect} />);
 
-    await user.click(screen.getByRole('button', { name: /^Command:/u }));
-    const inspect = screen.getByRole('button', { name: 'Open details for run_terminal_command' });
+    await user.click(screen.getByRole('button'));
+    const inspect = screen.getByRole('button', { name: `Open details for ${read.name}` });
     expect(inspect.querySelector('svg[data-icon="inline-start"]')).toBeInTheDocument();
     expect(inspect).toHaveClass('gap-1');
 
     await user.click(inspect);
-    expect(onInspect).toHaveBeenCalledExactlyOnceWith(node);
+    expect(onInspect).toHaveBeenCalledExactlyOnceWith(read);
   });
 });

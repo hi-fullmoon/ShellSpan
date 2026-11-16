@@ -26,6 +26,7 @@ import type {
   LogCursor,
   LogFileInfo,
   ProfileRow,
+  ProfileSudoPolicy,
   PortForwardRuntime,
   PortForwardStartRequest,
   ProfileSecretKind,
@@ -1160,6 +1161,19 @@ export async function listenToAgentRuntimeSession(
   });
 }
 
+export type AgentSudoPromptEvent =
+  | { state: 'requested'; promptId: string; host: string; port: number; username: string; command: string }
+  | { state: 'closed'; promptId: string };
+
+export function listenToAgentSudoPrompt(callback: EventCallback<AgentSudoPromptEvent>): Promise<UnlistenFn> {
+  return listen<AgentSudoPromptEvent>('agent-sudo-prompt', callback);
+}
+
+export function respondToAgentSudoPrompt(promptId: string, password: string | null): Promise<void> {
+  // Keep credential data and IPC errors out of the normal lifecycle logger.
+  return invoke('agent_runtime_respond_sudo', { promptId, password });
+}
+
 export async function listenToAgentTerminalLease(
   callback: EventCallback<AgentTerminalLeaseEvent>,
 ): Promise<UnlistenFn> {
@@ -1189,6 +1203,17 @@ export function invokeAnswerAgentRuntimeQuestion(input: import('@/types/agent-qu
 }
 export async function invokeListProfiles(): Promise<ProfileRow[]> {
   return invokeLogged<ProfileRow[]>('list_profiles');
+}
+
+export function invokeGetProfileSudoPolicy(profileId: string): Promise<ProfileSudoPolicy> {
+  return invokeLogged('get_profile_sudo_policy', { profileId });
+}
+
+export function invokeSaveProfileSudoPolicy(
+  profileId: string,
+  input: Pick<ProfileSudoPolicy, 'profileBinding' | 'revision' | 'operations' | 'runner'>,
+): Promise<void> {
+  return invokeLogged('save_profile_sudo_policy', { profileId, input });
 }
 
 export async function invokeAddProfile(profile: ProfileRow): Promise<void> {

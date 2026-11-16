@@ -16,6 +16,7 @@ const entry = { path, name: 'AGENTS.md', kind: 'file', size: metadata.size, modi
 const server = await createServer({
   root, configFile: false, appType: 'custom', logLevel: 'error',
   cacheDir: `${output}/vite`,
+  optimizeDeps: { entries: ['src/components/ui/__tests__/context-menu-hover.browser-entry.tsx'] },
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': `${root}src` } },
   server: { host: '127.0.0.1', port: 0, hmr: false },
@@ -52,15 +53,19 @@ try {
               : kind === 'blank' ? [page.getByRole('menuitem', { name: labels.refresh, exact: true })]
                 : [page.getByRole('button', { name: root.slice(0, -1), exact: true })];
           for (const item of targets) {
+            const isDelete = kind === 'file' && (await item.textContent()).trim() === labels.remove;
+            const expectedBackground = isDelete
+              ? `color-mix(in oklab, var(--destructive) ${theme === 'dark' ? 20 : 10}%, transparent)`
+              : 'var(--accent)';
             await item.hover();
-            await page.waitForFunction(element => {
+            await page.waitForFunction(({ element, expectedBackground }) => {
               const probe = document.createElement('span');
-              probe.style.backgroundColor = 'var(--accent)';
+              probe.style.backgroundColor = expectedBackground;
               element.append(probe);
               const expected = getComputedStyle(probe).backgroundColor;
               probe.remove();
               return getComputedStyle(element).backgroundColor === expected;
-            }, await item.elementHandle(), { timeout: 5000 }).catch(async error => {
+            }, { element: await item.elementHandle(), expectedBackground }, { timeout: 5000 }).catch(async error => {
               await page.screenshot({ path: `${output}/${engine}-failure.png` });
               const details = await item.evaluate(element => ({
                 text: element.textContent,
@@ -78,10 +83,10 @@ try {
               height: element.getBoundingClientRect().height,
             }));
             reference ??= result.background;
-            assert.equal(result.background, reference, `${engine}/${theme}/${locale}/${width}/${kind}: hover background`);
             assert.ok(result.text.length > 0, `${kind}: readable label`);
             assert.ok(result.height >= 28, `${kind}: menu item height`);
-            if (kind === 'file' && result.text === labels.remove) {
+            if (isDelete) {
+              assert.notEqual(result.background, reference, 'Delete uses its destructive hover background');
               const danger = await item.evaluate(element => {
                 const probe = document.createElement('span');
                 probe.style.color = 'var(--app-error)';
@@ -91,6 +96,10 @@ try {
                 return color;
               });
               assert.equal(result.color, danger, 'Delete keeps its warning text color');
+              const iconStroke = await item.locator('svg').evaluate(icon => getComputedStyle(icon).stroke);
+              assert.equal(iconStroke, danger, 'Delete icon matches the warning text color');
+            } else {
+              assert.equal(result.background, reference, `${engine}/${theme}/${locale}/${width}/${kind}: hover background`);
             }
           }
           if (kind === 'blank') {

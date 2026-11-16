@@ -116,6 +116,15 @@ struct TerminalCommandArguments {
     timeout_ms: Option<u64>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SudoOperationArguments {
+    sudo_operation_id: String,
+    explanation: String,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct WriteProcessInputArguments {
@@ -161,6 +170,24 @@ struct McpCallArguments {
 }
 
 impl NativeToolRuntime for NativeToolAdapter {
+    fn configured_sudo_operations(
+        &self,
+        target: &AgentSessionTarget,
+    ) -> Vec<crate::sudo_policy::SudoOperation> {
+        target_native(target)
+            .and_then(|target| {
+                crate::sudo_policy::policy_for_target(&self.services.database, &target)
+            })
+            .map(|policy| {
+                if policy.runner.is_some() {
+                    policy.operations
+                } else {
+                    Vec::new()
+                }
+            })
+            .unwrap_or_default()
+    }
+
     fn terminal_execution_capabilities(
         &self,
         transport_session_id: &str,
@@ -218,6 +245,16 @@ impl NativeToolRuntime for NativeToolAdapter {
         let credentials = &self.services.credentials;
         self.configure(runtime)?;
         let known_hosts_path = &self.services.known_hosts_path;
+        let mut owner_target = target_native(&request.target)?;
+        if request.model_call.name != "run_terminal_command"
+            || request
+                .model_call
+                .arguments
+                .get("sudoOperationId")
+                .is_none()
+        {
+            crate::sudo_policy::require_ordinary_remote_account(database, &owner_target)?;
+        }
         let original_arguments = request.model_call.arguments.clone();
         let scratch_scope = super::scratch::take_scope(
             &request.model_call.name,
@@ -269,7 +306,6 @@ impl NativeToolRuntime for NativeToolAdapter {
         if let Some(lease) = &mut scratch {
             lease.bind_execution_target(&request.target)?;
         }
-        let mut owner_target = target_native(&request.target)?;
         if scratch_scope {
             let root = &scratch
                 .as_ref()
@@ -400,10 +436,18 @@ impl NativeToolRuntime for NativeToolAdapter {
             return Ok(preparation);
         }
 
-        let direct_lifecycle_required = terminal_command_requires_direct_lifecycle(&request)?;
+        let elevated_command = request.model_call.name == "run_terminal_command"
+            && request
+                .model_call
+                .arguments
+                .get("sudoOperationId")
+                .is_some();
+        let direct_lifecycle_required =
+            !elevated_command && terminal_command_requires_direct_lifecycle(&request)?;
         let visible_route = if request.model_call.name == "run_terminal_command"
             && request.execution_surface == super::AgentExecutionSurface::BoundTerminal
             && !direct_lifecycle_required
+            && !elevated_command
         {
             let route = match &target {
                 AgentToolTargetNative::Local { session_id, .. } => {
@@ -448,8 +492,15 @@ impl NativeToolRuntime for NativeToolAdapter {
         } else {
             None
         };
-        let (native_name, arguments) =
-            normalize_arguments(&request, &target, visible_route, direct_lifecycle_required)?;
+        let (native_name, arguments) = if elevated_command {
+            (
+                "exec_command".into(),
+                normalize_sudo_operation(database, &request.model_call.arguments, &target)?,
+            )
+        } else {
+            normalize_arguments(&request, &target, visible_route, direct_lifecycle_required)?
+        };
+        let elevated = native_name == "exec_command" && arguments["elevated"] == json!(true);
         let internal_call_id = stable_native_id(
             "call",
             &format!(
@@ -507,12 +558,14 @@ impl NativeToolRuntime for NativeToolAdapter {
             prompt: prepared.native_prompt.clone(),
             expires_at_unix_ms,
             idempotency: match descriptor.idempotency {
+                _ if elevated => NativeToolIdempotency::No,
                 ToolIdempotencyNative::Yes => NativeToolIdempotency::Yes,
                 ToolIdempotencyNative::No => NativeToolIdempotency::No,
                 ToolIdempotencyNative::Conditional => NativeToolIdempotency::Conditional,
             },
             parallel: descriptor.parallel,
-            exclusive: descriptor.max_concurrency == 1
+            exclusive: elevated
+                || descriptor.max_concurrency == 1
                 || matches!(
                     effect,
                     AgentSessionEffect::StateChange
@@ -549,6 +602,16 @@ impl NativeToolRuntime for NativeToolAdapter {
         token: &str,
         approved: bool,
         cancellation: CancellationToken,
+    ) -> Result<NativeToolResult, String> {
+        self.execute_with_runner_journal(token, approved, cancellation, None)
+    }
+
+    fn execute_with_runner_journal(
+        &self,
+        token: &str,
+        approved: bool,
+        cancellation: CancellationToken,
+        journal: Option<super::RunnerDispatchJournal>,
     ) -> Result<NativeToolResult, String> {
         let mut stored = self
             .prepared
@@ -654,6 +717,7 @@ impl NativeToolRuntime for NativeToolAdapter {
                     credentials,
                     known_hosts_path,
                     &cancellation,
+                    journal,
                 )?;
                 let public_target_id = project_native_result_target(
                     &prepared.call.target,
@@ -738,6 +802,10 @@ impl NativeToolRuntime for NativeToolAdapter {
                 Ok(public_result)
             }
             PreparedAuthorization::Mcp(prepared) => {
+                crate::sudo_policy::require_ordinary_remote_account(
+                    database,
+                    &prepared.call.target,
+                )?;
                 let grant = runtime.issue_prepared_mcp_authorization(&prepared, approved)?;
                 if cancellation.is_cancelled() {
                     let _ = runtime.revoke_capability(&grant.capability_id);
@@ -800,6 +868,35 @@ impl NativeToolRuntime for NativeToolAdapter {
         self.scratch.release_process_handles(&confirmed)?;
         outcome
     }
+}
+
+fn normalize_sudo_operation(
+    database: &Database,
+    arguments: &Value,
+    target: &AgentToolTargetNative,
+) -> Result<Value, String> {
+    let args: SudoOperationArguments = serde_json::from_value(arguments.clone())
+        .map_err(|_| "AGENT_SUDO_INVALID_ARGUMENTS: supply sudoOperationId, explanation and an optional timeoutMs")?;
+    let policy = crate::sudo_policy::policy_for_target(database, target)?;
+    let runner = policy
+        .runner
+        .ok_or("AGENT_SUDO_UNAVAILABLE: a trusted restricted SSH runner is required")?;
+    let revision = policy
+        .revision
+        .ok_or("AGENT_SUDO_UNAVAILABLE: no elevated operations are configured")?;
+    let operation = policy
+        .operations
+        .iter()
+        .find(|op| op.id == args.sudo_operation_id)
+        .ok_or("AGENT_SUDO_UNAVAILABLE: that operation is not configured for this SSH profile")?;
+    Ok(omit_null_fields(json!({
+        "command": operation.command,
+        "explanation": args.explanation,
+        "channel": "direct",
+        "elevated": true,
+        "sudoOperation": { "id": operation.id, "revision": revision, "runnerUsername": runner.username, "runnerPort": runner.port },
+        "timeoutMs": args.timeout_ms,
+    })))
 }
 
 fn normalize_arguments(
@@ -894,6 +991,11 @@ fn normalize_arguments(
         };
     }
     match request.model_call.name.as_str() {
+        "exec_command" if request.model_call.arguments["elevated"] == json!(true)
+            || request.model_call.arguments.get("sudoOperation").is_some() =>
+        {
+            Err("AGENT_SUDO_UNAVAILABLE: request a configured sudoOperationId in run_terminal_command".into())
+        }
         "exec_command" if request.execution_surface == super::AgentExecutionSurface::BoundTerminal => {
             Err("TERMINAL_DIRECT_REQUIRED: exec_command requires an explicitly selected direct session; no command was executed; use run_terminal_command for the bound terminal".into())
         }
