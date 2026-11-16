@@ -1,4 +1,5 @@
 use super::*;
+use crate::connection::terminal_deadline::{self, TerminalStartupMode};
 use crate::db::Database;
 use crate::directory_request_registry::{
     DirectoryRequestRegistry, DIRECTORY_REQUEST_SUPERSEDED_MESSAGE,
@@ -44,9 +45,10 @@ const LOCAL_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES: usize = 1_000_000;
 const LOCAL_READER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 #[cfg(windows)]
 const LOCAL_SHELL_ENVIRONMENT_VARIABLE: &str = "SHELLSPAN_LOCAL_SHELL";
-/// The worker owns a 30-second network budget. Allow a bounded cleanup margin
-/// so its timeout error arrives before the result waiter expires.
-pub(crate) const SSH_CONNECT_RESULT_WAIT: Duration = Duration::from_secs(31);
+/// Wait for the initial attempt, its optional plain SSH retry, and cleanup.
+pub(crate) const SSH_CONNECT_RESULT_WAIT: Duration = terminal_deadline::TERMINAL_CONNECT_TIMEOUT
+    .saturating_add(terminal_deadline::PLAIN_SSH_FALLBACK_TIMEOUT)
+    .saturating_add(Duration::from_secs(1));
 
 /// Independent acceptance observation of the real local reader stream. Broker
 /// generation fencing is deliberately not a prerequisite: retired transports
@@ -4144,17 +4146,11 @@ pub(crate) fn spawn_ssh_thread(
     thread::spawn(move || {
         let cancellation_app = app.clone();
         let cancellation_session_id = session_id.clone();
-        let mut connection_guard =
-            crate::connection::terminal_deadline::TerminalConnectionGuard::new(
-                connection_deadline,
-                move || {
-                    cancellation_app
-                        .try_state::<SessionManager>()
-                        .is_none_or(|manager| {
-                            manager.target_state(&cancellation_session_id).is_err()
-                        })
-                },
-            );
+        let cancelled = move || {
+            cancellation_app
+                .try_state::<SessionManager>()
+                .is_none_or(|manager| manager.target_state(&cancellation_session_id).is_err())
+        };
         debug!("Spawned SSH worker session_id={session_id}");
         let _guard = PoolInvalidationGuard {
             pool: &pool,
@@ -4186,23 +4182,31 @@ pub(crate) fn spawn_ssh_thread(
             pool.activity_owner(&connection_request),
             crate::petdex::types::ActivityKind::Connect,
         );
-        let run_result = run_ssh_session(
-            &app,
-            &session_id,
-            &request,
-            &rx,
-            wake,
-            output_ready,
-            output_paused,
-            bootstrap_remote_integration,
-            on_connected,
-            &mut activity,
+        let (run_result, connection_failure) = terminal_deadline::run_with_plain_ssh_fallback(
+            connection_deadline,
+            cancelled,
+            |startup_mode| {
+                if startup_mode == TerminalStartupMode::PlainAfterNativeTimeout {
+                    warn!("Native SSH startup timed out; retrying ordinary SSH session_id={session_id}");
+                }
+                run_ssh_session(
+                    &app,
+                    &session_id,
+                    &request,
+                    &rx,
+                    &wake,
+                    Arc::clone(&output_ready),
+                    Arc::clone(&output_paused),
+                    bootstrap_remote_integration,
+                    startup_mode,
+                    &on_connected,
+                    &mut activity,
+                )
+            },
         );
         let run_result = run_result.map_err(|error| {
-            crate::connection::terminal_deadline::failure_reason()
-                .map_or(error, |message| ConnectionError::Other { message })
+            connection_failure.map_or(error, |message| ConnectionError::Other { message })
         });
-        connection_guard.finish();
 
         match run_result {
             Ok(message) => {

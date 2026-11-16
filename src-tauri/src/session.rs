@@ -715,10 +715,11 @@ pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
     session_id: &str,
     request: &SessionCreateRequest,
     rx: &Receiver<SessionCommand>,
-    wake: SessionWakeSource,
+    wake: &SessionWakeSource,
     output_ready: Arc<AtomicBool>,
     output_paused: Arc<AtomicBool>,
     bootstrap_remote_integration: bool,
+    startup_mode: crate::connection::terminal_deadline::TerminalStartupMode,
     on_connected: C,
     activity: &mut ActivityGuard,
 ) -> Result<Option<String>, ConnectionError> {
@@ -823,10 +824,16 @@ pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
         .and_then(|snapshot| snapshot.session)
         .map(|session| session.input_mode);
     let native_family = predecessor_mode.is_some();
+    let plain_after_timeout = startup_mode
+        == crate::connection::terminal_deadline::TerminalStartupMode::PlainAfterNativeTimeout;
     let native_requested = bootstrap_remote_integration
         && request.native_input_protocol.as_deref()
             == Some(crate::terminal_command::protocol::PROTOCOL);
-    let (mut native_integration, mut native_failure) = if native_requested {
+    let (mut native_integration, mut native_failure) = if plain_after_timeout {
+        (None, Some("nativeStartupTimedOut".into()))
+    } else if native_requested {
+        crate::connection::terminal_deadline::mark_native_startup_started()
+            .map_err(|message| ConnectionError::Other { message })?;
         match crate::terminal_command::artifacts::resource_root(app).and_then(|resources| {
             RemoteNativeBash::prepare(&session, &request.username, &resources)
         }) {
@@ -839,6 +846,9 @@ pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
     } else {
         (None, None)
     };
+    if native_requested && native_integration.is_none() {
+        crate::connection::terminal_deadline::finish_native_probe_without_startup();
+    }
     #[cfg(all(
         feature = "native-input-acceptance",
         debug_assertions,
@@ -942,7 +952,7 @@ pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
 
                     session.set_blocking(false);
                     if !native_attempted {
-                        if request.replaces_session_id.is_some() {
+                        if request.replaces_session_id.is_some() || plain_after_timeout {
                             confirm_plain_ssh_startup(&session, channel, &mut initial_output)
                                 .map_err(|message| ConnectionError::Other { message })?;
                         }
@@ -1015,7 +1025,9 @@ pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
                         let _ = runtime.mark_terminal_integration_unavailable(
                             session_id,
                             TerminalShellKind::Bash,
-                            if reason.starts_with(remote_native::GLIBC_TOO_OLD_REASON) {
+                            if reason.starts_with(remote_native::GLIBC_TOO_OLD_REASON)
+                                || plain_after_timeout
+                            {
                                 reason
                             } else {
                                 "nativeProfileMismatch"
@@ -1057,7 +1069,7 @@ pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
                         &session,
                         channel,
                         rx,
-                        &wake,
+                        wake,
                         &output_ready,
                         &output_paused,
                         remote_integration.as_mut(),

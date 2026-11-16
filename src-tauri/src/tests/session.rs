@@ -1951,6 +1951,68 @@
 
     #[test]
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn stalled_native_startup_reconnects_to_a_usable_plain_ssh_pty() {
+        use crate::connection::terminal_deadline::{
+            complete, mark_native_startup_started, run_with_plain_ssh_fallback, TerminalStartupMode,
+        };
+
+        let connection = crate::execution::fixture::isolated_ssh_connection();
+        let (_known_hosts, known_hosts_path) =
+            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
+        let mut attempts = Vec::new();
+        let (output, deadline_failure) = run_with_plain_ssh_fallback(
+            Instant::now() + Duration::from_secs(2),
+            || false,
+            |mode| -> Result<String, String> {
+                attempts.push(mode);
+                let session = crate::connection::open_authenticated_session(
+                    crate::connection::connect_tcp_stream(&connection.host, connection.port)?,
+                    &connection.username,
+                    connection.auth_method,
+                    connection.password.as_deref(),
+                    None,
+                    None,
+                    &connection.host,
+                    connection.port,
+                    Some(&known_hosts_path),
+                )
+                .map_err(|error| error.message())?;
+                let mut pty = session
+                    .channel_session()
+                    .map_err(|error| error.to_string())?;
+                if mode == TerminalStartupMode::Initial {
+                    mark_native_startup_started()?;
+                    // Hold an actual SSH channel read beyond the initial deadline.
+                    pty.exec("exec sleep 10")
+                        .map_err(|error| error.to_string())?;
+                    pty.read(&mut [0]).map_err(|error| error.to_string())?;
+                    return Err("stalled native channel closed".into());
+                }
+                pty.request_pty("xterm-256color", None, Some((80, 24, 0, 0)))
+                    .map_err(|error| error.to_string())?;
+                pty.shell().map_err(|error| error.to_string())?;
+                pty.write_all(b"printf 'plain-%s\\n' fallback-ready; exit\n")
+                    .map_err(|error| error.to_string())?;
+                let mut output = String::new();
+                pty.read_to_string(&mut output)
+                    .map_err(|error| error.to_string())?;
+                complete()?;
+                Ok(output)
+            },
+        );
+        assert_eq!(
+            attempts,
+            [
+                TerminalStartupMode::Initial,
+                TerminalStartupMode::PlainAfterNativeTimeout
+            ]
+        );
+        assert_eq!(deadline_failure, None);
+        assert!(output.unwrap().contains("plain-fallback-ready"));
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
     fn ordinary_ssh_unsupported_shell_is_unavailable_without_a_second_transport() {
         let mut connection = crate::execution::fixture::isolated_ssh_connection();
         connection.username = "shellspan-sh".into();

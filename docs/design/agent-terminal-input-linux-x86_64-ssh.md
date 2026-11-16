@@ -6,6 +6,8 @@ Linux x86_64 支持登录 Shell 为 Bash 且 glibc 为 2.28 或更新的 2.x 版
 
 Bash 的 SSH 加载流程根据远端平台选择清单。x86_64 将已校验的 Bash、adapter 和 relay 上传到本次连接的 `/tmp/.ss-nip-*` 目录，回读校验后再登录启动。服务器的 `/bin/bash`、`/etc/passwd` 和启动文件无需修改。普通断开时会尝试清理该目录；突然断网时，旧连接无法继续通过 SFTP 清理，重连创建新的目录和控制连接。
 
+认证后若原生准备耗尽 30 秒的首次连接预算，客户端先关闭未就绪的传输，再用最多 10 秒建立一次普通 SSH。认证阶段超时或用户取消时不启动这次回退。遇到低于 glibc 2.28 的 Shell 时，新建 Agent 对话使用 Direct，已有对话须由用户明确切换，队列和历史不会因打开对话而改变。
+
 ## 构建与包体对比
 
 在 macOS ARM64 上运行。Docker 需能运行 `linux/amd64` 和 `linux/arm64` 容器；macOS Zsh 继续使用仓库固定的 macOS 27.0 SDK 和 Xcode（见 `scripts/native-input-p3/build-macos-editor.sh`）。若 amd64 模拟构建不可用，在原生 amd64 runner 上用发布工作流中同一条 Docker 构建命令生产资源，再导入验收资源目录进行 `--no-build --require-ssh` 检查。
