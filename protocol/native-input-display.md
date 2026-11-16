@@ -85,6 +85,12 @@ Windows 新 ConPTY 的初始光标位置相对于新的可见屏幕。重绑到�
 
 任何进程 stdout 都可能产生同文 OSC，它至多改变不可信终端显示。模块不提供生命周期、ready、输入、审批或 lease 回调，不投递终端输入，不生成执行证据。只有匹配的原生私有控制/提交机制能推进命令事实。
 
+原生编辑器的 enter、exit 与后续 capture 标记在同一 PTY 流中界定输入区间。
+`terminal-command-decorations.ts` 仅使用 xterm 公共 marker、缓冲区坐标和 DOM 尺寸，
+为命令执行租约对应的输入行添加背景。它不读取 `commandDisplay` 或 `commandSubmission`，
+不写入终端文本。备用屏幕不显示该背景，raw 模式不安装该装饰。重绑时清理旧标记并保留终端历史。
+执行准入与恢复见 [NIP 契约](agent/runtime/native-input.md)。
+
 光标修复只在显式 reflow 时工作。复制修复是全局通用序列化规则，包括默认配置历史输出，不能以某些普通编辑对照一致推断所有旧复制行为不变。它只读真实 cell、软换行和选择范围，不保存另一份文本，不读取 command/source/lease。普通原生硬换行后 clipboard 与无换行源码的等值仅是额外诊断，不是新增产品目标。
 
 正式xterm构建同时保留显式reflow模式中EL0清除的软换行关系；默认模式继续使用原EL0
@@ -107,6 +113,10 @@ insert/delete/trim 事件解析其行并限制在可用滚动范围。不能继�
 该锚点。回归使用实际 LIVE 失败捕获，分别检查历史停留与底部跟随，不搜索文字或恢复选区。
 
 ## 可重建验证
+
+- `pnpm check:terminal:boundary` 在 Quality Gate 中检查显示逻辑是否使用公开接口，并核对原生编辑器准入清单。
+- `pnpm test:terminal-command-source`（别名 `pnpm test:terminal-command-redraw`）回放真实 PTY 采样，并用 Chromium/WebKit 和 DOM/WebGL 核对原生输入、视口、复制、搜索与重排。新鲜几何采样须包含实际读取时间，缺少采样时测试失败。
+- `pnpm test:terminal-command-presentation` 先用真实普通 Shell 和原生 ZLE 采样检查命令背景范围，再运行同一套原生显示检查。
 
 显示观察区分controller接受输出和xterm实际完成解析。`subscribeDisplayOutputParsed`只从原公开write/writeln回调通知对应的原data/source，不修改字节、控制序列、输入或生命周期事实；没有监听者时不为本地输出增加回调。该通知不授予原生、Agent或执行能力。
 

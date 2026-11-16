@@ -57,7 +57,7 @@ Windows 后台标记的名称冲突检查不得自动导入模块或执行模块
 历史证据只适用于采样时的源码与制品，当前验收边界见[统一验收清单](../../../docs/design/agent-terminal-input-acceptance-checklist.md)。
 不得在已有草稿或历史上热切换，不得因 native 失败改换执行路径或重放。
 能力不足的新 Agent 命令在 lease/PTY 写入前返回 `TERMINAL_NATIVE_INPUT_REQUIRED`；
-不自动选择替代 Shell。普通用户输入与 TUI 保留；当前后台作业的输入和管理均走已验证的原生通道。
+既有会话不会切换 Shell。普通用户输入与 TUI 保留；当前后台作业的输入和管理均走已验证的原生通道。
 生产编辑器清单准入 macOS arm64 本地及 Linux aarch64/glibc 2.36 SSH 的 Zsh 5.9/ZLE 5.9，
 以及 Windows x64 的 PowerShell 7 固定版本配置。Windows 本地原生终端在没有明确指定 Shell 时优先选择与随包摘要匹配的 `pwsh.exe`；准备失败时启动普通 Windows PowerShell 5.1 会话。明确指定的 Shell 仍按配置启动，缺少原生能力时使用普通终端模式。
 macOS 仅在所选 Zsh 匹配受信系统摘要时，启动应用随包提供的已校验私有 Zsh 和 Core。
@@ -97,6 +97,11 @@ P3 实现了按完整源文件及实际制品摘要绑定的 ZLE/PSReadLine prov
 [统一验收清单](../../../docs/design/agent-terminal-input-acceptance-checklist.md)。
 SSH 制品经真实 SFTP 上传、远端读取校验与独立 relay 通道加载。其他架构、libc、
 自定义输入/redisplay/信号 provider 和未校验的普通发行版构建均不能仅凭版本得到 native 能力。
+Linux x86_64 SSH 仅对登录 Shell 为 Bash、glibc 为 2.36 或更新的 2.x 版本启用
+`gnu-bash-5.3-readline-8.3.6-linux-x86_64-glibc-2.36-native`。启动前校验随包
+Bash、模块和 relay，上传后从该会话的私有目录回读校验，并在不读取登录配置的
+检查中加载模块确认 ABI。实际登录仍按 Bash 自身语义读取配置。准备失败时使用
+账户原来的 SSH Shell；Direct 的流程保持不变。ARM64 SSH 继续要求实际登录 Shell 摘要匹配。
 
 ## P2 生产传输与 Shell 语义
 
@@ -110,7 +115,7 @@ verifiedProfileId；不包含源码、执行计划、凭据或额外授权。未
 Shell 的文件摘要及可信资源目录的 module/relay/source 摘要。使用独立、完整构建的 GNU
 `--shellspan-native-init PATH -il` 启动：GNU 自身先按真实 HOME、login 状态和 argv0
 读取系统及用户配置，随后执行固定集成文件。不得替换 HOME 或手工再次 source profile/rc。
-不会把资源中附带的 GNU 可执行文件自动替换为用户绑定 Shell。scalar/array PROMPT_COMMAND
+Linux x86_64 SSH 的 Bash 只供新建的原生会话使用，不会更改远端登录设置或替换已绑定进程。scalar/array PROMPT_COMMAND
 按 GNU 各版本语义保留；readonly 或不支持的 provider 配置拒绝能力。
 
 私有控制帧进入现有每会话有界队列（8 个 credit），由所属本地 PTY/SSH worker 写入。
