@@ -72,6 +72,7 @@ import { routeProviderConfigs, useLlmRoutesStore } from '@/stores/llmRoutesStore
 import { isTauriRuntime } from '@/lib/ipc/tauri';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { readTerminalCurrentDirectory } from '@/lib/terminal/terminal-current-directory';
+import { terminalConnectionPresentationState, type RealTerminalPresentationState } from '@/lib/terminal/terminal-surface-semantics';
 import { terminalLoginLabel, terminalLoginScopeKey } from '@/lib/ai/terminal-login-scope';
 import {
   canContinueHistoricalConversation,
@@ -130,6 +131,8 @@ export interface AiSessionController {
   readonly providerLabel: string;
   readonly modelLabel: string;
   readonly canStartAgent: boolean;
+  readonly canSubmitAgent: boolean;
+  readonly realTerminalState: RealTerminalPresentationState;
   readonly agentUnavailableReason: string | null;
   readonly terminalConflict: boolean;
   readonly historyScopeLabel: string | null;
@@ -496,6 +499,14 @@ export function useAiSessionController({
   const visibleExecutionRequired = focusMode && Boolean(view && view.snapshot.value.header.executionSurface !== 'boundTerminal');
   const canStartAgent = !terminalSessionRestoring && !visibleExecutionRequired && (scope === 'workbench'
     || activeTerminal?.status === 'connected');
+  const realTerminalState: RealTerminalPresentationState = activeTerminal?.status === 'connected' && activeTerminal.integrationState === 'ready'
+    ? activeTerminal.promptReady ? 'ready' : 'busy'
+    : activeTerminal?.status === 'connected' && activeTerminal.integrationState === 'initializing'
+      ? 'initializing'
+      : terminalConnectionPresentationState(activeTerminal?.status);
+  const focusCommandsUnavailable = focusMode && activeTerminal?.status === 'connected'
+    && realTerminalState === 'unavailable' && !view?.snapshot.value.header.subagent;
+  const canSubmitAgent = canStartAgent && !focusCommandsUnavailable;
   const terminalUnavailableReason = scope === 'terminal' && !canStartAgent && !focusMode
     && activeTerminal?.status !== 'connecting'
     ? t('agent.availability.needsTerminal')
@@ -1978,6 +1989,8 @@ export function useAiSessionController({
     modelLabel: (canContinueHistoricalView ? undefined : visibleView?.snapshot.value.header.modelSelection?.modelId)
       ?? provider?.model ?? '',
     canStartAgent,
+    canSubmitAgent,
+    realTerminalState,
     agentUnavailableReason,
     terminalConflict,
     historyScopeLabel: scope === 'terminal' && activeTerminal
@@ -2010,7 +2023,7 @@ export function useAiSessionController({
     setDraft: (value) => { claimWorkspace(); dispatch({ type: 'draft.changed', value }); },
     setBusyPreference: (value) => dispatch({ type: 'preference.changed', value }),
     submit: (gesture, accelerated = false) => {
-      if (terminalSessionRestoring) return;
+      if (terminalSessionRestoring || focusCommandsUnavailable) return;
       const child = viewRef.current?.snapshot.value.header.subagent;
       if (child && readOnlySession) return;
       if (child && childBudgetExhausted(viewRef.current?.snapshot.value, now())
@@ -2121,6 +2134,10 @@ export function useAiSessionController({
     retryFailedDraft: (failedDraftId) => {
       const failed = composerRef.current.failedDrafts.find(item => item.id === failedDraftId);
       if (!failed?.error.retryable) return;
+      if (focusCommandsUnavailable) {
+        if (failed.error.deliveryUnknown) void retrySync();
+        return;
+      }
       if (childBudgetExhausted(viewRef.current?.snapshot.value, now())) {
         if (failed.error.deliveryUnknown) void retrySync();
         else toast.error(t('ai.error.childRecoveryBudgetExhausted'));
@@ -2140,7 +2157,8 @@ export function useAiSessionController({
         canCreateSession: canStartAgent,
       });
     },
-    failedDraftRetryBlockedReason: subagentBudgetExhausted ? t('ai.error.childRecoveryBudgetExhausted') : null,
+    failedDraftRetryBlockedReason: subagentBudgetExhausted ? t('ai.error.childRecoveryBudgetExhausted')
+      : focusCommandsUnavailable ? t('focus.terminalCommandsUnavailable') : null,
     dismissError: () => dispatch({ type: 'error.dismissed' }),
     retryingModel: retryingModelSession === view?.summary.id,
     retryModel: (turnId) => {
@@ -2149,7 +2167,7 @@ export function useAiSessionController({
       const context = submissionContextRef.current;
       if (!current || recovery?.kind !== 'retry' || recovery.turnId !== turnId
         || (recovery.retryAt ?? 0) > now() || (readOnlySession && !current.snapshot.value.childFailureRecovery)
-        || historicalTargetUnavailable || !canStartAgent
+        || historicalTargetUnavailable || !canSubmitAgent
         || modelRetryPending.current || settingsPending.current
         || ['submitting', 'stopping'].includes(composerRef.current.phase) || !adapter.retryModel) return;
       modelRetryPending.current = true;

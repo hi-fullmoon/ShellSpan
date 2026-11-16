@@ -329,6 +329,9 @@ export default {
   'focus.resize': 'Resize Agent and terminals',
   'focus.continueFirst': 'Send a message to the new target before choosing its project or skills.',
   'focus.visibleRequired': 'This historical session uses Direct execution. Start a new focus conversation for visible execution.',
+  'focus.terminalBusy': 'The terminal is busy. Wait for the shell prompt before asking the Agent to run another command.',
+  'focus.terminalInitializationTimeout': 'Visible command setup timed out. Try again later or open Terminal and choose Direct in the Agent panel.',
+  'focus.terminalCommandsUnavailable': 'You can’t send messages in Focus right now because visible commands are unavailable. Type commands in the terminal on the right, or open Terminal and choose Direct in the Agent panel.',
   'section.sftp': 'SFTP',
   'section.settings': 'Settings',
 
@@ -829,8 +832,6 @@ export default {
   'terminal.search.results': '{current}/{count}',
   'terminal.search.cappedResults': '{current}/{count}+',
   'terminal.search.manyResults': '{count}+ matches',
-  'terminal.scroll.latest': 'Jump to latest output',
-  'terminal.scroll.newOutput': 'New output · Jump to bottom',
   'terminal.notice.preparingInput': 'Preparing terminal; input is temporarily unavailable',
   'terminal.tab.closeStateAgent': 'AI is using this terminal. Closing it will interrupt terminal operations.',
   'terminal.tab.closeStateBusy': 'The shell has not returned to a prompt; a command may still be running.',

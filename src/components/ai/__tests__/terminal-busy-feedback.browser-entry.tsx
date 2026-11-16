@@ -16,6 +16,7 @@ interface FeedbackState {
   state: 'ready' | 'busy' | 'initializing' | 'unavailable';
   blockedAttempt?: string;
   locked?: boolean;
+  focusMode?: boolean;
 }
 
 export async function initialize(locale: Locale) {
@@ -25,6 +26,7 @@ export async function initialize(locale: Locale) {
     blocked: t('agent.executionSurface.v1.busyComposerHint'),
     direct: t('agent.executionSurface.v1.switchDirect'),
     unavailable: t('agent.executionSurface.v1.unavailableDescription'),
+    focusUnavailable: t('focus.terminalCommandsUnavailable'),
     timeout: t('agent.executionSurface.v1.initializationTimeoutDescription'),
   };
 }
@@ -37,8 +39,8 @@ export function show(state: FeedbackState) {
         onSubmit={() => { document.body.dataset.sent = 'true'; }}
         executionSurfaceNotice={state.state === 'ready' ? undefined : <AgentTerminalBusyNotice
           key={JSON.stringify([state.terminal, state.generation])}
-          state={state.state} blockedAttempt={state.blockedAttempt} disabled={Boolean(state.locked)}
-          onSwitchDirect={() => { document.body.dataset.switched = 'true'; }} />}
+          state={state.state} blockedAttempt={state.blockedAttempt} disabled={Boolean(state.locked)} focusMode={state.focusMode}
+          onSwitchDirect={state.focusMode ? undefined : () => { document.body.dataset.switched = 'true'; }} />}
       />
     </main>,
   ));

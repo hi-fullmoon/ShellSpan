@@ -329,6 +329,9 @@ export default {
   'focus.resize': '调整 Agent 与终端宽度',
   'focus.continueFirst': '请先向新目标发送消息，再选择该服务器的项目或技能。',
   'focus.visibleRequired': '该历史会话使用后台执行，请新建专注会话以使用可视执行。',
+  'focus.terminalBusy': '终端正忙。请等命令提示符重新出现后，再让 Agent 执行命令。',
+  'focus.terminalInitializationTimeout': '可视命令初始化超时。请稍后重试，或前往「终端」的 Agent 面板选择「直接执行」。',
+  'focus.terminalCommandsUnavailable': '当前专注模式无法发送消息，因为终端的可视命令不可用。你可以在右侧手动输入命令，或前往「终端」的 Agent 面板选择「直接执行」。',
   'section.sftp': 'SFTP',
   'section.settings': '设置',
 
@@ -829,8 +832,6 @@ export default {
   'terminal.search.results': '{current}/{count}',
   'terminal.search.cappedResults': '{current}/{count}+',
   'terminal.search.manyResults': '{count}+ 个匹配项',
-  'terminal.scroll.latest': '回到最新输出',
-  'terminal.scroll.newOutput': '有新输出 · 回到底部',
   'terminal.notice.preparingInput': '正在准备终端，暂时无法输入',
   'terminal.tab.closeStateAgent': 'AI 正在使用此终端，关闭会中断终端操作。',
   'terminal.tab.closeStateBusy': 'Shell 尚未返回提示符，可能有命令正在运行。',

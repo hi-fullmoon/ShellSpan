@@ -7,8 +7,10 @@ import { chromium, webkit } from 'playwright';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const server = await createServer({ root, configFile: false, appType: 'custom',
+  cacheDir: `${root}.artifacts/tests/terminal-busy-feedback/vite-cache`,
+  optimizeDeps: { entries: ['src/components/ai/__tests__/terminal-busy-feedback.browser-entry.tsx'] },
   plugins: [react(), tailwindcss()], resolve: { alias: { '@': `${root}src/` } },
-  server: { host: '127.0.0.1', port: 0 } });
+  server: { host: '127.0.0.1', port: 0, watch: null, hmr: false } });
 server.middlewares.use('/terminal-busy-feedback', async (_request, response) => {
   response.setHeader('Content-Type', 'text/html');
   response.end(await server.transformIndexHtml('/terminal-busy-feedback', '<html><body><div id="root"></div><script type="module" src="/src/components/ai/__tests__/terminal-busy-feedback.browser-entry.tsx"></script></body></html>'));
@@ -20,7 +22,7 @@ try {
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/terminal-busy-feedback`);
+    await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/terminal-busy-feedback`, { timeout: 60_000 });
     const labels = await page.evaluate(async locale => {
       const entry = await import('/src/components/ai/__tests__/terminal-busy-feedback.browser-entry.tsx');
       return entry.initialize(locale);
@@ -106,6 +108,13 @@ try {
     assert.equal(await notice.count(), 0, 'A new connection starts without timeout feedback');
     await show({ state: 'unavailable' });
     assert.ok((await notice.textContent()).includes(labels.unavailable), 'Unavailable state is distinct and immediate');
+    await show({ state: 'unavailable', focusMode: true });
+    assert.equal(await notice.textContent(), labels.focusUnavailable);
+    assert.equal(await notice.getByRole('button').count(), 0, 'Focus directs users to Terminal in the notice');
+    for (const width of [960, 420, 320]) {
+      await page.setViewportSize({ width, height: 520 });
+      assert.equal(await notice.evaluate(el => el.scrollWidth <= el.clientWidth), true, `Focus notice fits at ${width}px`);
+    }
     const showContention = blocked => page.evaluate(async blocked => {
       const entry = await import('/src/components/ai/__tests__/terminal-busy-feedback.browser-entry.tsx');
       entry.showContention(blocked);
@@ -124,7 +133,7 @@ try {
       await page.screenshot({ path: `/tmp/shellspan-contention-warning-${locale}-${width}.png` });
     }
     await showContention(false);
-    assert.equal(await warning.count(), 0, 'Release clears the warning');
+    await warning.waitFor({ state: 'detached', timeout: 5_000 });
     assert.equal(await send.isEnabled(), true, 'Release restores manual sending');
     assert.equal(await page.evaluate(() => document.body.dataset.contentionSent), undefined, 'Release must not automatically send the draft');
     assert.equal(await page.locator('[data-composer-editor]').innerText(), 'hello');

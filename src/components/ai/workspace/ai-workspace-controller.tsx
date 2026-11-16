@@ -7,9 +7,6 @@ import { useResolvedModel } from '@/lib/ai/provider-contract';
 import { useFocusStore } from '@/stores/focusStore';
 import { FocusNoTarget } from '@/components/focus/focus-no-target';
 import { FocusControls } from '@/components/focus/focus-controls';
-import {
-  terminalConnectionPresentationState,
-} from '@/lib/terminal/terminal-surface-semantics';
 import { useAppStore } from '@/stores/appStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { useTerminalStore } from '@/stores/terminalStore';
@@ -65,12 +62,6 @@ export function AiWorkspaceController({
     candidate => candidate.sessionId === activeTerminalId,
   )?.reconnecting ?? false);
   const terminalRecovery = !controller.readOnlySession && terminalExecutionRecovery(controller.view);
-  const activeTerminalIntegrationState = useTerminalStore((state) => state.sessions.find(
-    (candidate) => candidate.sessionId === activeTerminalId,
-  )?.integrationState);
-  const activeTerminalPromptReady = useTerminalStore((state) => state.sessions.find(
-    (candidate) => candidate.sessionId === activeTerminalId,
-  )?.promptReady);
   const terminalGeneration = useTerminalStore((state) => state.sessions.find(
     (candidate) => candidate.sessionId === activeTerminalId,
   )?.terminalGeneration);
@@ -98,18 +89,7 @@ export function AiWorkspaceController({
           || Boolean(controller.view.pendingApproval || controller.view.pendingQuestion)
         : Boolean(controller.composer.sessionId))
     ));
-  const realTerminalState = activeTerminalStatus === 'connected'
-    ? activeTerminalIntegrationState === 'ready'
-      ? activeTerminalPromptReady
-        ? 'ready'
-        : 'busy'
-      : activeTerminalIntegrationState === 'initializing'
-        ? 'initializing'
-      : activeTerminalIntegrationState === 'unavailable'
-          || activeTerminalIntegrationState === 'invalidated'
-          ? 'unavailable'
-          : 'unavailable'
-    : terminalConnectionPresentationState(activeTerminalStatus);
+  const realTerminalState = controller.realTerminalState;
   const imageDraftVisible = Boolean(
     controller.imageDraft.draft?.images.length || controller.imageDraft.pendingFiles.length,
   );
@@ -160,7 +140,7 @@ export function AiWorkspaceController({
       renamingSessionId={controller.renamingSessionId}
       renameError={controller.renameError}
       canStartAgent={controller.canStartAgent}
-      submissionDisabled={!controller.canStartAgent}
+      submissionDisabled={!controller.canSubmitAgent}
       agentUnavailableReason={controller.agentUnavailableReason}
       terminalConflict={controller.terminalConflict}
       historyScopeLabel={controller.historyScopeLabel}
@@ -200,12 +180,14 @@ export function AiWorkspaceController({
         : undefined}
       executionSurfaceNotice={session?.header.subagent ? undefined : <>
         {focusMode && activeTerminalStatus !== 'connected' ? <FocusNoTarget /> : scope === 'terminal' && activeTerminalStatus === 'connected' && realTerminalState !== 'ready'
-        && controller.selectedExecutionSurface === 'boundTerminal' && !controller.readOnlySession
+        && controller.selectedExecutionSurface === 'boundTerminal'
+        && (!controller.readOnlySession || (focusMode && controller.historicalContinuationAvailable))
         ? <AgentTerminalBusyNotice
             key={JSON.stringify([activeTerminalId, terminalSessionId, terminalGeneration])}
             context={controller.submissionContext}
             disabled={executionSurfaceLocked}
             state={realTerminalState}
+            focusMode={focusMode}
             blockedAttempt={blockedAttempt}
             onSwitchDirect={focusMode ? undefined : () => controller.selectExecutionSurface('direct')} />
         : undefined}
@@ -230,7 +212,7 @@ export function AiWorkspaceController({
       onRetryFailedDraft={controller.retryFailedDraft}
       failedDraftRetryBlockedReason={controller.failedDraftRetryBlockedReason}
       onRetrySync={controller.retrySync}
-      onRetryModel={controller.canStartAgent ? controller.retryModel : undefined}
+      onRetryModel={controller.canSubmitAgent ? controller.retryModel : undefined}
       retryingModel={controller.retryingModel}
       onOpenModel={openAiSettings}
       onHistory={controller.openSessions}

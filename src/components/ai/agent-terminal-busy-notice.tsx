@@ -7,12 +7,28 @@ import { useI18n } from '@/hooks/useI18n';
 interface AgentTerminalBusyNoticeProps {
   readonly disabled: boolean;
   readonly state?: 'busy' | 'initializing' | 'unavailable';
+  readonly focusMode?: boolean;
   /** A new runtime rejection during this busy period, rather than a historical failure. */
   readonly blockedAttempt?: string | null;
   /** Changes on navigation, but stays stable when submitting creates a session. */
   readonly context?: object;
   readonly onSwitchDirect?: () => void | Promise<void>;
 }
+
+const descriptions = {
+  busy: {
+    terminal: 'agent.executionSurface.v1.busyComposerHint',
+    focus: 'focus.terminalBusy',
+  },
+  initializing: {
+    terminal: 'agent.executionSurface.v1.initializationTimeoutDescription',
+    focus: 'focus.terminalInitializationTimeout',
+  },
+  unavailable: {
+    terminal: 'agent.executionSurface.v1.unavailableDescription',
+    focus: 'focus.terminalCommandsUnavailable',
+  },
+} as const;
 
 export function AgentTerminalBusyNotice(props: AgentTerminalBusyNoticeProps): React.ReactNode {
   const [owner, setOwner] = useState({ context: props.context, revision: 0 });
@@ -22,7 +38,7 @@ export function AgentTerminalBusyNotice(props: AgentTerminalBusyNoticeProps): Re
   return <TerminalBusyFeedback key={`${props.state ?? 'busy'}:${owner.revision}`} {...props} />;
 }
 
-function TerminalBusyFeedback({ disabled, onSwitchDirect, state = 'busy', blockedAttempt = null }: AgentTerminalBusyNoticeProps): React.ReactNode {
+function TerminalBusyFeedback({ disabled, onSwitchDirect, state = 'busy', focusMode = false, blockedAttempt = null }: AgentTerminalBusyNoticeProps): React.ReactNode {
   const { t } = useI18n();
   const [initialBlockedAttempt] = useState(blockedAttempt);
   const [initializationTimedOut, setInitializationTimedOut] = useState(false);
@@ -39,10 +55,7 @@ function TerminalBusyFeedback({ disabled, onSwitchDirect, state = 'busy', blocke
     <Alert variant="warning" size="sm" role="status" data-slot="terminal-busy-notice" className="[--alert-icon-inset:--spacing(1)]">
       <TriangleAlertIcon aria-hidden="true" />
       <AlertDescription className="flex min-w-0 flex-wrap items-start gap-1">
-        <span className="min-w-0 flex-1 basis-48 py-1">{t(state === 'busy'
-          ? 'agent.executionSurface.v1.busyComposerHint'
-          : state === 'initializing' ? 'agent.executionSurface.v1.initializationTimeoutDescription'
-            : 'agent.executionSurface.v1.unavailableDescription')}</span>
+        <span className="min-w-0 flex-1 basis-48 py-1">{t(descriptions[state][focusMode ? 'focus' : 'terminal'])}</span>
         {onSwitchDirect && <Button type="button" variant="ghost" size="xs" className="text-[11px]" disabled={disabled} onClick={onSwitchDirect}>
           {t('agent.executionSurface.v1.switchDirect')}
         </Button>}

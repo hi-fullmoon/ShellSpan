@@ -81,14 +81,14 @@ describe('terminal busy feedback', () => {
   });
 
   it('hides resolved rejections and shows subsequent rejections without a switch action in Focus', () => {
-    const { rerender } = render(<AgentTerminalBusyNotice disabled={false} />);
-    rerender(<AgentTerminalBusyNotice disabled={false} blockedAttempt="attempt-1" />);
-    expect(screen.getByRole('status')).toHaveTextContent(t('agent.executionSurface.v1.busyComposerHint'));
+    const { rerender } = render(<AgentTerminalBusyNotice disabled={false} focusMode />);
+    rerender(<AgentTerminalBusyNotice disabled={false} focusMode blockedAttempt="attempt-1" />);
+    expect(screen.getByRole('status')).toHaveTextContent(t('focus.terminalBusy'));
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
-    rerender(<AgentTerminalBusyNotice disabled={false} blockedAttempt={null} />);
+    rerender(<AgentTerminalBusyNotice disabled={false} focusMode blockedAttempt={null} />);
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
-    rerender(<AgentTerminalBusyNotice disabled={false} blockedAttempt="attempt-2" />);
-    expect(screen.getByRole('status')).toHaveTextContent(t('agent.executionSurface.v1.busyComposerHint'));
+    rerender(<AgentTerminalBusyNotice disabled={false} focusMode blockedAttempt="attempt-2" />);
+    expect(screen.getByRole('status')).toHaveTextContent(t('focus.terminalBusy'));
   });
 
   it('keeps the first new-session rejection visible and resets when navigating to another conversation', async () => {
@@ -128,6 +128,17 @@ describe('terminal busy feedback', () => {
     expect(screen.getByRole('status')).toHaveTextContent(t('agent.executionSurface.v1.unavailableDescription'));
     rerender(<AgentTerminalBusyNotice key="connection-2" disabled={false} state="initializing" />);
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  }, 20_000);
+
+  it('points Focus users to the Terminal Agent panel when setup times out or commands are unavailable', async () => {
+    const { rerender } = render(<AgentTerminalBusyNotice disabled={false} focusMode state="initializing" />);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    await elapse(15_100);
+    expect(screen.getByRole('status')).toHaveTextContent(t('focus.terminalInitializationTimeout'));
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    rerender(<AgentTerminalBusyNotice disabled={false} focusMode state="unavailable" />);
+    expect(screen.getByRole('status')).toHaveTextContent(t('focus.terminalCommandsUnavailable'));
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
   }, 20_000);
 
   it('clears the initialization timer when the terminal becomes ready', async () => {

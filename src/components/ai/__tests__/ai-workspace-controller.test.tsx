@@ -11,10 +11,12 @@ import {
   type AiSessionControllerAdapter,
 } from '@/components/ai/workspace/use-ai-session-controller';
 import type { AiSessionView, AiSubmitReceipt } from '@/lib/ai/session-adapter';
-import { initI18n } from '@/locales';
+import { initI18n, t } from '@/locales';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
+import { useAiDraftStore } from '@/stores/aiDraftStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useAppStore } from '@/stores/appStore';
+import { useFocusStore } from '@/stores/focusStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { appendTerminalOutput, clearTerminalOutput } from '@/lib/terminal/terminal-output-buffer';
@@ -1646,6 +1648,44 @@ describe('AiWorkspaceController', () => {
       'aria-description',
       'This terminal is running a foreground program. Wait for the prompt to return, or use Direct.',
     );
+  });
+
+  it('blocks Focus submissions while visible commands are unavailable and preserves the draft', async () => {
+    connectedTerminal();
+    const previousFocus = useFocusStore.getState();
+    const previousDrafts = useAiDraftStore.getState().drafts;
+    useFocusStore.setState({ targetSessionId: 'terminal-1', conversationSessionId: null });
+    const { unmount } = render(<AiWorkspaceController scope="terminal" focusMode />);
+    const editor = screen.getByRole('textbox');
+    const send = screen.getByRole('button', { name: t('ai.send') });
+    const draft = 'Show the current directory';
+    const integration = { sessionId: 'terminal-1', terminalSessionId: 'broker-terminal-1', terminalGeneration: 1 };
+
+    try {
+      await userEvent.setup().type(editor, draft);
+      expect(send).toBeEnabled();
+
+      act(() => useTerminalStore.getState().setIntegrationState({
+        ...integration, integrationStateRevision: 1, state: 'unavailable', promptReady: false,
+      }));
+      expect(screen.getByText(/^You can’t send messages in Focus right now/)).toBeVisible();
+      expect(send).toBeDisabled();
+      fireEvent.click(send);
+      fireEvent.keyDown(editor, { key: 'Enter' });
+      expect(editor).toHaveTextContent(draft);
+      expect(screen.queryByRole('article', { name: t('ai.message.user') })).not.toBeInTheDocument();
+
+      act(() => useTerminalStore.getState().setIntegrationState({
+        ...integration, integrationStateRevision: 2, state: 'ready', promptReady: true,
+      }));
+      expect(screen.queryByText(t('focus.terminalCommandsUnavailable'))).not.toBeInTheDocument();
+      expect(send).toBeEnabled();
+      expect(editor).toHaveTextContent(draft);
+    } finally {
+      unmount();
+      useFocusStore.setState(previousFocus);
+      useAiDraftStore.setState({ drafts: previousDrafts });
+    }
   });
 
   it('re-enables the execution surface trigger when a completed answer returns the Agent to idle', async () => {
