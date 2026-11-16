@@ -1,6 +1,6 @@
 # Linux x86_64 SSH 可视命令验收
 
-当前已接通代码和打包配置；以下构建、包体测量和服务器验收留到下一轮。首轮只支持登录 Shell 为 Bash 的 Linux x86_64 账户，远端须使用 glibc 2.36 或更新的 2.x 版本。随包 Bash 固定为 5.3 / Readline 8.3.6，构建基线为 Debian Bookworm 的 glibc 2.36。其 ELF 依赖（包括终端库）必须能在远端加载，SFTP 和可执行的私有临时目录也必须可用。musl、旧 glibc 和 Linux x86_64 Zsh 不在首轮范围内。
+首轮只支持登录 Shell 为 Bash 的 Linux x86_64 账户，远端须使用 glibc 2.36 或更新的 2.x 版本。随包 Bash 固定为 5.3 / Readline 8.3.6，以 Debian Bookworm 的 glibc 2.36 为构建基线，并静态链接 `libtinfo`。其余动态库必须能在远端加载，SFTP 和可执行的私有临时目录也必须可用。musl、旧 glibc 和 Linux x86_64 Zsh 不在首轮范围内。
 
 `scripts/native-input-p2/build.py` 写入 `catalogue-linux-x86_64-glibc-2.36.json` 与同名 profile 下的 `bash`、`adapter.so`、`native-input-relay`。构建缓存与 ARM64 分开，最终资源目录共用。发布流程在独立的 Linux amd64 和 ARM64 runner 上构建，macOS 包收录两者，Windows 包新增 amd64 SSH 资源。`native:prepare` 复核源码和文件摘要，Tauri 沿用 `native-input/generated/` 资源映射。
 

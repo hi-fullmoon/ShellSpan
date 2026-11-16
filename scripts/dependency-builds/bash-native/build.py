@@ -49,7 +49,15 @@ def main():
     setpgid_header = Path(__file__).with_name('darwin-setpgid.h')
     resize_patches = {version: Path(__file__).with_name(f'readline-resize-{readline_versions[version]}.patch') for version in ['4.1', '4.4']}
     sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+    static_tinfo = None
+    if host == 'linux' and platform.machine() == 'x86_64':
+        archive = Path(subprocess.check_output(['cc', '-print-file-name=libtinfo.a'], text=True).strip())
+        if not archive.is_absolute() or not archive.is_file():
+            raise RuntimeError('The Linux x86_64 Bash build requires the libtinfo static archive (libncurses-dev)')
+        static_tinfo = archive.resolve()
     stamp = hashlib.sha256((''.join(sha(patch) for patch in [*patches.values(), *display_patches.values(), paste_patch, darwin_patch, bind_x_patch, unload_patch, combining_patch, native_history_patch, *setpgid_patches.values(), setpgid_header, *resize_patches.values()]) + sha(Path(__file__)) + sha(helper_path) + sha(ROOT / 'scripts/native-input-p0/readline-sources.json')).encode()).hexdigest()[:20]
+    if static_tinfo:
+        stamp += '-' + sha(static_tinfo)[:12]
     bash_patch_lock = Path(__file__).with_name('bash-5.3-patches.json')
     macos_bash_patches = {}
     if host == 'darwin' and '5.3' in args.versions.split(','):
@@ -167,8 +175,13 @@ def main():
         if host == 'darwin' and version == '4.1':
             # Compile the actual production bind-x callback with its return contract checked.
             run(['make', 'bashline.o', 'CFLAGS=-O2 -std=gnu89 -Werror=implicit-function-declaration -Werror=return-type'], target)
-        run(['make', '-j4', 'CFLAGS=-O2 -std=gnu89 -Werror=implicit-function-declaration'], target)
+        terminal_library = [f'TERMCAP_LIB={static_tinfo}'] if static_tinfo and version == '5.3' else []
+        run(['make', '-j4', 'CFLAGS=-O2 -std=gnu89 -Werror=implicit-function-declaration', *terminal_library], target)
         shell = target / 'bash'
+        if terminal_library:
+            dynamic = subprocess.check_output(['readelf', '-dW', shell], text=True)
+            if 'libtinfo.so' in dynamic or 'libncurses' in dynamic:
+                raise RuntimeError('Linux x86_64 Bash still depends on a shared terminal library')
         if version == '5.3' and macos_bash_patches:
             patch_level = subprocess.check_output([shell, '--noprofile', '--norc', '-c',
                                                    'printf "%s" "${BASH_VERSINFO[2]}"'], text=True)

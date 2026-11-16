@@ -111,6 +111,10 @@ def main():
         destination.mkdir(exist_ok=True)
         # Darwin's debug map otherwise embeds the absolute Rust archive path.
         linker = ['-bundle', '-undefined', 'dynamic_lookup', '-Wl,-S'] if host == 'darwin' else ['-shared', '-fPIC']
+        if x86_linux:
+            # The SSH worker uploads and reads back this module before opening
+            # the terminal. Keep only the code and symbols needed at runtime.
+            linker += ['-Wl,--strip-debug,--exclude-libs,ALL,--gc-sections']
         module = destination / 'adapter.so'
         candidate = destination / 'adapter.candidate.so'
         run(['cc', *linker, '-O2', *[f'-I{p}' for p in includes], *[f'-I{p / "lib"}' for p in includes],
@@ -146,6 +150,8 @@ def main():
     # Source archives, exact GNU patches and license notices accompany modules.
     notices = catalogue / 'sources'
     notices.mkdir(exist_ok=True)
+    if x86_linux:
+        shutil.copy2('/usr/share/doc/libncurses-dev/copyright', notices / 'ncurses-COPYRIGHT')
     archives = [f'bash-{version}.tar.gz' for version in versions]
     if '5.3' in versions:
         pin = json.loads((ROOT / 'scripts/native-input-p0/readline-sources.json').read_text())

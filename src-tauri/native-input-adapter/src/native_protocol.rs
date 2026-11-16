@@ -50,9 +50,12 @@ impl Bridge {
             .verified_profile_id
             .as_deref()
             .and_then(nip::native_profile_versions);
-        let supported = cfg!(all(
-            any(target_os = "macos", target_os = "linux"),
-            target_arch = "aarch64"
+        let supported = cfg!(any(
+            all(
+                any(target_os = "macos", target_os = "linux"),
+                target_arch = "aarch64"
+            ),
+            all(target_os = "linux", target_arch = "x86_64", target_env = "gnu")
         )) && p0_native_protocol_supported() == 1
             && p0_bindings_valid() == 1
             && versions.is_some_and(|(bash, _readline, numeric)| {

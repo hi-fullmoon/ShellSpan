@@ -647,7 +647,12 @@ static int native_tty_stream(FILE *stream) {
 int p0_native_protocol_supported(void) {
   const char *codeset=nl_langinfo(CODESET);
 #ifdef __GLIBC__
-  if (strcmp(gnu_get_libc_version(),"2.36")) return 0;
+  const char *glibc = gnu_get_libc_version();
+#if defined(__linux__) && defined(__x86_64__)
+  if (strncmp(glibc, "2.", 2) || strverscmp(glibc, "2.36") < 0) return 0;
+#else
+  if (strcmp(glibc, "2.36")) return 0;
+#endif
 #endif
   return native_prompt_columns && codeset && (!strcmp(codeset,"UTF-8") || !strcmp(codeset,"UTF8"))
       && rl_editing_mode == 1 && saved_pre_input == NULL
