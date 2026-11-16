@@ -55,33 +55,44 @@ def main():
     versions = args.versions.split(',')
     if len(set(versions)) != len(versions) or any(version not in READLINE_VERSIONS for version in versions):
         parser.error('--versions requires distinct supported Bash versions: 4.1, 4.4, 5.3')
-    if platform.machine() not in ['arm64', 'aarch64']:
-        raise RuntimeError('Unaccepted module architecture')
     host = platform.system().lower()
-    if host == 'darwin':
+    machine = platform.machine()
+    if host == 'darwin' and machine in ('arm64', 'aarch64'):
         target = 'macos-arm64'
     elif host == 'linux' and platform.libc_ver() == ('glibc', '2.36'):
-        target = 'linux-aarch64-glibc-2.36'
+        if machine in ('arm64', 'aarch64'):
+            target = 'linux-aarch64-glibc-2.36'
+        elif machine == 'x86_64':
+            if versions != ['5.3']:
+                parser.error('Linux x86_64 supports only Bash 5.3 / Readline 8.3.6')
+            target = 'linux-x86_64-glibc-2.36'
+        else:
+            raise RuntimeError('Unaccepted Linux module architecture')
     else:
-        raise RuntimeError('Unaccepted module OS/libc')
+        raise RuntimeError('Unaccepted module OS/architecture/libc')
+    # Keep both Linux dependency builds, including the P0 build cache, isolated
+    # when the ARM64 and x86_64 producers mount the same checkout.
+    x86_linux = target == 'linux-x86_64-glibc-2.36'
+    dependency_root = BUILD_ROOT / target if x86_linux else BUILD_ROOT
     OUT.mkdir(parents=True, exist_ok=True)
-    log = OUT / f'build-{host}.log'
+    log = OUT / f'build-{target if x86_linux else host}.log'
 
     def run(command, env=None):
         with log.open('ab') as output:
             subprocess.run(list(map(str, command)), cwd=ROOT, env=env, stdout=output, stderr=subprocess.STDOUT, check=True)
 
-    run(['python3', '-B', 'scripts/dependency-builds/bash-native/build.py', '--versions', args.versions])
+    run(['python3', '-B', 'scripts/dependency-builds/bash-native/build.py', '--versions', args.versions],
+        {**os.environ, 'SHELLSPAN_NATIVE_BUILD_ROOT': str(dependency_root)})
     source = ROOT / 'src-tauri/native-input-adapter'
     manifest = source / 'Cargo.toml'
     rust_environment = macos_rust_environment(manifest) if host == 'darwin' else os.environ
     inputs = [p for p in source.rglob('*') if p.is_file() and 'target' not in p.parts]
-    inputs += [ROOT / 'src-tauri/src/terminal_command/protocol.rs', Path(__file__).resolve(),
+    inputs += [ROOT / 'src-tauri/src/terminal_command/protocol.rs', Path(__file__).resolve(), Path(__file__).with_name('Dockerfile'),
         ROOT / 'scripts/native-input-p0/build.py', ROOT / 'scripts/native-input-p0/readline-sources.json',
         *[p for p in (ROOT/'scripts/dependency-builds/bash-native').iterdir() if p.is_file()]]
     sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
     before = {str(p.relative_to(ROOT)): sha(p) for p in inputs}
-    builds = json.loads((OUT / f'bash-{host}.json').read_text())
+    builds = json.loads((dependency_root / 'native-input-p2' / f'bash-{host}.json').read_text())
     catalogue = OUT / 'resources/native-input'
     catalogue.mkdir(parents=True, exist_ok=True)
     profiles = []
@@ -124,6 +135,7 @@ def main():
         (proof / 'manifest.json').write_text(json.dumps({'profile': profile, 'shell': str(shell), 'bridge': str(module),
             'artifacts': {str(p): sha(p) for p in [shell, module]}, 'sources': before}, indent=2))
         profiles.append({'id': profile, 'target': target, 'bashVersion': version, 'readlineVersion': readline,
+                         **({'bashPatchLevel': builds[version]['bashPatchLevel']} if 'bashPatchLevel' in builds[version] else {}),
                          'shellSha256': sha(shell), 'moduleSha256': sha(module), 'module': f'{profile}/adapter.so',
                          'buildShell': str(shell), 'captureFence': 1,
                          'readlineDisplayAbi': 1,
@@ -138,15 +150,16 @@ def main():
     if '5.3' in versions:
         pin = json.loads((ROOT / 'scripts/native-input-p0/readline-sources.json').read_text())
         archives.extend(['readline-8.3.tar.gz', *(f'readline83-{n:03d}' for n in range(1, len(pin['patches']) + 1))])
+        archives.extend(builds['5.3'].get('gnuBashPatches', {}))
     for name in archives:
-        shutil.copy2(BUILD_ROOT / 'native-input-p0/upstream' / name, notices / name)
+        shutil.copy2(dependency_root / 'native-input-p0/upstream' / name, notices / name)
     for name in ['COPYING', 'AUTHORS']:
         shutil.copy2(upstream / name, notices / f'bash-{name}')
     for path in (ROOT / 'scripts/dependency-builds/bash-native').iterdir():
         if path.is_file() and path.suffix in ['.patch', '.h']:
             shutil.copy2(path, notices / path.name)
     shutil.copy2(ROOT / 'scripts/native-input-p0/readline-sources.json', notices / 'readline-sources.json')
-    (catalogue / 'README.txt').write_text('GNU Bash/Readline: GPL-3.0-or-later. Exact source archives, official GNU patches, post-profile integration and native prompt-column patches are in sources/.\nReadline native display ABI: 1; explicit matching targets only; never replaces an already-bound Shell.\nShellSpan adapter source: src-tauri/native-input-adapter; rebuild: python3 scripts/native-input-p2/build.py\n')
+    (catalogue / 'README.txt').write_text('GNU Bash/Readline: GPL-3.0-or-later. Exact source archives, official GNU patches, post-profile integration and native prompt-column patches are in sources/.\nReadline native display ABI: 1; explicit matching targets only. Linux x86_64 SSH uses the verified Bash in the private directory of a new session.\nShellSpan adapter source: src-tauri/native-input-adapter; rebuild: python3 scripts/native-input-p2/build.py\n')
     print(f'NIP production modules: {catalogue}')
 
 

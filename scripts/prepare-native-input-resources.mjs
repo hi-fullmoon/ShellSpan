@@ -7,7 +7,7 @@ import {basename,resolve} from 'node:path';
 import {parseArgs} from 'node:util';
 import {nativeInputBuildPath,nativeInputReleaseDirectory} from './native-input-p2/resource-paths.mjs';
 import {copyNativeRebuildSources} from './native-input-p2/rebuild-sources.mjs';
-import {bashProfileId,RELEASE_BASH_VERSION} from './native-input-p2/bash-profiles.mjs';
+import {bashProfileId,BASH_READLINE_VERSIONS,RELEASE_BASH_VERSION} from './native-input-p2/bash-profiles.mjs';
 
 const root=resolve(import.meta.dirname,'..');
 const {values}=parseArgs({options:{'no-build':{type:'boolean'},'with-ssh':{type:'boolean'},'require-ssh':{type:'boolean'},acceptance:{type:'boolean'},target:{type:'string'},'validation-editor':{type:'string',multiple:true}}});
@@ -19,6 +19,11 @@ const editorTargetsByBuildTarget=new Map([
 ]);
 const editorTarget=editorTargetsByBuildTarget.get(target);
 const linuxEditorTarget=editorTargetsByBuildTarget.get('aarch64-unknown-linux-gnu');
+const linuxX86BashTarget='linux-x86_64-glibc-2.36';
+const hostBashTarget=target==='aarch64-apple-darwin'?'macos-arm64':target==='aarch64-unknown-linux-gnu'?linuxEditorTarget:undefined;
+// Windows can carry the x86_64 Bash as a remote resource without selecting it locally.
+const sshBashTargets=target==='aarch64-apple-darwin'||target==='aarch64-unknown-linux-gnu'
+  ?[linuxEditorTarget,linuxX86BashTarget]:target==='x86_64-pc-windows-msvc'?[linuxX86BashTarget]:[];
 const validationTargets=values['validation-editor']??[];const validationOnly=validationTargets.length>0;
 const buildRoot=validationOnly||values.acceptance?'.artifacts/tests':nativeInputBuildPath;
 const sourceRoot=resolve(root,buildRoot,'native-input-p2/resources/native-input');
@@ -40,23 +45,25 @@ async function run(command,args,cwd=root){
   (await import('node:fs')).closeSync(log);
   assert.equal(code,0,`${command} failed; see ${logDirectory}`);
 }
-const supported=['aarch64-apple-darwin','aarch64-unknown-linux-gnu'].includes(target);
-const includeBash=supported&&!validationOnly;
-if(includeBash&&!values['no-build'])await run('python3',['-B','scripts/native-input-p2/build.py']);
+if(hostBashTarget&&!validationOnly&&!values['no-build'])await run('python3',['-B','scripts/native-input-p2/build.py']);
 if(!values['no-build']&&editorTarget&&(validationOnly?validationTargets.includes(editorTarget):productionProfilesFor(editorTarget).length>0)){
   if(editorTarget===linuxEditorTarget)await run('sh',['scripts/native-input-p3/linux-build.sh']);
   else if(editorTarget==='windows-x64')await run(process.execPath,['scripts/native-input-p3/build-windows.mjs']);
   else await run(process.execPath,['scripts/native-input-p3/build.mjs','--build-scoped-core']);
 }
-if(values['with-ssh']){
-  assert(process.arch==='arm64','The accepted Linux dependency build requires an arm64 Docker host');
-  await run('docker',['build','-t','shellspan-native-input-p2:local','-f','scripts/native-input-p2/Dockerfile','scripts/native-input-p2']);
+if(!validationOnly&&values['with-ssh']&&!values['no-build']){
   const args=['run','--rm','-e','SHELLSPAN_NATIVE_BUILD_ROOT','-v',`${root}:/work`];
   if(process.getuid)args.push('--user',`${process.getuid()}:${process.getgid()}`,'-e','CARGO_HOME=/tmp/cargo');
-  await run('docker',[...args,'shellspan-native-input-p2:local','python3','-B','scripts/native-input-p2/build.py']);
-  if(!validationOnly&&productionProfilesFor(linuxEditorTarget).length>0){
-    await run('docker',['build','-t','shellspan-native-input-p3:local','-f','scripts/native-input-p3/Dockerfile','scripts/native-input-p3']);
-    await run('docker',[...args,'shellspan-native-input-p3:local','sh','scripts/native-input-p3/linux-build.sh']);
+  for(const sshTarget of sshBashTargets){
+    const x86=sshTarget===linuxX86BashTarget;
+    const platform=x86?'linux/amd64':'linux/arm64';
+    const image=x86?'shellspan-native-input-p2:amd64':'shellspan-native-input-p2:local';
+    await run('docker',['build','--platform',platform,'-t',image,'-f','scripts/native-input-p2/Dockerfile','scripts/native-input-p2']);
+    await run('docker',[...args,'--platform',platform,image,'python3','-B','scripts/native-input-p2/build.py']);
+    if(!x86&&productionProfilesFor(linuxEditorTarget).length>0){
+      await run('docker',['build','--platform',platform,'-t','shellspan-native-input-p3:local','-f','scripts/native-input-p3/Dockerfile','scripts/native-input-p3']);
+      await run('docker',[...args,'--platform',platform,'shellspan-native-input-p3:local','sh','scripts/native-input-p3/linux-build.sh']);
+    }
   }
 }
 await mkdir(generated,{recursive:true});
@@ -129,34 +136,55 @@ for(const name of editorNames){
   }
   await cp(resolve(sourceRoot,name),resolve(generated,name));targets.push(name);
 }
-if(includeBash){
-  const names=(await readdir(sourceRoot)).filter(name=>/^catalogue-(macos-arm64|linux-aarch64-glibc-2\.36)\.json$/.test(name));
-  for(const name of names){
-    const catalogue=JSON.parse(await readFile(resolve(sourceRoot,name),'utf8'));
-    const catalogueTarget=name.slice('catalogue-'.length,-'.json'.length);
-    assert.equal(catalogue.version,1);
-    assert.deepEqual(catalogue.profiles.map(profile=>profile.id),[bashProfileId(RELEASE_BASH_VERSION,catalogueTarget)],`Unexpected release Bash profiles in ${name}`);
-    for(const [name,expected] of Object.entries(catalogue.sources))assert.equal(sha(await readFile(resolve(root,name))),expected,`Stale native source: ${name}`);
-    for(const profile of catalogue.profiles){
-      assert.equal(profile.target,catalogueTarget);
-      assert.equal(profile.bashVersion,RELEASE_BASH_VERSION);
-      assert.equal(profile.module,`${profile.id}/adapter.so`);assert.equal(profile.relay,`${profile.id}/native-input-relay`);
-      assert.equal(profile.readlineDisplayAbi,1,'Readline native display ABI missing');
-      for(const [path,expected] of [[profile.module,profile.moduleSha256],[profile.relay,profile.relaySha256],[`${profile.id}/bash`,profile.shellSha256]]){
-        const bytes=await readFile(resolve(sourceRoot,path));assert.equal(sha(bytes),expected,`Native artifact mismatch: ${path}`);
-        await mkdir(resolve(generated,profile.id),{recursive:true});await cp(resolve(sourceRoot,path),resolve(generated,path));
-      }
+const bashTargets=validationOnly?[]:[...new Set([hostBashTarget,...sshBashTargets].filter(Boolean))];
+for(const catalogueTarget of bashTargets){
+  const name=`catalogue-${catalogueTarget}.json`;
+  const required=catalogueTarget===hostBashTarget||values['require-ssh']||values['with-ssh'];
+  const bytes=await readFile(resolve(sourceRoot,name)).catch(error=>{
+    if(error.code==='ENOENT'&&!required)return undefined;
+    if(error.code==='ENOENT')throw Error(`Required native Bash catalogue missing: ${name}`);
+    throw error;
+  });
+  if(!bytes)continue;
+  const catalogue=JSON.parse(bytes);
+  assert.equal(catalogue.version,1);
+  assert.deepEqual(catalogue.profiles.map(profile=>profile.id),[bashProfileId(RELEASE_BASH_VERSION,catalogueTarget)],`Unexpected release Bash profiles in ${name}`);
+  for(const [name,expected] of Object.entries(catalogue.sources))assert.equal(sha(await readFile(resolve(root,name))),expected,`Stale native source: ${name}`);
+  if(catalogueTarget==='macos-arm64'){
+    const pinPath='scripts/dependency-builds/bash-native/bash-5.3-patches.json';
+    const pinBytes=await readFile(resolve(root,pinPath));
+    assert.equal(catalogue.sources[pinPath],sha(pinBytes));
+    const pins=JSON.parse(pinBytes);
+    assert.equal(pins.length,20);
+    assert.equal(catalogue.profiles[0].bashPatchLevel,pins.length);
+    for(const [index,expected] of pins.entries()){
+      const patch=`bash53-${String(index+1).padStart(3,'0')}`;
+      assert.equal(sha(await readFile(resolve(sourceRoot,'sources',patch))),expected,`GNU Bash patch mismatch: ${patch}`);
     }
-    await cp(resolve(sourceRoot,name),resolve(generated,name));targets.push(name);
   }
-  assert(targets.includes(`catalogue-${target==='aarch64-apple-darwin'?'macos-arm64':'linux-aarch64-glibc-2.36'}.json`),'Host native target missing');
-  if(values['require-ssh']||values['with-ssh'])assert(targets.includes('catalogue-linux-aarch64-glibc-2.36.json'),'Linux SSH resources missing');
+  for(const profile of catalogue.profiles){
+    assert.equal(profile.target,catalogueTarget);
+    assert.equal(profile.bashVersion,RELEASE_BASH_VERSION);
+    assert.equal(profile.readlineVersion,BASH_READLINE_VERSIONS[RELEASE_BASH_VERSION]);
+    assert.equal(profile.captureFence,1);
+    assert.equal(profile.module,`${profile.id}/adapter.so`);assert.equal(profile.relay,`${profile.id}/native-input-relay`);
+    assert.equal(profile.readlineDisplayAbi,1,'Readline native display ABI missing');
+    for(const [path,expected] of [[profile.module,profile.moduleSha256],[profile.relay,profile.relaySha256],[`${profile.id}/bash`,profile.shellSha256]]){
+      const bytes=await readFile(resolve(sourceRoot,path));assert.equal(sha(bytes),expected,`Native artifact mismatch: ${path}`);
+      await mkdir(resolve(generated,profile.id),{recursive:true});await cp(resolve(sourceRoot,path),resolve(generated,path));
+    }
+  }
+  await cp(resolve(sourceRoot,name),resolve(generated,name));targets.push(name);
+}
+const includeBash=targets.some(name=>name.startsWith('catalogue-'));
+if(includeBash){
   // Keep only this build's verified profiles, never stale ignored binaries.
   const allowed=new Set(['sources','README.txt',...targets,...editorAllowed]);
   for(const name of targets.filter(name=>name.startsWith('catalogue-')))for(const profile of JSON.parse(await readFile(resolve(generated,name),'utf8')).profiles)allowed.add(profile.id);
   for(const entry of await readdir(generated))if(!allowed.has(entry))await rm(resolve(generated,entry),{recursive:true});
   await cp(resolve(sourceRoot,'sources'),resolve(generated,'sources'),{recursive:true,filter:path=>{
     const name=basename(path);
+    if(/^bash53-\d{3}$/.test(name))return targets.includes('catalogue-macos-arm64.json');
     return !/^bash-[\d.]+\.tar\.gz$/.test(name)||name===`bash-${RELEASE_BASH_VERSION}.tar.gz`;
   }});
   const tree=resolve(generated,'sources/ShellSpan');await mkdir(tree,{recursive:true});
@@ -164,7 +192,7 @@ if(includeBash){
   for(const name of ['scripts/dependency-builds/bash-native','scripts/native-input-p0']){
     await cp(resolve(root,name),resolve(tree,name),{recursive:true,filter:path=>!path.split('/').some(part=>['target','__pycache__'].includes(part))});
   }
-  for(const name of ['src-tauri/src/terminal_command/protocol.rs','scripts/native-input-p2/build.py']){
+  for(const name of ['src-tauri/src/terminal_command/protocol.rs','scripts/native-input-p2/build.py','scripts/native-input-p2/Dockerfile']){
     await mkdir(resolve(tree,name,'..'),{recursive:true});await cp(resolve(root,name),resolve(tree,name));
   }
   for(const name of editorNames)for(const path of Object.keys(JSON.parse(await readFile(resolve(sourceRoot,name),'utf8')).sources)){

@@ -1,8 +1,4 @@
-"""Pinned GNU targets with an explicit, post-profile integration entry.
-
-The application never substitutes these binaries for the bound user shell.
-Only independently installed matching targets can negotiate the native ABI.
-"""
+"""Pinned GNU targets with an explicit, post-profile integration entry."""
 import argparse
 import hashlib
 import importlib.util
@@ -13,6 +9,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import urllib.request
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[3]
@@ -53,6 +50,25 @@ def main():
     resize_patches = {version: Path(__file__).with_name(f'readline-resize-{readline_versions[version]}.patch') for version in ['4.1', '4.4']}
     sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
     stamp = hashlib.sha256((''.join(sha(patch) for patch in [*patches.values(), *display_patches.values(), paste_patch, darwin_patch, bind_x_patch, unload_patch, combining_patch, native_history_patch, *setpgid_patches.values(), setpgid_header, *resize_patches.values()]) + sha(Path(__file__)) + sha(helper_path) + sha(ROOT / 'scripts/native-input-p0/readline-sources.json')).encode()).hexdigest()[:20]
+    bash_patch_lock = Path(__file__).with_name('bash-5.3-patches.json')
+    macos_bash_patches = {}
+    if host == 'darwin' and '5.3' in args.versions.split(','):
+        pin = json.loads(bash_patch_lock.read_text())
+        if len(pin) != 20:
+            raise RuntimeError('Expected GNU Bash 5.3 patches 001–020')
+        stamp += '-' + sha(bash_patch_lock)[:12]
+        for number, expected in enumerate(pin, 1):
+            name = f'bash53-{number:03d}'
+            official_patch = BUILD_ROOT / 'native-input-p0/upstream' / name
+            if not official_patch.exists():
+                with urllib.request.urlopen(f'https://ftp.gnu.org/gnu/bash/bash-5.3-patches/{name}', timeout=30) as response:
+                    contents = response.read()
+                if hashlib.sha256(contents).hexdigest() != expected:
+                    raise RuntimeError(f'{name}: checksum mismatch')
+                official_patch.write_bytes(contents)
+            if sha(official_patch) != expected:
+                raise RuntimeError(f'{name}: checksum mismatch')
+            macos_bash_patches[official_patch] = expected
     base = OUT / f'bash-{host}' / stamp
     sources = base / 'source'
     sources.mkdir(parents=True, exist_ok=True)
@@ -107,6 +123,9 @@ def main():
         source = sources / f'bash-{version}'
         if not source.exists():
             run(['tar', '-xzf', archive, '-C', sources])
+            if version == '5.3':
+                for official_patch in macos_bash_patches:
+                    run(['patch', '--batch', '-F', '0', '-p0', '-i', official_patch], source)
             run(['patch', '--batch', '-p1', '-i', patch], source)
             (source / '.shellspan-startup-init').write_text(sha(patch))
             if host == 'linux':
@@ -150,6 +169,11 @@ def main():
             run(['make', 'bashline.o', 'CFLAGS=-O2 -std=gnu89 -Werror=implicit-function-declaration -Werror=return-type'], target)
         run(['make', '-j4', 'CFLAGS=-O2 -std=gnu89 -Werror=implicit-function-declaration'], target)
         shell = target / 'bash'
+        if version == '5.3' and macos_bash_patches:
+            patch_level = subprocess.check_output([shell, '--noprofile', '--norc', '-c',
+                                                   'printf "%s" "${BASH_VERSINFO[2]}"'], text=True)
+            if patch_level != str(len(macos_bash_patches)):
+                raise RuntimeError(f'Unexpected GNU Bash patch level: {patch_level}')
         builds[version] = {'shell': str(shell), 'source': str(source), 'includes':
                           [*([str(readline / 'include')] if readline else []), str(target), str(source), str(source / 'include')],
                           'shellSha256': sha(shell), 'startupPatchSha256': sha(patch), 'archiveSha256': sha(archive),
@@ -165,6 +189,9 @@ def main():
                           'darwinHeaderPatch': {'patch': str(darwin_patch.relative_to(ROOT)), 'sha256': sha(darwin_patch)} if host == 'darwin' and version == '4.1' else None,
                           'unloadHookBackport': {'from': 'Bash 4.4', 'patch': str(unload_patch.relative_to(ROOT)), 'sha256': sha(unload_patch), 'enableSourceSha256': sha(source / 'builtins/enable.def'), 'generalHeaderSha256': sha(source / 'general.h')} if host == 'darwin' and version == '4.1' else None,
                           'bindXReturnBackport': {'from': 'Bash 4.4', 'patch': str(bind_x_patch.relative_to(ROOT)), 'sha256': sha(bind_x_patch), 'sourceSha256': sha(source / 'bashline.c'), 'compileGuard': '-Werror=return-type'} if host == 'darwin' and version == '4.1' else None}
+        if version == '5.3' and macos_bash_patches:
+            builds[version]['bashPatchLevel'] = int(patch_level)
+            builds[version]['gnuBashPatches'] = {path.name: digest for path, digest in macos_bash_patches.items()}
     (OUT / f'bash-{host}.json').write_text(json.dumps(builds, indent=2))
     print(f'GNU Bash post-profile targets: {OUT / f"bash-{host}.json"}')
 

@@ -229,4 +229,27 @@ describe('release publication gates', () => {
     const releaseDownload = release.jobs.build.steps.find(step => step.with?.name === upload.with.name);
     expect(releaseDownload.with.path).toBe(buildRoot);
   });
+
+  it('packs x86_64 SSH resources from the amd64 producer into both release clients', async () => {
+    const release = parse(await readFile(path.join(root, '.github/workflows/release.yml'), 'utf8'));
+    const producer = release.jobs['build-native-bash'];
+    expect(producer.strategy.matrix.include).toEqual([
+      { arch: 'arm64', runner: 'ubuntu-24.04-arm' },
+      { arch: 'amd64', runner: 'ubuntu-24.04' },
+    ]);
+    const upload = producer.steps.find(step => step.uses?.startsWith('actions/upload-artifact@'));
+    const bundle = release.jobs.build;
+    expect(bundle.needs).toContain('build-native-bash');
+    for (const arch of ['arm64', 'amd64']) {
+      const artifact = upload.with.name.replace('${{ matrix.arch }}', arch);
+      const download = bundle.steps.find(step => step.with?.name === artifact);
+      expect(download.with.path).toBe(upload.with.path);
+      expect(download.if).toBe(arch === 'arm64' ? "runner.os == 'macOS'" : undefined);
+      for (const client of arch === 'amd64' ? ['macOS', 'Windows'] : ['macOS']) {
+        const pack = bundle.steps.find(step => step.name === `Build Tauri bundle on ${client}`);
+        expect(bundle.steps.indexOf(download)).toBeLessThan(bundle.steps.indexOf(pack));
+        expect(pack.run).toMatch(/pnpm native:prepare .*--require-ssh/);
+      }
+    }
+  });
 });

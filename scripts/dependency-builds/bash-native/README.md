@@ -10,6 +10,13 @@ application matrix or checking its cumulative evidence.
 The dependency recipe verifies the pinned GNU archives and official Readline
 patches, then applies the explicit post-profile startup and native display patches.
 
+The P2 producer accepts Linux x86_64 only with glibc 2.36 and the default 5.3
+profile. The pinned `scripts/native-input-p2/Dockerfile` can run as `linux/amd64`;
+the producer isolates its dependency cache in `linux-x86_64-glibc-2.36/` under
+the build root. It publishes `catalogue-linux-x86_64-glibc-2.36.json` and the
+three executables in the same resource tree as the other GNU profiles. See the
+[build and acceptance checklist](../../../docs/design/agent-terminal-input-linux-x86_64-ssh.md).
+
 The Readline display extension adds `rl_native_prompt_columns()` to its public header
 and implementation. This read-only extension returns Readline's own column count
 for the prompt's last logical line, including invisible spans, multibyte widths
@@ -25,8 +32,9 @@ prefix, preserving source bytes. Clearing an unchanged owned draft restores its
 renderer before acknowledging DraftCleared; event-hook teardown retains its safe
 native service-key boundary. Foreign renderers and user drafts are not replaced.
 
-These are explicit dependency builds, not transparent substitutes for the user's
-bound executable. Each native profile verifies its actual Shell/module/relay
+Linux x86_64 SSH uses the packaged executable for a new native session only.
+Other GNU profiles require a match for the user's bound executable. Each native
+profile verifies its actual Shell/module/relay
 hashes and `readlineDisplayAbi: 1`. Source inputs invalidate cached builds when
 the recipe or patches change. GNU archives, official and integration patches,
 source notices and the rebuild instructions accompany the resource kit.
