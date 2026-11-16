@@ -204,11 +204,18 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<NativeArti
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub(crate) fn shellspan_bash(root: &Path) -> Result<std::path::PathBuf, String> {
+    use std::os::unix::fs::PermissionsExt;
+
     let artifact = read_catalogue(root, MACOS_BASH_TARGET)?
         .into_iter()
         .find(|artifact| artifact.id == SHELLSPAN_BASH_PROFILE)
         .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
     let shell = root.join(SHELLSPAN_BASH_PROFILE).join("bash");
+    let metadata =
+        fs::metadata(&shell).map_err(|_| "TERMINAL_NATIVE_PROFILE_ARTIFACT_UNAVAILABLE")?;
+    if !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
+        return Err("TERMINAL_NATIVE_PROFILE_ARTIFACT_UNAVAILABLE".into());
+    }
     if super::registration::file_sha(&shell)? != artifact.shell_sha256 {
         return Err("TERMINAL_NATIVE_PROFILE_MISMATCH".into());
     }

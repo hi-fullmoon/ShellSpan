@@ -699,6 +699,10 @@ impl AgentRuntime {
             .observe_terminal_raw_output(session_id, bytes)
     }
 
+    pub(crate) fn terminal_broker(&self) -> &crate::terminal_broker::TerminalSessionBroker {
+        self.native_engine.terminal_broker()
+    }
+
     pub(crate) fn attach_native_terminal_transport(
         &self,
         transport: &str,

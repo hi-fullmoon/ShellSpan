@@ -7,6 +7,8 @@ use crate::terminal_command::{
 };
 use sha2::{Digest, Sha256};
 
+const UNSUPPORTED_PROFILE: &str = "TERMINAL_NATIVE_PROFILE_UNSUPPORTED";
+
 #[cfg(all(test, target_os = "macos"))]
 #[path = "remote_tests.rs"]
 mod tests;
@@ -19,30 +21,42 @@ enum RemoteBashTarget {
 
 impl RemoteBashTarget {
     fn detect(session: &Session) -> Result<Self, String> {
+        let tag = format!("shellspan-platform-{}", Uuid::new_v4().simple());
         let output = read_ssh_setup_command(
             session,
-            r#"host=$(command uname -sm) || exit 1
-builtin printf '%s\n' "$host"
+            &format!(
+                r#"host=$(command uname -sm) || exit 1
+libc=
 case "$host" in
-  'Linux x86_64') LC_ALL=C command getconf GNU_LIBC_VERSION ;;
-esac"#,
+  'Linux x86_64') libc=$(LC_ALL=C command getconf GNU_LIBC_VERSION) || exit 1 ;;
+esac
+builtin printf '\n%s\t%s\t%s\n' '{}' "$host" "$libc""#,
+                tag
+            ),
         )
-        .map_err(|_| "TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
-        let output =
-            std::str::from_utf8(&output).map_err(|_| "TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
-        Self::parse(output).ok_or_else(|| "TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into())
+        .map_err(|_| UNSUPPORTED_PROFILE)?;
+        Self::parse(&tag, &output)
     }
 
-    fn parse(output: &str) -> Option<Self> {
-        let mut lines = output.lines();
-        match lines.next()? {
-            "Linux aarch64" if lines.next().is_none() => Some(Self::Arm64),
-            "Linux x86_64" => {
-                let (major, minor) = lines.next()?.strip_prefix("glibc ")?.split_once('.')?;
-                (major == "2" && minor.parse::<u32>().ok()? >= 36 && lines.next().is_none())
-                    .then_some(Self::X86_64)
-            }
-            _ => None,
+    fn parse(tag: &str, output: &[u8]) -> Result<Self, String> {
+        let prefix = format!("{tag}\t");
+        let mut records = output
+            .split(|byte| *byte == b'\n')
+            .filter_map(|line| line.strip_prefix(prefix.as_bytes()));
+        let record = std::str::from_utf8(records.next().ok_or(UNSUPPORTED_PROFILE)?)
+            .map_err(|_| UNSUPPORTED_PROFILE)?;
+        if records.next().is_some() {
+            return Err(UNSUPPORTED_PROFILE.into());
+        }
+        match record.split_once('\t') {
+            Some(("Linux aarch64", "")) => Ok(Self::Arm64),
+            Some(("Linux x86_64", libc)) => libc
+                .strip_prefix("glibc 2.")
+                .and_then(|value| value.parse::<u32>().ok())
+                .filter(|minor| *minor >= 36)
+                .map(|_| Self::X86_64)
+                .ok_or_else(|| UNSUPPORTED_PROFILE.into()),
+            _ => Err(UNSUPPORTED_PROFILE.into()),
         }
     }
 
@@ -56,25 +70,29 @@ esac"#,
 
 #[test]
 fn ssh_bash_targets_require_linux_and_x86_64_requires_glibc_236_or_newer() {
+    let parse = |value: &str| RemoteBashTarget::parse("tag", value.as_bytes());
     assert_eq!(
-        RemoteBashTarget::parse("Linux aarch64\n"),
-        Some(RemoteBashTarget::Arm64)
+        parse("user greeting\ntag\tLinux aarch64\t\n"),
+        Ok(RemoteBashTarget::Arm64)
     );
     for release in ["2.36", "2.38"] {
         assert_eq!(
-            RemoteBashTarget::parse(&format!("Linux x86_64\nglibc {release}\n")),
-            Some(RemoteBashTarget::X86_64)
+            parse(&format!(
+                "greeting\ntag\tLinux x86_64\tglibc {release}\nmore output\n"
+            )),
+            Ok(RemoteBashTarget::X86_64)
         );
     }
     for output in [
-        "Linux x86_64\n",
-        "Linux x86_64\nglibc 2.35\n",
-        "Linux x86_64\nmusl 1.2.5\n",
-        "Linux i686\nglibc 2.36\n",
-        "Darwin x86_64\n",
-        "Linux x86_64\nglibc 2.36\nunexpected output\n",
+        "Linux x86_64\tglibc 2.36\n",
+        "tag\tLinux x86_64\t\n",
+        "tag\tLinux x86_64\tglibc 2.35\n",
+        "tag\tLinux x86_64\tmusl 1.2.5\n",
+        "tag\tLinux i686\tglibc 2.36\n",
+        "tag\tDarwin x86_64\t\n",
+        "tag\tLinux x86_64\tglibc 2.36\ntag\tLinux aarch64\t\n",
     ] {
-        assert_eq!(RemoteBashTarget::parse(output), None, "{output:?}");
+        assert_eq!(parse(output), Err(UNSUPPORTED_PROFILE.into()), "{output:?}");
     }
 }
 
@@ -89,10 +107,60 @@ pub(super) struct RemoteNativeBash {
     pub control: Channel,
     pub active: bool,
     decoder: nip::Decoder,
+    relay_boundary: Option<RelayBoundary>,
     root: String,
     executable: String,
     startup: RemoteShellStartup,
 }
+
+struct RelayBoundary {
+    marker: Vec<u8>,
+    prefix: Vec<u8>,
+}
+
+impl RelayBoundary {
+    fn push(&mut self, bytes: &[u8]) -> Result<Option<&[u8]>, String> {
+        const MAX_PREAMBLE_BYTES: usize = 8_192;
+        self.prefix.extend_from_slice(bytes);
+        if let Some(index) = self
+            .prefix
+            .windows(self.marker.len())
+            .position(|part| part == self.marker)
+        {
+            if index <= MAX_PREAMBLE_BYTES {
+                return Ok(Some(&self.prefix[index + self.marker.len()..]));
+            }
+        } else if self.prefix.len() < MAX_PREAMBLE_BYTES + self.marker.len() {
+            return Ok(None);
+        }
+        Err("TERMINAL_NATIVE_RELAY_PREAMBLE_INVALID".into())
+    }
+}
+
+fn start_native_relay(session: &Session, root: &str) -> Result<(Channel, RelayBoundary), String> {
+    let tag = format!("shellspan-relay-{}", Uuid::new_v4().simple());
+    let mut channel = session
+        .channel_session()
+        .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
+    channel
+        .handle_extended_data(ExtendedData::Ignore)
+        .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
+    channel
+        .exec(&format!(
+            "builtin printf '\\n%s\\n' '{tag}' && exec {} {}",
+            quote_remote_posix(&format!("{root}/relay")),
+            quote_remote_posix(&format!("{root}/control")),
+        ))
+        .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
+    Ok((
+        channel,
+        RelayBoundary {
+            marker: format!("\n{tag}\n").into_bytes(),
+            prefix: Vec::new(),
+        },
+    ))
+}
+
 impl RemoteNativeBash {
     pub fn prepare(
         session: &Session,
@@ -238,21 +306,13 @@ impl RemoteNativeBash {
                 )
                 .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
             }
-            let mut control = session
-                .channel_session()
-                .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
-            control
-                .exec(&format!(
-                    "exec {} {}",
-                    quote_remote_posix(&relay_path),
-                    quote_remote_posix(&socket)
-                ))
-                .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
+            let (control, boundary) = start_native_relay(session, &root)?;
             Ok(Self {
                 profile,
                 control,
                 active: true,
                 decoder: nip::Decoder::default(),
+                relay_boundary: Some(boundary),
                 root: root.clone(),
                 executable,
                 startup,
@@ -419,21 +479,13 @@ impl RemoteNativeBash {
             let initializer=format!("__shellspan_nip_initialize() {{\n precmd_functions=(\"${{(@)precmd_functions:#__shellspan_nip_initialize}}\"); unfunction __shellspan_nip_initialize\n source {}\n}}\nprecmd_functions=(__shellspan_nip_initialize \"${{precmd_functions[@]}}\")\n",quote_remote_posix(&format!("{root}/native-init")));
             let wrapper=format!("{original_env}if {core_loader}; then\n{initializer}else\n builtin printf '%s\\n' TERMINAL_NATIVE_SCOPED_CORE_CONFLICT >&2\nfi\n");
             upload(&sftp, &format!("{root}/.zshenv"), wrapper.as_bytes(), 0o600)?;
-            let mut control = session
-                .channel_session()
-                .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
-            control
-                .exec(&format!(
-                    "exec {} {}",
-                    quote_remote_posix(&format!("{root}/relay")),
-                    quote_remote_posix(&format!("{root}/control"))
-                ))
-                .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
+            let (control, boundary) = start_native_relay(session, &root)?;
             Ok(Self {
                 profile,
                 control,
                 active: true,
                 decoder: nip::Decoder::default(),
+                relay_boundary: Some(boundary),
                 root: root.clone(),
                 executable: identity.executable.clone(),
                 startup: RemoteShellStartup::Zle,
@@ -450,45 +502,75 @@ impl RemoteNativeBash {
         }
         write_all_nonblocking(session, &mut self.control, bytes)
     }
+
+    pub fn relay_started(&self) -> bool {
+        self.relay_boundary.is_none()
+    }
+
+    fn decode_control_bytes(&mut self, bytes: &[u8]) -> Result<Vec<nip::Message>, String> {
+        let bytes = if let Some(boundary) = &mut self.relay_boundary {
+            let Some(bytes) = boundary.push(bytes)? else {
+                return Ok(Vec::new());
+            };
+            bytes
+        } else {
+            bytes
+        };
+        let messages = self
+            .decoder
+            .push(bytes)
+            .map_err(|_| "TERMINAL_NATIVE_PROTOCOL_INVALID")?;
+        self.relay_boundary = None;
+        Ok(messages)
+    }
+
+    pub fn read_control(&mut self) -> Result<Option<Vec<nip::Message>>, String> {
+        let mut bytes = [0; 8192];
+        match self.control.read(&mut bytes) {
+            Ok(0) if self.control.eof() => {
+                self.decoder
+                    .finish()
+                    .map_err(|_| "TERMINAL_NATIVE_PARTIAL_FRAME_EOF")?;
+                Err("TERMINAL_NATIVE_CONTROL_CLOSED".into())
+            }
+            Ok(0) => Ok(None),
+            Ok(count) => self.decode_control_bytes(&bytes[..count]).map(Some),
+            Err(error) if is_retryable_channel_error_kind(error.kind()) => Ok(None),
+            Err(_) => Err("TERMINAL_NATIVE_CONTROL_UNAVAILABLE".into()),
+        }
+    }
+
+    pub fn accept_message(
+        app: &AppHandle,
+        transport: &str,
+        message: nip::Message,
+    ) -> Result<(), String> {
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        crate::terminal_command::acceptance_trace::observe_ssh_receipt(&message, transport)?;
+        app.try_state::<crate::agent_runtime::AgentRuntime>()
+            .ok_or("TERMINAL_NATIVE_RUNTIME_UNAVAILABLE")?
+            .accept_native_terminal_message(transport, message)?;
+        crate::commands::emit_terminal_integration_state(app, transport);
+        Ok(())
+    }
+
     pub fn drain(&mut self, app: &AppHandle, transport: &str) -> Result<bool, String> {
         if !self.active {
             return Ok(false);
         }
-        let mut bytes = [0; 8192];
         let mut progress = false;
         for _ in 0..32 {
-            match self.control.read(&mut bytes) {
-                Ok(0) if self.control.eof() => {
-                    self.decoder
-                        .finish()
-                        .map_err(|_| "TERMINAL_NATIVE_PARTIAL_FRAME_EOF")?;
-                    return Err("TERMINAL_NATIVE_CONTROL_CLOSED".into());
-                }
-                Ok(0) => break,
-                Ok(count) => {
-                    progress = true;
-                    for message in self
-                        .decoder
-                        .push(&bytes[..count])
-                        .map_err(|_| "TERMINAL_NATIVE_PROTOCOL_INVALID")?
-                    {
-                        #[cfg(all(
-                            feature = "native-input-acceptance",
-                            debug_assertions,
-                            target_os = "macos",
-                            target_arch = "aarch64"
-                        ))]
-                        crate::terminal_command::acceptance_trace::observe_ssh_receipt(
-                            &message, transport,
-                        )?;
-                        app.try_state::<crate::agent_runtime::AgentRuntime>()
-                            .ok_or("TERMINAL_NATIVE_RUNTIME_UNAVAILABLE")?
-                            .accept_native_terminal_message(transport, message)?;
-                        crate::commands::emit_terminal_integration_state(app, transport);
-                    }
-                }
-                Err(error) if is_retryable_channel_error_kind(error.kind()) => break,
-                Err(_) => return Err("TERMINAL_NATIVE_CONTROL_UNAVAILABLE".into()),
+            let Some(messages) = self.read_control()? else {
+                break;
+            };
+            progress = true;
+            for message in messages {
+                Self::accept_message(app, transport, message)?;
             }
         }
         Ok(progress)

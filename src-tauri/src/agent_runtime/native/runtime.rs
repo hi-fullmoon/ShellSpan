@@ -155,6 +155,10 @@ impl Default for NativeToolEngine {
 }
 
 impl NativeToolEngine {
+    pub(crate) fn terminal_broker(&self) -> &TerminalSessionBroker {
+        &self.terminal_broker
+    }
+
     pub(crate) fn attach_native_terminal_transport(
         &self,
         transport: &str,

@@ -24,7 +24,7 @@ stdout、OSC、前端 ready 和显示完成都不是控制报文。
 
 ## 模式、身份和能力
 
-macOS ARM64 的新建会话提供「ShellSpan Bash」本地配置。显式选择时，后端校验资源清单和 Bash 可执行文件的 SHA-256，启动应用随附的 Bash 5.3.20 / Readline 8.3.6，再沿用本地私有控制通道握手。默认「本地终端」仍按 `$SHELL` 选择，未设置时使用 `/bin/sh`。握手完成并确认提示符就绪后，Visible command 才能使用该终端。握手失败时沿用现有不可用反馈，由用户决定是否切换到 Direct。
+macOS ARM64 的新建会话在 Bash 资源可用时提供「ShellSpan Bash」本地配置。后端校验资源清单和 Bash 可执行文件的 SHA-256 后展示选项，创建会话时再次校验，再启动应用随附的 Bash 5.3.20 / Readline 8.3.6。默认「本地终端」仍按 `$SHELL` 选择，未设置时使用 `/bin/sh`。私有控制通道握手完成并确认提示符就绪后，Visible command 才能使用该终端。握手失败时沿用现有不可用反馈，由用户决定是否切换到 Direct。
 
 Windows 原生输入新身份包含 `shellspan1-conpty1.25.260930003-graphemes`，
 同时固定私有 PSReadLine 与 ConPTY；旧系统控制台身份不能等同替代。
@@ -104,6 +104,11 @@ Linux x86_64 SSH 仅对登录 Shell 为 Bash、glibc 为 2.36 或更新的 2.x �
 Bash、模块和 relay，上传后从该会话的私有目录回读校验，并在不读取登录配置的
 检查中加载模块确认 ABI。实际登录仍按 Bash 自身语义读取配置。准备失败时使用
 账户原来的 SSH Shell；Direct 的流程保持不变。ARM64 SSH 继续要求实际登录 Shell 摘要匹配。
+
+SSH 平台探测和 relay 启动使用每次连接独立的标记区分协议和非交互 Shell 的启动输出。
+重连的候选会话先在 Broker 之外接收并验证原生握手，再提交新代次。x86_64 私有 Bash
+启动失败时尝试以账户原来的 Shell 打开普通 PTY。普通 PTY 在有限时间内观察早期退出，
+可继续连接时才替换旧代次。候选会话退出或连接被取消时，旧代次保持原有输入与控制状态。
 
 ## P2 生产传输与 Shell 语义
 

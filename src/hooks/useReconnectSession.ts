@@ -18,6 +18,7 @@ import {
 } from '@/lib/connections/keychain-key-prompt';
 import { usePortForwardStore } from '@/stores/portForwardStore';
 import { useAppStore } from '@/stores/appStore';
+import { useToastStore } from '@/stores/toastStore';
 import { useI18n } from '@/hooks/useI18n';
 
 const logger = createLogger('reconnect');
@@ -146,6 +147,11 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
 
       setReconnecting(sessionId, true);
       logger.info(`Reconnecting session ${sessionId} (${profile.host}:${profile.port})`);
+      const predecessorConnected = (): boolean => useTerminalStore.getState().sessions
+        .some((item) => item.sessionId === sessionId && item.status === 'connected');
+      const updateReconnectStatus = (status: 'connecting' | 'disconnected', message: string): void => {
+        if (!predecessorConnected()) setStatus(sessionId, { sessionId, status, message });
+      };
       const replaceSession = async (
         summary: Awaited<ReturnType<typeof invokeCreateSession>>,
       ): Promise<void> => {
@@ -179,24 +185,15 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
       for (let attempt = 0; attempt < limit; attempt += 1) {
         if (attempt > 0) {
           const delayMs = AUTO_RECONNECT_DELAYS_MS[attempt];
-          setStatus(sessionId, {
-            sessionId,
-            status: 'connecting',
-            message: t('terminal.notice.reconnectRetryIn', { seconds: delayMs / 1_000 }),
-          });
+          updateReconnectStatus('connecting', t('terminal.notice.reconnectRetryIn', { seconds: delayMs / 1_000 }));
           await waitForConnectionRetry(delayMs);
           if (!useTerminalStore.getState().sessions.some((item) => item.sessionId === sessionId)) return;
           if (!useAppStore.getState().terminalAutoReconnect) {
-            setStatus(sessionId, { sessionId, status: 'disconnected',
-              message: t('terminal.notice.pressEnterReconnect') });
+            updateReconnectStatus('disconnected', t('terminal.notice.pressEnterReconnect'));
             return;
           }
         }
-        setStatus(sessionId, {
-          sessionId,
-          status: 'connecting',
-          message: t('terminal.notice.reconnectingLabel'),
-        });
+        updateReconnectStatus('connecting', t('terminal.notice.reconnectingLabel'));
         try {
           const summary = await invokeCreateSession(
             buildSessionCreateRequest(activeProfile, cols, rows, replacesSessionId),
@@ -212,8 +209,7 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
             const recoveredProfile = await promptForMissingKeychainKey(activeProfile, missingKeyTarget);
             if (!recoveredProfile) {
               logger.info(`Reconnect cancelled by user for session ${sessionId}`);
-              setStatus(sessionId, { sessionId, status: 'disconnected',
-                message: t('terminal.notice.pressEnterReconnect') });
+              updateReconnectStatus('disconnected', t('terminal.notice.pressEnterReconnect'));
               return;
             }
             activeProfile = recoveredProfile;
@@ -232,11 +228,9 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
             continue;
           }
           logger.error(`Failed to reconnect session ${sessionId}`, error);
-          setStatus(sessionId, {
-            sessionId,
-            status: 'error',
-            message: getToastErrorMessage(error),
-          });
+          const message = getToastErrorMessage(error);
+          if (predecessorConnected()) useToastStore.getState().addToast(message, 'error');
+          else setStatus(sessionId, { sessionId, status: 'error', message });
           return;
         }
       }

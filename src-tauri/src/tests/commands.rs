@@ -58,6 +58,21 @@
         );
     }
 
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn shellspan_bash_profile_requires_available_resources() {
+        use super::resolve_unix_local_shell;
+        use crate::models::LocalTerminalProfile;
+
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(
+            resolve_unix_local_shell(Some(LocalTerminalProfile::ShellSpanBash), None, || {
+                Ok(root.path().to_owned())
+            }),
+            Err("TERMINAL_NATIVE_ARTIFACTS_UNAVAILABLE".into())
+        );
+    }
+
     #[test]
     fn local_open_and_reveal_reject_relative_or_missing_paths() {
         assert_eq!(

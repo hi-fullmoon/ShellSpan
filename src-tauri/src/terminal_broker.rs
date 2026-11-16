@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use uuid::Uuid;
 
+use crate::models::{SessionManager, StatusEvent};
 use crate::terminal_command::protocol::{self as nip, InputMode};
 use crate::terminal_command::{
     journal::SubmissionJournal,
@@ -189,6 +190,13 @@ impl TerminalGeometry {
 pub(crate) struct TerminalBrokerAttachment {
     pub(crate) terminal_session_id: String,
     pub(crate) terminal_generation: u64,
+}
+
+/// An SSH generation under startup. It is invisible to callers until the
+/// worker has checked the PTY and, when present, its native control channel.
+pub(crate) struct PendingSshTerminal {
+    record: SessionRecord,
+    predecessor: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -2333,98 +2341,88 @@ impl TerminalSessionBroker {
         if !state.rollout.enabled {
             return Ok(None);
         }
-        if state
-            .transports
-            .get(transport_session_id)
-            .is_some_and(|attachment| attachment.active)
-        {
-            return Err("TERMINAL_BROKER_TRANSPORT_ALREADY_ATTACHED".into());
-        }
-
-        let (terminal_session_id, terminal_generation) =
-            if let Some(predecessor_transport_session_id) = predecessor_transport_session_id {
-                let predecessor = state
-                    .transports
-                    .get(predecessor_transport_session_id)
-                    .cloned()
-                    .ok_or_else(|| "TERMINAL_BROKER_PREDECESSOR_NOT_FOUND".to_string())?;
-                let next_generation = predecessor
-                    .terminal_generation
-                    .checked_add(1)
-                    .ok_or_else(counter_exhausted)?;
-                if next_generation > JAVASCRIPT_MAX_SAFE_INTEGER {
-                    return Err(counter_exhausted());
-                }
-                let record = state
-                    .sessions
-                    .get_mut(&predecessor.terminal_session_id)
-                    .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
-                if record.terminal_generation != predecessor.terminal_generation {
-                    return Err("TERMINAL_BROKER_STALE_PREDECESSOR".into());
-                }
-                if record.open {
-                    if record.transport_session_id != predecessor_transport_session_id {
-                        return Err("TERMINAL_BROKER_STALE_PREDECESSOR".into());
-                    }
-                    record.close(TerminalGenerationCloseReason::Replaced)?;
-                }
-                if let Some(attachment) = state.transports.get_mut(predecessor_transport_session_id)
-                {
-                    attachment.active = false;
-                }
-                (predecessor.terminal_session_id, next_generation)
-            } else {
-                (format!("terminal-{}", Uuid::new_v4()), 1)
-            };
-
-        if terminal_generation > JAVASCRIPT_MAX_SAFE_INTEGER {
-            return Err(counter_exhausted());
-        }
-        // Only the currently attached transport or the most recent closed
-        // predecessor is needed. Superseded transport identities must not
-        // accumulate across repeated reconnects.
-        state
-            .transports
-            .retain(|_, attachment| attachment.terminal_session_id != terminal_session_id);
-        state
-            .closed_session_order
-            .retain(|closed_id| closed_id != &terminal_session_id);
-        let interactive_tools_enabled =
-            effective_interactive_tools_for_transport(&state, transport_kind);
-        let mut predecessors = state
-            .sessions
-            .get(&terminal_session_id)
-            .map(|record| record.predecessor_transport_session_ids.clone())
-            .unwrap_or_default();
-        if let Some(previous) = predecessor_transport_session_id {
-            predecessors.push(previous.to_owned());
-        }
-        if predecessors.len() > 32 {
-            predecessors.drain(..predecessors.len() - 32);
-        }
-        let mut record = SessionRecord::open(
-            terminal_session_id.clone(),
-            terminal_generation,
-            transport_session_id.to_string(),
+        let record = new_transport_record(
+            &state,
+            transport_session_id,
+            predecessor_transport_session_id,
             transport_kind,
             geometry,
-            interactive_tools_enabled,
-        );
-        record.input_mode = input_mode;
-        record.predecessor_transport_session_ids = predecessors;
-        state.sessions.insert(terminal_session_id.clone(), record);
-        state.transports.insert(
-            transport_session_id.to_string(),
-            TransportAttachment {
-                terminal_session_id: terminal_session_id.clone(),
-                terminal_generation,
-                active: true,
-            },
-        );
-        Ok(Some(TerminalBrokerAttachment {
-            terminal_session_id,
-            terminal_generation,
-        }))
+            input_mode,
+        )?;
+        install_transport_record(&mut state, record, predecessor_transport_session_id).map(Some)
+    }
+
+    pub(crate) fn prepare_ssh_native_terminal(
+        &self,
+        transport: &str,
+        predecessor: Option<&str>,
+        geometry: TerminalGeometry,
+    ) -> Result<PendingSshTerminal, String> {
+        validate_identifier(transport, "transport session id")?;
+        let state = self.lock()?;
+        if !state.remote_bound_terminal_rollout.enabled {
+            return Err("TERMINAL_NATIVE_INITIALIZATION_REJECTED".into());
+        }
+        let record = new_transport_record(
+            &state,
+            transport,
+            predecessor,
+            TerminalTransportKind::SshPty,
+            geometry,
+            InputMode::NativeInline,
+        )?;
+        Ok(PendingSshTerminal {
+            record,
+            predecessor: predecessor.map(str::to_owned),
+        })
+    }
+
+    pub(crate) fn commit_started_ssh_terminal(
+        &self,
+        sessions: &SessionManager,
+        transport: &str,
+        predecessor: Option<&str>,
+        geometry: TerminalGeometry,
+        pending: Option<PendingSshTerminal>,
+    ) -> Result<StatusEvent, String> {
+        validate_identifier(transport, "transport session id")?;
+        // Input admission enqueues through SessionManager under the Broker lock.
+        // Take the same locks in the same order when committing a replacement.
+        let mut state = self.lock()?;
+        let record = if let Some(mut pending) = pending {
+            if !state.remote_bound_terminal_rollout.enabled
+                || pending.record.transport_session_id != transport
+                || pending.predecessor.as_deref() != predecessor
+                || pending.record.geometry != geometry
+            {
+                return Err("TERMINAL_NATIVE_INITIALIZATION_REJECTED".into());
+            }
+            let interactive_tools =
+                effective_interactive_tools_for_transport(&state, TerminalTransportKind::SshPty);
+            pending.record.screen_model =
+                interactive_tools.then(|| TerminalScreenModel::new(geometry));
+            Some(pending.record)
+        } else if state.rollout.enabled {
+            Some(new_transport_record(
+                &state,
+                transport,
+                predecessor,
+                TerminalTransportKind::SshPty,
+                geometry,
+                InputMode::Raw,
+            )?)
+        } else {
+            None
+        };
+        let event = sessions.commit_connection_ready(transport, || {
+            crate::connection::terminal_deadline::complete()?;
+            if let Some(record) = record {
+                install_transport_record(&mut state, record, predecessor)?;
+            }
+            Ok(())
+        })?;
+        self.changed.notify_all();
+        Ok(event)
     }
 
     pub(crate) fn is_replacement_transport(
@@ -5367,6 +5365,116 @@ fn effective_interactive_tools_for_transport(
         && (transport_kind != TerminalTransportKind::SshPty
             || (state.remote_bound_terminal_rollout.enabled
                 && state.remote_interactive_tools_rollout.enabled))
+}
+
+fn transport_predecessor<'a>(
+    state: &'a BrokerState,
+    transport: &str,
+) -> Result<&'a SessionRecord, String> {
+    let attachment = state
+        .transports
+        .get(transport)
+        .ok_or("TERMINAL_BROKER_PREDECESSOR_NOT_FOUND")?;
+    let record = state
+        .sessions
+        .get(&attachment.terminal_session_id)
+        .ok_or("TERMINAL_BROKER_SESSION_NOT_FOUND")?;
+    if record.terminal_generation != attachment.terminal_generation
+        || record.transport_session_id != transport
+    {
+        return Err("TERMINAL_BROKER_STALE_PREDECESSOR".into());
+    }
+    Ok(record)
+}
+
+fn new_transport_record(
+    state: &BrokerState,
+    transport: &str,
+    predecessor: Option<&str>,
+    kind: TerminalTransportKind,
+    geometry: TerminalGeometry,
+    mode: InputMode,
+) -> Result<SessionRecord, String> {
+    let (session_id, generation) = if let Some(predecessor) = predecessor {
+        let old = transport_predecessor(state, predecessor)?;
+        let generation = old
+            .terminal_generation
+            .checked_add(1)
+            .filter(|generation| *generation <= JAVASCRIPT_MAX_SAFE_INTEGER)
+            .ok_or_else(counter_exhausted)?;
+        (old.terminal_session_id.clone(), generation)
+    } else {
+        (format!("terminal-{}", Uuid::new_v4()), 1)
+    };
+    let mut record = SessionRecord::open(
+        session_id,
+        generation,
+        transport.to_owned(),
+        kind,
+        geometry,
+        effective_interactive_tools_for_transport(state, kind),
+    );
+    record.input_mode = mode;
+    Ok(record)
+}
+
+fn install_transport_record(
+    state: &mut BrokerState,
+    mut record: SessionRecord,
+    predecessor: Option<&str>,
+) -> Result<TerminalBrokerAttachment, String> {
+    let transport = &record.transport_session_id;
+    if state
+        .transports
+        .get(transport)
+        .is_some_and(|attachment| attachment.active)
+    {
+        return Err("TERMINAL_BROKER_TRANSPORT_ALREADY_ATTACHED".into());
+    }
+    let terminal_session_id = record.terminal_session_id.clone();
+    let terminal_generation = record.terminal_generation;
+    if let Some(predecessor) = predecessor {
+        let old = transport_predecessor(state, predecessor)?;
+        if old.terminal_session_id != terminal_session_id
+            || old.terminal_generation + 1 != terminal_generation
+        {
+            return Err("TERMINAL_BROKER_STALE_PREDECESSOR".into());
+        }
+        let old = state
+            .sessions
+            .get_mut(&terminal_session_id)
+            .ok_or("TERMINAL_BROKER_SESSION_NOT_FOUND")?;
+        if old.open {
+            old.close(TerminalGenerationCloseReason::Replaced)?;
+        }
+        record.predecessor_transport_session_ids = old.predecessor_transport_session_ids.clone();
+        record
+            .predecessor_transport_session_ids
+            .push(predecessor.to_owned());
+        if record.predecessor_transport_session_ids.len() > 32 {
+            record.predecessor_transport_session_ids.remove(0);
+        }
+    }
+    // Keep only the current or most recently closed transport for each session.
+    state
+        .transports
+        .retain(|_, attachment| attachment.terminal_session_id != terminal_session_id);
+    state
+        .closed_session_order
+        .retain(|closed_id| closed_id != &terminal_session_id);
+    state.transports.insert(
+        transport.clone(),
+        TransportAttachment {
+            terminal_session_id: terminal_session_id.clone(),
+            terminal_generation,
+            active: true,
+        },
+    );
+    state.sessions.insert(terminal_session_id.clone(), record);
+    Ok(TerminalBrokerAttachment {
+        terminal_session_id,
+        terminal_generation,
+    })
 }
 
 fn current_attachment<'a>(

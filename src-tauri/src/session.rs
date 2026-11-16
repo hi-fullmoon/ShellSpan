@@ -31,10 +31,12 @@ use crate::{
     known_hosts::known_hosts_path,
     models::{
         ClosedReasonKind, ConnectionError, SessionCommand, SessionCreateRequest, SessionErrorEvent,
-        SessionStatus,
+        SessionManager, SessionStatus, StatusEvent,
     },
     observe_terminal_raw_output,
     petdex::{ActivityGuard, ActivityPhase},
+    terminal_broker::{PendingSshTerminal, TerminalGeometry, TerminalSessionBroker},
+    terminal_command::protocol as native_protocol,
     terminal_integration::{
         quote_remote_posix, remote_posix_bootstrap, TerminalIntegrationStreamDecoder,
         TerminalShellKind,
@@ -45,6 +47,7 @@ const SSH_IDLE_WAIT_SLICE_MS: u64 = 20;
 const SSH_OUTPUT_FLUSH_THRESHOLD_BYTES: usize = 64 * 1024;
 const SSH_OUTPUT_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const SSH_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES: usize = 1_000_000;
+const SSH_PLAIN_STARTUP_GRACE: Duration = Duration::from_millis(400);
 #[path = "terminal_command/remote.rs"]
 mod remote_native;
 use remote_native::RemoteNativeBash;
@@ -496,10 +499,218 @@ fn open_remote_pty_channel(
     setup.map(|()| channel)
 }
 
-pub(crate) fn run_ssh_session<
-    A: FnOnce(crate::terminal_command::protocol::InputMode) -> Result<(), String> + Send,
-    C: FnOnce() -> Result<(), String> + Send,
->(
+fn read_startup_pty(channel: &mut Channel, output: &mut Vec<u8>) -> Result<bool, String> {
+    let mut bytes = [0; 8192];
+    match channel.read(&mut bytes) {
+        Ok(0) if channel.eof() => Err("remote shell closed during initialization".into()),
+        Ok(0) => Ok(false),
+        Ok(count) => {
+            output.extend_from_slice(&bytes[..count]);
+            Ok(true)
+        }
+        Err(error) if is_retryable_channel_error_kind(error.kind()) => Ok(false),
+        Err(error) => Err(format_transport_error(
+            "startup PTY failed",
+            &error.to_string(),
+        )),
+    }
+}
+
+fn confirm_plain_ssh_startup(
+    session: &Session,
+    channel: &mut Channel,
+    output: &mut Vec<u8>,
+) -> Result<(), String> {
+    // An SSH shell request only acknowledges the fork. Give immediate login
+    // failures time to arrive without requiring a prompt from arbitrary shells.
+    let deadline = Instant::now() + SSH_PLAIN_STARTUP_GRACE;
+    loop {
+        let progress = read_startup_pty(channel, output)?;
+        if channel.eof() {
+            return Err("remote shell closed during initialization".into());
+        }
+        if Instant::now() >= deadline || output.len() >= SSH_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES {
+            return Ok(());
+        }
+        if !progress {
+            wait_for_session_socket(session, Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS))?;
+        }
+    }
+}
+
+fn queue_initial_ssh_directory(
+    session: &Session,
+    channel: &mut Channel,
+    input: Option<&str>,
+) -> Result<(), String> {
+    if let Some(input) = input {
+        write_all_nonblocking(session, channel, input.as_bytes())
+            .map_err(|error| format!("failed to queue initial terminal directory: {error}"))?;
+    }
+    Ok(())
+}
+
+fn wait_for_native_ssh_startup(
+    session: &Session,
+    channel: &mut Channel,
+    native: &mut RemoteNativeBash,
+    pending: &mut PendingSshTerminal,
+    _session_id: &str,
+    output: &mut Vec<u8>,
+) -> Result<Option<Vec<native_protocol::Message>>, String> {
+    let probe = pending.register_native_channel(native.profile.clone())?;
+    let bytes = probe
+        .encode()
+        .map_err(|_| "TERMINAL_NATIVE_PROTOCOL_INVALID")?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut probe_sent = false;
+    loop {
+        let pty_progress = read_startup_pty(channel, output)?;
+        if !probe_sent && native.relay_started() {
+            if native.send(session, &bytes).is_err() {
+                return Ok(None);
+            }
+            probe_sent = true;
+        }
+        match native.read_control() {
+            Ok(Some(messages)) if !messages.is_empty() => {
+                let mut messages = messages.into_iter();
+                let message = messages.next().expect("nonempty control batch");
+                let native_protocol::Message::Connection(capabilities) = &message else {
+                    return Ok(None);
+                };
+                #[cfg(all(
+                    feature = "native-input-acceptance",
+                    debug_assertions,
+                    target_os = "macos",
+                    target_arch = "aarch64"
+                ))]
+                crate::terminal_command::acceptance_trace::observe_ssh_receipt(
+                    &message,
+                    _session_id,
+                )?;
+                if pending.accept_native_capabilities(capabilities).is_err() {
+                    return Ok(None);
+                }
+                // Reading the relay can also consume a PTY EOF from this socket.
+                read_startup_pty(channel, output)?;
+                if channel.eof() || native.control.eof() {
+                    return Err(
+                        "remote shell or native control closed during initialization".into(),
+                    );
+                }
+                return Ok(Some(messages.collect()));
+            }
+            Err(_) => return Ok(None),
+            Ok(_) => {}
+        }
+        if Instant::now() >= deadline || output.len() >= SSH_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES {
+            return Ok(None);
+        }
+        if !pty_progress {
+            wait_for_session_socket(session, Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS))?;
+        }
+    }
+}
+
+struct SshNativeStartup {
+    pending: PendingSshTerminal,
+    messages: Option<Vec<native_protocol::Message>>,
+}
+
+fn start_ssh_native_or_fallback(
+    session: &Session,
+    channel: &mut Channel,
+    native: &mut Option<RemoteNativeBash>,
+    broker: &TerminalSessionBroker,
+    request: &SessionCreateRequest,
+    session_id: &str,
+    initial_output: &mut Vec<u8>,
+    initial_input: Option<&str>,
+) -> Result<Option<SshNativeStartup>, ConnectionError> {
+    let prepared = native.as_mut().expect("native resources prepared");
+    let private_bash = prepared.uses_private_bash();
+    let mut pending = broker
+        .prepare_ssh_native_terminal(
+            session_id,
+            request.replaces_session_id.as_deref(),
+            TerminalGeometry::new(request.terminal_cols, request.terminal_rows),
+        )
+        .map_err(|message| ConnectionError::Other { message })?;
+    let startup = prepared.start_shell(channel).and_then(|()| {
+        session.set_blocking(false);
+        queue_initial_ssh_directory(session, channel, initial_input)?;
+        wait_for_native_ssh_startup(
+            session,
+            channel,
+            prepared,
+            &mut pending,
+            session_id,
+            initial_output,
+        )
+    });
+    match startup {
+        Ok(Some(messages)) => {
+            return Ok(Some(SshNativeStartup {
+                pending,
+                messages: Some(messages),
+            }))
+        }
+        Ok(None) if !private_bash => {
+            confirm_plain_ssh_startup(session, channel, initial_output)
+                .map_err(|message| ConnectionError::Other { message })?;
+            return Ok(Some(SshNativeStartup {
+                pending,
+                messages: None,
+            }));
+        }
+        Err(message) if !private_bash => return Err(ConnectionError::Other { message }),
+        _ => {}
+    }
+    if let Some(message) = crate::connection::terminal_deadline::failure_reason() {
+        return Err(ConnectionError::Other { message });
+    }
+    warn!("Private remote Bash startup failed; using ordinary SSH shell session_id={session_id}");
+    session.set_blocking(false);
+    graceful_shutdown(channel);
+    if let Some(native) = native.take() {
+        native.close(session);
+    }
+    *channel = open_remote_pty_channel(session, request, session_id)?;
+    channel.shell().map_err(|error| ConnectionError::Other {
+        message: format!(
+            "failed to start ordinary remote shell after native startup failed: {error}"
+        ),
+    })?;
+    initial_output.clear();
+    session.set_blocking(false);
+    confirm_plain_ssh_startup(session, channel, initial_output)
+        .and_then(|()| queue_initial_ssh_directory(session, channel, initial_input))
+        .map_err(|message| ConnectionError::Other { message })?;
+    Ok(None)
+}
+
+fn attach_started_ssh_terminal(
+    broker: &TerminalSessionBroker,
+    sessions: &SessionManager,
+    request: &SessionCreateRequest,
+    session_id: &str,
+    startup: Option<SshNativeStartup>,
+) -> Result<(StatusEvent, Option<Vec<native_protocol::Message>>), String> {
+    let (pending, messages) = startup.map_or((None, None), |startup| {
+        (Some(startup.pending), startup.messages)
+    });
+    let event = broker.commit_started_ssh_terminal(
+        sessions,
+        session_id,
+        request.replaces_session_id.as_deref(),
+        TerminalGeometry::new(request.terminal_cols, request.terminal_rows),
+        pending,
+    )?;
+    Ok((event, messages))
+}
+
+pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
     app: &AppHandle,
     session_id: &str,
     request: &SessionCreateRequest,
@@ -508,7 +719,6 @@ pub(crate) fn run_ssh_session<
     output_ready: Arc<AtomicBool>,
     output_paused: Arc<AtomicBool>,
     bootstrap_remote_integration: bool,
-    on_broker_attached: A,
     on_connected: C,
     activity: &mut ActivityGuard,
 ) -> Result<Option<String>, ConnectionError> {
@@ -680,20 +890,31 @@ pub(crate) fn run_ssh_session<
                             }
                         });
 
-                    if let Some(native) = native_integration.as_ref() {
-                        if let Err(message) = native.start_shell(channel) {
-                            if !native.uses_private_bash() {
-                                return Err(ConnectionError::Other { message });
-                            }
-                            if let Some(native) = native_integration.take() {
-                                native.close(&session);
-                            }
-                            graceful_shutdown(channel);
-                            *channel = open_remote_pty_channel(&session, request, session_id)?;
-                            native_failure = Some(message);
-                            channel.shell().map_err(|error| ConnectionError::Other {
-                                message: format!("failed to start ordinary remote shell after native startup failed: {error}"),
-                            })?;
+                    let runtime = app
+                        .try_state::<crate::agent_runtime::AgentRuntime>()
+                        .ok_or_else(|| ConnectionError::Other {
+                            message: "terminal integration runtime is unavailable".into(),
+                        })?;
+                    let broker = runtime.terminal_broker();
+                    let initial_input =
+                        initial_directory_input(request.initial_directory.as_deref())
+                            .map_err(|message| ConnectionError::Other { message })?;
+                    let mut startup = None;
+                    let mut initial_output = Vec::new();
+                    let native_attempted = native_integration.is_some();
+                    if native_attempted {
+                        startup = start_ssh_native_or_fallback(
+                            &session,
+                            channel,
+                            &mut native_integration,
+                            broker,
+                            request,
+                            session_id,
+                            &mut initial_output,
+                            initial_input.as_deref(),
+                        )?;
+                        if startup.is_none() {
+                            native_failure = Some("TERMINAL_NATIVE_SHELL_START_FAILED".into());
                         }
                     } else if let Some(integration) = remote_integration.as_ref() {
                         if let Err(message) = integration.start_shell(channel) {
@@ -719,49 +940,42 @@ pub(crate) fn run_ssh_session<
                         })?;
                     }
 
-                    if let Some(input) =
-                        initial_directory_input(request.initial_directory.as_deref())
-                            .map_err(|message| ConnectionError::Other { message })?
-                    {
-                        // Queue one complete line before exposing the transport.
-                        // This also applies to unsupported shells and SFTP failure.
-                        channel.write_all(input.as_bytes()).map_err(|error| {
-                            ConnectionError::Other {
-                                message: format!(
-                                    "failed to queue initial terminal directory: {error}"
-                                ),
-                            }
-                        })?;
+                    session.set_blocking(false);
+                    if !native_attempted {
+                        if request.replaces_session_id.is_some() {
+                            confirm_plain_ssh_startup(&session, channel, &mut initial_output)
+                                .map_err(|message| ConnectionError::Other { message })?;
+                        }
+                        queue_initial_ssh_directory(&session, channel, initial_input.as_deref())
+                            .map_err(|message| ConnectionError::Other { message })?;
                     }
 
-                    // Register a replacement only after its SSH shell starts. The
-                    // predecessor remains usable if startup fails before attachment.
-                    let input_mode = if native_integration.is_some() {
-                        crate::terminal_command::protocol::InputMode::NativeInline
-                    } else {
-                        crate::terminal_command::protocol::InputMode::Raw
-                    };
-                    on_broker_attached(input_mode)
-                        .map_err(|message| ConnectionError::Other { message })?;
-                    let runtime = app
-                        .try_state::<crate::agent_runtime::AgentRuntime>()
-                        .ok_or_else(|| ConnectionError::Other {
-                            message: "terminal integration runtime is unavailable".into(),
-                        })?;
+                    let sessions = app.try_state::<SessionManager>().ok_or_else(|| {
+                        ConnectionError::Other {
+                            message: "SSH connection cancelled".into(),
+                        }
+                    })?;
+                    let (ready_event, initial_messages) = attach_started_ssh_terminal(
+                        broker, &sessions, request, session_id, startup,
+                    )
+                    .map_err(|message| ConnectionError::Other {
+                        message: crate::commands::attachment_failure_message(&message, Vec::new()),
+                    })?;
 
                     if let Some(native) = native_integration.as_mut() {
-                        let probe = runtime
-                            .register_native_terminal(session_id, native.profile.clone())
-                            .map_err(|message| ConnectionError::Other { message })?;
-                        if native
-                            .send(
-                                &session,
-                                &probe.encode().map_err(|_| ConnectionError::Other {
-                                    message: "TERMINAL_NATIVE_PROTOCOL_INVALID".into(),
-                                })?,
-                            )
-                            .is_err()
-                        {
+                        if let Some(messages) = initial_messages {
+                            if messages.is_empty() {
+                                crate::commands::emit_terminal_integration_state(app, session_id);
+                            }
+                            for message in messages {
+                                if RemoteNativeBash::accept_message(app, session_id, message)
+                                    .is_err()
+                                {
+                                    native.fail(app, session_id);
+                                    break;
+                                }
+                            }
+                        } else {
                             native.fail(app, session_id);
                         }
                     }
@@ -783,102 +997,47 @@ pub(crate) fn run_ssh_session<
                                 integration.close(&session);
                             }
                         } else {
-                            crate::commands::publish_terminal_integration_state(app, session_id)
-                                .map_err(|message| ConnectionError::Other { message })?;
+                            crate::commands::emit_terminal_integration_state(app, session_id);
                         }
                     }
 
                     if let Some((shell, reason)) = integration_failure {
                         if reason == "unsupportedRemoteShell" {
-                            runtime
-                                .mark_terminal_integration_unavailable(session_id, shell, reason)
-                                .map_err(|message| ConnectionError::Other { message })?;
+                            let _ = runtime
+                                .mark_terminal_integration_unavailable(session_id, shell, reason);
                         } else {
-                            runtime
-                                .mark_terminal_integration_degraded(session_id, shell, reason)
-                                .map_err(|message| ConnectionError::Other { message })?;
+                            let _ = runtime
+                                .mark_terminal_integration_degraded(session_id, shell, reason);
                         }
-                        crate::commands::publish_terminal_integration_state(app, session_id)
-                            .map_err(|message| ConnectionError::Other { message })?;
-                    }
-                    if native_failure.is_some() {
-                        runtime
-                            .mark_terminal_integration_unavailable(
-                                session_id,
-                                TerminalShellKind::Bash,
-                                "nativeProfileMismatch",
-                            )
-                            .map_err(|message| ConnectionError::Other { message })?;
                         crate::commands::emit_terminal_integration_state(app, session_id);
                     }
-                    session.set_blocking(false);
-                    let mut initial_output = Vec::new();
-                    if let Some(native) = native_integration.as_mut() {
-                        let deadline = Instant::now() + Duration::from_secs(5);
-                        let mut bytes = [0; 8192];
-                        while native.active {
-                            if native.drain(app, session_id).is_err() {
-                                native.fail(app, session_id);
-                                break;
-                            }
-                            let ready = runtime
-                                .terminal_broker_snapshot(Some(session_id))
-                                .map_err(|message| ConnectionError::Other { message })?
-                                .session
-                                .is_some_and(|session| {
-                                    session.integration_state
-                                        == crate::terminal_broker::TerminalIntegrationState::Ready
-                                });
-                            if ready {
-                                break;
-                            }
-                            if Instant::now() >= deadline
-                                || initial_output.len() >= SSH_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES
-                            {
-                                native.fail(app, session_id);
-                                break;
-                            }
-                            match channel.read(&mut bytes) {
-                                Ok(0) if channel.eof() => {
-                                    return Err(ConnectionError::Other {
-                                        message: "remote shell closed during native initialization"
-                                            .into(),
-                                    })
-                                }
-                                Ok(count) if count > 0 => {
-                                    ssh_recovery_read(session_id, &bytes[..count]);
-                                    observe_terminal_raw_output(app, session_id, &bytes[..count]);
-                                    initial_output.extend_from_slice(&bytes[..count]);
-                                }
-                                Ok(_) => {}
-                                Err(error) if is_retryable_channel_error_kind(error.kind()) => {}
-                                Err(error) => {
-                                    return Err(ConnectionError::Other {
-                                        message: format_transport_error(
-                                            "native startup PTY failed",
-                                            &error.to_string(),
-                                        ),
-                                    })
-                                }
-                            }
-                            wait_for_session_socket(
-                                &session,
-                                Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS),
-                            )
-                            .map_err(|message| ConnectionError::Other { message })?;
-                        }
+                    if native_failure.is_some() {
+                        let _ = runtime.mark_terminal_integration_unavailable(
+                            session_id,
+                            TerminalShellKind::Bash,
+                            "nativeProfileMismatch",
+                        );
+                        crate::commands::emit_terminal_integration_state(app, session_id);
+                    } else if !bootstrap_remote_integration
+                        && runtime
+                            .terminal_shell_integration_enabled()
+                            .unwrap_or(false)
+                    {
+                        let _ = runtime.mark_terminal_integration_unavailable(
+                            session_id,
+                            TerminalShellKind::Unsupported,
+                            "remoteBoundTerminalDisabled",
+                        );
+                        crate::commands::emit_terminal_integration_state(app, session_id);
+                    }
+                    for bytes in initial_output.chunks(8192) {
+                        ssh_recovery_read(session_id, bytes);
+                        observe_terminal_raw_output(app, session_id, bytes);
                     }
 
                     publish_ssh_connection_ready(
                         || {
-                            let event = app
-                                .try_state::<crate::models::SessionManager>()
-                                .ok_or_else(|| "SSH connection cancelled".to_string())?
-                                .commit_connection_ready(
-                                    session_id,
-                                    crate::connection::terminal_deadline::complete,
-                                )?;
-                            app.emit(crate::SSH_STATUS_EVENT, event)
+                            app.emit(crate::SSH_STATUS_EVENT, ready_event)
                                 .map_err(|error| error.to_string())
                         },
                         || activity.transition(ActivityPhase::Connected),
@@ -887,6 +1046,7 @@ pub(crate) fn run_ssh_session<
                     .map_err(|message| ConnectionError::Other { message })?;
                     info!("SSH session connected session_id={session_id}");
 
+                    session.set_blocking(false);
                     session_loop(
                         app,
                         session_id,

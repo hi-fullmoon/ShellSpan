@@ -630,8 +630,23 @@ async fn create_remote_terminal_session(
 }
 
 #[tauri::command]
-pub(crate) fn supports_shellspan_bash() -> bool {
-    cfg!(all(target_os = "macos", target_arch = "aarch64"))
+pub(crate) async fn supports_shellspan_bash(app: AppHandle) -> Result<bool, String> {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            resolve_unix_local_shell(Some(LocalTerminalProfile::ShellSpanBash), None, || {
+                crate::terminal_command::artifacts::resource_root(&app)
+            })
+            .is_ok()
+        })
+        .await
+        .map_err(|_| "local terminal worker failed".into())
+    }
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    {
+        let _ = app;
+        Ok(false)
+    }
 }
 
 #[cfg(not(windows))]
@@ -4153,60 +4168,11 @@ pub(crate) fn spawn_ssh_thread(
         };
 
         let tx_for_connected = connection_result_tx.clone();
-        let broker_app = app.clone();
-        let broker_session_id = session_id.clone();
-        let predecessor_session_id = request.replaces_session_id.clone();
-        let broker_geometry = crate::terminal_broker::TerminalGeometry::new(
-            request.terminal_cols,
-            request.terminal_rows,
-        );
         let bootstrap_remote_integration = should_prepare_remote_integration(
             app.try_state::<crate::agent_runtime::AgentRuntime>()
                 .and_then(|runtime| runtime.terminal_broker_snapshot(None).ok())
                 .is_some_and(|snapshot| snapshot.remote_bound_terminal_rollout.enabled),
         );
-        let broker_bootstrap_remote_integration = bootstrap_remote_integration;
-        let on_broker_attached = move |input_mode| {
-            broker_app
-                .try_state::<SessionManager>()
-                .ok_or_else(|| {
-                    attachment_failure_message("terminal SessionManager is unavailable", Vec::new())
-                })?
-                .target_state(&broker_session_id)
-                .map_err(|_| {
-                    attachment_failure_message(
-                        "terminal session was cancelled before broker attachment",
-                        Vec::new(),
-                    )
-                })?;
-            let runtime = broker_app
-                .try_state::<crate::agent_runtime::AgentRuntime>()
-                .ok_or_else(|| {
-                    attachment_failure_message("terminal broker runtime is unavailable", Vec::new())
-                })?;
-            runtime
-                .attach_native_terminal_transport(
-                    &broker_session_id,
-                    predecessor_session_id.as_deref(),
-                    crate::terminal_broker::TerminalTransportKind::SshPty,
-                    broker_geometry,
-                    input_mode,
-                )
-                .map_err(|error| attachment_failure_message(&error, Vec::new()))?;
-            if !broker_bootstrap_remote_integration
-                && runtime
-                    .terminal_shell_integration_enabled()
-                    .unwrap_or(false)
-            {
-                let _ = runtime.mark_terminal_integration_unavailable(
-                    &broker_session_id,
-                    TerminalShellKind::Unsupported,
-                    "remoteBoundTerminalDisabled",
-                );
-                emit_terminal_integration_state(&broker_app, &broker_session_id);
-            }
-            Ok(())
-        };
         let on_connected = move || match tx_for_connected.as_ref() {
             Some(tx) => tx.send(Ok(())).map_err(|_| {
                 "SSH connection waiter stopped before readiness publication".to_string()
@@ -4229,7 +4195,6 @@ pub(crate) fn spawn_ssh_thread(
             output_ready,
             output_paused,
             bootstrap_remote_integration,
-            on_broker_attached,
             on_connected,
             &mut activity,
         );

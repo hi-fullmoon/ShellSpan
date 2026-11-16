@@ -26,6 +26,131 @@ pub(crate) struct NativeInputCoordinator {
     readonly_first_partial: Option<String>,
 }
 
+impl PendingSshTerminal {
+    pub(crate) fn register_native_channel(
+        &mut self,
+        profile: crate::terminal_command::registration::VerifiedNativeProfile,
+    ) -> Result<nip::ConnectionEnvelope, String> {
+        self.record.register_native_channel(profile)
+    }
+
+    pub(crate) fn accept_native_capabilities(
+        &mut self,
+        message: &nip::ConnectionEnvelope,
+    ) -> Result<(), String> {
+        self.record.accept_native_capabilities(message)
+    }
+}
+
+impl SessionRecord {
+    fn register_native_channel(
+        &mut self,
+        profile: crate::terminal_command::registration::VerifiedNativeProfile,
+    ) -> Result<nip::ConnectionEnvelope, String> {
+        let record = self;
+        if record.input_mode != InputMode::NativeInline
+            || record.integration_state != TerminalIntegrationState::Initializing
+            || record.integration_id.is_some()
+            || record.active_command.is_some()
+        {
+            return Err("TERMINAL_NATIVE_INITIALIZATION_REJECTED".into());
+        }
+        let connection = nip::ConnectionIdentity {
+            terminal_session_id: record.terminal_session_id.clone(),
+            terminal_generation: record.terminal_generation,
+            control_id: opaque_id("native-control"),
+        };
+        let request_id = opaque_id("native-probe");
+        record.integration_id = Some(connection.control_id.clone());
+        record.integration_shell = Some(profile.shell());
+        record.native_profile = Some(profile);
+        record.native_probe_request_id = Some(request_id.clone());
+        Ok(nip::ConnectionEnvelope {
+            protocol: nip::PROTOCOL.into(),
+            request_id,
+            connection,
+            payload: nip::ConnectionPayload::Probe,
+        })
+    }
+
+    fn accept_native_capabilities(
+        &mut self,
+        message: &nip::ConnectionEnvelope,
+    ) -> Result<(), String> {
+        message.validate().map_err(wire_error)?;
+        let nip::ConnectionPayload::Capabilities {
+            profile,
+            native_inline,
+            source_echo,
+            atomic_handoff,
+            complete_proof,
+            draft_clear,
+            inband_display,
+            editor_empty,
+        } = &message.payload
+        else {
+            return Err("TERMINAL_NATIVE_UNEXPECTED_MESSAGE".into());
+        };
+        let record = self;
+        if record.input_mode != InputMode::NativeInline
+            || record.integration_state != TerminalIntegrationState::Initializing
+            || record.integration_id.as_ref() != Some(&message.connection.control_id)
+            || record.native_probe_request_id.as_ref() != Some(&message.request_id)
+            || record.terminal_session_id != message.connection.terminal_session_id
+            || record.terminal_generation != message.connection.terminal_generation
+        {
+            return Err("TERMINAL_NATIVE_IDENTITY_MISMATCH".into());
+        }
+        let verified = record
+            .native_profile
+            .as_ref()
+            .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
+        let profile_matches = verified.matches(profile);
+        let complete = [
+            native_inline,
+            source_echo,
+            atomic_handoff,
+            complete_proof,
+            draft_clear,
+            inband_display,
+            editor_empty,
+        ]
+        .iter()
+        .all(|flag| **flag);
+        if !profile_matches || !complete {
+            record.integration_state = TerminalIntegrationState::Unavailable;
+            record.integration_reason = Some(
+                if profile_matches {
+                    "nativeCapabilityMissing"
+                } else {
+                    "nativeProfileMismatch"
+                }
+                .into(),
+            );
+            record.prompt_ready = false;
+            record.native_input = false;
+            advance_integration_state_revision(record)?;
+            return Err(if profile_matches {
+                "TERMINAL_NATIVE_CAPABILITY_UNAVAILABLE"
+            } else {
+                "TERMINAL_NATIVE_PROFILE_UNSUPPORTED"
+            }
+            .into());
+        }
+        record.integration_shell = Some(verified.shell());
+        record.native_peer_profile = Some(profile.clone());
+        record.integration_state = TerminalIntegrationState::Ready;
+        record.prompt_ready = verified.shell() == TerminalShellKind::Bash;
+        record.native_input = true;
+        record.native_jobs = verified.supports_jobs();
+        record.native_checkpoints = verified.capture_fence();
+        record.native_typing = verified.capture_fence();
+        record.native_private_control = verified.capture_fence();
+        record.native_display_negotiated = true;
+        advance_integration_state_revision(record)
+    }
+}
+
 impl TerminalSessionBroker {
     pub(crate) fn accept_native_observation(
         &self,
@@ -105,30 +230,7 @@ impl TerminalSessionBroker {
     ) -> Result<nip::ConnectionEnvelope, String> {
         let mut state = self.lock()?;
         let attachment = current_attachment(&state, transport)?.clone();
-        let record = current_record_mut(&mut state, transport, &attachment)?;
-        if record.input_mode != InputMode::NativeInline
-            || record.integration_state != TerminalIntegrationState::Initializing
-            || record.integration_id.is_some()
-            || record.active_command.is_some()
-        {
-            return Err("TERMINAL_NATIVE_INITIALIZATION_REJECTED".into());
-        }
-        let connection = nip::ConnectionIdentity {
-            terminal_session_id: record.terminal_session_id.clone(),
-            terminal_generation: record.terminal_generation,
-            control_id: opaque_id("native-control"),
-        };
-        let request_id = opaque_id("native-probe");
-        record.integration_id = Some(connection.control_id.clone());
-        record.integration_shell = Some(profile.shell());
-        record.native_profile = Some(profile);
-        record.native_probe_request_id = Some(request_id.clone());
-        Ok(nip::ConnectionEnvelope {
-            protocol: nip::PROTOCOL.into(),
-            request_id,
-            connection,
-            payload: nip::ConnectionPayload::Probe,
-        })
+        current_record_mut(&mut state, transport, &attachment)?.register_native_channel(profile)
     }
     /// Real private-channel Readline observations, including ordinary user input.
     /// No operation/Agent/task is invented for connection initialization.
@@ -204,79 +306,10 @@ impl TerminalSessionBroker {
         transport: &str,
         message: &nip::ConnectionEnvelope,
     ) -> Result<(), String> {
-        message.validate().map_err(wire_error)?;
-        let nip::ConnectionPayload::Capabilities {
-            profile,
-            native_inline,
-            source_echo,
-            atomic_handoff,
-            complete_proof,
-            draft_clear,
-            inband_display,
-            editor_empty,
-        } = &message.payload
-        else {
-            return Err("TERMINAL_NATIVE_UNEXPECTED_MESSAGE".into());
-        };
         let mut state = self.lock()?;
         let attachment = current_attachment(&state, transport)?.clone();
-        let record = current_record_mut(&mut state, transport, &attachment)?;
-        if record.input_mode != InputMode::NativeInline
-            || record.integration_state != TerminalIntegrationState::Initializing
-            || record.integration_id.as_ref() != Some(&message.connection.control_id)
-            || record.native_probe_request_id.as_ref() != Some(&message.request_id)
-            || record.terminal_session_id != message.connection.terminal_session_id
-            || record.terminal_generation != message.connection.terminal_generation
-        {
-            return Err("TERMINAL_NATIVE_IDENTITY_MISMATCH".into());
-        }
-        let verified = record
-            .native_profile
-            .as_ref()
-            .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
-        let profile_matches = verified.matches(profile);
-        let complete = [
-            native_inline,
-            source_echo,
-            atomic_handoff,
-            complete_proof,
-            draft_clear,
-            inband_display,
-            editor_empty,
-        ]
-        .iter()
-        .all(|flag| **flag);
-        if !profile_matches || !complete {
-            record.integration_state = TerminalIntegrationState::Unavailable;
-            record.integration_reason = Some(
-                if profile_matches {
-                    "nativeCapabilityMissing"
-                } else {
-                    "nativeProfileMismatch"
-                }
-                .into(),
-            );
-            record.prompt_ready = false;
-            record.native_input = false;
-            advance_integration_state_revision(record)?;
-            return Err(if profile_matches {
-                "TERMINAL_NATIVE_CAPABILITY_UNAVAILABLE"
-            } else {
-                "TERMINAL_NATIVE_PROFILE_UNSUPPORTED"
-            }
-            .into());
-        }
-        record.integration_shell = Some(verified.shell());
-        record.native_peer_profile = Some(profile.clone());
-        record.integration_state = TerminalIntegrationState::Ready;
-        record.prompt_ready = verified.shell() == TerminalShellKind::Bash;
-        record.native_input = true;
-        record.native_jobs = verified.supports_jobs();
-        record.native_checkpoints = verified.capture_fence();
-        record.native_typing = verified.capture_fence();
-        record.native_private_control = verified.capture_fence();
-        record.native_display_negotiated = true;
-        advance_integration_state_revision(record)?;
+        current_record_mut(&mut state, transport, &attachment)?
+            .accept_native_capabilities(message)?;
         self.changed.notify_all();
         Ok(())
     }
