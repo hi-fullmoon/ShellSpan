@@ -263,7 +263,7 @@ fn production_remote_zle_parent_parser_and_background() {
         serde_json::to_vec_pretty(&display_binding).unwrap(),
     )
     .unwrap();
-    assert!(native.zle);
+    assert!(matches!(native.startup, RemoteShellStartup::Zle));
     assert_eq!(native.profile.shell(), TerminalShellKind::Zsh);
     let mut pty = session.channel_session().unwrap();
     pty.request_pty("xterm-256color", None, Some((columns, 30, 0, 0)))

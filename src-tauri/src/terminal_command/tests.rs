@@ -16,6 +16,22 @@ fn experimental_profile_is_outside_the_production_catalogue() {
 }
 
 #[test]
+fn x86_64_ssh_only_admits_the_fixed_bash_readline_pair() {
+    assert_eq!(
+        native_profile_versions("gnu-bash-5.3-readline-8.3.6-linux-x86_64-glibc-2.36-native"),
+        Some(("5.3", "8.3.6", 0x0803))
+    );
+    for profile in [
+        "gnu-bash-4.1-readline-6.0-linux-x86_64-glibc-2.36-native",
+        "gnu-bash-4.4-readline-7.0-linux-x86_64-glibc-2.36-native",
+        "gnu-bash-5.3-readline-8.3.6-linux-x86_64-musl-native",
+        "gnu-bash-5.3-readline-8.3.5-linux-x86_64-glibc-2.36-native",
+    ] {
+        assert_eq!(native_profile_versions(profile), None, "{profile}");
+    }
+}
+
+#[test]
 fn windows_editor_binding_requires_the_updated_exact_host_and_artifacts() {
     use super::registration::VerifiedNativeProfile;
     use sha2::{Digest, Sha256};

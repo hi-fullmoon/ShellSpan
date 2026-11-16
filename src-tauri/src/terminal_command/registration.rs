@@ -45,8 +45,14 @@ impl VerifiedNativeProfile {
         expected_module_sha: &str,
         actual_module_sha: &str,
     ) -> Result<Self, String> {
-        if !profile_id.contains("linux-aarch64-glibc-2.36")
-            || nip::native_profile_versions(profile_id).is_none()
+        let Some((bash, readline, _)) = nip::native_profile_versions(profile_id) else {
+            return Err("TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into());
+        };
+        if ![nip::LINUX_ARM64_BASH_TARGET, nip::LINUX_X86_64_BASH_TARGET]
+            .iter()
+            .any(|target| {
+                profile_id == format!("gnu-bash-{bash}-readline-{readline}-{target}-native")
+            })
         {
             return Err("TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into());
         }

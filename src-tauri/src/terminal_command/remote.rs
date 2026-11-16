@@ -1,5 +1,5 @@
 //! Native SSH transport owned by the existing SSH worker. No per-grapheme
-//! network requests, terminal bytes on the control plane, or new user shell.
+//! network requests or terminal bytes on the control plane.
 use super::*;
 use crate::terminal_command::{
     artifacts, protocol as nip,
@@ -11,6 +11,79 @@ use sha2::{Digest, Sha256};
 #[path = "remote_tests.rs"]
 mod tests;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RemoteBashTarget {
+    Arm64,
+    X86_64,
+}
+
+impl RemoteBashTarget {
+    fn detect(session: &Session) -> Result<Self, String> {
+        let output = read_ssh_setup_command(
+            session,
+            r#"host=$(command uname -sm) || exit 1
+builtin printf '%s\n' "$host"
+case "$host" in
+  'Linux x86_64') LC_ALL=C command getconf GNU_LIBC_VERSION ;;
+esac"#,
+        )
+        .map_err(|_| "TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
+        let output =
+            std::str::from_utf8(&output).map_err(|_| "TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
+        Self::parse(output).ok_or_else(|| "TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into())
+    }
+
+    fn parse(output: &str) -> Option<Self> {
+        let mut lines = output.lines();
+        match lines.next()? {
+            "Linux aarch64" if lines.next().is_none() => Some(Self::Arm64),
+            "Linux x86_64" => {
+                let (major, minor) = lines.next()?.strip_prefix("glibc ")?.split_once('.')?;
+                (major == "2" && minor.parse::<u32>().ok()? >= 36 && lines.next().is_none())
+                    .then_some(Self::X86_64)
+            }
+            _ => None,
+        }
+    }
+
+    fn catalogue(self) -> &'static str {
+        match self {
+            Self::Arm64 => nip::LINUX_ARM64_BASH_TARGET,
+            Self::X86_64 => nip::LINUX_X86_64_BASH_TARGET,
+        }
+    }
+}
+
+#[test]
+fn ssh_bash_targets_require_linux_and_x86_64_requires_glibc_236_or_newer() {
+    assert_eq!(
+        RemoteBashTarget::parse("Linux aarch64\n"),
+        Some(RemoteBashTarget::Arm64)
+    );
+    for release in ["2.36", "2.38"] {
+        assert_eq!(
+            RemoteBashTarget::parse(&format!("Linux x86_64\nglibc {release}\n")),
+            Some(RemoteBashTarget::X86_64)
+        );
+    }
+    for output in [
+        "Linux x86_64\n",
+        "Linux x86_64\nglibc 2.35\n",
+        "Linux x86_64\nmusl 1.2.5\n",
+        "Linux i686\nglibc 2.36\n",
+        "Darwin x86_64\n",
+        "Linux x86_64\nglibc 2.36\nunexpected output\n",
+    ] {
+        assert_eq!(RemoteBashTarget::parse(output), None, "{output:?}");
+    }
+}
+
+enum RemoteShellStartup {
+    Bash,
+    PrivateBash,
+    Zle,
+}
+
 pub(super) struct RemoteNativeBash {
     pub profile: VerifiedNativeProfile,
     pub control: Channel,
@@ -18,7 +91,7 @@ pub(super) struct RemoteNativeBash {
     decoder: nip::Decoder,
     root: String,
     executable: String,
-    zle: bool,
+    startup: RemoteShellStartup,
 }
 impl RemoteNativeBash {
     pub fn prepare(
@@ -33,13 +106,23 @@ impl RemoteNativeBash {
         if identity.shell != TerminalShellKind::Bash {
             return Ok(None);
         }
+        let target = RemoteBashTarget::detect(session)?;
         let sftp = session
             .sftp()
             .map_err(|_| "TERMINAL_NATIVE_SFTP_UNAVAILABLE")?;
-        let shell_sha = remote_sha(&sftp, &identity.executable)?;
-        let artifact = artifacts::read_catalogue(resources, "linux-aarch64-glibc-2.36")?
+        let system_shell_sha = if target == RemoteBashTarget::Arm64 {
+            Some(remote_sha(&sftp, &identity.executable)?)
+        } else {
+            None
+        };
+        let artifact = artifacts::read_catalogue(resources, target.catalogue())?
             .into_iter()
-            .find(|artifact| artifact.shell_sha256 == shell_sha)
+            // The x86_64 catalogue only admits the fixed 5.3/8.3.6 profile.
+            .find(|artifact| {
+                system_shell_sha
+                    .as_ref()
+                    .is_none_or(|sha| artifact.shell_sha256 == *sha)
+            })
             .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
         let module = resources.join(&artifact.module);
         let relay = resources.join(&artifact.relay);
@@ -48,12 +131,34 @@ impl RemoteNativeBash {
         {
             return Err("TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH".into());
         }
+        let private_shell = if target == RemoteBashTarget::X86_64 {
+            let bytes = std::fs::read(resources.join(&artifact.id).join("bash"))
+                .map_err(|_| "TERMINAL_NATIVE_ARTIFACTS_UNAVAILABLE")?;
+            if hex::encode(Sha256::digest(&bytes)) != artifact.shell_sha256 {
+                return Err("TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH".into());
+            }
+            Some(bytes)
+        } else {
+            None
+        };
         let root = format!("/tmp/.ss-nip-{}", Uuid::new_v4().simple());
         sftp.mkdir(Path::new(&root), 0o700)
             .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
         let result = (|| {
             let module_path = format!("{root}/adapter.so");
             let relay_path = format!("{root}/relay");
+            let (executable, shell_sha, startup) = if let Some(bytes) = private_shell {
+                let path = format!("{root}/bash");
+                upload(&sftp, &path, &bytes, 0o500)?;
+                let sha = remote_sha(&sftp, &path)?;
+                (path, sha, RemoteShellStartup::PrivateBash)
+            } else {
+                (
+                    identity.executable,
+                    system_shell_sha.ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?,
+                    RemoteShellStartup::Bash,
+                )
+            };
             upload(
                 &sftp,
                 &module_path,
@@ -120,6 +225,19 @@ impl RemoteNativeBash {
                     )?;
                 }
             }
+            if matches!(startup, RemoteShellStartup::PrivateBash) {
+                // Check the actual dynamic loader, terminal library and adapter
+                // before starting a login shell or attaching a generation.
+                run_ssh_setup_command(
+                    session,
+                    &format!(
+                        "exec {} --noprofile --norc -p -c 'builtin enable -f \"$1\" ss_native_input ss_native_input_display_abi && builtin ss_native_input_display_abi' shellspan-native-check {}",
+                        quote_remote_posix(&executable),
+                        quote_remote_posix(&module_path),
+                    ),
+                )
+                .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
+            }
             let mut control = session
                 .channel_session()
                 .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
@@ -136,8 +254,8 @@ impl RemoteNativeBash {
                 active: true,
                 decoder: nip::Decoder::default(),
                 root: root.clone(),
-                executable: identity.executable,
-                zle: false,
+                executable,
+                startup,
             })
         })();
         if result.is_err() {
@@ -145,8 +263,11 @@ impl RemoteNativeBash {
         }
         result.map(Some)
     }
+    pub fn uses_private_bash(&self) -> bool {
+        matches!(self.startup, RemoteShellStartup::PrivateBash)
+    }
     pub fn start_shell(&self, channel: &mut Channel) -> Result<(), String> {
-        if self.zle {
+        if matches!(self.startup, RemoteShellStartup::Zle) {
             return channel
                 .exec(&format!(
                     "{}\nexec env ZDOTDIR={} {} -il",
@@ -315,7 +436,7 @@ impl RemoteNativeBash {
                 decoder: nip::Decoder::default(),
                 root: root.clone(),
                 executable: identity.executable.clone(),
-                zle: true,
+                startup: RemoteShellStartup::Zle,
             })
         })();
         if result.is_err() {
@@ -480,6 +601,7 @@ fn cleanup(sftp: &ssh2::Sftp, root: &str) {
                 && (matches!(
                     name,
                     "adapter.so"
+                        | "bash"
                         | "ss_nip.so"
                         | ".zshenv"
                         | "relay"
