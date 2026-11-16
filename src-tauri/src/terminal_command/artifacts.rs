@@ -160,6 +160,13 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<NativeArti
     {
         return Err("TERMINAL_NATIVE_STALE_ARTIFACTS".into());
     }
+    if target == super::protocol::LINUX_X86_64_BASH_TARGET {
+        let recipe = "scripts/native-input-p2/Dockerfile.amd64";
+        let contents = include_str!("../../../scripts/native-input-p2/Dockerfile.amd64");
+        if catalogue.sources.get(recipe) != Some(&super::protocol::sha(contents)) {
+            return Err("TERMINAL_NATIVE_STALE_ARTIFACTS".into());
+        }
+    }
     if target == MACOS_BASH_TARGET
         && catalogue
             .profiles

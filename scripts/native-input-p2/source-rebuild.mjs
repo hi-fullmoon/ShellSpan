@@ -12,7 +12,7 @@ const directory=resolve(root,'.artifacts/tests/native-input-p2/source-rebuild',r
 await mkdir(directory,{recursive:true,mode:0o700});
 const clean=resolve(directory,'ShellSpan');await cp(resolve(packaged,'sources/ShellSpan'),clean,{recursive:true});
 const x86Linux=process.platform==='linux'&&process.arch==='x64';
-const target=process.platform==='darwin'?'macos-arm64':x86Linux?'linux-x86_64-glibc-2.36':'linux-aarch64-glibc-2.36';
+const target=process.platform==='darwin'?'macos-arm64':x86Linux?'linux-x86_64-glibc-2.28':'linux-aarch64-glibc-2.36';
 const dependencyRoot=resolve(clean,'.artifacts/tests',x86Linux?target:'.');
 const cache=resolve(dependencyRoot,'native-input-p0/upstream');await mkdir(cache,{recursive:true});
 for(const name of await readdir(resolve(packaged,'sources')))if(name.endsWith('.tar.gz')||/^(?:bash53|readline83)-\d{3}$/.test(name))await cp(resolve(packaged,'sources',name),resolve(cache,name));

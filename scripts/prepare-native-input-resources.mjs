@@ -19,7 +19,7 @@ const editorTargetsByBuildTarget=new Map([
 ]);
 const editorTarget=editorTargetsByBuildTarget.get(target);
 const linuxEditorTarget=editorTargetsByBuildTarget.get('aarch64-unknown-linux-gnu');
-const linuxX86BashTarget='linux-x86_64-glibc-2.36';
+const linuxX86BashTarget='linux-x86_64-glibc-2.28';
 const hostBashTarget=target==='aarch64-apple-darwin'?'macos-arm64':target==='aarch64-unknown-linux-gnu'?linuxEditorTarget:undefined;
 // Windows can carry the x86_64 Bash as a remote resource without selecting it locally.
 const sshBashTargets=target==='aarch64-apple-darwin'||target==='aarch64-unknown-linux-gnu'
@@ -58,7 +58,8 @@ if(!validationOnly&&values['with-ssh']&&!values['no-build']){
     const x86=sshTarget===linuxX86BashTarget;
     const platform=x86?'linux/amd64':'linux/arm64';
     const image=x86?'shellspan-native-input-p2:amd64':'shellspan-native-input-p2:local';
-    await run('docker',['build','--platform',platform,'-t',image,'-f','scripts/native-input-p2/Dockerfile','scripts/native-input-p2']);
+    const dockerfile=x86?'Dockerfile.amd64':'Dockerfile';
+    await run('docker',['build','--platform',platform,'-t',image,'-f',`scripts/native-input-p2/${dockerfile}`,'scripts/native-input-p2']);
     await run('docker',[...args,'--platform',platform,image,'python3','-B','scripts/native-input-p2/build.py']);
     if(!x86&&productionProfilesFor(linuxEditorTarget).length>0){
       await run('docker',['build','--platform',platform,'-t','shellspan-native-input-p3:local','-f','scripts/native-input-p3/Dockerfile','scripts/native-input-p3']);
@@ -199,7 +200,7 @@ if(includeBash){
   for(const name of ['scripts/dependency-builds/bash-native','scripts/native-input-p0']){
     await cp(resolve(root,name),resolve(tree,name),{recursive:true,filter:path=>!path.split('/').some(part=>['target','__pycache__'].includes(part))});
   }
-  for(const name of ['src-tauri/src/terminal_command/protocol.rs','scripts/native-input-p2/build.py','scripts/native-input-p2/Dockerfile']){
+  for(const name of ['src-tauri/src/terminal_command/protocol.rs','scripts/native-input-p2/build.py','scripts/native-input-p2/Dockerfile','scripts/native-input-p2/Dockerfile.amd64']){
     await mkdir(resolve(tree,name,'..'),{recursive:true});await cp(resolve(root,name),resolve(tree,name));
   }
   for(const name of editorNames)for(const path of Object.keys(JSON.parse(await readFile(resolve(sourceRoot,name),'utf8')).sources)){

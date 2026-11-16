@@ -136,8 +136,11 @@ jobs:
         shell: bash
         env:
           DOCKER_PLATFORM: linux/${{ matrix.arch }}
+          BASH_ARCH: ${{ matrix.arch }}
         run: |
-          docker build --platform "$DOCKER_PLATFORM" -t shellspan-native-input-p2:local -f scripts/native-input-p2/Dockerfile scripts/native-input-p2
+          dockerfile=scripts/native-input-p2/Dockerfile
+          if [[ "$BASH_ARCH" == amd64 ]]; then dockerfile="$dockerfile.amd64"; fi
+          docker build --platform "$DOCKER_PLATFORM" -t shellspan-native-input-p2:local -f "$dockerfile" scripts/native-input-p2
           docker run --rm --platform "$DOCKER_PLATFORM" --user "$(id -u):$(id -g)" -e CARGO_HOME=/tmp/cargo -e SHELLSPAN_NATIVE_BUILD_ROOT=src-tauri/target/native-input -v "$PWD:/work" shellspan-native-input-p2:local python3 -B scripts/native-input-p2/build.py
       - name: Build pinned Linux ARM64 Zsh resources
         if: matrix.arch == 'arm64'

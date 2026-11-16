@@ -1011,11 +1011,15 @@ pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
                         }
                         crate::commands::emit_terminal_integration_state(app, session_id);
                     }
-                    if native_failure.is_some() {
+                    if let Some(reason) = native_failure.as_deref() {
                         let _ = runtime.mark_terminal_integration_unavailable(
                             session_id,
                             TerminalShellKind::Bash,
-                            "nativeProfileMismatch",
+                            if reason.starts_with(remote_native::GLIBC_TOO_OLD_REASON) {
+                                reason
+                            } else {
+                                "nativeProfileMismatch"
+                            },
                         );
                         crate::commands::emit_terminal_integration_state(app, session_id);
                     } else if !bootstrap_remote_integration

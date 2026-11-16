@@ -180,16 +180,18 @@ export function AiWorkspaceController({
         : undefined}
       executionSurfaceNotice={session?.header.subagent ? undefined : <>
         {focusMode && activeTerminalStatus !== 'connected' ? <FocusNoTarget /> : scope === 'terminal' && activeTerminalStatus === 'connected' && realTerminalState !== 'ready'
-        && controller.selectedExecutionSurface === 'boundTerminal'
+        && (controller.selectedExecutionSurface === 'boundTerminal' || controller.glibcMismatch)
         && (!controller.readOnlySession || (focusMode && controller.historicalContinuationAvailable))
         ? <AgentTerminalBusyNotice
             key={JSON.stringify([activeTerminalId, terminalSessionId, terminalGeneration])}
             context={controller.submissionContext}
             disabled={executionSurfaceLocked}
             state={realTerminalState}
+            glibcMismatch={controller.glibcMismatch}
             focusMode={focusMode}
             blockedAttempt={blockedAttempt}
-            onSwitchDirect={focusMode ? undefined : () => controller.selectExecutionSurface('direct')} />
+            onSwitchDirect={focusMode || controller.selectedExecutionSurface === 'direct'
+              ? undefined : () => controller.selectExecutionSurface('direct')} />
         : undefined}
       </>}
       onDraftChange={controller.setDraft}

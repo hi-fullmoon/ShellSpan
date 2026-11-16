@@ -7,6 +7,8 @@ use crate::terminal_command::{
 };
 use sha2::{Digest, Sha256};
 
+pub(super) const GLIBC_TOO_OLD_REASON: &str = "remoteGlibcTooOld:";
+const X86_GLIBC_MINIMUM_MINOR: u32 = 28;
 const UNSUPPORTED_PROFILE: &str = "TERMINAL_NATIVE_PROFILE_UNSUPPORTED";
 // libssh2 pipelines SFTP packets within one read or write. Keep enough bytes
 // outstanding for remote SSH links while retaining the connection deadline.
@@ -53,12 +55,18 @@ builtin printf '\n%s\t%s\t%s\n' '{}' "$host" "$libc""#,
         }
         match record.split_once('\t') {
             Some(("Linux aarch64", "")) => Ok(Self::Arm64),
-            Some(("Linux x86_64", libc)) => libc
-                .strip_prefix("glibc 2.")
-                .and_then(|value| value.parse::<u32>().ok())
-                .filter(|minor| *minor >= 36)
-                .map(|_| Self::X86_64)
-                .ok_or_else(|| UNSUPPORTED_PROFILE.into()),
+            Some(("Linux x86_64", libc)) => {
+                let minor = libc
+                    .strip_prefix("glibc 2.")
+                    .and_then(|value| value.parse::<u32>().ok())
+                    .ok_or(UNSUPPORTED_PROFILE)?;
+                if minor < X86_GLIBC_MINIMUM_MINOR {
+                    return Err(format!(
+                        "{GLIBC_TOO_OLD_REASON}2.{minor}:2.{X86_GLIBC_MINIMUM_MINOR}"
+                    ));
+                }
+                Ok(Self::X86_64)
+            }
             _ => Err(UNSUPPORTED_PROFILE.into()),
         }
     }
@@ -72,13 +80,13 @@ builtin printf '\n%s\t%s\t%s\n' '{}' "$host" "$libc""#,
 }
 
 #[test]
-fn ssh_bash_targets_require_linux_and_x86_64_requires_glibc_236_or_newer() {
+fn ssh_bash_targets_require_linux_and_x86_64_requires_glibc_228_or_newer() {
     let parse = |value: &str| RemoteBashTarget::parse("tag", value.as_bytes());
     assert_eq!(
         parse("user greeting\ntag\tLinux aarch64\t\n"),
         Ok(RemoteBashTarget::Arm64)
     );
-    for release in ["2.36", "2.38"] {
+    for release in ["2.28", "2.35", "2.38"] {
         assert_eq!(
             parse(&format!(
                 "greeting\ntag\tLinux x86_64\tglibc {release}\nmore output\n"
@@ -86,10 +94,13 @@ fn ssh_bash_targets_require_linux_and_x86_64_requires_glibc_236_or_newer() {
             Ok(RemoteBashTarget::X86_64)
         );
     }
+    assert_eq!(
+        parse("tag\tLinux x86_64\tglibc 2.27\n"),
+        Err("remoteGlibcTooOld:2.27:2.28".into())
+    );
     for output in [
         "Linux x86_64\tglibc 2.36\n",
         "tag\tLinux x86_64\t\n",
-        "tag\tLinux x86_64\tglibc 2.35\n",
         "tag\tLinux x86_64\tmusl 1.2.5\n",
         "tag\tLinux i686\tglibc 2.36\n",
         "tag\tDarwin x86_64\t\n",

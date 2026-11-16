@@ -3,9 +3,9 @@
 `pnpm native:prepare` builds the supported local editor resources and stages
 verified resources in `src-tauri/target/native-input/generated/` at the repository
 root. Preparation logs, staging and retained prior output are in the sibling
-`resource-build/` directory and are not bundled. `--with-ssh` builds the pinned
-glibc 2.36 Linux SSH resources with Docker (`linux/arm64` and `linux/amd64` for
-macOS; `linux/amd64` for Windows). Release CI builds both Linux architectures
+`resource-build/` directory and are not bundled. `--with-ssh` builds Linux SSH
+resources with Docker (ARM64 on glibc 2.36 and x86_64 on glibc 2.28 for macOS,
+x86_64 for Windows). Release CI builds both Linux architectures
 on native runners; `--require-ssh` makes the client package fail if any of its
 required SSH resources are missing.
 

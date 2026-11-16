@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,21 @@ ROOT = Path(__file__).resolve().parents[2]
 BUILD_ROOT = ROOT / os.environ.get('SHELLSPAN_NATIVE_BUILD_ROOT', 'src-tauri/target/native-input')
 OUT = BUILD_ROOT / 'native-input-p2'
 READLINE_VERSIONS = {'4.1': '6.0', '4.4': '7.0', '5.3': '8.3.6'}
+X86_GLIBC_MINIMUM = (2, 28)
+X86_GLIBC_VERSION = '.'.join(map(str, X86_GLIBC_MINIMUM))
+X86_TARGET = f'linux-x86_64-glibc-{X86_GLIBC_VERSION}'
+
+
+def verify_glibc_needs(path):
+    output = subprocess.check_output(['readelf', '--version-info', '--wide', path],
+                                     text=True, env={**os.environ, 'LC_ALL': 'C'})
+    required = set(re.findall(r'Name:\s+(GLIBC_\S+)', output))
+    if not required:
+        raise RuntimeError(f'{path}: expected versioned glibc imports')
+    for name in sorted(required):
+        match = re.fullmatch(r'GLIBC_(\d+)\.(\d+)(?:\.(\d+))?', name)
+        if not match or tuple(map(int, match.groups(default='0'))) > (*X86_GLIBC_MINIMUM, 0):
+            raise RuntimeError(f'{path}: {name} exceeds the glibc {X86_GLIBC_VERSION} baseline')
 
 
 def macos_rust_environment(manifest):
@@ -59,20 +75,21 @@ def main():
     machine = platform.machine()
     if host == 'darwin' and machine in ('arm64', 'aarch64'):
         target = 'macos-arm64'
-    elif host == 'linux' and platform.libc_ver() == ('glibc', '2.36'):
-        if machine in ('arm64', 'aarch64'):
+    elif host == 'linux':
+        glibc = os.confstr('CS_GNU_LIBC_VERSION')
+        if machine in ('arm64', 'aarch64') and glibc == 'glibc 2.36':
             target = 'linux-aarch64-glibc-2.36'
-        elif machine == 'x86_64':
+        elif machine == 'x86_64' and glibc == f'glibc {X86_GLIBC_VERSION}':
             if versions != ['5.3']:
                 parser.error('Linux x86_64 supports only Bash 5.3 / Readline 8.3.6')
-            target = 'linux-x86_64-glibc-2.36'
+            target = X86_TARGET
         else:
-            raise RuntimeError('Unaccepted Linux module architecture')
+            raise RuntimeError(f'Unaccepted Linux module build host: {machine}, {glibc}')
     else:
         raise RuntimeError('Unaccepted module OS/architecture/libc')
     # Keep both Linux dependency builds, including the P0 build cache, isolated
     # when the ARM64 and x86_64 producers mount the same checkout.
-    x86_linux = target == 'linux-x86_64-glibc-2.36'
+    x86_linux = target == X86_TARGET
     dependency_root = BUILD_ROOT / target if x86_linux else BUILD_ROOT
     OUT.mkdir(parents=True, exist_ok=True)
     log = OUT / f'build-{target if x86_linux else host}.log'
@@ -90,6 +107,8 @@ def main():
     inputs += [ROOT / 'src-tauri/src/terminal_command/protocol.rs', Path(__file__).resolve(), Path(__file__).with_name('Dockerfile'),
         ROOT / 'scripts/native-input-p0/build.py', ROOT / 'scripts/native-input-p0/readline-sources.json',
         *[p for p in (ROOT/'scripts/dependency-builds/bash-native').iterdir() if p.is_file()]]
+    if x86_linux:
+        inputs.append(Path(__file__).with_name('Dockerfile.amd64'))
     sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
     before = {str(p.relative_to(ROOT)): sha(p) for p in inputs}
     builds = json.loads((dependency_root / 'native-input-p2' / f'bash-{host}.json').read_text())
@@ -117,8 +136,12 @@ def main():
             linker += ['-Wl,--strip-debug,--exclude-libs,ALL,--gc-sections']
         module = destination / 'adapter.so'
         candidate = destination / 'adapter.candidate.so'
-        run(['cc', *linker, '-O2', *[f'-I{p}' for p in includes], *[f'-I{p / "lib"}' for p in includes],
+        runtime_defines = [f'-DSHELLSPAN_MIN_GLIBC="{X86_GLIBC_VERSION}"'] if x86_linux else []
+        run(['cc', *linker, *runtime_defines, '-O2', *[f'-I{p}' for p in includes], *[f'-I{p / "lib"}' for p in includes],
              source / 'bridge.c', rust / 'release/libshellspan_native_input_adapter.a', '-lpthread', '-ldl', '-lm', '-o', candidate])
+        if x86_linux:
+            for artifact in (shell, candidate, rust / 'release/native-input-relay'):
+                verify_glibc_needs(artifact)
         # The real target must expose the versioned native display API. Loading
         # the actual module verifies it without opening a PTY or accepting input.
         run([shell, '--noprofile', '--norc', '-c', 'enable -f "$1" ss_native_input ss_native_input_display_abi && builtin ss_native_input_display_abi', 'native-display-abi-check', candidate],
@@ -151,7 +174,7 @@ def main():
     notices = catalogue / 'sources'
     notices.mkdir(exist_ok=True)
     if x86_linux:
-        shutil.copy2('/usr/share/doc/libncurses-dev/copyright', notices / 'ncurses-COPYRIGHT')
+        shutil.copy2('/opt/shellspan/share/ncurses-COPYRIGHT', notices / 'ncurses-COPYRIGHT')
     archives = [f'bash-{version}.tar.gz' for version in versions]
     if '5.3' in versions:
         pin = json.loads((ROOT / 'scripts/native-input-p0/readline-sources.json').read_text())

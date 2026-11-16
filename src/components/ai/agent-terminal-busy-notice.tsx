@@ -3,11 +3,13 @@ import { TriangleAlertIcon } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/hooks/useI18n';
+import type { RemoteGlibcMismatch } from '@/lib/terminal/terminal-surface-semantics';
 
 interface AgentTerminalBusyNoticeProps {
   readonly disabled: boolean;
   readonly state?: 'busy' | 'initializing' | 'unavailable';
   readonly focusMode?: boolean;
+  readonly glibcMismatch?: RemoteGlibcMismatch | null;
   /** A new runtime rejection during this busy period, rather than a historical failure. */
   readonly blockedAttempt?: string | null;
   /** Changes on navigation, but stays stable when submitting creates a session. */
@@ -38,7 +40,7 @@ export function AgentTerminalBusyNotice(props: AgentTerminalBusyNoticeProps): Re
   return <TerminalBusyFeedback key={`${props.state ?? 'busy'}:${owner.revision}`} {...props} />;
 }
 
-function TerminalBusyFeedback({ disabled, onSwitchDirect, state = 'busy', focusMode = false, blockedAttempt = null }: AgentTerminalBusyNoticeProps): React.ReactNode {
+function TerminalBusyFeedback({ disabled, onSwitchDirect, state = 'busy', focusMode = false, blockedAttempt = null, glibcMismatch }: AgentTerminalBusyNoticeProps): React.ReactNode {
   const { t } = useI18n();
   const [initialBlockedAttempt] = useState(blockedAttempt);
   const [initializationTimedOut, setInitializationTimedOut] = useState(false);
@@ -55,7 +57,9 @@ function TerminalBusyFeedback({ disabled, onSwitchDirect, state = 'busy', focusM
     <Alert variant="warning" size="sm" role="status" data-slot="terminal-busy-notice" className="[--alert-icon-inset:--spacing(1)]">
       <TriangleAlertIcon aria-hidden="true" />
       <AlertDescription className="flex min-w-0 flex-wrap items-start gap-1">
-        <span className="min-w-0 flex-1 basis-48 py-1">{t(descriptions[state][focusMode ? 'focus' : 'terminal'])}</span>
+        <span className="min-w-0 flex-1 basis-48 py-1">{glibcMismatch
+          ? t('agent.executionSurface.v1.remoteGlibcTooOld', { ...glibcMismatch })
+          : t(descriptions[state][focusMode ? 'focus' : 'terminal'])}</span>
         {onSwitchDirect && <Button type="button" variant="ghost" size="xs" className="text-[11px]" disabled={disabled} onClick={onSwitchDirect}>
           {t('agent.executionSurface.v1.switchDirect')}
         </Button>}

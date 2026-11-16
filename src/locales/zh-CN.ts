@@ -2353,6 +2353,7 @@ export default {
   'ai.workspace.status.openSettings': '打开 AI 设置',
   'ai.workspace.status.reconnect': '重新连接终端',
   'agent.executionSurface.v1.unavailableDescription': '此终端无法使用真实终端命令能力，请改用直接执行。',
+  'agent.executionSurface.v1.remoteGlibcTooOld': '远端 glibc 为 {actual}，可视命令要求 glibc {minimum} 或更新版本。请在终端 Agent 中使用直接执行。',
   'agent.executionSurface.v1.directFallbackDescription': '真实终端命令能力无法使用，运行时已回退到直接执行。',
   'agent.approval.title': '终端命令审批',
   'agent.approval.dialogTitle': '批准执行这条终端命令？',

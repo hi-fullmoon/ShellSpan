@@ -13,11 +13,12 @@ The dependency recipe verifies the pinned GNU archives and Readline 8.3 patches
 before applying the ShellSpan integration patches. The catalogue keeps the
 Bash 5.3 profile ID and records the macOS patch level separately.
 
-The P2 producer accepts Linux x86_64 only with glibc 2.36 and the default 5.3
-profile. The pinned `scripts/native-input-p2/Dockerfile` can run as `linux/amd64`;
-the producer isolates its dependency cache in `linux-x86_64-glibc-2.36/` under
-the build root. It publishes `catalogue-linux-x86_64-glibc-2.36.json` and the
-three executables in the same resource tree as the other GNU profiles. See the
+The P2 producer builds the Linux x86_64 5.3 profile on glibc 2.28 using the
+pinned AlmaLinux 8 image in `scripts/native-input-p2/Dockerfile.amd64`.
+It isolates dependencies in `linux-x86_64-glibc-2.28/` under the build root
+and rejects glibc symbol requirements above 2.28 in Bash, the adapter and the
+relay. It publishes `catalogue-linux-x86_64-glibc-2.28.json` and the three
+executables in the same resource tree as the other GNU profiles. See the
 [build and acceptance checklist](../../../docs/design/agent-terminal-input-linux-x86_64-ssh.md).
 
 The Readline display extension adds `rl_native_prompt_columns()` to its public header

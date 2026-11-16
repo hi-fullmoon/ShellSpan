@@ -72,7 +72,7 @@ import { routeProviderConfigs, useLlmRoutesStore } from '@/stores/llmRoutesStore
 import { isTauriRuntime } from '@/lib/ipc/tauri';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { readTerminalCurrentDirectory } from '@/lib/terminal/terminal-current-directory';
-import { terminalConnectionPresentationState, type RealTerminalPresentationState } from '@/lib/terminal/terminal-surface-semantics';
+import { remoteGlibcMismatch, terminalConnectionPresentationState, type RealTerminalPresentationState, type RemoteGlibcMismatch } from '@/lib/terminal/terminal-surface-semantics';
 import { terminalLoginLabel, terminalLoginScopeKey } from '@/lib/ai/terminal-login-scope';
 import {
   canContinueHistoricalConversation,
@@ -109,6 +109,7 @@ export interface AiSessionController {
   readonly selectedProvider?: AiProviderConfig;
   readonly selectedPermission?: AgentPermissionMode;
   readonly selectedExecutionSurface: AgentExecutionSurface;
+  readonly glibcMismatch: RemoteGlibcMismatch | null;
   readonly settingsBusy: boolean;
   readonly selectModel: (provider: AiProviderConfig) => Promise<void>;
   readonly selectPermission: (mode: AgentPermissionMode) => Promise<void>;
@@ -504,9 +505,16 @@ export function useAiSessionController({
     : activeTerminal?.status === 'connected' && activeTerminal.integrationState === 'initializing'
       ? 'initializing'
       : terminalConnectionPresentationState(activeTerminal?.status);
+  const glibcMismatch = scope === 'terminal' && activeTerminal?.status === 'connected'
+    ? remoteGlibcMismatch(activeTerminal.integrationReason) : null;
+  const terminalCreationSurface = focusMode ? 'boundTerminal' : glibcMismatch ? 'direct' : newExecutionSurface;
+  const needsDirectFallback = !focusMode && glibcMismatch !== null
+    && view?.snapshot.value.header.executionSurface === 'boundTerminal'
+    && view.snapshot.value.header.target?.sessionId === activeTerminal?.sessionId
+    && !view.snapshot.value.header.subagent;
   const focusCommandsUnavailable = focusMode && activeTerminal?.status === 'connected'
     && realTerminalState === 'unavailable' && !view?.snapshot.value.header.subagent;
-  const canSubmitAgent = canStartAgent && !focusCommandsUnavailable;
+  const canSubmitAgent = canStartAgent && !focusCommandsUnavailable && !needsDirectFallback;
   const terminalUnavailableReason = scope === 'terminal' && !canStartAgent && !focusMode
     && activeTerminal?.status !== 'connecting'
     ? t('agent.availability.needsTerminal')
@@ -671,11 +679,11 @@ export function useAiSessionController({
         permissionMode: permissionMode(
           useAgentPermissionStore.getState().getMode(activeTerminal.sessionId),
         ),
-        executionSurface: focusMode ? 'boundTerminal' : newExecutionSurface,
+        executionSurface: terminalCreationSurface,
         successCriteria: intent.successCriteria,
       },
     };
-  }, [activeTerminal, focusMode, newExecutionSurface, operationId, scope, t]);
+  }, [activeTerminal, focusMode, operationId, scope, t, terminalCreationSurface]);
 
   const projectKey = `${workspaceScopeKey}:${openedSessionId ?? 'new'}:${skillNavigation}:${focusMode ? activeTerminal?.sessionId ?? '' : ''}`;
   const projectEpoch = useRef({ key: projectKey });
@@ -1339,8 +1347,24 @@ export function useAiSessionController({
     useFocusStore.getState().setConversation(openedSessionId);
   }, [focusMode, composer.phase, composer.pendingSubmissions.length, settingsBusy, imageDraft.busy, historicalContinuationBusy, openedSessionId, view, activeTerminal]);
   useEffect(() => () => { if (focusMode) useFocusStore.getState().setBusy(false); }, [focusMode]);
-  const selectedExecutionSurface = focusMode ? 'boundTerminal' : canContinueHistoricalView ? newExecutionSurface
-    : visibleView?.snapshot.value.header.executionSurface ?? newExecutionSurface;
+  const selectedExecutionSurface = focusMode ? 'boundTerminal' : canContinueHistoricalView ? terminalCreationSurface
+    : visibleView?.snapshot.value.header.executionSurface ?? terminalCreationSurface;
+  const directFallbackAttempt = useRef<string | null>(null);
+  useEffect(() => {
+    const setExecutionSurface = adapter.setExecutionSurface;
+    if (!needsDirectFallback || terminalSessionRestoring || !view || !setExecutionSurface
+      || readOnlySession || view.summary.archived || view.snapshot.value.archived
+      || settingsBusy || settingsPending.current
+      || view.status === 'running' || view.status === 'waiting' || view.pendingApproval || view.pendingQuestion
+      || view.snapshot.value.uncertainNativeEffects || composer.pendingSubmissions.length > 0
+      || composer.phase === 'submitting' || composer.phase === 'stopping') return;
+    const key = JSON.stringify([activeTerminal?.sessionId, view.summary.id]);
+    if (directFallbackAttempt.current === key) return;
+    directFallbackAttempt.current = key;
+    // Only switch the idle conversation. Any already submitted work keeps its original surface.
+    void changeSettings(sessionId => setExecutionSurface(sessionId, 'direct'));
+  }, [activeTerminal?.sessionId, adapter, changeSettings, composer.pendingSubmissions.length,
+    composer.phase, needsDirectFallback, readOnlySession, settingsBusy, terminalSessionRestoring, view]);
   const terminalConflict = !terminalSessionRestoring && !isSubagent && scope === 'terminal' && selectedExecutionSurface === 'boundTerminal'
     && Boolean(terminalOccupancy && terminalOccupancy.agentSessionId !== (visibleView?.summary.id ?? composer.sessionId));
   const agentUnavailableReason = terminalSessionRestoring ? null
@@ -1944,6 +1968,7 @@ export function useAiSessionController({
         : preferredAgentPermission
       : permissionModeForUi(visibleView.snapshot.value.header.permissionMode),
     selectedExecutionSurface,
+    glibcMismatch,
     settingsBusy,
     selectModel: (provider) => changeSettings(async (sessionId) => {
       if (!adapter.selectModel) throw new Error('Model selection is unavailable');
@@ -2023,7 +2048,7 @@ export function useAiSessionController({
     setDraft: (value) => { claimWorkspace(); dispatch({ type: 'draft.changed', value }); },
     setBusyPreference: (value) => dispatch({ type: 'preference.changed', value }),
     submit: (gesture, accelerated = false) => {
-      if (terminalSessionRestoring || focusCommandsUnavailable) return;
+      if (terminalSessionRestoring || focusCommandsUnavailable || needsDirectFallback) return;
       const child = viewRef.current?.snapshot.value.header.subagent;
       if (child && readOnlySession) return;
       if (child && childBudgetExhausted(viewRef.current?.snapshot.value, now())

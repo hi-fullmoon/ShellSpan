@@ -12,7 +12,7 @@ pub const DISPLAY_ENTER: &str = "SetUserVar=ShellSpanNativeInput=MQ==";
 pub const DISPLAY_EXIT: &str = "SetUserVar=ShellSpanNativeInput=MA==";
 pub const VERIFIED_PROFILE: &str = "gnu-bash-5.3-readline-8.3.6-macos-arm64-prototype";
 pub const LINUX_ARM64_BASH_TARGET: &str = "linux-aarch64-glibc-2.36";
-pub const LINUX_X86_64_BASH_TARGET: &str = "linux-x86_64-glibc-2.36";
+pub const LINUX_X86_64_BASH_TARGET: &str = "linux-x86_64-glibc-2.28";
 
 pub fn capture_marker(request_id: &str, end: bool) -> Vec<u8> {
     let token = sha(&format!(

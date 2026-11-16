@@ -648,8 +648,8 @@ int p0_native_protocol_supported(void) {
   const char *codeset=nl_langinfo(CODESET);
 #ifdef __GLIBC__
   const char *glibc = gnu_get_libc_version();
-#if defined(__linux__) && defined(__x86_64__)
-  if (strncmp(glibc, "2.", 2) || strverscmp(glibc, "2.36") < 0) return 0;
+#ifdef SHELLSPAN_MIN_GLIBC
+  if (strncmp(glibc, "2.", 2) || strverscmp(glibc, SHELLSPAN_MIN_GLIBC) < 0) return 0;
 #else
   if (strcmp(glibc, "2.36")) return 0;
 #endif

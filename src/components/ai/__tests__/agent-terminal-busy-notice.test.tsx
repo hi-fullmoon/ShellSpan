@@ -17,6 +17,17 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('terminal busy feedback', () => {
+  it.each(['en-US', 'zh-CN'] as const)('shows both glibc versions when Direct is available in %s', async locale => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+    render(<AgentTerminalBusyNotice disabled={false} state="unavailable" glibcMismatch={{ actual: '2.27', minimum: '2.28' }} />);
+    const notice = screen.getByRole('status');
+    expect(notice).toHaveTextContent('glibc');
+    expect(notice).toHaveTextContent('2.27');
+    expect(notice).toHaveTextContent('2.28');
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
   it('keeps short commands silent before and after returning to the prompt', async () => {
     const { rerender } = render(<StrictMode><AgentTerminalBusyNotice disabled={false} /></StrictMode>);
     expect(screen.queryByRole('status')).not.toBeInTheDocument();

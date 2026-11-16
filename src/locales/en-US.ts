@@ -2355,6 +2355,7 @@ export default {
   'ai.workspace.status.openSettings': 'Open AI settings',
   'ai.workspace.status.reconnect': 'Reconnect terminal',
   'agent.executionSurface.v1.unavailableDescription': 'Real-terminal command support is unavailable for this terminal. Choose Direct instead.',
+  'agent.executionSurface.v1.remoteGlibcTooOld': 'Remote glibc is {actual}. Visible command requires glibc {minimum} or later. Use Direct in the terminal Agent.',
   'agent.executionSurface.v1.directFallbackDescription': 'The runtime fell back to Direct because real-terminal command support could not be used.',
   'agent.approval.title': 'Terminal command approval',
   'agent.approval.dialogTitle': 'Approve this terminal command?',

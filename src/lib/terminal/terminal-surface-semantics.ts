@@ -17,6 +17,16 @@ export interface TerminalSurfaceRuntimeFallbackSignal {
   readonly kind: 'directFallback';
 }
 
+export interface RemoteGlibcMismatch {
+  readonly actual: string;
+  readonly minimum: string;
+}
+
+export function remoteGlibcMismatch(reason: string | undefined): RemoteGlibcMismatch | null {
+  const match = /^remoteGlibcTooOld:(2\.\d{1,10}):(2\.\d{1,10})$/.exec(reason ?? '');
+  return match ? { actual: match[1], minimum: match[2] } : null;
+}
+
 export interface TerminalSurfacePresentation {
   /** Overall state shown for the currently selected execution surface. */
   readonly state: TerminalSurfacePresentationState;

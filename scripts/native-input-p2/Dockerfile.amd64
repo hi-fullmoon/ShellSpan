@@ -1,0 +1,35 @@
+FROM rust:1.95-bookworm@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1 AS rust
+FROM almalinux:8@sha256:1965cb10f9c392766b2d544d3c1b997eb008d0e413c808e6a20086e87c802a80
+
+RUN --mount=type=cache,target=/var/cache/dnf \
+    dnf -y --setopt=install_weak_deps=False --setopt=timeout=20 --setopt=retries=3 \
+      --disablerepo=extras \
+      --setopt=baseos.mirrorlist= --setopt=baseos.baseurl=https://repo.almalinux.org/almalinux/8/BaseOS/x86_64/os/ \
+      --setopt=appstream.mirrorlist= --setopt=appstream.baseurl=https://repo.almalinux.org/almalinux/8/AppStream/x86_64/os/ \
+      install \
+      automake binutils diffutils findutils gcc gcc-c++ glibc-langpack-en gzip \
+      make ncurses-devel openssh-server patch python3.11 tar zlib \
+    && mkdir -p /opt/shellspan/bin /opt/shellspan/share /usr/share/misc /run/sshd \
+    && ln -s /usr/bin/python3.11 /opt/shellspan/bin/python3 \
+    && ln -s /usr/share/automake-*/config.guess /usr/share/misc/config.guess \
+    && ln -s /usr/share/automake-*/config.sub /usr/share/misc/config.sub \
+    && useradd -m -s /bin/bash native53
+
+# AlmaLinux 8 does not ship the static terminal library in its standard repos.
+ADD --checksum=sha256:136d91bc269a9a5785e5f9e980bc76ab57428f604ce3e5a5a90cebc767971cc6 https://ftp.gnu.org/gnu/ncurses/ncurses-6.5.tar.gz /tmp/ncurses-6.5.tar.gz
+RUN tar -xzf /tmp/ncurses-6.5.tar.gz -C /tmp \
+    && cd /tmp/ncurses-6.5 \
+    && ./configure --with-termlib --without-shared --without-debug --disable-widec \
+        --without-ada --without-cxx --without-cxx-binding --without-manpages --without-progs --without-tests \
+        --with-default-terminfo-dir=/usr/share/terminfo --with-terminfo-dirs=/etc/terminfo:/lib/terminfo:/usr/share/terminfo \
+    && make -j4 \
+    && cp lib/libtinfo.a /usr/lib64/libtinfo.a \
+    && cp COPYING /opt/shellspan/share/ncurses-COPYRIGHT \
+    && rm -rf /tmp/ncurses-6.5
+
+COPY --from=rust /usr/local/rustup/toolchains/1.95.0-x86_64-unknown-linux-gnu /opt/rust
+ENV PATH=/opt/rust/bin:/opt/shellspan/bin:$PATH
+RUN test "$(getconf GNU_LIBC_VERSION)" = 'glibc 2.28' \
+    && rustc --version && cargo --version \
+    && test -f "$(cc -print-file-name=libtinfo.a)"
+WORKDIR /work
