@@ -1,10 +1,10 @@
 # ZLE SSH 故障恢复实机交接清单
 
-2026-11-12。Linux SSH/SFTP 本批已恢复，隔离传输回归 17/17、五个无模型 ZLE SSH 实机用例 5/5。逐案签名、原始证据、失败复验和清理见 [实机报告](../../.artifacts/tests/agent-terminal-input/20261112-zle-ssh-live/REPORT.md)。Windows 继续暂停，严格 Unicode 模型子项继续延期，完整远端 E08 留到正式发布前。前序资源构建、Bash 七项及原始结论见 [Linux SSH/SFTP 原交接](../../.artifacts/tests/agent-terminal-input/20261112-linux-ssh-offline-5346f103/REPORT.md)。本清单使用 [统一验收标准](agent-terminal-input-acceptance-checklist.md) 的 C01、C05、C06、D05、D06、E01、E07 编号。
+2026-11-12。Linux SSH/SFTP 本批已恢复，隔离传输回归 17/17、五个无模型 ZLE SSH 实机用例 5/5。逐案签名、原始证据、失败复验和清理见 [实机报告](../../.artifacts/tests/agent-terminal-input/20261112-zle-ssh-live/REPORT.md)。Windows 由另一台设备独立验收，完整远端 E08 留到正式发布前。前序资源构建、Bash 七项及原始结论见 [Linux SSH/SFTP 原交接](../../.artifacts/tests/agent-terminal-input/20261112-linux-ssh-offline-5346f103/REPORT.md)。本清单使用 [统一验收标准](agent-terminal-input-acceptance-checklist.md) 的 C01、C05、C06、D05、D06、E01、E07 编号。
 
 本机续验通过接受键前后独立控制 EOF 4/4、真实 App 崩溃及同数据根重启 4/4。固定 ZLE Main/Core、模块、relay 的 SFTP 及进程映射均有实载证据。`ssh-recovery.mjs --list-cases` 列出无模型子案。Bash 5.3 使用独立 GNU 夹具和 `--bash`，ZLE 使用固定 Debian Main。各案单独创建夹具和数据目录，同一崩溃案使用原数据目录重启。 [双 Shell 本批报告](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/REPORT.md) · [逐案回执](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/attempts.json) · [余项清单](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/CHECKLIST.md)
 
-ZLE 启动读取 OpenSSH 执行父进程的初始 `ZDOTDIR`。未设置和显式指定均从真实 PTY 验证了 `.zshenv`、`.zprofile`、`.zshrc` 顺序。签名 App 的五项 ZLE 历史、无 SFTP、未知 Main、后台作业和真实文件链均通过。双 Shell 人工前后台焦点 2/2，实际接管 4/4。系统复制和 E06 模型链有独立记录，E06 留待另行授权。 [启动对照](../../.artifacts/tests/agent-terminal-input/20261113-zle-ssh-startup-transport/REPORT.md) · [人工逐案回执](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/manual-closeout-audit.json) · [系统复制](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/system-selection-audit.json)
+ZLE 启动读取 OpenSSH 执行父进程的初始 `ZDOTDIR`。未设置和显式指定均从真实 PTY 验证了 `.zshenv`、`.zprofile`、`.zshrc` 顺序。签名 App 的五项 ZLE 历史、无 SFTP、未知 Main、后台作业和无模型文件链均通过。双 Shell 人工前后台焦点 2/2，实际接管 4/4。系统复制与 E06 另有逐案记录。 [启动对照](../../.artifacts/tests/agent-terminal-input/20261113-zle-ssh-startup-transport/REPORT.md) · [人工逐案回执](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/manual-closeout-audit.json) · [系统复制](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/system-selection-audit.json) · [E06 实测](../../.artifacts/tests/agent-terminal-input/20261113-e06-real-model/REPORT.md)
 
 候选 37 因重新构建后 Linux 模块摘要变化，用新夹具复验了实际 Zsh Main、Core、模块与 relay，四代重绑、接受前后控制 EOF、实际 App 崩溃及同数据根重启、WKWebView 与错误资源拒绝均通过。每次运行记录实际加载对象和 SFTP 回执。候选 39 隔离 SSH/SFTP 回归 17/17。 [当前回执](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/REPORT.md) · [逐案台账](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/attempts.json)
 
@@ -61,15 +61,11 @@ zle_ssh_case() {
 
 四个提交案都重新连接同一逻辑终端，检查 transport ID 变化、代次恰好加一、旧写入拒绝、`SSH_RECOVERY_OK` 从新 PTY 输出，以及原账本和远端效果未被重连更改。错误身份和旧代次的拒绝以组件回归单列，实机保留真实 peer 回执。双 Shell 的 App 进程崩溃重启和控制 EOF 已有独立切点记录。 [本批故障记录](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/REPORT.md)
 
-原模型作业入口在其授权时段单独运行。
-
-```bash
-zle_fixture=$(node scripts/native-input-p3/linux-peer.mjs "$sealed_root" --app)
-SHELLSPAN_ALLOW_FOREGROUND_TESTS=1 SHELLSPAN_P3_CASE=jobs \
-  SHELLSPAN_P3_SSH_FIXTURE="$zle_fixture" node scripts/native-input-p3/app.mjs
-```
+E06 独立批次已收口，Bash 5/5、ZLE 5/5。实际模型审批、单次提交、作业及文件链均有原始证据。ZLE 作业的正常退出和磁盘历史从同一实测的原件复核。后续复验使用新夹具、新数据根和 Agent 会话，操作者在 App 实际审批面板决定。 [E06 实测报告](../../.artifacts/tests/agent-terminal-input/20261113-e06-real-model/REPORT.md) · [用例计划](../../.artifacts/tests/agent-terminal-input/20261113-e06-real-model/PLAN.md)
 
 ## 留档和清理
+
+B01 严格 Unicode 模型复验的 ZLE 案于 2026-11-16 使用 DeepSeek Flash 通过。原始提案、待批参数及原生输入证明匹配 217 字节，人工批准后一次接受、一次输出及同身份结算。历史 MiniMax 提案仍按原案归档。 [DeepSeek 实测](../../.artifacts/tests/agent-terminal-input/20261116-unicode-model-diagnosis/REPORT.md) · [MiniMax 原记录](../../.artifacts/tests/agent-terminal-input/20261113-strict-unicode-model/REPORT.md)
 
 - 单案目录为 `.artifacts/tests/native-input-p2/ssh-recovery/<fixture UUID>/`。保留 `inputs.json`、冻结源码和已签名 App 身份、逐阶段 `.command.json` / `.log` / `.exit.json`、`native-webview-evidence.json`、`native-p3-progress-*.json`、原始 `native-control-trace-*.jsonl`、接受键切点、旧套接字断开或尾包放行回执、`ledger-after-app.json`、`effect-after-app.json` 和 `result.json`。发布验收台账使用实际断言与这些原始证据。失败记录保留实际阶段、退出码、最后 Broker 快照、原调用及相关 PTY 字节。
 - 入口按正常 API 关闭自己的终端、撤除并核对专属 CredentialRef，再确认容器归属、锁账号和停止容器。保留容器、数据目录、原意图及文件效果。若准备阶段中断且未进入自动清理，从夹具 `owner.json` / `fixture.json` 核对完整容器 ID、镜像 ID、回环映射和 `shellspan.native-input-p2=<UUID>`，确认没有该案运行中的 App、PTY 和转发器，再仅处理该夹具。参考 `credential-cleanup-command.json` 与本案输入中的引用，通过初始化入口执行 `--native-input-p2-credential cleanup`，经 stdin 传 `{"reference":"<本案引用>"}`，验证返回 0。只对已确认归属的容器执行 `docker exec "$container" usermod -L nativeZle` 与 `docker stop --timeout 5 "$container"`，记录 `.State.Running=false`。有仍运行或结果不明的原操作时保留账本和文件引用。密钥和密码不入档。

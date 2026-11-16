@@ -11,9 +11,17 @@
 | Windows x64，ConPTY | `wt5c1` 已在 D 盘实际安装、启动并通过三种 Shell、接管清稿、运行中关闭、进程重启、WebView2 实际交互、异常资源和标准卸载。真实临时脚本及 PowerShell 无模型验证均已留证。[内测包与逐项验收](../../.artifacts/tests/agent-terminal-input/windows-wt5c1/REPORT.md) | 更广的统一发布子案按逐项状态补验，包括多代次重绑、选区锚点及完整 Quality Gate。 |
 | 当前源码与交付 | `2aaaaf75` 的 Bash 5.3 收敛和 `e63021ea` 的 PowerShell 7 收敛均已推送至 `origin/main`。两平台 Bash 5.3 资源和包内清单已核对，macOS 随包源码离线重建、前端全量测试及生产构建已通过。 | 以各平台最新候选提交继续实机验收。正式发布仍待完成。 |
 
+## E06 回环 SSH/SFTP 真实模型验收
+
+2026-11-13 独立批次从 `24086667` 封存，核对候选 78 四套原生资源。在签名 macOS arm64 App 中通过配置的 MiniMax-M3.1-Flash 实测 Bash 5.3／Readline 8.3.6 和 Zsh 5.9／ZLE 5.9，各通过 5/5。每案独占回环夹具、数据根和 Agent 会话，操作者在 App 的实际审批面板决定。ZLE 作业实际 App 退出 0，原始磁盘历史经独立复核通过，原外层断言失败保留。 [E06 报告](../../.artifacts/tests/agent-terminal-input/20261113-e06-real-model/REPORT.md)
+
+## B01 回环 SSH 严格 Unicode 复验
+
+2026-11-16，B01 严格 Unicode 真实模型在回环 SSH 上完成，Bash 和 ZLE 各通过 1/1。DeepSeek Flash 原始工具提案保留 217 个 UTF-8 字节，人工批准后核对原生输入证明、一次接受、原样 PTY 输出和同身份结算。MiniMax 两模型失败的提案继续按原批保留，公开分词器的 NFC 行为已复核。 [DeepSeek 实测与根因调查](../../.artifacts/tests/agent-terminal-input/20261116-unicode-model-diagnosis/REPORT.md) · [MiniMax 原记录](../../.artifacts/tests/agent-terminal-input/20261113-strict-unicode-model/REPORT.md)
+
 ## macOS arm64 本地验收
 
-候选 78 已完成本轮 macOS arm64 与受控 Debian 回环的无模型验收。回环 SSH 自动用例 98/98，实际操作者接管 4/4、焦点切换 2/2。真实模型、Windows 实机和正式发布前远端 E08 分别按各自条件恢复。 [本机收口报告](../../.artifacts/tests/agent-terminal-input/20261113-candidate78-closeout/REPORT.md)
+候选 78 已完成本轮 macOS arm64 与受控 Debian 回环的无模型验收。回环 SSH 自动用例 98/98，实际操作者接管 4/4、焦点切换 2/2。真实模型结果见独立 E06 批次。 [本机收口报告](../../.artifacts/tests/agent-terminal-input/20261113-candidate78-closeout/REPORT.md)
 
 R04 已收口。Zsh 5.9／ZLE 5.9 与 Bash 5.3／Readline 8.3.6 本轮适用条款 63/63 通过，涵盖实际 App 崩溃重启、重绑与旧 PTY 输出、系统输入和显示、真实模型链路，以及安装后资源加载。严格 Unicode 模型子项继续延期，E08 留到正式发布前。旧 Bash 4.1／4.4 仍可普通编辑和运行 TUI，原生执行兼容性按需验证。
 
@@ -75,7 +83,7 @@ ZLE 的初始 `ZDOTDIR` 已修正并在两种实际 OpenSSH 环境、五种签�
 | 1. 冻结候选与夹具（A01–A06） | 冻结客户端源码和制品，核对构建工具链、Linux 架构与 glibc、镜像摘要、SSH 主机指纹和回环端口。用仓库构建入口重建两个 Shell 的 Linux 资源。为本批使用独立容器、账号、HOME、远端工作目录和 App 数据目录。 | 随包资源、远端读回、实际加载的 Shell、模块、relay 及适用的 ZLE Main/Core 摘要一致。列出必测用例，记录选中、执行、通过、失败和跳过数量。错误摘要、缺符号、实验资源和不支持的目标保留普通终端并拒绝 Agent 原生执行。 |
 | 2. 验证 SSH/SFTP 与单次执行（B01–B08、E01、E02、E04） | 先跑隔离 SSH 回归，再用实际 App 在原用户终端验证 SFTP 上传与读回、独立 relay、终端尺寸及信号。Bash 跑五种历史配置、后台作业和生命周期共 7 项。ZLE 独立核对启动、同线程编辑、清稿、父解析器、hook/widget、信号和 EOF。覆盖父 Shell 工作目录及环境、8192／8193 字节边界、取消后用户 Enter、后台输出和停止。 | 上传及读回的路径、字节数和摘要相符，远端写入限于本批授权目录。批准的命令只接受一次并产生一次预期效果，拒绝或清稿后无文件效果。使用现有连接和终端标签，普通终端与无 SFTP 时的降级单列。 |
 | 3. 验证断线、恢复与旧输出（C01–C07、D05–D06） | 两种 Shell 分别在接受键发出前后验证控制 EOF、SSH 断线和超时。按清单补停止、接管及 App 崩溃重启，使用原隔离数据目录重启并显式验证重连。保留旧连接尾包，观察恢复普通模式与新连接输出的顺序。 | 对照原请求、连接代次、提交意图、实际接受次数、文件效果和持久记录。接受键前零效果，发出后最多一次。结果不明保留恢复门禁和原操作引用，禁止重放。迟到 Started 只补事实，只有匹配的 Settled 才可结算；旧代次不能影响新终端。独立账本探针与实际 App 分别记账。 |
-| 4. 补齐显示、人工交互与模型链（D01–D06、E05、E06） | 从本批真实 SSH PTY 采集窄宽切换、后台交错和重绑数据，覆盖 Chromium/WebKit 的 DOM/WebGL；实际 App 单独检查选择、复制、搜索、历史视口、被动焦点与接管。最后按授权时段运行双 Shell 真实模型的批准、后台作业和远端脚本文件链。 | 浏览器回放和原生 App 分别留证。模型案核对真实文件工具、批准后写入、SFTP 读回、返回的绝对路径和原父 Shell 执行。Direct 对照单列。严格 Unicode 模型子项继续延期。 |
+| 4. 补齐显示、人工交互与模型链（D01–D06、E05、E06） | 从本批真实 SSH PTY 采集窄宽切换、后台交错和重绑数据，覆盖 Chromium/WebKit 的 DOM/WebGL；实际 App 单独检查选择、复制、搜索、历史视口、被动焦点与接管。最后按授权时段运行双 Shell 真实模型的批准、后台作业和远端脚本文件链。 | 浏览器回放和原生 App 分别留证。模型案核对真实文件工具、批准后写入、SFTP 读回、返回的绝对路径和原父 Shell 执行。Direct 对照单列。严格 Unicode 模型子项见 [B01 回环 SSH 严格 Unicode 复验](#b01-回环-ssh-严格-unicode-复验)。 |
 | 5. 归档与清理（A05、E07、E08） | 独立核对 SSH/SFTP 回归及历史 scoped loopback HTTP/SSH 转发的半关闭、取消和超时。按 Shell 汇总条款，记录候选、命令及退出码、原始流、界面证据、远端效果和清理回执。 | 只清理确认归本批且已终止的进程、容器、目录和 CredentialRef。运行中或结果不明的操作保留引用。未覆盖或失败项注明恢复条件。正式发布前另核验最终 `main` 的完整远端 E08。 |
 
 恢复后先用 `node scripts/native-input-p2/matrix.mjs --list-cases` 核对用例清单，执行时显式选择七个 `5.3/ssh/*` 对应项。隔离传输回归使用 `pnpm test:terminal-visible:ssh`，运行前核对其 Compose 资源归属。资源构建沿用 [Linux Bash 构建器](../../scripts/native-input-p2/build.py) 和 [Linux ZLE 构建入口](../../scripts/native-input-p3/linux-build.sh)。实际 App 沿用 [P2 SSH 夹具](../../scripts/native-input-p2/ssh.mjs)、[Bash App 入口](../../scripts/native-input-p2/app.mjs) 与 [ZLE jobs 入口](../../scripts/native-input-p3/app.mjs)。ZLE 的四个故障切点与旧 PTY 尾包独立执行，使用 `node scripts/native-input-p3/ssh-recovery.mjs --list-cases` 发现。实机状态、命令、证据和清理见 [ZLE SSH 故障恢复交接清单](agent-terminal-input-zle-ssh-recovery.md)。
