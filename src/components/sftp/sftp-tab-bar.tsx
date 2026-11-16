@@ -496,7 +496,13 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
         onDragCancel={handleDragCancel}
       >
         <SortableContext items={connections.map((c) => c.id)} strategy={() => null}>
-          <ScrollArea viewportRef={scrollRef} horizontal vertical={false} size="thin" className="h-8 min-w-0 flex-1">
+          <ScrollArea
+            viewportRef={scrollRef}
+            horizontal
+            vertical={false}
+            size="thin"
+            className="h-8 min-w-0 flex-1 [&>[data-slot=scroll-area-scrollbar]]:top-0 [&>[data-slot=scroll-area-scrollbar]]:z-20"
+          >
             <div role="tablist" className="flex min-w-0 items-center gap-0 p-0">
               {connections.map((connection, index) => {
                 const isDragging = draggingConnectionId === connection.id;
