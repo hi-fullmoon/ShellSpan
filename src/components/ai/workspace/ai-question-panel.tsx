@@ -4,9 +4,11 @@ import {
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  CopyIcon,
   MessageCircleQuestionIcon,
   PenLineIcon,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   Card,
   CardAction,
@@ -28,6 +30,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   InputGroup,
   InputGroupAddon,
@@ -42,6 +45,7 @@ import { useI18n } from '@/hooks/useI18n';
 import { AiContentTitle } from './ai-content-title';
 import { AiSubmissionButtonLabel, submissionFeedbackMs } from './ai-submission-button-label';
 import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
+import { writeClipboardText } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 import { questionIssue, questionIssueMessageKey, questionSubmissionIssue, type QuestionSubmissionIssue } from '@/lib/ai/question-submission';
 import {
@@ -135,6 +139,7 @@ export function AiQuestionPanel({
 }: AiQuestionPanelProps): React.ReactNode {
   const { t } = useI18n();
   const userAction = pendingUserAction(question);
+  const copyCommandLabel = t('ai.workspace.tool.copyCommand');
   const key = questionKey(question.identity) + (userAction ? ':action' : '');
   const draft = useAgentQuestionStore((state) => state.drafts[key]);
   const [operation, setOperation] = useState<(
@@ -308,7 +313,31 @@ export function AiQuestionPanel({
               <FieldDescription className="whitespace-pre-wrap [overflow-wrap:anywhere]">{userAction.instructions}</FieldDescription>
               <Field>
                 <FieldDescription>{t('ai.workspace.question.actionVerification')}</FieldDescription>
-                <pre className={cn(AI_CONTENT_CODE_CLASS, 'whitespace-pre-wrap [overflow-wrap:anywhere]')}>{userAction.verification_command}</pre>
+                <div className="ai-code-block flex min-w-0 items-start gap-1" data-ai-copy-region>
+                  <pre className={cn(AI_CONTENT_CODE_CLASS, 'flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]')}>
+                    <code>{userAction.verification_command}</code>
+                  </pre>
+                  <Tooltip>
+                    <TooltipTrigger render={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="ai-tool-copy-button mt-1 mr-1 shrink-0"
+                        aria-label={copyCommandLabel}
+                        onClick={() => {
+                          void writeClipboardText(userAction.verification_command).then(
+                            () => toast.success(t('common.copied')),
+                            () => toast.error(t('ai.workspace.question.actionCopyFailed')),
+                          );
+                        }}
+                      />
+                    }>
+                      <CopyIcon aria-hidden="true" />
+                    </TooltipTrigger>
+                    <TooltipContent>{copyCommandLabel}</TooltipContent>
+                  </Tooltip>
+                </div>
               </Field>
             </FieldGroup> : <FieldGroup className="ai-question-list gap-0">
               <FieldSet

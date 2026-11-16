@@ -263,6 +263,7 @@ export default {
   'ai.workspace.question.actionTitle': 'Your action is needed',
   'ai.workspace.question.actionWaiting': 'Complete the following steps before continuing',
   'ai.workspace.question.actionVerification': 'After you confirm completion, this command must succeed before dependent work continues:',
+  'ai.workspace.question.actionCopyFailed': 'Could not copy the verification command',
   'ai.workspace.question.actionCancel': 'Cancel',
   'ai.workspace.question.actionChangePlan': 'Change plan',
   'ai.workspace.question.actionComplete': 'I have completed it',

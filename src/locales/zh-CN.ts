@@ -263,6 +263,7 @@ export default {
   'ai.workspace.question.actionTitle': '需要你完成操作',
   'ai.workspace.question.actionWaiting': '请完成以下操作后再继续',
   'ai.workspace.question.actionVerification': '确认完成后，以下验证命令必须成功，才能继续后续操作：',
+  'ai.workspace.question.actionCopyFailed': '无法复制验证命令',
   'ai.workspace.question.actionCancel': '取消',
   'ai.workspace.question.actionChangePlan': '切换方案',
   'ai.workspace.question.actionComplete': '我已完成操作',
