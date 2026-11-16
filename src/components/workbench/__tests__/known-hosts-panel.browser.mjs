@@ -50,16 +50,19 @@ try {
       const group = input.closest('[data-slot="input-group"]');
       const actions = group.parentElement;
       const bounds = [...actions.children].map((element) => element.getBoundingClientRect());
+      const title = actions.previousElementSibling.getBoundingClientRect();
       return {
         width: group.getBoundingClientRect().width,
         tops: bounds.map((rect) => rect.top),
+        stacked: bounds[0].top >= title.bottom,
         right: Math.max(...bounds.map((rect) => rect.right)),
         containerRight: actions.getBoundingClientRect().right,
       };
     });
     assert.ok(searchLayout.width <= 256, 'Search must not grow beyond the connection manager search width');
-    if (width >= 420) assert.equal(searchLayout.width, 256);
+    if (width >= 960) assert.equal(searchLayout.width, 256);
     else assert.ok(searchLayout.width < 256, 'Search must shrink in narrow containers');
+    assert.equal(searchLayout.stacked, width === 320, `Title and actions row placement at ${width}px`);
     assert.equal(new Set(searchLayout.tops).size, 1, 'Search and refresh must remain on one row');
     assert.ok(searchLayout.right <= searchLayout.containerRight, 'Refresh must remain inside the action row');
     if (process.argv.includes('--search-only')) {

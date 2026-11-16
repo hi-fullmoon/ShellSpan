@@ -269,7 +269,6 @@ export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionPr
           actions={
             <>
               <WorkbenchSearchInput
-                containerClassName="min-w-0 max-w-64 flex-1 @min-[64rem]:flex-none"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={t('workbench.keychain.searchPlaceholder')}
@@ -297,7 +296,7 @@ export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionPr
                 icon={<KeyRound className="size-5" />}
               />
             )}
-            {initialized && keys.length > 0 && filteredKeys.length === 0 && (
+            {keys.length > 0 && filteredKeys.length === 0 && (
               <PanelEmptyState
                 title={t('workbench.keychain.filteredEmpty')}
                 description={t('common.noSearchResults')}

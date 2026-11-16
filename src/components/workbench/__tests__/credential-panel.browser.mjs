@@ -3,7 +3,10 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, mkdir, rm } from 'node:fs/promises';
 import { tmpdir, hostname, userInfo } from 'node:os';
 import { join } from 'node:path';
-import { chromium } from 'playwright';
+import { fileURLToPath } from 'node:url';
+import { createServer } from 'vite';
+import tailwindcss from '@tailwindcss/vite';
+import { chromium, webkit } from 'playwright';
 
 // Use a real, freshly generated SSH key. Only public metadata enters the browser.
 const directory = await mkdtemp(join(tmpdir(), 'shellspan-credential-review-'));
@@ -11,41 +14,77 @@ const keyPath = join(directory, 'identity');
 execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', keyPath]);
 const publicKey = await readFile(`${keyPath}.pub`, 'utf8');
 const fingerprint = execFileSync('ssh-keygen', ['-l', '-E', 'sha256', '-f', `${keyPath}.pub`], { encoding: 'utf8' }).trim().split(/\s+/)[1];
-const browser = await chromium.launch();
+const host = hostname();
+const username = userInfo().username;
+const root = fileURLToPath(new URL('../../../../', import.meta.url));
+// Mount the real panel without starting the desktop app in the same document.
+const server = await createServer({
+  root,
+  configFile: false,
+  appType: 'custom',
+  cacheDir: join(directory, 'vite'),
+  logLevel: 'error',
+  resolve: { alias: { '@': join(root, 'src') } },
+  plugins: [tailwindcss(), {
+    name: 'credential-panel-review',
+    resolveId(id) { if (id === '/credential-runtime.js') return id; },
+    load(id) {
+      if (id === '/credential-runtime.js') return `
+        import '/src/styles/base.css';
+        export { default as React } from 'react';
+        export { createRoot } from 'react-dom/client';
+        export { KeychainPanel } from '@/components/workbench/keychain-panel.tsx';
+        export { useKeychainStore } from '@/stores/keychainStore';
+        export { useProfileStore } from '@/stores/profileStore';
+        export { useAppStore } from '@/stores/appStore';
+        export { initI18n } from '@/locales';
+      `;
+    },
+    configureServer(vite) {
+      vite.middlewares.use((request, response, next) => {
+        if (request.url !== '/') return next();
+        response.setHeader('Content-Type', 'text/html');
+        response.end('<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"></head><body><div id="credential-review" style="position:fixed;inset:0"></div></body></html>');
+      });
+    },
+  }],
+  server: { host: '127.0.0.1', port: 0, hmr: false, watch: null, forwardConsole: false },
+});
+const browserType = process.argv.includes('--webkit') ? webkit : chromium;
+let browser;
 try {
+  await server.listen();
+  browser = await browserType.launch();
   const page = await browser.newPage();
-  await page.goto(process.env.SHELLSPAN_TEST_URL ?? 'http://localhost:1420');
+  page.setDefaultTimeout(8000);
+  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/`);
   await page.evaluate(async ({ publicKey, fingerprint, host, username }) => {
-    const { default: React } = await import('/node_modules/.vite/deps/react.js');
-    const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js');
-    const { KeychainPanel } = await import('/src/components/workbench/keychain-panel.tsx');
-    const { useKeychainStore } = await import('/src/stores/keychainStore.ts');
-    const { useProfileStore } = await import('/src/stores/profileStore.ts');
-    const { useAppStore } = await import('/src/stores/appStore.ts');
-    const { initI18n } = await import('/src/locales/index.ts');
+    const {
+      React, createRoot, KeychainPanel, useKeychainStore, useProfileStore, useAppStore, initI18n,
+    } = await import('/credential-runtime.js');
     await initI18n('zh-CN');
-    await useProfileStore.getState().hydrateFromDb();
     useAppStore.setState({ locale: 'zh-CN' });
     const profile = { id: 'local-ssh', name: host, host, port: 22, username, authMethod: 'key', keychainKeyId: 'generated-key', createdAt: Date.now(), updatedAt: Date.now() };
     useProfileStore.setState({ initialized: true, profiles: [profile] });
     useKeychainStore.setState({ initialized: true, loadError: undefined, keys: [
       { id: 'generated-key', label: 'OpenSSH · Ed25519', kind: 'keyFile', keyType: 'ssh-ed25519', service: 'com.shellspan.key', publicKey, fingerprint },
     ] });
-    const appRoot = document.getElementById('root');
-    if (appRoot) appRoot.style.display = 'none';
-    const root = document.createElement('div');
-    root.id = 'credential-review';
-    root.style.cssText = 'position:fixed;inset:0;background:var(--background);';
-    document.body.append(root);
-    ReactDOM.createRoot(root).render(React.createElement(KeychainPanel));
-  }, { publicKey, fingerprint, host: hostname(), username: userInfo().username });
+    createRoot(document.getElementById('credential-review')).render(React.createElement(KeychainPanel));
+  }, { publicKey, fingerprint, host, username });
+  // The browser has no native IPC, so the refresh fails while the cached key remains available.
+  await page.waitForFunction(async () => {
+    const { useKeychainStore } = await import('/credential-runtime.js');
+    const { initialized, keys } = useKeychainStore.getState();
+    return !initialized && keys.length > 0;
+  });
 
   await mkdir('.artifacts/tests/workbench', { recursive: true });
-  for (const width of [1440, 960, 420]) {
+  const widths = process.argv.includes('--search-only') ? [1440, 960, 420, 360] : [1440, 960, 420];
+  for (const width of widths) {
     await page.setViewportSize({ width, height: 720 });
     await page.getByRole('heading', { name: '凭据管理', exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: '新建', exact: true }).count(), 1);
-    const search = page.getByRole('textbox', { name: '搜索名称、类型或关联连接' });
+    const search = page.getByRole('textbox', { name: '搜索名称、类型、账号、主机或端口' });
     const searchLayout = await search.evaluate((input) => {
       const group = input.closest('[data-slot="input-group"]');
       const actions = group.parentElement;
@@ -59,6 +98,7 @@ try {
     });
     assert.ok(searchLayout.width <= 256, 'Search must not grow beyond the connection manager search width');
     if (width >= 960) assert.equal(searchLayout.width, 256);
+    if (width === 360) assert.ok(searchLayout.width < 256, 'Search must shrink in narrow containers');
     assert.equal(new Set(searchLayout.tops).size, 1, 'Search and actions must remain on one row');
     assert.ok(searchLayout.right <= searchLayout.containerRight, 'Search must shrink to keep actions visible');
     if (process.argv.includes('--search-only')) {
@@ -81,17 +121,24 @@ try {
     assert.equal(await page.locator('#credential-review .grid').evaluate((grid) => grid.getBoundingClientRect().top), cardTop);
     await page.screenshot({ path: `.artifacts/tests/workbench/credential-help-${width}.png` });
     await page.keyboard.press('Escape');
-    await helpPanel.waitFor({ state: 'hidden' });
-    await help.focus();
-    await page.keyboard.press('Enter');
+    const popup = page.locator('[data-slot="popover-content"]');
+    await popup.waitFor({ state: 'detached' });
+    await help.press('Enter');
+    await helpPanel.waitFor();
+    await page.keyboard.press('Escape');
+    await popup.waitFor({ state: 'detached' });
+    assert.ok(await help.evaluate((button) => button === document.activeElement), 'Escape must return focus to Help');
+    await help.press('Enter');
     await helpPanel.waitFor();
     await page.mouse.click(width - 10, 700);
     await helpPanel.waitFor({ state: 'hidden' });
     if (process.argv.includes('--help-only')) continue;
-    await search.fill(hostname());
-    assert.equal(await page.getByText('OpenSSH · Ed25519', { exact: true }).count(), 1);
+    const association = page.getByText(`用于：${username}@${host}:22`, { exact: true });
+    await association.waitFor();
     await search.fill('登录密码');
     await page.getByText('没有匹配的凭据', { exact: true }).waitFor();
+    await search.fill(host);
+    await association.waitFor();
     await search.fill('');
     const layout = await page.locator('#credential-review').evaluate((root) => {
       const actions = root.querySelector('[data-slot="workbench-page-header-actions"]');
@@ -152,7 +199,7 @@ try {
     await page.getByRole('button', { name: '删除', exact: true }).click();
     const confirmation = page.getByRole('alertdialog');
     await confirmation.waitFor();
-    assert.ok((await confirmation.textContent()).includes(hostname()), 'Deletion must identify linked connections');
+    assert.ok((await confirmation.textContent()).includes(host), 'Deletion must identify linked connections');
     assert.ok((await confirmation.textContent()).includes('服务器上的公钥授权不会被撤销'));
     await confirmation.getByRole('button', { name: '取消', exact: true }).click();
     await confirmation.waitFor({ state: 'hidden' });
@@ -161,8 +208,9 @@ try {
     ? 'Credential search: fixed width and narrow container shrinking passed.'
     : process.argv.includes('--help-only')
     ? 'Credential help: wide/narrow rendering, keyboard, outside dismissal and stable layout passed.'
-    : 'Credential panel: metadata privacy, search, delete context and wide/narrow rendering passed.');
+    : `Credential panel (${browserType.name()}): help, metadata privacy, search, delete context and wide/narrow rendering passed.`);
 } finally {
-  await browser.close();
+  await browser?.close();
+  await server.close();
   await rm(directory, { recursive: true, force: true });
 }

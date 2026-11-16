@@ -168,7 +168,6 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
     <TooltipProvider>
       <WorkbenchPage>
         <WorkbenchPageHeader
-          compactActions
           icon={ServerIcon}
           title={t('workbench.connections.title')}
           description={t('workbench.connections.count', {
@@ -183,7 +182,6 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={t('workbench.connections.searchPlaceholder')}
                 aria-label={t('workbench.connections.searchPlaceholder')}
-                containerClassName="max-w-64 flex-1 @min-[48rem]:flex-none"
                 />} />
                 <TooltipContent>{t('workbench.connections.searchHint')}</TooltipContent>
               </Tooltip>

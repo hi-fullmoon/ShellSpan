@@ -128,7 +128,6 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
           actions={(
             <>
               <WorkbenchSearchInput
-                containerClassName="min-w-0 max-w-64 flex-1 @min-[64rem]:flex-none"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={t('workbench.knownHosts.searchPlaceholder')}

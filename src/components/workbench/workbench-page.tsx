@@ -8,21 +8,15 @@ import {
   InputGroupInput,
 } from '@/components/ui/input-group';
 
-export const WORKBENCH_SEARCH_WIDTH_CLASS =
-  'w-64 max-w-full flex-none';
-
 type WorkbenchSearchClearProps =
   | { onClear?: never; clearLabel?: never }
   | { onClear: () => void; clearLabel: string };
 
 type WorkbenchSearchInputProps = React.ComponentProps<typeof InputGroupInput> &
-  WorkbenchSearchClearProps & {
-    containerClassName?: string;
-  };
+  WorkbenchSearchClearProps;
 
 export const WorkbenchSearchInput: React.FC<WorkbenchSearchInputProps> = ({
   className,
-  containerClassName,
   onClear,
   clearLabel,
   value,
@@ -30,9 +24,8 @@ export const WorkbenchSearchInput: React.FC<WorkbenchSearchInputProps> = ({
 }) => (
   <InputGroup
     className={cn(
-      'h-8 bg-background has-[[data-slot=input-group-control]:focus-visible]:border-input has-[[data-slot=input-group-control]:focus-visible]:ring-1 has-[[data-slot=input-group-control]:focus-visible]:ring-ring',
-      WORKBENCH_SEARCH_WIDTH_CLASS,
-      containerClassName,
+      'h-8 w-64 max-w-full flex-none bg-background has-[[data-slot=input-group-control]:focus-visible]:border-input has-[[data-slot=input-group-control]:focus-visible]:ring-1 has-[[data-slot=input-group-control]:focus-visible]:ring-ring',
+      'in-data-[slot=workbench-page-header-actions]:w-32 in-data-[slot=workbench-page-header-actions]:max-w-64 in-data-[slot=workbench-page-header-actions]:flex-1',
     )}
   >
     <InputGroupInput className={className} value={value} {...props} />
@@ -72,7 +65,6 @@ interface WorkbenchPageHeaderProps extends Omit<React.ComponentProps<'header'>, 
   description?: React.ReactNode;
   titleMeta?: React.ReactNode;
   actions?: React.ReactNode;
-  compactActions?: boolean;
 }
 
 export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
@@ -81,7 +73,6 @@ export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
   description,
   titleMeta,
   actions,
-  compactActions = false,
   children,
   className,
   ...props
@@ -94,12 +85,10 @@ export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
     )}
     {...props}
   >
-    <div className={cn('flex flex-col gap-2', compactActions
-      ? '@min-[48rem]:flex-row @min-[48rem]:items-center @min-[48rem]:justify-between'
-      : '@min-[64rem]:flex-row @min-[64rem]:items-center @min-[64rem]:justify-between')}>
+    <div className="flex flex-wrap items-center gap-2">
       <div
         data-slot="workbench-page-header-copy"
-        className={cn('flex h-9 min-w-0 shrink-0 items-center gap-2', compactActions ? '@min-[48rem]:flex-1' : '@min-[64rem]:flex-1')}
+        className="flex h-9 max-w-full min-w-0 shrink-0 items-center gap-2"
       >
         <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <Icon className="size-4" aria-hidden />
@@ -117,9 +106,11 @@ export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
       {actions && (
         <div
           data-slot="workbench-page-header-actions"
-          className={cn('-m-1 flex h-10 min-w-0 flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>button]:shrink-0', compactActions
-            ? '@min-[48rem]:m-0 @min-[48rem]:h-8 @min-[48rem]:shrink-0 @min-[48rem]:overflow-visible @min-[48rem]:p-0 @min-[48rem]:justify-end'
-            : '@min-[64rem]:m-0 @min-[64rem]:h-8 @min-[64rem]:shrink-0 @min-[64rem]:overflow-visible @min-[64rem]:p-0 @min-[64rem]:justify-end')}
+          className={cn(
+            '-m-1 flex h-10 min-w-0 flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>button]:shrink-0',
+            // Reserve enough room for the controls before wrapping, then fill the available row.
+            'flex-[1_1_min-content] justify-end-safe',
+          )}
         >
           {actions}
         </div>

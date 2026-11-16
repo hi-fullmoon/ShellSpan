@@ -260,7 +260,7 @@ describe('ConnectionList', () => {
     expect(onAdd).toHaveBeenCalledTimes(1);
   });
 
-  it('lets connection search shrink in narrow containers and describes searchable fields', () => {
+  it('provides an accessible name for connection search without a native tooltip', () => {
     render(
       <ConnectionList
         profiles={[]}
@@ -281,12 +281,6 @@ describe('ConnectionList', () => {
       name: 'workbench.connections.searchPlaceholder',
     });
     expect(search.parentElement).toHaveAttribute('data-slot', 'input-group');
-    expect(search.parentElement).toHaveClass(
-      'min-w-0',
-      'flex-1',
-      'max-w-64',
-      '@min-[48rem]:flex-none',
-    );
     expect(search).not.toHaveAttribute('title');
   });
 

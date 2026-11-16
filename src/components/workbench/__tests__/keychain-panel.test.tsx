@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { KeychainPanel } from '../keychain-panel';
 import { useKeychainStore } from '@/stores/keychainStore';
 import { useProfileStore } from '@/stores/profileStore';
@@ -95,17 +95,13 @@ describe('KeychainPanel', () => {
   it('renders the header refresh action as a text button', () => {
     render(<KeychainPanel />);
 
-    expect(screen.getByRole('button', { name: 'common.refresh' }))
+    const header = screen.getByRole('banner');
+    expect(within(header).getByRole('button', { name: 'common.refresh' }))
       .toHaveTextContent('common.refresh');
-    const search = screen.getByRole('textbox', {
+    const search = within(header).getByRole('textbox', {
       name: 'workbench.keychain.searchPlaceholder',
     });
     expect(search.parentElement).toHaveAttribute('data-slot', 'input-group');
-    expect(search.parentElement).toHaveClass(
-      'min-w-0',
-      'max-w-64',
-      'flex-1',
-    );
   });
 
   it('creates key-file keys only and hides the kind selector', () => {

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { KnownHostsPanel } from '../known-hosts-panel';
 
@@ -31,22 +31,16 @@ vi.mock('@/stores/knownHostsStore', () => ({
 }));
 
 describe('KnownHostsPanel', () => {
-  it('lets the header search shrink until the wide container breakpoint', () => {
+  it('provides labeled search and refresh actions in the header', () => {
     render(<KnownHostsPanel />);
 
-    expect(screen.getByRole('button', { name: 'common.refresh' }))
+    const header = screen.getByRole('banner');
+    expect(within(header).getByRole('button', { name: 'common.refresh' }))
       .toHaveTextContent('common.refresh');
-    const search = screen.getByRole('textbox', {
+    const search = within(header).getByRole('textbox', {
       name: 'workbench.knownHosts.searchPlaceholder',
     });
     expect(search.parentElement).toHaveAttribute('data-slot', 'input-group');
-    expect(search.parentElement).toHaveClass(
-      'min-w-0',
-      'w-64',
-      'max-w-64',
-      'flex-1',
-      '@min-[64rem]:flex-none',
-    );
   });
 
   it('spaces known-host cards with the compact grid gap', () => {
