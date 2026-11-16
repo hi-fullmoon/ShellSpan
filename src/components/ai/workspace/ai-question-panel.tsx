@@ -313,30 +313,33 @@ export function AiQuestionPanel({
               <FieldDescription className="whitespace-pre-wrap [overflow-wrap:anywhere]">{userAction.instructions}</FieldDescription>
               <Field>
                 <FieldDescription>{t('ai.workspace.question.actionVerification')}</FieldDescription>
-                <div className="ai-code-block flex min-w-0 items-start gap-1" data-ai-copy-region>
-                  <pre className={cn(AI_CONTENT_CODE_CLASS, 'flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]')}>
+                <div className="ai-code-block flex min-w-0 items-baseline" data-ai-copy-region>
+                  <pre className={cn(AI_CONTENT_CODE_CLASS, 'flex-1 pr-12 whitespace-pre-wrap [overflow-wrap:anywhere]')}>
                     <code>{userAction.verification_command}</code>
                   </pre>
-                  <Tooltip>
-                    <TooltipTrigger render={
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        className="ai-tool-copy-button mt-1 mr-1 shrink-0"
-                        aria-label={copyCommandLabel}
-                        onClick={() => {
-                          void writeClipboardText(userAction.verification_command).then(
-                            () => toast.success(t('common.copied')),
-                            () => toast.error(t('ai.workspace.question.actionCopyFailed')),
-                          );
-                        }}
-                      />
-                    }>
-                      <CopyIcon aria-hidden="true" />
-                    </TooltipTrigger>
-                    <TooltipContent>{copyCommandLabel}</TooltipContent>
-                  </Tooltip>
+                  {/* A zero-size box shares the first text baseline without taking space from the command. */}
+                  <span className="relative size-0 shrink-0" data-ai-copy-anchor>
+                    <Tooltip>
+                      <TooltipTrigger render={
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          className="ai-tool-copy-button absolute -top-[0.5ex] right-1 -translate-y-1/2 [font:var(--ai-font-markdown-code-block)]"
+                          aria-label={copyCommandLabel}
+                          onClick={() => {
+                            void writeClipboardText(userAction.verification_command).then(
+                              () => toast.success(t('common.copied')),
+                              () => toast.error(t('ai.workspace.question.actionCopyFailed')),
+                            );
+                          }}
+                        />
+                      }>
+                        <CopyIcon aria-hidden="true" />
+                      </TooltipTrigger>
+                      <TooltipContent>{copyCommandLabel}</TooltipContent>
+                    </Tooltip>
+                  </span>
                 </div>
               </Field>
             </FieldGroup> : <FieldGroup className="ai-question-list gap-0">

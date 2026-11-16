@@ -42,9 +42,9 @@ try {
     const browser = await engine.launch(engine === chromium ? { channel: 'chromium' } : {});
     try {
       for (const locale of ['en-US', 'zh-CN']) {
-        for (const width of [320, 420, 720]) {
+        for (const width of [200, 320, 420, 720]) {
           const page = await browser.newPage({
-            viewport: { width, height: 640 },
+            viewport: { width, height: width === 200 ? 800 : 640 },
             ...(engine === chromium && { permissions: ['clipboard-read', 'clipboard-write'] }),
           });
           const errors = [];
@@ -110,9 +110,27 @@ try {
           assert.notEqual(background, 'rgba(0, 0, 0, 0)', 'The command block must have a background.');
           assert.notEqual(background, panelBackground, 'The command and panel backgrounds must be distinct.');
           assert.equal(await copy.textContent(), '', 'The copy button must have no visible text label.');
-          assert.equal(await copy.locator('svg').count(), 1);
+          const iconBox = await copy.locator('svg').boundingBox();
           assert.equal(copyBox.height, copyBox.width, 'The copy button must be square.');
-          assert.ok(commandBox.x + commandBox.width <= copyBox.x, 'The copy button must not overlap the command.');
+          assert.equal(await copy.evaluate(element => getComputedStyle(element).position), 'absolute');
+          const { firstLineCenter, lineCount } = await command.locator('code').evaluate(element => {
+            const commandText = document.createRange();
+            commandText.selectNodeContents(element);
+            const lineCount = commandText.getClientRects().length;
+            const baselineMarker = document.createElement('span');
+            baselineMarker.style.cssText = 'display:inline-block;width:0;height:1ex;vertical-align:baseline';
+            element.prepend(baselineMarker);
+            const { top, height } = baselineMarker.getBoundingClientRect();
+            baselineMarker.remove();
+            return { firstLineCenter: top + height / 2, lineCount };
+          });
+          if (width === 200) assert.ok(lineCount > 1, 'The command must wrap in the narrow viewport.');
+          const iconCenter = iconBox.y + iconBox.height / 2;
+          assert.ok(Math.abs(iconCenter - firstLineCenter) <= 0.5,
+            `The copy icon center (${iconCenter}) must align with the first command line (${firstLineCenter}).`);
+          const commandPadding = await command.evaluate(element => parseFloat(getComputedStyle(element).paddingRight));
+          assert.ok(commandBox.x + commandBox.width - commandPadding <= copyBox.x,
+            'The copy button must stay inside the space reserved to the right of the command text.');
           assert.ok(copyBox.x + copyBox.width <= regionBox.x + regionBox.width, 'The copy button must fit inside the command block.');
           const copyOpacity = () => copy.evaluate(element => getComputedStyle(element).opacity);
           assert.equal(await copyOpacity(), '0', 'The copy button must be hidden at rest.');
@@ -127,7 +145,7 @@ try {
             await page.locator('[data-slot="tooltip-content"]').filter({ hasText: copyLabel }).waitFor({ timeout: 5_000 });
             await copy.click();
           } else {
-            await page.locator('.ai-question-panel-header button').focus();
+            await page.locator('.ai-question-panel-actions').getByRole('button').focus();
             await page.keyboard.press('Tab');
             assert.equal(await copy.evaluate(button => button === document.activeElement), true);
             assert.equal(await copyOpacity(), '1', 'Keyboard focus must reveal the copy button.');
