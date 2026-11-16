@@ -108,7 +108,7 @@ authorizes deployment; verification never implicitly authorizes rollback.
 
 ## Verification
 
-`pnpm test:agent-diagnostics` runs the local Python HTTP/TLS/host tests, native
+`node scripts/verify-agent-diagnostics.mjs` runs the local Python HTTP/TLS/host tests, native
 diagnostic admission/cancellation tests, and a disposable Debian systemd container
 with real sshd lifecycle and journal cursor tests. Docker and Python are required.
 The container uses a private cgroup namespace, no host bind mounts, no published

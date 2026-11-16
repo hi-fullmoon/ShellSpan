@@ -155,7 +155,7 @@ multimodal PDF support or OCR. Model context budgets still apply.
   different document capabilities for Responses and Chat Completions.
 - [DeepSeek upload file](https://api-docs.deepseek.com/api/create-file/)
   documents image uploads; it is not evidence of general document API support.
-- `pnpm test:document-upload` exercises real PDF, DOCX, XLSX and text uploads,
+- `node scripts/verify-document-upload.mjs` exercises real PDF, DOCX, XLSX and text uploads,
   preview, submission, removal, failures and navigation in Chromium and WebKit at
   narrow and wide widths. It uses PDF-lib, ExcelJS and Mammoth's actual DOCX fixture.
 - `node scripts/verify-chat-reference-live.mjs --history PATH --context PATH --database PATH`

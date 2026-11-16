@@ -27,14 +27,14 @@ pnpm install --frozen-lockfile
 
 ```bash
 # 无需旧机器捕获目录，使用仓库真实 PTY 冻结显示片段
-pnpm test:terminal-native-display
+node src/lib/terminal/__tests__/native-input-display.browser.mjs
 
 # macOS arm64：构建固定 GNU Bash 5.3 / Readline 8.3.6、重新采集并验证
-pnpm test:terminal-native-input:p0:formal
+node scripts/verify-terminal-p0-formal.mjs
 
 # 只采集/验证相关复制，或只验证同流模式
-pnpm test:terminal-native-input:p0:copy
-pnpm test:terminal-native-input:p0:inband
+node scripts/verify-terminal-p0-formal.mjs --copy-only
+node scripts/verify-terminal-p0-formal.mjs --inband-only
 ```
 
 完整入口缺少输入时生成真实 capture，不 skip；也支持显式 `--captures`（ownership）、`--copy-captures`、`--compat-captures`、`--geometry-captures`、`--commit-capture` 回放。它通过 `pnpm patch --ignore-existing` 提取原包生成对照；候选始终直接加载正式 node_modules 运行包，不再次套实验补丁。结果记录正式 pnpm patch hash、实际 JS/source 摘要及所有 capture 路径。没有硬编码旧时间戳作为必需输入。

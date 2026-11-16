@@ -1,6 +1,6 @@
 # P1 native input acceptance
 
-Run `pnpm test:terminal-input:p1` on the frozen macOS arm64 host. It builds the
+Run `node scripts/verify-terminal-input-p1.mjs` on the frozen macOS arm64 host. It builds the
 GNU Bash 5.3 / static Readline 8.3.6 producer using the P0 pinned archives and
 reviewed C patches, then exercises the shared NIP protocol through a real PTY
 and private Unix socket. No production session selects native mode here.

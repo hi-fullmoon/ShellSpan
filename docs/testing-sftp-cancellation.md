@@ -3,7 +3,7 @@
 Run from the repository:
 
 ```bash
-pnpm test:sftp-cancellation:ssh
+node scripts/verify-sftp-cancellation.mjs
 ```
 
 Requires Node and pnpm versions from `package.json`, Docker with Linux containers,

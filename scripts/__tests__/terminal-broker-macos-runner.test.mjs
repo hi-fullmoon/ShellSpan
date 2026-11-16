@@ -34,9 +34,6 @@ describe('macOS terminal rollout runner', () => {
     expect(runner).toContain("process.argv.includes('--editors-only')");
     expect(runner).toContain("execute(editor, ['--version'])");
     expect(runner).toContain("cargoTest(testName, ['--ignored', '--exact'], testName)");
-    const manifest = JSON.parse(await readFile(path.join(repositoryRoot, 'package.json'), 'utf8'));
-    expect(manifest.scripts['test:terminal-editors:macos'])
-      .toBe('node scripts/verify-terminal-broker-macos.mjs --editors-only');
   });
 
   it('keeps both native shells and every rollout phase in the consolidated gate', async () => {

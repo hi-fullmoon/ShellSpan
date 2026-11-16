@@ -31,6 +31,7 @@
 - [凭据刷新](testing-credential-refresh.md)
 - [SFTP 取消](testing-sftp-cancellation.md)
 - [Agent 与用户终端争用](testing-agent-terminal-contention.md)
+- [其他专项验证命令](testing.md)
 
 ## 终端实施与验收
 

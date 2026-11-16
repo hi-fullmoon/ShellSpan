@@ -12,8 +12,8 @@ not launch an App, browser, model, Shell/PTY or SSH fixture as part of cleanup.
 
 ## Installed terminal package
 
-`pnpm test:terminal-native-input:p0:formal` checks the installed, digest-verified
-xterm package. Its `p0:copy` and `p0:inband` entries select narrower scopes.
+`node scripts/verify-terminal-p0-formal.mjs` checks the installed, digest-verified
+xterm package. Pass `--copy-only` or `--inband-only` to select a narrower scope.
 The generic cursor, copy, selection and viewport patch sources remain here
 because the maintained dependency build records their digests.
 
@@ -31,9 +31,9 @@ Never reapply a laboratory patch to the installed package.
 
 ## Standalone GNU prototype
 
-`pnpm test:terminal-native-input:p0 --upstream` builds and exercises the pinned
+`node scripts/verify-terminal-native-input.mjs --upstream` builds and exercises the pinned
 GNU Bash 4.1, 4.4 and 5.3 prototype. The SSH entry is
-`pnpm test:terminal-native-input:p0:ssh`; `--ssh` adds that lane to the local
+`python3 scripts/native-input-p0/ssh.py`; `--ssh` adds that lane to the local
 driver. `--browser-only` replays a supplied capture, and `--native-only`
 selects native capture without browser replay. These two local scope selectors
 are mutually exclusive; combining them is rejected before any checks start.

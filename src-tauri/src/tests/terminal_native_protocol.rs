@@ -1555,7 +1555,7 @@ impl Drop for NativeShell {
 }
 
 #[test]
-#[ignore = "requires the pinned NIP native producer; run pnpm test:terminal-input:p1"]
+#[ignore = "requires the pinned NIP native producer; run node scripts/verify-terminal-input-p1.mjs"]
 fn native_protocol_real_bash_commit_and_duplicate_fence() {
     let mut shell = NativeShell::start("commit");
     assert_eq!(
@@ -1636,7 +1636,7 @@ fn native_protocol_real_bash_commit_and_duplicate_fence() {
 }
 
 #[test]
-#[ignore = "requires the pinned NIP native producer; run pnpm test:terminal-input:p1"]
+#[ignore = "requires the pinned NIP native producer; run node scripts/verify-terminal-input-p1.mjs"]
 fn native_protocol_real_queries_do_not_exhaust_cancellation() {
     let mut shell = NativeShell::start("queries-cancel");
     let source = "printf forbidden >> \"$HOME/effect\"; : 'owned draft 中文'";
@@ -1751,7 +1751,7 @@ fn native_protocol_crash_child() {
 }
 
 #[test]
-#[ignore = "requires the rebuilt native producer; run pnpm test:terminal-input:p1"]
+#[ignore = "requires the rebuilt native producer; run node scripts/verify-terminal-input-p1.mjs"]
 fn native_protocol_real_process_crash_recovery_never_reinputs_or_reaccepts() {
     use std::os::unix::process::ExitStatusExt;
     let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
