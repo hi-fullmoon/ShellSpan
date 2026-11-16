@@ -1,14 +1,17 @@
 # Native GNU dependency targets
 
-`python3 -B scripts/native-input-p2/build.py` builds the release profile,
-Bash 5.3 / Readline 8.3.6, under `src-tauri/target/native-input/`. Set
+`python3 -B scripts/native-input-p2/build.py` builds the release profile under
+`src-tauri/target/native-input/`. On macOS ARM64 it builds ShellSpan Bash
+(Bash 5.3.20 / Readline 8.3.6). Set
 `SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests` when preparing inputs for local
 acceptance tests. To build the older
 profiles for compatibility checks, pass `--versions 4.1,4.4` or
 `--versions 4.1,4.4,5.3`. Use `--include-legacy` when listing or running the P2
 application matrix or checking its cumulative evidence.
-The dependency recipe verifies the pinned GNU archives and official Readline
-patches, then applies the explicit post-profile startup and native display patches.
+The dependency recipe verifies the pinned GNU archives and Readline 8.3 patches
+001–006. On macOS ARM64 it also verifies and applies Bash 5.3 patches 001–020
+before applying the ShellSpan integration patches. The catalogue keeps the
+Bash 5.3 profile ID and records the macOS patch level separately.
 
 The P2 producer accepts Linux x86_64 only with glibc 2.36 and the default 5.3
 profile. The pinned `scripts/native-input-p2/Dockerfile` can run as `linux/amd64`;

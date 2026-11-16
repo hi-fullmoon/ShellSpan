@@ -14,6 +14,7 @@ import {
   stageTerminalWorkspace,
 } from '@/lib/terminal/terminal-workspace-persistence';
 import { createLogger } from '@/lib/logger';
+import { invokeSupportsShellSpanBash, isTauriRuntime } from '@/lib/ipc/tauri';
 import { cn } from '@/lib/utils';
 import { terminalRegistry } from './registry/terminal-registry';
 import { TerminalControllerLayer } from './terminal-controller-layer';
@@ -65,6 +66,7 @@ const Terminal: React.FC = () => {
   const { connect, openLocal } = useConnectSession();
 
   const [newSessionDialogOpen, setNewSessionDialogOpen] = useState(false);
+  const [supportsShellSpanBash, setSupportsShellSpanBash] = useState(false);
   const [tabSwitcherOpen, setTabSwitcherOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     session: TerminalSession;
@@ -202,6 +204,15 @@ const Terminal: React.FC = () => {
     const handleNewTabRequest = (): void => setNewSessionDialogOpen((previous) => !previous);
     document.addEventListener('shellspan:new-terminal-tab', handleNewTabRequest);
     return () => document.removeEventListener('shellspan:new-terminal-tab', handleNewTabRequest);
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let mounted = true;
+    void invokeSupportsShellSpanBash().then((supported) => {
+      if (mounted) setSupportsShellSpanBash(supported);
+    }).catch((error: unknown) => logger.warn('Failed to check local ShellSpan Bash support', error));
+    return () => { mounted = false; };
   }, []);
 
   useEffect(() => {
@@ -891,6 +902,7 @@ const Terminal: React.FC = () => {
           onClose={() => setNewSessionDialogOpen(false)}
           onConnect={connect}
           onOpenLocal={openLocal}
+          supportsShellSpanBash={supportsShellSpanBash}
         />
         <TerminalTabSwitcher
           sessions={sessions}

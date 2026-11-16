@@ -21,6 +21,7 @@ import type {
   JumpHostConfig,
   KnownHostEntry,
   LocalDirectoryListing,
+  LocalTerminalProfile,
   LogChunk,
   LogCursor,
   LogFileInfo,
@@ -220,13 +221,19 @@ export async function invokeCreateLocalSession(
   rows = 30,
   replacesSessionId?: string,
   nativeInputProtocol: 'shellspan.native-input' | null = 'shellspan.native-input',
+  localProfile?: LocalTerminalProfile,
 ): Promise<SessionSummary> {
   return invokeLogged<SessionSummary>('create_local_session', {
     cols,
     rows,
     ...(nativeInputProtocol ? { nativeInputProtocol } : {}),
     ...(replacesSessionId ? { replacesSessionId } : {}),
+    ...(localProfile ? { localProfile } : {}),
   });
+}
+
+export function invokeSupportsShellSpanBash(): Promise<boolean> {
+  return invokeLogged<boolean>('supports_shellspan_bash');
 }
 
 export async function invokeGetTerminalBrokerSnapshot(

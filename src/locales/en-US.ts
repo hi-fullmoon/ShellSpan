@@ -765,6 +765,8 @@ export default {
   'terminal.newSession.noSearchResultsHint': 'Try another search or create a new SSH connection.',
   'terminal.newSession.localTerminal': 'Local terminal',
   'terminal.newSession.localTerminalHint': 'Start the system shell on this device',
+  'terminal.newSession.shellSpanBash': 'ShellSpan Bash',
+  'terminal.newSession.shellSpanBashHint': 'Start the bundled Bash 5.3.20 with Readline 8.3.6',
   'terminal.newSession.createConnection': 'New SSH connection',
   'terminal.newSession.manageConnections': 'Manage connections',
   'terminal.newSession.navigate': 'navigate',

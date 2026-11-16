@@ -1199,8 +1199,8 @@ gates do; Windows remains a native-evidence debt rather than a claimed pass.
 The historical native feasibility report in Git history records real
 Bash/Readline PTY, loopback SSH and browser experiments. Current boundaries are
 listed in the [acceptance checklist](../../../docs/design/agent-terminal-input-acceptance-checklist.md).
-`pnpm test:terminal-native-input:p0 --upstream` runs native PTYs and browsers;
-`pnpm test:terminal-native-input:p0:ssh` runs the isolated SSH lane. Add `--ssh`
+`node scripts/verify-terminal-native-input.mjs --upstream` runs native PTYs and browsers;
+`python3 scripts/native-input-p0/ssh.py` runs the isolated SSH lane. Add `--ssh`
 to the first command to run both and retain any earlier nonzero status.
 
 The experimental messages and builtins allocate no online TSP version or
@@ -1282,7 +1282,7 @@ can at most alter untrusted display state; native commit/lifecycle authority is
 unchanged. Public-parser fragmentation, queued resize, control EOF, TUI and real
 process exits are checked separately. SIGKILL requires actual terminal EOF
 cleanup. Production negotiation/recovery remains unimplemented; tab-copy failures
-are retained. See the P0 report and `test:terminal-native-input:p0:inband`.
+are retained. See the P0 report and `node scripts/verify-terminal-p0-formal.mjs --inband-only`.
 
 An actual dense-resize commit probe also exposed post-accept hidden-plan echo.
 The isolated native prototype protects the accepted return line with a temporary

@@ -161,6 +161,13 @@ for(const catalogueTarget of bashTargets){
       const patch=`bash53-${String(index+1).padStart(3,'0')}`;
       assert.equal(sha(await readFile(resolve(sourceRoot,'sources',patch))),expected,`GNU Bash patch mismatch: ${patch}`);
     }
+    const readline=JSON.parse(await readFile(resolve(root,'scripts/native-input-p0/readline-sources.json'),'utf8'));
+    assert.equal(readline.patches.length,6);
+    assert.equal(sha(await readFile(resolve(sourceRoot,'sources/readline-8.3.tar.gz'))),readline.archive);
+    for(const [index,expected] of readline.patches.entries()){
+      const patch=`readline83-${String(index+1).padStart(3,'0')}`;
+      assert.equal(sha(await readFile(resolve(sourceRoot,'sources',patch))),expected,`GNU Readline patch mismatch: ${patch}`);
+    }
   }
   for(const profile of catalogue.profiles){
     assert.equal(profile.target,catalogueTarget);

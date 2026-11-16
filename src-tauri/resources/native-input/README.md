@@ -16,7 +16,9 @@ preparation remains under `.artifacts/tests/` and does not replace release input
 Generated binaries are excluded from Git. The Tauri resource map preserves
 `native-input/generated/` in the final bundle; release loading uses that
 directory. Source, GNU archives/patches, Rust vendor sources and notices accompany
-the resources. Linux x86_64 SSH verifies the bundled Bash 5.3 / Readline 8.3.6,
+the resources. On macOS ARM64, selecting ShellSpan Bash in the new session dialog
+launches the bundled Bash 5.3.20 / Readline 8.3.6 after verifying its catalogue
+and executable SHA-256. Linux x86_64 SSH verifies the bundled Bash 5.3 / Readline 8.3.6,
 adapter and relay locally and after SFTP upload. It uses that Bash only for the
 new native terminal session, without modifying the account's login shell. Linux
 ARM64 continues to require a digest match for the account's existing shell.

@@ -209,12 +209,15 @@ export interface SessionSummary {
   ptyInfo?: SessionPtyInfo;
 }
 
+export type LocalTerminalProfile = 'shellSpanBash';
+
 export interface SessionPtyInfo {
   /** Local Windows startup waits for the renderer's initial resize/ready FIFO. */
   deferredStartup?: boolean;
   transportKind: TerminalBrokerTransportKind;
   inputMode?: TerminalBrokerSessionSnapshot['inputMode'];
   nativeDisplayBinding?: TerminalBrokerSessionSnapshot['nativeDisplayBinding'];
+  localProfile?: LocalTerminalProfile;
   /** Actual local Windows kernel build, absent for SSH and non-Windows PTYs. */
   windowsBuildNumber?: number;
 }

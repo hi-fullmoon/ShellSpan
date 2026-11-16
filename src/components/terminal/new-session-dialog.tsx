@@ -28,17 +28,18 @@ import {
 import { Kbd } from '@/components/ui/kbd';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import type { ConnectionProfile } from '@/types';
+import type { ConnectionProfile, LocalTerminalProfile } from '@/types';
 
 interface NewSessionDialogProps {
   open: boolean;
   onClose: () => void;
   onConnect: (profile: ConnectionProfile) => Promise<void>;
-  onOpenLocal?: () => Promise<void>;
+  onOpenLocal?: (localProfile?: LocalTerminalProfile) => Promise<void>;
+  supportsShellSpanBash?: boolean;
 }
 
 type SessionCommand =
-  | { kind: 'local' }
+  | { kind: 'local'; localProfile?: LocalTerminalProfile; label: string; hint: string }
   | { kind: 'profile'; profile: ConnectionProfile; isRecent: boolean };
 
 interface IndexedSessionCommand {
@@ -51,6 +52,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
   onClose,
   onConnect,
   onOpenLocal,
+  supportsShellSpanBash = false,
 }) => {
   const { t } = useI18n();
   const platform = usePlatform();
@@ -63,7 +65,6 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const commandListRef = useRef<HTMLDivElement>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
   const activatingRef = useRef(false);
 
   const profileCommands = useMemo<SessionCommand[]>(() => {
@@ -101,14 +102,23 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
   }, [profiles, query, recentIds]);
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
-  const showLocal = Boolean(onOpenLocal) && (
-    !normalizedQuery
-    || t('terminal.newSession.localTerminal').toLocaleLowerCase().includes(normalizedQuery)
-  );
-  const commands = useMemo<SessionCommand[]>(
-    () => [...(showLocal ? [{ kind: 'local' as const }] : []), ...profileCommands],
-    [profileCommands, showLocal],
-  );
+  const commands = useMemo<SessionCommand[]>(() => {
+    if (!onOpenLocal) return profileCommands;
+    const localCommands: Extract<SessionCommand, { kind: 'local' }>[] = [{
+      kind: 'local',
+      label: t('terminal.newSession.localTerminal'),
+      hint: t('terminal.newSession.localTerminalHint'),
+    }];
+    if (supportsShellSpanBash) {
+      localCommands.push({
+        kind: 'local',
+        localProfile: 'shellSpanBash',
+        label: t('terminal.newSession.shellSpanBash'),
+        hint: t('terminal.newSession.shellSpanBashHint'),
+      });
+    }
+    return [...localCommands.filter(({ label }) => label.toLocaleLowerCase().includes(normalizedQuery)), ...profileCommands];
+  }, [normalizedQuery, onOpenLocal, profileCommands, supportsShellSpanBash, t]);
   const indexedCommands = useMemo<IndexedSessionCommand[]>(
     () => commands.map((command, index) => ({ command, index })),
     [commands],
@@ -130,7 +140,8 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
   const activateCommand = useCallback((command: SessionCommand): void => {
     activateOnce(() => {
       if (command.kind === 'local') {
-        void onOpenLocal?.();
+        if (command.localProfile) void onOpenLocal?.(command.localProfile);
+        else void onOpenLocal?.();
       } else {
         void onConnect(command.profile);
       }
@@ -139,7 +150,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
 
   useEffect(() => {
     setSelectedIndex(0);
-  }, [query]);
+  }, [query, supportsShellSpanBash]);
 
   useEffect(() => {
     const selectedCommand = commandListRef.current?.querySelector<HTMLElement>(
@@ -155,31 +166,25 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
     setSelectedIndex(0);
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (document.activeElement !== searchInputRef.current || commands.length === 0) return;
-      const isNext = event.key === 'ArrowDown'
-        || (event.ctrlKey && event.key.toLocaleLowerCase() === 'n');
-      const isPrevious = event.key === 'ArrowUp'
-        || (event.ctrlKey && event.key.toLocaleLowerCase() === 'p');
+  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (!open || commands.length === 0 || event.nativeEvent.isComposing) return;
+    const isNext = event.key === 'ArrowDown'
+      || (event.ctrlKey && event.key.toLocaleLowerCase() === 'n');
+    const isPrevious = event.key === 'ArrowUp'
+      || (event.ctrlKey && event.key.toLocaleLowerCase() === 'p');
 
-      if (isNext) {
-        event.preventDefault();
-        setSelectedIndex((current) => (current + 1) % commands.length);
-      } else if (isPrevious) {
-        event.preventDefault();
-        setSelectedIndex((current) => (current - 1 + commands.length) % commands.length);
-      } else if (event.key === 'Enter') {
-        event.preventDefault();
-        const selectedCommand = commands[selectedIndex];
-        if (selectedCommand) activateCommand(selectedCommand);
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [activateCommand, commands, open, selectedIndex]);
+    if (isNext) {
+      event.preventDefault();
+      setSelectedIndex((current) => (current + 1) % commands.length);
+    } else if (isPrevious) {
+      event.preventDefault();
+      setSelectedIndex((current) => (current - 1 + commands.length) % commands.length);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      const selectedCommand = commands[selectedIndex];
+      if (selectedCommand) activateCommand(selectedCommand);
+    }
+  };
 
   const handleCreateConnection = (): void => {
     onClose();
@@ -235,8 +240,6 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
     );
   };
 
-  const localCommand = indexedCommands.find((entry) => entry.command.kind === 'local');
-
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
       <DialogContent className="top-[12vh] flex h-[76vh] max-h-[76vh] w-[calc(100%-2rem)] max-w-2xl translate-y-0 flex-col gap-0 overflow-hidden p-0">
@@ -248,11 +251,11 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
         <div className="shrink-0 px-4 pb-4">
           <InputGroup className="h-10 has-[[data-slot=input-group-control]:focus-visible]:ring-1">
             <InputGroupInput
-              ref={searchInputRef}
               type="search"
               aria-label={t('terminal.newSession.searchPlaceholder')}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={handleSearchKeyDown}
               placeholder={t('terminal.newSession.searchPlaceholder')}
               autoFocus
             />
@@ -266,29 +269,30 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
         <Separator />
         <ScrollArea className="min-h-0 flex-1">
           <div id="new-session-command-list" ref={commandListRef} className="flex flex-col gap-2 px-4 py-3">
-            {localCommand && (
+            {indexedCommands.map(({ command, index }) => command.kind === 'local' && (
               <Button
-                id={`new-session-command-${localCommand.index}`}
+                key={command.localProfile ?? 'default'}
+                id={`new-session-command-${index}`}
                 type="button"
-                aria-label={t('terminal.newSession.localTerminal')}
-                variant={selectedIndex === localCommand.index ? 'secondary' : 'ghost'}
-                onClick={() => activateCommand(localCommand.command)}
-                onMouseEnter={() => setSelectedIndex(localCommand.index)}
-                data-command-index={localCommand.index}
+                aria-label={command.label}
+                variant={selectedIndex === index ? 'secondary' : 'ghost'}
+                onClick={() => activateCommand(command)}
+                onMouseEnter={() => setSelectedIndex(index)}
+                data-command-index={index}
                 className="h-auto w-full justify-start gap-1 rounded-lg p-3 text-left"
               >
                 <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                   <SquareTerminalIcon data-icon="inline-start" />
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-                  <span className="text-sm font-medium">{t('terminal.newSession.localTerminal')}</span>
+                  <span className="text-sm font-medium">{command.label}</span>
                   <span className="text-xs text-muted-foreground">
-                    {t('terminal.newSession.localTerminalHint')}
+                    {command.hint}
                   </span>
                 </span>
-                {selectedIndex === localCommand.index && <Kbd aria-hidden="true">↵</Kbd>}
+                {selectedIndex === index && <Kbd aria-hidden="true">↵</Kbd>}
               </Button>
-            )}
+            ))}
 
             {normalizedQuery
               ? renderProfileGroup(t('terminal.newSession.searchResults'), savedCommands.concat(recentCommands).sort((left, right) => left.index - right.index))

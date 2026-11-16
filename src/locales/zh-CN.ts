@@ -765,6 +765,8 @@ export default {
   'terminal.newSession.noSearchResultsHint': '可以调整搜索关键词，或新建一个 SSH 连接。',
   'terminal.newSession.localTerminal': '本地终端',
   'terminal.newSession.localTerminalHint': '在当前设备上启动系统 Shell',
+  'terminal.newSession.shellSpanBash': 'ShellSpan Bash',
+  'terminal.newSession.shellSpanBashHint': '启动应用自带的 Bash 5.3.20 和 Readline 8.3.6',
   'terminal.newSession.createConnection': '新建 SSH 连接',
   'terminal.newSession.manageConnections': '管理连接',
   'terminal.newSession.navigate': '选择',

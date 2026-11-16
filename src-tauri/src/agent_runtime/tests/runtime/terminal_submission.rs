@@ -25,6 +25,85 @@ fn recorded_result(
         .unwrap_or_else(|| panic!("missing result for {id}"))
 }
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[tokio::test]
+#[ignore = "requires the ShellSpan Bash development resources"]
+async fn shellspan_bash_visible_command_requires_the_selected_pty_handshake() {
+    use crate::terminal_broker::{TerminalIntegrationState, TerminalVisibleCommandRoute};
+
+    let source = r#"printf '%s %s\n' "$BASH_VERSION" "$$" > visible-shell"#;
+    for (startup, route) in [
+        (None, TerminalVisibleCommandRoute::TerminalExecute),
+        (
+            Some("exec /bin/sh -i\n"),
+            TerminalVisibleCommandRoute::Unavailable,
+        ),
+    ] {
+        let scenario = Scenario::with_shell_startup(TerminalShellKind::Bash, true, startup);
+        assert_eq!(
+            scenario.broker.visible_command_route(TERMINAL).unwrap(),
+            route
+        );
+        let snapshot = scenario
+            .broker
+            .snapshot(Some(TERMINAL))
+            .unwrap()
+            .session
+            .unwrap();
+        let session = "shellspan-bash-visible";
+        let entry = scenario.root(
+            session,
+            AgentExecutionSurface::BoundTerminal,
+            AgentSessionPermissionMode::Operator,
+        );
+        scenario.start(&entry, "bash-turn", "bash-step");
+        let settlement = scenario.runtime.tools.process_model_calls(
+            &entry, "bash-turn", "bash-step", "bash-request", vec![file_call(
+                "run_terminal_command", "visible-bash", json!({
+                    "command": source, "explanation": "Observe the Bash version and PID in the selected PTY",
+                }),
+            )],
+        ).await;
+        let (status, result) = recorded_result(&scenario, session, "visible-bash");
+        let marker = scenario.root.path().join("work/visible-shell");
+        if startup.is_none() {
+            settlement.unwrap();
+            assert_eq!(status, AgentToolResultStatus::Completed, "{result}");
+            assert_eq!(result["channel"], "terminal");
+            assert_eq!(result["terminalSessionId"], snapshot.terminal_session_id);
+            assert_eq!(result["exitCode"], 0);
+            let observed = std::fs::read_to_string(marker).unwrap();
+            assert_eq!(
+                observed.trim(),
+                format!("5.3.20(1)-release {}", scenario.child.process_id().unwrap())
+            );
+        } else {
+            assert_eq!(
+                snapshot.integration_state,
+                TerminalIntegrationState::Unavailable
+            );
+            assert_eq!(
+                snapshot.integration_reason.as_deref(),
+                Some("nativeControlClosed")
+            );
+            assert_eq!(status, AgentToolResultStatus::Rejected, "{result}");
+            assert_eq!(result["execution"], "notStarted");
+            assert_eq!(result["executed"], false);
+            assert!(!marker.exists());
+            assert_eq!(
+                scenario
+                    .runtime
+                    .sessions
+                    .snapshot(session)
+                    .unwrap()
+                    .header
+                    .execution_surface,
+                AgentExecutionSurface::BoundTerminal
+            );
+        }
+    }
+}
+
 #[tokio::test]
 async fn rejected_background_launch_does_not_restrict_later_execution_or_reopen_as_unknown() {
     for shell in [TerminalShellKind::Bash, TerminalShellKind::Zsh] {

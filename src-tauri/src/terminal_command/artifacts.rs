@@ -160,9 +160,15 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<NativeArti
     {
         return Err("TERMINAL_NATIVE_STALE_ARTIFACTS".into());
     }
-    if target == MACOS_BASH_TARGET && catalogue.profiles.iter().any(|artifact| artifact.id == SHELLSPAN_BASH_PROFILE) {
+    if target == MACOS_BASH_TARGET
+        && catalogue
+            .profiles
+            .iter()
+            .any(|artifact| artifact.id == SHELLSPAN_BASH_PROFILE)
+    {
         let pin = "scripts/dependency-builds/bash-native/bash-5.3-patches.json";
-        let contents = include_str!("../../../scripts/dependency-builds/bash-native/bash-5.3-patches.json");
+        let contents =
+            include_str!("../../../scripts/dependency-builds/bash-native/bash-5.3-patches.json");
         if catalogue.sources.get(pin) != Some(&super::protocol::sha(contents)) {
             return Err("TERMINAL_NATIVE_STALE_ARTIFACTS".into());
         }

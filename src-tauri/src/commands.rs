@@ -8,13 +8,13 @@ use crate::models::{
     CopyLocalPathsRequest, CopyRemotePathRequest, CopyRemoteToRemoteRequest,
     CreateRemoteEntryRequest, CreateSessionError, DeleteRemotePathRequest,
     DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult, KeyCredentialSummary,
-    KnownHostEntry, LocalDirectoryListing, LocalFileEntry, LocalTerminalProfile, LogFileInfo, ManagedSession,
-    OpenRemoteFileRequest, PortForwardStartRequest, PreflightCancellationRegistry, ProfileRow,
-    ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
-    RemoteDirectoryRequest, RemoteEntryOwners, RemoteEntryOwnersRequest, RemoteFileKind,
-    RemoteFileReadCancellationRegistry, RemoteFsError, RenameRemotePathRequest, SessionCommand,
-    SessionCommandSender, SessionCreateRequest, SessionIdentity, SessionStatus, SessionSummary,
-    SessionTerminalKind, SftpBookmarkRow, TransferBatchResult, TrustHostRequest,
+    KnownHostEntry, LocalDirectoryListing, LocalFileEntry, LocalTerminalProfile, LogFileInfo,
+    ManagedSession, OpenRemoteFileRequest, PortForwardStartRequest, PreflightCancellationRegistry,
+    ProfileRow, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest,
+    RemoteDirectoryListing, RemoteDirectoryRequest, RemoteEntryOwners, RemoteEntryOwnersRequest,
+    RemoteFileKind, RemoteFileReadCancellationRegistry, RemoteFsError, RenameRemotePathRequest,
+    SessionCommand, SessionCommandSender, SessionCreateRequest, SessionIdentity, SessionStatus,
+    SessionSummary, SessionTerminalKind, SftpBookmarkRow, TransferBatchResult, TrustHostRequest,
     UpdateRemotePermissionsRequest, UploadLocalPathsRequest, REMOTE_FILE_READ_CANCELLED_MESSAGE,
 };
 use crate::sftp_pool::SftpPool;
@@ -634,6 +634,31 @@ pub(crate) fn supports_shellspan_bash() -> bool {
     cfg!(all(target_os = "macos", target_arch = "aarch64"))
 }
 
+#[cfg(not(windows))]
+pub(crate) fn resolve_unix_local_shell(
+    profile: Option<LocalTerminalProfile>,
+    default_shell: Option<String>,
+    resource_root: impl FnOnce() -> Result<std::path::PathBuf, String>,
+) -> Result<String, String> {
+    match profile {
+        None => Ok(default_shell.unwrap_or_else(|| "/bin/sh".into())),
+        Some(LocalTerminalProfile::ShellSpanBash) => {
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            {
+                crate::terminal_command::artifacts::shellspan_bash(&resource_root()?)?
+                    .into_os_string()
+                    .into_string()
+                    .map_err(|_| "TERMINAL_NATIVE_PATH_INVALID".into())
+            }
+            #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+            {
+                let _ = resource_root;
+                Err("TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into())
+            }
+        }
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn create_local_session(
     app: AppHandle,
@@ -669,7 +694,8 @@ fn create_local_session_blocking(
     native_input_protocol: Option<String>,
     local_profile: Option<LocalTerminalProfile>,
 ) -> Result<SessionSummary, String> {
-    if local_profile.is_some() && !supports_shellspan_bash() {
+    #[cfg(windows)]
+    if local_profile.is_some() {
         return Err("TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into());
     }
     let session_id = Uuid::new_v4().to_string();
@@ -702,15 +728,9 @@ fn create_local_session_blocking(
         &session_id,
     );
     #[cfg(not(windows))]
-    let mut shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    if let Some(LocalTerminalProfile::ShellSpanBash) = local_profile {
-        use crate::terminal_command::artifacts;
-        shell = artifacts::shellspan_bash(&artifacts::resource_root(&app)?)?
-            .into_os_string()
-            .into_string()
-            .map_err(|_| "TERMINAL_NATIVE_PATH_INVALID")?;
-    }
+    let shell = resolve_unix_local_shell(local_profile, std::env::var("SHELL").ok(), || {
+        crate::terminal_command::artifacts::resource_root(&app)
+    })?;
     let shell_kind = TerminalShellKind::detect(&shell);
     let title = std::path::Path::new(&shell)
         .file_stem()

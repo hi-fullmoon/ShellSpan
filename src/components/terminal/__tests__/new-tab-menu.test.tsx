@@ -158,8 +158,9 @@ describe('NewSessionDialog', () => {
     const onClose = vi.fn();
     render(<NewSessionDialog open onClose={onClose} onConnect={mockConnect} />);
 
-    fireEvent.keyDown(document, { key: 'ArrowDown' });
-    fireEvent.keyDown(document, { key: 'Enter' });
+    const search = screen.getByRole('searchbox');
+    fireEvent.keyDown(search, { key: 'ArrowDown' });
+    fireEvent.keyDown(search, { key: 'Enter' });
 
     expect(mockConnect).toHaveBeenCalledTimes(1);
     expect(mockConnect).toHaveBeenCalledWith(p2);
@@ -182,9 +183,10 @@ describe('NewSessionDialog', () => {
     );
 
     expect(screen.getByText('terminal.newSession.localTerminal')).toBeInTheDocument();
-    fireEvent.keyDown(document, { key: 'n', ctrlKey: true });
-    fireEvent.keyDown(document, { key: 'p', ctrlKey: true });
-    fireEvent.keyDown(document, { key: 'Enter' });
+    const search = screen.getByRole('searchbox');
+    fireEvent.keyDown(search, { key: 'n', ctrlKey: true });
+    fireEvent.keyDown(search, { key: 'p', ctrlKey: true });
+    fireEvent.keyDown(search, { key: 'Enter' });
 
     expect(onOpenLocal).toHaveBeenCalledTimes(1);
     expect(mockConnect).not.toHaveBeenCalled();
@@ -220,8 +222,9 @@ describe('NewSessionDialog', () => {
 
     render(<NewSessionDialog open onClose={vi.fn()} onConnect={mockConnect} />);
 
-    fireEvent.keyDown(document, { key: 'ArrowUp' });
-    fireEvent.keyDown(document, { key: 'Enter' });
+    const search = screen.getByRole('searchbox');
+    fireEvent.keyDown(search, { key: 'ArrowUp' });
+    fireEvent.keyDown(search, { key: 'Enter' });
 
     expect(mockConnect).toHaveBeenCalledWith(p2);
   });

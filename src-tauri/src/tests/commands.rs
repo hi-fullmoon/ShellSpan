@@ -23,6 +23,41 @@
     use std::sync::{Arc, Barrier};
     use std::thread;
 
+    #[cfg(unix)]
+    #[test]
+    fn default_local_profile_uses_login_shell_or_bin_sh_without_native_resources() {
+        use super::resolve_unix_local_shell;
+
+        let unavailable = || Err("TERMINAL_NATIVE_ARTIFACTS_UNAVAILABLE".into());
+        for (login_shell, expected) in [
+            (Some("/bin/bash"), "/bin/bash"),
+            (Some("/bin/zsh"), "/bin/zsh"),
+            (None, "/bin/sh"),
+        ] {
+            assert_eq!(
+                resolve_unix_local_shell(None, login_shell.map(String::from), unavailable).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn shellspan_bash_profile_round_trips_in_local_pty_metadata() {
+        use crate::models::{LocalTerminalProfile, SessionPtyInfo};
+
+        let profile: LocalTerminalProfile = serde_json::from_str("\"shellSpanBash\"").unwrap();
+        let mut pty = SessionPtyInfo::local();
+        assert!(serde_json::to_value(&pty)
+            .unwrap()
+            .get("localProfile")
+            .is_none());
+        pty.local_profile = Some(profile);
+        assert_eq!(
+            serde_json::to_value(pty).unwrap()["localProfile"],
+            "shellSpanBash"
+        );
+    }
+
     #[test]
     fn local_open_and_reveal_reject_relative_or_missing_paths() {
         assert_eq!(

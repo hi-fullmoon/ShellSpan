@@ -24,6 +24,8 @@ stdout、OSC、前端 ready 和显示完成都不是控制报文。
 
 ## 模式、身份和能力
 
+macOS ARM64 的新建会话提供「ShellSpan Bash」本地配置。显式选择时，后端校验资源清单和 Bash 可执行文件的 SHA-256，启动应用随附的 Bash 5.3.20 / Readline 8.3.6，再沿用本地私有控制通道握手。默认「本地终端」仍按 `$SHELL` 选择，未设置时使用 `/bin/sh`。握手完成并确认提示符就绪后，Visible command 才能使用该终端。握手失败时沿用现有不可用反馈，由用户决定是否切换到 Direct。
+
 Windows 原生输入新身份包含 `shellspan1-conpty1.25.260930003-graphemes`，
 同时固定私有 PSReadLine 与 ConPTY；旧系统控制台身份不能等同替代。
 私有 ConPTY 以实际 DLL/OpenConsole 摘要校验和显式 API 加载绑定，完整流的字素宽度
@@ -479,7 +481,7 @@ macOS 私有 Zsh Core 的普通编辑刷新另按固定 `native-macos-refresh.pa
 必须同时对应，失效资源须实际重建。独立真实 PTY 和浏览器诊断只支持缺陷定位与回归，
 正式验收仍需要新签名 App 的缩放、取消、选择、Unicode 和生命周期直接证据。
 
-`pnpm test:terminal-input:p1` 从固定源码重建模块，运行 reducer/Broker/执行器/lease、
+`node scripts/verify-terminal-input-p1.mjs` 从固定源码重建模块，运行 reducer/Broker/执行器/lease、
 真实 PTY/私有 socket、原生 SIGKILL 恢复、实际捕获的 schema 校验、浏览器排空/重绑，
 以及能力缺失、未验证编辑模式拒绝和前端回归，不再调用已删除测试或旧实验报文用例。
 输出在 Git 忽略的 `.artifacts/tests/native-input-p0/p1-validation` 与 `p1-evidence`，无时间戳依赖。

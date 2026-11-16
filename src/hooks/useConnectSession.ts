@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useAppStore } from '@/stores/appStore';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
-import type { ConnectionProfile } from '@/types';
+import type { ConnectionProfile, LocalTerminalProfile } from '@/types';
 import {
   buildSessionCreateRequest,
   invokeCreateLocalSession,
@@ -38,7 +38,7 @@ export function useConnectSession(): {
     profile: ConnectionProfile,
     options?: ConnectSessionOptions,
   ) => Promise<void>;
-  openLocal: () => Promise<void>;
+  openLocal: (localProfile?: LocalTerminalProfile) => Promise<void>;
 } {
   const beginConnectionAttempt = useTerminalStore((state) => state.beginConnectionAttempt);
   const resolveConnectionAttempt = useTerminalStore((state) => state.resolveConnectionAttempt);
@@ -193,7 +193,7 @@ export function useConnectSession(): {
     }
   }, [beginConnectionAttempt, endConnectionAttempt, handleConnectionError, resolveConnectionAttempt, setActiveSection]);
 
-  const openLocal = async (): Promise<void> => {
+  const openLocal = async (localProfile?: LocalTerminalProfile): Promise<void> => {
     const connectionAttemptId = beginConnectionAttempt({
       title: t('terminal.newSession.localTerminal'),
       host: '',
@@ -204,7 +204,9 @@ export function useConnectSession(): {
     try {
       const dimensions = await terminalRegistry.measureInitialDimensions(connectionAttemptId);
       if (!useTerminalStore.getState().sessions.some((session) => session.sessionId === connectionAttemptId)) return;
-      const summary = await invokeCreateLocalSession(dimensions?.cols, dimensions?.rows);
+      const summary = localProfile
+        ? await invokeCreateLocalSession(dimensions?.cols, dimensions?.rows, undefined, undefined, localProfile)
+        : await invokeCreateLocalSession(dimensions?.cols, dimensions?.rows);
       resolveConnectionAttempt(connectionAttemptId, summary);
     } catch (error) {
       useToastStore.getState().addToast(getToastErrorMessage(error), 'error');

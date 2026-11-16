@@ -52,7 +52,18 @@ impl Scenario {
     }
 
     fn with_native_input(shell: TerminalShellKind, native_input: bool) -> Self {
+        Self::with_shell_startup(shell, native_input, None)
+    }
+
+    fn with_shell_startup(
+        shell: TerminalShellKind,
+        native_input: bool,
+        bash_profile: Option<&str>,
+    ) -> Self {
         let root = tempfile::tempdir().unwrap();
+        if let Some(startup) = bash_profile {
+            std::fs::write(root.path().join(".bash_profile"), startup).unwrap();
+        }
         let work = root.path().join("work");
         std::fs::create_dir(&work).unwrap();
         let state = root.path().join("state");
@@ -92,17 +103,24 @@ impl Scenario {
         let resources = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../.artifacts/tests/native-input-p2/resources/native-input");
         let executable = if native_input && shell == TerminalShellKind::Bash {
-            let target = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-                "macos-arm64"
-            } else {
-                "linux-aarch64-glibc-2.36"
-            };
-            let profile = crate::terminal_command::artifacts::read_catalogue(&resources, target)
-                .expect("set SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests and run scripts/native-input-p2/build.py --versions 5.3")
-                .into_iter()
-                .find(|profile| profile.bash_version == "5.3")
-                .expect("verified GNU Bash 5.3 test profile");
-            resources.join(profile.id).join("bash")
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            {
+                let shell = crate::commands::resolve_unix_local_shell(
+                    Some(crate::models::LocalTerminalProfile::ShellSpanBash),
+                    Some("/bin/bash".into()),
+                    || Ok(resources.clone()),
+                ).expect("set SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests and run scripts/native-input-p2/build.py --versions 5.3");
+                std::path::PathBuf::from(shell)
+            }
+            #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+            {
+                let profile = crate::terminal_command::artifacts::read_catalogue(&resources, "linux-aarch64-glibc-2.36")
+                    .expect("set SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests and run scripts/native-input-p2/build.py --versions 5.3")
+                    .into_iter()
+                    .find(|profile| profile.bash_version == "5.3")
+                    .expect("verified GNU Bash 5.3 test profile");
+                resources.join(profile.id).join("bash")
+            }
         } else if native_input && shell == TerminalShellKind::Zsh {
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             {
@@ -155,6 +173,10 @@ impl Scenario {
             let probe = engine
                 .register_native_terminal(TERMINAL, native.profile.clone())
                 .unwrap();
+            assert_eq!(
+                broker.visible_command_route(TERMINAL).unwrap(),
+                crate::terminal_broker::TerminalVisibleCommandRoute::Unavailable
+            );
             let events = engine.clone();
             let closed = engine.clone();
             Arc::new(native.start(
@@ -295,11 +317,15 @@ impl Scenario {
             input: Some(input),
         };
         if native_input {
-            scenario
+            let binding = scenario
                 .runtime
                 .native_engine
                 .wait_native_initialization(TERMINAL, Duration::from_secs(8))
                 .unwrap();
+            if bash_profile.is_some() {
+                assert!(binding.is_none());
+                return scenario;
+            }
             let snapshot = scenario
                 .broker
                 .snapshot(Some(TERMINAL))

@@ -105,7 +105,7 @@ Windows 新 ConPTY 的初始光标位置相对于新的可见屏幕。重绑到�
 间隙及insert/delete/trim坐标变换；不保存选中文字、不搜索原文回选，不覆盖公共选择接口。
 程序自行重画的当前行或已被裁剪的锚点不能据旧坐标推断时清理无效选区；既有纵向resize
 清选区、alt buffer与矩形选择行为保持。就近真实PTY数据回归覆盖公开API、正反向真实鼠标
-拖选、Unicode及长源码；入口为 `pnpm test:terminal-native-selection`。
+拖选、Unicode及长源码；入口为 `node src/lib/terminal/__tests__/native-selection-reflow.browser.mjs`。
 
 横向重排前，已经滚离底部的普通历史视口也记录顶部 cell 的临时坐标锚点；重排后按实际
 insert/delete/trim 事件解析其行并限制在可用滚动范围。不能继续沿用旧数字行号，否则宽行
@@ -115,17 +115,17 @@ insert/delete/trim 事件解析其行并限制在可用滚动范围。不能继�
 ## 可重建验证
 
 - `pnpm check:terminal:boundary` 在 Quality Gate 中检查显示逻辑是否使用公开接口，并核对原生编辑器准入清单。
-- `pnpm test:terminal-command-source`（别名 `pnpm test:terminal-command-redraw`）回放真实 PTY 采样，并用 Chromium/WebKit 和 DOM/WebGL 核对原生输入、视口、复制、搜索与重排。新鲜几何采样须包含实际读取时间，缺少采样时测试失败。
-- `pnpm test:terminal-command-presentation` 先用真实普通 Shell 和原生 ZLE 采样检查命令背景范围，再运行同一套原生显示检查。
+- `node src/components/terminal/__tests__/terminal-command-stream.browser.mjs` 回放真实 PTY 采样，并用 Chromium/WebKit 和 DOM/WebGL 核对原生输入、视口、复制、搜索与重排。新鲜几何采样须包含实际读取时间，缺少采样时测试失败。
+- `node src/components/terminal/__tests__/terminal-command-decorations.browser.mjs` 先用真实普通 Shell 和原生 ZLE 采样检查命令背景范围，再运行同一套原生显示检查。
 
 显示观察区分controller接受输出和xterm实际完成解析。`subscribeDisplayOutputParsed`只从原公开write/writeln回调通知对应的原data/source，不修改字节、控制序列、输入或生命周期事实；没有监听者时不为本地输出增加回调。该通知不授予原生、Agent或执行能力。
 
 私有EOF验收可显式使用显示trace版本6：保留原输出接收、实际解析完成事件和每次resize时完整公共buffer/光标/viewport/selection状态。回放分别核对事件顺序、每个实际resize状态和原排空检查点；未观察到的部分解析或任何状态差异仍失败。旧版本的排空要求保持，缺失这些事件/状态的旧失败捕获不能事后升级。`node src/components/terminal/__tests__/native-display-parsed.browser.mjs`用真实cat输出及固定Chromium/WebKit/xterm验证排队写入与resize交错、完整状态相等、原始HTTP字节留存及负向拒绝，不执行Shell源码回放，也不提供原生或人工验收回执。
 
-`pnpm test:terminal-native-display` 直接使用仓库内由真实 PTY 导出的冻结包片段；缺失或摘要不符会失败，不依赖旧机器上的忽略目录。
+`node src/lib/terminal/__tests__/native-input-display.browser.mjs` 直接使用仓库内由真实 PTY 导出的冻结包片段；缺失或摘要不符会失败，不依赖旧机器上的忽略目录。
 
-`pnpm test:terminal-input:p1` 从源码重建正式 NIP producer，重新捕获真实 PTY，并在 Chromium/WebKit × DOM/WebGL 校验正式键、碎片、输出排空、EOF 半包、重绑、旧控制器重复释放及零可执行输入。显示断言不伪造原生控制回执。
+`node scripts/verify-terminal-input-p1.mjs` 从源码重建正式 NIP producer，重新捕获真实 PTY，并在 Chromium/WebKit × DOM/WebGL 校验正式键、碎片、输出排空、EOF 半包、重绑、旧控制器重复释放及零可执行输入。显示断言不伪造原生控制回执。
 
-`pnpm test:terminal-native-input:p0:formal` 从固定 GNU 源码构建原型并重新采集真实 PTY，再用正式安装包验证复制、同流模式、边界、几何和提交。也可显式传入每项真实 capture 路径回放，结果记录这些输入路径与当前源码/运行包摘要。重采集后可运行 `node scripts/export-native-display-fixture.mjs --captures <successful ownership capture>` 重新生成就近 fixture；它只导出显示字节，不伪造私有回执。
+`node scripts/verify-terminal-p0-formal.mjs` 从固定 GNU 源码构建原型并重新采集真实 PTY，再用正式安装包验证复制、同流模式、边界、几何和提交。也可显式传入每项真实 capture 路径回放，结果记录这些输入路径与当前源码/运行包摘要。重采集后可运行 `node scripts/export-native-display-fixture.mjs --captures <successful ownership capture>` 重新生成就近 fixture；它只导出显示字节，不伪造私有回执。
 
 历史冻结范围和结果保留在Git历史，不外推当前源码、Linux/SSH新扩展、Windows、其他架构或用户插件。当前待验范围见[统一验收清单](../docs/design/agent-terminal-input-acceptance-checklist.md)，历史通过结果不能启用未验收的生产配置。

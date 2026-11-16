@@ -23,9 +23,11 @@ const server = await createServer({
         import { useProfileStore } from '/src/stores/profileStore.ts';
         import { useRecentProfilesStore } from '/src/stores/recentProfilesStore.ts';
         import '/src/styles/base.css';
-        const kind = new URLSearchParams(location.search).get('kind');
-        useAppStore.setState({ locale: 'zh-CN' });
-        await initI18n('zh-CN');
+        const params = new URLSearchParams(location.search);
+        const kind = params.get('kind');
+        const locale = params.get('locale') ?? 'zh-CN';
+        useAppStore.setState({ locale });
+        await initI18n(locale);
         const profiles = Array.from({ length: 40 }, (_, i) => ({
           id: 'p' + i,
           name: 'Server-' + String(i).padStart(2, '0'),
@@ -42,7 +44,8 @@ const server = await createServer({
           open: true,
           onClose: () => {},
           onConnect: async () => {},
-          onOpenLocal: async () => {},
+          onOpenLocal: async (profile) => { document.body.dataset.openedLocal = profile ?? 'default'; },
+          supportsShellSpanBash: params.has('shellSpanBash'),
         };
         const dialog = kind === 'sftp'
           ? React.createElement(SftpNewConnectionMenu, props)
@@ -104,7 +107,45 @@ try {
       assert.ok(geometry.thumbHeight > 1, `${kind} scrollbar thumb must be rendered`);
     }
   }
-  console.log('New session and SFTP quick-open lists scroll with a visible scrollbar at tall and short window sizes.');
+  const terminalUrl = `${server.resolvedUrls.local[0]}scroll-review?kind=terminal`;
+  for (const [locale, defaultLabel, viewport] of [
+    ['zh-CN', '本地终端', { width: 900, height: 500 }],
+    ['en-US', 'Local terminal', { width: 1280, height: 800 }],
+  ]) {
+    const url = `${terminalUrl}&locale=${locale}&shellSpanBash`;
+    await page.setViewportSize(viewport);
+    await page.goto(url);
+    const defaultShell = page.getByRole('button', { name: defaultLabel, exact: true });
+    const shellSpanBash = page.getByRole('button', { name: 'ShellSpan Bash', exact: true });
+    const search = page.getByRole('searchbox');
+    await shellSpanBash.waitFor();
+    assert.match(await shellSpanBash.innerText(), /Bash 5\.3\.20.*Readline 8\.3\.6/);
+    const [defaultBounds, bashBounds] = await Promise.all([defaultShell.boundingBox(), shellSpanBash.boundingBox()]);
+    assert.equal(defaultBounds.height, bashBounds.height);
+    assert.equal(defaultBounds.width, bashBounds.width);
+    assert.ok(defaultBounds.y < bashBounds.y);
+    assert.ok(await search.evaluate((input) => input === document.activeElement));
+    await search.press('Enter');
+    assert.equal(await page.locator('body').getAttribute('data-opened-local'), 'default');
+
+    await page.goto(url);
+    await shellSpanBash.waitFor();
+    await search.hover();
+    await search.press('ArrowDown');
+    await shellSpanBash.getByText('↵').waitFor();
+    await search.press('Enter');
+    assert.equal(await page.locator('body').getAttribute('data-opened-local'), 'shellSpanBash');
+
+    await page.goto(url);
+    await search.fill('ShellSpan Bash');
+    assert.equal(await defaultShell.count(), 0);
+    await shellSpanBash.click();
+    assert.equal(await page.locator('body').getAttribute('data-opened-local'), 'shellSpanBash');
+  }
+  await page.goto(terminalUrl);
+  await page.getByRole('button', { name: '本地终端', exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'ShellSpan Bash', exact: true }).count(), 0);
+  console.log('Session dialogs scroll at both sizes and the local shell choices work by keyboard and mouse in both locales.');
 } finally {
   await browser?.close();
   await server.close();

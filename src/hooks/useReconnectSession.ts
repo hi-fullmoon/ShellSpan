@@ -92,7 +92,10 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
         setReconnecting(sessionId, true);
         logger.info(`Reconnecting local session ${sessionId}`);
         try {
-          const summary = await invokeCreateLocalSession(cols, rows, replacesSessionId);
+          const localProfile = session.ptyInfo?.localProfile;
+          const summary = localProfile
+            ? await invokeCreateLocalSession(cols, rows, replacesSessionId, undefined, localProfile)
+            : await invokeCreateLocalSession(cols, rows, replacesSessionId);
 
           if (!useTerminalStore.getState().sessions.some((item) => item.sessionId === sessionId)) {
             logger.info(`Discarding replacement local session ${summary.sessionId}; source ${sessionId} was closed`);
