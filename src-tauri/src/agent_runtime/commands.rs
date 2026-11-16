@@ -263,9 +263,10 @@ pub(crate) struct AgentSessionIdInput {
 pub(crate) fn agent_runtime_create_session(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,
-    request: CreateAgentSessionRequest,
+    mut request: CreateAgentSessionRequest,
 ) -> Result<AgentSessionSnapshot, String> {
     configure_runtime(&app, &runtime)?;
+    apply_connection_sandbox(&app, &mut request)?;
     runtime.create_session(request)
 }
 
@@ -273,10 +274,36 @@ pub(crate) fn agent_runtime_create_session(
 pub(crate) fn agent_runtime_continue_on_target(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,
-    request: CreateAgentSessionRequest,
+    mut request: CreateAgentSessionRequest,
 ) -> Result<AgentSessionSnapshot, String> {
     configure_runtime(&app, &runtime)?;
+    apply_connection_sandbox(&app, &mut request)?;
     runtime.continue_on_target(request)
+}
+
+fn apply_connection_sandbox(
+    app: &AppHandle,
+    request: &mut CreateAgentSessionRequest,
+) -> Result<(), String> {
+    let Some(target) = request.target.as_mut().filter(|t| t.kind == "remote") else {
+        return Ok(());
+    };
+    let native = super::native_adapter::target_native(target)?;
+    let db = app.state::<crate::db::Database>();
+    let known_hosts = crate::known_hosts::known_hosts_path(app)?;
+    if let Some(policy) = crate::remote_sandbox::binding_for_target(&native, &db, &known_hosts)?
+        .and_then(|b| b.state.policy)
+    {
+        if target
+            .root_path
+            .as_deref()
+            .is_none_or(|root| !policy.contains(root))
+        {
+            target.root_path = Some(policy.workspace);
+        }
+        request.execution_surface = super::AgentExecutionSurface::Direct;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]

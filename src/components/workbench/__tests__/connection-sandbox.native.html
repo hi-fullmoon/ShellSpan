@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8"><title>Remote sandbox connection regression</title></head>
+  <body><div id="root"></div><script type="module">
+    import('./connection-sandbox.native.tsx').catch((error) => {
+      const token = new URLSearchParams(location.search).get('token');
+      void fetch(`/__sandbox-result/${token}`, { method: 'POST', body: JSON.stringify({ ok: false, error: String(error) }) });
+    });
+  </script></body>
+</html>

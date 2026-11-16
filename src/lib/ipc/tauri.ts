@@ -1229,6 +1229,18 @@ export function invokeGetProfileSudoPolicy(profileId: string): Promise<ProfileSu
   return invokeLogged('get_profile_sudo_policy', { profileId });
 }
 
+export function invokeGetProfileSandbox(profileId: string): Promise<import('@/types').ProfileSandbox> {
+  return invokeLogged('get_profile_sandbox', { profileId });
+}
+
+export function invokeSaveProfileSandbox(profileId: string, binding: string, policy: import('@/types').SandboxPolicy | null): Promise<void> {
+  return invokeLogged('save_profile_sandbox', { profileId, binding, policy });
+}
+
+export function invokeTestProfileSandbox(profileId: string, binding: string, policy: import('@/types').SandboxPolicy, operationId: string): Promise<import('@/types').SandboxTestResult> {
+  return invokeLogged('test_profile_sandbox', { profileId, binding, policy, operationId });
+}
+
 export function invokeSaveProfileSudoPolicy(
   profileId: string,
   input: Pick<ProfileSudoPolicy, 'profileBinding' | 'revision' | 'operations' | 'runner'>,

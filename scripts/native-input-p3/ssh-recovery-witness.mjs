@@ -29,6 +29,7 @@ export async function openSshRecoveryForwarder(fixture) {
   });
   return {
     port: server.address().port,
+    connectionCount: () => opened,
     disconnect() {
       const ids = [];
       for (const pair of pairs) {

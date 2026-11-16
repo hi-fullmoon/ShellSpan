@@ -545,6 +545,32 @@ export interface ConnectionPreflightRequest extends RemoteConnectionRequest {
   operationId: string;
 }
 
+export type SandboxMode = 'readOnly' | 'workspaceWrite';
+
+export interface SandboxPolicy {
+  mode: SandboxMode;
+  workspace: string;
+}
+
+export interface ProfileSandbox {
+  binding: string;
+  policy: SandboxPolicy | null;
+}
+
+export type SandboxStep = 'executorProtocol' | 'linux' | 'bubblewrap' | 'sandboxStart'
+  | 'workspaceRead' | 'workspaceWrite' | 'outsideWorkspace' | 'processIsolation'
+  | 'networkIsolation' | 'sandboxSftp';
+
+export interface SandboxTestResult {
+  ssh: ConnectionPreflightResult;
+  steps: [SandboxStep, ConnectionPreflightStepStatus][];
+  protocolVersion: number | null;
+  passed: boolean;
+  cancelled: boolean;
+  packageMissing: boolean;
+  installCommand: string | null;
+}
+
 export interface RemoteFileEntry {
   path: string;
   name: string;

@@ -49,6 +49,7 @@ fn initializes_empty_database_to_current_version() {
         [
             "key_credentials",
             "preferences",
+            "profile_sandbox",
             "profile_sudo_policy",
             "profiles",
             "recent_profiles",

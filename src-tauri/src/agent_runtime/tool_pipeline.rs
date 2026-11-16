@@ -3178,6 +3178,7 @@ impl AgentToolPipeline {
                 })?;
             let restricted_sudo = call.native_name.as_deref() == Some("exec_command")
                 && call.arguments["elevated"] == serde_json::json!(true);
+            let sandbox = call.arguments["sandboxExecutor"] == "bubblewrapV1";
             let raw_calls = events
                 .iter()
                 .filter(|event| event.step_id.as_deref() == Some(&step_id))
@@ -3193,7 +3194,7 @@ impl AgentToolPipeline {
                 })
                 // Cancelling an unsent elevation needs only its durable
                 // approval and native call. It must not recover stale inputs.
-                .or_else(|| restricted_sudo.then(|| vec![call.clone()]))
+                .or_else(|| (restricted_sudo || sandbox).then(|| vec![call.clone()]))
                 .ok_or_else(|| {
                     "Recovery found no model call for the durable native call".to_string()
                 })?;
@@ -3239,14 +3240,18 @@ impl AgentToolPipeline {
             };
             // A restricted runner has no resumable authorization before the
             // durable send boundary. Request a new approval after restart.
-            if restricted_sudo || super::model::recorded_tool_call_omits_replay(call) {
+            if restricted_sudo || sandbox || super::model::recorded_tool_call_omits_replay(call) {
                 let reason_code = if restricted_sudo {
                     "sudoApprovalCancelledAfterRestart"
+                } else if sandbox {
+                    "sandboxApprovalCancelledAfterRestart"
                 } else {
                     "ephemeralArgumentsUnavailableAfterRestart"
                 };
                 let reason = if restricted_sudo {
                     "The remote sudo approval was closed after restart. Request the current operation for fresh approval."
+                } else if sandbox {
+                    "The remote sandbox approval was closed after restart. Request the operation again to verify the current connection and policy."
                 } else if status == AgentToolApprovalStatus::Approved {
                     "An ephemeral tool call was authorized but not dispatched before restart; it was cancelled because its private arguments were not persisted."
                 } else {

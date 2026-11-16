@@ -1,16 +1,18 @@
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
 use serde::Serialize;
 use serde_json::{json, Value};
-use ssh2::{OpenFlags, OpenType, RenameFlags, Sftp};
+use ssh2::RenameFlags;
 use tempfile::NamedTempFile;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::agent_runtime::{
@@ -21,9 +23,9 @@ use crate::agent_runtime::{
     TransferFileArgumentsNative, TrashFileArgumentsNative, WriteFileArgumentsNative,
     WriteFilePreconditionNative, MAX_WRITE_FILE_CONTENT_BYTES,
 };
-use crate::connection::connect_sftp;
 use crate::db::Database;
 use crate::keychain::CredentialManager;
+use crate::remote_sandbox::{AgentSftp, AgentSftpConnection, Binding, Control};
 
 use super::{
     connection_for_remote_target, sha256_hex, AgentFileCheckpointNative,
@@ -40,7 +42,7 @@ const DEFAULT_TRANSFER_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_TRANSFER_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXACT_DIFF_BYTES: usize = 240 * 1024;
 
-type ActiveFileOperationsNative = Arc<Mutex<HashMap<(String, String), Arc<AtomicBool>>>>;
+type ActiveFileOperationsNative = Arc<Mutex<HashMap<(String, String), CancellationToken>>>;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -70,11 +72,24 @@ struct FileOperationGuardNative {
     registry: FileOperationRegistryNative,
     task_id: String,
     call_id: String,
-    flag: Arc<AtomicBool>,
+    token: CancellationToken,
+    sandbox: Option<Binding>,
+    sandbox_sftp_started: Cell<bool>,
 }
 
 impl FileOperationRegistryNative {
+    #[cfg(test)]
     fn begin(&self, task_id: &str, call_id: &str) -> Result<FileOperationGuardNative, String> {
+        self.begin_with_policy(task_id, call_id, None, CancellationToken::new())
+    }
+
+    fn begin_with_policy(
+        &self,
+        task_id: &str,
+        call_id: &str,
+        sandbox: Option<&Binding>,
+        token: CancellationToken,
+    ) -> Result<FileOperationGuardNative, String> {
         let mut operations = self
             .operations
             .lock()
@@ -83,13 +98,15 @@ impl FileOperationRegistryNative {
         if operations.contains_key(&key) {
             return Err("File operation id is already active".into());
         }
-        let flag = Arc::new(AtomicBool::new(false));
-        operations.insert(key.clone(), Arc::clone(&flag));
+        let token = token.child_token();
+        operations.insert(key.clone(), token.clone());
         Ok(FileOperationGuardNative {
             registry: self.clone(),
             task_id: key.0,
             call_id: key.1,
-            flag,
+            token,
+            sandbox: sandbox.cloned(),
+            sandbox_sftp_started: Cell::new(false),
         })
     }
 
@@ -100,7 +117,7 @@ impl FileOperationRegistryNative {
             .map_err(|_| "File operation registry is unavailable".to_string())?;
         for ((owner_task_id, _), flag) in operations.iter() {
             if owner_task_id == task_id {
-                flag.store(true, Ordering::SeqCst);
+                flag.cancel();
             }
         }
         Ok(())
@@ -109,11 +126,44 @@ impl FileOperationRegistryNative {
 
 impl FileOperationGuardNative {
     fn ensure_active(&self) -> Result<(), String> {
-        if self.flag.load(Ordering::SeqCst) {
-            Err("File operation was cancelled".into())
+        if self.token.is_cancelled() {
+            Err(if self.sandbox_sftp_started.get() {
+                crate::remote_sandbox::SFTP_UNCERTAIN.into()
+            } else {
+                "File operation was cancelled".into()
+            })
         } else {
             Ok(())
         }
+    }
+
+    fn connect(
+        &self,
+        target: &AgentToolTargetNative,
+        db: &Database,
+        credentials: &CredentialManager,
+        known_hosts: &Path,
+    ) -> Result<AgentSftpConnection, String> {
+        self.ensure_active()?;
+        let connection = connection_for_remote_target(target, db, credentials)?;
+        let binding = match &self.sandbox {
+            Some(binding) => Some(binding.clone()),
+            None => crate::remote_sandbox::binding_for_target(target, db, known_hosts)?,
+        };
+        let connection = AgentSftpConnection::connect(
+            db,
+            binding.as_ref(),
+            &connection,
+            known_hosts,
+            Control::new(
+                Instant::now() + Duration::from_secs(120),
+                self.token.clone(),
+            ),
+        )?;
+        if matches!(connection, AgentSftpConnection::Sandbox(_)) {
+            self.sandbox_sftp_started.set(true);
+        }
+        Ok(connection)
     }
 }
 
@@ -141,7 +191,15 @@ pub(super) fn preview_file_call_native(
     database: &Database,
     credentials: &CredentialManager,
     known_hosts_path: &Path,
+    sandbox: Option<&Binding>,
 ) -> Result<AgentCallPreviewNative, String> {
+    let operations = FileOperationRegistryNative::default();
+    let operation = operations.begin_with_policy(
+        "preview",
+        &call.call_id,
+        sandbox,
+        CancellationToken::new(),
+    )?;
     if matches!(
         call.tool_name.as_str(),
         "read_file" | "list_directory" | "search_text"
@@ -174,6 +232,7 @@ pub(super) fn preview_file_call_native(
                 database,
                 credentials,
                 known_hosts_path,
+                &operation,
             )?;
             Ok(AgentCallPreviewNative {
                 tool_name: call.tool_name.clone(),
@@ -192,8 +251,13 @@ pub(super) fn preview_file_call_native(
             })
         }
         "apply_patch" | "edit_file" => {
-            let (preview, _) =
-                compute_edit_call_preview(call, database, credentials, known_hosts_path)?;
+            let (preview, _) = compute_edit_call_preview(
+                call,
+                database,
+                credentials,
+                known_hosts_path,
+                &operation,
+            )?;
             Ok(AgentCallPreviewNative {
                 tool_name: call.tool_name.clone(),
                 target_id: call.target.target_id().to_string(),
@@ -234,12 +298,24 @@ pub(super) fn preview_file_call_native(
     }
 }
 
+#[cfg(test)]
 pub(super) fn execute_file_tool_native(
     context: FileExecutionContextNative<'_>,
 ) -> Result<FileToolOutputNative, String> {
-    let operation = context
-        .operations
-        .begin(context.task_id, &context.call.call_id)?;
+    execute_file_tool_with_policy(context, None, CancellationToken::new())
+}
+
+pub(super) fn execute_file_tool_with_policy(
+    context: FileExecutionContextNative<'_>,
+    sandbox: Option<&Binding>,
+    token: CancellationToken,
+) -> Result<FileToolOutputNative, String> {
+    let operation = context.operations.begin_with_policy(
+        context.task_id,
+        &context.call.call_id,
+        sandbox,
+        token,
+    )?;
     match context.call.tool_name.as_str() {
         "read_file" => execute_read_file(&context, &operation),
         "list_directory" => execute_list_directory(&context, &operation),
@@ -569,6 +645,7 @@ fn execute_write_file(
         context.database,
         context.credentials,
         context.known_hosts_path,
+        operation,
     )?;
     let operation_name = if preview.before.is_some() {
         "replace"
@@ -631,6 +708,7 @@ fn execute_apply_patch(
         context.database,
         context.credentials,
         context.known_hosts_path,
+        operation,
     )?;
     if dry_run {
         return Ok(FileToolOutputNative {
@@ -723,14 +801,13 @@ fn execute_transfer_file(
             "Native SFTP transfer requires a remote target with remote and local roots".into(),
         );
     };
-    let connection =
-        connection_for_remote_target(&context.call.target, context.database, context.credentials)?;
-    let connected = connect_sftp(&connection, None, Some(context.known_hosts_path))
-        .map_err(|error| format!("Native SFTP connection failed: {error:?}"))?;
-    let connected = connected
-        .lock()
-        .map_err(|_| "Native SFTP connection is unavailable".to_string())?;
-    let sftp = &connected.sftp;
+    let connected = operation.connect(
+        &context.call.target,
+        context.database,
+        context.credentials,
+        context.known_hosts_path,
+    )?;
+    let sftp = &connected.sftp();
     let remote_root = resolve_remote_root(sftp, remote_root)?;
     let local_root = canonical_local_root(Path::new(local_root))?;
 
@@ -867,16 +944,15 @@ fn compute_write_preview(
     database: &Database,
     credentials: &CredentialManager,
     known_hosts_path: &Path,
+    operation: &FileOperationGuardNative,
 ) -> Result<WritePreviewNative, String> {
-    let operation_registry = FileOperationRegistryNative::default();
-    let operation = operation_registry.begin("preview", "write-preview")?;
     let (path, before, metadata) = read_write_destination(
         target,
         &arguments.path,
         database,
         credentials,
         known_hosts_path,
-        &operation,
+        operation,
     )?;
     let before_sha256 = before.as_deref().map(sha256_hex);
     match &arguments.precondition {
@@ -952,6 +1028,7 @@ fn compute_edit_call_preview(
     database: &Database,
     credentials: &CredentialManager,
     known_hosts_path: &Path,
+    operation: &FileOperationGuardNative,
 ) -> Result<(PatchPreviewNative, bool), String> {
     if call.tool_name == "apply_patch" {
         let arguments: ApplyPatchArgumentsNative =
@@ -963,21 +1040,20 @@ fn compute_edit_call_preview(
             database,
             credentials,
             known_hosts_path,
+            operation,
         )
         .map(|preview| (preview, arguments.dry_run.unwrap_or(false)));
     }
     crate::agent_runtime::validate_tool_arguments_native("edit_file", &call.arguments)?;
     let arguments: EditFileArgumentsNative = serde_json::from_value(call.arguments.clone())
         .map_err(|error| format!("Invalid edit_file arguments: {error}"))?;
-    let registry = FileOperationRegistryNative::default();
-    let operation = registry.begin("edit-preview", "edit-preview")?;
     let (_, before, _) = read_target_file(
         &call.target,
         &arguments.path,
         database,
         credentials,
         known_hosts_path,
-        &operation,
+        operation,
         MAX_FILE_BYTES,
     )?;
     if sha256_hex(&before) != arguments.precondition.sha256 {
@@ -1013,6 +1089,7 @@ fn compute_edit_call_preview(
         database,
         credentials,
         known_hosts_path,
+        operation,
     )
     .map(|preview| (preview, false))
 }
@@ -1023,20 +1100,19 @@ fn compute_patch_preview(
     database: &Database,
     credentials: &CredentialManager,
     known_hosts_path: &Path,
+    operation: &FileOperationGuardNative,
 ) -> Result<PatchPreviewNative, String> {
     if arguments.preconditions.len() != 1 {
         return Err("M2 apply_patch accepts exactly one digest-bound file per call".into());
     }
     let precondition = &arguments.preconditions[0];
-    let operation_registry = FileOperationRegistryNative::default();
-    let operation = operation_registry.begin("preview", "preview")?;
     let (path, before, metadata) = read_target_file(
         target,
         &precondition.path,
         database,
         credentials,
         known_hosts_path,
-        &operation,
+        operation,
         MAX_FILE_BYTES,
     )?;
     let before_sha256 = sha256_hex(&before);
@@ -1126,15 +1202,11 @@ fn read_write_destination(
             root_path: Some(root),
             ..
         } => {
-            let connection = connection_for_remote_target(target, database, credentials)?;
-            let connected = connect_sftp(&connection, None, Some(known_hosts_path))
-                .map_err(|error| format!("Native SFTP connection failed: {error:?}"))?;
-            let connected = connected
-                .lock()
-                .map_err(|_| "Native SFTP connection is unavailable".to_string())?;
-            let root = resolve_remote_root(&connected.sftp, root)?;
-            let path = resolve_remote_path(&connected.sftp, &root, requested_path, true)?;
-            let metadata = match connected.sftp.lstat(Path::new(&path)) {
+            let connected = operation.connect(target, database, credentials, known_hosts_path)?;
+            let sftp = connected.sftp();
+            let root = resolve_remote_root(&sftp, root)?;
+            let path = resolve_remote_path(&sftp, &root, requested_path, true)?;
+            let metadata = match sftp.lstat(Path::new(&path)) {
                 Ok(stat) => CheckpointOriginalMetadataNative {
                     permissions: stat.perm,
                     modified_unix_ms: stat.mtime.map(|value| value.saturating_mul(1_000)),
@@ -1144,7 +1216,7 @@ fn read_write_destination(
                 }
                 Err(error) => return Err(format!("Failed to inspect remote file: {error}")),
             };
-            let before = read_remote_optional(&connected.sftp, &path, MAX_FILE_BYTES, operation)?;
+            let before = read_remote_optional(&sftp, &path, MAX_FILE_BYTES, operation)?;
             Ok((path, before, metadata))
         }
         AgentToolTargetNative::Local { cwd: None, .. } => {
@@ -1198,19 +1270,14 @@ fn read_target_file(
             root_path: Some(root),
             ..
         } => {
-            let connection = connection_for_remote_target(target, database, credentials)?;
-            let connected = connect_sftp(&connection, None, Some(known_hosts_path))
-                .map_err(|error| format!("Native SFTP connection failed: {error:?}"))?;
-            let connected = connected
-                .lock()
-                .map_err(|_| "Native SFTP connection is unavailable".to_string())?;
-            let root = resolve_remote_root(&connected.sftp, root)?;
-            let path = resolve_remote_path(&connected.sftp, &root, requested_path, false)?;
-            let stat = connected
-                .sftp
-                .stat(Path::new(&path))
+            let connected = operation.connect(target, database, credentials, known_hosts_path)?;
+            let sftp = connected.sftp();
+            let root = resolve_remote_root(&sftp, root)?;
+            let path = resolve_remote_path(&sftp, &root, requested_path, false)?;
+            let stat = sftp
+                .lstat(Path::new(&path))
                 .map_err(|error| format!("Failed to inspect remote file: {error}"))?;
-            let bytes = read_remote_bounded(&connected.sftp, &path, limit, operation)?;
+            let bytes = read_remote_bounded(&sftp, &path, limit, operation)?;
             Ok((
                 path,
                 bytes,
@@ -1252,22 +1319,11 @@ fn write_target_file(
             root_path: Some(root),
             ..
         } => {
-            let connection = connection_for_remote_target(target, database, credentials)?;
-            let connected = connect_sftp(&connection, None, Some(known_hosts_path))
-                .map_err(|error| format!("Native SFTP connection failed: {error:?}"))?;
-            let connected = connected
-                .lock()
-                .map_err(|_| "Native SFTP connection is unavailable".to_string())?;
-            let root = resolve_remote_root(&connected.sftp, root)?;
-            let path = resolve_remote_path(&connected.sftp, &root, requested_path, true)?;
-            write_remote_atomic(
-                &connected.sftp,
-                &root,
-                &path,
-                content,
-                expected_before,
-                operation,
-            )
+            let connected = operation.connect(target, database, credentials, known_hosts_path)?;
+            let sftp = connected.sftp();
+            let root = resolve_remote_root(&sftp, root)?;
+            let path = resolve_remote_path(&sftp, &root, requested_path, true)?;
+            write_remote_atomic(&sftp, &root, &path, content, expected_before, operation)
         }
         _ => Err("File write requires a path-scoped host target".into()),
     }
@@ -1328,24 +1384,18 @@ fn list_target_directory(
             root_path: Some(root),
             ..
         } => {
-            let connection = connection_for_remote_target(target, database, credentials)?;
-            let connected = connect_sftp(&connection, None, Some(known_hosts_path))
-                .map_err(|error| format!("Native SFTP connection failed: {error:?}"))?;
-            let connected = connected
-                .lock()
-                .map_err(|_| "Native SFTP connection is unavailable".to_string())?;
-            let root = resolve_remote_root(&connected.sftp, root)?;
-            let path = resolve_remote_path(&connected.sftp, &root, requested_path, false)?;
-            let stat = connected
-                .sftp
+            let connected = operation.connect(target, database, credentials, known_hosts_path)?;
+            let sftp = connected.sftp();
+            let root = resolve_remote_root(&sftp, root)?;
+            let path = resolve_remote_path(&sftp, &root, requested_path, false)?;
+            let stat = sftp
                 .lstat(Path::new(&path))
                 .map_err(|error| format!("Failed to inspect remote directory: {error}"))?;
             if remote_kind(stat.perm) != "directory" {
                 return Err("Remote list path is not a directory".into());
             }
             let mut entries = Vec::new();
-            for (entry_path, stat) in connected
-                .sftp
+            for (entry_path, stat) in sftp
                 .readdir(Path::new(&path))
                 .map_err(|error| format!("Failed to list remote directory: {error}"))?
             {
@@ -1463,24 +1513,17 @@ fn search_target(
             root_path: Some(root),
             ..
         } => {
-            let connection = connection_for_remote_target(target, database, credentials)?;
-            let connected = connect_sftp(&connection, None, Some(known_hosts_path))
-                .map_err(|error| format!("Native SFTP connection failed: {error:?}"))?;
-            let connected = connected
-                .lock()
-                .map_err(|_| "Native SFTP connection is unavailable".to_string())?;
-            let root = resolve_remote_root(&connected.sftp, root)?;
-            let search_root = resolve_remote_path(&connected.sftp, &root, &arguments.path, false)?;
+            let connected = operation.connect(target, database, credentials, known_hosts_path)?;
+            let sftp = connected.sftp();
+            let root = resolve_remote_root(&sftp, root)?;
+            let search_root = resolve_remote_path(&sftp, &root, &arguments.path, false)?;
             let mut files = Vec::new();
-            let stat = connected
-                .sftp
+            let stat = sftp
                 .lstat(Path::new(&search_root))
                 .map_err(|error| format!("Failed to inspect remote search path: {error}"))?;
             match remote_kind(stat.perm) {
                 "file" => files.push((search_root.clone(), stat.size.unwrap_or(0))),
-                "directory" => {
-                    collect_remote_files(&connected.sftp, &search_root, &mut files, operation)?
-                }
+                "directory" => collect_remote_files(&sftp, &search_root, &mut files, operation)?,
                 "symlink" => return Err("Remote symlink traversal is denied".into()),
                 _ => return Err("search_text path must be a regular file or directory".into()),
             }
@@ -1517,7 +1560,7 @@ fn search_target(
                         break;
                     }
                     bytes_read = bytes_read.saturating_add(size);
-                    let bytes = read_remote_bounded(&connected.sftp, &file, size, operation)?;
+                    let bytes = read_remote_bounded(&sftp, &file, size, operation)?;
                     append_content_matches(&file, &bytes, arguments, &mut matches);
                 }
             }
@@ -1587,7 +1630,7 @@ fn collect_local_files(
 }
 
 fn collect_remote_files(
-    sftp: &Sftp,
+    sftp: &AgentSftp<'_>,
     root: &str,
     files: &mut Vec<(String, u64)>,
     operation: &FileOperationGuardNative,
@@ -1875,7 +1918,7 @@ fn local_metadata(path: &Path) -> Result<CheckpointOriginalMetadataNative, Strin
     })
 }
 
-fn resolve_remote_root(sftp: &Sftp, root: &str) -> Result<String, String> {
+pub(super) fn resolve_remote_root(sftp: &AgentSftp<'_>, root: &str) -> Result<String, String> {
     let normalized = normalize_remote_absolute(root)?;
     let stat = sftp
         .lstat(Path::new(&normalized))
@@ -1894,8 +1937,8 @@ fn resolve_remote_root(sftp: &Sftp, root: &str) -> Result<String, String> {
     Ok(canonical)
 }
 
-fn resolve_remote_path(
-    sftp: &Sftp,
+pub(super) fn resolve_remote_path(
+    sftp: &AgentSftp<'_>,
     root: &str,
     requested: &str,
     allow_missing_leaf: bool,
@@ -1982,7 +2025,7 @@ fn remote_path_within(root: &str, path: &str) -> bool {
 }
 
 fn read_remote_optional(
-    sftp: &Sftp,
+    sftp: &AgentSftp<'_>,
     path: &str,
     limit: u64,
     operation: &FileOperationGuardNative,
@@ -1998,7 +2041,7 @@ fn read_remote_optional(
 }
 
 fn read_remote_bounded(
-    sftp: &Sftp,
+    sftp: &AgentSftp<'_>,
     path: &str,
     limit: u64,
     operation: &FileOperationGuardNative,
@@ -2017,7 +2060,7 @@ fn read_remote_bounded(
 }
 
 fn write_remote_atomic(
-    sftp: &Sftp,
+    sftp: &AgentSftp<'_>,
     root: &str,
     destination: &str,
     content: &[u8],
@@ -2046,12 +2089,7 @@ fn write_remote_atomic(
     let name = destination.rsplit('/').next().unwrap_or("file");
     let temp_path = format!("{parent}/.shellspan-{}-{name}", Uuid::new_v4().simple());
     let mut temp = sftp
-        .open_mode(
-            Path::new(&temp_path),
-            OpenFlags::CREATE | OpenFlags::WRITE | OpenFlags::TRUNCATE | OpenFlags::EXCLUSIVE,
-            0o600,
-            OpenType::File,
-        )
+        .create_exclusive(Path::new(&temp_path))
         .map_err(|error| format!("Failed to create remote temp file: {error}"))?;
     let write_result = write_stream(&mut temp, content, operation);
     if let Err(error) = write_result {
@@ -2060,7 +2098,8 @@ fn write_remote_atomic(
     }
     temp.flush()
         .map_err(|error| format!("Failed to flush remote temp file: {error}"))?;
-    drop(temp);
+    temp.close()
+        .map_err(|error| format!("Failed to close remote temp file: {error}"))?;
     if let Some(permissions) = existing_permissions {
         sftp.setstat(
             Path::new(&temp_path),
@@ -2475,7 +2514,8 @@ mod tests {
             &call,
             &database,
             &credentials,
-            &base.join("known_hosts")
+            &base.join("known_hosts"),
+            None
         )
         .unwrap_err()
         .starts_with("AGENT_UNSAFE_FILE_ROOT"));
@@ -2931,7 +2971,8 @@ mod tests {
         }
         let call = make_call("const data", "const info", &digest);
         let preview =
-            preview_file_call_native(&call, &database, &credentials, &known_hosts_path).unwrap();
+            preview_file_call_native(&call, &database, &credentials, &known_hosts_path, None)
+                .unwrap();
         assert_eq!(preview.tool_name, "edit_file");
         let output = run(&call).unwrap();
         let changed = original.replacen("const data", "const info", 1);

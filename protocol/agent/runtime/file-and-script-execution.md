@@ -331,9 +331,10 @@ promise it. There is no permanent-delete fallback, automatic purge or in-app
 undo. Cancellation stops before the OS call; an in-progress OS trash call cannot
 be interrupted. Errors require inspecting both source and trash before retrying.
 
-This release does not provide a production process sandbox, remote executor,
-batch/directory trash plans or atomic protection against hostile concurrent
-path replacement. Platform trash APIs are path-based; checks do not establish
-an OS-enforced filesystem boundary. Arbitrary approved shell programs can still
-delete data permanently, including outside the working directory. Existing
-structured-edit checkpoints do not back up arbitrary shell side effects.
+For explicitly configured Linux SSH connections, see the [remote Bubblewrap
+protocol](remote-bubblewrap.md). The sandbox is independent of trash. Platform
+trash APIs are path-based; trash checks do not establish an OS-enforced
+filesystem boundary or protect against hostile concurrent path replacement.
+There are no batch or directory trash plans. Outside a configured sandbox,
+arbitrary approved shell programs can delete data outside the working directory.
+Structured-edit checkpoints do not back up shell side effects.

@@ -1,0 +1,9 @@
+Port 22
+AddressFamily inet
+ListenAddress 0.0.0.0
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+PermitRootLogin no
+AllowUsers sandbox
+Subsystem sftp internal-sftp
+Subsystem shellspan-bwrap-v1 /usr/local/libexec/shellspan-bwrap-v1

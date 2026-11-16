@@ -3049,3 +3049,7 @@ mod tests {
 #[cfg(all(test, unix))]
 #[path = "tests/runtime/native_regressions.rs"]
 mod native_regression_tests;
+
+#[cfg(test)]
+#[path = "tests/runtime/sandbox_disconnect.rs"]
+mod sandbox_disconnect;

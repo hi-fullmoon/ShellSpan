@@ -38,7 +38,7 @@ use crate::terminal_integration::{TerminalIntegrationControlEvent, TerminalShell
 
 use super::{
     assess_effect_native, configured_tool_policy_native, current_unix_ms,
-    enforce_native_call_policy_native, execute_file_tool_native, execute_http_probe_native,
+    enforce_native_call_policy_native, execute_file_tool_with_policy, execute_http_probe_native,
     execute_mcp_tool_native, inspect_call_policy_scope_native, load_mcp_server_native,
     preview_file_call_native, spawn_local_process_native, spawn_remote_process_native,
     AgentCallPreviewNative, CapabilityIssueRequestNative, CheckpointStoreNative,
@@ -108,6 +108,7 @@ pub(crate) struct AgentAuthorizeCallRequestNative {
 #[derive(Debug, Clone)]
 pub(crate) struct PreparedAuthorizationNative {
     reviewed_command: Option<super::ReviewedReadCommand>,
+    pub(crate) sandbox: Option<crate::remote_sandbox::Binding>,
     pub(crate) context: NativeExecutionContext,
     pub(crate) call: AgentToolCallNative,
     pub(crate) effect: AgentObservedEffectNative,
@@ -788,6 +789,7 @@ impl NativeToolEngine {
             target: input.target,
             capability_id: "pending-native-capability".into(),
         };
+        let sandbox = call_sandbox_binding(&context, &call, database, known_hosts_path)?;
         if call.tool_name == "exec_command" && call.arguments["elevated"] == json!(true) {
             let arguments: ExecCommandArgumentsNative =
                 serde_json::from_value(call.arguments.clone()).map_err(|e| e.to_string())?;
@@ -804,7 +806,29 @@ impl NativeToolEngine {
         if ttl_ms == 0 || ttl_ms > MAX_CAPABILITY_TTL_MS {
             return Err("Capability TTL is outside the native limit".into());
         }
-        let preview = preview_file_call_native(&call, database, credentials, known_hosts_path)?;
+        let preview_call = || {
+            preview_file_call_native(
+                &call,
+                database,
+                credentials,
+                known_hosts_path,
+                sandbox.as_ref(),
+            )
+        };
+        let preview = if sandbox.as_ref().is_some_and(|b| b.state.policy.is_some())
+            && matches!(
+                call.tool_name.as_str(),
+                "write_file" | "edit_file" | "apply_patch"
+            )
+            && tokio::runtime::Handle::try_current().is_ok()
+        {
+            // Approval preparation can run on a Tokio worker. The synchronous
+            // file driver owns a separate runtime for its SSH/SFTP transport.
+            std::thread::scope(|scope| scope.spawn(preview_call).join())
+                .map_err(|_| "Sandbox SFTP preview worker failed")??
+        } else {
+            preview_call()?
+        };
         let review = super::review_call(context.request.permission_mode, &call, &effect, &scope);
         effect
             .summary
@@ -812,10 +836,19 @@ impl NativeToolEngine {
         Ok(PreparedAuthorizationNative {
             reviewed_command: review.command,
             native_prompt: format!(
-                "{}\nApproval review: {}",
+                "{}\nApproval review: {}{}",
                 native_prompt(&context, &call, &effect, &scope, &preview, ttl_ms),
-                review.reason
+                review.reason,
+                sandbox
+                    .as_ref()
+                    .and_then(|b| b.state.policy.as_ref())
+                    .map(|p| format!(
+                        "\nRemote Bubblewrap sandbox: {} ({:?}). Network is disabled.",
+                        p.workspace, p.mode
+                    ))
+                    .unwrap_or_default()
             ),
+            sandbox,
             context,
             call,
             effect,
@@ -843,7 +876,7 @@ impl NativeToolEngine {
                     request_id: prepared.context.request.request_id.clone(),
                     user_session_id: prepared.context.request.user_session_id.clone(),
                     call_id: prepared.call.call_id.clone(),
-                    call_digest: call_digest(&prepared.call)?,
+                    call_digest: bound_call_digest(&prepared.call, prepared.sandbox.as_ref())?,
                     allowed_tools: vec![prepared.call.tool_name.clone()],
                     allowed_effects: vec![prepared.effect.kind],
                     target_ids: vec![prepared.call.target.target_id().to_string()],
@@ -1061,6 +1094,7 @@ impl NativeToolEngine {
             .registry
             .executable(&call.tool_name)
             .map_err(registry_error_message)?;
+        let sandbox = call_sandbox_binding(context, &call, database, known_hosts_path)?;
         self.revalidate_target(context, &call.target, sessions, database)?;
         if !(call.tool_name == "exec_command" && call.arguments["elevated"] == json!(true)) {
             ensure_unmanaged_call(database, context, &call)?;
@@ -1089,7 +1123,7 @@ impl NativeToolEngine {
                     call_id: &call.call_id,
                     target_id: call.target.target_id(),
                 },
-                &call_digest(&call)?,
+                &bound_call_digest(&call, sandbox.as_ref())?,
                 current_unix_ms(),
             )
             .map_err(|error| format!("Native capability verification failed: {error:?}"))?;
@@ -1147,6 +1181,7 @@ impl NativeToolEngine {
                 reviewed_command.as_ref(),
                 cancellation,
                 runner_journal,
+                sandbox.as_ref(),
             ),
             "terminal_execute" => self.execute_terminal_command(
                 context,
@@ -1216,6 +1251,8 @@ impl NativeToolEngine {
                 database,
                 credentials,
                 known_hosts_path,
+                sandbox.as_ref(),
+                cancellation,
             ),
             _ => Err("Tool is outside the native execution kernel".into()),
         }
@@ -1742,6 +1779,7 @@ impl NativeToolEngine {
         reviewed_command: Option<&super::ReviewedReadCommand>,
         cancellation: &CancellationToken,
         runner_journal: Option<crate::agent_runtime::RunnerDispatchJournal>,
+        sandbox: Option<&crate::remote_sandbox::Binding>,
     ) -> Result<AgentToolResultNative, String> {
         let arguments: ExecCommandArgumentsNative = serde_json::from_value(call.arguments.clone())
             .map_err(|error| format!("Invalid exec_command arguments: {error}"))?;
@@ -1872,6 +1910,76 @@ impl NativeToolEngine {
         } else {
             timeout
         };
+        if let Some(binding) = sandbox.filter(|b| b.state.policy.is_some()) {
+            use crate::remote_sandbox::{CommandOutcome, CommandState};
+            let connection = connection_for_remote_target(&call.target, database, credentials)?;
+            let outcome = crate::remote_sandbox::execute_command(
+                database,
+                binding,
+                &connection,
+                known_hosts_path,
+                &arguments.command,
+                timeout,
+                cancellation,
+            );
+            let mut result =
+                completed_result(&context.request, call, effect, "", json!(null), false);
+            match outcome {
+                CommandOutcome::Confirmed {
+                    state,
+                    exit_code,
+                    stdout,
+                    stderr,
+                    truncated,
+                } => {
+                    (result.status, result.summary) = match state {
+                        CommandState::Exited => (
+                            if exit_code == 0 {
+                                AgentToolResultStatusNative::Completed
+                            } else {
+                                AgentToolResultStatusNative::Failed
+                            },
+                            format!("Remote sandbox command exited with status {exit_code}."),
+                        ),
+                        CommandState::Cancelled => (
+                            AgentToolResultStatusNative::Cancelled,
+                            "Remote sandbox cancellation and termination confirmed.".into(),
+                        ),
+                        CommandState::TimedOut => (
+                            AgentToolResultStatusNative::TimedOut,
+                            "Remote sandbox command timed out and termination was confirmed."
+                                .into(),
+                        ),
+                        CommandState::OutputLimit => (
+                            AgentToolResultStatusNative::Failed,
+                            "Remote sandbox command exceeded the output limit and was stopped."
+                                .into(),
+                        ),
+                    };
+                    result.truncated = Some(truncated);
+                    result.data = Some(
+                        json!({"channel":"direct","sandbox":"bubblewrap","state":state,"exitCode":exit_code,"stdout":stdout,"stderr":stderr,"terminationConfirmed":true,"truncated":truncated}),
+                    );
+                }
+                CommandOutcome::NotStarted(error) => {
+                    result.status = if cancellation.is_cancelled() {
+                        AgentToolResultStatusNative::Cancelled
+                    } else {
+                        AgentToolResultStatusNative::Failed
+                    };
+                    result.summary = error;
+                    result.data = Some(json!({"started":false,"sandbox":"bubblewrap"}));
+                }
+                CommandOutcome::Uncertain => {
+                    result.status = AgentToolResultStatusNative::Uncertain;
+                    result.summary = "SANDBOX_TERMINATION_UNCONFIRMED: the command may have started; inspect the remote workspace before continuing. Do not retry automatically.".into();
+                    result.data = Some(
+                        json!({"sandbox":"bubblewrap","terminationConfirmed":false,"doNotRetry":true}),
+                    );
+                }
+            }
+            return Ok(result);
+        }
         if self.processes.running_count()? >= max_concurrency as usize {
             return Err("exec_command native concurrency limit was reached".into());
         }
@@ -2809,18 +2917,39 @@ impl NativeToolEngine {
         database: &Database,
         credentials: &CredentialManager,
         known_hosts_path: &Path,
+        sandbox: Option<&crate::remote_sandbox::Binding>,
+        cancellation: &CancellationToken,
     ) -> Result<AgentToolResultNative, String> {
         let checkpoint_root = self.checkpoint_root()?;
-        let output = execute_file_tool_native(FileExecutionContextNative {
-            task_id: &context.request.task_id,
-            call,
-            database,
-            credentials,
-            known_hosts_path,
-            checkpoint_root: &checkpoint_root,
-            checkpoints: &self.checkpoints,
-            operations: &self.file_operations,
-        })?;
+        let output = execute_file_tool_with_policy(
+            FileExecutionContextNative {
+                task_id: &context.request.task_id,
+                call,
+                database,
+                credentials,
+                known_hosts_path,
+                checkpoint_root: &checkpoint_root,
+                checkpoints: &self.checkpoints,
+                operations: &self.file_operations,
+            },
+            sandbox,
+            cancellation.clone(),
+        );
+        let output = match output {
+            Err(error) if error.contains("SANDBOX_SFTP_UNCERTAIN") => {
+                let mut result = completed_result(
+                    &context.request,
+                    call,
+                    effect,
+                    &error,
+                    json!({"sandbox":"bubblewrap","terminationConfirmed":false,"doNotRetry":true}),
+                    false,
+                );
+                result.status = AgentToolResultStatusNative::Uncertain;
+                return Ok(result);
+            }
+            result => result?,
+        };
         let mut observed = effect.clone();
         observed.paths = output.paths;
         Ok(completed_result(
@@ -2889,18 +3018,67 @@ fn registry_error_message(error: ToolRegistryErrorNative) -> String {
 }
 
 fn call_digest(call: &AgentToolCallNative) -> Result<String, String> {
+    bound_call_digest(call, None)
+}
+
+fn bound_call_digest(
+    call: &AgentToolCallNative,
+    sandbox: Option<&crate::remote_sandbox::Binding>,
+) -> Result<String, String> {
     let bytes = serde_json::to_vec(&(
         call.request_id.as_str(),
         call.call_id.as_str(),
         call.tool_name.as_str(),
         &call.arguments,
         &call.target,
+        sandbox.map(|b| &b.digest),
     ))
     .map_err(|error| format!("Failed to digest native call: {error}"))?;
     Ok(Sha256::digest(bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect())
+}
+
+fn call_sandbox_binding(
+    context: &NativeExecutionContext,
+    call: &AgentToolCallNative,
+    database: &Database,
+    known_hosts: &Path,
+) -> Result<Option<crate::remote_sandbox::Binding>, String> {
+    if call.tool_name == "exec_command" && call.arguments["elevated"] == json!(true) {
+        return Ok(None);
+    }
+    let owner = match &call.target {
+        AgentToolTargetNative::Process {
+            owner_target_id, ..
+        } => context
+            .request
+            .targets
+            .iter()
+            .find(|target| target.target_id() == owner_target_id)
+            .ok_or("Process has no frozen owner")?,
+        _ => &call.target,
+    };
+    let binding = crate::remote_sandbox::binding_for_target(owner, database, known_hosts)?;
+    crate::remote_sandbox::guard_tool(binding.as_ref(), &call.tool_name, &call.arguments)?;
+    if let Some(policy) = binding.as_ref().and_then(|b| b.state.policy.as_ref()) {
+        if call.tool_name == "exec_command" {
+            if call.arguments["cwd"]
+                .as_str()
+                .is_some_and(|cwd| cwd != policy.workspace)
+            {
+                return Err(
+                    "SANDBOX_WORKSPACE_MISMATCH: the executor starts in the configured workspace"
+                        .into(),
+                );
+            }
+        } else if !matches!(owner, AgentToolTargetNative::Remote { root_path: Some(root), .. } if policy.contains(root))
+        {
+            return Err("SANDBOX_WORKSPACE_MISMATCH: the Agent file root must be within the configured workspace".into());
+        }
+    }
+    Ok(binding)
 }
 
 fn validate_identifier(value: &str, label: &str) -> Result<(), String> {
@@ -2990,10 +3168,21 @@ pub(crate) fn connection_for_remote_target(
     else {
         return Err("Remote execution requires a frozen profile id".into());
     };
+    connection_for_saved_profile(profile_id, host, *port, username, database, credentials)
+}
+
+pub(crate) fn connection_for_saved_profile(
+    profile_id: &str,
+    host: &str,
+    port: u16,
+    username: &str,
+    database: &Database,
+    credentials: &CredentialManager,
+) -> Result<RemoteConnectionRequest, String> {
     let profile = database
         .get_profile(profile_id)?
         .ok_or_else(|| "Remote execution profile was not found".to_string())?;
-    if profile.host != *host || profile.port != *port || profile.username != *username {
+    if profile.host != host || profile.port != port || profile.username != username {
         return Err("Remote execution profile identity drifted".into());
     }
     let auth_method = match profile.auth_method {
@@ -3816,6 +4005,7 @@ mod tests {
                 1,
                 None,
                 &CancellationToken::new(),
+                None,
                 None,
             )
             .unwrap();

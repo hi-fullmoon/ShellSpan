@@ -1,0 +1,328 @@
+#!/usr/bin/python3 -I
+"""OpenSSH subsystem for ShellSpan's Linux Agent sandbox (protocol 1)."""
+
+import base64
+import ctypes
+import errno
+import json
+import os
+import platform
+import re
+import selectors
+import signal
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+
+
+BWRAP = "/usr/bin/bwrap"
+BASE = "/var/lib/shellspan-sandbox"
+ROOTFS = BASE + "/rootfs"
+OUTSIDE = BASE + "/outside-probe"
+WORKSPACES = "/srv/shellspan-workspaces"
+SFTP_SERVER = "/usr/lib/openssh/sftp-server"
+ENV = {"PATH": "/usr/bin:/bin", "LANG": "C"}
+PROBE = r'''
+import errno, os, socket, sys
+root, mode, outside, pid, net, name = sys.argv[1:]
+print('sandboxStart', flush=True)
+assert os.getuid() != 0
+with os.scandir(root) as entries:
+    next(entries, None)
+print('workspaceRead', flush=True)
+file = root + '/' + name
+try:
+    fd = os.open(file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+except OSError as error:
+    assert mode == 'readOnly' and error.errno == errno.EROFS
+else:
+    try:
+        with os.fdopen(fd, 'wb') as target:
+            target.write(b'shellspan')
+        with open(file, 'rb') as target:
+            assert target.read() == b'shellspan'
+        assert mode == 'workspaceWrite'
+    finally:
+        os.unlink(file)
+print('workspaceWrite', flush=True)
+try:
+    with open(outside, 'rb'):
+        pass
+except FileNotFoundError:
+    print('outsideWorkspace', flush=True)
+else:
+    raise AssertionError('host witness is visible')
+assert os.readlink('/proc/self/ns/pid') != pid
+print('processIsolation', flush=True)
+assert os.readlink('/proc/self/ns/net') != net
+for family in (socket.AF_UNIX, socket.AF_INET, socket.AF_INET6):
+    try:
+        socket.socket(family, socket.SOCK_STREAM)
+    except OSError as error:
+        assert error.errno == errno.EPERM
+    else:
+        raise AssertionError('socket creation allowed')
+print('networkIsolation', flush=True)
+'''
+
+
+def reply(**message):
+    print(json.dumps(message, separators=(",", ":")), flush=True)
+
+
+def read_request():
+    line = sys.stdin.buffer.readline(65537)
+    if not line.endswith(b"\n") or len(line) > 65536:
+        raise ValueError("invalid request frame")
+    obj = json.loads(line)
+    if not isinstance(obj, dict):
+        raise ValueError("invalid request")
+    return obj
+
+
+def trusted_dir(path):
+    meta = os.lstat(path)
+    if not stat.S_ISDIR(meta.st_mode) or meta.st_uid != 0 or meta.st_mode & 0o022:
+        raise ValueError("deployment directories must be owned and writable only by root")
+
+
+def package_manager():
+    try:
+        distro = platform.freedesktop_os_release().get("ID")
+    except OSError:
+        return None
+    if distro in ("debian", "ubuntu"):
+        command = "apt-get"
+    elif distro == "alpine":
+        command = "apk"
+    elif distro in ("fedora", "rhel", "centos", "rocky", "almalinux"):
+        command = "dnf"
+    elif distro in ("opensuse-leap", "opensuse-tumbleweed", "sles"):
+        command = "zypper"
+    elif distro == "arch":
+        command = "pacman"
+    else:
+        return None
+    return command if any(os.access(base + "/" + command, os.X_OK) for base in
+                          ("/usr/bin", "/usr/sbin", "/bin", "/sbin")) else None
+
+
+def validate_workspace(path, mode):
+    if os.getuid() == 0 or mode not in ("readOnly", "workspaceWrite"):
+        raise ValueError("unsupported account or policy")
+    if not isinstance(path, str) or not re.fullmatch(re.escape(WORKSPACES) + r"/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", path):
+        raise ValueError("invalid workspace path")
+    for directory in ("/srv", WORKSPACES, "/var", "/var/lib", BASE, ROOTFS):
+        trusted_dir(directory)
+    if not stat.S_ISDIR(os.lstat(path).st_mode):
+        raise ValueError("workspace must be a real directory")
+    # Bind mounts are recursive. Require a distinct filesystem root with no
+    # nested mounts so pre-existing hard links and submounts stay in scope.
+    if os.stat(path).st_dev == os.stat(WORKSPACES).st_dev:
+        raise ValueError("the workspace needs its own mounted filesystem")
+    mounts = json.loads(subprocess.run([
+        "findmnt", "--json", "--submounts", "--mountpoint", path,
+        "--output", "TARGET,FSROOT,OPTIONS",
+    ], env=ENV, timeout=3, capture_output=True, check=True).stdout)["filesystems"]
+    if (len(mounts) != 1 or mounts[0]["target"] != path or mounts[0]["fsroot"] != "/"
+            or mounts[0].get("children") or not {"nodev", "nosuid"} <= set(mounts[0]["options"].split(","))):
+        raise ValueError("workspace mount must be nodev,nosuid and have no submounts")
+    if not os.path.isfile(OUTSIDE) or not os.access(OUTSIDE, os.R_OK):
+        raise ValueError("deploy the readable host boundary witness")
+
+
+def syscall_filter(output):
+    # libseccomp compiles a filter for the current Linux architecture. All
+    # communication with the outside is over the three SSH stdio streams.
+    lib = ctypes.CDLL("libseccomp.so.2")
+    lib.seccomp_init.argtypes = [ctypes.c_uint32]
+    lib.seccomp_init.restype = ctypes.c_void_p
+    lib.seccomp_syscall_resolve_name.argtypes = [ctypes.c_char_p]
+    lib.seccomp_rule_add.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int, ctypes.c_uint]
+    lib.seccomp_export_bpf.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    lib.seccomp_release.argtypes = [ctypes.c_void_p]
+    context = lib.seccomp_init(0x7FFF0000)  # SCMP_ACT_ALLOW
+    if not context:
+        raise RuntimeError("seccomp initialization failed")
+    try:
+        for name in (b"socket", b"socketcall", b"socketpair", b"connect", b"bind", b"io_uring_setup",
+                     b"symlink", b"symlinkat", b"mknod", b"mknodat"):
+            number = lib.seccomp_syscall_resolve_name(name)
+            if number != -1 and lib.seccomp_rule_add(context, 0x50000 | errno.EPERM, number, 0) != 0:
+                raise RuntimeError("seccomp rule installation failed")
+        if lib.seccomp_export_bpf(context, output.fileno()) != 0:
+            raise RuntimeError("seccomp export failed")
+        output.seek(0)
+    finally:
+        lib.seccomp_release(context)
+
+
+def launch(workspace, mode, argv, **kwargs):
+    with tempfile.TemporaryFile() as bpf:
+        syscall_filter(bpf)
+        return subprocess.Popen([
+            BWRAP, "--unshare-all", "--unshare-user", "--disable-userns", "--die-with-parent",
+            "--cap-drop", "ALL", "--clearenv", "--setenv", "PATH", ENV["PATH"],
+            "--setenv", "LANG", "C", "--setenv", "HOME", "/tmp", "--setenv", "TMPDIR", "/tmp",
+            "--ro-bind", ROOTFS, "/", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
+            "--tmpfs", "/run", "--tmpfs", "/srv", "--dir", WORKSPACES,
+            "--ro-bind" if mode == "readOnly" else "--bind", workspace, workspace,
+            "--remount-ro", "/srv", "--chdir", workspace, "--seccomp", str(bpf.fileno()),
+            "--", *argv,
+        ], env=ENV, pass_fds=(bpf.fileno(),), start_new_session=True, **kwargs)
+
+
+def stop(process):
+    if process.poll() is None:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    return process.wait()
+
+
+def execute(workspace, mode, command, timeout_ms, receipt):
+    # The trusted inner shell publishes proof it started before executing user
+    # text. The supervisor removes this prefix and authenticates the outcome
+    # independently from the rest of stdout.
+    marker = (receipt + "\n").encode()
+    prefix = bytearray()
+    bootstrap = 'printf "%s\\n" "$1" && exec /bin/sh -c "$2"'
+    process = launch(workspace, mode, ["/bin/sh", "-c", bootstrap, "shellspan", receipt, command], stdin=subprocess.DEVNULL,
+                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    captured = {"stdout": bytearray(), "stderr": bytearray()}
+    caps = {"stdout": 256 * 1024, "stderr": 64 * 1024}
+    consumed, truncated, state = 0, False, "exited"
+    deadline = time.monotonic() + timeout_ms / 1000
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(sys.stdin.fileno(), selectors.EVENT_READ, "cancel")
+            selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+            selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+            while process.poll() is None or len(selector.get_map()) > 1:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    state = "timedOut"
+                    break
+                for key, _ in selector.select(min(remaining, 0.1)):
+                    if key.data == "cancel":
+                        state = "cancelled"
+                        break
+                    chunk = os.read(key.fd, 65536)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    if key.data == "stdout" and len(prefix) < len(marker):
+                        remaining_prefix = len(marker) - len(prefix)
+                        prefix.extend(chunk[:remaining_prefix])
+                        chunk = chunk[remaining_prefix:]
+                    consumed += len(chunk)
+                    room = caps[key.data] - len(captured[key.data])
+                    captured[key.data].extend(chunk[:room])
+                    truncated |= len(chunk) > room
+                    if consumed > 8 * 1024 * 1024:
+                        state, truncated = "outputLimit", True
+                        break
+                if state != "exited":
+                    break
+    finally:
+        status = stop(process)
+    if state == "exited" and prefix != marker:
+        return {"type": "unstarted", "receipt": receipt}
+    return {"type": "completed", "receipt": receipt, "state": state, "exitCode": status if status >= 0 else 128 - status,
+            "stdout": base64.b64encode(captured["stdout"]).decode(),
+            "stderr": base64.b64encode(captured["stderr"]).decode(), "truncated": truncated}
+
+
+def probe_target(workspace, name):
+    if not isinstance(name, str) or not re.fullmatch(r"\.shellspan-probe-[0-9a-f]{32}", name):
+        raise ValueError("invalid probe target")
+    path = workspace + "/" + name
+    if os.path.lexists(path):
+        raise ValueError("probe target already exists")
+    return path
+
+
+def remove_probe(path):
+    if path is not None and os.path.lexists(path):
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+
+
+def run():
+    request = read_request()
+    kind = request.get("type")
+    if kind == "inspect":
+        linux = sys.platform == "linux"
+        bubblewrap = "missing"
+        if linux:
+            try:
+                output = subprocess.run([BWRAP, "--version"], env=ENV, timeout=5,
+                                        capture_output=True, check=True).stdout
+                bubblewrap = "available" if output.startswith(b"bubblewrap ") else "unusable"
+            except FileNotFoundError:
+                if os.path.lexists(BWRAP):
+                    bubblewrap = "unusable"
+            except (OSError, subprocess.SubprocessError):
+                bubblewrap = "unusable"
+        reply(type="executor", version=1, linux=linux, bubblewrap=bubblewrap,
+              packageManager=package_manager() if linux and bubblewrap == "missing" else None,
+              pidNamespace=os.readlink("/proc/self/ns/pid") if linux else None,
+              netNamespace=os.readlink("/proc/self/ns/net") if linux else None)
+        return
+    workspace, mode = request.get("workspace"), request.get("mode")
+    validate_workspace(workspace, mode)
+    if kind == "probe":
+        name = ".shellspan-probe-" + uuid.uuid4().hex
+        path = probe_target(workspace, name)
+        argv = ["/usr/bin/python3", "-I", "-c", PROBE, workspace, mode, OUTSIDE,
+                os.readlink("/proc/self/ns/pid"), os.readlink("/proc/self/ns/net"), name]
+        process = launch(workspace, mode, argv, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        try:
+            stdout, _ = process.communicate(timeout=10)
+        finally:
+            stop(process)
+            remove_probe(path)
+        reply(type="probe", passed=stdout.decode("ascii").splitlines())
+    elif kind == "sftp":
+        args = [SFTP_SERVER, "-e", "-d", workspace, "-u", "077"]
+        if mode == "readOnly":
+            args.append("-R")
+        probe_file = probe_target(workspace, request["probeFile"]) if "probeFile" in request else None
+        # No payload has been sent by the client before this protocol boundary.
+        reply(type="sftp", version=1)
+        try:
+            process = launch(workspace, mode, args)
+            try:
+                return process.wait(timeout=15 if probe_file else 300)
+            finally:
+                stop(process)
+                remove_probe(probe_file)
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            return 1  # stdout is now SFTP, never send a JSON error here
+    elif kind == "command":
+        receipt = os.urandom(16).hex()
+        reply(type="ready", receipt=receipt)
+        dispatch = read_request()
+        command, timeout = dispatch.get("command"), dispatch.get("timeoutMs")
+        if (dispatch.get("receipt") != receipt or not isinstance(command, str) or not command
+                or "\0" in command or len(command.encode()) > 8192 or type(timeout) is not int
+                or not 1 <= timeout <= 300000):
+            raise ValueError("invalid command frame")
+        reply(**execute(workspace, mode, command, timeout, receipt))
+    else:
+        raise ValueError("unsupported operation")
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(run())
+    except (ValueError, OSError, RuntimeError, subprocess.SubprocessError):
+        reply(type="rejected")
+        sys.exit(1)

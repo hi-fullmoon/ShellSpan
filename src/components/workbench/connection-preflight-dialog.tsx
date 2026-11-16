@@ -59,7 +59,7 @@ function stepBadgeVariant(
   return 'outline';
 }
 
-function PreflightStepRow({
+export function PreflightStepRow({
   step,
   onTrust,
 }: {

@@ -6,6 +6,7 @@ import {
   KeyRound,
   Network,
   Server,
+  ShieldCheckIcon,
   TagsIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -29,6 +30,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { FieldGroup } from '@/components/ui/field';
 import { FormRow } from './shared';
 import { ConnectionSudoPolicyDialog } from './connection-sudo-policy-dialog';
+import { ConnectionSandboxDialog } from './connection-sandbox-dialog';
 import {
   invokeCancelConnectionPreflight,
   invokePickPrivateKeyFile,
@@ -597,6 +599,10 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
 
             {initial && <FormSection icon={KeyRound} title={t('connection.sudo.section')}>
               <ConnectionSudoPolicyDialog key={initial.id} profileId={initial.id} />
+            </FormSection>}
+
+            {initial && <FormSection icon={ShieldCheckIcon} title={t('connection.sandbox.title')}>
+              <ConnectionSandboxDialog key={initial.id} profileId={initial.id} />
             </FormSection>}
 
             <FormSection icon={TagsIcon} title={t('connection.form.section.organization')}>

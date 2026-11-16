@@ -4344,6 +4344,85 @@ pub(crate) async fn get_profile_sudo_policy(
 }
 
 #[tauri::command]
+pub(crate) async fn get_profile_sandbox(
+    db: State<'_, Database>,
+    profile_id: String,
+) -> Result<crate::remote_sandbox::ProfileSandbox, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || db.profile_sandbox(&profile_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn save_profile_sandbox(
+    db: State<'_, Database>,
+    profile_id: String,
+    binding: String,
+    policy: Option<crate::remote_sandbox::Policy>,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        db.save_profile_sandbox(&profile_id, &binding, policy)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn test_profile_sandbox(
+    app: AppHandle,
+    db: State<'_, Database>,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    preflights: State<'_, PreflightCancellationRegistry>,
+    profile_id: String,
+    binding: String,
+    policy: crate::remote_sandbox::Policy,
+    operation_id: String,
+) -> Result<crate::remote_sandbox::TestResult, String> {
+    policy.validate()?;
+    if operation_id.is_empty()
+        || operation_id.len() > 128
+        || !operation_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_.:".contains(&b))
+    {
+        return Err("invalid sandbox preflight operation id".into());
+    }
+    let db = db.inner().clone();
+    let credentials = credentials.inner().clone();
+    let known_hosts = crate::known_hosts::known_hosts_path(&app)?;
+    let flag = preflights.register(operation_id.clone())?;
+    let id = operation_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let saved = db.profile_sandbox(&profile_id)?;
+        if saved.binding != binding {
+            return Err("SANDBOX_POLICY_CHANGED".to_owned());
+        }
+        let trusted_keys = crate::remote_sandbox::trust_snapshot(&known_hosts)?;
+        let connection = crate::agent_runtime::connection_for_saved_profile(
+            &profile_id,
+            &saved.host,
+            saved.port,
+            &saved.username,
+            &db,
+            &credentials,
+        )?;
+        let result =
+            crate::remote_sandbox::test_executor(connection, &policy, id, &known_hosts, flag);
+        if db.profile_sandbox(&profile_id)?.binding != binding
+            || crate::remote_sandbox::trust_snapshot(&known_hosts)? != trusted_keys
+        {
+            return Err("SANDBOX_POLICY_CHANGED".into());
+        }
+        Ok(result)
+    })
+    .await;
+    let _ = preflights.remove(&operation_id);
+    result.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub(crate) async fn save_profile_sudo_policy(
     db: State<'_, Database>,
     sessions: State<'_, SessionManager>,

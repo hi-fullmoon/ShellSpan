@@ -27,6 +27,7 @@ mod port_forward;
 mod redaction;
 mod remote_fs;
 mod remote_health;
+mod remote_sandbox;
 mod runbook;
 mod session;
 mod sftp_pool;
@@ -577,6 +578,9 @@ pub fn run() {
             commands::remove_profile,
             commands::get_profile_sudo_policy,
             commands::save_profile_sudo_policy,
+            commands::get_profile_sandbox,
+            commands::save_profile_sandbox,
+            commands::test_profile_sandbox,
             commands::load_preferences,
             commands::save_preferences,
             frontend_storage::load_ui_preferences,

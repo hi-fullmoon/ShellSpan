@@ -2,6 +2,8 @@
 
 日期：2026-10-14。状态：待实施；本文中的勾选项均未验收，不代表已经提供生产沙箱能力。
 
+此计划针对本地 Docker 工作副本。Linux SSH 连接的独立 Bubblewrap 方案以[远端协议](../../protocol/agent/runtime/remote-bubblewrap.md)和[部署说明](../remote-agent-sandbox.md)为准。
+
 关联设计：[Agent 执行安全与使用体验设计](agent-execution-safety-and-usability.md)。当前行为以 [文件与脚本执行协议](../../protocol/agent/runtime/file-and-script-execution.md) 为准。
 
 ## 实施原则与首版范围

@@ -11,6 +11,11 @@ fn with_sftp<T>(
     operation: impl FnOnce(&Sftp, &str) -> Result<T, String>,
 ) -> Result<T, String> {
     let target = super::super::native_adapter::target_native(&record.target)?;
+    if crate::remote_sandbox::binding_for_target(&target, services.database, services.known_hosts)?
+        .is_some_and(|binding| binding.state.policy.is_some())
+    {
+        return Err("SANDBOX_TOOL_UNAVAILABLE: legacy remote scratch cannot use host SFTP".into());
+    }
     let connection = super::super::connection_for_remote_target(
         &target,
         services.database,

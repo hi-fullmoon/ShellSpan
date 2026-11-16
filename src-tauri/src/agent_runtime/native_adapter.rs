@@ -246,25 +246,38 @@ impl NativeToolRuntime for NativeToolAdapter {
         self.configure(runtime)?;
         let known_hosts_path = &self.services.known_hosts_path;
         let mut owner_target = target_native(&request.target)?;
-        if request.model_call.name != "run_terminal_command"
-            || request
+        let elevated_command = request.model_call.name == "run_terminal_command"
+            && request
                 .model_call
                 .arguments
                 .get("sudoOperationId")
-                .is_none()
-        {
+                .is_some();
+        let sandbox = if elevated_command {
+            None
+        } else {
             crate::sudo_policy::require_ordinary_remote_account(database, &owner_target)?;
-        }
+            crate::remote_sandbox::binding_for_target(&owner_target, database, known_hosts_path)?
+        };
+        crate::remote_sandbox::guard_tool(
+            sandbox.as_ref(),
+            &request.model_call.name,
+            &request.model_call.arguments,
+        )?;
+        let sandbox_enabled = sandbox.as_ref().is_some_and(|b| b.state.policy.is_some());
         let original_arguments = request.model_call.arguments.clone();
         let scratch_scope = super::scratch::take_scope(
             &request.model_call.name,
             &mut request.model_call.arguments,
         )?;
+        if sandbox_enabled && scratch_scope {
+            return Err("SANDBOX_TOOL_UNAVAILABLE: use the configured sandbox workspace instead of remote scratch".into());
+        }
         let tracks_execution = request.model_call.name == "run_terminal_command"
             || is_model_process_tool(&request.model_call.name);
-        let mut scratch = if scratch_scope
-            || (tracks_execution
-                && (request.target.kind == "local" || request.target.profile_id.is_some()))
+        let mut scratch = if !sandbox_enabled
+            && (scratch_scope
+                || (tracks_execution
+                    && (request.target.kind == "local" || request.target.profile_id.is_some())))
         {
             super::scratch::validate_transport_target(&request.scratch_target, &request.target)?;
             let services = super::scratch::ScratchServices {
@@ -436,12 +449,11 @@ impl NativeToolRuntime for NativeToolAdapter {
             return Ok(preparation);
         }
 
-        let elevated_command = request.model_call.name == "run_terminal_command"
-            && request
-                .model_call
-                .arguments
-                .get("sudoOperationId")
-                .is_some();
+        if sandbox_enabled && request.model_call.name == "run_terminal_command" {
+            // The public command tool can run from either session surface. A
+            // sandboxed connection always uses the isolated Direct executor.
+            request.execution_surface = super::AgentExecutionSurface::Direct;
+        }
         let direct_lifecycle_required =
             !elevated_command && terminal_command_requires_direct_lifecycle(&request)?;
         let visible_route = if request.model_call.name == "run_terminal_command"
@@ -527,6 +539,9 @@ impl NativeToolRuntime for NativeToolAdapter {
             credentials,
             known_hosts_path,
         )?;
+        if sandbox.as_ref().map(|b| &b.digest) != prepared.sandbox.as_ref().map(|b| &b.digest) {
+            return Err("SANDBOX_POLICY_CHANGED: request fresh authorization".into());
+        }
         let descriptor = runtime.tool(&native_name)?.descriptor.clone();
         let effect = effect_from_native(prepared.effect.kind);
         let token = format!("prepared-{}", Uuid::new_v4().simple());
@@ -549,6 +564,12 @@ impl NativeToolRuntime for NativeToolAdapter {
         };
         if scratch_scope {
             call.arguments["fileScope"] = json!("scratch");
+        }
+        if let Some(binding) = &prepared.sandbox {
+            call.arguments["connectionPolicyBinding"] = json!(binding.digest);
+            if binding.state.policy.is_some() {
+                call.arguments["sandboxExecutor"] = json!("bubblewrapV1");
+            }
         }
         let expires_at_unix_ms = current_unix_ms().saturating_add(DEFAULT_NATIVE_APPROVAL_TTL_MS);
         let preparation = NativeToolPreparation {
@@ -630,6 +651,9 @@ impl NativeToolRuntime for NativeToolAdapter {
         let known_hosts_path = &self.services.known_hosts_path;
         match stored.authorization {
             PreparedAuthorization::Tool(prepared) => {
+                if let Some(binding) = &prepared.sandbox {
+                    binding.check(database, known_hosts_path)?;
+                }
                 let native_request_id = prepared.call.request_id.clone();
                 let native_call_id = prepared.call.call_id.clone();
                 let native_tool_name = prepared.call.tool_name.clone();
@@ -1289,6 +1313,10 @@ pub(crate) fn list_remote_file_references(
         Ok(t) => t,
         Err(_) => return FileReferenceList::failed("Denied"),
     };
+    let binding = match crate::remote_sandbox::binding_for_target(&target, database, known_hosts) {
+        Ok(binding) => binding,
+        Err(_) => return FileReferenceList::failed("SandboxPolicyChanged"),
+    };
     let connection = match super::connection_for_remote_target(&target, database, credentials) {
         Ok(c) => c,
         Err(_) => return FileReferenceList::failed("Drift"),
@@ -1299,6 +1327,33 @@ pub(crate) fn list_remote_file_references(
     };
     if let Err(e) = control.check() {
         return FileReferenceList::failed(e.to_string());
+    }
+    if let Some((binding, policy)) = binding
+        .as_ref()
+        .and_then(|b| b.state.policy.as_ref().map(|p| (b, p)))
+    {
+        if !policy.contains(root) {
+            return FileReferenceList::failed("SandboxWorkspaceMismatch");
+        }
+        let connection = match crate::remote_sandbox::AgentSftpConnection::connect(
+            database,
+            Some(binding),
+            &connection,
+            known_hosts,
+            crate::remote_sandbox::Control::new(control.deadline, control.cancellation.clone()),
+        ) {
+            Ok(connection) => connection,
+            Err(_) => return FileReferenceList::failed("SandboxUnavailable"),
+        };
+        let reader = match SandboxScopedReader::open(connection.sftp(), root, &binding.digest) {
+            Ok(reader) => reader,
+            Err(error) => return FileReferenceList::failed(error.to_string()),
+        };
+        let result = discover(&reader, &request);
+        if binding.check(database, known_hosts).is_err() {
+            return FileReferenceList::failed("SandboxPolicyChanged");
+        }
+        return result;
     }
     crate::connection::with_scoped_connection_io(
         request.cancellation.clone(),
@@ -1315,6 +1370,12 @@ pub(crate) fn list_remote_file_references(
             };
             if let Err(e) = control.check() {
                 return FileReferenceList::failed(e.to_string());
+            }
+            if binding
+                .as_ref()
+                .is_some_and(|b| b.check(database, known_hosts).is_err())
+            {
+                return FileReferenceList::failed("SandboxPolicyChanged");
             }
             connected.session.set_timeout(
                 control
@@ -1353,6 +1414,10 @@ pub(crate) fn read_remote_skills(
         Ok(t) => t,
         Err(_) => return SkillReadResult::failed(ScopeReadError::Denied),
     };
+    let binding = match crate::remote_sandbox::binding_for_target(&target, database, known_hosts) {
+        Ok(binding) => binding,
+        Err(_) => return SkillReadResult::failed(ScopeReadError::Drift),
+    };
     let connection = match super::connection_for_remote_target(&target, database, credentials) {
         Ok(c) => c,
         Err(_) => return SkillReadResult::failed(ScopeReadError::Drift),
@@ -1363,6 +1428,33 @@ pub(crate) fn read_remote_skills(
     };
     if let Err(e) = control.check() {
         return SkillReadResult::failed(e);
+    }
+    if let Some((binding, policy)) = binding
+        .as_ref()
+        .and_then(|b| b.state.policy.as_ref().map(|p| (b, p)))
+    {
+        if !policy.contains(root) {
+            return SkillReadResult::failed(ScopeReadError::Denied);
+        }
+        let connection = match crate::remote_sandbox::AgentSftpConnection::connect(
+            database,
+            Some(binding),
+            &connection,
+            known_hosts,
+            crate::remote_sandbox::Control::new(control.deadline, control.cancellation.clone()),
+        ) {
+            Ok(connection) => connection,
+            Err(_) => return SkillReadResult::failed(ScopeReadError::Unavailable),
+        };
+        let reader = match SandboxScopedReader::open(connection.sftp(), root, &binding.digest) {
+            Ok(reader) => reader,
+            Err(error) => return SkillReadResult::failed(error),
+        };
+        let result = discover(&reader, &request, &control);
+        if binding.check(database, known_hosts).is_err() {
+            return SkillReadResult::failed(ScopeReadError::Drift);
+        }
+        return result;
     }
     crate::connection::with_scoped_connection_io(
         request.cancellation.clone(),
@@ -1379,6 +1471,12 @@ pub(crate) fn read_remote_skills(
             };
             if let Err(e) = control.check() {
                 return SkillReadResult::failed(e);
+            }
+            if binding
+                .as_ref()
+                .is_some_and(|b| b.check(database, known_hosts).is_err())
+            {
+                return SkillReadResult::failed(ScopeReadError::Drift);
             }
             connected.session.set_timeout(
                 control

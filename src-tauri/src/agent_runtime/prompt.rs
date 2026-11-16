@@ -288,7 +288,7 @@ fn permission_prompt(
         AgentSessionPermissionMode::Operator => {
             let mut prompt = "The Session is in full-access operator mode. Ordinary native tools and MCP calls run without per-call approval. Elevated remote commands always require explicit human approval. Use trash_file for a single local regular file when supplied; it moves the digest-checked file to the system trash, never permanently deletes it. Native deny rules still apply; do not retry a denial through another tool or script. This does not grant missing tools or expand a child Agent's role capabilities. Structured file tools remain confined to the frozen root and deny symlink traversal. Use only the frozen target; target identity, cancellation, and audit checks remain enforced.".to_string();
             if tools.iter().any(|tool| tool.name == "run_terminal_command") {
-                prompt.push_str(" Shell commands can access files outside the workspace and use the network with the connected account's permissions, without a workspace sandbox.");
+                prompt.push_str(" Unless the connection uses a verified sandbox, shell commands can access files outside the workspace and use the network with the connected account's permissions. A sandbox denial is final for that call; do not switch to another command, terminal, or file channel to bypass it.");
             }
             prompt
         },
@@ -297,7 +297,7 @@ fn permission_prompt(
         == AgentSessionPermissionMode::RequestApproval
         && tools.iter().any(|tool| tool.name == "run_terminal_command")
     {
-        policy.push_str(" All shell commands require approval because execution is not sandboxed, including commands classified as read-only. Approval does not add a sandbox. Waiting for or stopping an owned process does not require repeated approval.");
+        policy.push_str(" All shell commands require approval, including read-only commands. Approval does not create or bypass a sandbox. Waiting for or stopping an owned process does not require repeated approval.");
     }
     policy
 }
@@ -717,7 +717,7 @@ mod tests {
         let restricted = assemble_model_input(&header, tools());
         assert!(!restricted
             .system_prompt
-            .contains("Shell commands can access"));
+            .contains("shell commands can access"));
         assert!(restricted
             .system_prompt
             .contains("Terminal command execution is unavailable"));
@@ -726,7 +726,9 @@ mod tests {
             .contains("return the missing capability"));
         assert!(restricted.system_prompt.contains("health unknown"));
         let capable = assemble_model_input(&header, crate::agent_runtime::default_model_tools());
-        assert!(capable.system_prompt.contains("Shell commands can access"));
+        assert!(capable
+            .system_prompt
+            .contains("Unless the connection uses a verified sandbox, shell commands can access"));
         assert!(!capable
             .system_prompt
             .contains("Terminal command execution is unavailable"));

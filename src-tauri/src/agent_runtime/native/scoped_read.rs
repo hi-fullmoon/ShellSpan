@@ -452,6 +452,127 @@ fn list_handle(
 // SFTP v3 cannot atomically express no-follow traversal. Reads therefore use
 // a fixed Python helper over the same authenticated SSH connection, with all
 // target/path input sent as JSON on stdin. A missing helper runtime is unavailable.
+pub(crate) struct SandboxScopedReader<'a> {
+    sftp: crate::remote_sandbox::AgentSftp<'a>,
+    root: String,
+    binding: &'a str,
+}
+
+impl<'a> SandboxScopedReader<'a> {
+    pub(crate) fn open(
+        sftp: crate::remote_sandbox::AgentSftp<'a>,
+        root: &str,
+        binding: &'a str,
+    ) -> Result<Self, ScopeReadError> {
+        let reader = Self {
+            sftp,
+            root: root.trim_end_matches('/').to_owned(),
+            binding,
+        };
+        reader.check_root()?;
+        Ok(reader)
+    }
+
+    fn resolve(&self, path: &str) -> Result<PathBuf, ScopeReadError> {
+        if path.is_empty() {
+            return Ok(PathBuf::from(&self.root));
+        }
+        relative(path)?;
+        let mut candidate = PathBuf::from(&self.root);
+        for part in path.split('/') {
+            candidate.push(part);
+            if self.sftp.lstat(&candidate)?.file_type().is_symlink() {
+                return Err(ScopeReadError::Denied);
+            }
+        }
+        if self.sftp.realpath(&candidate)? != candidate {
+            return Err(ScopeReadError::Denied);
+        }
+        Ok(candidate)
+    }
+}
+
+impl ScopedReader for SandboxScopedReader<'_> {
+    fn identity(&self) -> &str {
+        self.binding
+    }
+    fn root(&self) -> &str {
+        &self.root
+    }
+    fn check_root(&self) -> Result<(), ScopeReadError> {
+        let path = Path::new(&self.root);
+        if !self.sftp.lstat(path)?.is_dir() || self.sftp.realpath(path)? != path {
+            return Err(ScopeReadError::Denied);
+        }
+        Ok(())
+    }
+    fn list(
+        &self,
+        path: &str,
+        limit: usize,
+        control: &ReadControl,
+    ) -> Result<Vec<ScopedEntry>, ScopeReadError> {
+        control.check()?;
+        self.check_root()?;
+        let path = self.resolve(path)?;
+        let entries = self.sftp.readdir(&path)?;
+        if entries.len() > limit {
+            return Err(ScopeReadError::Limit);
+        }
+        let result = entries
+            .into_iter()
+            .map(|(path, stat)| {
+                let name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .ok_or(ScopeReadError::Denied)?;
+                Ok(ScopedEntry {
+                    name: name.to_owned(),
+                    directory: stat.is_dir(),
+                    file: stat.is_file(),
+                })
+            })
+            .collect();
+        control.check()?;
+        self.check_root()?;
+        result
+    }
+    fn read(
+        &self,
+        path: &str,
+        limit: usize,
+        control: &ReadControl,
+    ) -> Result<Vec<u8>, ScopeReadError> {
+        control.check()?;
+        self.check_root()?;
+        let path = self.resolve(path)?;
+        let stat = self.sftp.lstat(&path)?;
+        if !stat.is_file() {
+            return Err(ScopeReadError::Denied);
+        }
+        if stat.size.is_none_or(|size| size > limit as u64) {
+            return Err(ScopeReadError::Limit);
+        }
+        let mut output = Vec::new();
+        let mut file = self.sftp.open(&path)?.take(limit as u64 + 1);
+        file.read_to_end(&mut output)?;
+        file.into_inner().close()?;
+        if output.len() > limit {
+            return Err(ScopeReadError::Limit);
+        }
+        control.check()?;
+        let after = self.sftp.lstat(&path)?;
+        if after.size != stat.size
+            || after.mtime != stat.mtime
+            || self.sftp.realpath(&path)? != path
+        {
+            return Err(ScopeReadError::Drift);
+        }
+        self.check_root()?;
+        Ok(output)
+    }
+}
+
 pub(crate) struct RemoteScopedReader<'a> {
     session: &'a ssh2::Session,
     root: String,

@@ -1,0 +1,22 @@
+ARG BASE_IMAGE=alpine:3.22
+FROM ${BASE_IMAGE}
+RUN apk add --no-cache openssh python3 libseccomp findmnt \
+    && adduser -D -s /bin/sh sandbox \
+    && echo 'sandbox:shellspan-sandbox-e2e' | chpasswd \
+    && mkdir -p /srv/shellspan-workspaces/project /var/lib/shellspan-sandbox /run/sshd \
+    && printf '%s\n' 'inside workspace' > /srv/shellspan-workspaces/project/seed.txt \
+    && chown -R sandbox:sandbox /srv/shellspan-workspaces/project \
+    && printf '%s\n' 'outside workspace' > /var/lib/shellspan-sandbox/outside-probe
+RUN root=/var/lib/shellspan-sandbox/rootfs \
+    && mkdir -p "$root" \
+    && apk --root "$root" --initdb --repositories-file /etc/apk/repositories --keys-dir /etc/apk/keys add --no-cache alpine-base python3 openssh-sftp-server \
+    && printf 'sandbox:x:%s:%s:Sandbox fixture:/tmp:/bin/sh\n' "$(id -u sandbox)" "$(id -g sandbox)" >> "$root/etc/passwd" \
+    && mkdir -p "$root/usr/lib/openssh" "$root/srv" "$root/run" "$root/tmp" "$root/proc" "$root/dev" \
+    && server="$(find "$root/usr/lib" -name sftp-server -type f -print -quit)" \
+    && test -n "$server" \
+    && ln -s "${server#"$root"}" "$root/usr/lib/openssh/sftp-server"
+COPY scripts/remote-sandbox/shellspan-bwrap-v1 /usr/local/libexec/shellspan-bwrap-v1
+RUN chmod 755 /usr/local/libexec/shellspan-bwrap-v1
+COPY tests/ssh-e2e/sshd_sandbox_config /etc/ssh/sshd_config
+EXPOSE 22
+CMD ["sh", "-c", "chown sandbox:sandbox /srv/shellspan-workspaces/project && printf 'inside workspace\\n' > /srv/shellspan-workspaces/project/seed.txt && ssh-keygen -A && exec /usr/sbin/sshd -D -e"]

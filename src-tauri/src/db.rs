@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-const CURRENT_SCHEMA_VERSION: i32 = 3;
+const CURRENT_SCHEMA_VERSION: i32 = 4;
 pub(crate) const DATABASE_FILE_NAME: &str = "shellspan-main.db";
 const TERMINAL_WORKSPACE_VERSION: u64 = 1;
 const MAX_TERMINAL_WORKSPACE_BYTES: usize = 1024 * 1024;
@@ -124,6 +124,26 @@ ALTER TABLE profile_sudo_policy ADD COLUMN runner_json TEXT;
 INSERT INTO schema_version (version) VALUES (3);
 ";
 
+const SCHEMA_REMOTE_SANDBOX: &str = "
+CREATE TABLE profile_sandbox (
+    profile_id TEXT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+    revision TEXT NOT NULL,
+    policy_json TEXT NOT NULL
+);
+
+CREATE TRIGGER revise_sandbox_on_identity_change
+AFTER UPDATE OF host, port, username, auth_method, keychain_key_id, jump_host_config ON profiles
+WHEN OLD.host IS NOT NEW.host OR OLD.port IS NOT NEW.port OR OLD.username IS NOT NEW.username
+  OR OLD.auth_method IS NOT NEW.auth_method OR OLD.keychain_key_id IS NOT NEW.keychain_key_id
+  OR OLD.jump_host_config IS NOT NEW.jump_host_config
+BEGIN
+    INSERT INTO profile_sandbox VALUES (NEW.id, lower(hex(randomblob(16))), 'null')
+    ON CONFLICT(profile_id) DO UPDATE SET revision=excluded.revision;
+END;
+
+INSERT INTO schema_version (version) VALUES (4);
+";
+
 #[derive(Clone)]
 pub(crate) struct Database {
     conn: Arc<Mutex<Connection>>,
@@ -217,6 +237,7 @@ impl Database {
                 .and_then(|_| tx.execute_batch("INSERT INTO schema_version (version) VALUES (1);"))
                 .and_then(|_| tx.execute_batch(SCHEMA_PROFILE_SUDO_POLICY))
                 .and_then(|_| tx.execute_batch(SCHEMA_RESTRICTED_SUDO_RUNNER))
+                .and_then(|_| tx.execute_batch(SCHEMA_REMOTE_SANDBOX))
                 .map_err(|e| format!("failed to initialize database schema: {e}"))?;
             return tx
                 .commit()
@@ -238,17 +259,21 @@ impl Database {
                 "unsupported database schema version {version}; latest supported version is {CURRENT_SCHEMA_VERSION}"
             ));
         }
-        if versions == [1] || versions == [1, 2] {
+        if versions == [1] || versions == [1, 2] || versions == [1, 2, 3] {
             let tx = conn.transaction().map_err(|e| e.to_string())?;
             if versions == [1] {
                 tx.execute_batch(SCHEMA_PROFILE_SUDO_POLICY)
                     .map_err(|e| e.to_string())?;
             }
-            tx.execute_batch(SCHEMA_RESTRICTED_SUDO_RUNNER)
+            if versions.len() < 3 {
+                tx.execute_batch(SCHEMA_RESTRICTED_SUDO_RUNNER)
+                    .map_err(|e| e.to_string())?;
+            }
+            tx.execute_batch(SCHEMA_REMOTE_SANDBOX)
                 .map_err(|e| e.to_string())?;
             return tx.commit().map_err(|e| e.to_string());
         }
-        if versions != [1, 2, CURRENT_SCHEMA_VERSION] {
+        if versions != [1, 2, 3, CURRENT_SCHEMA_VERSION] {
             return Err(format!(
                 "invalid database schema version: expected version {CURRENT_SCHEMA_VERSION}"
             ));
@@ -269,6 +294,98 @@ impl Database {
     }
 
     // --- Profiles ---
+
+    fn read_profile_sandbox(
+        conn: &Connection,
+        id: &str,
+    ) -> Result<crate::remote_sandbox::ProfileSandbox, String> {
+        let (host, port, username, auth, key, jump, revision, raw) = conn.query_row(
+            "SELECT host, port, username, auth_method, keychain_key_id, jump_host_config, revision, policy_json
+             FROM profiles LEFT JOIN profile_sandbox ON profile_id = id WHERE id = ?1",
+            [id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, u16>(1)?, r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?, r.get::<_, Option<String>>(4)?, r.get::<_, Option<String>>(5)?,
+                r.get::<_, Option<String>>(6)?, r.get::<_, Option<String>>(7)?)),
+        ).optional().map_err(|e| e.to_string())?.ok_or("SANDBOX_PROFILE_MISSING")?;
+        let policy: Option<crate::remote_sandbox::Policy> =
+            serde_json::from_str(raw.as_deref().unwrap_or("null"))
+                .map_err(|_| "SANDBOX_POLICY_INVALID")?;
+        if let Some(policy) = &policy {
+            policy.validate()?;
+        }
+        use sha2::{Digest, Sha256};
+        let binding = serde_json::to_vec(&(
+            id, &host, port, &username, auth, key, jump, revision, &policy,
+        ))
+        .map_err(|e| e.to_string())?;
+        Ok(crate::remote_sandbox::ProfileSandbox {
+            binding: hex::encode(Sha256::digest(binding)),
+            host,
+            port,
+            username,
+            policy,
+        })
+    }
+
+    pub(crate) fn profile_sandbox(
+        &self,
+        id: &str,
+    ) -> Result<crate::remote_sandbox::ProfileSandbox, String> {
+        let conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
+        Self::read_profile_sandbox(&conn, id)
+    }
+
+    pub(crate) fn save_profile_sandbox(
+        &self,
+        id: &str,
+        binding: &str,
+        policy: Option<crate::remote_sandbox::Policy>,
+    ) -> Result<(), String> {
+        if let Some(policy) = &policy {
+            policy.validate()?;
+        }
+        let conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
+        let current = Self::read_profile_sandbox(&conn, id)?;
+        if current.binding != binding {
+            return Err("SANDBOX_POLICY_CHANGED".into());
+        }
+        if current.policy == policy {
+            return Ok(());
+        }
+        conn.execute(
+            "INSERT INTO profile_sandbox VALUES (?1, ?2, ?3)
+             ON CONFLICT(profile_id) DO UPDATE SET revision=excluded.revision, policy_json=excluded.policy_json",
+            params![id, uuid::Uuid::new_v4().to_string(), serde_json::to_string(&policy).map_err(|e| e.to_string())?],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub(crate) fn endpoint_has_sandbox(
+        &self,
+        host: &str,
+        port: u16,
+        username: &str,
+    ) -> Result<bool, String> {
+        let conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM profiles p JOIN profile_sandbox s ON s.profile_id=p.id
+             WHERE lower(p.host)=lower(?1) AND p.port=?2 AND p.username=?3 AND s.policy_json <> 'null')",
+            params![host, port, username], |row| row.get(0),
+        ).map_err(|e| e.to_string())
+    }
+
+    pub(crate) fn with_sandbox_dispatch<T>(
+        &self,
+        id: &str,
+        binding: &str,
+        send: impl FnOnce() -> T,
+    ) -> Result<T, String> {
+        let conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
+        if Self::read_profile_sandbox(&conn, id)?.binding != binding {
+            return Err("SANDBOX_POLICY_CHANGED".into());
+        }
+        Ok(send())
+    }
 
     fn read_sudo_policy(
         conn: &Connection,
