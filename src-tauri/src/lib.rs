@@ -483,6 +483,7 @@ pub fn run() {
             petdex::petdex_test_connection,
             commands::create_session,
             commands::create_local_session,
+            commands::supports_shellspan_bash,
             commands::write_session,
             commands::respond_terminal_prompt_origin,
             commands::get_session_status,

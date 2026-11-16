@@ -11,6 +11,8 @@ pub const DISPLAY_OSC: u32 = 1337;
 pub const DISPLAY_ENTER: &str = "SetUserVar=ShellSpanNativeInput=MQ==";
 pub const DISPLAY_EXIT: &str = "SetUserVar=ShellSpanNativeInput=MA==";
 pub const VERIFIED_PROFILE: &str = "gnu-bash-5.3-readline-8.3.6-macos-arm64-prototype";
+pub const LINUX_ARM64_BASH_TARGET: &str = "linux-aarch64-glibc-2.36";
+pub const LINUX_X86_64_BASH_TARGET: &str = "linux-x86_64-glibc-2.36";
 
 pub fn capture_marker(request_id: &str, end: bool) -> Vec<u8> {
     let token = sha(&format!(
@@ -26,7 +28,14 @@ pub fn native_profile_versions(profile: &str) -> Option<(&'static str, &'static 
         ("4.4", "7.0", 0x0700),
         ("5.3", "8.3.6", 0x0803),
     ] {
-        for target in ["macos-arm64", "linux-aarch64-glibc-2.36"] {
+        for target in [
+            "macos-arm64",
+            LINUX_ARM64_BASH_TARGET,
+            LINUX_X86_64_BASH_TARGET,
+        ] {
+            if target == LINUX_X86_64_BASH_TARGET && bash != "5.3" {
+                continue;
+            }
             if profile == format!("gnu-bash-{bash}-readline-{readline}-{target}-native") {
                 return Some((bash, readline, numeric));
             }

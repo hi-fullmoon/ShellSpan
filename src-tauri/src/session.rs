@@ -366,6 +366,10 @@ fn parse_remote_login_shell_identity(
 }
 
 fn run_ssh_setup_command(session: &Session, command: &str) -> Result<(), String> {
+    read_ssh_setup_command(session, command).map(drop)
+}
+
+fn read_ssh_setup_command(session: &Session, command: &str) -> Result<Vec<u8>, String> {
     let mut channel = session
         .channel_session()
         .map_err(|error| format!("failed to open remote integration setup channel: {error}"))?;
@@ -387,7 +391,7 @@ fn run_ssh_setup_command(session: &Session, command: &str) -> Result<(), String>
         .exit_status()
         .map_err(|error| format!("failed to read remote integration setup status: {error}"))?;
     if status == 0 {
-        Ok(())
+        Ok(output)
     } else {
         Err(format!(
             "remote integration setup exited with status {status}"
@@ -612,7 +616,7 @@ pub(crate) fn run_ssh_session<
     let native_requested = bootstrap_remote_integration
         && request.native_input_protocol.as_deref()
             == Some(crate::terminal_command::protocol::PROTOCOL);
-    let (mut native_integration, native_failure) = if native_requested {
+    let (mut native_integration, mut native_failure) = if native_requested {
         match crate::terminal_command::artifacts::resource_root(app).and_then(|resources| {
             RemoteNativeBash::prepare(&session, &request.username, &resources)
         }) {
@@ -645,11 +649,6 @@ pub(crate) fn run_ssh_session<
         }
     }
     let native_selected = native_integration.is_some() || native_failure.is_some();
-    let input_mode = if native_integration.is_some() {
-        crate::terminal_command::protocol::InputMode::NativeInline
-    } else {
-        crate::terminal_command::protocol::InputMode::Raw
-    };
     let (mut remote_integration, remote_integration_error) =
         if bootstrap_remote_integration && !native_selected {
             match RemoteSshShellIntegration::prepare(&session, &request.username) {
@@ -682,9 +681,20 @@ pub(crate) fn run_ssh_session<
                         });
 
                     if let Some(native) = native_integration.as_ref() {
-                        native
-                            .start_shell(channel)
-                            .map_err(|message| ConnectionError::Other { message })?;
+                        if let Err(message) = native.start_shell(channel) {
+                            if !native.uses_private_bash() {
+                                return Err(ConnectionError::Other { message });
+                            }
+                            if let Some(native) = native_integration.take() {
+                                native.close(&session);
+                            }
+                            graceful_shutdown(channel);
+                            *channel = open_remote_pty_channel(&session, request, session_id)?;
+                            native_failure = Some(message);
+                            channel.shell().map_err(|error| ConnectionError::Other {
+                                message: format!("failed to start ordinary remote shell after native startup failed: {error}"),
+                            })?;
+                        }
                     } else if let Some(integration) = remote_integration.as_ref() {
                         if let Err(message) = integration.start_shell(channel) {
                             warn!(
@@ -726,6 +736,11 @@ pub(crate) fn run_ssh_session<
 
                     // Register a replacement only after its SSH shell starts. The
                     // predecessor remains usable if startup fails before attachment.
+                    let input_mode = if native_integration.is_some() {
+                        crate::terminal_command::protocol::InputMode::NativeInline
+                    } else {
+                        crate::terminal_command::protocol::InputMode::Raw
+                    };
                     on_broker_attached(input_mode)
                         .map_err(|message| ConnectionError::Other { message })?;
                     let runtime = app

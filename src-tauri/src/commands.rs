@@ -8,7 +8,7 @@ use crate::models::{
     CopyLocalPathsRequest, CopyRemotePathRequest, CopyRemoteToRemoteRequest,
     CreateRemoteEntryRequest, CreateSessionError, DeleteRemotePathRequest,
     DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult, KeyCredentialSummary,
-    KnownHostEntry, LocalDirectoryListing, LocalFileEntry, LogFileInfo, ManagedSession,
+    KnownHostEntry, LocalDirectoryListing, LocalFileEntry, LocalTerminalProfile, LogFileInfo, ManagedSession,
     OpenRemoteFileRequest, PortForwardStartRequest, PreflightCancellationRegistry, ProfileRow,
     ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
     RemoteDirectoryRequest, RemoteEntryOwners, RemoteEntryOwnersRequest, RemoteFileKind,
@@ -630,6 +630,11 @@ async fn create_remote_terminal_session(
 }
 
 #[tauri::command]
+pub(crate) fn supports_shellspan_bash() -> bool {
+    cfg!(all(target_os = "macos", target_arch = "aarch64"))
+}
+
+#[tauri::command]
 pub(crate) async fn create_local_session(
     app: AppHandle,
     state: State<'_, SessionManager>,
@@ -637,6 +642,7 @@ pub(crate) async fn create_local_session(
     rows: u16,
     replaces_session_id: Option<String>,
     native_input_protocol: Option<String>,
+    local_profile: Option<LocalTerminalProfile>,
 ) -> Result<SessionSummary, String> {
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -647,6 +653,7 @@ pub(crate) async fn create_local_session(
             rows,
             replaces_session_id,
             native_input_protocol,
+            local_profile,
         )
     })
     .await
@@ -660,7 +667,11 @@ fn create_local_session_blocking(
     rows: u16,
     replaces_session_id: Option<String>,
     native_input_protocol: Option<String>,
+    local_profile: Option<LocalTerminalProfile>,
 ) -> Result<SessionSummary, String> {
+    if local_profile.is_some() && !supports_shellspan_bash() {
+        return Err("TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into());
+    }
     let session_id = Uuid::new_v4().to_string();
     let terminal_broker_enabled = app
         .try_state::<crate::agent_runtime::AgentRuntime>()
@@ -691,7 +702,15 @@ fn create_local_session_blocking(
         &session_id,
     );
     #[cfg(not(windows))]
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    let mut shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    if let Some(LocalTerminalProfile::ShellSpanBash) = local_profile {
+        use crate::terminal_command::artifacts;
+        shell = artifacts::shellspan_bash(&artifacts::resource_root(&app)?)?
+            .into_os_string()
+            .into_string()
+            .map_err(|_| "TERMINAL_NATIVE_PATH_INVALID")?;
+    }
     let shell_kind = TerminalShellKind::detect(&shell);
     let title = std::path::Path::new(&shell)
         .file_stem()
@@ -713,6 +732,7 @@ fn create_local_session_blocking(
         terminal_generation: None,
         pty_info: crate::models::SessionPtyInfo::local(),
     };
+    summary.pty_info.local_profile = local_profile;
     #[cfg(unix)]
     let prepared_native = if native_client
         && shell_integration_enabled

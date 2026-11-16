@@ -43,6 +43,14 @@ pub(crate) struct SessionPtyInfo {
     pub(crate) input_mode: Option<crate::terminal_command::protocol::InputMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) native_display_binding: Option<crate::terminal_command::protocol::DisplayBinding>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) local_profile: Option<LocalTerminalProfile>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum LocalTerminalProfile {
+    ShellSpanBash,
 }
 
 impl SessionPtyInfo {
@@ -51,6 +59,7 @@ impl SessionPtyInfo {
             deferred_startup: cfg!(windows).then_some(true),
             input_mode: None,
             native_display_binding: None,
+            local_profile: None,
             transport_kind: if cfg!(windows) {
                 crate::terminal_broker::TerminalTransportKind::WindowsConPty
             } else {
@@ -73,6 +82,7 @@ impl SessionPtyInfo {
             deferred_startup: None,
             input_mode: None,
             native_display_binding: None,
+            local_profile: None,
             transport_kind: crate::terminal_broker::TerminalTransportKind::SshPty,
             windows_build_number: None,
         }

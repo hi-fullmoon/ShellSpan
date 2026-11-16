@@ -4,6 +4,8 @@ use serde::Deserialize;
 use std::{collections::HashMap, fs, path::Path};
 
 pub(crate) const BUNDLE_RESOURCE_DIRECTORY: &str = "native-input/generated";
+const MACOS_BASH_TARGET: &str = "macos-arm64";
+const SHELLSPAN_BASH_PROFILE: &str = "gnu-bash-5.3-readline-8.3.6-macos-arm64-native";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -18,6 +20,7 @@ pub(crate) struct NativeArtifact {
     pub id: String,
     pub target: String,
     pub bash_version: String,
+    pub bash_patch_level: Option<u32>,
     pub readline_version: String,
     pub shell_sha256: String,
     pub module_sha256: String,
@@ -71,6 +74,10 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<NativeArti
         (
             "scripts/native-input-p2/build.py",
             include_str!("../../../scripts/native-input-p2/build.py"),
+        ),
+        (
+            "scripts/native-input-p2/Dockerfile",
+            include_str!("../../../scripts/native-input-p2/Dockerfile"),
         ),
         (
             "scripts/dependency-builds/bash-native/build.py",
@@ -153,13 +160,22 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<NativeArti
     {
         return Err("TERMINAL_NATIVE_STALE_ARTIFACTS".into());
     }
+    if target == MACOS_BASH_TARGET && catalogue.profiles.iter().any(|artifact| artifact.id == SHELLSPAN_BASH_PROFILE) {
+        let pin = "scripts/dependency-builds/bash-native/bash-5.3-patches.json";
+        let contents = include_str!("../../../scripts/dependency-builds/bash-native/bash-5.3-patches.json");
+        if catalogue.sources.get(pin) != Some(&super::protocol::sha(contents)) {
+            return Err("TERMINAL_NATIVE_STALE_ARTIFACTS".into());
+        }
+    }
     for artifact in &catalogue.profiles {
         let Some((bash, readline, _)) = super::protocol::native_profile_versions(&artifact.id)
         else {
             return Err("TERMINAL_NATIVE_MANIFEST_INVALID".into());
         };
         if artifact.target != target
+            || artifact.id != format!("gnu-bash-{bash}-readline-{readline}-{target}-native")
             || artifact.bash_version != bash
+            || (artifact.id == SHELLSPAN_BASH_PROFILE && artifact.bash_patch_level != Some(20))
             || artifact.readline_version != readline
             || artifact.capture_fence != 1
             || artifact.readline_display_abi != 1
@@ -179,6 +195,20 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<NativeArti
     }
     Ok(catalogue.profiles)
 }
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub(crate) fn shellspan_bash(root: &Path) -> Result<std::path::PathBuf, String> {
+    let artifact = read_catalogue(root, MACOS_BASH_TARGET)?
+        .into_iter()
+        .find(|artifact| artifact.id == SHELLSPAN_BASH_PROFILE)
+        .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
+    let shell = root.join(SHELLSPAN_BASH_PROFILE).join("bash");
+    if super::registration::file_sha(&shell)? != artifact.shell_sha256 {
+        return Err("TERMINAL_NATIVE_PROFILE_MISMATCH".into());
+    }
+    Ok(shell)
+}
+
 pub(crate) fn resource_root(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     use tauri::Manager;
     if let Some(root) = super::editors::validation_resource_root()? {
