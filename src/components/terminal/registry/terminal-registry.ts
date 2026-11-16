@@ -13,7 +13,6 @@ import { attachRawInputDisplay } from '@/lib/terminal/raw-input-display';
 import { observeNativePromptOrigin } from '@/lib/terminal/native-prompt-origin';
 import { terminalInputReadiness } from '../terminal-input-readiness';
 import { useToastStore } from '@/stores/toastStore';
-import { getTerminalScrollState } from '@/components/terminal/terminal-scroll-state';
 import {
   invokeGetSessionStatus,
   invokeMarkSessionReady,
@@ -537,7 +536,6 @@ class TerminalControllerImpl implements TerminalController {
     this.searchAddon = new SearchAddon();
     this.terminal.loadAddon(this.fitAddon);
     this.terminal.loadAddon(this.searchAddon);
-    getTerminalScrollState(this.terminal);
     this.commandDecorations = this.installInputRendering(ptyInfo);
 
     this.container = document.createElement('div');

@@ -32,7 +32,6 @@ const server = await createServer({
         export { Terminal } from '@xterm/xterm';
         export { SearchAddon } from '@xterm/addon-search';
         export { TerminalSearch } from '/src/components/terminal/terminal-search.tsx';
-        export { TerminalScrollButton } from '/src/components/terminal/terminal-scroll-button.tsx';
         export { TerminalPastePreview } from '/src/components/terminal/terminal-paste-preview.tsx';
         export { TerminalCloseDetails } from '/src/components/terminal/terminal-close-details.tsx';
         export { TerminalPane } from '/src/components/terminal/terminal-pane.tsx';
@@ -82,7 +81,7 @@ try {
   await page.evaluate(async ({ output, identity }) => {
     const runtime = await import('/experience-runtime.js');
     window.runtime = runtime;
-    const { React, createRoot, Terminal, SearchAddon, FitAddon, resolveTerminalTheme, TERMINAL_CONTAINER_CLASS, TerminalSearch, TerminalScrollButton, useAppStore, initI18n } = runtime;
+    const { React, createRoot, Terminal, SearchAddon, FitAddon, resolveTerminalTheme, TERMINAL_CONTAINER_CLASS, TerminalSearch, useAppStore, initI18n } = runtime;
     useAppStore.setState({ locale: 'zh-CN' });
     await initI18n('zh-CN');
     document.documentElement.setAttribute('data-theme', 'light');
@@ -102,11 +101,10 @@ try {
     const controls = createRoot(document.getElementById('controls'));
     const dialog = createRoot(document.getElementById('dialog'));
     window.dialogRoot = dialog;
-    window.unmountControls = () => controls.render(null);
-    window.renderControls = (search = true) => controls.render(React.createElement(React.Fragment, null,
-      search && React.createElement(TerminalSearch, { addon, onClose: () => { window.renderControls(false); terminal.focus(); } }),
-      React.createElement(TerminalScrollButton, { terminal })));
-    window.renderControls();
+    controls.render(React.createElement(TerminalSearch, {
+      addon,
+      onClose: () => { controls.render(null); terminal.focus(); },
+    }));
   }, { output, identity });
 
   const search = page.getByRole('textbox', { name: '搜索...' });
@@ -283,15 +281,6 @@ try {
   assert.equal(await page.locator('[data-terminal-search]').count(), 0);
   assert.ok(await page.locator('.xterm-helper-textarea').evaluate((element) => element === document.activeElement));
 
-  await page.evaluate(() => window.terminal.scrollToTop());
-  await page.getByRole('button', { name: '回到最新输出' }).waitFor();
-  await page.evaluate(async (text) => {
-    await new Promise((resolve) => window.terminal.write(text.replace(/\n/g, '\r\n'), resolve));
-  }, output);
-  const latest = page.getByRole('button', { name: '有新输出 · 回到底部' });
-  await latest.waitFor();
-  // TerminalCarousel unmounts inactive panes. Remounting must keep unread state.
-  await page.evaluate(() => window.unmountControls());
   await page.setViewportSize({ width: 1000, height: 600 });
   await page.evaluate(() => {
     const { React, createRoot, TerminalResizeIndicator } = window.runtime;
@@ -355,66 +344,6 @@ try {
     document.getElementById('pane').style.height = '360px';
     window.fit.fit();
   });
-  await latest.waitFor({ state: 'detached' });
-  await page.evaluate(() => window.renderControls(false));
-  await latest.waitFor();
-  const iconGap = await latest.evaluate((button) => getComputedStyle(button).columnGap);
-  assert.equal(iconGap, '4px');
-  for (const width of [900, 320]) {
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.evaluate((width) => { document.getElementById('pane').style.width = `${width}px`; }, width);
-    const geometry = await latest.evaluate((button) => {
-      const bounds = button.getBoundingClientRect();
-      const pane = document.getElementById('pane').getBoundingClientRect();
-      const style = getComputedStyle(button);
-      return {
-        height: bounds.height,
-        bottom: pane.bottom - bounds.bottom,
-        right: pane.right - bounds.right,
-        inside: bounds.left >= pane.left && button.scrollWidth <= button.clientWidth,
-        border: style.borderTopWidth,
-        radius: style.borderTopLeftRadius,
-        fontSize: style.fontSize,
-      };
-    });
-    assert.equal(geometry.height, 24);
-    assert.equal(geometry.fontSize, '11px');
-    assert.equal(geometry.bottom, 16);
-    assert.equal(geometry.right, 16);
-    assert.equal(geometry.border, '0px');
-    assert.ok(parseFloat(geometry.radius) >= 12, JSON.stringify(geometry));
-    assert.ok(geometry.inside, JSON.stringify(geometry));
-    await page.screenshot({ path: `/tmp/shellspan-terminal-scroll-${width}.png` });
-  }
-  await latest.focus();
-  await latest.press('Enter');
-  await page.waitForFunction(() => window.terminal.buffer.active.viewportY === window.terminal.buffer.active.baseY);
-  assert.equal(await latest.count(), 0);
-  assert.ok(await page.locator('.xterm-helper-textarea').evaluate((element) => element === document.activeElement));
-  // Also track output that first arrives while the pane is unmounted.
-  await page.evaluate(() => window.terminal.scrollToTop());
-  await page.getByRole('button', { name: '回到最新输出' }).waitFor();
-  await page.evaluate(() => window.unmountControls());
-  await page.getByRole('button', { name: '回到最新输出' }).waitFor({ state: 'detached' });
-  await page.evaluate(async (text) => {
-    await new Promise((resolve) => window.terminal.write(text.replace(/\n/g, '\r\n'), resolve));
-    window.renderControls(false);
-  }, output);
-  await latest.waitFor();
-  await latest.click();
-  await latest.waitFor({ state: 'detached' });
-  await page.evaluate(() => window.unmountControls());
-  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
-  await page.evaluate(() => window.renderControls(false));
-  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
-  assert.equal(await page.getByRole('button', { name: /回到最新输出|有新输出/ }).count(), 0);
-  await page.evaluate(async () => {
-    window.terminal.scrollToTop();
-    await new Promise((resolve) => window.terminal.write('\x1b[?1049h', resolve));
-  });
-  assert.equal(await page.getByRole('button', { name: /回到最新输出|有新输出/ }).count(), 0);
-  await page.evaluate(async () => { await new Promise((resolve) => window.terminal.write('\x1b[?1049l', resolve)); });
-
   await page.evaluate((text) => {
     const { React, ConfirmationDialog, TerminalPastePreview, t } = window.runtime;
     const target = `${window.identity.username}@${window.identity.host}`;

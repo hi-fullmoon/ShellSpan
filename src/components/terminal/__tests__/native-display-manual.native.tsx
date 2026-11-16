@@ -4,7 +4,6 @@ import {getCurrentWindow} from '@tauri-apps/api/window';
 import {TerminalControllerLayer} from '../terminal-controller-layer';
 import {TerminalPane} from '../terminal-pane';
 import {terminalRegistry} from '../registry/terminal-registry';
-import {getTerminalScrollState} from '../terminal-scroll-state';
 import {useTerminalStore} from '@/stores/terminalStore';
 import {useAppStore} from '@/stores/appStore';
 import {useToastStore} from '@/stores/toastStore';
@@ -90,7 +89,8 @@ function ManualDisplay({sessionId,finish}:{sessionId:string;finish:(receipts:Rec
    if(step+1===steps.length)setWheel(false);
   }else{
    const buffer=controller.terminal.buffer.normal,selection=controller.terminal.getSelection(),before={viewportY:buffer.viewportY,baseY:buffer.baseY,columns:controller.terminal.cols,top:buffer.getLine(buffer.viewportY)?.translateToString(true),selection};
-   if(!wheel||!getTerminalScrollState(controller.terminal).getSnapshot().history||selection!==nativeDisplaySamples.history||!before.top?.startsWith('HISTORY_')){setMessage(t('terminal.acceptance.historyMismatch'));return;}
+   const viewingHistory=controller.terminal.buffer.active.type==='normal'&&before.viewportY<before.baseY;
+   if(!wheel||!viewingHistory||selection!==nativeDisplaySamples.history||!before.top?.startsWith('HISTORY_')){setMessage(t('terminal.acceptance.historyMismatch'));return;}
    setNarrow(true);await until(()=>controller.terminal.cols<before.columns,'Narrow layout did not change the terminal geometry');
    await until(async()=>(await invokeGetTerminalBrokerSnapshot(sessionId)).session?.geometry.columns===controller.terminal.cols,'Backend PTY did not acknowledge the narrowed geometry');await wait(350);
    const after={viewportY:buffer.viewportY,baseY:buffer.baseY,columns:controller.terminal.cols,top:buffer.getLine(buffer.viewportY)?.translateToString(true),selection:controller.terminal.getSelection()};
