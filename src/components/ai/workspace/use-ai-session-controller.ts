@@ -186,6 +186,7 @@ export interface AiSessionController {
   readonly renameSession: (summary: AiSessionSummary, title: string) => void;
   readonly back: () => void;
   readonly openToolDetails: (node: AiConversationNodeOf<'tool'>) => void;
+  readonly openStoredToolOutput: (artifactId: string) => void;
   readonly openArtifactDetails: (node: AiConversationNodeOf<'artifact'>) => void;
   readonly saveScrollAnchor: (anchor: AiScrollAnchor) => void;
   readonly completeRouteReturn: () => void;
@@ -1744,6 +1745,12 @@ export function useAiSessionController({
           route: { kind: 'conversation', sessionId: viewRef.current?.summary.id ?? null },
         };
       }
+      if (current.route.kind === 'artifactDetails' && current.route.sourceToolKey) {
+        return {
+          ...current,
+          route: { kind: 'toolDetails', sessionId: current.route.sessionId, nodeKey: current.route.sourceToolKey },
+        };
+      }
       if (current.route.kind === 'toolDetails' || current.route.kind === 'artifactDetails') {
         return {
           ...current,
@@ -1760,6 +1767,13 @@ export function useAiSessionController({
       route: { kind: 'toolDetails', sessionId: node.sessionId, nodeKey: node.key },
       returnFocus: { sessionId: node.sessionId, nodeKey: node.key },
     }));
+  }, []);
+
+  const openStoredToolOutput = useCallback((artifactId: string): void => {
+    setNavigation((current) => current.route.kind === 'toolDetails' ? {
+      ...current,
+      route: { kind: 'artifactDetails', sessionId: current.route.sessionId, artifactId, sourceToolKey: current.route.nodeKey },
+    } : current);
   }, []);
 
   const openArtifactDetails = useCallback((node: AiConversationNodeOf<'artifact'>): void => {
@@ -2212,6 +2226,7 @@ export function useAiSessionController({
     renameSession,
     back,
     openToolDetails,
+    openStoredToolOutput,
     openArtifactDetails,
     saveScrollAnchor,
     completeRouteReturn: () => setNavigation((current) => ({ ...current, returnFocus: null })),

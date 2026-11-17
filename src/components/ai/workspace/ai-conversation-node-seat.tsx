@@ -64,7 +64,7 @@ type AiConversationNodeRendererProps<Kind extends AiConversationNode['kind']> = 
 };
 
 export type AiConversationNodeRendererMap = {
-  readonly [Kind in AiConversationNode['kind']]: React.ComponentType<AiConversationNodeRendererProps<Kind>>;
+  readonly [Kind in Exclude<AiConversationNode['kind'], 'runtimeArtifacts'>]: React.ComponentType<AiConversationNodeRendererProps<Kind>>;
 };
 
 function assistantText(node: AiConversationNodeOf<'assistantMessage'>): string {
@@ -435,29 +435,6 @@ function ArtifactNodeView({
   );
 }
 
-function RuntimeArtifactsNodeView({ node, onOpenArtifact }: AiConversationNodeRendererProps<'runtimeArtifacts'>) {
-  const { t } = useI18n();
-  const [open, setOpen] = useState(false);
-  return <Collapsible open={open} onOpenChange={setOpen} className="min-w-0" data-runtime-artifacts="">
-    <CollapsibleTrigger render={<Button type="button" variant="plain" size="sm"
-      className={AI_DISCLOSURE_ROW_CLASS} />} aria-label={t('ai.workspace.artifact.runtimeDetails')}>
-      <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
-        <FileInputIcon /><ChevronDownIcon className="ai-disclosure-chevron" />
-      </span>
-      <span className={AI_DISCLOSURE_TITLE_CLASS}>{t('ai.workspace.artifact.runtimeDetails')}</span>
-      <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
-      <span className={AI_DISCLOSURE_SUMMARY_CLASS}>{t('ai.workspace.artifact.runtimeCount', { count: node.artifacts.length })}</span>
-    </CollapsibleTrigger>
-    <CollapsibleContent>
-      <div className="mt-1 flex max-h-65 min-w-0 flex-col gap-1 overflow-auto" data-runtime-artifact-list="">
-        {node.artifacts.map(artifact => <div key={artifact.key} data-ai-node-key={artifact.key} className="min-w-0">
-          <ArtifactNodeView node={artifact} onOpenArtifact={onOpenArtifact} />
-        </div>)}
-      </div>
-    </CollapsibleContent>
-  </Collapsible>;
-}
-
 function ApprovalMarkerNodeView({ node }: { readonly node: AiConversationNodeOf<'approvalMarker'> }) {
   const { t } = useI18n();
   return (
@@ -691,7 +668,6 @@ export const aiConversationNodeRenderers = {
   tool: ToolNodeView,
   question: ({ node }) => <AiQuestionHistory question={node.question} />,
   artifact: ArtifactNodeView,
-  runtimeArtifacts: RuntimeArtifactsNodeView,
   approvalMarker: ApprovalMarkerNodeView,
   retry: RetryNodeView,
   error: ErrorNodeView,
@@ -739,7 +715,7 @@ function renderNode(
     case 'artifact':
       return React.createElement(renderers.artifact, { node, onOpenArtifact });
     case 'runtimeArtifacts':
-      return React.createElement(renderers.runtimeArtifacts, { node, onOpenArtifact });
+      return null;
     case 'approvalMarker':
       return React.createElement(renderers.approvalMarker, { node });
     case 'retry':
@@ -854,6 +830,7 @@ export const AiConversationNodeSeat = React.memo(
     readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
     readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
   }) {
+    if (node.kind === 'runtimeArtifacts') return null;
     return (
       <div
         className="ai-transcript-flow-item min-w-0 max-w-full"

@@ -4,7 +4,7 @@ export type AiPanelRoute =
   | Readonly<{ kind: 'conversation'; sessionId: string | null }>
   | Readonly<{ kind: 'sessions' }>
   | Readonly<{ kind: 'toolDetails'; sessionId: string; nodeKey: string }>
-  | Readonly<{ kind: 'artifactDetails'; sessionId: string; artifactId: string }>;
+  | Readonly<{ kind: 'artifactDetails'; sessionId: string; artifactId: string; sourceToolKey?: string }>;
 
 export interface AiScrollAnchor {
   readonly nodeKey: string;

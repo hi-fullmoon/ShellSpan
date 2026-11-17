@@ -1,5 +1,12 @@
 import type { AiConversationNode, AiToolNode, AiTurnProcessChildNode } from './conversation-node';
 
+export function storedToolOutputId(node: AiToolNode): string | undefined {
+  if (typeof node.output !== 'object' || node.output === null || Array.isArray(node.output)) return;
+  const output = node.output as Record<string, unknown>;
+  if (output.readWith === 'read_tool_result' && typeof output.artifactRef === 'string'
+    && /^artifact-[0-9a-f]{32}$/u.test(output.artifactRef)) return output.artifactRef;
+}
+
 function resultReadIdentity(node: AiToolNode): string | null {
   if (node.name !== 'read_tool_result' || node.effect !== 'readOnly' || !node.turnId) return null;
   if (typeof node.input !== 'object' || node.input === null || Array.isArray(node.input)) return null;

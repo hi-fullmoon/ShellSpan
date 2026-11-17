@@ -237,6 +237,7 @@ export function AiWorkspaceController({
       onRenameSession={controller.renameSession}
       onBack={controller.back}
       onOpenTool={controller.openToolDetails}
+      onOpenStoredOutput={controller.openStoredToolOutput}
       onOpenArtifact={controller.openArtifactDetails}
       onScrollAnchorChange={controller.saveScrollAnchor}
       onRouteReturnComplete={controller.completeRouteReturn}

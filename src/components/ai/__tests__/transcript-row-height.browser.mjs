@@ -16,7 +16,10 @@ const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
   cacheDir: join(artifacts, 'vite-cache'),
   resolve: { alias: { '@': `${root}src` } }, esbuild: { jsx: 'automatic' },
-  optimizeDeps: { include: ['react', 'react-dom/client'] },
+  optimizeDeps: {
+    entries: ['src/components/ai/workspace/ai-conversation-node-seat.tsx'],
+    include: ['react', 'react-dom/client'],
+  },
   server: { host: '127.0.0.1', port: 0, watch: null, hmr: false },
   plugins: [tailwindcss()],
 });
@@ -57,7 +60,7 @@ try {
               React.createElement(AiConversationNodeList, { nodes: [node] })))));
         }, { recordings, locale });
         await page.locator('[data-recorded-row="systemPrompt"] .ai-disclosure-row').first().waitFor();
-        for (const kind of ['systemPrompt', 'contextInjection', 'runtimeArtifacts', 'turnProcess', 'tool']) {
+        for (const kind of ['systemPrompt', 'contextInjection', 'turnProcess', 'tool']) {
           assert.ok(await page.locator(`[data-recorded-row="${kind}"] :is(.ai-disclosure-row, .ai-tool-row)`).count(),
             `The original recordings cover ${kind}`);
         }

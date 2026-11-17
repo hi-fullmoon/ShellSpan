@@ -1,122 +1,124 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { chromium } from 'playwright';
+import { createServer } from 'vite';
 
-assert.ok(process.argv[2], 'Pass a real session JSONL ledger; only internal artifact metadata is used.');
-const events = (await readFile(process.argv[2], 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line));
-const kinds = new Set(['tool-result', 'model-tool-result', 'context-budget', 'context-budget-checkpoint',
-  'compaction-attempt', 'structured-compaction', 'task-budget-progress', 'task-budget-checkpoint']);
-const turns = new Map();
-for (const event of events) {
-  if (event.type !== 'context/artifact' || !kinds.has(event.data.kind)) continue;
-  const items = turns.get(event.turnId) ?? new Map();
-  items.set(event.data.artifactId, {
-    kind: 'artifact', key: `artifact:${event.data.artifactId}`, sourceKind: 'agent',
-    sessionId: event.sessionId, turnId: event.turnId ?? null, stepId: event.stepId ?? null,
-    firstSeq: event.seq, lastSeq: event.seq, timestamp: new Date(event.timeUnixMs).toISOString(),
-    artifactId: event.data.artifactId, artifactKind: event.data.kind, title: event.data.title,
-    sizeBytes: event.data.sizeBytes ?? null, mediaType: event.data.mediaType ?? null,
-    sha256: event.data.sha256 ?? null, sensitivity: event.data.sensitivity ?? null,
+const [ledger, artifactRoot] = process.argv.slice(2);
+assert.ok(ledger && artifactRoot, 'Pass a recorded session JSONL ledger and the corresponding artifact directory.');
+const events = (await readFile(ledger, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+const turn = events.find(event => event.type === 'tool/result' && event.data.name === 'run_terminal_command'
+  && event.data.data?.readWith === 'read_tool_result')?.turnId;
+const results = events.filter(event => event.turnId === turn && event.type === 'tool/result'
+  && event.data.name === 'run_terminal_command' && event.data.data?.readWith === 'read_tool_result');
+assert.ok(turn && results.length, 'The ledger must contain terminal commands with saved output.');
+const outputs = new Map();
+for (const result of results) {
+  const { artifactRef } = result.data.data;
+  const event = events.find(event => event.type === 'context/artifact' && event.data.artifactId === artifactRef);
+  assert.ok(event && /^[a-zA-Z0-9_-]+$/u.test(event.sessionId) && /^artifact-[0-9a-f]{32}$/u.test(artifactRef));
+  const body = await readFile(join(artifactRoot, event.sessionId, `${artifactRef}.bin`));
+  assert.equal(createHash('sha256').update(body).digest('hex'), event.data.sha256);
+  const expected = JSON.stringify(JSON.parse(body.toString('utf8')), null, 2);
+  outputs.set(artifactRef, {
+    event,
+    previewHash: createHash('sha256').update(expected).digest('hex'),
+    response: { metadata: { ...event.data, createdAtUnixMs: event.timeUnixMs },
+      bodyBase64: body.toString('base64'), truncated: false },
   });
-  turns.set(event.turnId, items);
 }
-const artifacts = [...turns.values()].sort((left, right) => right.size - left.size)[0];
-assert.ok(artifacts?.size > 0, 'The ledger must contain recorded internal artifacts.');
-const evidence = [...artifacts.values()];
+// Keep unrelated commands and messages out of the browser capture.
+const evidence = events.filter(event => (event.type === 'turn/start' || event.type === 'turn/end') && event.turnId === turn
+  || results.some(result => event === result || event.type === 'tool/call' && event.data.call.callId === result.data.callId)
+  || [...outputs.values()].some(output => output.event === event))
+  .map((event, seq) => ({ ...event, seq, sourceSeq: event.seq }));
+
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const entry = '/src/components/ai/__tests__/ai-runtime-artifacts.browser.tsx';
-const server = await createServer({ root, configFile: false, appType: 'custom', logLevel: 'error',
+const cacheDir = await mkdtemp(join(tmpdir(), 'shellspan-saved-output-'));
+const server = await createServer({ root, cacheDir, configFile: false, appType: 'custom', logLevel: 'error',
   plugins: [react(), tailwindcss()], resolve: { alias: { '@': `${root}src/` } },
-  server: { host: '127.0.0.1', port: 0 } });
+  optimizeDeps: { entries: [entry.slice(1)], include: ['react', 'react-dom/client', 'react/jsx-runtime'] },
+  server: { host: '127.0.0.1', port: 0, watch: null, hmr: false, fs: { allow: [root, cacheDir] } } });
+const reads = [];
 server.middlewares.use(async (request, response, next) => {
-  if (request.url === '/evidence') {
-    response.setHeader('Content-Type', 'application/json');
-    response.end(JSON.stringify(evidence));
-  } else if (request.url === '/') {
+  if (request.url === '/') {
     response.setHeader('Content-Type', 'text/html');
     response.end(await server.transformIndexHtml('/', '<!doctype html><html><body><div id="root"></div></body></html>'));
+  } else if (request.url === '/evidence') {
+    response.setHeader('Content-Type', 'application/json');
+    response.end(JSON.stringify(evidence));
+  } else if (request.url?.startsWith('/saved-output/')) {
+    const [sessionId, id] = request.url.slice('/saved-output/'.length).split('/');
+    const output = outputs.get(id);
+    if (!output || sessionId !== output.event.sessionId) {
+      response.writeHead(404).end();
+      return;
+    }
+    reads.push(id);
+    response.setHeader('Content-Type', 'application/json');
+    response.end(JSON.stringify(output.response));
   } else next();
 });
+
 let browser;
 try {
   await server.listen();
   browser = await chromium.launch();
-  const page = await browser.newPage({ viewport: { width: 1000, height: 800 }, deviceScaleFactor: 2 });
+  const page = await browser.newPage({ reducedMotion: 'reduce' });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(server.resolvedUrls.local[0]);
-  for (const locale of ['zh-CN', 'en-US']) {
+  for (const [locale, labels] of [
+    ['zh-CN', { records: '运行记录', output: '查看已保存的输出', back: '返回' }],
+    ['en-US', { records: 'Run records', output: 'View saved output', back: 'Back' }],
+  ]) {
     for (const width of [1000, 320]) {
-      await page.setViewportSize({ width, height: 800 });
-      const result = await page.evaluate(async ({ entry, locale, width }) =>
-        (await import(entry)).show(locale, width), { entry, locale, width });
-      const trigger = page.getByRole('button', { name: locale === 'zh-CN' ? '运行记录' : 'Run records', exact: true });
-      await trigger.waitFor();
-      assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
-      assert.equal(await page.locator('.ai-produced-files-label').count(), 0);
-      assert.equal(await page.locator('[data-runtime-artifact-list]').count(), 0);
-      await page.screenshot({ path: `/tmp/shellspan-runtime-artifacts-${locale}-${width}-collapsed.png` });
-      await trigger.focus();
-      await page.keyboard.press('Enter');
-      const list = page.locator('[data-runtime-artifact-list]');
-      const expandedHeight = await (await page.waitForFunction(() => {
-        const animation = document.querySelector('[data-runtime-artifacts] > [data-slot="collapsible-content"]')
-          ?.getAnimations().find(item => item.transitionProperty === 'height');
-        if (!animation) return false;
-        const frames = animation.effect.getKeyframes();
-        return { from: parseFloat(frames[0].height), to: parseFloat(frames.at(-1).height) };
-      })).jsonValue();
-      assert.equal(expandedHeight.from, 0);
-      assert.ok(expandedHeight.to > 0);
-      await page.evaluate(() => document.getAnimations().forEach(animation => animation.finish()));
-      await list.waitFor();
-      assert.equal(await list.getByRole('button').count(), result.count);
-      const bounds = await list.evaluate(element => {
-        const box = element.getBoundingClientRect();
-        return { fits: box.left >= 0 && box.right <= innerWidth && element.scrollWidth <= element.clientWidth,
-          height: box.height, scrolls: element.scrollHeight > element.clientHeight };
-      });
-      assert.equal(bounds.fits, true, `${locale} list fits at ${width}px`);
-      assert.ok(bounds.height <= 260, 'Run records keep a bounded scrolling area');
-      if (result.count >= 20) assert.equal(bounds.scrolls, true);
-      await page.screenshot({ path: `/tmp/shellspan-runtime-artifacts-${locale}-${width}-expanded.png` });
-      const entryButton = list.getByRole('button').last();
-      await entryButton.click();
-      assert.equal(await page.locator('body').getAttribute('data-opened-artifact'), result.lastArtifactId);
-      await page.keyboard.press('Tab');
-      await entryButton.focus();
-      assert.equal(await entryButton.evaluate(element => element.matches(':focus-visible')), true);
-      const focusStyle = await entryButton.evaluate(element => {
-        const style = getComputedStyle(element);
-        return { outline: style.outlineStyle, shadow: style.boxShadow };
-      });
-      assert.deepEqual(focusStyle, { outline: 'none', shadow: 'none' }, 'Run record focus must not draw an outer ring');
-      await page.locator('body').evaluate(element => element.removeAttribute('data-opened-artifact'));
-      await page.keyboard.press('Enter');
-      assert.equal(await page.locator('body').getAttribute('data-opened-artifact'), result.lastArtifactId);
-      await page.screenshot({ path: `/tmp/shellspan-runtime-artifacts-${locale}-${width}-focused.png` });
-      await trigger.click();
-      const closingHeight = await (await page.waitForFunction(() => {
-        const animation = document.querySelector('[data-runtime-artifacts] > [data-slot="collapsible-content"][data-ending-style]')
-          ?.getAnimations().find(item => item.transitionProperty === 'height');
-        if (!animation) return false;
-        const frames = animation.effect.getKeyframes();
-        return { from: parseFloat(frames[0].height), to: parseFloat(frames.at(-1).height) };
-      })).jsonValue();
-      assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
-      assert.ok(closingHeight.from > 0);
-      assert.equal(closingHeight.to, 0);
-      await page.evaluate(() => document.getAnimations().forEach(animation => animation.finish()));
-      await list.waitFor({ state: 'detached' });
+      await page.setViewportSize({ width, height: 650 });
+      await page.evaluate(async ({ entry, locale, width }) => (await import(entry)).show(locale, width), { entry, locale, width });
+      const process = page.locator('.ai-turn-process-trigger');
+      await process.waitFor();
+      if (await process.getAttribute('aria-expanded') === 'false') await process.press('Enter');
+      const tools = page.locator('[data-tool-variant="terminal"]');
+      assert.equal(await tools.count(), results.length);
+      assert.equal(await page.getByRole('button', { name: labels.records, exact: true }).count(), 0);
+      assert.equal(await page.locator('[data-ai-node-kind="runtimeArtifacts"]').count(), 0);
+      for (const [index, result] of results.entries()) {
+        const row = tools.nth(index);
+        const trigger = row.locator('[data-ai-node-action]');
+        if (await trigger.getAttribute('aria-expanded') === 'false') await trigger.press('Enter');
+        const before = reads.length;
+        await row.locator('.ai-tool-inspect').press('Enter');
+        const savedOutput = page.getByRole('button', { name: labels.output, exact: true });
+        await savedOutput.waitFor();
+        const bounds = await savedOutput.boundingBox();
+        assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= width
+          && bounds.y >= 0 && bounds.y + bounds.height <= 650, 'Saved output action fits in the viewport');
+        assert.equal(reads.length, before, 'Opening tool details is lazy');
+        await savedOutput.press('Enter');
+        const preview = page.locator('[data-slot="ai-artifact-details"] pre');
+        await preview.waitFor();
+        const id = result.data.data.artifactRef;
+        assert.deepEqual(reads.slice(before), [id]);
+        const digest = createHash('sha256').update(await preview.textContent()).digest('hex');
+        assert.equal(digest, outputs.get(id).previewHash);
+        const back = page.getByRole('button', { name: labels.back, exact: true });
+        await back.press('Enter');
+        await savedOutput.waitFor();
+        await back.press('Enter');
+        await tools.nth(index).waitFor();
+      }
     }
   }
   assert.deepEqual(errors, []);
-  console.log(`Run records: ${evidence.length} recorded artifacts grouped, animated, accessible and bounded in both languages and widths.`);
+  console.log(`Saved output verified for ${results.length} recorded commands in both languages at 320px and 1000px.`);
 } finally {
   await browser?.close();
   await server.close();
+  await rm(cacheDir, { recursive: true, force: true });
 }

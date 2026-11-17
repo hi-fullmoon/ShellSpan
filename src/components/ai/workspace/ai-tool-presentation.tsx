@@ -32,6 +32,7 @@ import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
+import { storedToolOutputId } from '@/lib/ai/conversation-tool';
 import { aiErrorMessage, httpProbeTimeoutKind } from '@/lib/ai/error-message';
 import { renderTerminalTranscript } from '@/lib/terminal/terminal-output-buffer';
 import { cn } from '@/lib/utils';
@@ -895,7 +896,7 @@ function IoSurface({ node, showCopyActions, scrollable, showInput = true }: {
   const input = bounded(formatToolValue(node.input));
   const output = bounded(outputText(node));
   return (
-    <div className="ai-io-card my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col gap-3" data-ai-tool-view="generic">
+    <div className="ai-io-card my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col gap-2" data-ai-tool-view="generic">
       {showInput && input && (
         <AiToolTextSection title={t('ai.workspace.tool.inputLabel')} text={input}
           copyText={showCopyActions ? formatToolValue(node.input) : undefined}
@@ -1042,7 +1043,7 @@ export function AiToolRow({
         <CollapsibleContent>
           <div className="ai-tool-body flex min-w-0 max-w-full flex-col">
             <AiToolExpandedContent node={node} compact diffModel={model ?? undefined} />
-            {onInspect && !hasInlinePreview && (
+            {onInspect && (!hasInlinePreview || storedToolOutputId(node)) && (
               <Tooltip>
                 <TooltipTrigger
                   render={(

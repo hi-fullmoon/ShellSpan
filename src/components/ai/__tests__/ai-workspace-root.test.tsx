@@ -443,10 +443,7 @@ describe('AiWorkspaceRoot conversation structure', () => {
     expect(within(error).getByText(title)).toBeVisible();
     expect(error).not.toHaveTextContent('taskTokenBudgetExceeded:');
     expect(screen.queryByText(artifact)).toBeNull();
-    const runtimeDetails = screen.getByRole('button', { name: locale === 'zh-CN' ? '运行记录' : 'Run records' });
-    expect(runtimeDetails).toHaveAttribute('aria-expanded', 'false');
-    await userEvent.setup().click(runtimeDetails);
-    expect(screen.getByText(artifact)).toBeVisible();
+    expect(screen.queryByRole('button', { name: locale === 'zh-CN' ? '运行记录' : 'Run records' })).toBeNull();
     expect(container.querySelector('[data-token-budget-notice]')).not.toBeNull();
     const notice = container.querySelector('[data-token-budget-notice]') as HTMLElement;
     expect(within(notice).queryByRole('button')).toBeNull();

@@ -13,7 +13,7 @@ import { conversationArtifacts } from '@/lib/ai/conversation-artifact';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
 import { canResumeTokenBudgetedTask, hasTokenBudgetCheckpoint, taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { findConversationTool } from '@/lib/ai/conversation-tool';
+import { findConversationTool, storedToolOutputId } from '@/lib/ai/conversation-tool';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
 import type { AiInboxItem, AiSessionView } from '@/lib/ai/session-adapter';
 import type { AiSessionSummary } from '@/lib/ai/session-adapter';
@@ -63,7 +63,6 @@ function askConversationNodes(nodes: readonly AiConversationNode[]): readonly Ai
       || node.kind === 'reasoning'
       || node.kind === 'turnTail'
       || (node.kind === 'artifact' && taskBudgetArtifactTitleKey(node.artifactKind) !== null)
-      || node.kind === 'runtimeArtifacts'
     ) return [node];
     if (node.kind !== 'turnProcess') return [];
     const notices = node.children.filter((child) => child.kind === 'question' || child.kind === 'error'
@@ -320,6 +319,7 @@ export interface AiWorkspaceRootProps {
   readonly onRenameSession?: (summary: AiSessionSummary, title: string) => void;
   readonly onBack?: () => void;
   readonly onOpenTool?: (node: import('@/lib/ai/conversation-node').AiConversationNodeOf<'tool'>) => void;
+  readonly onOpenStoredOutput?: (artifactId: string) => void;
   readonly onOpenArtifact?: (node: import('@/lib/ai/conversation-node').AiConversationNodeOf<'artifact'>) => void;
   readonly onScrollAnchorChange?: (anchor: AiScrollAnchor) => void;
   readonly onRouteReturnComplete?: () => void;
@@ -417,6 +417,7 @@ export function AiWorkspaceRoot({
   onRenameSession,
   onBack,
   onOpenTool,
+  onOpenStoredOutput,
   onOpenArtifact,
   onScrollAnchorChange,
   onRouteReturnComplete,
@@ -496,7 +497,9 @@ export function AiWorkspaceRoot({
     // A detached historical session may have no final event (for example after
     // process exit). Preserve its output without presenting it as still live.
     // One-shot subagents are read-only even while their output is still live.
-    const nodes = historicalTargetUnavailable ? visibleNodes.map(historicalOutput) : visibleNodes;
+    const transcriptNodes = visibleNodes.filter(node => node.kind !== 'runtimeArtifacts');
+    const nodes: readonly AiConversationNode[] = historicalTargetUnavailable
+      ? transcriptNodes.map(historicalOutput) : transcriptNodes;
     return (
       surfaceMode === 'ask'
         ? askConversationNodes(nodes)
@@ -532,6 +535,7 @@ export function AiWorkspaceRoot({
   const toolDetailsNode = route.kind === 'toolDetails' && view
     ? findConversationTool(view.nodes, route)
     : undefined;
+  const storedOutputId = toolDetailsNode && storedToolOutputId(toolDetailsNode);
   const artifactDetailsNode = route.kind === 'artifactDetails'
     ? conversationArtifacts(view?.nodes ?? []).find((node) => node.artifactId === route.artifactId)
     : undefined;
@@ -576,6 +580,7 @@ export function AiWorkspaceRoot({
       {route.kind === 'toolDetails' ? (
         <AiToolDetails
           node={toolDetailsNode ?? null}
+          onOpenStoredOutput={storedOutputId && onOpenStoredOutput ? () => onOpenStoredOutput(storedOutputId) : undefined}
           onBack={() => onBack?.()}
           onClose={onClose}
         />
@@ -583,6 +588,8 @@ export function AiWorkspaceRoot({
         <AiArtifactDetails
           sessionId={route.sessionId}
           node={artifactDetailsNode?.kind === 'artifact' ? artifactDetailsNode : null}
+          artifactId={route.sourceToolKey ? route.artifactId : undefined}
+          title={route.sourceToolKey ? t('ai.workspace.details.output') : undefined}
           load={loadArtifact ?? (() => Promise.reject(new Error(t('ai.workspace.details.artifactUnavailable'))))}
           onBack={() => onBack?.()}
           onClose={onClose}

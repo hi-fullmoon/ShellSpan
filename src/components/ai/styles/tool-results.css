@@ -218,10 +218,6 @@
   color: var(--ai-text-muted);
 }
 
-[data-runtime-artifact-list] .ai-produced-file:focus-visible {
-  outline: none;
-}
-
 .ai-transcript-notice {
   color: var(--ai-text-secondary);
   font-size: 13px;

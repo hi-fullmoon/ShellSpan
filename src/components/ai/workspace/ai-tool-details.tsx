@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Clock3Icon } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
@@ -72,10 +73,12 @@ function DetailCode({ value, label }: { readonly value: unknown; readonly label:
 
 export function AiToolDetails({
   node,
+  onOpenStoredOutput,
   onBack,
   onClose,
 }: {
   readonly node: AiConversationNodeOf<'tool'> | null;
+  readonly onOpenStoredOutput?: () => void;
   readonly onBack: () => void;
   readonly onClose?: () => void;
 }): React.ReactNode {
@@ -122,6 +125,11 @@ export function AiToolDetails({
                   : <AiToolExpandedContent node={node} showCopyActions={false} showInput={false} scrollable={false} diffModel={outputDiff ?? undefined} diffCopyAction={outputDiff ? outputCopyAction : undefined} />}
                 {node.error && !toolErrorIsInOutput(node) && <p className="ai-detail-error m-0 py-3 px-3.5 [overflow-wrap:anywhere]">{node.error}</p>}
               </DetailSection>
+              {onOpenStoredOutput && (
+                <Button type="button" size="xs" variant="outline" className="shrink-0 self-start" onClick={onOpenStoredOutput}>
+                  {t('ai.workspace.details.openStoredOutput')}
+                </Button>
+              )}
               {executionDetails && <DetailCode value={executionDetails} label={t('ai.workspace.details.execution')} />}
               <DetailCode
                 value={{

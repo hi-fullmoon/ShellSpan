@@ -216,7 +216,7 @@ describe('AI tool presentation', () => {
       expect(body).toContainElement(section.querySelector('.ai-tool-copy-button'));
       expect(header?.querySelector('.ai-tool-copy-button')).toBeNull();
     }
-    expect(container.querySelector('.ai-io-card')).toHaveClass('gap-3');
+    expect(container.querySelector('.ai-io-card')).toHaveClass('gap-2');
     expect(container.querySelector('.ai-io-card')).not.toHaveClass('overflow-hidden');
     expect(container.querySelector('.ai-io-input')).toHaveClass('max-h-65');
     expect(container.querySelector('.ai-io-output')).toHaveClass('max-h-65');

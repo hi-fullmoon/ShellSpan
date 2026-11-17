@@ -56,12 +56,16 @@ function ArtifactBody({ artifact }: { readonly artifact: AgentArtifactResponse }
 export function AiArtifactDetails({
   sessionId,
   node,
+  artifactId = node?.artifactId,
+  title,
   load,
   onBack,
   onClose,
 }: {
   readonly sessionId: string;
   readonly node: AiConversationNodeOf<'artifact'> | null;
+  readonly artifactId?: string;
+  readonly title?: string;
   readonly load: (sessionId: string, artifactId: string, maxBytes: number) => Promise<AgentArtifactResponse>;
   readonly onBack: () => void;
   readonly onClose?: () => void;
@@ -72,7 +76,6 @@ export function AiArtifactDetails({
     | { readonly kind: 'loaded'; readonly artifact: AgentArtifactResponse }
     | { readonly kind: 'error'; readonly message: string }
   >({ kind: 'loading' });
-  const artifactId = node?.artifactId;
   const artifactSha256 = node?.sha256;
   const titleKey = node ? taskBudgetArtifactTitleKey(node.artifactKind) : null;
 
@@ -100,7 +103,7 @@ export function AiArtifactDetails({
   return (
     <div className="ai-details-root flex size-full min-h-0 min-w-0 flex-col" data-slot="ai-artifact-details">
       <AiRouteHeader
-        title={titleKey ? t(titleKey) : node?.title ?? t('ai.workspace.details.artifactTitle')}
+        title={title ?? (titleKey ? t(titleKey) : node?.title ?? t('ai.workspace.details.artifactTitle'))}
         description={t('ai.workspace.details.artifactDescription')}
         onBack={onBack}
         onClose={onClose}

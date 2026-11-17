@@ -45,7 +45,11 @@ const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
   cacheDir: join(screenshots, 'vite-cache'),
   resolve: { alias: { '@': `${root}src` } }, esbuild: { jsx: 'automatic' },
-  optimizeDeps: { include: ['react', 'react-dom/client'] },
+  optimizeDeps: {
+    entries: ['src/components/ai/__tests__/agent-content-surfaces.browser-runtime.ts',
+      'src/components/ai/workspace/ai-conversation-node-seat.tsx', 'src/components/ai/workspace/ai-tool-details.tsx'],
+    include: ['react', 'react-dom/client'],
+  },
   server: { host: '127.0.0.1', port: 0, hmr: false },
   plugins: [tailwindcss(), {
     name: 'agent-content-surfaces',
@@ -426,7 +430,7 @@ try {
               };
             });
             assert.equal(splitLayout.border, '0px', 'The two content boxes must not share an outer border');
-            assert.equal(splitLayout.gap, 12, 'Separate content boxes use the shared 12px spacing');
+            assert.equal(splitLayout.gap, 8, 'Input and output cards have an 8px gap');
             assert.ok(splitLayout.independent && splitLayout.fits, 'Each content box must scroll independently within panel bounds');
             await generic.locator('.ai-io-input [data-slot="scroll-area-viewport"]').evaluate(element => { element.scrollTop = 0; });
             for (const selector of ['#read .ai-read-lines', '#search .ai-search-results', '#web .ai-web-content',

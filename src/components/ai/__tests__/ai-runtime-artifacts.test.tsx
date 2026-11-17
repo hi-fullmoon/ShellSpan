@@ -1,46 +1,26 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
 import { AiConversationNodeList } from '../workspace/ai-conversation-node-seat';
 import { conversationArtifacts } from '@/lib/ai/conversation-artifact';
 import { createAgentChatProjector, projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { hasTokenBudgetCheckpoint } from '@/lib/ai/task-token-budget';
 import { taskTokenBudgetEvidence, taskTokenBudgetView } from '@/tests/fixtures/task-token-budget';
-import type { AiArtifactNode } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import '../styles/styles.css';
 
 afterEach(cleanup);
 
-it.each(['zh-CN', 'en-US'] as const)('collapses recorded internal artifacts without hiding their details in %s', async locale => {
+it.each(['zh-CN', 'en-US'] as const)('omits internal artifact rows while retaining the checkpoint in %s', async locale => {
   useAppStore.setState({ locale });
   await initI18n(locale);
   const view = taskTokenBudgetView();
   const group = view.nodes.find(node => node.kind === 'runtimeArtifacts');
   expect(group?.kind).toBe('runtimeArtifacts');
   if (group?.kind !== 'runtimeArtifacts') throw new Error('Recorded runtime artifacts are required');
-  const artifacts = conversationArtifacts(view.nodes);
-  const opened: AiArtifactNode[] = [];
-  const user = userEvent.setup();
-  const { container } = render(<AiConversationNodeList nodes={[group]} onOpenArtifact={artifact => opened.push(artifact)} />);
-  const trigger = screen.getByRole('button', { name: locale === 'zh-CN' ? '运行记录' : 'Run records' });
-  expect(trigger).toHaveAttribute('aria-expanded', 'false');
-  expect(screen.queryByText(locale === 'zh-CN' ? '已生成' : 'Produced')).toBeNull();
-  expect(container.querySelector('[data-runtime-artifact-list]')).toBeNull();
-  trigger.focus();
-  await user.keyboard('{Enter}');
-  expect(trigger).toHaveAttribute('aria-expanded', 'true');
-  const list = container.querySelector('[data-runtime-artifact-list]') as HTMLElement;
-  const panel = list.parentElement!;
-  expect(getComputedStyle(panel).height).toBe('var(--collapsible-panel-height)');
-  expect(getComputedStyle(panel).overflow).toBe('hidden');
-  expect(getComputedStyle(panel).transitionProperty).toBe('height, opacity');
-  const entries = within(list).getAllByRole('button');
-  expect(entries).toHaveLength(artifacts.length);
-  expect(list).toHaveClass('max-h-65', 'overflow-auto');
-  await user.click(entries[entries.length - 1]);
-  expect(opened).toEqual([artifacts[artifacts.length - 1]]);
+  const { container } = render(<AiConversationNodeList nodes={[group]} />);
+  expect(container).toBeEmptyDOMElement();
+  expect(screen.queryByRole('button', { name: locale === 'zh-CN' ? '运行记录' : 'Run records' })).toBeNull();
   expect(hasTokenBudgetCheckpoint(view)).toBe(true);
 });
 
