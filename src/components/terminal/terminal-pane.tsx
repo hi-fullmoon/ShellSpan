@@ -23,8 +23,6 @@ import { useFocusStore } from '@/stores/focusStore';
 import { eventMatchesShortcut } from '@/lib/shortcuts';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import type { ShortcutBindings } from '@/types';
-import { Badge } from '@/components/ui/badge';
-import { Spinner as ButtonSpinner } from '@/components/ui/spinner';
 import {
   Tooltip,
   TooltipContent,
@@ -35,10 +33,7 @@ import {
   agentTerminalLeaseState,
   type AgentTerminalLeaseView,
 } from '@/components/terminal/agent-terminal-lease-state';
-import {
-  SquareTerminalIcon,
-  SquareIcon,
-} from 'lucide-react';
+import { ArrowUpRightIcon, TerminalIcon } from 'lucide-react';
 
 const effectiveShortcuts = (): ShortcutBindings => ({
   ...DEFAULT_SHORTCUTS,
@@ -51,17 +46,19 @@ const MIN_CONNECTING_OVERLAY_MS = 600;
 
 const AgentTerminalLeaseBar: React.FC<{
   lease: AgentTerminalLeaseView;
-}> = ({ lease }) => {
+  inputLocked: boolean;
+}> = ({ lease, inputLocked }) => {
   const { t } = useI18n();
   const { error: showError } = useToast();
   const focusEnabled = useFocusStore(state => state.enabled);
   const panelOpen = useAiPanelStore(state => state.panelOpenBySection.terminal);
   const activeSection = useAppStore(state => state.activeSection);
   const workspace = focusEnabled ? 'focus' : 'terminal';
+  const ownerWorkspace = terminalTaskWorkspace(lease);
   const displayedSessionId = useTerminalTaskNavigation(state => state.displayedSessionByWorkspace[workspace]);
   const taskVisible = activeSection === 'terminal'
     && (focusEnabled || panelOpen)
-    && terminalTaskWorkspace(lease) === workspace
+    && ownerWorkspace === workspace
     && displayedSessionId === lease.agentSessionId;
   const shownFailureOperationRef = useRef<string | null>(null);
   useEffect(() => {
@@ -79,73 +76,81 @@ const AgentTerminalLeaseBar: React.FC<{
   const activityLabel = lease.terminalOwned
     ? t(feedback.label)
     : t(lease.waitingForUserAction ? 'terminal.agentLease.waitingForUserAction' : 'terminal.agentLease.turnRunning');
-  const interactionHint = !lease.terminalOwned
-    ? activityLabel
-    : lease.inputBlocked ? t('terminal.agentLease.inputBlockedAccessibleHint') : t(feedback.hint);
+  const interactionHint = lease.terminalOwned
+    ? t(lease.inputBlocked ? 'terminal.agentLease.inputBlockedAccessibleHint' : feedback.hint)
+    : null;
+  const modeLabel = t('terminal.agentLease.visibleCommandLabel');
+  const workspaceLabel = t(ownerWorkspace === 'focus' ? 'terminal.occupancy.focus' : 'terminal.occupancy.terminal');
+  const inputLabel = inputLocked ? t('terminal.agentLease.inputLockedLabel') : null;
+  const viewTaskLabel = t('terminal.occupancy.viewTask');
 
   return (
     <div
-      className="agent-terminal-lease-bar @container/terminal-lease shrink-0 border-b border-app-border/50 bg-app-surface"
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
+      className="@container/terminal-lease shrink-0 border-b border-app-border/50 bg-app-surface"
       data-testid="agent-terminal-lease-bar"
       data-operation-id={lease.operationId}
       data-terminal-owned={lease.terminalOwned || undefined}
       data-input-blocked={lease.inputBlocked || undefined}
     >
-      <div className="agent-terminal-lease-layout flex min-w-0 items-center gap-3 px-2 py-1.5">
-        <div className="agent-terminal-lease-status flex shrink-0 items-center gap-1">
+      <div className="flex min-w-0 items-center gap-2 px-2.5 py-0.5">
+        <div className="agent-terminal-lease-status flex min-w-0 flex-1 items-center gap-2">
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger
-                render={(
-                  <Badge
-                    variant="outline"
-                    className="agent-terminal-lease-identity h-6 @max-[400px]/terminal-lease:size-6 @max-[400px]/terminal-lease:p-0 @max-[400px]/terminal-lease:has-data-[icon=inline-start]:pl-0"
-                    data-testid="agent-terminal-lease-identity"
-                    aria-label={t('terminal.agentLease.visibleCommandLabel')}
-                  />
-                )}
+                render={<span />}
+                className="grid size-7 shrink-0 place-items-center rounded-md bg-app-surface-muted text-app-primary"
+                data-testid="agent-terminal-lease-identity"
               >
-                <SquareTerminalIcon data-icon="inline-start" />
-                <span className="hidden @min-[400px]/terminal-lease:inline">{t('terminal.agentLease.visibleCommandLabel')}</span>
+                <TerminalIcon aria-hidden="true" className="size-3.5" />
               </TooltipTrigger>
-              <TooltipContent>{t('terminal.agentLease.agentIdentity', { id: lease.agentSessionId })}</TooltipContent>
+              <TooltipContent align="start" side="bottom">
+                {modeLabel} · {workspaceLabel} · {t('terminal.agentLease.agentIdentity', { id: lease.agentSessionId })}
+              </TooltipContent>
             </Tooltip>
           </TooltipProvider>
+          <div className="min-w-0" aria-hidden="true">
+            <div className="agent-terminal-lease-description truncate text-xs leading-4 font-semibold text-app-text" title={interactionHint ? `${activityLabel} — ${interactionHint}` : activityLabel}>
+              {activityLabel}
+            </div>
+            <div className="flex items-center gap-1 text-[11px] leading-3.5 text-app-text-soft">
+              <span className={inputLabel ? 'hidden truncate @min-[420px]/terminal-lease:inline' : 'truncate'}>{modeLabel}</span>
+              {inputLabel && <>
+                <span className="hidden @min-[420px]/terminal-lease:inline">·</span>
+                <span className="shrink-0">{inputLabel}</span>
+              </>}
+            </div>
+          </div>
         </div>
-        <span
-          className="agent-terminal-lease-description min-w-0 flex-1 truncate text-xs text-app-text-soft"
-          aria-hidden="true"
-          title={interactionHint}
-        >
-          {t(terminalTaskWorkspace(lease) === 'focus' ? 'terminal.occupancy.focus' : 'terminal.occupancy.terminal')} · {activityLabel}
-        </span>
-        {!taskVisible && <Button variant="ghost" size="xs" className="shrink-0" onClick={() => {
-          if (!openTerminalTask(lease)) showError(t('terminal.occupancy.navigationBlocked'));
-        }}>{t('terminal.occupancy.viewTask')}</Button>}
-        {!lease.waitingForUserAction && <Button
-          type="button"
-          variant="outline"
-          size="xs"
-          className="agent-terminal-takeover shrink-0"
-          disabled={lease.takeoverRequested}
-          aria-busy={lease.takeoverRequested || undefined}
-          aria-label={t(lease.takeoverRequested
-            ? 'terminal.agentLease.takingOver'
-            : 'terminal.agentLease.takeover')}
-          onClick={lease.requestTakeover}
-        >
-          {lease.takeoverRequested ? (
-            <ButtonSpinner data-icon="inline-start" aria-hidden="true" />
-          ) : (
-            <SquareIcon data-icon="inline-start" />
-          )}
-          {t('terminal.agentLease.takeover')}
-        </Button>}
+        <div className="flex shrink-0 items-center gap-1">
+          {!taskVisible && <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="@max-[420px]/terminal-lease:w-6 @max-[420px]/terminal-lease:px-0"
+            title={viewTaskLabel}
+            onClick={() => {
+              if (!openTerminalTask(lease)) showError(t('terminal.occupancy.navigationBlocked'));
+            }}
+          >
+            <ArrowUpRightIcon aria-hidden="true" className="@min-[420px]/terminal-lease:hidden" />
+            <span className="@max-[420px]/terminal-lease:sr-only">{viewTaskLabel}</span>
+          </Button>}
+          {!lease.waitingForUserAction && <Button
+            type="button"
+            variant="secondary"
+            size="xs"
+            className="agent-terminal-takeover"
+            disabled={lease.takeoverRequested}
+            aria-busy={lease.takeoverRequested || undefined}
+            onClick={lease.requestTakeover}
+          >
+            {t(lease.takeoverRequested ? 'terminal.agentLease.takingOver' : 'terminal.agentLease.takeover')}
+          </Button>}
+        </div>
       </div>
-      <span className="sr-only">{activityLabel} {interactionHint}</span>
+      <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {[activityLabel, modeLabel, workspaceLabel, inputLabel, interactionHint].filter(Boolean).join(' · ')}
+      </span>
     </div>
   );
 };
@@ -415,7 +420,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   return (
     <div ref={resizeBoundaryRef} className="relative flex h-full w-full flex-col overflow-hidden bg-app-bg" data-terminal-pane-session={activeSessionId}>
       {activeLease && (
-        <AgentTerminalLeaseBar lease={activeLease} />
+        <AgentTerminalLeaseBar
+          lease={activeLease}
+          inputLocked={agentTerminalLeaseState.blocksUserInput(activeLease.sessionId, activeSession?.foregroundHandoffActive)}
+        />
       )}
       <div className="relative min-h-0 flex-1" style={{ backgroundColor: terminalSurfaceStyle.backgroundColor }}>
         {activeLease && !activeLease.waitingForUserAction && (

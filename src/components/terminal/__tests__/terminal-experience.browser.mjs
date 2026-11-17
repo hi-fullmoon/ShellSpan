@@ -517,13 +517,11 @@ try {
     await page.setViewportSize({ width, height: 800 });
     const bar = page.getByTestId('agent-terminal-lease-bar');
     await bar.locator('.agent-terminal-lease-description').filter({ hasText: '正在输入命令…' }).waitFor();
-    assert.equal(await bar.locator('.agent-terminal-lease-status > *').count(), 1);
-    assert.equal(await bar.getByText('键盘已锁定', { exact: true }).count(), 0);
+    await bar.getByText('输入锁定', { exact: true }).waitFor();
     const typingBar = await bar.boundingBox();
     const takeover = bar.getByRole('button', { name: '停止并接管', exact: true });
     const typingButton = await takeover.boundingBox();
     assert.ok(typingButton.x >= typingBar.x && typingButton.x + typingButton.width <= typingBar.x + typingBar.width);
-    await page.screenshot({ path: `/tmp/shellspan-terminal-typing-${width}.png` });
     await page.evaluate(async () => {
       const store = window.runtime.agentTerminalLeaseState;
       const lease = store.get(window.identity.sessionId);
@@ -533,7 +531,7 @@ try {
       await coordinator.handle({ ...lease, state: 'activity', commandPhase: 'running' });
       coordinator.dispose();
     });
-    await bar.locator('.agent-terminal-lease-description').filter({ hasText: 'Agent 正在此终端执行命令' }).waitFor();
+    await bar.locator('.agent-terminal-lease-description').filter({ hasText: 'Agent 正在执行命令' }).waitFor();
     assert.deepEqual(await bar.boundingBox(), typingBar);
     assert.deepEqual(await takeover.boundingBox(), typingButton);
     await page.evaluate(async () => {
@@ -555,48 +553,48 @@ try {
     for (const width of [1280, 760, 600, 420, 320]) {
       await page.setViewportSize({ width, height: 800 });
       const bar = page.getByTestId('agent-terminal-lease-bar');
+      const activity = locale === 'zh-CN' ? 'Agent 正在处理' : 'Agent is working';
+      const lock = locale === 'zh-CN' ? '输入锁定' : 'Input locked';
+      const taskButton = bar.getByRole('button', { name: locale === 'zh-CN' ? '查看任务' : 'View task', exact: true });
+      const takeover = bar.getByRole('button', { name: locale === 'zh-CN' ? '停止并接管' : 'Stop & take over', exact: true });
+      const description = bar.getByText(activity, { exact: true });
+      const lockLabel = bar.getByText(lock, { exact: true });
+      await description.waitFor();
+      await lockLabel.waitFor();
+      await taskButton.waitFor();
+      assert.equal(await takeover.locator('svg').count(), 0, 'The takeover button should contain text only');
       const geometry = await bar.evaluate(element => {
         const bounds = element.getBoundingClientRect();
-        const selectors = ['.agent-terminal-lease-status', '.agent-terminal-lease-description', '.agent-terminal-takeover'];
-        return { width: element.clientWidth, overflow: element.scrollWidth > element.clientWidth,
-          items: selectors.map(selector => {
-            const rect = element.querySelector(selector).getBoundingClientRect();
-            return { left: rect.left - bounds.left, right: rect.right - bounds.left, top: rect.top, bottom: rect.bottom };
-          }) };
+        const status = element.querySelector('.agent-terminal-lease-status');
+        const items = [status, ...element.querySelectorAll('button')].map(item => item.getBoundingClientRect().toJSON());
+        return { left: bounds.left, right: bounds.right, height: bounds.height, items,
+          overflow: element.scrollWidth > element.clientWidth,
+          terminalTop: element.nextElementSibling.getBoundingClientRect().top, bottom: bounds.bottom };
       });
       assert.equal(geometry.overflow, false, `Lease bar must fit ${locale} at ${width}px`);
-      assert.ok(geometry.items.every(item => item.left >= 0 && item.right <= geometry.width + 1));
-      const [status, description, action] = geometry.items;
-      assert.ok(description.left >= status.right && action.left >= description.right,
-        'Status, description and takeover must not overlap');
-      assert.ok(Math.abs(status.top - action.top) < 1 && Math.abs(status.bottom - action.bottom) < 1,
-        'Status and takeover must stay on one row');
-      assert.ok(description.top >= status.top && description.bottom <= status.bottom,
-        'Description must stay within the same row');
-      assert.equal(await bar.locator('.agent-terminal-input-state').count(), 0);
-      assert.equal(await bar.locator('.agent-terminal-lease-status > *').count(), 1);
-      assert.equal(await bar.getByText(locale === 'zh-CN' ? '键盘已锁定' : 'Keyboard locked', { exact: true }).count(), 0);
-      await bar.evaluate(async element => {
-        await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished));
-      });
-      const iconAlignment = await bar.getByTestId('agent-terminal-lease-identity').evaluateAll(badges => badges.map(badge => {
-        const bounds = badge.getBoundingClientRect();
-        const icon = badge.querySelector('svg').getBoundingClientRect();
-        const label = badge.querySelector('span');
-        return {
-          iconOnly: getComputedStyle(label).display === 'none',
-          horizontal: Math.abs(icon.x + icon.width / 2 - bounds.x - bounds.width / 2),
-          vertical: Math.abs(icon.y + icon.height / 2 - bounds.y - bounds.height / 2),
-        };
-      }));
-      for (const alignment of iconAlignment) {
-        assert.ok(alignment.vertical < 0.1, `Badge icon must be vertically centered at ${locale} ${width}px`);
-        if (alignment.iconOnly) assert.ok(alignment.horizontal < 0.1,
-          `Icon-only badge must be horizontally centered at ${locale} ${width}px: ${JSON.stringify(alignment)}`);
+      assert.ok(geometry.items.every(item => item.left >= geometry.left && item.right <= geometry.right));
+      const [status, task, action] = geometry.items;
+      assert.ok(task.left >= status.right && action.left >= task.right, 'Status and actions must not overlap');
+      assert.equal(task.height, action.height, 'Actions must have equal heights');
+      assert.ok(Math.abs(status.y + status.height / 2 - action.y - action.height / 2) < 1,
+        'Status and actions must stay vertically centered');
+      assert.ok(geometry.height <= 36 && Math.abs(geometry.terminalTop - geometry.bottom) < 1,
+        'The compact bar must sit directly above the terminal');
+      assert.equal(await description.evaluate(element => element.scrollWidth <= element.clientWidth + 1), true,
+        `Activity text must be legible at ${locale} ${width}px`);
+      const caption = lockLabel.locator('..');
+      assert.equal(await caption.locator('svg').count(), 0, 'The caption should contain text only');
+      if (width === 760) {
+        const mode = locale === 'zh-CN' ? '可视命令' : 'Visible command';
+        assert.equal((await caption.innerText()).replace(/\s+/g, ' ').trim(), `${mode} · ${lock}`);
       }
-      await bar.screenshot({ path: `/tmp/shellspan-terminal-lease-${locale}-${width}.png` });
-      const taskButton = bar.getByRole('button', { name: locale === 'zh-CN' ? '查看任务' : 'View task', exact: true });
-      assert.equal(await taskButton.count(), 1, 'A hidden task must retain its navigation entry');
+      if (width === 320) {
+        await taskButton.focus();
+        await page.keyboard.press('Tab');
+        assert.equal(await takeover.evaluate(element => element === document.activeElement), true);
+        await takeover.blur();
+        await bar.screenshot({ path: `${root}.artifacts/tests/terminal-lease/${locale}-compact.png` });
+      }
       await page.evaluate(() => {
         const { useTerminalTaskNavigation, useAiPanelStore, useFocusStore, useAppStore, agentTerminalLeaseState } = window.runtime;
         useAppStore.setState({ activeSection: 'terminal' });
@@ -606,7 +604,14 @@ try {
       });
       await taskButton.waitFor({ state: 'detached' });
       assert.equal(await bar.getByRole('button').count(), 1, 'The displayed task must only retain takeover');
-      await bar.screenshot({ path: `/tmp/shellspan-terminal-task-visible-${locale}-${width}.png` });
+      if (locale === 'zh-CN' && width === 760) {
+        assert.equal(await bar.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(255, 255, 255)');
+        await bar.screenshot({ animations: 'disabled', path: `${root}.artifacts/tests/terminal-lease/zh-CN-wide.png` });
+        await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+        assert.equal(await bar.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(32, 33, 34)');
+        await bar.screenshot({ animations: 'disabled', path: `${root}.artifacts/tests/terminal-lease/zh-CN-dark.png` });
+        await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
+      }
       await page.evaluate(() => window.runtime.useAiPanelStore.getState().setOpen(false, 'terminal'));
       await taskButton.waitFor();
       await page.evaluate(() => {

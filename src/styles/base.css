@@ -57,27 +57,6 @@
   background: color-mix(in srgb, var(--terminal-command-color) 7%, transparent);
 }
 
-.agent-terminal-lease-identity {
-  border-color: color-mix(in srgb, var(--app-primary) 28%, var(--app-border));
-  background: color-mix(in srgb, var(--app-primary) 8%, transparent);
-  color: var(--app-primary);
-}
-
-.agent-terminal-input-state-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
-  background: var(--app-success);
-}
-
-.agent-terminal-lease-bar[data-terminal-owned='true'] .agent-terminal-input-state-dot {
-  background: var(--app-warning);
-}
-
-.agent-terminal-takeover {
-  color: var(--app-text-soft);
-}
-
 .image-preview-overlay {
   background: var(--image-preview-backdrop);
   backdrop-filter: none;

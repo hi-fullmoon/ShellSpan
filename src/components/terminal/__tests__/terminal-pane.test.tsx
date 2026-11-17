@@ -220,7 +220,7 @@ describe('TerminalPane', () => {
     expect(bar).toHaveAttribute('data-operation-id', 'operation-1');
     expect(bar).toHaveTextContent('terminal.agentLease.visibleCommandLabel');
     expect(bar).toHaveTextContent('terminal.agentLease.commandRunning');
-    expect(bar).not.toHaveTextContent('terminal.agentLease.inputLockedLabel');
+    expect(bar).toHaveTextContent('terminal.agentLease.inputLockedLabel');
     expect(bar).not.toHaveTextContent('terminal.agentLease.runtime');
     expect(bar.querySelector('[aria-label="terminal.agentLease.runtime"]')).toBeNull();
     expect(bar).not.toHaveClass('absolute');
@@ -236,18 +236,7 @@ describe('TerminalPane', () => {
     expect(bar).not.toHaveClass('min-h-10');
     expect(screen.getByTestId('agent-visible-terminal-aura'))
       .toHaveClass('pointer-events-none', 'absolute', 'inset-0');
-    const identity = screen.getByTestId('agent-terminal-lease-identity');
-    expect(identity).toHaveClass('h-6', 'text-xs');
-    expect(identity).not.toHaveAttribute('title');
     expect(bar).not.toHaveTextContent('[Agent] $ echo [REDACTED]');
-    expect(bar.querySelector('.agent-terminal-lease-layout')).toHaveClass(
-      'flex', 'items-center',
-    );
-    expect(bar.querySelector('.agent-terminal-lease-description')).toHaveClass('min-w-0', 'flex-1', 'truncate');
-    expect(bar.querySelector('.agent-terminal-lease-status')).not.toHaveClass('flex-wrap');
-    expect(bar.querySelector('.agent-terminal-input-state')).toBeNull();
-    expect(bar.querySelector('.agent-terminal-lease-status')).toContainElement(identity);
-    expect(bar.querySelector('.agent-terminal-lease-status')?.children).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }))
       .toHaveAttribute('data-slot', 'button');
     expect(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }))
@@ -277,8 +266,8 @@ describe('TerminalPane', () => {
     const pendingButton = screen.getByRole('button', { name: 'terminal.agentLease.takingOver' });
     expect(pendingButton).toBeDisabled();
     expect(pendingButton).toHaveAttribute('aria-busy', 'true');
-    expect(pendingButton).toHaveTextContent('terminal.agentLease.takeover');
-    expect(pendingButton.querySelector('[data-slot="spinner"]')).toBeInTheDocument();
+    expect(pendingButton).toHaveTextContent('terminal.agentLease.takingOver');
+    expect(pendingButton.querySelector('svg')).not.toBeInTheDocument();
 
     const escape = new KeyboardEvent('keydown', {
       key: 'Escape',
@@ -302,7 +291,8 @@ describe('TerminalPane', () => {
     });
 
     const bar = screen.getByTestId('agent-terminal-lease-bar');
-    expect(bar).toHaveAttribute('aria-live', 'polite');
+    expect(bar).toContainElement(screen.getByRole('status', { name: '' }));
+    expect(screen.getByRole('status', { name: '' })).toHaveAttribute('aria-live', 'polite');
     expect(bar).toHaveTextContent('terminal.agentLease.inputBlockedAccessibleHint');
     const prompt = screen.getByRole('status', {
       name: 'terminal.agentLease.inputBlockedPrompt',
@@ -319,7 +309,7 @@ describe('TerminalPane', () => {
 
     const bar = screen.getByTestId('agent-terminal-lease-bar');
     expect(bar).toHaveTextContent('terminal.agentLease.turnRunning');
-    expect(bar).not.toHaveTextContent('terminal.agentLease.inputLockedLabel');
+    expect(bar).toHaveTextContent('terminal.agentLease.inputLockedLabel');
     expect(bar).not.toHaveTextContent('terminal.agentLease.inputAvailableLabel');
     expect(screen.getByTestId('agent-visible-terminal-aura')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }));
