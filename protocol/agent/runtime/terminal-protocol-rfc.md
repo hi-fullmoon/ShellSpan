@@ -551,16 +551,17 @@ disconnection or an unready output listener rejects frontend readiness and
 releases the reservation without command input. Lease changes increment the
 Broker's lease `revision`; the runtime publishes `acquired` or `released` events.
 
-Before acknowledging a connected, output-ready Agent lease, the frontend selects
-and displays the lease's target terminal, commits its attachment, and verifies
-that the target xterm textarea owns DOM focus. It rechecks controller and lease
-identity after the UI commit. Failed focus leaves frontend readiness pending;
-the existing five-second readiness timeout releases the lease without PTY input.
+Commands write to the leased PTY independently of DOM focus. The frontend
+preserves keyboard focus and keeps the current view if revealing the target
+would change the section or tab while an element has focus. Otherwise, an
+initial lease can reveal the target terminal and fit its pane before
+acknowledging readiness. The frontend rechecks lease and controller identity
+after the UI commit. Connected transport, output readiness, pending/unverified
+input and credential-prompt checks remain required.
 When a Terminal-workspace Agent runs while the user is viewing Focus, acquisition
 and release preserve the viewed workspace, selection, target and keyboard focus.
-In this case DOM focus is not a readiness requirement: commands write to the
-leased PTY directly. Controller identity, connected transport, output readiness,
-pending/unverified input and credential-prompt checks remain required.
+During automatic typing, a visible terminal uses a solid cursor even when
+unfocused, while user input stays locked.
 Deferred section/tab focus must revalidate the selected session and controller
 identity when it runs, and discard obsolete requests or requests after unmount.
 
@@ -597,7 +598,8 @@ User takeover is an atomic lease transition to user ownership. Once it wins:
 
 1. every later Agent input for the released operation is rejected;
 2. the broker may send one scoped interrupt;
-3. the UI regains input without waiting for model cancellation; and
+3. the UI regains input without waiting for model cancellation and focuses the
+   terminal after a confirmed user takeover if that pane is still visible; and
 4. the command is `takenOver` only when an accepted cooperative completion
    proves the boundary,
    otherwise it is `uncertain`.

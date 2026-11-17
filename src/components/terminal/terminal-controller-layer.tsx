@@ -78,6 +78,11 @@ interface ActiveLeaseResources {
   removeLifecycle?: () => void;
 }
 
+interface PendingTurnStop {
+  readonly timer: ReturnType<typeof setTimeout>;
+  readonly focusTerminal: () => void;
+}
+
 export interface AgentTerminalLeaseCoordinator {
   handle(lease: AgentTerminalLeaseEvent): Promise<void>;
   handleSession(event: AgentSessionEvent): void;
@@ -104,10 +109,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
   const pendingTurnBindings = new Map<string, Promise<void>>();
   const workspaceOwners = new Map<string, TerminalWorkspace>();
   const fencedTurns = new Map<string, string | undefined>();
-  const pendingTurnStops = new Map<string, {
-    operationId: string;
-    timer: ReturnType<typeof setTimeout>;
-  }>();
+  const pendingTurnStops = new Map<string, PendingTurnStop>();
 
   const runsBehindFocus = (agentSessionId: string): boolean =>
     useFocusStore.getState().enabled
@@ -301,12 +303,24 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       || pendingTurnStops.has(view.agentSessionId)
     ) return;
     const agentSessionId = view.agentSessionId;
+    const controller = terminalRegistry.get(sessionId);
+    const workspace = useTerminalStore.getState().workspace;
+    const focusTerminal = (): void => {
+      const store = useTerminalStore.getState();
+      const { enabled, terminalOpen } = useFocusStore.getState();
+      if (!controller?.terminal.textarea?.isConnected || controller.sessionId !== sessionId
+        || terminalRegistry.get(sessionId) !== controller || store.workspace !== workspace
+        || useAppStore.getState().activeSection !== 'terminal' || (enabled && !terminalOpen)
+        || agentTerminalLeaseState.blocksUserInput(sessionId)) return;
+      store.setActiveSession(sessionId);
+      controller.focus();
+    };
     agentTerminalLeaseState.update(sessionId, operationId, (current) => ({
       ...current,
       takeoverRequested: true,
       takeoverFailed: false,
     }));
-    let pendingStop: { operationId: string; timer: ReturnType<typeof setTimeout> };
+    let pendingStop: PendingTurnStop;
     const timer = setTimeout(() => {
       if (pendingTurnStops.get(agentSessionId) !== pendingStop) return;
       pendingTurnStops.delete(agentSessionId);
@@ -317,8 +331,13 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       }));
       logger.warn(`Timed out waiting for Agent turn cancellation ${agentSessionId}`);
     }, TAKEOVER_CONFIRMATION_TIMEOUT_MS);
-    pendingStop = { operationId, timer };
+    pendingStop = { timer, focusTerminal };
     pendingTurnStops.set(agentSessionId, pendingStop);
+    const completeTakeover = (): void => {
+      fencedTurns.set(agentSessionId, currentTurns.get(agentSessionId));
+      clearTurn(agentSessionId);
+      focusTerminal();
+    };
     void (async () => {
       let backendFenced = false;
       try {
@@ -333,8 +352,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       if (pendingTurnStops.get(agentSessionId) !== pendingStop) return;
 
       if (backendFenced) {
-        fencedTurns.set(agentSessionId, currentTurns.get(agentSessionId));
-        clearTurn(agentSessionId);
+        completeTakeover();
         void invokeInterruptAgentRuntime({ sessionId: agentSessionId }).catch((error) => {
           logger.warn(`Failed to stop taken-over Agent turn ${agentSessionId}`, error);
         });
@@ -344,8 +362,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       try {
         await invokeInterruptAgentRuntime({ sessionId: agentSessionId });
         if (pendingTurnStops.get(agentSessionId) !== pendingStop) return;
-        fencedTurns.set(agentSessionId, currentTurns.get(agentSessionId));
-        clearTurn(agentSessionId);
+        completeTakeover();
       } catch (error) {
         if (pendingTurnStops.get(agentSessionId) !== pendingStop) return;
         clearTimeout(pendingStop.timer);
@@ -606,15 +623,15 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         || activeLeases.get(lease.sessionId)?.lease.operationId !== lease.operationId
       ) return;
 
-      // PTY writes target the leased transport, not the DOM keyboard focus.
-      // An existing turn already owns its transport. Delegated commands and
-      // repeated leases must preserve the user's current workspace, focus and draft.
-      const preserveView = inheritedInput !== undefined || preserveDelegatedView || runsBehindFocus(lease.agentSessionId);
-      let terminalFocused = false;
+      const focused = document.activeElement;
+      const changesView = useAppStore.getState().activeSection !== 'terminal'
+        || useTerminalStore.getState().activeSessionId !== lease.sessionId;
+      // Changing tabs or sections may detach the currently focused input.
+      const preserveView = inheritedInput !== undefined || preserveDelegatedView || runsBehindFocus(lease.agentSessionId)
+        || (changesView && focused !== null && focused !== document.body);
       if (controller && controller.sessionId === lease.sessionId
         && terminalRegistry.get(lease.sessionId) === controller && !preserveView) {
-        // Commit the target pane's attachment before focusing xterm. The backend
-        // cannot start writing the command until the readiness acknowledgement.
+        // Commit the pane's attachment before acknowledging the output listener.
         flushSync(() => {
           // Focus commands use whichever terminal workspace the user is viewing.
           // A lease must not re-enter Focus after the user has left it.
@@ -625,30 +642,18 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
           if (useFocusStore.getState().enabled) useFocusStore.getState().setTerminalOpen(true);
         });
         // Switching sections can synchronously dispose or rebind a controller.
-        // Never focus the captured instance after its lease or identity changed.
+        // Don't acknowledge a controller whose lease or identity changed.
         if (disposed || activeLeases.get(lease.sessionId) !== active
           || controller.sessionId !== lease.sessionId
           || terminalRegistry.get(lease.sessionId) !== controller) return;
         controller.fit();
-        controller.focus();
         if (disposed || activeLeases.get(lease.sessionId) !== active
           || controller.sessionId !== lease.sessionId
           || terminalRegistry.get(lease.sessionId) !== controller) return;
-        terminalFocused = Boolean(controller.terminal.textarea?.isConnected
-          && document.activeElement === controller.terminal.textarea
-          && useTerminalStore.getState().activeSessionId === lease.sessionId
-          && useAppStore.getState().activeSection === 'terminal');
       }
       const terminalConnected = useTerminalStore.getState().sessions.some(
         (session) => session.sessionId === lease.sessionId && session.status === 'connected',
       );
-      if (terminalConnected && outputListenerReady && !preserveView && !terminalFocused) {
-        // Leave readiness pending: the backend times out and releases the lease
-        // without writing anything if the target cannot receive focus.
-        logger.warn(`Target terminal focus failed before Agent input for ${lease.sessionId}`);
-        return;
-      }
-
       try {
         await invokeAgentTerminalLeaseReady({
           sessionId: lease.sessionId,
@@ -731,7 +736,9 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       if (event.type === 'turn/end') {
         const surface = turnSurfaces.get(event.sessionId);
         if (!surface || !surface.turnId || surface.turnId === event.turnId) {
+          const pendingStop = pendingTurnStops.get(event.sessionId);
           clearTurn(event.sessionId);
+          pendingStop?.focusTerminal();
         }
         if (!event.turnId || currentTurns.get(event.sessionId) === event.turnId) {
           currentTurns.delete(event.sessionId);

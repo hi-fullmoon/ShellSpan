@@ -791,7 +791,8 @@ describe('TerminalControllerLayer', () => {
     coordinator.dispose();
   });
 
-  it('acknowledges a connected target only after its input receives focus', async () => {
+  it('preserves editor focus and locks terminal input until takeover is confirmed', async () => {
+    const previousSection = useAppStore.getState().activeSection;
     const controller = seedController();
     attachTerminal('s1');
     addSession('s1');
@@ -799,28 +800,28 @@ describe('TerminalControllerLayer', () => {
     await controller.whenOutputReady();
     const input = document.createElement('textarea');
     document.body.appendChild(input);
+    useAppStore.getState().setActiveSection('terminal');
     input.focus();
-    let acknowledgedDuringFocus = false;
-    let observedFocus = false;
-    const recordFocus = (): void => {
-      observedFocus = document.activeElement === controller.terminal.textarea;
-      acknowledgedDuringFocus = vi.mocked(invokeAgentTerminalLeaseReady).mock.calls.length > 0;
-    };
-    controller.terminal.textarea!.addEventListener('focus', recordFocus);
     const coordinator = createAgentTerminalLeaseCoordinator();
     try {
       await coordinator.handle(leaseEvent('operation-focused').payload);
-      expect(observedFocus).toBe(true);
-      expect(acknowledgedDuringFocus).toBe(false);
-      expect(document.activeElement).toBe(controller.terminal.textarea);
+      expect(document.activeElement).toBe(input);
       expect(invokeAgentTerminalLeaseReady).toHaveBeenCalledWith(expect.objectContaining({
         sessionId: 's1', operationId: 'operation-focused',
         terminalConnected: true, outputListenerReady: true,
       }));
+      await coordinator.handle(leaseEvent('operation-focused', 'activity', { commandPhase: 'typing' }).payload);
+      expect(document.activeElement).toBe(input);
+      await expect(controller.writeUserInput('blocked')).resolves.toBe(false);
+
+      agentTerminalLeaseState.get('s1')?.requestTakeover();
+      expect(document.activeElement).toBe(input);
+      await vi.waitFor(() => expect(document.activeElement).toBe(controller.terminal.textarea));
+      await expect(controller.writeUserInput('accepted after takeover')).resolves.toBe(true);
     } finally {
-      controller.terminal.textarea!.removeEventListener('focus', recordFocus);
       coordinator.dispose();
       input.remove();
+      useAppStore.getState().setActiveSection(previousSection);
     }
   });
 
@@ -846,7 +847,7 @@ describe('TerminalControllerLayer', () => {
         expect(useFocusStore.getState().targetSessionId).toBe('s1');
         expect(useTerminalStore.getState().workspace).toBe('terminal');
         expect(useAppStore.getState().activeSection).toBe('terminal');
-        expect(document.activeElement).toBe(controller.terminal.textarea);
+        expect(document.activeElement).toBe(document.body);
         expect(invokeAgentTerminalLeaseReady).toHaveBeenCalledWith(expect.objectContaining({
           operationId, terminalConnected: true, outputListenerReady: true,
         }));
@@ -862,7 +863,7 @@ describe('TerminalControllerLayer', () => {
   });
 
   it.each(['detached', 'redirected'] as const)(
-    'keeps connected, output-ready input gated when target focus is %s', async (failure) => {
+    'acknowledges transport readiness and keeps input locked when target focus is %s', async (failure) => {
       const controller = seedController();
       attachTerminal('s1');
       addSession('s1');
@@ -878,7 +879,9 @@ describe('TerminalControllerLayer', () => {
       try {
         await coordinator.handle(leaseEvent('operation-focus-failed').payload);
         expect(document.activeElement).toBe(input);
-        expect(invokeAgentTerminalLeaseReady).not.toHaveBeenCalled();
+        expect(invokeAgentTerminalLeaseReady).toHaveBeenCalledWith(expect.objectContaining({
+          operationId: 'operation-focus-failed', terminalConnected: true, outputListenerReady: true,
+        }));
         expect(agentTerminalLeaseState.get('s1')).toMatchObject({
           operationId: 'operation-focus-failed', terminalOwned: true,
         });

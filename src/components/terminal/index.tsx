@@ -20,6 +20,7 @@ import type { LocalTerminalOptions } from '@/types';
 import { cn } from '@/lib/utils';
 import { terminalRegistry } from './registry/terminal-registry';
 import { TerminalControllerLayer } from './terminal-controller-layer';
+import { agentTerminalLeaseState } from './agent-terminal-lease-state';
 import { TerminalTabBar } from './terminal-tab-bar';
 import { TerminalTabSwitcher } from './terminal-tab-switcher';
 import { TerminalPane } from './terminal-pane';
@@ -123,8 +124,10 @@ const Terminal: React.FC = () => {
   }, []);
 
   const pendingFocusFrameRef = useRef<number | null>(null);
-  const focusSession = useCallback((sessionId: string): void => {
+  const focusSession = useCallback((sessionId: string, automatic = false): void => {
     if (pendingFocusFrameRef.current !== null) cancelAnimationFrame(pendingFocusFrameRef.current);
+    pendingFocusFrameRef.current = null;
+    if (automatic && agentTerminalLeaseState.blocksUserInput(sessionId)) return;
     const controller = terminalRegistry.get(sessionId);
     const requestedWorkspace = useTerminalStore.getState().workspace;
     pendingFocusFrameRef.current = requestAnimationFrame(() => {
@@ -132,6 +135,7 @@ const Terminal: React.FC = () => {
       if (useAppStore.getState().activeSection !== 'terminal'
         || useTerminalStore.getState().workspace !== requestedWorkspace
         || useTerminalStore.getState().activeSessionId !== sessionId
+        || (automatic && agentTerminalLeaseState.blocksUserInput(sessionId))
         || !controller || controller.sessionId !== sessionId
         || terminalRegistry.get(sessionId) !== controller) return;
       controller.focus();
@@ -151,7 +155,7 @@ const Terminal: React.FC = () => {
     if (prevSection === 'terminal' || activeSection !== 'terminal') return;
     const focusedGroup = split ? findTerminalGroup(split, focusedGroupRef.current) : null;
     const sessionId = activeSessionId || focusedGroup?.activeSessionId;
-    if (sessionId) focusSession(sessionId);
+    if (sessionId) focusSession(sessionId, true);
   }, [activeSection, activeSessionId, split, focusSession]);
 
   useEffect(() => {
@@ -183,7 +187,7 @@ const Terminal: React.FC = () => {
     setTabSwitcherOpen(false);
     setContextMenu(null);
     setDropPreview(null);
-    if (activeSessionId) focusSession(activeSessionId);
+    if (activeSessionId) focusSession(activeSessionId, true);
   }, [workspace]);
 
   useEffect(() => {
@@ -714,6 +718,7 @@ const Terminal: React.FC = () => {
           // pointerdowns landing on the terminal screen of an inactive group
           // and just focus the group; tab bar presses are left untouched.
           if (focused) return;
+          if ((e.target as HTMLElement).closest('.agent-terminal-takeover')) return;
           if (!(e.target as HTMLElement).closest('[data-terminal-content]')) return;
           e.preventDefault();
           e.stopPropagation();
@@ -728,7 +733,7 @@ const Terminal: React.FC = () => {
           // group via activateTab. Handling them here as well would
           // re-activate the render-time groupActiveSession, clobbering a
           // same-press tab switch with the stale session.
-          if ((e.target as HTMLElement).closest('[data-session-tab]')) return;
+          if ((e.target as HTMLElement).closest('[data-session-tab], .agent-terminal-takeover')) return;
           focusGroup(slot);
           if (groupActiveSession) {
             useTerminalStore.getState().setActiveSession(groupActiveSession.sessionId);

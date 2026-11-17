@@ -572,8 +572,10 @@ try {
           terminalTop: element.nextElementSibling.getBoundingClientRect().top, bottom: bounds.bottom };
       });
       assert.equal(geometry.overflow, false, `Lease bar must fit ${locale} at ${width}px`);
-      assert.ok(geometry.items.every(item => item.left >= geometry.left && item.right <= geometry.right));
       const [status, task, action] = geometry.items;
+      const inset = width < 420 ? 12 : 16;
+      assert.equal(status.left - geometry.left, inset, `Status inset at ${locale} ${width}px`);
+      assert.equal(geometry.right - action.right, inset, `Action inset at ${locale} ${width}px`);
       assert.ok(task.left >= status.right && action.left >= task.right, 'Status and actions must not overlap');
       assert.equal(task.height, action.height, 'Actions must have equal heights');
       assert.ok(Math.abs(status.y + status.height / 2 - action.y - action.height / 2) < 1,
@@ -605,10 +607,14 @@ try {
       await taskButton.waitFor({ state: 'detached' });
       assert.equal(await bar.getByRole('button').count(), 1, 'The displayed task must only retain takeover');
       if (locale === 'zh-CN' && width === 760) {
-        assert.equal(await bar.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(255, 255, 255)');
+        const readBarStyle = () => bar.evaluate(element => {
+          const { backgroundColor, borderBottomWidth } = getComputedStyle(element);
+          return { backgroundColor, borderBottomWidth };
+        });
+        assert.deepEqual(await readBarStyle(), { backgroundColor: 'rgb(255, 255, 255)', borderBottomWidth: '0px' });
         await bar.screenshot({ animations: 'disabled', path: `${root}artifacts/tests/terminal-lease/zh-CN-wide.png` });
         await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
-        assert.equal(await bar.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(32, 33, 34)');
+        assert.deepEqual(await readBarStyle(), { backgroundColor: 'rgb(32, 33, 34)', borderBottomWidth: '0px' });
         await bar.screenshot({ animations: 'disabled', path: `${root}artifacts/tests/terminal-lease/zh-CN-dark.png` });
         await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
       }
@@ -768,18 +774,38 @@ try {
       };
       try {
         await coordinator.handle(lease);
-        const focused = document.activeElement === controller.terminal.textarea;
         await new Promise(requestAnimationFrame);
-        const focusedAfterFrame = document.activeElement === controller.terminal.textarea;
-        input.focus();
+        const editorFocusPreserved = document.activeElement === input
+          && useAppStore.getState().activeSection === 'workbench'
+          && useTerminalStore.getState().activeSessionId === otherId;
         await coordinator.handle(lease);
         await coordinator.handle({ ...lease, operationId: crypto.randomUUID(), state: 'activity', commandPhase: 'typing' });
         const duplicatePreservedFocus = document.activeElement === input;
         coordinator.handleSession({ type: 'turn/end', sessionId: lease.agentSessionId });
-        flushSync(() => store.setActiveSession(otherId));
-        otherController.focus();
-        await coordinator.handle({ ...lease, operationId: crypto.randomUUID() });
+        input.blur();
+        const visibleLease = { ...lease, operationId: crypto.randomUUID() };
+        await coordinator.handle(visibleLease);
+        await new Promise(requestAnimationFrame);
+        const revealPreservedFocus = document.activeElement === document.body;
+        input.focus();
         await new Promise((resolve) => controller.terminal.write(terminalOutput.replace(/\n/g, '\r\n'), resolve));
+        const cursor = () => controller.terminal.element.querySelector('.xterm-cursor');
+        const paint = async () => {
+          await new Promise(requestAnimationFrame);
+          await new Promise(requestAnimationFrame);
+        };
+        await paint();
+        const idleCursorUnfilled = !cursor()?.classList.contains('xterm-cursor-block');
+        await coordinator.handle({ ...visibleLease, state: 'activity', commandPhase: 'typing' });
+        await paint();
+        const typingCursor = cursor();
+        const typingCursorSolid = !!typingCursor?.classList.contains('xterm-cursor-block')
+          && getComputedStyle(typingCursor).backgroundColor !== 'rgba(0, 0, 0, 0)';
+        const typingPreservedFocus = document.activeElement === input;
+        const typingInputLocked = !(await controller.writeUserInput('blocked'));
+        await coordinator.handle({ ...visibleLease, state: 'activity', commandPhase: 'running' });
+        await paint();
+        const runningCursorOutlined = cursor()?.classList.contains('xterm-cursor-outline') ?? false;
         if (controller.terminal.buffer.active.type !== 'normal' || controller.terminal.buffer.active.baseY === 0) {
           throw new Error('Scroll-button regression requires real terminal scrollback');
         }
@@ -793,8 +819,9 @@ try {
           throw new Error('Terminal pane must not show the removed scroll button');
         }
         const result = {
-          otherInitiallyFocused, focused, focusedAfterFrame, duplicatePreservedFocus,
-          nextCommandFocused: document.activeElement === controller.terminal.textarea,
+          otherInitiallyFocused, editorFocusPreserved, revealPreservedFocus, duplicatePreservedFocus,
+          idleCursorUnfilled, typingCursorSolid, typingPreservedFocus, typingInputLocked, runningCursorOutlined,
+          runningPreservedFocus: document.activeElement === input,
           selected: useTerminalStore.getState().activeSessionId === id,
           visible: useAppStore.getState().activeSection === 'terminal',
         };
@@ -844,8 +871,9 @@ try {
       }
     }, output);
     assert.deepEqual(focusResult, {
-      otherInitiallyFocused: true, focused: true, focusedAfterFrame: true, duplicatePreservedFocus: true,
-      nextCommandFocused: true, selected: true, visible: true, rebindPreservedFocus: true,
+      otherInitiallyFocused: true, editorFocusPreserved: true, revealPreservedFocus: true, duplicatePreservedFocus: true,
+      idleCursorUnfilled: true, typingCursorSolid: true, typingPreservedFocus: true, typingInputLocked: true, runningCursorOutlined: true,
+      runningPreservedFocus: true, selected: true, visible: true, rebindPreservedFocus: true,
     });
   }
   for (const width of [1200, 400]) {
@@ -910,6 +938,7 @@ try {
           useFocusStore.getState().leave();
         });
         await new Promise(requestAnimationFrame);
+        document.activeElement?.blur();
         await coordinator.handle({
           sessionId: ids[1], agentSessionId: `focus-agent-${crypto.randomUUID()}`, taskId: crypto.randomUUID(),
           operationId: crypto.randomUUID(), acquiredAtUnixMs: Date.now(), state: 'acquired',
@@ -917,7 +946,7 @@ try {
         const focusCommandRouted = !useFocusStore.getState().enabled
           && useTerminalStore.getState().workspace === 'terminal'
           && useTerminalStore.getState().activeSessionId === ids[1]
-          && document.activeElement === second.terminal.textarea;
+          && document.activeElement === document.body;
         const focusSelectionPreserved = useTerminalStore.getState().workspaceViews.focus.activeSessionId === ids[1];
         flushSync(() => store.setActiveSession(ids[0]));
         first.focus();
@@ -944,6 +973,7 @@ try {
         const releasePreservedFocus = document.activeElement === input;
         coordinator.handleSession({ type: 'turn/end', sessionId: terminalLease.agentSessionId });
         flushSync(() => useFocusStore.getState().leave());
+        input.blur();
         await coordinator.handle({
           ...terminalLease, operationId: crypto.randomUUID(),
         });
@@ -956,7 +986,7 @@ try {
             && useTerminalStore.getState().workspaceViews.focus.activeSessionId === ids[0],
           sourceInitiallyFocused,
           backgroundPreservedFocus, releasePreservedFocus,
-          targetFocused: document.activeElement === terminalRegistry.get(ids[1]).terminal.textarea,
+          revealPreservedFocus: document.activeElement === document.body,
           focusedOtherTerminal: focusedIds.includes(ids[0]),
           targetFocusObserved: focusedIds.includes(ids[1]),
           targetGroupSelected: surface.querySelector('[data-terminal-group="second"] [data-session-tab][aria-selected="true"]') !== null,
@@ -975,20 +1005,20 @@ try {
     assert.deepEqual(splitFocus, {
       workspaceIsolation: true,
       commandWorkspaceRouting: true,
-      sourceInitiallyFocused: true, targetFocused: true, focusedOtherTerminal: false,
+      sourceInitiallyFocused: true, revealPreservedFocus: true, focusedOtherTerminal: false,
       backgroundPreservedFocus: true, releasePreservedFocus: true,
-      targetFocusObserved: true, targetGroupSelected: true,
+      targetFocusObserved: false, targetGroupSelected: true,
     });
   }
   const workspaceResize = await page.evaluate(async ({ output, identity }) => {
     const { React, createRoot, flushSync, TerminalWorkspace, terminalRegistry, useAppStore, useTerminalStore } = window.runtime;
     const store = useTerminalStore.getState();
+    const { sessions, activeSessionId, restoredLayout } = store;
+    useTerminalStore.setState({ sessions: [], activeSessionId: null, restoredLayout: null });
     const ids = Array.from({ length: 2 }, () => {
       const sessionId = crypto.randomUUID();
       store.addSession({ ...identity, sessionId });
       store.setStatus(sessionId, { sessionId, status: 'disconnected' });
-    const { sessions, activeSessionId, restoredLayout } = store;
-    useTerminalStore.setState({ sessions: [], activeSessionId: null, restoredLayout: null });
       return sessionId;
     });
     useAppStore.setState({ activeSection: 'terminal', restoreWorkspace: false });

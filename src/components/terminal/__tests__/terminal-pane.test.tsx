@@ -224,15 +224,7 @@ describe('TerminalPane', () => {
     expect(bar).not.toHaveTextContent('terminal.agentLease.runtime');
     expect(bar.querySelector('[aria-label="terminal.agentLease.runtime"]')).toBeNull();
     expect(bar).not.toHaveClass('absolute');
-    // Only a bottom border: the top separation comes from the tab bar's
-    // hairline directly above the lease bar; a top border here would stack
-    // into a doubled line.
-    expect(bar).toHaveClass(
-      '@container/terminal-lease',
-      'border-b',
-      'border-app-border/50',
-    );
-    expect(bar).not.toHaveClass('border-y', 'border-t');
+    expect(bar).toHaveClass('@container/terminal-lease');
     expect(bar).not.toHaveClass('min-h-10');
     expect(screen.getByTestId('agent-visible-terminal-aura'))
       .toHaveClass('pointer-events-none', 'absolute', 'inset-0');

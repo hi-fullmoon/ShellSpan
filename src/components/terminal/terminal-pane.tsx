@@ -86,13 +86,13 @@ const AgentTerminalLeaseBar: React.FC<{
 
   return (
     <div
-      className="@container/terminal-lease shrink-0 border-b border-app-border/50 bg-app-surface"
+      className="@container/terminal-lease shrink-0 bg-app-surface"
       data-testid="agent-terminal-lease-bar"
       data-operation-id={lease.operationId}
       data-terminal-owned={lease.terminalOwned || undefined}
       data-input-blocked={lease.inputBlocked || undefined}
     >
-      <div className="flex min-w-0 items-center gap-2 px-2.5 py-0.5">
+      <div className="flex min-w-0 items-center gap-2 px-3 py-0.5 @min-[420px]/terminal-lease:px-4">
         <div className="agent-terminal-lease-status flex min-w-0 flex-1 items-center gap-2">
           <TooltipProvider>
             <Tooltip>
@@ -229,7 +229,23 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     agentTerminalLeaseState.subscribe,
     () => agentTerminalLeaseState.get(activeSessionId),
   );
+  const inputLocked = !!activeLease && agentTerminalLeaseState.blocksUserInput(
+    activeLease.sessionId, activeSession?.foregroundHandoffActive,
+  );
+  const agentTyping = inputLocked && activeLease.terminalOwned && activeLease.commandExecution !== false
+    && agentTerminalCommandFeedback(activeLease).label === 'terminal.agentLease.commandTyping';
   const { focus, clearSearch } = useActiveController(paneRef, activeSessionId, isActive && !searchOpen, isVisible);
+
+  useLayoutEffect(() => {
+    if (!terminal || !agentTyping) return;
+    const previous = terminal.options.cursorInactiveStyle;
+    terminal.options.cursorInactiveStyle = 'block';
+    // xterm initializes the cursor on first keyboard focus. Agent typing can
+    // be the first interaction, so initialize the renderer without focusing it.
+    const { _core } = terminal as unknown as { _core?: { _showCursor?: () => void } };
+    _core?._showCursor?.();
+    return () => { terminal.options.cursorInactiveStyle = previous; };
+  }, [terminal, agentTyping]);
 
   const connecting = activeSession?.status === 'connecting' && !activeSession.reconnecting;
   // Once the overlay appears, hold it for MIN_CONNECTING_OVERLAY_MS even if
@@ -422,7 +438,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       {activeLease && (
         <AgentTerminalLeaseBar
           lease={activeLease}
-          inputLocked={agentTerminalLeaseState.blocksUserInput(activeLease.sessionId, activeSession?.foregroundHandoffActive)}
+          inputLocked={inputLocked}
         />
       )}
       <div className="relative min-h-0 flex-1" style={{ backgroundColor: terminalSurfaceStyle.backgroundColor }}>

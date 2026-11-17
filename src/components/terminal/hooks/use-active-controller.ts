@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { useFocusStore } from '@/stores/focusStore';
+import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
 
 interface SearchOptions {
   caseSensitive?: boolean;
@@ -27,11 +28,8 @@ export function useActiveController(
     activeSessionId === null ? undefined : terminalRegistry.get(activeSessionId),
   );
 
-  // Opening xterm under a display:none ancestor gives its renderer a zero-size
-  // canvas. The first visible frame can then stretch that stale canvas before
-  // fit() corrects it, which briefly renders the terminal at a huge scale.
-  // Attach only while the terminal section is visible, and do it in a layout
-  // effect so open() and the initial fit complete before the browser paints.
+  // Attach only when the pane can be measured, in a layout effect so xterm
+  // opens and fits its grid before the browser paints.
   useLayoutEffect(() => {
     const attachedId = attachedIdRef.current;
     if (attachedId !== null) {
@@ -67,10 +65,11 @@ export function useActiveController(
   }, [controller, shouldAttach, focusEnabled, terminalOpen]);
 
   useEffect(() => {
-    if (!autoFocus || activeSessionId === null) return;
+    if (!autoFocus || activeSessionId === null || agentTerminalLeaseState.blocksUserInput(activeSessionId)) return;
     const focusedWhenScheduled = document.activeElement;
     const focusFrame = requestAnimationFrame(() => {
-      if (!focusTarget.current.autoFocus || focusTarget.current.activeSessionId !== activeSessionId) return;
+      if (!focusTarget.current.autoFocus || focusTarget.current.activeSessionId !== activeSessionId
+        || agentTerminalLeaseState.blocksUserInput(activeSessionId)) return;
       // A user can enter a composer/search field after the selection commit
       // but before this frame. Preserve that newer editing intent. Moving
       // between actual terminal inputs still follows the selected session.
