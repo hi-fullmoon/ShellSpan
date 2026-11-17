@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
+import { usePlatform } from '@/hooks/usePlatform';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -14,7 +15,8 @@ import {
   stageTerminalWorkspace,
 } from '@/lib/terminal/terminal-workspace-persistence';
 import { createLogger } from '@/lib/logger';
-import { invokeSupportsShellSpanBash, isTauriRuntime } from '@/lib/ipc/tauri';
+import { invokeGetLocalTerminalOptions, isTauriRuntime } from '@/lib/ipc/tauri';
+import type { LocalTerminalOptions } from '@/types';
 import { cn } from '@/lib/utils';
 import { terminalRegistry } from './registry/terminal-registry';
 import { TerminalControllerLayer } from './terminal-controller-layer';
@@ -55,6 +57,7 @@ const TERMINAL_MIN_PANE_SIZE = 120;
 
 const Terminal: React.FC = () => {
   const { t } = useI18n();
+  const platform = usePlatform();
   const sessions = useTerminalStore((state) => state.sessions);
   const activeSessionId = useTerminalStore((state) => state.activeSessionId);
   const workspace = useTerminalStore((state) => state.workspace);
@@ -64,7 +67,7 @@ const Terminal: React.FC = () => {
   const { connect, openLocal } = useConnectSession();
 
   const [newSessionDialogOpen, setNewSessionDialogOpen] = useState(false);
-  const [supportsShellSpanBash, setSupportsShellSpanBash] = useState(false);
+  const [localTerminalOptions, setLocalTerminalOptions] = useState<LocalTerminalOptions>();
   const [tabSwitcherOpen, setTabSwitcherOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     session: TerminalSession;
@@ -204,14 +207,15 @@ const Terminal: React.FC = () => {
     return () => document.removeEventListener('shellspan:new-terminal-tab', handleNewTabRequest);
   }, []);
 
+  const shouldLoadLocalTerminalOptions = platform !== 'windows' || newSessionDialogOpen;
   useEffect(() => {
-    if (!isTauriRuntime()) return;
+    if (!shouldLoadLocalTerminalOptions || !isTauriRuntime()) return;
     let mounted = true;
-    void invokeSupportsShellSpanBash().then((supported) => {
-      if (mounted) setSupportsShellSpanBash(supported);
-    }).catch((error: unknown) => logger.warn('Failed to check local ShellSpan Bash support', error));
+    void invokeGetLocalTerminalOptions().then((options) => {
+      if (mounted) setLocalTerminalOptions(options);
+    }).catch((error: unknown) => logger.warn('Failed to load local terminal options', error));
     return () => { mounted = false; };
-  }, []);
+  }, [shouldLoadLocalTerminalOptions]);
 
   useEffect(() => {
     const handleTabSwitcherRequest = (): void => {
@@ -859,7 +863,9 @@ const Terminal: React.FC = () => {
           onClose={() => setNewSessionDialogOpen(false)}
           onConnect={connect}
           onOpenLocal={openLocal}
-          supportsShellSpanBash={supportsShellSpanBash}
+          defaultShellKind={localTerminalOptions?.defaultShellKind}
+          defaultShellPath={localTerminalOptions?.defaultShellPath}
+          supportsShellSpanBash={localTerminalOptions?.supportsShellSpanBash}
         />
         <TerminalTabSwitcher
           sessions={sessions}

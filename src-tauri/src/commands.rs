@@ -244,36 +244,43 @@ fn rollback_local_broker_attachment_failure(
 }
 
 #[cfg(windows)]
-fn prepare_windows_local_shell(
-    app: &AppHandle,
-    native_requested: bool,
-    session_id: &str,
-) -> (
-    String,
-    Option<crate::terminal_command::windows::PreparedNativePowerShell>,
-) {
-    use crate::terminal_command::{artifacts, windows};
-    use std::path::{Path, PathBuf};
+struct WindowsLocalShell {
+    configured: Option<String>,
+}
 
-    let configured = std::env::var(LOCAL_SHELL_ENVIRONMENT_VARIABLE)
-        .or_else(|_| std::env::var("SHELL"))
-        .ok();
-    let fallback = || {
-        configured
-            .clone()
-            .unwrap_or_else(|| "powershell.exe".into())
-    };
-    if !native_requested
-        || !cfg!(target_arch = "x86_64")
-        || configured
-            .as_ref()
-            .is_some_and(|shell| TerminalShellKind::detect(shell) != TerminalShellKind::PowerShell7)
-    {
-        return (fallback(), None);
+#[cfg(windows)]
+impl WindowsLocalShell {
+    fn from_environment() -> Self {
+        Self {
+            configured: std::env::var(LOCAL_SHELL_ENVIRONMENT_VARIABLE)
+                .or_else(|_| std::env::var("SHELL"))
+                .ok(),
+        }
     }
 
-    let prepared = artifacts::resource_root(app).and_then(|resources| {
-        let shell = match configured.as_deref() {
+    fn fallback(&self) -> &str {
+        self.configured.as_deref().unwrap_or("powershell.exe")
+    }
+
+    fn native_candidate(
+        &self,
+        app: &AppHandle,
+        native_requested: bool,
+    ) -> Result<Option<(std::path::PathBuf, std::path::PathBuf)>, String> {
+        use crate::terminal_command::{artifacts, windows};
+        use std::path::{Path, PathBuf};
+
+        if !native_requested
+            || !cfg!(target_arch = "x86_64")
+            || self.configured.as_deref().is_some_and(|shell| {
+                TerminalShellKind::detect(shell) != TerminalShellKind::PowerShell7
+            })
+        {
+            return Ok(None);
+        }
+
+        let resources = artifacts::resource_root(app)?;
+        let shell = match self.configured.as_deref() {
             None => windows::matching_powershell7(&resources)?,
             Some(shell) if Path::new(shell).file_name() == Some(std::ffi::OsStr::new(shell)) => {
                 windows::powershell7_candidates()
@@ -282,23 +289,58 @@ fn prepare_windows_local_shell(
             }
             Some(shell) => PathBuf::from(shell),
         };
-        let executable = shell
-            .to_str()
-            .ok_or("TERMINAL_NATIVE_PATH_INVALID")?
-            .to_owned();
-        let home = app
-            .path()
-            .home_dir()
-            .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
-        let native = windows::PreparedNativePowerShell::prepare(
-            &shell,
-            &resources,
-            &crate::shellspan_data_dir(&home),
-        )?;
-        Ok((executable, native))
-    });
+        Ok(Some((shell, resources)))
+    }
+
+    fn preview(&self, app: &AppHandle, native_requested: bool) -> String {
+        // An explicit selection remains the same even if native preparation fails.
+        if self.configured.is_some() || app.path().home_dir().is_err() {
+            return self.fallback().to_owned();
+        }
+        self.native_candidate(app, native_requested)
+            .ok()
+            .flatten()
+            .and_then(|(shell, _)| shell.into_os_string().into_string().ok())
+            .unwrap_or_else(|| self.fallback().to_owned())
+    }
+}
+
+#[cfg(windows)]
+fn prepare_windows_local_shell(
+    app: &AppHandle,
+    native_requested: bool,
+    session_id: &str,
+) -> (
+    String,
+    Option<crate::terminal_command::windows::PreparedNativePowerShell>,
+) {
+    use crate::terminal_command::windows;
+
+    let selection = WindowsLocalShell::from_environment();
+    let prepared = selection
+        .native_candidate(app, native_requested)
+        .and_then(|candidate| {
+            let Some((shell, resources)) = candidate else {
+                return Ok(None);
+            };
+            let executable = shell
+                .to_str()
+                .ok_or("TERMINAL_NATIVE_PATH_INVALID")?
+                .to_owned();
+            let home = app
+                .path()
+                .home_dir()
+                .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
+            let native = windows::PreparedNativePowerShell::prepare(
+                &shell,
+                &resources,
+                &crate::shellspan_data_dir(&home),
+            )?;
+            Ok(Some((executable, native)))
+        });
     match prepared {
-        Ok((executable, native)) => (executable, Some(native)),
+        Ok(Some((executable, native))) => (executable, Some(native)),
+        Ok(None) => (selection.fallback().to_owned(), None),
         Err(reason) => {
             let code = if reason.starts_with("TERMINAL_NATIVE_")
                 && reason.len() <= 128
@@ -311,7 +353,7 @@ fn prepare_windows_local_shell(
                 "TERMINAL_NATIVE_PREPARATION_FAILED"
             };
             warn!("Native Windows input preparation rejected session_id={session_id} code={code}");
-            (fallback(), None)
+            (selection.fallback().to_owned(), None)
         }
     }
 }
@@ -633,24 +675,68 @@ async fn create_remote_terminal_session(
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LocalTerminalOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_shell_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_shell_kind: Option<TerminalShellKind>,
+    supports_shell_span_bash: bool,
+}
+
 #[tauri::command]
-pub(crate) async fn supports_shellspan_bash(app: AppHandle) -> Result<bool, String> {
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    {
-        tauri::async_runtime::spawn_blocking(move || {
-            resolve_unix_local_shell(Some(LocalTerminalProfile::ShellSpanBash), None, || {
-                crate::terminal_command::artifacts::resource_root(&app)
-            })
-            .is_ok()
+pub(crate) async fn get_local_terminal_options(
+    app: AppHandle,
+) -> Result<LocalTerminalOptions, String> {
+    #[cfg(not(windows))]
+    let default_shell_path = Some(default_unix_local_shell(std::env::var("SHELL").ok()));
+    #[cfg(windows)]
+    let (default_shell_path, default_shell_kind) = {
+        let (_, shell_integration_enabled) = local_terminal_rollouts(&app)?;
+        let shell = tauri::async_runtime::spawn_blocking(move || {
+            WindowsLocalShell::from_environment().preview(&app, shell_integration_enabled)
         })
         .await
-        .map_err(|_| "local terminal worker failed".into())
-    }
-    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-    {
+        .map_err(|_| "local terminal worker failed".to_string())?;
+        let kind = match TerminalShellKind::detect(&shell) {
+            kind @ (TerminalShellKind::PowerShell7 | TerminalShellKind::WindowsPowerShell) => {
+                Some(kind)
+            }
+            _ => None,
+        };
+        (Some(shell), kind)
+    };
+    #[cfg(not(windows))]
+    let default_shell_kind = None;
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    let supports_shell_span_bash = tauri::async_runtime::spawn_blocking(move || {
+        resolve_unix_local_shell(Some(LocalTerminalProfile::ShellSpanBash), None, || {
+            crate::terminal_command::artifacts::resource_root(&app)
+        })
+        .is_ok()
+    })
+    .await
+    .map_err(|_| "local terminal worker failed".to_string())?;
+    #[cfg(all(not(windows), not(all(target_os = "macos", target_arch = "aarch64"))))]
+    let supports_shell_span_bash = {
         let _ = app;
-        Ok(false)
-    }
+        false
+    };
+    #[cfg(windows)]
+    let supports_shell_span_bash = false;
+
+    Ok(LocalTerminalOptions {
+        default_shell_path,
+        default_shell_kind,
+        supports_shell_span_bash,
+    })
+}
+
+#[cfg(not(windows))]
+fn default_unix_local_shell(default_shell: Option<String>) -> String {
+    default_shell.unwrap_or_else(|| "/bin/sh".into())
 }
 
 #[cfg(not(windows))]
@@ -660,7 +746,7 @@ pub(crate) fn resolve_unix_local_shell(
     resource_root: impl FnOnce() -> Result<std::path::PathBuf, String>,
 ) -> Result<String, String> {
     match profile {
-        None => Ok(default_shell.unwrap_or_else(|| "/bin/sh".into())),
+        None => Ok(default_unix_local_shell(default_shell)),
         Some(LocalTerminalProfile::ShellSpanBash) => {
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             {
@@ -704,6 +790,16 @@ pub(crate) async fn create_local_session(
     .map_err(|_| "local terminal worker failed".to_string())?
 }
 
+fn local_terminal_rollouts(app: &AppHandle) -> Result<(bool, bool), String> {
+    let runtime = app
+        .try_state::<crate::agent_runtime::AgentRuntime>()
+        .ok_or_else(|| "terminal broker runtime is unavailable".to_string())?;
+    let broker_enabled = runtime.terminal_broker_snapshot(None)?.rollout.enabled;
+    let shell_integration_enabled =
+        broker_enabled && runtime.terminal_shell_integration_enabled()?;
+    Ok((broker_enabled, shell_integration_enabled))
+}
+
 fn create_local_session_blocking(
     app: AppHandle,
     state: &SessionManager,
@@ -718,17 +814,7 @@ fn create_local_session_blocking(
         return Err("TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into());
     }
     let session_id = Uuid::new_v4().to_string();
-    let terminal_broker_enabled = app
-        .try_state::<crate::agent_runtime::AgentRuntime>()
-        .ok_or_else(|| "terminal broker runtime is unavailable".to_string())?
-        .terminal_broker_snapshot(None)?
-        .rollout
-        .enabled;
-    let shell_integration_enabled = terminal_broker_enabled
-        && app
-            .try_state::<crate::agent_runtime::AgentRuntime>()
-            .ok_or_else(|| "terminal broker runtime is unavailable".to_string())?
-            .terminal_shell_integration_enabled()?;
+    let (terminal_broker_enabled, shell_integration_enabled) = local_terminal_rollouts(&app)?;
     let predecessor_mode = if let Some(previous) = replaces_session_id.as_deref() {
         app.state::<crate::agent_runtime::AgentRuntime>()
             .terminal_broker_snapshot(Some(previous))?

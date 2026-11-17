@@ -58,6 +58,26 @@
         );
     }
 
+    #[test]
+    fn local_terminal_options_identify_both_powershell_executables() {
+        use super::{LocalTerminalOptions, TerminalShellKind};
+
+        for (executable, kind) in [
+            ("pwsh.exe", "powerShell7"),
+            ("powershell.exe", "windowsPowerShell"),
+        ] {
+            let options = LocalTerminalOptions {
+                default_shell_path: Some(executable.into()),
+                default_shell_kind: Some(TerminalShellKind::detect(executable)),
+                supports_shell_span_bash: false,
+            };
+            let wire = serde_json::to_value(options).unwrap();
+            assert_eq!(wire["defaultShellPath"], executable);
+            assert_eq!(wire["defaultShellKind"], kind);
+            assert_eq!(wire["supportsShellSpanBash"], false);
+        }
+    }
+
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[test]
     fn shellspan_bash_profile_requires_available_resources() {

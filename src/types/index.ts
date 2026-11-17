@@ -233,6 +233,12 @@ export interface SessionSummary {
 
 export type LocalTerminalProfile = 'shellSpanBash';
 
+export interface LocalTerminalOptions {
+  defaultShellPath?: string;
+  defaultShellKind?: 'powerShell7' | 'windowsPowerShell';
+  supportsShellSpanBash: boolean;
+}
+
 export interface SessionPtyInfo {
   /** Local Windows startup waits for the renderer's initial resize/ready FIFO. */
   deferredStartup?: boolean;

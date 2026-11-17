@@ -21,6 +21,7 @@ import type {
   JumpHostConfig,
   KnownHostEntry,
   LocalDirectoryListing,
+  LocalTerminalOptions,
   LocalTerminalProfile,
   LogChunk,
   LogCursor,
@@ -237,8 +238,8 @@ export async function invokeCreateLocalSession(
   });
 }
 
-export function invokeSupportsShellSpanBash(): Promise<boolean> {
-  return invokeLogged<boolean>('supports_shellspan_bash');
+export function invokeGetLocalTerminalOptions(): Promise<LocalTerminalOptions> {
+  return invokeLogged<LocalTerminalOptions>('get_local_terminal_options');
 }
 
 export async function invokeGetTerminalBrokerSnapshot(

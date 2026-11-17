@@ -45,6 +45,8 @@ const server = await createServer({
           onClose: () => {},
           onConnect: async () => {},
           onOpenLocal: async (profile) => { document.body.dataset.openedLocal = profile ?? 'default'; },
+          defaultShellKind: params.get('shellKind') ?? undefined,
+          defaultShellPath: params.get('defaultShell') ?? undefined,
           supportsShellSpanBash: params.has('shellSpanBash'),
         };
         const dialog = kind === 'sftp'
@@ -108,17 +110,21 @@ try {
     }
   }
   const terminalUrl = `${server.resolvedUrls.local[0]}scroll-review?kind=terminal`;
-  for (const [locale, defaultLabel, viewport] of [
-    ['zh-CN', '本地终端', { width: 900, height: 500 }],
-    ['en-US', 'Local terminal', { width: 1280, height: 800 }],
+  for (const [locale, defaultLabel, defaultHint, viewport] of [
+    ['zh-CN', '本地终端', '启动默认 Shell（/bin/bash）', { width: 900, height: 500 }],
+    ['en-US', 'Local terminal', 'Start the default shell (/bin/bash)', { width: 1280, height: 800 }],
   ]) {
-    const url = `${terminalUrl}&locale=${locale}&shellSpanBash`;
+    const url = `${terminalUrl}&locale=${locale}&defaultShell=%2Fbin%2Fbash&shellSpanBash`;
     await page.setViewportSize(viewport);
     await page.goto(url);
     const defaultShell = page.getByRole('button', { name: defaultLabel, exact: true });
     const shellSpanBash = page.getByRole('button', { name: 'ShellSpan Bash', exact: true });
     const search = page.getByRole('searchbox');
     await shellSpanBash.waitFor();
+    const hint = defaultShell.getByText(defaultHint, { exact: true });
+    await hint.waitFor({ state: 'visible' });
+    assert.equal(await defaultShell.getAttribute('aria-describedby'), await hint.getAttribute('id'));
+    assert.ok(await hint.evaluate((element) => element.scrollWidth <= element.clientWidth));
     assert.match(await shellSpanBash.innerText(), /Bash 5\.3\.20.*Readline 8\.3\.6/);
     const [defaultBounds, bashBounds] = await Promise.all([defaultShell.boundingBox(), shellSpanBash.boundingBox()]);
     assert.equal(defaultBounds.height, bashBounds.height);
@@ -142,8 +148,29 @@ try {
     await shellSpanBash.click();
     assert.equal(await page.locator('body').getAttribute('data-opened-local'), 'shellSpanBash');
   }
+
+  for (const [kind, name, executable] of [
+    ['powerShell7', 'PowerShell 7', 'pwsh.exe'],
+    ['windowsPowerShell', 'Windows PowerShell', 'powershell.exe'],
+  ]) {
+    for (const [locale, localLabel, expectedHint] of [
+      ['zh-CN', '本地终端', `启动默认 Shell（${name}）`],
+      ['en-US', 'Local terminal', `Start the default shell (${name})`],
+    ]) {
+      await page.goto(`${terminalUrl}&locale=${locale}&shellKind=${kind}&defaultShell=${executable}`);
+      const localShell = page.getByRole('button', { name: localLabel, exact: true });
+      const hint = localShell.getByText(expectedHint, { exact: true });
+      await hint.waitFor({ state: 'visible' });
+      assert.equal(await localShell.getAttribute('aria-describedby'), await hint.getAttribute('id'));
+      assert.equal(await page.getByRole('button', { name: 'ShellSpan Bash', exact: true }).count(), 0);
+      await localShell.click();
+      assert.equal(await page.locator('body').getAttribute('data-opened-local'), 'default');
+    }
+  }
+
   await page.goto(terminalUrl);
-  await page.getByRole('button', { name: '本地终端', exact: true }).waitFor();
+  await page.getByRole('button', { name: '本地终端', exact: true })
+    .getByText('在当前设备上启动系统 Shell', { exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'ShellSpan Bash', exact: true }).count(), 0);
   console.log('Session dialogs scroll at both sizes and the local shell choices work by keyboard and mouse in both locales.');
 } finally {

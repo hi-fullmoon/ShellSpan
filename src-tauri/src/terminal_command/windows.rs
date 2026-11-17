@@ -46,9 +46,11 @@ pub(crate) fn matching_powershell7(resources: &Path) -> Result<PathBuf, String> 
             artifact.profile.verified_profile_id.as_deref() == Some(POWERSHELL7_NATIVE_PROFILE)
         })
         .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
-    powershell7_candidates()
+    let shell = powershell7_candidates()
         .find(|candidate| file_sha(candidate).is_ok_and(|digest| digest == artifact.shell_sha256))
-        .ok_or_else(|| "TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into())
+        .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
+    editors::verify(&artifact, &shell, &resources.join(&artifact.module))?;
+    Ok(shell)
 }
 
 #[cfg(test)]

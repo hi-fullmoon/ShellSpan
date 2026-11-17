@@ -28,13 +28,15 @@ import {
 import { Kbd } from '@/components/ui/kbd';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import type { ConnectionProfile, LocalTerminalProfile } from '@/types';
+import type { ConnectionProfile, LocalTerminalOptions, LocalTerminalProfile } from '@/types';
 
 interface NewSessionDialogProps {
   open: boolean;
   onClose: () => void;
   onConnect: (profile: ConnectionProfile) => Promise<void>;
   onOpenLocal?: (localProfile?: LocalTerminalProfile) => Promise<void>;
+  defaultShellKind?: LocalTerminalOptions['defaultShellKind'];
+  defaultShellPath?: string;
   supportsShellSpanBash?: boolean;
 }
 
@@ -47,11 +49,18 @@ interface IndexedSessionCommand {
   index: number;
 }
 
+const WINDOWS_SHELL_LABELS = {
+  powerShell7: 'terminal.newSession.powerShell7',
+  windowsPowerShell: 'terminal.newSession.windowsPowerShell',
+} as const;
+
 export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
   open,
   onClose,
   onConnect,
   onOpenLocal,
+  defaultShellKind,
+  defaultShellPath,
   supportsShellSpanBash = false,
 }) => {
   const { t } = useI18n();
@@ -104,10 +113,13 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const commands = useMemo<SessionCommand[]>(() => {
     if (!onOpenLocal) return profileCommands;
+    const defaultShell = defaultShellKind ? t(WINDOWS_SHELL_LABELS[defaultShellKind]) : defaultShellPath;
     const localCommands: Extract<SessionCommand, { kind: 'local' }>[] = [{
       kind: 'local',
       label: t('terminal.newSession.localTerminal'),
-      hint: t('terminal.newSession.localTerminalHint'),
+      hint: defaultShell
+        ? t('terminal.newSession.localTerminalWithShellHint', { shell: defaultShell })
+        : t('terminal.newSession.localTerminalHint'),
     }];
     if (supportsShellSpanBash) {
       localCommands.push({
@@ -118,7 +130,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
       });
     }
     return [...localCommands.filter(({ label }) => label.toLocaleLowerCase().includes(normalizedQuery)), ...profileCommands];
-  }, [normalizedQuery, onOpenLocal, profileCommands, supportsShellSpanBash, t]);
+  }, [defaultShellKind, defaultShellPath, normalizedQuery, onOpenLocal, profileCommands, supportsShellSpanBash, t]);
   const indexedCommands = useMemo<IndexedSessionCommand[]>(
     () => commands.map((command, index) => ({ command, index })),
     [commands],
@@ -275,6 +287,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
                 id={`new-session-command-${index}`}
                 type="button"
                 aria-label={command.label}
+                aria-describedby={`new-session-command-${index}-hint`}
                 variant={selectedIndex === index ? 'secondary' : 'ghost'}
                 onClick={() => activateCommand(command)}
                 onMouseEnter={() => setSelectedIndex(index)}
@@ -286,7 +299,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
                   <span className="text-sm font-medium">{command.label}</span>
-                  <span className="text-xs text-muted-foreground">
+                  <span id={`new-session-command-${index}-hint`} className="w-full truncate text-xs text-muted-foreground">
                     {command.hint}
                   </span>
                 </span>
