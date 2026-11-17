@@ -39,16 +39,16 @@ async function main(){
   assert.equal(process.platform,'win32');assert.equal(process.arch,'x64');if(!values['frontend-only'])assertNativeGuiAllowed();
   assert(!(values['frontend-only']&&values['reuse-package-from']),'Choose compilation-only or retained-package execution');
   assert(values.root,'A fresh sealed source snapshot is required');
-  const root=await realpath(values.root);inside(resolve(owner,'.artifacts/tests/p3'),root);
+  const root=await realpath(values.root);inside(resolve(owner,'artifacts/tests/p3'),root);
   const read=async path=>JSON.parse(await readFile(path,'utf8'));
-  const stage=await read(resolve(root,'.artifacts/tests/native-input-p3/candidate-stage.json'));
+  const stage=await read(resolve(root,'artifacts/tests/native-input-p3/candidate-stage.json'));
   assertArtifactSourceContext(stage);
   assert(stage.sealed&&stage.root===root);const sources=await read(resolve(stage.directory,'sources.json'));
   assert.deepEqual(captureValidationSources(root),sources,'Full frozen source changed');
   const controllerRoot=values['controller-root']?await realpath(values['controller-root']):root;
   assert(values['reuse-package-from']||controllerRoot===root||stage.contextKind==='artifact-revision','Separate controller context requires a declared artifact revision or retained artifact');
-  inside(resolve(owner,'.artifacts/tests/p3'),controllerRoot);
-  const controllerStage=await read(resolve(controllerRoot,'.artifacts/tests/native-input-p3/candidate-stage.json'));
+  inside(resolve(owner,'artifacts/tests/p3'),controllerRoot);
+  const controllerStage=await read(resolve(controllerRoot,'artifacts/tests/native-input-p3/candidate-stage.json'));
   assert(controllerStage.sealed&&controllerStage.root===controllerRoot);
   const controllerSources=await read(resolve(controllerStage.directory,'sources.json'));
   assert.deepEqual(captureValidationSources(controllerRoot),controllerSources,'Controller snapshot drift');
@@ -59,7 +59,7 @@ async function main(){
   // The controller and all helper modules must belong to this exact snapshot.
   const controllerPaths=Object.keys(controllerSources).filter(path=>path.startsWith('scripts/native-input-p3/')||['scripts/native-input-p2/frozen-validation.mjs','scripts/native-input-p2/resource-paths.mjs','scripts/native-input-p2/gui-lock.mjs'].includes(path));
   for(const path of controllerPaths)assert.equal(await hashFile(resolve(owner,path)),controllerSources[path],`Controller differs from sealed source: ${path}`);
-  const runId=randomUUID(),directory=resolve(root,'.artifacts/tests/pk',runId.slice(0,8));let id=runId,short=id.slice(0,8),install=resolve(directory,'i');
+  const runId=randomUUID(),directory=resolve(root,'artifacts/tests/pk',runId.slice(0,8));let id=runId,short=id.slice(0,8),install=resolve(directory,'i');
   await mkdir(resolve(directory,'..'),{recursive:true});await mkdir(directory,{recursive:false});const write=(path,value)=>writeFile(path,JSON.stringify(value,null,2),{flag:'wx'});
   const phases=[],audits=backgroundQueue(2),abort=new AbortController(),cancelRequest=resolve(directory,'cancel.request.json');
   const stopPolling=watchBatchCancellation(cancelRequest,runId,abort);
@@ -91,7 +91,7 @@ async function main(){
     await write(resolve(directory,'reuse-provenance.json'),{artifactSource:reusable.directory,artifactBatchId:id,runId,controllerRoot,
       dependencyInventoryMigration:'Declared Vite cacheDir outputs are excluded from production build inputs; all installed package bytes and links match',oldResultsReplayed:false});
   }
-  const resources=resolve(root,'.artifacts/tests/native-input-p2/resources/native-input'),catalogue=await read(resolve(resources,'editors-windows-x64.json'));
+  const resources=resolve(root,'artifacts/tests/native-input-p2/resources/native-input'),catalogue=await read(resolve(resources,'editors-windows-x64.json'));
   const catalogueHosts = catalogue.profiles.map(({ profile }) => ({ shell: profile.shell, expectedVersion: profile.shellVersion }));
   assert.deepEqual(catalogueHosts, selectWindowsProfiles(), 'Windows native catalogue differs from the supported hosts');
   for(const [path,sha]of Object.entries(catalogue.sources))assert.equal(await hashFile(resolve(root,path)),sha,'Native source changed');

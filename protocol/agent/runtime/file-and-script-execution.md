@@ -121,7 +121,7 @@ path replacement or unregistered detached processes.
 
 The local scratch regression executes real scripts through Direct and the
 accepted native GNU Bash transport. Build its source-verified shell/module with
-`SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests python3 -B scripts/native-input-p2/build.py --versions 5.3`, then run
+`SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests python3 -B scripts/native-input-p2/build.py --versions 5.3`, then run
 `cargo test --manifest-path src-tauri/Cargo.toml --lib scratch`.
 The fixture requires the real native handshake; it does not grant capabilities
 to a legacy shell or change editor admission policy. Remote SFTP coverage remains

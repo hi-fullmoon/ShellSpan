@@ -4,7 +4,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const root = path.resolve(import.meta.dirname, '../..');
-const artifacts = path.join(root, '.artifacts/tests/native-job-marker');
+const artifacts = path.join(root, 'artifacts/tests/native-job-marker');
 
 describe.runIf(process.platform === 'win32')('native PowerShell marker discovery', () => {
   it.each([

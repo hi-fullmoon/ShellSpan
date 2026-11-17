@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createCanvas, loadImage } from 'canvas';
 import { chromium, webkit } from 'playwright';
 
-const outputDirectory = new URL('../../../../.artifacts/tests/section-nav/', import.meta.url);
+const outputDirectory = new URL('../../../../artifacts/tests/section-nav/', import.meta.url);
 await mkdir(outputDirectory, { recursive: true });
 const scale = Number(process.env.SHELLSPAN_TEST_SCALE ?? '1');
 const browserType = process.env.SHELLSPAN_TEST_BROWSER === 'webkit' ? webkit : chromium;

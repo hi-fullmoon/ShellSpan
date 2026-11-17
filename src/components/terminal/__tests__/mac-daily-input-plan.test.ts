@@ -29,7 +29,7 @@ it('rejects unowned or unbounded output identities and embedded NUL',()=>{
  expect(()=>macDailyOutputPlan('unowned','value',1)).toThrow();expect(()=>macDailyOutputPlan(token,'value',33)).toThrow();expect(()=>macDailyOutputPlan(token,'bad\0value',1)).toThrow();
 });
 it.runIf(process.platform==='darwin'&&process.arch==='arm64')('retains all real received long-command bytes separately from its short stdout frame',()=>{
- const base=resolve(import.meta.dirname,'../../../../.artifacts/tests/mac-daily-pump-plan');mkdirSync(base,{recursive:true});const home=mkdtempSync(resolve(base,'home-')),plan=macDailyPumpCompletionPlan(token);
+ const base=resolve(import.meta.dirname,'../../../../artifacts/tests/mac-daily-pump-plan');mkdirSync(base,{recursive:true});const home=mkdtempSync(resolve(base,'home-')),plan=macDailyPumpCompletionPlan(token);
  expect(Buffer.byteLength(plan.source)).toBe(4790);expect(plan.source).not.toContain(plan.expectedOutput.trimEnd());
  const output=execFileSync('/bin/sh',['-c',plan.source],{env:{...process.env,HOME:home}});
  expect(Array.from(readFileSync(resolve(home,plan.filename)))).toEqual(Array.from(Buffer.from(plan.value)));
@@ -52,13 +52,13 @@ it('keeps the combining/emoji payload while replacing a wide character after a c
  expect(plan.traversalKeys).toBeGreaterThan(Array.from(plan.initialValue).length);
 });
 it.runIf(process.platform==='darwin'&&process.arch==='arm64')('creates the actual completion file with a literal Tab without typing a Tab key',()=>{
- const plan=macDailyCompletionPlan(token),base=resolve(import.meta.dirname,'../../../../.artifacts/tests/mac-daily-completion');mkdirSync(base,{recursive:true});
+ const plan=macDailyCompletionPlan(token),base=resolve(import.meta.dirname,'../../../../artifacts/tests/mac-daily-completion');mkdirSync(base,{recursive:true});
  const home=mkdtempSync(resolve(base,'home-'));expect(plan.setup.includes('\t')).toBe(false);
  execFileSync('/bin/sh',['-c',plan.setup],{env:{...process.env,HOME:home}});
  expect(Array.from(readFileSync(resolve(home,plan.filename)))).toEqual(Array.from(new TextEncoder().encode('COMPLETE_11111111_中文_e\u0301\tEND\n')));
 });
 it.runIf(process.platform==='darwin'&&process.arch==='arm64')('prints the exact independent UTF8 frame through a real Shell and one final printf',()=>{
- const base=resolve(import.meta.dirname,'../../../../.artifacts/tests/mac-daily-output');mkdirSync(base,{recursive:true});const home=mkdtempSync(resolve(base,'home-'));
+ const base=resolve(import.meta.dirname,'../../../../artifacts/tests/mac-daily-output');mkdirSync(base,{recursive:true});const home=mkdtempSync(resolve(base,'home-'));
  for(const value of ['BG_中文_e\u0301_👩🏽‍💻_TAIL_OK','中文 café Å\t\'quoted\' "double"']){
   const plan=macDailySingleOutputPlan(token,value,12),actual=execFileSync('/bin/sh',['-c',plan.source],{env:{...process.env,HOME:home}});
   expect(Array.from(actual)).toEqual(Array.from(Buffer.from(plan.prefix+Buffer.from(value,'utf8').toString('hex')+':END\n','utf8')));

@@ -6,7 +6,7 @@ it('refuses non-owned cursor diagnostic identifiers', () => {
   expect(() => nativeDisplayCursorDiagnostic('../foreign')).toThrow('Owned cursor diagnostic');
 });
 it.skipIf(process.platform !== 'win32')('compiles the read-only sampler and writes parseable numeric records in an isolated process', () => {
-  const token = randomUUID(), root = path.resolve('.artifacts/tests/native-display-cursor', token);fs.mkdirSync(root,{recursive:true});
+  const token = randomUUID(), root = path.resolve('artifacts/tests/native-display-cursor', token);fs.mkdirSync(root,{recursive:true});
   const module = path.resolve('src-tauri/resources/powershell/PSReadLine/2.4.5/PSReadLine.psd1').split("'").join("''");
   const script = path.join(root,'observe.ps1'), file = path.join(root,'display-cursor-'+token+'.jsonl');
   fs.writeFileSync(script, `Import-Module '${module}' -ErrorAction Stop\nGet-PSReadLineOption | Out-Null\n${nativeDisplayCursorDiagnostic(token)}\nStart-Sleep -Milliseconds 250\n`,{flag:'wx'});

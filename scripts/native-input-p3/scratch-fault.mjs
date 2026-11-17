@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {mkdir,lstat,realpath,writeFile} from 'node:fs/promises';
 import {resolve,relative,isAbsolute,sep} from 'node:path';
 
-const evidenceRoot=resolve(import.meta.dirname,'../../.artifacts/tests/native-input-p2');
+const evidenceRoot=resolve(import.meta.dirname,'../../artifacts/tests/native-input-p2');
 const uuid=/^[a-f0-9-]{36}$/;
 export const scratchFaultOriginal=(token,posix=false)=>posix?`printf '%s\\n' 'SCRATCH_ORIGINAL_${token}'`:`Write-Output 'SCRATCH_ORIGINAL_${token}'`;
 const pathIdentity=path=>process.platform==='win32'?resolve(path).toLowerCase():resolve(path);

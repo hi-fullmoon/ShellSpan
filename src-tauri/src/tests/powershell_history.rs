@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn isolated_history_directory_refuses_file_or_link_replacement() {
     let artifacts =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../.artifacts/tests/powershell-history-policy");
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../artifacts/tests/powershell-history-policy");
     fs::create_dir_all(&artifacts).unwrap();
     let root = tempfile::tempdir_in(&artifacts).unwrap();
     let path = prepare_isolated_powershell_history_directory(root.path()).unwrap();
@@ -24,7 +24,7 @@ fn isolated_history_directory_refuses_file_or_link_replacement() {
 fn actual_powershell_history_policy_preserves_owned_paths_and_rejects_escape_links() {
     use std::process::Command;
     let artifact_root =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../.artifacts/tests/powershell-history-policy");
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../artifacts/tests/powershell-history-policy");
     fs::create_dir_all(&artifact_root).unwrap();
     let modern = std::env::var_os("SHELLSPAN_TEST_PWSH")
         .map(PathBuf::from)

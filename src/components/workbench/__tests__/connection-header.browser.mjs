@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import { chromium, webkit } from 'playwright';
 
-const screenshotDirectory = '.artifacts/tests/workbench';
+const screenshotDirectory = 'artifacts/tests/workbench';
 await mkdir(screenshotDirectory, { recursive: true });
 
 for (const browserType of [chromium, webkit]) {

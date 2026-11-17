@@ -8,7 +8,7 @@ import {closeNativeValidationServer} from '../native-input-p3/close-validation-s
 import {nativePackageEndpoint} from '../../src/components/terminal/__tests__/native-package-endpoint';
 
 async function fixture(mode,selection,capture,client='relative'){
- const root=p.resolve(import.meta.dirname,'../../.artifacts/tests/window-evidence-route',randomUUID()),token=randomUUID();
+ const root=p.resolve(import.meta.dirname,'../../artifacts/tests/window-evidence-route',randomUUID()),token=randomUUID();
  fs.mkdirSync(p.join(root,'assets'),{recursive:true});fs.writeFileSync(p.join(root,'assets/index.html'),'<!doctype html><title>Component HTTP routing only</title>');
  let attached=false;
  const install=server=>{attached=attachNativeWindowEvidence(server,{token,platform:'win32',...selection,capture});};

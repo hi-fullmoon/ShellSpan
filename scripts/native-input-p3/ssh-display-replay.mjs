@@ -14,8 +14,8 @@ const focusComparison = process.argv[3] === '--focus-comparison';
 assert(process.argv.length === (focusComparison ? 4 : 3));
 const root = artifactWorkspace(input);
 assert.equal(resolve(process.cwd()), root, 'Replay must use the capture’s frozen work directory');
-assert(input.startsWith(`${root}/.artifacts/tests/native-input-p2/ssh-recovery/`), 'Use this sealed root’s actual App evidence');
-const stage = JSON.parse(await readFile(resolve(root, '.artifacts/tests/native-input-p3/candidate-stage.json'), 'utf8'));
+assert(input.startsWith(`${root}/artifacts/tests/native-input-p2/ssh-recovery/`), 'Use this sealed root’s actual App evidence');
+const stage = JSON.parse(await readFile(resolve(root, 'artifacts/tests/native-input-p3/candidate-stage.json'), 'utf8'));
 assert(stage.sealed && stage.root === root);
 const bytes = await readFile(input);
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -37,7 +37,7 @@ if (evidence.records.wideText !== undefined) {
 const retainedSelection = evidence.records.parkedAfterOutput !== undefined;
 if (retainedSelection) assert.deepEqual(events.filter(row => historyStages.includes(row.stage)).map(row => row.stage), historyStages);
 const runtime = await installedRuntimeManifest();
-const output = resolve(root, '.artifacts/tests/native-input-p3/ssh-display-replay', randomUUID());
+const output = resolve(root, 'artifacts/tests/native-input-p3/ssh-display-replay', randomUUID());
 await mkdir(output, { recursive: true, mode: 0o700 });
 const scripts = {
   '/xterm.js': 'node_modules/@xterm/xterm/lib/xterm.js',

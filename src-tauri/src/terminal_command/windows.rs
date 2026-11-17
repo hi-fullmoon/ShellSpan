@@ -73,7 +73,7 @@ mod path_tests {
     #[ignore = "requires the rebuilt Windows PowerShell 7 catalogue and the actual installed shells"]
     fn installed_powershell7_is_preferred_and_windows_powershell_stays_raw() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        let resources = root.join(".artifacts/tests/native-input-p2/resources/native-input");
+        let resources = root.join("artifacts/tests/native-input-p2/resources/native-input");
         let shell = matching_powershell7(&resources).expect("Reviewed PowerShell 7 was not found");
         let data = tempfile::tempdir().unwrap();
         let native = PreparedNativePowerShell::prepare(&shell, &resources, data.path()).unwrap();
@@ -99,7 +99,7 @@ mod path_tests {
             Ok("1")
         );
         let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        let owned = source.join(".artifacts/tests").canonicalize().unwrap();
+        let owned = source.join("artifacts/tests").canonicalize().unwrap();
         let resources = editors::validation_resource_root().unwrap().unwrap();
         assert!(resources.starts_with(&owned));
         let evidence = PathBuf::from(std::env::var_os("SHELLSPAN_ADMISSION_EVIDENCE").unwrap());
@@ -523,7 +523,7 @@ mod bootstrap_lifetime_tests {
         File,
     ) {
         let parent = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../.artifacts/tests/native-input-p3/bootstrap-lifetime");
+            .join("../artifacts/tests/native-input-p3/bootstrap-lifetime");
         fs::create_dir_all(&parent).unwrap();
         let outer = tempfile::tempdir_in(parent).unwrap();
         let root = tempfile::tempdir_in(outer.path()).unwrap();

@@ -11,7 +11,7 @@ const directories = [];
 const notes = '### 问题修复\n\n- 修复 SSH 命令取消后无法立即重试的问题。';
 
 async function fixtureDirectory(prefix) {
-  const base=path.join(root,'.artifacts/tests/release-review');
+  const base=path.join(root,'artifacts/tests/release-review');
   await mkdir(base,{recursive:true});
   const directory=await mkdtemp(path.join(base,prefix));
   directories.push(directory);
@@ -251,7 +251,7 @@ describe('release preparation recovery', () => {
     const pkg = JSON.parse(await readFile(path.join(directory, 'package.json'), 'utf8'));
     expect(pkg.scripts).not.toHaveProperty('version');
     await writeFile(path.join(directory,'pnpm-workspace.yaml'),'packages: []\n');
-    // Keep pnpm's Git discovery inside this fixture even under .artifacts/.
+    // Keep pnpm's Git discovery inside this fixture even under artifacts/.
     // A clean local baseline lets the real preversion hook be the refusal.
     command('git',['init','--quiet'],directory);
     command('git',['add','.'],directory);

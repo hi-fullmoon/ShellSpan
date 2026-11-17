@@ -8,7 +8,7 @@ protocol messages, create an Agent, or prove native acceptance.
 Build with the repository's Rust toolchain and this standalone locked manifest.
 Arguments are the reviewed shell executable, a JSON array of `{id,source,expect}`
 cases, and a fresh absolute evidence directory beneath the workspace's
-`.artifacts/tests/`. All source cases are sent once. `expect` is an observation
+`artifacts/tests/`. All source cases are sent once. `expect` is an observation
 gate; a missing observation retains a failure and stops the remaining cases.
 
 The pinned project PSReadLine 2.4.5 is loaded without the native adapter. The

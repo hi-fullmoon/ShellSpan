@@ -20,7 +20,7 @@ import time
 import uuid
 
 root = Path(__file__).resolve().parents[2]
-directory = root / '.artifacts/tests/native-input-p3/zle' / str(uuid.uuid4())
+directory = root / 'artifacts/tests/native-input-p3/zle' / str(uuid.uuid4())
 home = directory / 'home'
 home.mkdir(parents=True, mode=0o700)
 sockpath = f'/tmp/ss-p3-{uuid.uuid4().hex[:16]}'
@@ -29,7 +29,7 @@ listener.bind(sockpath)
 os.chmod(sockpath, 0o600)
 listener.listen(1)
 listener.setblocking(False)
-module = root / '.artifacts/tests/native-input-p3/ss_nip.so'
+module = root / 'artifacts/tests/native-input-p3/ss_nip.so'
 profile = {'shell': 'zsh', 'shellVersion': '5.9', 'editor': 'zle', 'editorVersion': '5.9',
            'editorNumericVersion': 509, 'adapterVersion': '1',
            'verifiedProfileId': 'zsh-5.9-zle-5.9-macos-arm64-native'}

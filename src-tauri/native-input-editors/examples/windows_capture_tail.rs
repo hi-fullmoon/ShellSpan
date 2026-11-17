@@ -30,7 +30,7 @@ mod actual {
             .join("../..")
             .canonicalize()
             .unwrap();
-        let owned = owner.join(".artifacts/tests").canonicalize().unwrap();
+        let owned = owner.join("artifacts/tests").canonicalize().unwrap();
         assert!(library.starts_with(&owned));
         assert!(
             evidence.is_absolute()

@@ -7,7 +7,7 @@ import {createCaptureTailWitness} from '../native-input-p3/capture-tail-witness.
 const servers=[];afterEach(async()=>{for(const server of servers.splice(0))await new Promise(resolve=>server.close(resolve));});
 describe('owned capture-tail witness (unit support only)',()=>{
  it('requires retained unknown observation and releases the owned gate once',async()=>{
-  const owned=resolve('.artifacts/tests/capture-tail-witness');await mkdir(owned,{recursive:true});const directory=await mkdtemp(join(owned,'case-')),library=join(directory,'fixture.dll'),token='12345678-1234-1234-1234-123456789abc';
+  const owned=resolve('artifacts/tests/capture-tail-witness');await mkdir(owned,{recursive:true});const directory=await mkdtemp(join(owned,'case-')),library=join(directory,'fixture.dll'),token='12345678-1234-1234-1234-123456789abc';
   // Hash-only data fixture, never loaded/executed as a DLL or native proof.
   await writeFile(library,'unit-data');const librarySha256=createHash('sha256').update('unit-data').digest('hex');
   const handler=await createCaptureTailWitness({ownedRoot:owned,evidence:directory,token,library,librarySha256}),server=createServer((req,res)=>{void handler(req,res);});servers.push(server);await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const port=server.address().port,url=`http://127.0.0.1:${port}`;
@@ -17,7 +17,7 @@ describe('owned capture-tail witness (unit support only)',()=>{
   expect((await fetch(url+'/release',{method:'POST'})).status).toBe(200);expect(await readFile(join(directory,`release-capture-tail-${token}.txt`),'utf8')).toBe(`release:${token}`);expect((await fetch(url+'/release',{method:'POST'})).status).toBe(409);
  });
  it('rejects a mismatched fixture digest before serving anything',async()=>{
-  const owned=resolve('.artifacts/tests/capture-tail-witness');await mkdir(owned,{recursive:true});const directory=await mkdtemp(join(owned,'digest-')),library=join(directory,'fixture.dll');await writeFile(library,'unit-data');
+  const owned=resolve('artifacts/tests/capture-tail-witness');await mkdir(owned,{recursive:true});const directory=await mkdtemp(join(owned,'digest-')),library=join(directory,'fixture.dll');await writeFile(library,'unit-data');
   await expect(createCaptureTailWitness({ownedRoot:owned,evidence:directory,token:'12345678-1234-1234-1234-123456789abc',library,librarySha256:'0'.repeat(64)})).rejects.toThrow();
  });
 });

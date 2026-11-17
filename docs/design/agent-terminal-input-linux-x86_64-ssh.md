@@ -17,15 +17,15 @@ pnpm install --frozen-lockfile
 pnpm check:ci:static
 cargo test --manifest-path src-tauri/Cargo.toml x86_64_ssh_only_admits_the_fixed_bash_readline_pair
 cargo test --manifest-path src-tauri/Cargo.toml ssh_bash_targets_require_linux_and_x86_64_requires_glibc_228_or_newer
-SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests pnpm native:prepare --acceptance --with-ssh
+SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests pnpm native:prepare --acceptance --with-ssh
 pnpm build
 ```
 
 确认生成目录的 `resource-manifest.json` 同时列出 macOS ARM64、Linux ARM64 和 Linux x86_64 的 Bash 清单。以同一份代码和签名配置先打候选包，再暂存 x86_64 清单、重跑 `native:prepare --no-build` 打对照包。对照包只缺 x86_64 资源；两份 DMG 均保存在验收目录。
 
 ```sh
-evidence="$PWD/.artifacts/tests/agent-terminal-input/linux-x86_64-ssh"
-catalogue="$PWD/.artifacts/tests/native-input-p2/resources/native-input/catalogue-linux-x86_64-glibc-2.28.json"
+evidence="$PWD/artifacts/tests/agent-terminal-input/linux-x86_64-ssh"
+catalogue="$PWD/artifacts/tests/native-input-p2/resources/native-input/catalogue-linux-x86_64-glibc-2.28.json"
 export CARGO_TARGET_DIR="$PWD/src-tauri/target/releases/linux-x86_64-ssh-acceptance"
 dmg_dir="$CARGO_TARGET_DIR/aarch64-apple-darwin/release/bundle/dmg"
 mkdir -p "$evidence"
@@ -34,11 +34,11 @@ pnpm exec tauri build --target aarch64-apple-darwin --bundles app,dmg --config "
 cp "$dmg_dir"/*.dmg "$evidence/with-x86_64.dmg"
 
 mv "$catalogue" "$evidence/catalogue-linux-x86_64-glibc-2.28.json"
-SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests pnpm native:prepare --acceptance --no-build
+SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests pnpm native:prepare --acceptance --no-build
 pnpm exec tauri build --target aarch64-apple-darwin --bundles app,dmg --config "$config"
 cp "$dmg_dir"/*.dmg "$evidence/without-x86_64.dmg"
 mv "$evidence/catalogue-linux-x86_64-glibc-2.28.json" "$catalogue"
-SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests pnpm native:prepare --acceptance --no-build --require-ssh
+SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests pnpm native:prepare --acceptance --no-build --require-ssh
 stat -f '%N %z bytes' "$evidence"/*.dmg
 ```
 

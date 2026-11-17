@@ -734,7 +734,7 @@ mod tests {
 
     fn directory() -> tempfile::TempDir {
         let base = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../.artifacts/tests/native-input-p3/trace-unit");
+            .join("../artifacts/tests/native-input-p3/trace-unit");
         fs::create_dir_all(&base).unwrap();
         tempfile::Builder::new()
             .permissions(fs::Permissions::from_mode(0o700))

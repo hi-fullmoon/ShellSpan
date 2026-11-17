@@ -3,7 +3,7 @@
 `python3 -B scripts/native-input-p2/build.py` builds the release profile under
 `src-tauri/target/native-input/`. On macOS ARM64 it builds ShellSpan Bash
 (Bash 5.3.20 / Readline 8.3.6). Set
-`SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests` when preparing inputs for local
+`SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests` when preparing inputs for local
 acceptance tests. To build the older
 profiles for compatibility checks, pass `--versions 4.1,4.4` or
 `--versions 4.1,4.4,5.3`. Use `--include-legacy` when listing or running the P2

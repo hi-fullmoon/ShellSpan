@@ -194,7 +194,7 @@ mod tests {
             std::env::var_os("SHELLSPAN_DISPLAY_PIPE_TEST_EVIDENCE")
                 .expect("Fresh evidence directory required"),
         );
-        assert!(evidence.is_absolute() && evidence.starts_with(root.join(".artifacts/tests")));
+        assert!(evidence.is_absolute() && evidence.starts_with(root.join("artifacts/tests")));
         std::fs::create_dir(&evidence).expect("Evidence directory must be fresh");
         let quote = |path: &std::path::Path| path.to_string_lossy().replace('\'', "''");
         for (host, executable) in [

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -14,7 +14,8 @@ assert.notEqual(compiler.root, 'none');
 const scanner = new Scanner({ sources: [{ ...(compiler.root ?? { base: root, pattern: '**/*' }), negated: false }, ...compiler.sources] });
 const candidates = scanner.scan();
 const css = compiler.build(candidates);
-const output = resolve(root, '.artifacts/compiled-source-check.css');
+const output = resolve(root, 'artifacts/tests/compiled-source-check.css');
+mkdirSync(dirname(output), { recursive: true });
 writeFileSync(output, css, { flag: 'wx' });
 const postcssRequire = createRequire(import.meta.resolve('vite'));
 const postcss = postcssRequire('postcss');

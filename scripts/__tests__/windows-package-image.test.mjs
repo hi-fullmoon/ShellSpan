@@ -29,7 +29,7 @@ it('keeps both native profile paths within NSIS limits without changing their id
  // Pure path budgeting must not assume the test checkout itself is short.
  // A sealed source copy is deliberately deeper than the packaging workspace.
  const owner=path.resolve(path.parse(path.resolve(import.meta.dirname)).root,'owned'),root=windowsShortSnapshotLocation(owner,'12345678-1234-1234-1234-123456789abc').root;
- const install=path.join(root,'.artifacts/tests/pk/12345678/i');
+ const install=path.join(root,'artifacts/tests/pk/12345678/i');
  const profiles=['powershell-7.6.9','windows-powershell-5.1.26100.9818'].map(host=>`${host}-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native/shellspan_native_input_editors.dll`);
  expect(()=>assertPackageResourcePaths(root,install,profiles)).not.toThrow();
  expect(()=>assertPackageResourcePaths(root,path.join(install,'too-long-install-directory'),profiles)).toThrow('MAX_PATH');
@@ -41,7 +41,7 @@ it('keeps both native profile paths within NSIS limits without changing their id
 });
 
 it('binds explicit validation package markers only to owned source-context installations',()=>{
- const root=path.resolve(import.meta.dirname,'../..'),resources=path.join(root,'.artifacts/tests/pk/owned/install/native-input/generated'),digest='a'.repeat(64);
+ const root=path.resolve(import.meta.dirname,'../..'),resources=path.join(root,'artifacts/tests/pk/owned/install/native-input/generated'),digest='a'.repeat(64);
  expect(validationPackageMarker(root,resources,digest)).toEqual({protocol:'shellspan.native-editor-validation',resourceRoot:resources,sourceManifestSha256:digest,editorTargets:['windows-x64']});
  expect(()=>validationPackageMarker(root,path.join(root,'external-install'),digest)).toThrow('owned package cases');
  expect(()=>validationPackageMarker(root,resources,'bad')).toThrow('manifest digest');
@@ -49,10 +49,10 @@ it('binds explicit validation package markers only to owned source-context insta
 
 it('passes frontend assets as a relative directory rather than a Windows drive URL',()=>{
   const root=path.resolve(import.meta.dirname,'../..');
-  const frontend=path.join(root,'.artifacts/tests/frontend');
+  const frontend=path.join(root,'artifacts/tests/frontend');
   const configured=packageFrontendDirectory(root,frontend);
   expect(path.resolve(root,'src-tauri',configured)).toBe(frontend);
-  expect(configured).toBe('../.artifacts/tests/frontend');
+  expect(configured).toBe('../artifacts/tests/frontend');
   expect(configured).not.toContain(':');
 });
 

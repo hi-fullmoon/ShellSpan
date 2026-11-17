@@ -7,9 +7,9 @@ import {mkdirSync,readFileSync,writeFileSync,openSync,closeSync} from 'node:fs';
 import {resolve} from 'node:path';
 const owner=resolve(import.meta.dirname,'../..'),fixture=JSON.parse(readFileSync(process.argv[2],'utf8'));
 const root=fixture.root.replaceAll('\\','/'),runId=randomUUID();
-const directory=resolve(owner,'.artifacts/tests/native-input-p3/credential-cancellation',runId);mkdirSync(directory,{recursive:true,mode:0o700});
-const evidence=`${root}/.artifacts/tests/native-input-p2/credential-${runId}`,remoteConfig=`${root}/.artifacts/tests/native-input-p3/cancellation-${runId}.json`;
-const configuration={runId,workspace:root,evidenceDirectory:evidence,shellKinds:['powerShell7'],routeDatabase:'C:/Users/zhengbiwen/.shellspan/shellspan-main.db',opensslDirectory:'D:/Developer/ShellSpan-native-terminal-20261023/dependency-cache/openssl-3.6.3-msvc-x64',cargoTargetDirectory:'D:/Developer/ShellSpan-native-input-p3-app-aba582e7-d273-46d0-82f2-5840b462366e/.artifacts/tests/native-input-p2/frozen-target'};
+const directory=resolve(owner,'artifacts/tests/native-input-p3/credential-cancellation',runId);mkdirSync(directory,{recursive:true,mode:0o700});
+const evidence=`${root}/artifacts/tests/native-input-p2/credential-${runId}`,remoteConfig=`${root}/artifacts/tests/native-input-p3/cancellation-${runId}.json`;
+const configuration={runId,workspace:root,evidenceDirectory:evidence,shellKinds:['powerShell7'],routeDatabase:'C:/Users/zhengbiwen/.shellspan/shellspan-main.db',opensslDirectory:'D:/Developer/ShellSpan-native-terminal-20261023/dependency-cache/openssl-3.6.3-msvc-x64',cargoTargetDirectory:'D:/Developer/ShellSpan-native-input-p3-app-aba582e7-d273-46d0-82f2-5840b462366e/artifacts/tests/native-input-p2/frozen-target'};
 writeFileSync(resolve(directory,'configuration.json'),JSON.stringify(configuration,null,2));
 execFileSync('scp',[...fixture.ssh,resolve(directory,'configuration.json'),`${fixture.peer}:${remoteConfig}`],{stdio:'pipe',timeout:20000});
 function command(script,timeout=20000){return execFileSync('ssh',[...fixture.ssh,fixture.peer,'D:/Programs/PowerShell/7/pwsh.exe -NoLogo -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand '+Buffer.from("$ProgressPreference='SilentlyContinue'; "+script,'utf16le').toString('base64')],{encoding:'utf8',timeout,maxBuffer:1024*1024});}

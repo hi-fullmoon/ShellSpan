@@ -65,7 +65,7 @@ fn main() {
     let candidate_module=std::env::var_os("SHELLSPAN_ACCEPTANCE_PSREADLINE_MANIFEST").map(PathBuf::from);
     let module=candidate_module.clone().unwrap_or_else(||root.join("../resources/powershell/PSReadLine/2.4.5/PSReadLine.psd1"));
     let editor_hash=if candidate_module.is_some() {
-        let owned=root.join("../../.artifacts/tests").canonicalize().unwrap();
+        let owned=root.join("../../artifacts/tests").canonicalize().unwrap();
         assert!(module.is_absolute()&&module.canonicalize().unwrap().starts_with(owned),"Candidate module must be inside owned test artifacts");
         let expected=std::env::var("SHELLSPAN_ACCEPTANCE_PSREADLINE_SHA256").expect("Explicit candidate assembly digest");
         assert_eq!(expected,hex::encode(sha2::Sha256::digest(fs::read(module.parent().unwrap().join("Microsoft.PowerShell.PSReadLine.dll")).unwrap())));
@@ -78,7 +78,7 @@ fn main() {
     let history_mode=args.get(4).filter(|mode|history_cases::is_mode(mode));
     let library=if loader_mode||display_mode||std::env::var_os("SHELLSPAN_ACCEPTANCE_NATIVE_LIBRARY").is_some() {
         let candidate=PathBuf::from(std::env::var_os("SHELLSPAN_ACCEPTANCE_NATIVE_LIBRARY").expect("Explicit loader candidate"));
-        assert!(candidate.is_absolute()&&candidate.canonicalize().unwrap().starts_with(root.join("../../.artifacts/tests").canonicalize().unwrap()));
+        assert!(candidate.is_absolute()&&candidate.canonicalize().unwrap().starts_with(root.join("../../artifacts/tests").canonicalize().unwrap()));
         assert_eq!(candidate.file_name().unwrap(),"shellspan_native_input_editors.dll");
         assert_eq!(std::env::var("SHELLSPAN_ACCEPTANCE_NATIVE_SHA256").unwrap(),hex::encode(sha2::Sha256::digest(fs::read(&candidate).unwrap())));
         candidate

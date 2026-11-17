@@ -5,7 +5,7 @@ import {readFileSync,writeFileSync,existsSync} from 'node:fs';
 import {resolve,dirname} from 'node:path';
 const owner=resolve(import.meta.dirname,'../..'),results=[];
 for(const argument of process.argv.slice(2)){
- const file=resolve(argument);assert(file.startsWith(resolve(owner,'.artifacts/tests/native-input-p3/acceptance-source')+'/'));
+ const file=resolve(argument);assert(file.startsWith(resolve(owner,'artifacts/tests/native-input-p3/acceptance-source')+'/'));
  const fixture=JSON.parse(readFileSync(file,'utf8'));assert.equal(fixture.container,`shellspan-nip-p3-${fixture.id}`);
  assert.equal(execFileSync('docker',['inspect','--format','{{index .Config.Labels "shellspan.native-input-p3"}}',fixture.container],{encoding:'utf8'}).trim(),fixture.id);
  const resultFile=resolve(dirname(file),'run-result.json');if(existsSync(resultFile)){const result=JSON.parse(readFileSync(resultFile,'utf8'));assert(result.accountLocked&&result.credentialDeleted&&result.cleanupErrors.length===0);}

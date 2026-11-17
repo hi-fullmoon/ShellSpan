@@ -8,7 +8,7 @@ const quote=value=>"'"+value.replaceAll("'","'\\''")+"'";
 const json=path=>JSON.parse(readFileSync(path,'utf8'));
 export function prepareZleAppHistory(root,directory,mode){
  assert(zleAppHistoryModes.includes(mode));
- assert(directory.startsWith(resolve(root,'.artifacts/tests/')+'/'));
+ assert(directory.startsWith(resolve(root,'artifacts/tests/')+'/'));
  const home=resolve(directory,'home'),history=resolve(home,mode==='custom'?'历史 custom/history.txt':'history');
  assert(!existsSync(resolve(home,'.zshrc')),'Never replace an existing user profile');
  mkdirSync(resolve(history,'..'),{recursive:true,mode:0o700});

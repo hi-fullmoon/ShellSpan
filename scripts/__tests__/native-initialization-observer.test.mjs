@@ -4,7 +4,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {readInitializationObserver} from '../native-input-p3/initialization-observer.mjs';
 function fixture(){
- const token=randomUUID(),root=p.resolve(import.meta.dirname,'../../.artifacts/tests/initialization-observer',token);fs.mkdirSync(root,{recursive:true});
+ const token=randomUUID(),root=p.resolve(import.meta.dirname,'../../artifacts/tests/initialization-observer',token);fs.mkdirSync(root,{recursive:true});
  const manifest=p.join(root,'frozen-manifest-'+token+'.json'),name='native-image-101-'+token,exe=p.join(root,'native-image-component/ShellSpan.exe');
  const put=(name,value)=>fs.writeFileSync(p.join(root,name),JSON.stringify(value));
  const app={pid:202,runnerPid:101,path:exe,handleCreated:'2026-11-08T01:02:03.1234567Z',handleHeld:true,ended:false,sha256:'a'.repeat(64)};

@@ -7,7 +7,7 @@ import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
-const artifacts = join(root, '.artifacts/tests/sftp-preview-toolbar');
+const artifacts = join(root, 'artifacts/tests/sftp-preview-toolbar');
 await mkdir(artifacts, { recursive: true });
 // Render actual repository files through the production preview and translations.
 const files = await Promise.all(['src/components/ui/button.tsx', 'public/shellspan-icon.svg', 'src/lib/ai/retry-policy.json'].map(async relativePath => {

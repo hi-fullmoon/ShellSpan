@@ -257,9 +257,9 @@ fn native_input_pump_large_input_control_order_and_cancel_preserve_real_pty() {
         "a53bc44ed67c2900b925d887aa3d599c3abc8e138f57abcd5040d80f61d7d2bc"
     );
     let owner = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let resources = owner.join(".artifacts/tests/native-input-p2/resources/native-input");
+    let resources = owner.join("artifacts/tests/native-input-p2/resources/native-input");
     let evidence = owner
-        .join(".artifacts/tests/native-input-p3/input-pump")
+        .join("artifacts/tests/native-input-p3/input-pump")
         .join(uuid::Uuid::new_v4().to_string());
     fs::create_dir_all(&evidence).unwrap();
     let zsh = crate::terminal_command::editors::local_zle_shell(&resources).unwrap();
@@ -350,9 +350,9 @@ fn native_input_pump_large_input_control_order_and_cancel_preserve_real_pty() {
 fn native_ordinary_bracketed_paste_preserves_bytes_before_enter() {
     require_native_mac();
     let owner = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let resources = owner.join(".artifacts/tests/native-input-p2/resources/native-input");
+    let resources = owner.join("artifacts/tests/native-input-p2/resources/native-input");
     let evidence = owner
-        .join(".artifacts/tests/native-input-p3/ordinary-paste")
+        .join("artifacts/tests/native-input-p3/ordinary-paste")
         .join(uuid::Uuid::new_v4().to_string());
     fs::create_dir_all(&evidence).unwrap();
     let shells = [
@@ -479,9 +479,9 @@ fn native_ordinary_bracketed_paste_preserves_bytes_before_enter() {
 fn native_ordinary_resize_keeps_real_editor_geometry_and_exact_bytes() {
     require_native_mac();
     let owner = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let resources = owner.join(".artifacts/tests/native-input-p2/resources/native-input");
+    let resources = owner.join("artifacts/tests/native-input-p2/resources/native-input");
     let evidence = owner
-        .join(".artifacts/tests/native-input-p3/ordinary-resize")
+        .join("artifacts/tests/native-input-p3/ordinary-resize")
         .join(uuid::Uuid::new_v4().to_string());
     fs::create_dir_all(&evidence).unwrap();
     let shells = [

@@ -6,7 +6,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
 const root=p.resolve(import.meta.dirname,'../..');
-const directory=p.join(root,'.artifacts/tests/windows-process-ownership',randomUUID());
+const directory=p.join(root,'artifacts/tests/windows-process-ownership',randomUUID());
 fs.mkdirSync(directory,{recursive:true});
 const helper=p.join(root,'scripts/fixtures/windows-process-ownership.ps1');
 const script=p.join(root,'scripts/fixtures/windows-process-ownership-test.ps1');

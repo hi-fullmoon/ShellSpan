@@ -1,7 +1,7 @@
 param([Parameter(Mandatory=$true)][string]$ShellRecord,[Parameter(Mandatory=$true)][string]$Output,[int]$TimeoutMs=600000)
 $ErrorActionPreference='Stop'
 $project=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
-$artifacts=[IO.Path]::GetFullPath((Join-Path $project '.artifacts/tests')).TrimEnd('\')+'\'
+$artifacts=[IO.Path]::GetFullPath((Join-Path $project 'artifacts/tests')).TrimEnd('\')+'\'
 foreach($path in @($ShellRecord,$Output)){
   if(-not [IO.Path]::IsPathRooted($path)-or -not [IO.Path]::GetFullPath($path).StartsWith($artifacts,[StringComparison]::OrdinalIgnoreCase)){throw 'Exit observer paths must be owned test evidence'}
 }

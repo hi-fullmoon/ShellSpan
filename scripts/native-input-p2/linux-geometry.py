@@ -232,7 +232,7 @@ if sys.argv[1] == '--widget':
 
 inputs = Path(sys.argv[1])
 entries, results = json.loads(inputs.read_text()), []
-catalogue = json.loads((ROOT / '.artifacts/tests/native-input-p2/resources/native-input/catalogue-linux-aarch64-glibc-2.36.json').read_text())
+catalogue = json.loads((ROOT / 'artifacts/tests/native-input-p2/resources/native-input/catalogue-linux-aarch64-glibc-2.36.json').read_text())
 expected = sorted((profile['id'], columns) for profile in catalogue['profiles'] for columns in [32, 40, 100, 180])
 assert expected and sorted((item['profile'], item['columns']) for item in entries) == expected
 for item in entries:
@@ -270,5 +270,5 @@ for item in entries:
 summary = inputs.with_name('geometry-summary.json')
 summary.write_text(json.dumps(results, ensure_ascii=False, indent=2))
 host_summary = Path(entries[0]['hostDirectory']).parent / 'geometry-summary.json'
-(ROOT / '.artifacts/tests/native-input-p2/latest-linux-geometry.json').write_text(json.dumps({'summary': str(host_summary)}))
+(ROOT / 'artifacts/tests/native-input-p2/latest-linux-geometry.json').write_text(json.dumps({'summary': str(host_summary)}))
 print(json.dumps({'scope': 'actual formal Linux target PTYs, not app transport simulation', 'result': 'PASS', 'cases': len(results), 'summary': str(host_summary)}))

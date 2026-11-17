@@ -9,6 +9,11 @@
 - [发布流程](releasing.md)
 - [版本记录](../CHANGELOG.md)与[各版本发布说明](../release-notes/)
 
+## 部署与配置
+
+- [Linux SSH Agent 远端沙箱](remote-agent-sandbox.md)及[运行时协议](../protocol/agent/runtime/remote-bubblewrap.md)
+- [远端受限 sudo 执行器](remote-sudo-runner.md)
+
 ## 当前协议
 
 协议描述运行时契约；设计、计划和验收记录中的结论只适用于各自注明的范围与版本。
@@ -18,10 +23,13 @@
 - [文件与脚本执行、安全边界](../protocol/agent/runtime/file-and-script-execution.md)
 - [项目目录绑定](../protocol/agent/runtime/project-root-binding.md)
 - [任务与回合计划](../protocol/agent/runtime/turn-and-task-plan.md)
+- [用户审批与提问](../protocol/agent/runtime/user-interactions.md)
 - [可靠提交](../protocol/agent/runtime/reliable-submission.md)
 - [上下文预算](../protocol/agent/runtime/context-budget.md)
+- [流式追加的性能边界](../protocol/agent/runtime/streaming-append-performance.md)
 - [内容脱敏](../protocol/agent/runtime/content-redaction.md)
 - [诊断工具](../protocol/agent/runtime/diagnostic-tools.md)
+- [切换工作区焦点](../protocol/agent/runtime/focus-workspace.md)与[会话标题](../protocol/agent/runtime/session-titles.md)
 - [图片附件](../protocol/agent/runtime/image-attachments.md)与[文档附件](../protocol/agent/runtime/document-attachments.md)
 - [LLM 协议](../protocol/llm/README.md)
 - [Petdex 动作联动](../protocol/petdex/integration.md)与[消息气泡](../protocol/petdex/bubble.md)
@@ -39,14 +47,13 @@
 - [原生终端显示与命令标记](../protocol/native-input-display.md)记录显示集成边界和浏览器回归入口。
 - [原生终端后续实施计划](design/agent-terminal-input-implementation-plan.md)记录当前进度、各平台剩余工作和交付顺序。
 - [原生输入统一验收标准](design/agent-terminal-input-acceptance-checklist.md)规定 35 条要求、五个发布绑定和证据规则。
-- [macOS arm64 验收记录](design/agent-terminal-input-macos-acceptance-2026-11-06.md)和 [Windows 验收记录](design/agent-terminal-input-windows-acceptance.md)保留历史实机结果及证据索引。
+- [Linux x86_64 SSH](design/agent-terminal-input-linux-x86_64-ssh.md)与 [双 Shell SSH 故障恢复](design/agent-terminal-input-zle-ssh-recovery.md)记录专项验证范围和执行入口。
+- [ZLE 追加能力契约](../protocol/agent/runtime/native-zle-append.md)说明验证范围与启用条件。
 
-## 设计与历史证据
+## 后续设计与历史记录
 
 - [终端兼容与分阶段上线记录](../protocol/agent/runtime/terminal-execution-compatibility.md)
-- [Agent 执行安全与使用体验](design/agent-execution-safety-and-usability.md)及[沙箱实施计划](design/agent-sandbox-implementation-plan.md)：包含未实施目标，不能视为已交付生产沙箱。
-- [Petdex 动作联动验收记录](design/petdex-integration-acceptance.md)
-- [Petdex 消息气泡验收记录](design/petdex-message-integration-acceptance.md)
+- [本地 Agent 沙箱计划](design/agent-sandbox-implementation-plan.md)：本地 Docker 工作副本尚未交付。
 - [in-band 完成帧阶段 0 攻击记录](design/agent-direct-shell-execution-stage-0-gate.md)及[独立实验夹具](../tests/agent-direct-shell-gate/README.md)：保留被否决方案的反例，避免将终端输出当成可信完成信号。
 
-已被当前协议和验收清单覆盖的终端设计、路线图、阶段验收及显示复查，以及已完成的重复实施计划，统一通过 Git 历史查阅。保留文档中的历史文件清单按当时事实记录；历史通过结果不能作为当前源码的运行证明。
+原生终端旧批次、Petdex 阶段验收流水和旧权限设计通过 `git log -- docs/design/` 查阅。历史通过结果只覆盖当时的源码、制品和环境。新测试与验收产物写到 `artifacts/tests/`，本机产物不随仓库分发。

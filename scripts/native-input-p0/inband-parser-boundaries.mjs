@@ -19,7 +19,7 @@ const trials=packets.flatMap(({off,bytes})=>{
     prefix:raw.subarray(0,start+split).toString('base64'),suffix:bytes.subarray(split).toString('base64')}));
 });
 const assets={
-  '/xterm.js':[candidateRuntime('.artifacts/tests/native-input-p0/xterm-reflow-lab/xterm.js'),'application/javascript'],
+  '/xterm.js':[candidateRuntime('artifacts/tests/native-input-p0/xterm-reflow-lab/xterm.js'),'application/javascript'],
   '/webgl.js':['node_modules/@xterm/addon-webgl/lib/addon-webgl.js','application/javascript'],
   '/xterm.css':['node_modules/@xterm/xterm/css/xterm.css','text/css']
 };

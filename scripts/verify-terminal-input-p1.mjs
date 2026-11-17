@@ -10,7 +10,7 @@ import Ajv2020 from 'ajv/dist/2020.js';
 
 const root = path.resolve(import.meta.dirname, '..');
 process.chdir(root);
-const output = path.join(root, '.artifacts/tests/native-input-p0/p1-validation');
+const output = path.join(root, 'artifacts/tests/native-input-p0/p1-validation');
 await mkdir(output, { recursive: true });
 const steps = [];
 async function run(name, command, args, environment = {}) {
@@ -35,7 +35,7 @@ async function validateCaptures() {
       else if (entry.name.endsWith('control.bin')) files.push(file);
     }
   }
-  await walk('.artifacts/tests/native-input-p0/p1-evidence');
+  await walk('artifacts/tests/native-input-p0/p1-evidence');
   const counts = {};
   for (const file of files) {
     let count = 0;

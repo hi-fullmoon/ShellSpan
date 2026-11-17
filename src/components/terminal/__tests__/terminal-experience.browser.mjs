@@ -593,7 +593,7 @@ try {
         await page.keyboard.press('Tab');
         assert.equal(await takeover.evaluate(element => element === document.activeElement), true);
         await takeover.blur();
-        await bar.screenshot({ path: `${root}.artifacts/tests/terminal-lease/${locale}-compact.png` });
+        await bar.screenshot({ path: `${root}artifacts/tests/terminal-lease/${locale}-compact.png` });
       }
       await page.evaluate(() => {
         const { useTerminalTaskNavigation, useAiPanelStore, useFocusStore, useAppStore, agentTerminalLeaseState } = window.runtime;
@@ -606,10 +606,10 @@ try {
       assert.equal(await bar.getByRole('button').count(), 1, 'The displayed task must only retain takeover');
       if (locale === 'zh-CN' && width === 760) {
         assert.equal(await bar.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(255, 255, 255)');
-        await bar.screenshot({ animations: 'disabled', path: `${root}.artifacts/tests/terminal-lease/zh-CN-wide.png` });
+        await bar.screenshot({ animations: 'disabled', path: `${root}artifacts/tests/terminal-lease/zh-CN-wide.png` });
         await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
         assert.equal(await bar.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(32, 33, 34)');
-        await bar.screenshot({ animations: 'disabled', path: `${root}.artifacts/tests/terminal-lease/zh-CN-dark.png` });
+        await bar.screenshot({ animations: 'disabled', path: `${root}artifacts/tests/terminal-lease/zh-CN-dark.png` });
         await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
       }
       await page.evaluate(() => window.runtime.useAiPanelStore.getState().setOpen(false, 'terminal'));

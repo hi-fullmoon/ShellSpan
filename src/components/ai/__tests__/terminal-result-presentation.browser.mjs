@@ -10,7 +10,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
-const artifacts = join(root, '.artifacts/tests/terminal-result-presentation/browser');
+const artifacts = join(root, 'artifacts/tests/terminal-result-presentation/browser');
 await mkdir(artifacts, { recursive: true });
 
 function capture(command) {

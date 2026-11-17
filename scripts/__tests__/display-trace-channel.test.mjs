@@ -11,7 +11,7 @@ import {attachDisplayTraceChannel} from '../native-input-p3/display-trace-channe
 // Original: display-paste-checks/4500b306-e735-4298-bec6-da3bcee329ad/chromium.json.
 const captured=await readFile(resolve(import.meta.dirname,'fixtures/public-paste-trace-v5.json'));
 async function channel(selection,run){
- const directory=resolve(import.meta.dirname,'../../.artifacts/tests/display-trace-channel',randomUUID()),token=randomUUID();await mkdir(directory,{recursive:true,mode:0o700});
+ const directory=resolve(import.meta.dirname,'../../artifacts/tests/display-trace-channel',randomUUID()),token=randomUUID();await mkdir(directory,{recursive:true,mode:0o700});
  const vite=await createViteServer({root:directory,configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true},plugins:[{name:'actual-owned-trace-channel',configureServer(server){attachDisplayTraceChannel(server,token,directory,{nativeDaily:selection});}}]});
  const server=createServer(vite.middlewares);await new Promise(done=>server.listen(0,'127.0.0.1',done));
  try{await run({directory,url:`http://127.0.0.1:${server.address().port}/__native-display-trace/${token}`});}

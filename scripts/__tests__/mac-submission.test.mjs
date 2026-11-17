@@ -8,7 +8,7 @@ import {attachMacSubmissionWitness,macSubmissionControlMode,macSubmissionObserva
 import {macDailyAcceptance} from '../native-input-p3/mac-daily.mjs';
 
 it('admits only owned no-model submission cases without taking a visual or human receipt',()=>{
- const root=resolve('.artifacts/tests/mac-submission-selector');
+ const root=resolve('artifacts/tests/mac-submission-selector');
  const environment={SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:root,SHELLSPAN_DATA_DIR:join(root,'data'),SHELLSPAN_LOCAL_HOME:join(root,'home')};
  for(const selection of ['submission-zsh','submission-bash']){
   const values={'native-mac-daily':selection,'no-model':true,'data-scope':'com.shellspan.validation.native-input-p3'};
@@ -32,7 +32,7 @@ it('admits only owned no-model submission cases without taking a visual or human
 });
 
 it('retains actual filesystem effect observations and refuses writes and symlink effects over real HTTP',async()=>{
- const base=resolve('.artifacts/tests/mac-submission-witness');await mkdir(base,{recursive:true});const directory=await mkdtemp(join(base,'case-'));
+ const base=resolve('artifacts/tests/mac-submission-witness');await mkdir(base,{recursive:true});const directory=await mkdtemp(join(base,'case-'));
  const home=join(directory,'home');await mkdir(home);const token=randomUUID();
  const file=join(home,'phase3-effects'),linked=await mkdtemp(join(base,'linked-')),other=randomUUID();
  await mkdir(join(linked,'home'));await symlink(file,join(linked,'home','phase3-effects'));
@@ -50,7 +50,7 @@ it('retains actual filesystem effect observations and refuses writes and symlink
 
 it.each([{cut:'intent'},{cut:'input-complete',scenario:'input-complete-stop'},{cut:'armed',scenario:'armed-cancel'},{cut:'before-accept',scenario:'before-accept-takeover'},{cut:'prepare',scenario:'app-crash-prepare'},{cut:'key',scenario:'app-crash-key'},{cut:'accept-receipt',scenario:'timeout-unknown-accept'},{cut:'accept-receipt',scenario:'timeout-unknown-accept',settlement:true}])('releases the observed $cut nonce/PID without writing runtime or recovery state',async(configuration)=>{
  // These are control-file inputs for the HTTP guard, not native receipts or App proof.
- const base=resolve('.artifacts/tests/mac-submission-cut-control');await mkdir(base,{recursive:true});const directory=await mkdtemp(join(base,'case-')),token=randomUUID();
+ const base=resolve('artifacts/tests/mac-submission-cut-control');await mkdir(base,{recursive:true});const directory=await mkdtemp(join(base,'case-')),token=randomUUID();
  const vite=await createViteServer({root:directory,configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true},plugins:[{name:'cut-control-files',configureServer(server){attachMacSubmissionWitness(server,token,directory,configuration);}}]});
  const server=createServer(vite.middlewares);await new Promise(done=>server.listen(0,'127.0.0.1',done));
  const {settlement}=configuration,route=settlement?'settled-cut':'cut';

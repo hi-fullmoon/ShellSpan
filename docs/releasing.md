@@ -77,7 +77,7 @@ CI 发布顺序：
 
 main 和 PR 的独立 Quality Gate 仍执行原有前端及双平台检查。准备前的成功记录只用于允许分配版本号，不能替代发布提交本身的完整检查。发布流程仅复用同一次运行内的前端产物，不跨提交或跨运行复用构建产物。并行打包可缩短等待时间，但后端检查失败时已经执行的打包会消耗额外 runner 时间，产物不会公开。
 
-发布流程在 `src-tauri/target/native-input/` 构建并准备原生资源，在 `src-tauri/target/releases/` 写入临时打包配置、暂存和下载安装包，并组装发布附件。Quality Gate 复用已构建的 macOS 原生资源时，将其下载到 `.artifacts/tests/` 作为测试输入。
+发布流程在 `src-tauri/target/native-input/` 构建并准备原生资源，在 `src-tauri/target/releases/` 写入临时打包配置、暂存和下载安装包，并组装发布附件。Quality Gate 复用已构建的 macOS 原生资源时，将其下载到 `artifacts/tests/` 作为测试输入。
 
 ## 失败和恢复
 

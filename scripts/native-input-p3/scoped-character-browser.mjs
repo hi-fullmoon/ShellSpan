@@ -13,7 +13,7 @@ import {captureValidationSources} from '../native-input-p2/frozen-validation.mjs
 import {artifactWorkspace} from '../artifact-paths.mjs';
 const owner=resolve(import.meta.dirname,'../..'),input=resolve(process.argv[2]);
 const root=artifactWorkspace(input);
-const stage=JSON.parse(await readFile(resolve(root,'.artifacts/tests/native-input-p3/candidate-stage.json'),'utf8'));
+const stage=JSON.parse(await readFile(resolve(root,'artifacts/tests/native-input-p3/candidate-stage.json'),'utf8'));
 assert(stage.sealed&&stage.root===root);
 const sourceMap=JSON.parse(await readFile(resolve(stage.directory,'sources.json'),'utf8'));
 assert.deepEqual(captureValidationSources(root),sourceMap);
@@ -27,7 +27,7 @@ const corpus=JSON.parse(await readFile(resolve(input,'source-corpus.json'),'utf8
 assert.equal(corpus.length,3);assert(corpus.every(x=>x.actualFullInputProof));
 const wire=(await readFile(resolve(input,'control.jsonl'),'utf8')).trim().split('\n').map(JSON.parse);
 for(const entry of corpus)assert(wire.some(x=>x.requestId===`prepare-${entry.index}`&&x.payload.kind==='inputConfirmed'&&x.payload.sourceDigest===entry.sourceDigest&&x.payload.utf8Bytes===entry.utf8Bytes));
-const directory=resolve(owner,'.artifacts/tests/native-input-p3/scoped-character-browser',randomUUID());await mkdir(directory,{recursive:true});
+const directory=resolve(owner,'artifacts/tests/native-input-p3/scoped-character-browser',randomUUID());await mkdir(directory,{recursive:true});
 const python=process.env.SHELLSPAN_P3_PEXPECT_PYTHON??'/Library/Frameworks/Python.framework/Versions/3.14/bin/python3';
 const ordinaryCore=process.env.SHELLSPAN_P3_ORDINARY_CORE_PRODUCER;
 const baselines=[];

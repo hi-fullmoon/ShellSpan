@@ -5,7 +5,7 @@ import {randomUUID} from 'node:crypto';
 import {copySnapshotResources} from '../native-input-p3/acceptance-snapshot-resources.mjs';
 
 it('copies actual source bytes into regular independent files so validation metadata writes cannot alter retained inputs',()=>{
- const root=resolve(import.meta.dirname,'../..'),directory=resolve(root,'.artifacts/tests/snapshot-resource-copy',randomUUID()),source=resolve(directory,'source'),destination=resolve(directory,'destination');
+ const root=resolve(import.meta.dirname,'../..'),directory=resolve(root,'artifacts/tests/snapshot-resource-copy',randomUUID()),source=resolve(directory,'source'),destination=resolve(directory,'destination');
  mkdirSync(source,{recursive:true});
  const file='native-zle-source.c';copyFileSync(resolve(root,'src-tauri/native-input-editors/zle.c'),resolve(source,file));
  const original=readFileSync(resolve(source,file));copySnapshotResources(source,destination);

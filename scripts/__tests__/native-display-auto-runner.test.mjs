@@ -22,7 +22,7 @@ it.each([
  {args:valid,gate:'1',foreignHome:true},
  {args:[...valid,'--native-input-p3-startup-user-edit'],gate:'1',foreignHome:false},
 ])('rejects unsafe automatic display modes before starting an App: %j',({args,gate,foreignHome})=>{
- const evidence=p.join(root,'.artifacts/tests/native-display-auto-scope',randomUUID());
+ const evidence=p.join(root,'artifacts/tests/native-display-auto-scope',randomUUID());
  const value=spawnSync(process.execPath,[p.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{
   cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:gate,SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:p.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:foreignHome?p.join(evidence,'foreign'):p.join(evidence,'home'),SHELLSPAN_LOCAL_SHELL:'D:/Programs/PowerShell/7/pwsh.exe'},encoding:'utf8',timeout:10000,
  });

@@ -29,7 +29,7 @@ fn validate_owned_historical_session_corpus_readonly() {
     let input: Input = serde_json::from_slice(&fs::read(&plan).expect("read plan metadata"))
         .expect("decode bounded corpus plan");
     let owner = fs::canonicalize(&input.owner_root).expect("resolve explicit owner root");
-    let artifacts = fs::canonicalize(owner.join(".artifacts/tests")).expect("owned artifact root");
+    let artifacts = fs::canonicalize(owner.join("artifacts/tests")).expect("owned artifact root");
     assert!(fs::canonicalize(&plan).unwrap().starts_with(&artifacts));
     assert!(input.output.is_absolute());
     assert!(fs::canonicalize(input.output.parent().unwrap())

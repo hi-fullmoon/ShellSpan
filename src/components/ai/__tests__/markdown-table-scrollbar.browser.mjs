@@ -10,7 +10,7 @@ import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
-const artifacts = join(root, '.artifacts/tests/markdown-table-scrollbar');
+const artifacts = join(root, 'artifacts/tests/markdown-table-scrollbar');
 await mkdir(artifacts, { recursive: true });
 const source = await readFile(join(root, 'protocol/agent/runtime/terminal-execution-compatibility.md'), 'utf8');
 const document = unified().use(remarkParse).use(remarkGfm).parse(source);

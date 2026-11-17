@@ -9,7 +9,7 @@ import {chromium,webkit} from 'playwright';
 import {displayModuleJavaScript,installedRuntimeManifest} from '../../../../scripts/native-input-p0/formal-runtime.mjs';
 
 const root=resolve(import.meta.dirname,'../../../..'),capture=resolve(process.argv[2]??''),mode=process.argv[3]??'resize';
-assert(process.argv.length>=3&&process.argv.length<=4&&['resize','fit'].includes(mode)&&capture.includes('/.artifacts/tests/native-input-p2/phase2/'),'Supply one actual owned App capture and optional fit mode');
+assert(process.argv.length>=3&&process.argv.length<=4&&['resize','fit'].includes(mode)&&capture.includes('/artifacts/tests/native-input-p2/phase2/'),'Supply one actual owned App capture and optional fit mode');
 const read=p=>JSON.parse(readFileSync(p,'utf8')),sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const evidence=read(resolve(capture,'native-webview-evidence.json'));
 const traceBytes=readFileSync(resolve(capture,'native-display-trace.json')),visibleBytes=readFileSync(resolve(capture,'native-display-visible-output.utf8'));
@@ -23,7 +23,7 @@ assert.equal(last.label,'failure');assert.equal(evidence.records.at(-1).reason,'
 const original=JSON.parse(last.stateJson);assert.equal(original.columns,127);
 const runtime=await installedRuntimeManifest(),display=await displayModuleJavaScript();
 const assets={'/xterm.js':'node_modules/@xterm/xterm/lib/xterm.js','/xterm.css':'node_modules/@xterm/xterm/css/xterm.css','/fit.js':'node_modules/@xterm/addon-fit/lib/addon-fit.js','/unicode.js':'node_modules/@xterm/addon-unicode11/lib/addon-unicode11.js','/webgl.js':'node_modules/@xterm/addon-webgl/lib/addon-webgl.js','/search.js':'node_modules/@xterm/addon-search/lib/addon-search.js'};
-const output=resolve(root,'.artifacts/tests/native-viewport-capture',randomUUID());mkdirSync(output,{recursive:true,mode:0o700});
+const output=resolve(root,'artifacts/tests/native-viewport-capture',randomUUID());mkdirSync(output,{recursive:true,mode:0o700});
 const server=createServer((request,response)=>{
  if(request.url==='/display.js'){response.setHeader('Content-Type','application/javascript');response.end(display);return;}
  const file=assets[request.url];response.setHeader('Content-Type',file?(file.endsWith('.css')?'text/css':'application/javascript'):'text/html');

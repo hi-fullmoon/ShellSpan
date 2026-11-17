@@ -14,7 +14,7 @@ const cwd = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sandboxPath = '/srv/shellspan-workspaces/project';
 const runId = randomUUID();
 const image = `shellspan-bwrap-acceptance:${runId}`;
-const artifacts = resolve(cwd, '.artifacts/tests/remote-sandbox');
+const artifacts = resolve(cwd, 'artifacts/tests/remote-sandbox');
 mkdirSync(artifacts, { recursive: true });
 const evidence = mkdtempSync(resolve(artifacts, 'linux-'));
 const docker = (args) => execFileSync('docker', args, { cwd, encoding: 'utf8' }).trim();

@@ -5,7 +5,7 @@ import {readWindowsHistoryReuseReceipt, readWindowsHistoryReuseCase} from '../na
 import {readOwnedHistoryJson} from '../native-input-p3/windows-history-witness.mjs';
 
 function fixture(){
- const root=p.resolve(import.meta.dirname,'../../.artifacts/tests/history-reuse-witness',randomUUID());fs.mkdirSync(p.join(root,'home'),{recursive:true});fs.mkdirSync(p.join(root,'data'));
+ const root=p.resolve(import.meta.dirname,'../../artifacts/tests/history-reuse-witness',randomUUID());fs.mkdirSync(p.join(root,'home'),{recursive:true});fs.mkdirSync(p.join(root,'data'));
  const plan=prepareWindowsHistoryReuseProfile({host:'powerShell7',mode:'history-default',maximumVariable:'int71',evidence:root,home:p.join(root,'home'),data:p.join(root,'data'),reuseId:randomUUID()});
  const expected={host:plan.host,mode:plan.mode,reuseId:plan.reuseId,pid:2345,created:'2026-11-08T01:00:00.1234567Z',seedApplied:false,beforeReader:{exists:true,bytes:37,sha256:createHash('sha256').update('prior actual disk witness').digest('hex')}};
  const launch=p.join(plan.launches,'2345-639296964001234567.json');

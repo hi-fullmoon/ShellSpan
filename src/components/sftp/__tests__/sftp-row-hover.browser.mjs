@@ -8,7 +8,7 @@ import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
-const artifacts = join(root, '.artifacts/tests/sftp-row-hover');
+const artifacts = join(root, 'artifacts/tests/sftp-row-hover');
 await mkdir(artifacts, { recursive: true });
 // Read real repository entries; the browser renders the production list and selection logic.
 const entries = await Promise.all(['src', 'AGENTS.md', 'package.json'].map(async name => {

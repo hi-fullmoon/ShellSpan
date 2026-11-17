@@ -11,7 +11,7 @@ required SSH resources are missing.
 
 Clean Cargo/dev builds create only an empty staging directory for Tauri resource
 discovery; they do not generate or admit any native profile. Isolated validation
-preparation remains under `.artifacts/tests/` and does not replace release input.
+preparation remains under `artifacts/tests/` and does not replace release input.
 
 Generated binaries are excluded from Git. The Tauri resource map preserves
 `native-input/generated/` in the final bundle; release loading uses that

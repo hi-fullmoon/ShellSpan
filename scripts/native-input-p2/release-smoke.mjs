@@ -15,7 +15,7 @@ const root=resolve(import.meta.dirname,'../..');
 assert(process.platform==='darwin'&&process.arch==='arm64');
 const shell=process.argv[2]??'bash';
 assert(process.argv.length<=3&&['bash','zsh'].includes(shell),'Select packaged Bash or Zsh');
-const directory=resolve(root,'.artifacts/tests/native-input-p2/release-smoke',randomUUID());await mkdir(directory,{recursive:true,mode:0o700});
+const directory=resolve(root,'artifacts/tests/native-input-p2/release-smoke',randomUUID());await mkdir(directory,{recursive:true,mode:0o700});
 const token=randomUUID();let settle;
 const result=new Promise(resolve=>{settle=resolve;});
 const server=createServer(async(request,response)=>{
@@ -40,7 +40,7 @@ try{
   await build({configFile:false,root,base:'/',logLevel:'error',resolve:{alias:{'@':resolve(root,'src')}},plugins:[react(),tailwindcss()],define:{__NATIVE_P2_RELEASE_REPORT__:JSON.stringify(report)},build:{outDir:frontend,emptyOutDir:true,rolldownOptions:{input:resolve(root,'src/components/terminal/__tests__/native-input-p2-release.native.html')}}});
   const config={identifier:'com.shellspan.validation.native-input-p2-release',build:{beforeBuildCommand:'',frontendDist:packageFrontendDirectory(root,frontend)},app:{windows:[{label:'main',url:'src/components/terminal/__tests__/native-input-p2-release.native.html',width:1200,height:800}],security:{csp:`default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost ${new URL(report).origin}; font-src 'self' data:`}},bundle:{createUpdaterArtifacts:false,macOS:{signingIdentity:'Apple Development'}}};
   await writeFile(resolve(directory,'tauri-config.json'),JSON.stringify(config,null,2));
-  const target=resolve(root,'.artifacts/tests/native-input-p2/release-target');
+  const target=resolve(root,'artifacts/tests/native-input-p2/release-target');
   await run('pnpm',['exec','tauri','build','--bundles','app','--config',resolve(directory,'tauri-config.json')],{...process.env,CARGO_TARGET_DIR:target});
   const bundle=resolve(target,'release/bundle/macos/ShellSpan.app');
   execFileSync('/usr/bin/codesign',['--verify','--deep','--strict',bundle],{stdio:'pipe'});
@@ -51,7 +51,7 @@ try{
   const executable=resolve(resource,shell==='bash'?`${profileId}/bash`:accepted.shell);
   const data=resolve(directory,'data');const home=resolve(directory,'home');await mkdir(data);await mkdir(home);
   // Select the actual packaged executable. The release loader must locate
-  // its adapter from resource_dir(), with no debug .artifacts/tests/native-input-p2 fallback.
+  // its adapter from resource_dir(), with no debug artifacts/tests/native-input-p2 fallback.
   releaseGui=await acquireNativeGui();
   child=spawn(resolve(bundle,'Contents/MacOS/ShellSpan'),[],{cwd:directory,env:{...process.env,SHELLSPAN_DATA_DIR:data,SHELLSPAN_LOCAL_HOME:home,SHELL:executable,SHELLSPAN_TERMINAL_BROKER:'1',SHELLSPAN_TERMINAL_SHELL_INTEGRATION:'1',SHELLSPAN_TERMINAL_EXECUTE:'1'},stdio:'ignore'});
   child.once('exit',code=>settle({ok:false,error:`Packaged app exited before evidence (${code})`}));

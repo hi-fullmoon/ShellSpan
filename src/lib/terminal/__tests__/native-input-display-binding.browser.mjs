@@ -8,11 +8,11 @@ import { chromium, webkit } from 'playwright';
 import { displayModuleJavaScript, installedRuntimeManifest } from '../../../../scripts/native-input-p0/formal-runtime.mjs';
 
 const installed = await installedRuntimeManifest();
-const output = path.resolve('.artifacts/tests/native-input-p0/p1-evidence/display-binding');
+const output = path.resolve('artifacts/tests/native-input-p0/p1-evidence/display-binding');
 await mkdir(output, { recursive: true });
 const captures = {};
 for (const name of ['commit', 'stdout-partial-eof']) {
-  const bytes = await readFile(`.artifacts/tests/native-input-p0/p1-evidence/${name}/pty.bin`);
+  const bytes = await readFile(`artifacts/tests/native-input-p0/p1-evidence/${name}/pty.bin`);
   captures[name] = { bytes: [...bytes], sha256: createHash('sha256').update(bytes).digest('hex') };
 }
 const assets = {

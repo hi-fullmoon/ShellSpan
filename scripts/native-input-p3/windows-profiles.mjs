@@ -21,6 +21,6 @@ export function windowsValidationPaths(evidence){
 export function windowsShortSnapshotLocation(owner,id){
   assert(typeof owner==='string'&&isAbsolute(owner),'Windows snapshot requires an absolute owner directory');
   assert(/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(id),'Windows snapshot requires a UUID');
-  const directory=resolve(owner,'.artifacts/tests/p3',id.replaceAll('-','').slice(0,8));
+  const directory=resolve(owner,'artifacts/tests/p3',id.replaceAll('-','').slice(0,8));
   return {directory,root:resolve(directory,'s')};
 }

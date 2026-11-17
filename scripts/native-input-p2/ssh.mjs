@@ -9,7 +9,7 @@ import {bashProfileId,BASH_READLINE_VERSIONS} from './bash-profiles.mjs';
 const root=resolve(import.meta.dirname,'../..');
 const configuration=`Port 22229\nListenAddress 0.0.0.0\nHostKey /tmp/nip-sshd/host_key\nPidFile /tmp/nip-sshd/pid\nPasswordAuthentication yes\nKbdInteractiveAuthentication no\nUsePAM no\nPermitRootLogin no\nAllowUsers native41* native44* native53* nativeRaw\nSubsystem sftp internal-sftp\nSetEnv LANG=en_US.UTF-8\nPrintMotd no\nLogLevel ERROR\n`;
 const target='linux-aarch64-glibc-2.36';
-const resources=resolve(root,'.artifacts/tests/native-input-p2/resources/native-input');
+const resources=resolve(root,'artifacts/tests/native-input-p2/resources/native-input');
 const users={'4.1':'native41','4.4':'native44','5.3':'native53'};
 function readProfiles(){
   const catalogue=JSON.parse(readFileSync(resolve(resources,`catalogue-${target}.json`),'utf8'));
@@ -37,7 +37,7 @@ if(process.argv[2]==='--from-resources'){
   const noSftp=process.argv[4]==='--no-sftp',unknownMain=process.argv[4]==='--unknown-main';
   assert(process.argv.length===(noSftp||unknownMain?5:4),'Unknown owned fixture option');
   const profiles=readProfiles();
-  const id=randomUUID(),directory=resolve(root,'.artifacts/tests/native-input-p2/ssh',id),container=`shellspan-nip-p2-${id}`;
+  const id=randomUUID(),directory=resolve(root,'artifacts/tests/native-input-p2/ssh',id),container=`shellspan-nip-p2-${id}`;
   mkdirSync(directory,{recursive:true,mode:0o700});
   const owner={id,container,image,imageId:image,root,directory,...(unknownMain?{mainVariant:'unknown'}:{})};
   writeFileSync(resolve(directory,'owner.json'),JSON.stringify(owner,null,2),{mode:0o600});
@@ -77,10 +77,10 @@ if(process.argv[2]==='--from-resources'){
   assert(fixture.container===`shellspan-nip-p2-${label}`);
   if(process.argv[2]==='--stop')execFileSync('docker',['rm','-f',fixture.container],{stdio:'ignore'});
   else{
-    assert(resolve(fixture.directory).startsWith(resolve(root,'.artifacts/tests/native-input-p2/ssh')+'/'));
+    assert(resolve(fixture.directory).startsWith(resolve(root,'artifacts/tests/native-input-p2/ssh')+'/'));
     const profiles=readProfiles();
     writeFileSync(resolve(fixture.directory,'sshd_config'),configuration,{mode:0o600});
-    execFileSync('docker',['exec',fixture.container,'/usr/sbin/sshd','-t','-f',`/work/.artifacts/tests/native-input-p2/ssh/${label}/sshd_config`]);
+    execFileSync('docker',['exec',fixture.container,'/usr/sbin/sshd','-t','-f',`/work/artifacts/tests/native-input-p2/ssh/${label}/sshd_config`]);
     const pid=execFileSync('docker',['exec',fixture.container,'cat','/tmp/nip-sshd/pid'],{encoding:'utf8'}).trim();assert(/^\d+$/.test(pid));
     execFileSync('docker',['exec',fixture.container,'kill','-HUP',pid]);
     execFileSync('docker',['cp',resolve(import.meta.dirname,'system-profile-audit.sh'),`${fixture.container}:/etc/profile.d/shellspan-p2-audit.sh`]);
@@ -92,19 +92,19 @@ if(process.argv[2]==='--from-resources'){
   }
 }else{
   const id=randomUUID();
-  const directory=resolve(root,'.artifacts/tests/native-input-p2/ssh',id);
+  const directory=resolve(root,'artifacts/tests/native-input-p2/ssh',id);
   mkdirSync(directory,{recursive:true,mode:0o700});
-  mkdirSync(resolve(root,'.artifacts/tests/native-input-p2/cargo-registry'),{recursive:true});
+  mkdirSync(resolve(root,'artifacts/tests/native-input-p2/cargo-registry'),{recursive:true});
   const server=createServer();
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const port=server.address().port;
   await new Promise(resolve=>server.close(resolve));
   const container=`shellspan-nip-p2-${id}`;
   execFileSync('docker',['run','-d','--name',container,'--label',`shellspan.native-input-p2=${id}`,
-    '-p',`127.0.0.1:${port}:22229`,'-v',`${root}:/work`,'-v',`${resolve(root,'.artifacts/tests/native-input-p2/cargo-registry')}:/usr/local/cargo/registry`,
+    '-p',`127.0.0.1:${port}:22229`,'-v',`${root}:/work`,'-v',`${resolve(root,'artifacts/tests/native-input-p2/cargo-registry')}:/usr/local/cargo/registry`,
     'shellspan-native-input-p2:local','sleep','infinity'],{stdio:'pipe'});
   const log=openSync(resolve(directory,'build.log'),'wx',0o600);
-  const build=spawn('docker',['exec','-e','SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests',container,'python3','scripts/native-input-p2/build.py'],{stdio:['ignore',log,log]});
+  const build=spawn('docker',['exec','-e','SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests',container,'python3','scripts/native-input-p2/build.py'],{stdio:['ignore',log,log]});
   const code=await new Promise((resolve,reject)=>{build.once('error',reject);build.once('exit',resolve);});
   closeSync(log);
   writeFileSync(resolve(directory,'build-result.json'),JSON.stringify({exitCode:code}));
@@ -115,7 +115,7 @@ if(process.argv[2]==='--from-resources'){
   execFileSync('docker',['exec',container,'mkdir','-m','700','/tmp/nip-sshd']);
   execFileSync('docker',['exec',container,'ssh-keygen','-q','-t','ed25519','-N','','-f','/tmp/nip-sshd/host_key']);
   execFileSync('docker',['cp',resolve(import.meta.dirname,'system-profile-audit.sh'),`${container}:/etc/profile.d/shellspan-p2-audit.sh`]);
-  const path=`/work/.artifacts/tests/native-input-p2/ssh/${id}/sshd_config`;
+  const path=`/work/artifacts/tests/native-input-p2/ssh/${id}/sshd_config`;
   execFileSync('docker',['exec','-d',container,'/usr/sbin/sshd','-D','-e','-f',path]);
   const fixture={container,port,host:'127.0.0.1',users:profiles.map(profile=>users[profile.bashVersion]),image:'shellspan-native-input-p2:local',directory};
   writeFileSync(resolve(directory,'fixture.json'),JSON.stringify(fixture,null,2),{mode:0o600});

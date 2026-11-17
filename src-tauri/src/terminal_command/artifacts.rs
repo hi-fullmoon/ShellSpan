@@ -236,7 +236,7 @@ pub(crate) fn resource_root(app: &tauri::AppHandle) -> Result<std::path::PathBuf
     }
     if cfg!(debug_assertions) {
         Ok(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../.artifacts/tests/native-input-p2/resources/native-input"))
+            .join("../artifacts/tests/native-input-p2/resources/native-input"))
     } else {
         app.path()
             .resource_dir()

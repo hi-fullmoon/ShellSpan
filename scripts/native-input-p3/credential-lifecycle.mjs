@@ -6,7 +6,7 @@ export const credentialLifecyclePhases = ['initiallyAbsent', 'stored', 'roundtri
 export function credentialLifecycleWindowOptions(enabled) { return {visible: !enabled, focus: !enabled}; }
 export function createCredentialLifecycleWitness(directory, token) {
   assert(isAbsolute(directory) && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(token), 'Exact owned credential evidence/token required');
-  const artifacts = resolve(import.meta.dirname, '../../.artifacts/tests');assert(resolve(directory).toLowerCase().startsWith(artifacts.toLowerCase() + sep), 'Credential witness must remain in owned test artifacts');
+  const artifacts = resolve(import.meta.dirname, '../../artifacts/tests');assert(resolve(directory).toLowerCase().startsWith(artifacts.toLowerCase() + sep), 'Credential witness must remain in owned test artifacts');
   for (let cursor = resolve(directory);; cursor = dirname(cursor)) { const info = lstatSync(cursor);assert(info.isDirectory() && !info.isSymbolicLink(), 'Invalid owned credential evidence ancestor');if (cursor.toLowerCase() === artifacts.toLowerCase()) break;assert(dirname(cursor) !== cursor, 'Credential witness ancestor escaped'); }
   const reference = 'native-e07-' + token, file = join(resolve(directory), 'data/shellspan-main.db'), checkpoints = [];
   writeFileSync(join(directory, 'credential-reservation.json'), JSON.stringify({version: 1, reference, service: 'com.shellspan.dev.profile-password', metadataService: 'com.shellspan.profile-password', reservedOnly: true, normalCreateApi: 'store_profile_password', secretReceived: false}, null, 2), {flag: 'wx', mode: 0o600});

@@ -58,7 +58,7 @@ uses the pinned Readline 8.3.6 sources; actual source versions and checksums
 remain in the build manifests.
 
 Builds, raw PTY/control captures, timelines, command results and summaries stay
-under the ignored `.artifacts/tests/native-input-p0/` directory. Freeze sources, dependencies,
+under the ignored `artifacts/tests/native-input-p0/` directory. Freeze sources, dependencies,
 artifacts and actual loaded binaries for each new batch. Historical captured
 bytes and failures remain unchanged; old captures do not validate current code.
 

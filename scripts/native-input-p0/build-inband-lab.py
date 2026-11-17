@@ -5,12 +5,12 @@ import shutil
 import subprocess
 from acceptance import ROOT
 
-out=ROOT/'.artifacts/tests/native-input-p0/inband-display-lab';out.mkdir(parents=True,exist_ok=True)
+out=ROOT/'artifacts/tests/native-input-p0/inband-display-lab';out.mkdir(parents=True,exist_ok=True)
 source=out/'bridge.c';shutil.copy2(ROOT/'scripts/native-input-p0/bridge.c',source)
 patch=ROOT/'scripts/native-input-p0/inband-display.patch'
 subprocess.run(['patch','--batch','-p1','-i',str(patch)],cwd=out,check=True)
-build=ROOT/'.artifacts/tests/native-input-p0/build-darwin'
-upstream=ROOT/'.artifacts/tests/native-input-p0/upstream/bash-5.3'
+build=ROOT/'artifacts/tests/native-input-p0/build-darwin'
+upstream=ROOT/'artifacts/tests/native-input-p0/upstream/bash-5.3'
 includes=[build/'readline-8.3.6/install/include',build/'bash-5.3-readline-8.3.6',upstream,upstream/'include']
 library=build/'debug/libshellspan_native_input_p0.a'
 subprocess.run(['cc','-bundle','-undefined','dynamic_lookup',*[f'-I{p}' for p in includes],

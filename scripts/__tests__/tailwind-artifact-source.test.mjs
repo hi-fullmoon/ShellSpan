@@ -7,14 +7,14 @@ const owner = resolve(import.meta.dirname, '../..');
 
 describe('Tailwind generated-source boundary in a frozen copy without Git metadata', () => {
   it('excludes retained artifacts, including a real FIFO on Unix, while compiling shared-control classes', async () => {
-    const parent = resolve(owner, '.artifacts/tests/tailwind-source');
+    const parent = resolve(owner, 'artifacts/tests/tailwind-source');
     await mkdir(parent, { recursive: true });
     const root = await mkdtemp(resolve(parent, 'frozen-'));
     for (const path of ['.gitignore', 'src/styles/base.css', 'src/components/ui/button.tsx']) {
       await mkdir(dirname(resolve(root, path)), { recursive: true });
       await copyFile(resolve(owner, path), resolve(root, path));
     }
-    const generated = ['.artifacts', 'src-tauri/target'];
+    const generated = ['artifacts', '.artifacts', 'src-tauri/target'];
     for (const directory of generated) {
       const ignored = resolve(root, directory, 'retained');
       await mkdir(ignored, { recursive: true });

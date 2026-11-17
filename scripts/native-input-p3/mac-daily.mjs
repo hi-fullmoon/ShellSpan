@@ -40,7 +40,7 @@ export function macHumanFinalEvidenceWindow(startedAt,value){
 
 export async function macDailyAppConfiguration(root,directory,token,{submission=false,passiveWindow=false}={}){
  assert(/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(token)&&isAbsolute(root)&&isAbsolute(directory),'Exact native case identity required');
- assert(relative(root,directory).startsWith(['.artifacts','tests','native-input-p2',''].join(sep)),'Window data must stay in the owned frozen case');
+ assert(relative(root,directory).startsWith(['artifacts','tests','native-input-p2',''].join(sep)),'Window data must stay in the owned frozen case');
  const base=JSON.parse(await readFile(resolve(root,'src-tauri/tauri.conf.json'),'utf8'));
  const development=JSON.parse(await readFile(resolve(root,'src-tauri/tauri.dev.conf.json'),'utf8'));
  const windows=development.app?.windows??base.app?.windows;

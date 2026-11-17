@@ -19,6 +19,7 @@ export default defineConfig({
       'node_modules',
       'dist',
       '**/.worktrees/**',
+      '**/artifacts/**',
       '**/.artifacts/**',
       '**/src-tauri/target/**',
       '**/scripts/native-input-p0/target/**',

@@ -77,7 +77,7 @@ export function parseSshRecoveryArgs(args) {
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 
 export function readOwnedSshFixture(root, argument, bash = false) {
-  const base = resolve(root, '.artifacts/tests/native-input-p2/ssh');
+  const base = resolve(root, 'artifacts/tests/native-input-p2/ssh');
   const file = resolve(argument);
   assert(file.startsWith(`${base}/`) && file.endsWith('/fixture.json'), 'Use a ZLE fixture from this sealed source root');
   const id = file.slice(base.length + 1, -'/fixture.json'.length);

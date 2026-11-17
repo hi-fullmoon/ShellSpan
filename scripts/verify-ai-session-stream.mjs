@@ -585,7 +585,7 @@ const boundaryFixtureModule=boundaryNoInference?await import('./native-input-p3/
 const boundaryFixture=boundaryFixtureModule?.createNativeBoundaryFixture(token,Number(byteBoundary));
 const ownedEvidenceDirectory = process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR;
 const sshCredentialInitialization = Boolean(initializationRun && credentialMode && values['data-scope']==='com.shellspan.validation.native-input-p3'
-  && ownedEvidenceDirectory && /^\.artifacts\/tests\/native-input-p2\/ssh-recovery\/[a-f0-9-]{36}$/.test(relative(repository, ownedEvidenceDirectory)));
+  && ownedEvidenceDirectory && /^artifacts\/tests\/native-input-p2\/ssh-recovery\/[a-f0-9-]{36}$/.test(relative(repository, ownedEvidenceDirectory)));
 assert(!observedInitialization||ownedEvidenceDirectory&&isAbsolute(ownedEvidenceDirectory),'Observed initialization requires an owned absolute evidence directory');
 const windowsOutputMarker = windowsShell ? `native-jobs-${randomUUID()}` : undefined;
 const windowsCompletionGate = windowsShell ? resolve(ownedEvidenceDirectory ?? tmpdir(), `shellspan-completion-gate-${token}`) : undefined;
@@ -706,10 +706,10 @@ const attachResult = (vite) => {
     try{const receipt=await readInitializationObserver(ownedEvidenceDirectory,token,frozenManifestPath);response.setHeader('Content-Type','application/json');response.end(JSON.stringify(receipt));}
     catch{response.writeHead(409).end('Owned initializer OS identity unavailable');}
   });
-  if(stopBoundary){const handler=createStopBoundaryWitness({ownedRoot:resolve(repository,'.artifacts/tests'),evidence:ownedEvidenceDirectory,home:process.env.SHELLSPAN_LOCAL_HOME,token,selection:stopBoundary});vite.middlewares.use(`/__native-stop-boundary/${token}`,(request,response)=>{void handler.then(run=>run(request,response)).catch(()=>response.writeHead(409).end('Owned stop-boundary inputs unavailable'));});}
+  if(stopBoundary){const handler=createStopBoundaryWitness({ownedRoot:resolve(repository,'artifacts/tests'),evidence:ownedEvidenceDirectory,home:process.env.SHELLSPAN_LOCAL_HOME,token,selection:stopBoundary});vite.middlewares.use(`/__native-stop-boundary/${token}`,(request,response)=>{void handler.then(run=>run(request,response)).catch(()=>response.writeHead(409).end('Owned stop-boundary inputs unavailable'));});}
   if(captureTail){
     assert(!process.env.SHELLSPAN_CAPTURE_TAIL_EOF||process.env.SHELLSPAN_CAPTURE_TAIL_EOF==='1','Explicit capture-tail EOF mode required');
-    const handler=createCaptureTailWitness({ownedRoot:resolve(repository,'.artifacts/tests'),evidence:ownedEvidenceDirectory,token,library:process.env.SHELLSPAN_CAPTURE_TAIL_DLL,librarySha256:process.env.SHELLSPAN_CAPTURE_TAIL_DLL_SHA256,eof:process.env.SHELLSPAN_CAPTURE_TAIL_EOF==='1'});
+    const handler=createCaptureTailWitness({ownedRoot:resolve(repository,'artifacts/tests'),evidence:ownedEvidenceDirectory,token,library:process.env.SHELLSPAN_CAPTURE_TAIL_DLL,librarySha256:process.env.SHELLSPAN_CAPTURE_TAIL_DLL_SHA256,eof:process.env.SHELLSPAN_CAPTURE_TAIL_EOF==='1'});
     vite.middlewares.use(`/__native-capture-tail/${token}`,(request,response)=>{void handler.then(run=>run(request,response)).catch(()=>response.writeHead(409).end('Owned capture-tail inputs unavailable'));});
   }
   if(lateReceipt)vite.middlewares.use(`/__native-late-receipt/${token}`,async(request,response)=>{
@@ -1366,7 +1366,7 @@ try {
   if(values['native-input-p2-ssh-fixture']){
     assert(values['native-input-p2']&&values['native-jobs'],'P2 SSH requires the explicit native acceptance mode');
     const fixturePath=resolve(values['native-input-p2-ssh-fixture']);
-    assert(fixturePath.startsWith(resolve(repository,'.artifacts/tests/native-input-p2/ssh')+'/'),'SSH fixture must belong to this isolated task root');
+    assert(fixturePath.startsWith(resolve(repository,'artifacts/tests/native-input-p2/ssh')+'/'),'SSH fixture must belong to this isolated task root');
     const fixture=JSON.parse(await readFile(fixturePath,'utf8'));
     assert(fixture.host==='127.0.0.1'&&Number.isInteger(fixture.port)&&fixture.port>1024);
     assert(/^shellspan-nip-p2-[a-f0-9-]{36}$/.test(fixture.container));
@@ -1411,7 +1411,7 @@ try {
     }] } } : nativeDaily||macLocalLifecycle?{app:await macDailyAppConfiguration(repository,ownedEvidenceDirectory,token,{
       submission:nativeDaily?.startsWith('submission-'),passiveWindow:nativeDaily?.startsWith('raw-'),
     })}:{}),
-  })], { cwd: repository, env: frozenNativeRun?{...nativeEnvironment,CARGO_TARGET_DIR:(values['data-scope']==='com.shellspan.validation.native-input-p3'||macLocalLifecycle||nativeRaw)&&process.env.SHELLSPAN_P3_BUILD_CACHE?process.env.SHELLSPAN_P3_BUILD_CACHE:resolve(repository,'.artifacts/tests/native-input-p2/frozen-target'),SHELLSPAN_ACCEPTANCE_FROZEN_MANIFEST:frozenManifestPath,
+  })], { cwd: repository, env: frozenNativeRun?{...nativeEnvironment,CARGO_TARGET_DIR:(values['data-scope']==='com.shellspan.validation.native-input-p3'||macLocalLifecycle||nativeRaw)&&process.env.SHELLSPAN_P3_BUILD_CACHE?process.env.SHELLSPAN_P3_BUILD_CACHE:resolve(repository,'artifacts/tests/native-input-p2/frozen-target'),SHELLSPAN_ACCEPTANCE_FROZEN_MANIFEST:frozenManifestPath,
     ...(frozenWindows?{RUSTUP_TOOLCHAIN:'1.95.0-x86_64-pc-windows-msvc',CARGO_BUILD_TARGET:'x86_64-pc-windows-msvc'}:{})}:nativeEnvironment, stdio: ['ignore', 'ignore', 'inherit'], detached: process.platform !== 'win32' });
   child.once('error', (error) => settle({ ok: false, error: error.message }));
   child.once('exit', (code) => settle({ ok: false, error: `Tauri exited before reporting results (${code})` }));
@@ -1492,8 +1492,8 @@ try {
     if(processes.length){
       frozenImageStarted=true;const application=processes[0];
       const frozenSource=JSON.parse(await readFile(frozenManifestPath,'utf8'));
-      const isolatedImage=frozenWindows?values['data-scope']==='com.shellspan.validation.native-input-p3':frozenSource.root.includes('.artifacts/tests/native-input-p3/acceptance-source/');
-      const imageParent=isolatedImage?ownedEvidenceDirectory:resolve(repository,'.artifacts/tests/native-input-p2/frozen-target');
+      const isolatedImage=frozenWindows?values['data-scope']==='com.shellspan.validation.native-input-p3':frozenSource.root.includes('artifacts/tests/native-input-p3/acceptance-source/');
+      const imageParent=isolatedImage?ownedEvidenceDirectory:resolve(repository,'artifacts/tests/native-input-p2/frozen-target');
       assert(Number.isSafeInteger(application.appPid)&&application.appPid>1&&application.executable.startsWith(imageParent+sep));
       if(frozenWindows){
         execFileSync('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-File',resolve(repository,'scripts/native-input-p3/windows-image.ps1'),

@@ -109,9 +109,7 @@ impl NativeShell {
                 manifest_path
                     .map(std::path::Path::to_path_buf)
                     .unwrap_or_else(|| {
-                        root.join(
-                            ".artifacts/tests/native-input-p0/p1-protocol-build/manifest.json",
-                        )
+                        root.join("artifacts/tests/native-input-p0/p1-protocol-build/manifest.json")
                     }),
             )
             .expect("run the NIP source builder"),
@@ -160,9 +158,9 @@ impl NativeShell {
             .map(|root| root.join("evidence"))
             .unwrap_or_else(|| {
                 root.join(if manifest_path.is_some() {
-                    ".artifacts/tests/native-input-p2/capture-evidence"
+                    "artifacts/tests/native-input-p2/capture-evidence"
                 } else {
-                    ".artifacts/tests/native-input-p0/p1-evidence"
+                    "artifacts/tests/native-input-p0/p1-evidence"
                 })
             })
             .join(case);
@@ -527,14 +525,14 @@ fn production_bash_profiles(
     root: &std::path::Path,
     target: &str,
 ) -> Vec<crate::terminal_command::artifacts::NativeArtifact> {
-    let resources = root.join(".artifacts/tests/native-input-p2/resources/native-input");
+    let resources = root.join("artifacts/tests/native-input-p2/resources/native-input");
     let profiles = crate::terminal_command::artifacts::read_catalogue(&resources, target).unwrap();
     assert!(!profiles.is_empty(), "No native Bash profiles for {target}");
     profiles
 }
 
 #[test]
-#[ignore = "set SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests and run python3 scripts/native-input-p2/build.py"]
+#[ignore = "set SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests and run python3 scripts/native-input-p2/build.py"]
 fn native_production_private_widget_restores_real_stream_after_signal_and_control_eof() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -544,7 +542,7 @@ fn native_production_private_widget_restores_real_stream_after_signal_and_contro
     for artifact in production_bash_profiles(&root, "macos-arm64") {
         let version = artifact.bash_version;
         let manifest = root
-            .join(".artifacts/tests/native-input-p2/producers")
+            .join("artifacts/tests/native-input-p2/producers")
             .join(&artifact.id)
             .join("manifest.json");
         for fault in ["normal", "interrupt", "control-eof"] {
@@ -876,7 +874,7 @@ fn native_production_private_widget_restores_real_stream_after_signal_and_contro
 }
 // The type is private to the Broker module; this alias exposes no new writer.
 #[test]
-#[ignore = "set SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests and run python3 scripts/native-input-p2/build.py"]
+#[ignore = "set SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests and run python3 scripts/native-input-p2/build.py"]
 fn native_production_geometry_unicode_and_real_resize() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -887,7 +885,7 @@ fn native_production_geometry_unicode_and_real_resize() {
     for artifact in production_bash_profiles(&root, "macos-arm64") {
         let version = artifact.bash_version;
         let manifest = root
-            .join(".artifacts/tests/native-input-p2/producers")
+            .join("artifacts/tests/native-input-p2/producers")
             .join(&artifact.id)
             .join("manifest.json");
         for columns in [32, 40, 100, 180] {
@@ -1139,12 +1137,12 @@ fn native_production_geometry_unicode_and_real_resize() {
         );
     }
     let summary = root
-        .join(".artifacts/tests/native-input-p2/capture-evidence")
+        .join("artifacts/tests/native-input-p2/capture-evidence")
         .join(run)
         .join("geometry-summary.json");
     fs::write(&summary, serde_json::to_vec_pretty(&entries).unwrap()).unwrap();
     fs::write(
-        root.join(".artifacts/tests/native-input-p2/latest-geometry.json"),
+        root.join("artifacts/tests/native-input-p2/latest-geometry.json"),
         serde_json::to_vec(&serde_json::json!({"summary":summary})).unwrap(),
     )
     .unwrap();
@@ -1163,7 +1161,7 @@ fn native_linux_geometry_inputs() {
     let artifacts = production_bash_profiles(&root, "linux-aarch64-glibc-2.36");
     let run = uuid::Uuid::new_v4().to_string();
     let output = root
-        .join(".artifacts/tests/native-input-p2/linux-geometry")
+        .join("artifacts/tests/native-input-p2/linux-geometry")
         .join(&run);
     fs::create_dir_all(&output).unwrap();
     let mut entries = Vec::new();
@@ -1172,14 +1170,14 @@ fn native_linux_geometry_inputs() {
             let case = format!("{}-{columns}-oversize", artifact.bash_version);
             let host = output.join(&case);
             let linux =
-                format!("/work/.artifacts/tests/native-input-p2/linux-geometry/{run}/{case}");
+                format!("/work/artifacts/tests/native-input-p2/linux-geometry/{run}/{case}");
             fs::create_dir_all(&host).unwrap();
             let socket = format!(
                 "/tmp/ss-lg-{}/control",
                 &uuid::Uuid::new_v4().simple().to_string()[..16]
             );
             let module = format!(
-                "/work/.artifacts/tests/native-input-p2/resources/native-input/{}",
+                "/work/artifacts/tests/native-input-p2/resources/native-input/{}",
                 artifact.module
             );
             let bootstrap = crate::terminal_command::bash::bootstrap_source(
@@ -1366,11 +1364,11 @@ fn native_linux_geometry_inputs() {
     )
     .unwrap();
     fs::write(&inputs, serde_json::to_vec_pretty(&entries).unwrap()).unwrap();
-    fs::write(root.join(".artifacts/tests/native-input-p2/linux-geometry-inputs.json"),serde_json::to_vec(&serde_json::json!({"inputs":inputs,"linuxInputs":format!("/work/.artifacts/tests/native-input-p2/linux-geometry/{run}/inputs.json")})).unwrap()).unwrap();
+    fs::write(root.join("artifacts/tests/native-input-p2/linux-geometry-inputs.json"),serde_json::to_vec(&serde_json::json!({"inputs":inputs,"linuxInputs":format!("/work/artifacts/tests/native-input-p2/linux-geometry/{run}/inputs.json")})).unwrap()).unwrap();
 }
 
 #[test]
-#[ignore = "set SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests and run python3 scripts/native-input-p2/build.py"]
+#[ignore = "set SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests and run python3 scripts/native-input-p2/build.py"]
 fn native_production_capture_preserves_real_output_and_bounds_osc_across_all_splits() {
     use crate::terminal_command::capture::CaptureFence;
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1383,7 +1381,7 @@ fn native_production_capture_preserves_real_output_and_bounds_osc_across_all_spl
         let version = artifact.bash_version;
         let profile = artifact.id;
         let manifest = root
-            .join(".artifacts/tests/native-input-p2/producers")
+            .join("artifacts/tests/native-input-p2/producers")
             .join(&profile)
             .join("manifest.json");
         let ordinary = b"x\xe4\xb8\xad\x1b]133;C\x07ss_native_input_begin NIP> ";
@@ -1534,7 +1532,7 @@ fn native_production_capture_preserves_real_output_and_bounds_osc_across_all_spl
         assert_eq!(snapshot.state, TerminalCommandState::Uncertain);
     }
     fs::write(
-        root.join(".artifacts/tests/native-input-p2/capture-evidence")
+        root.join("artifacts/tests/native-input-p2/capture-evidence")
             .join(&run_id)
             .join("summary.json"),
         serde_json::to_vec_pretty(&summary).unwrap(),
@@ -1848,7 +1846,7 @@ fn native_protocol_real_process_crash_recovery_never_reinputs_or_reaccepts() {
         );
         drop(restored);
         let destination = repository
-            .join(".artifacts/tests/native-input-p0/p1-evidence")
+            .join("artifacts/tests/native-input-p0/p1-evidence")
             .join(format!("sigkill-{cut}"));
         fs::create_dir_all(&destination).unwrap();
         fs::copy(

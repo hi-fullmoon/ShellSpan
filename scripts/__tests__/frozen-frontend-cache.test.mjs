@@ -6,18 +6,18 @@ import {expect,it} from 'vitest';
 import {buildFrozenFrontend} from '../native-input-p3/frozen-frontend-cache.mjs';
 import {captureValidationAssets,captureValidationSources} from '../native-input-p2/frozen-validation.mjs';
 
-const artifacts=p.resolve(import.meta.dirname,'../../.artifacts/tests/frozen-frontend-cache');
+const artifacts=p.resolve(import.meta.dirname,'../../artifacts/tests/frozen-frontend-cache');
 function fixture(){
   const root=p.join(artifacts,randomUUID());fs.mkdirSync(root,{recursive:true});
   execFileSync('git',['init','--quiet',root]);
-  fs.writeFileSync(p.join(root,'.gitignore'),'.artifacts/\nnode_modules/\n');
+  fs.writeFileSync(p.join(root,'.gitignore'),'artifacts/\nnode_modules/\n');
   fs.writeFileSync(p.join(root,'entry.html'),'<html>source</html>');
   fs.mkdirSync(p.join(root,'node_modules/pkg'),{recursive:true});
   fs.writeFileSync(p.join(root,'node_modules/pkg/input.js'),'dependency-v1');
-  const cacheRoot=p.join(root,'.artifacts/tests/frontend-cache');
+  const cacheRoot=p.join(root,'artifacts/tests/frontend-cache');
   let compiled=0;
   function options(){
-    const evidence=p.join(root,'.artifacts/tests/native-input-p2',randomUUID());fs.mkdirSync(evidence,{recursive:true});
+    const evidence=p.join(root,'artifacts/tests/native-input-p2',randomUUID());fs.mkdirSync(evidence,{recursive:true});
     const output=p.join(evidence,'frontend');
     return{root,output,entry:'entry.html',sources:captureValidationSources(root),cacheRoot,build:async()=>{
       compiled++;fs.mkdirSync(p.join(output,'assets'),{recursive:true});
@@ -80,14 +80,14 @@ it('refuses paths outside the owned scope, linked cache roots, and overwriting c
   await expect(buildFrozenFrontend(outside)).rejects.toThrow('owned test artifacts');
   const first=f.options();await buildFrozenFrontend(first);
   await expect(buildFrozenFrontend(first)).rejects.toThrow('Never overwrite');
-  const link=p.join(f.root,'.artifacts/tests/cache-link');fs.symlinkSync(f.cacheRoot,link,process.platform==='win32'?'junction':'dir');
+  const link=p.join(f.root,'artifacts/tests/cache-link');fs.symlinkSync(f.cacheRoot,link,process.platform==='win32'?'junction':'dir');
   await expect(buildFrozenFrontend({...f.options(),cacheRoot:link})).rejects.toThrow('must not be a link');
 });
 it('preserves ordinary compilation when cache is not explicitly enabled',async()=>{
   let called=0;expect(await buildFrozenFrontend({build:async()=>{called++;}})).toEqual({enabled:false,reused:false});expect(called).toBe(1);
 });
 it('refuses linked cache ancestors before creating a missing directory at their target',async()=>{
-  const f=fixture(),foreign=p.join(f.root,'outside-cache-scope'),link=p.join(f.root,'.artifacts/tests/cache-parent');
+  const f=fixture(),foreign=p.join(f.root,'outside-cache-scope'),link=p.join(f.root,'artifacts/tests/cache-parent');
   fs.mkdirSync(foreign);fs.mkdirSync(p.dirname(link),{recursive:true});
   fs.symlinkSync(foreign,link,process.platform==='win32'?'junction':'dir');
   await expect(buildFrozenFrontend({...f.options(),cacheRoot:p.join(link,'must-not-exist')})).rejects.toThrow(/link/);

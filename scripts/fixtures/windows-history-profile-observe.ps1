@@ -6,7 +6,7 @@ param(
 )
 $ErrorActionPreference='Stop'
 $project=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
-$owned=[IO.Path]::GetFullPath((Join-Path $project '.artifacts/tests')).TrimEnd('\')+'\'
+$owned=[IO.Path]::GetFullPath((Join-Path $project 'artifacts/tests')).TrimEnd('\')+'\'
 foreach($path in @($OwnedProfile,$Observation)){
  if(-not [IO.Path]::IsPathRooted($path)-or -not [IO.Path]::GetFullPath($path).StartsWith($owned,[StringComparison]::OrdinalIgnoreCase)){throw 'History profile observation requires owned test paths'}
 }

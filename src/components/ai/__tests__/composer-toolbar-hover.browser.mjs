@@ -7,7 +7,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
-const artifacts = `${root}.artifacts/tests/composer-toolbar-hover`;
+const artifacts = `${root}artifacts/tests/composer-toolbar-hover`;
 await mkdir(artifacts, { recursive: true });
 const server = await createServer({
   root, configFile: false, appType: 'custom', logLevel: 'error',

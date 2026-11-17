@@ -58,14 +58,14 @@ describe('ZLE SSH recovery offline discovery and admission', () => {
   });
 
   it('rejects foreign, malformed and missing fixture paths without contacting Docker or SSH', () => {
-    const base = resolve(root, '.artifacts/tests/native-input-p2/ssh');
+    const base = resolve(root, 'artifacts/tests/native-input-p2/ssh');
     expect(() => readOwnedZleFixture(root, resolve(root, 'package.json'))).toThrow(/sealed source root/);
     expect(() => readOwnedZleFixture(root, resolve(base, 'foreign/fixture.json'))).toThrow(/exact owner UUID/);
     expect(() => readOwnedZleFixture(root, resolve(base, '00000000-0000-0000-0000-000000000000/fixture.json'))).toThrow(/ENOENT/);
   });
 
   it('rejects mixed model, fixture or data directory arguments at the actual App runner boundary', () => {
-    const directory = resolve(root, '.artifacts/tests/native-input-p2/ssh-recovery');
+    const directory = resolve(root, 'artifacts/tests/native-input-p2/ssh-recovery');
     const env = { SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR: directory, SHELLSPAN_DATA_DIR: resolve(directory, 'data'),
       SHELLSPAN_LOCAL_HOME: resolve(directory, 'home'), HOME: process.env.HOME };
     const args = { 'native-input-p3-ssh-recovery': 'after-key-timeout', 'native-input-p3-ssh-recovery-fixture': 'fixture.json',

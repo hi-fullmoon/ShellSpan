@@ -7,7 +7,7 @@ import {prepareZleAppHistory,readZleHistoryObservation,readZleAppHistoryDisk,zle
 const root=resolve(import.meta.dirname,'../..');
 describe('owned ZLE App history observation',()=>{
  it.skipIf(process.platform!=='darwin'||process.env.SHELLSPAN_ALLOW_FOREGROUND_TESTS!=='1')('runs the real PTY observer without blocking later hooks or changing parent status',()=>{
-  const directory=resolve(root,'.artifacts/tests/zle-app-history',randomUUID());mkdirSync(resolve(directory,'home'),{recursive:true,mode:0o700});
+  const directory=resolve(root,'artifacts/tests/zle-app-history',randomUUID());mkdirSync(resolve(directory,'home'),{recursive:true,mode:0o700});
   const plan=prepareZleAppHistory(root,directory,'default');
   appendFileSync(resolve(plan.home,'.zshrc'),'p3_probe_later_hook() { builtin print -r -- entered >> "$HOME/after-observer-hook"; }\nzle -N p3_probe_later_hook\nadd-zle-hook-widget line-init p3_probe_later_hook\n');
   execFileSync('python3',['-B',resolve(root,'scripts/native-input-p3/zle-app-history-observer-probe.py'),'/bin/zsh',plan.home,directory],{stdio:'pipe',timeout:20000});
@@ -18,7 +18,7 @@ describe('owned ZLE App history observation',()=>{
   expect(JSON.parse(readFileSync(resolve(directory,'pty-exit.json'),'utf8')).status).toBe(0);
  });
  it.skipIf(process.platform!=='darwin').each(zleAppHistoryModes)('retains real Zsh public history/configuration for %s',mode=>{
-  const directory=resolve(root,'.artifacts/tests/zle-app-history',randomUUID());mkdirSync(resolve(directory,'home'),{recursive:true,mode:0o700});
+  const directory=resolve(root,'artifacts/tests/zle-app-history',randomUUID());mkdirSync(resolve(directory,'home'),{recursive:true,mode:0o700});
   const plan=prepareZleAppHistory(root,directory,mode),observation=resolve(plan.home,'history-observations/0');
   execFileSync('/bin/zsh',['-f','-c','source "$1"; fc -R "$2"; print -s -- OWNED_OBSERVER_CURRENT_EVENT; p3_history_export "$3"','owned-history-test',resolve(plan.home,'.zshrc'),plan.history,observation],{env:{...process.env,HOME:plan.home,ZDOTDIR:plan.home,LC_ALL:'en_US.UTF-8'},stdio:'pipe'});
   const actual=readZleHistoryObservation(observation);expect(actual.ready).toBe(true);expect(actual.entries).toEqual(plan.seedSources);
@@ -38,7 +38,7 @@ describe('owned ZLE App history observation',()=>{
   expect(outcome.error).toBeUndefined();expect(outcome.status).toBe(1);expect(outcome.stderr).toContain('--native-input-p3-zle-history requires one isolated');
  });
  it('does not treat absent public completion as an empty successful history',()=>{
-  const directory=resolve(root,'.artifacts/tests/zle-app-history',randomUUID());mkdirSync(directory,{recursive:true});
+  const directory=resolve(root,'artifacts/tests/zle-app-history',randomUUID());mkdirSync(directory,{recursive:true});
   expect(readZleHistoryObservation(directory)).toEqual({ready:false});writeFileSync(resolve(directory,'ready'),'wrong');expect(()=>readZleHistoryObservation(directory)).toThrow();
  });
 });

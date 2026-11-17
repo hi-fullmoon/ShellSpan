@@ -6,7 +6,7 @@ import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 
 assert.equal(process.platform, 'darwin', 'Native terminal color verification requires macOS.');
-const artifacts = resolve('.artifacts/tests/terminal-colors');
+const artifacts = resolve('artifacts/tests/terminal-colors');
 await mkdir(artifacts, { recursive: true });
 const directory = await mkdtemp(`${artifacts}/native-`);
 const server = await createServer({

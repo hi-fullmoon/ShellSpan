@@ -28,8 +28,8 @@ import {manualWindowMilliseconds,manualWindowTransition} from './windows-manual-
 assert.equal(process.platform,'win32');assert.equal(process.arch,'x64');
 assertNativeGuiAllowed();
 const owner=resolve(import.meta.dirname,'../..'),root=await realpath(process.argv[2]);
-const owned=relative(resolve(owner,'.artifacts/tests/p3'),root);assert(owned&&!owned.startsWith('..')&&!isAbsolute(owned));
-const stage=JSON.parse(await readFile(resolve(root,'.artifacts/tests/native-input-p3/candidate-stage.json'),'utf8'));assert(stage.sealed&&stage.root===root);
+const owned=relative(resolve(owner,'artifacts/tests/p3'),root);assert(owned&&!owned.startsWith('..')&&!isAbsolute(owned));
+const stage=JSON.parse(await readFile(resolve(root,'artifacts/tests/native-input-p3/candidate-stage.json'),'utf8'));assert(stage.sealed&&stage.root===root);
 const before=captureValidationSources(root),sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const nativeResources=process.argv[3]?await realpath(process.argv[3]):undefined;
 if(nativeResources){const child=relative(root,nativeResources);assert(child&&!child.startsWith('..')&&!isAbsolute(child),'Validation inputs must be inside the sealed source');}
@@ -40,7 +40,7 @@ const resourceAdmission=process.argv[5]==='resource-admission';
 const modelValidation=process.argv[5]==='model-validation';
 const modelSemantics=process.argv[5]==='model-semantics'||modelValidation;
 assert.equal(sha(await readFile(fileURLToPath(import.meta.url))),before['scripts/native-input-p3/windows-package-smoke.mjs'],'Controller differs from sealed source');
-const id=randomUUID(),short=id.slice(0,8),directory=resolve(root,'.artifacts/tests/pk',short),install=resolve(directory,'i');
+const id=randomUUID(),short=id.slice(0,8),directory=resolve(root,'artifacts/tests/pk',short),install=resolve(directory,'i');
 assert(!fs.existsSync(directory));await mkdir(directory,{recursive:true});
 for(const name of ['home','data','webview'])await mkdir(resolve(directory,name));
 const binaryName=`ShellSpanPkg${short}`,productName=`ShellSpan Package Acceptance ${short}`,identifier=`com.shellspan.validation.package.${id}`;

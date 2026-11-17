@@ -7,14 +7,14 @@ fn native_package_frontend_directory_uses_the_actual_sdk_path_variant() {
     use tauri::utils::config::FrontendDist;
     let windows_absolute: FrontendDist = serde_json::from_str(r#""D:\\owned\\frontend""#).unwrap();
     assert!(matches!(windows_absolute, FrontendDist::Url(_)));
-    let relative: FrontendDist = serde_json::from_str(r#""../.artifacts/tests/frontend""#).unwrap();
+    let relative: FrontendDist = serde_json::from_str(r#""../artifacts/tests/frontend""#).unwrap();
     assert!(matches!(relative, FrontendDist::Directory(_)));
 }
 
 #[test]
 fn native_resource_mapping_preserves_release_layout_without_stale_sources_or_build_logs() {
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let evidence = owner.join(".artifacts/tests/native-resource-layout");
+    let evidence = owner.join("artifacts/tests/native-resource-layout");
     fs::create_dir_all(&evidence).unwrap();
     let directory = tempfile::tempdir_in(evidence).unwrap();
     let workspace = directory.path().join("workspace");

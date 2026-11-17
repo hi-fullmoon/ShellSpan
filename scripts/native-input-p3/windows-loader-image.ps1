@@ -6,7 +6,7 @@ param(
 )
 $ErrorActionPreference='Stop'
 $workspace=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
-$owned=[IO.Path]::GetFullPath((Join-Path $workspace '.artifacts/tests'))+'\'
+$owned=[IO.Path]::GetFullPath((Join-Path $workspace 'artifacts/tests'))+'\'
 $library=[IO.Path]::GetFullPath((Get-Item -LiteralPath $LibraryPath).FullName)
 if(-not $library.StartsWith($owned,[StringComparison]::OrdinalIgnoreCase)){throw 'Loader candidate escaped owned artifacts'}
 $console=Get-CimInstance Win32_Process -Filter ('ProcessId='+$ConsoleProcessId)

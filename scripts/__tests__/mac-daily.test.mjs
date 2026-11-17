@@ -42,7 +42,7 @@ test('only fixed automatic full/raw cases separate capture from visual acceptanc
 });
 test('actual capture barrier abort preserves a pending capture and grants no visual authority',async()=>{
  const fs=await import('node:fs/promises'),{randomUUID}=await import('node:crypto'),{createServer}=await import('node:http'),{createServer:createViteServer}=await import('vite');
- const directory=resolve(import.meta.dirname,'../../.artifacts/tests/mac-daily-capture-abort',randomUUID()),token=randomUUID();await fs.mkdir(directory,{recursive:true,mode:0o700});
+ const directory=resolve(import.meta.dirname,'../../artifacts/tests/mac-daily-capture-abort',randomUUID()),token=randomUUID();await fs.mkdir(directory,{recursive:true,mode:0o700});
  const vite=await createViteServer({root:directory,configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true},plugins:[{name:'actual-capture-abort',configureServer(server){attachMacDailyCheckpoints(server,token,directory,undefined,macDailyCaptureConfiguration('full-zsh'));}}]});
  const server=createServer(vite.middlewares);await new Promise(done=>server.listen(0,'127.0.0.1',done));
  try{
@@ -55,7 +55,7 @@ test('actual capture barrier abort preserves a pending capture and grants no vis
 },15000);
 test('legacy standalone capture requests are disabled before a pending file can be created',async()=>{
  const fs=await import('node:fs/promises'),{randomUUID}=await import('node:crypto'),{createServer}=await import('node:http'),{createServer:createViteServer}=await import('vite');
- const directory=resolve(import.meta.dirname,'../../.artifacts/tests/mac-daily-capture-disabled',randomUUID()),token=randomUUID();await fs.mkdir(directory,{recursive:true,mode:0o700});
+ const directory=resolve(import.meta.dirname,'../../artifacts/tests/mac-daily-capture-disabled',randomUUID()),token=randomUUID();await fs.mkdir(directory,{recursive:true,mode:0o700});
  const vite=await createViteServer({root:directory,configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true},plugins:[{name:'actual-disabled-capture',configureServer(server){attachMacDailyCheckpoints(server,token,directory);}}]});
  const server=createServer(vite.middlewares);await new Promise(done=>server.listen(0,'127.0.0.1',done));
  try{
@@ -92,7 +92,7 @@ test('daily selector requires exact owned no-model configuration',()=>{
 });
 test('actual automatic daily archive retains original bytes once without a completion receipt',async()=>{
  const fs=await import('node:fs/promises'),{randomUUID,createHash}=await import('node:crypto'),{createServer}=await import('node:http'),{createServer:createViteServer}=await import('vite');
- const directory=resolve(import.meta.dirname,'../../.artifacts/tests/mac-daily-snapshot-http',randomUUID()),token=randomUUID();await fs.mkdir(directory,{recursive:true,mode:0o700});
+ const directory=resolve(import.meta.dirname,'../../artifacts/tests/mac-daily-snapshot-http',randomUUID()),token=randomUUID();await fs.mkdir(directory,{recursive:true,mode:0o700});
  const source=resolve(import.meta.dirname,'../../src/components/terminal/__tests__/mac-wire-capture.ts'),original=await fs.readFile(source);
  const body=JSON.stringify({kind:'mac-human-capture-snapshot',token,label:'daily-final',role:'automatic',humanReceipt:false,scope:'Actual file bytes for HTTP retention only; no native transport, execution or visual claim.',source,hex:original.toString('hex')});
  const vite=await createViteServer({root:directory,configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true},plugins:[{name:'actual-daily-wire-archive',configureServer(server){attachMacDailyCheckpoints(server,token,directory);}}]});
@@ -106,7 +106,7 @@ test('actual automatic daily archive retains original bytes once without a compl
 },15000);
 test('real checkpoint HTTP abort preserves pending evidence and cannot count as an image observation',async()=>{
  const fs=await import('node:fs/promises'),{randomUUID}=await import('node:crypto'),{createServer}=await import('node:http'),{createServer:createViteServer}=await import('vite');
- const root=resolve(import.meta.dirname,'../..'),directory=resolve(root,'.artifacts/tests/mac-daily-checkpoints',randomUUID()),token=randomUUID();await fs.mkdir(directory,{recursive:true,mode:0o700});
+ const root=resolve(import.meta.dirname,'../..'),directory=resolve(root,'artifacts/tests/mac-daily-checkpoints',randomUUID()),token=randomUUID();await fs.mkdir(directory,{recursive:true,mode:0o700});
  const vite=await createViteServer({root:directory,configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true},plugins:[{name:'owned-mac-daily-checkpoint-test',configureServer(server){attachMacDailyCheckpoints(server,token,directory);}}]});
  const server=createServer(vite.middlewares);await new Promise(done=>server.listen(0,'127.0.0.1',done));
  try{
@@ -119,7 +119,7 @@ test('real checkpoint HTTP abort preserves pending evidence and cannot count as 
  }finally{await new Promise(done=>server.close(done));await vite.close();}
 },15000);
 test('retains window options and leaves the WebKit identifier to the runtime SDK API',async()=>{
- const root=resolve(import.meta.dirname,'../..'),directory=resolve(root,'.artifacts/tests/native-input-p2/window-options-case');
+ const root=resolve(import.meta.dirname,'../..'),directory=resolve(root,'artifacts/tests/native-input-p2/window-options-case');
  const token='11111111-2222-4333-8444-555555555555',other='aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
  const base=JSON.parse(readFileSync(resolve(root,'src-tauri/tauri.conf.json'),'utf8')).app.windows;
  const first=await macDailyAppConfiguration(root,directory,token),second=await macDailyAppConfiguration(root,directory,other);
@@ -137,7 +137,7 @@ test('retains window options and leaves the WebKit identifier to the runtime SDK
 });
 test('actual human checkpoint HTTP archive preserves bytes once and grants no visual or human receipt',async()=>{
  const fs=await import('node:fs/promises'),{randomUUID,createHash}=await import('node:crypto'),{createServer}=await import('node:http'),{createServer:createViteServer}=await import('vite');
- const directory=resolve(import.meta.dirname,'../../.artifacts/tests/mac-human-snapshot-http',randomUUID()),token=randomUUID();await fs.mkdir(directory,{recursive:true,mode:0o700});
+ const directory=resolve(import.meta.dirname,'../../artifacts/tests/mac-human-snapshot-http',randomUUID()),token=randomUUID();await fs.mkdir(directory,{recursive:true,mode:0o700});
  const source=resolve(import.meta.dirname,'../../package.json'),sourceBytes=await fs.readFile(source);
  const body=JSON.stringify({kind:'mac-human-capture-snapshot',token,label:'human-final',scope:'HTTP retention regression only. Payload is actual source file bytes, not a native execution, user action or screenshot.',retentionProbe:{source,hex:sourceBytes.toString('hex')}});
  const vite=await createViteServer({root:directory,configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true},plugins:[{name:'actual-human-snapshot-retention',configureServer(server){attachMacDailyCheckpoints(server,token,directory);}}]});
@@ -153,7 +153,7 @@ test('actual human checkpoint HTTP archive preserves bytes once and grants no vi
 },15000);
 test.runIf(process.platform==='darwin'&&process.arch==='arm64')('actual pump evidence endpoint reads once without writing and refuses symbolic links',async()=>{
  const fs=await import('node:fs/promises'),{randomUUID}=await import('node:crypto'),{createServer}=await import('node:http'),{createServer:createViteServer}=await import('vite');
- const root=resolve(import.meta.dirname,'../..'),base=resolve(root,'.artifacts/tests/mac-daily-pump-http',randomUUID()),source=resolve(root,'src/components/terminal/__tests__/mac-daily-input-plan.ts');
+ const root=resolve(import.meta.dirname,'../..'),base=resolve(root,'artifacts/tests/mac-daily-pump-http',randomUUID()),source=resolve(root,'src/components/terminal/__tests__/mac-daily-input-plan.ts');
  const cases=[{directory:resolve(base,'regular'),token:randomUUID(),link:false},{directory:resolve(base,'symlink'),token:randomUUID(),link:true}];
  for(const item of cases){await fs.mkdir(resolve(item.directory,'home'),{recursive:true,mode:0o700});const destination=resolve(item.directory,'home','phase2-pump-result');if(item.link)await fs.symlink(source,destination);else await fs.copyFile(source,destination);}
  for(const item of cases){const destination=resolve(item.directory,'data','logs','frontend.log');await fs.mkdir(resolve(item.directory,'data','logs'),{recursive:true,mode:0o700});if(item.link)await fs.symlink(source,destination);else await fs.copyFile(source,destination);}

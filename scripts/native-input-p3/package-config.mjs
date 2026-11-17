@@ -23,7 +23,7 @@ export function packageFrontendDirectory(root,directory){
 }
 
 export function validationPackageMarker(root,installedResources,sourceManifestSha256){
-  const directory=resolve(installedResources),base=resolve(root,'.artifacts/tests/pk'),child=relative(base,directory);
+  const directory=resolve(installedResources),base=resolve(root,'artifacts/tests/pk'),child=relative(base,directory);
   assert(child&&!child.startsWith('..')&&!isAbsolute(child),'Validation installation must stay inside the owned package cases');
   assert(/^[a-f0-9]{64}$/.test(sourceManifestSha256),'Exact source manifest digest required');
   return {protocol:'shellspan.native-editor-validation',resourceRoot:directory,sourceManifestSha256,editorTargets:['windows-x64']};

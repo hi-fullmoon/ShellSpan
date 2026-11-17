@@ -85,7 +85,7 @@ fn real_ssh_bash_startup_fallback_preserves_predecessor_until_attachment() {
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../.artifacts/tests/native-input-p2/resources/native-input")
+                .join("../artifacts/tests/native-input-p2/resources/native-input")
         });
     let broker = TerminalSessionBroker::phase5_enabled_for_test(65_536);
     let sessions = SessionManager::default();
@@ -386,7 +386,7 @@ fn remote_early_core_preserved(session: &Session, owner: &Path, evidence: &Path)
     let mut native = RemoteNativeBash::prepare(
         session,
         "nativeZle",
-        &owner.join(".artifacts/tests/native-input-p2/resources/native-input"),
+        &owner.join("artifacts/tests/native-input-p2/resources/native-input"),
         &mut SftpStartupTimings::default(),
     )
     .unwrap()
@@ -485,7 +485,7 @@ fn production_remote_zle_parent_parser_and_background() {
     let username = fixture["username"].as_str().unwrap();
     assert_eq!(username, "nativeZle");
     let evidence = owner
-        .join(".artifacts/tests/native-input-p3/production-ssh-zle")
+        .join("artifacts/tests/native-input-p3/production-ssh-zle")
         .join(Uuid::new_v4().to_string());
     fs::create_dir_all(&evidence).unwrap();
     let columns = std::env::var("SHELLSPAN_P3_TEST_COLUMNS")
@@ -542,7 +542,7 @@ fn production_remote_zle_parent_parser_and_background() {
     let mut native = RemoteNativeBash::prepare(
         &session,
         username,
-        &owner.join(".artifacts/tests/native-input-p2/resources/native-input"),
+        &owner.join("artifacts/tests/native-input-p2/resources/native-input"),
         &mut SftpStartupTimings::default(),
     )
     .unwrap()

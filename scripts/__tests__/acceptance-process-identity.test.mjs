@@ -7,7 +7,7 @@ import {inside} from '../native-input-p3/acceptance-inputs.mjs';
 
 const expected={pid:42,exe:'D:\\Programs\\nodejs\\node.exe',start:'2026-11-05T06:35:01.614Z',end:'2026-11-05T06:35:01.882Z'};
 const observed={pid:42,exe:'d:/programs/nodejs/node.exe',created:'2026-11-05T06:35:01.700Z'};
-const roots=[],base=resolve(import.meta.dirname,'../../.artifacts/tests/acceptance-process-identity');
+const roots=[],base=resolve(import.meta.dirname,'../../artifacts/tests/acceptance-process-identity');
 afterEach(async()=>{for(const root of roots.splice(0)){inside(base,root);await rm(root,{recursive:true,force:true});}});
 async function fixture(){await mkdir(base,{recursive:true});const root=await mkdtemp(resolve(base,'case-'));roots.push(root);await writeFile(resolve(root,'result.json'),'{}');return root;}
 

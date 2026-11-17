@@ -12,4 +12,4 @@ ShellSpan 对已保存的 SSH 连接提供 Bubblewrap 沙箱。管理员配置�
 
 现有[独立 sudo 受管连接](remote-sudo-runner.md)的限制继续有效。用普通连接启用沙箱，用受管连接请求管理员放行的提权作业。
 
-开发验证使用 `node scripts/verify-remote-sandbox.mjs`。加 `--ui` 会在桌面应用中通过真实 IPC 验证连接设置。脚本创建回环 SSH 容器和隔离的应用数据目录，以测试管理员身份在容器中安装 Bubblewrap，然后记录结果到 `.artifacts/tests/remote-sandbox/`。
+开发验证使用 `node scripts/verify-remote-sandbox.mjs`。加 `--ui` 会在桌面应用中通过真实 IPC 验证连接设置。脚本创建回环 SSH 容器和隔离的应用数据目录，以测试管理员身份在容器中安装 Bubblewrap，然后记录结果到 `artifacts/tests/remote-sandbox/`。

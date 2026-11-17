@@ -25,7 +25,7 @@ const hostBashTarget=target==='aarch64-apple-darwin'?'macos-arm64':target==='aar
 const sshBashTargets=target==='aarch64-apple-darwin'||target==='aarch64-unknown-linux-gnu'
   ?[linuxEditorTarget,linuxX86BashTarget]:target==='x86_64-pc-windows-msvc'?[linuxX86BashTarget]:[];
 const validationTargets=values['validation-editor']??[];const validationOnly=validationTargets.length>0;
-const buildRoot=validationOnly||values.acceptance?'.artifacts/tests':nativeInputBuildPath;
+const buildRoot=validationOnly||values.acceptance?'artifacts/tests':nativeInputBuildPath;
 const sourceRoot=resolve(root,buildRoot,'native-input-p2/resources/native-input');
 const logDirectory=validationOnly?resolve(root,buildRoot,'native-input-p3/resource-build'):resolve(root,nativeInputBuildPath,'resource-build');await mkdir(logDirectory,{recursive:true,mode:0o700});
 assert(validationTargets.every(value=>[...editorTargetsByBuildTarget.values()].includes(value)));
@@ -33,11 +33,11 @@ const policy=JSON.parse(await readFile(resolve(root,'protocol/agent/runtime/nati
 const productionProfilesFor=editor=>policy.productionProfiles.filter(id=>id.endsWith(`-${editor}-native`));
 let frozenSources,sourceManifestSha256;
 if(validationOnly){
-  const stage=JSON.parse(await readFile(resolve(root,'.artifacts/tests/native-input-p3/candidate-stage.json'),'utf8'));assert(stage.sealed&&stage.root===root,'Editor validation requires a sealed full source copy');
-  const manifest=await readFile(resolve(stage.directory,'sources.json'));frozenSources=JSON.parse(manifest.toString('utf8'));assert.deepEqual(captureValidationSources(root),frozenSources);sourceManifestSha256=createHash('sha256').update(manifest).digest('hex');await writeFile(resolve(root,'.artifacts/tests/native-input-p3/editor-validation-sources.json'),manifest);
+  const stage=JSON.parse(await readFile(resolve(root,'artifacts/tests/native-input-p3/candidate-stage.json'),'utf8'));assert(stage.sealed&&stage.root===root,'Editor validation requires a sealed full source copy');
+  const manifest=await readFile(resolve(stage.directory,'sources.json'));frozenSources=JSON.parse(manifest.toString('utf8'));assert.deepEqual(captureValidationSources(root),frozenSources);sourceManifestSha256=createHash('sha256').update(manifest).digest('hex');await writeFile(resolve(root,'artifacts/tests/native-input-p3/editor-validation-sources.json'),manifest);
 }
 const runId=randomUUID(),generated=resolve(logDirectory,`staging-${runId}`);
-const destination=validationOnly?resolve(root,'.artifacts/tests/native-input-p3/validation-resources',runId,'native-input'):nativeInputReleaseDirectory(root);
+const destination=validationOnly?resolve(root,'artifacts/tests/native-input-p3/validation-resources',runId,'native-input'):nativeInputReleaseDirectory(root);
 async function run(command,args,cwd=root){
   const log=await import('node:fs').then(fs=>fs.openSync(resolve(logDirectory,'prepare.log'),'a',0o600));
   const child=spawn(command,args,{cwd,env:{...process.env,SHELLSPAN_NATIVE_BUILD_ROOT:buildRoot,PYTHONDONTWRITEBYTECODE:'1'},stdio:['ignore',log,log]});

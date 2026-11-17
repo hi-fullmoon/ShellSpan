@@ -7,7 +7,7 @@ import {driveTerminal} from '../native-input-p3/live-terminal-bridge.mjs';
 const roots = [];
 afterEach(() => {for (const root of roots.splice(0)) fs.rmSync(root, {recursive: true, force: true});});
 const create = () => {
-  const root = path.resolve('.artifacts/tests/live-terminal-bridge', randomUUID());
+  const root = path.resolve('artifacts/tests/live-terminal-bridge', randomUUID());
   fs.mkdirSync(root, {recursive: true});roots.push(root);return root;
 };
 

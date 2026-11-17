@@ -12,7 +12,7 @@ const{values:args}=parseArgs({options:{captures:{type:'string'},'copy-captures':
   'copy-only':{type:'boolean'},'inband-only':{type:'boolean'}}});
 if(args['copy-only']&&args['inband-only'])throw new Error('Choose one scope');
 const scope=args['copy-only']?'copy':args['inband-only']?'inband':'full';
-const output=path.join(root,'.artifacts/tests/native-input-p0/formal-runs',new Date().toISOString().replaceAll(':','-'));
+const output=path.join(root,'artifacts/tests/native-input-p0/formal-runs',new Date().toISOString().replaceAll(':','-'));
 mkdirSync(output,{recursive:true});
 const installed=await installedRuntimeManifest();
 const owners=['scripts/native-input-p0/bridge.c','scripts/native-input-p0/inband-display.patch',
@@ -22,7 +22,7 @@ const hashes=()=>Object.fromEntries(owners.map(name=>[name,createHash('sha256').
 const before=hashes(),results=[];writeFileSync(path.join(output,'sources-before.json'),JSON.stringify(before,null,2));
 const original=path.join(output,'original-package');
 function run(name,command,parameters,env={}){
-  const result=spawnSync(command,parameters,{cwd:root,env:{...process.env,SHELLSPAN_NATIVE_BUILD_ROOT:'.artifacts/tests',SHELLSPAN_P0_FORMAL_XTERM:'1',
+  const result=spawnSync(command,parameters,{cwd:root,env:{...process.env,SHELLSPAN_NATIVE_BUILD_ROOT:'artifacts/tests',SHELLSPAN_P0_FORMAL_XTERM:'1',
     SHELLSPAN_P0_ORIGINAL_PACKAGE:original,SHELLSPAN_P0_ORIGINAL_XTERM:path.join(original,'lib/xterm.js'),...env},
     encoding:'utf8',maxBuffer:64*1024*1024});
   writeFileSync(path.join(output,`${name}.log`),`${result.stdout??''}${result.stderr??''}\nexit=${result.status}\n`);
@@ -40,8 +40,8 @@ function nativeTarget(){
   if(process.platform!=='darwin'||process.arch!=='arm64')throw new Error('Frozen native target requires macOS arm64; not a skip');
   if(!run('native-build','python3',['scripts/native-input-p0/build.py','--upstream','--versions','5.3']))throw new Error('Native build failed');
   if(!run('native-display-build','python3',['scripts/native-input-p0/build-inband-lab.py']))throw new Error('Native display build failed');
-  const build=JSON.parse(readFileSync(path.join(root,'.artifacts/tests/native-input-p0/build-darwin.json'),'utf8'))['5.3'];
-  built={shell:build.shell,bridge:path.join(root,'.artifacts/tests/native-input-p0/inband-display-lab/bridge.so')};return built;
+  const build=JSON.parse(readFileSync(path.join(root,'artifacts/tests/native-input-p0/build-darwin.json'),'utf8'))['5.3'];
+  built={shell:build.shell,bridge:path.join(root,'artifacts/tests/native-input-p0/inband-display-lab/bridge.so')};return built;
 }
 function capture(option,script,name,flags=[]){
   if(args[option])return path.resolve(root,args[option]);

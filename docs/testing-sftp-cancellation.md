@@ -37,7 +37,7 @@ with actual SSH completion. It exercises the shared path queue, rather than the
 SFTP page's drag-and-drop batch admission, which has its own upload-queue tests.
 
 Each run saves timestamps, operation states, byte counters, fingerprints,
-checksums, and cleanup results in `.artifacts/tests/sftp-cancellation/<run-id>/result.json`. The
+checksums, and cleanup results in `artifacts/tests/sftp-cancellation/<run-id>/result.json`. The
 directory is ignored by Git. Generated input/download directories are moved to
 the system trash through the project's existing trash command after verification.
 The native window removes its temporary host trust and disconnects SFTP; the

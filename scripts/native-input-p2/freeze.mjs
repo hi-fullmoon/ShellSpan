@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '../..');
-const destination = resolve(root, '.artifacts/tests/native-input-p2/baseline', new Date().toISOString().replaceAll(':', '-'));
+const destination = resolve(root, 'artifacts/tests/native-input-p2/baseline', new Date().toISOString().replaceAll(':', '-'));
 mkdirSync(destination, { recursive: true, mode: 0o700 });
 const git = (...args) => execFileSync('git', args, { cwd: root, maxBuffer: 128 * 1024 * 1024 });
 writeFileSync(resolve(destination, 'status.txt'), git('status', '--short'));

@@ -8,7 +8,7 @@ import { chromium, webkit } from 'playwright';
 
 // node src/components/ui/__tests__/context-menu-hover.browser.mjs
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
-const output = `${root}.artifacts/tests/context-menu-hover`;
+const output = `${root}artifacts/tests/context-menu-hover`;
 await mkdir(output, { recursive: true });
 const path = `${root}AGENTS.md`;
 const metadata = await stat(path);

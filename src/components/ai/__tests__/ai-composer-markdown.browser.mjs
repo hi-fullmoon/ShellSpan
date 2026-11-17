@@ -7,7 +7,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { chromium, webkit } from 'playwright';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
-const artifacts = `${root}.artifacts/tests/composer-markdown`;
+const artifacts = `${root}artifacts/tests/composer-markdown`;
 await mkdir(artifacts, { recursive: true });
 const server = await createServer({
   root, configFile: false, appType: 'custom', logLevel: 'error', cacheDir: `${artifacts}/vite-cache`,

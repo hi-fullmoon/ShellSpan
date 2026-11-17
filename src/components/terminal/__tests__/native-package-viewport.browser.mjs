@@ -7,9 +7,9 @@ import {build} from 'vite';
 import {chromium} from 'playwright';
 import {inside} from '../../../../scripts/native-input-p3/acceptance-inputs.mjs';
 
-const root=resolve(import.meta.dirname,'../../../..'),directory=resolve(root,'.artifacts/tests/native-package-viewport',randomUUID());await mkdir(directory,{recursive:true});
+const root=resolve(import.meta.dirname,'../../../..'),directory=resolve(root,'artifacts/tests/native-package-viewport',randomUUID());await mkdir(directory,{recursive:true});
 assert(process.argv[2],'Explicit retained package directory required');
-const artifact=fs.realpathSync(process.argv[2]);inside(resolve(root,'.artifacts/tests'),artifact);
+const artifact=fs.realpathSync(process.argv[2]);inside(resolve(root,'artifacts/tests'),artifact);
 const assets=JSON.parse(fs.readFileSync(resolve(artifact,'frontend-assets.json'),'utf8'));
 const cssName=Object.keys(assets).find(name=>name.endsWith('.css'));assert(cssName,'Retained package CSS missing');
 const cssPath=resolve(artifact,'frontend',cssName),css=fs.readFileSync(cssPath,'utf8');assert.equal(createHash('sha256').update(css).digest('hex'),assets[cssName]);

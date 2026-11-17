@@ -197,7 +197,7 @@ describe('release publication gates', () => {
     expect(packageDownload.with).toEqual({ name: artifact, path: 'dist' });
     const publishDownload = release.jobs.release.steps.find(step => step.uses?.startsWith('actions/download-artifact@'));
     expect(publishDownload.with).toEqual({ pattern: 'bundle-*', path: 'src-tauri/target/releases/inputs' });
-    expect(JSON.stringify(release.jobs)).not.toContain('.artifacts/');
+    expect(JSON.stringify(release.jobs)).not.toContain('artifacts/');
   });
 
   it('prepares the macOS shell fixtures before Rust tests and reuses the release ZLE build', async () => {
@@ -209,14 +209,14 @@ describe('release publication gates', () => {
     const preparation = steps.slice(0, steps.findIndex(step => step.name === 'Run Agent terminal contract tests'));
     const buildBash = preparation.find(step => step.name === 'Build pinned Bash and Readline test resources');
     expect(buildBash.if).toBe("runner.os == 'macOS'");
-    expect(buildBash.env.SHELLSPAN_NATIVE_BUILD_ROOT).toBe('.artifacts/tests');
+    expect(buildBash.env.SHELLSPAN_NATIVE_BUILD_ROOT).toBe('artifacts/tests');
     const build = preparation.find(step => step.name === 'Build pinned Zsh and ZLE test resources');
     const download = preparation.find(step => step.name === 'Download pinned Zsh and ZLE test resources');
     const restore = preparation.find(step => step.name === 'Restore executable permission on downloaded Zsh');
     expect(build.if).toBe("runner.os == 'macOS' && !inputs.macos-editor-artifact");
-    expect(build.env.SHELLSPAN_NATIVE_BUILD_ROOT).toBe('.artifacts/tests');
+    expect(build.env.SHELLSPAN_NATIVE_BUILD_ROOT).toBe('artifacts/tests');
     expect(download.if).toBe("runner.os == 'macOS' && inputs.macos-editor-artifact");
-    expect(download.with).toEqual({ name: '${{ inputs.macos-editor-artifact }}', path: '.artifacts/tests' });
+    expect(download.with).toEqual({ name: '${{ inputs.macos-editor-artifact }}', path: 'artifacts/tests' });
     expect(preparation.indexOf(restore)).toBeGreaterThan(preparation.indexOf(download));
     expect(restore.if).toBe(download.if);
     const producer = release.jobs['build-native-macos-editor'];

@@ -13,7 +13,7 @@ export function requireVisiblePackageViewport(value){
 }
 
 export async function retainUninstallResidue(owner,install,destination){
-  const base=resolve(owner,'.artifacts/tests');inside(base,install);inside(base,destination);
+  const base=resolve(owner,'artifacts/tests');inside(base,install);inside(base,destination);
   assert.equal((await realpath(install)).toLowerCase(),resolve(install).toLowerCase(),'Linked installation residue rejected');
   const names=(await readdir(install)).sort();
   assert(names.length===0||names.length===1&&names[0]==='uninstall.exe','Unexpected files remain after normal uninstall');
@@ -27,7 +27,7 @@ export async function retainUninstallResidue(owner,install,destination){
 
 export function packageCargoLocation(owner,batchId){
   assert(/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(batchId),'Exact batch identity required');
-  const directory=resolve(owner,'.artifacts/tests/cb',batchId.slice(0,8)),target=resolve(directory,'t');
+  const directory=resolve(owner,'artifacts/tests/cb',batchId.slice(0,8)),target=resolve(directory,'t');
   const opensslPath=target+'/x86_64-pc-windows-msvc/release/build/openssl-sys-0123456789abcdef/out/openssl-build/build/src/providers/implementations/ciphers/cipher_aes_cbc_hmac_sha512_etm_hw.c';
   assert(opensslPath.length<260,'Dedicated Cargo output exceeds the reviewed Windows OpenSSL path budget');
   return {directory,target};

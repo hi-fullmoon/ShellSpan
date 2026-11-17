@@ -5,7 +5,9 @@ src-tauri/target
 .env
 .env.local
 .worktrees/
-/.artifacts/
+/artifacts/
+# Local alias for pre-migration evidence paths.
+/.artifacts
 **/__pycache__/
 *.py[cod]
 /src-tauri/native-input-adapter/target/

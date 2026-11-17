@@ -1,19 +1,15 @@
 # Petdex 联动契约与限制
 
-核验日期：2026-09-29。阶段 0 建立基线；阶段 1 已补齐客户端通信可靠性与诊断契约；阶段 2 已实现活动快照、仲裁与独立预览；阶段 3 已接入 AI 回合观察和分类配置。
+本文描述 ShellSpan 的动作联动。独立的消息气泡见[气泡契约](bubble.md)。对端行为以 Petdex Desktop 0.8.0 为核验基线。
 
 ## 证据范围
 
-- ShellSpan 基线：`a09a6cfcdf48a84d40010d04c6dd50f2865f8d46`，实现入口为 `src-tauri/src/petdex.rs` 及其子模块。
-- 本机 `/Applications/Petdex.app` 的 Info.plist 和 package-manifest.zon 均标记版本 0.8.0。
+- ShellSpan 实现入口为 `src-tauri/src/petdex.rs` 及其子模块。
 - 上游 `desktop-v0.8.0` 对应 commit `f2ea48aac6f89fbaeedd6a639faf4e208864ae5d`（另经 commits API 确认）。以下服务端结论来自该版本源码静态阅读，**不是本机运行验收**；未建立安装二进制与该源码的可复现构建对应关系。
 - [HTTP 服务、认证及队列源码](https://github.com/crafter-station/petdex/blob/f2ea48aac6f89fbaeedd6a639faf4e208864ae5d/packages/petdex-desktop-native/src/hook_server.zig)：`StateEvent`、`Mailbox.enqueueWithCounter`、`start/run`、`route`、`tokenOk`、`parseDuration`。
 - [显示状态消费源码](https://github.com/crafter-station/petdex/blob/f2ea48aac6f89fbaeedd6a639faf4e208864ae5d/packages/petdex-desktop-native/src/main.zig)：`isDurationState`、`dwellFor`、`applyState`、`poll_tick`。
-- 运行环境、命令结果及尚未完成的联调见 [验收记录](../../docs/design/petdex-integration-acceptance.md)。阶段 0 仅发现 Python 监听；阶段 1 后续核对到运行中的 Native Desktop，确认 PID 与安装路径后验证了 health/whoami 和生产客户端的挥手 POST；未向 Python 发送令牌。
 
 ## 现有请求契约
-
-消息气泡默认关闭，使用独立的 `/bubble` 通道。归属、显示和关闭结算见[气泡契约](bubble.md)，实际显示和计时证据见[消息验收](../../docs/design/petdex-message-integration-acceptance.md)。
 
 ShellSpan 的动作发送只向 `http://127.0.0.1:7777/state` 发出 JSON POST，凭证通过 `tokio::fs::read_to_string` 异步读取自 `~/.petdex/runtime/update-token`，使用标记为 sensitive 的 `X-Petdex-Update-Token` 请求头。客户端禁止代理，显式使用 `reqwest::redirect::Policy::none()` 禁止重定向，连接超时 250ms、单次请求超时 750ms。取消覆盖请求锁等待、异步读取和请求；重新读取后再次检查取消。阶段 4 另有用户主动触发的匿名只读 `GET /health`，见下文。
 
@@ -49,7 +45,7 @@ ShellSpan 的动作发送只向 `http://127.0.0.1:7777/state` 发出 JSON POST�
 
 `StateEvent` 仅有状态与时长，没有来源、所有者、运行 ID 或租约。完整 `route` 未提供状态 release 接口；`/bubble` 的会话隔离不适用于 `/state`。多应用共享队列和每秒 30 次的 state/bubble 限流预算，处理顺序、合并和当前停留共同决定显示，不应简化为“最后写入立即覆盖”。
 
-关闭 ShellSpan 联动会取消通信协调器并清空短提示与预览，纯内存活动登记继续跟随工作线程，不读取凭证、不发送清理请求。阶段5已观察：关闭总开关后约4.7秒、正常退出后约3.6秒桌宠仍有waiting抬手帧，不能承诺自动清除。**不新增全局idle清理请求**，以免覆盖其他应用。两个实际客户端已验证共享队列的非抢占顺序，ShellSpan周期idle会影响另一客户端留下的running；详见最终验收时序，未宣称穷尽所有应用组合。
+关闭联动会取消动作发送并清空短提示与预览。纯内存活动登记继续跟随工作线程。ShellSpan 不发送全局 `idle` 清理请求，已有动作可能继续显示。关闭前的气泡结算只涉及 ShellSpan 已使用的槽，见[气泡契约](bubble.md)。
 
 ## 状态映射与后续实现边界
 
@@ -73,8 +69,8 @@ ShellSpan 的动作发送只向 `http://127.0.0.1:7777/state` 发出 JSON POST�
 
 ## 隐私与错误处理
 
-- 业务标识只用于 ShellSpan 内部仲裁，不发送主机、路径、文件名、任务 ID、终端/AI 内容或自由文本，不调用 bubble、更新或远程服务接口。
-- 总开关默认关闭；关闭时不读凭证、不发请求。Petdex 拥有的令牌文件是本地协议凭证来源，不复制到普通配置、日志、快照或仓库。
+- 动作请求只包含状态和时长。业务归属标识只用于内部仲裁。气泡详情另有独立开关与内容限制。
+- 总开关默认关闭；关闭并完成已有气泡的有界结算后，不读凭证、不发请求。Petdex 拥有的令牌文件是本地协议凭证来源，不复制到普通配置、日志、快照或仓库。
 - 当前客户端 trim 后校验 64 位十六进制；401 时重新读取，只有值发生变化才立即重试一次；传输失败由协调器退避恢复。250ms 起步，最大 60s；最短发送间隔 100ms。
 - 传输错误映射为 `unreachable`，不推断对端是否运行；凭证缺失、不可读、无效、认证失败与请求拒绝分别呈现有限类别，不输出原始响应或令牌。
 - 没有真实环境时可推进上述客户端可靠性、诊断、仲裁及内部业务接入；不得声称来源隔离、租约、显示抢占、重启恢复或多应用联调已通过。

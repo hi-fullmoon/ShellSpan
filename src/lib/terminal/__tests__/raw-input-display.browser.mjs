@@ -11,7 +11,7 @@ assert.equal(process.platform,'darwin','This explicit regression requires actual
 const root=resolve(import.meta.dirname,'../../../..'),paths=process.argv.slice(2);assert.equal(paths.length,3,'Supply actual raw Bash, raw Zsh and native capture directories');
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex'),read=p=>JSON.parse(readFileSync(p,'utf8'));
 const captures=paths.map(path=>{
- const directory=resolve(path);assert(directory.includes('/.artifacts/'));
+ const directory=resolve(path);assert(directory.includes('/artifacts/'));
  const evidence=read(resolve(directory,'native-webview-evidence.json'));
  const traceBytes=readFileSync(resolve(directory,'native-display-trace.json')),visibleBytes=readFileSync(resolve(directory,'native-display-visible-output.utf8'));
  assert.equal(sha(traceBytes),evidence.uploads.trace.sha256);assert.equal(sha(visibleBytes),evidence.uploads['visible-output'].sha256);
@@ -27,7 +27,7 @@ const server=createServer((request,response)=>{
  if(request.url==='/raw.js'||request.url==='/platform.js'){response.setHeader('Content-Type','application/javascript');response.end(transpile(request.url==='/raw.js'?source:platform));return;}
  const file=assets[request.url];response.setHeader('Content-Type',file?(file.endsWith('.css')?'text/css':'application/javascript'):'text/html');response.end(file?readFileSync(file):'<!doctype html><link rel="stylesheet" href="/xterm.css"><div id="surface"></div><script type="importmap">'+JSON.stringify({imports})+'</script><script src="/xterm.js"></script><script src="/webgl.js"></script>');
 });
-const output=resolve(root,'.artifacts/tests/raw-input-display',randomUUID());mkdirSync(output,{recursive:true,mode:0o700});
+const output=resolve(root,'artifacts/tests/raw-input-display',randomUUID());mkdirSync(output,{recursive:true,mode:0o700});
 await new Promise(done=>server.listen(0,'127.0.0.1',done));const results=[];
 try{for(const [engine,launcher]of [['chromium',chromium],['webkit',webkit]]){
  const browser=await launcher.launch({headless:true});

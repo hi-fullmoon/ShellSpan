@@ -7,7 +7,7 @@ import {createServer} from 'node:http';
 import {pathToFileURL} from 'node:url';
 const owner=resolve(import.meta.dirname,'../../../..'),batch=resolve(process.argv[2]),id=process.argv[3],read=p=>JSON.parse(readFileSync(p,'utf8')),sha=b=>createHash('sha256').update(b).digest('hex');
 assert(/^[a-f0-9-]{36}$/.test(id??''),'Exact retained real-App capture required');
-const c=read(resolve(batch,'case-'+id+'.json')),directory=resolve(owner,'.artifacts/tests/native-selection-height-capture',randomUUID());mkdirSync(directory,{recursive:true});
+const c=read(resolve(batch,'case-'+id+'.json')),directory=resolve(owner,'artifacts/tests/native-selection-height-capture',randomUUID());mkdirSync(directory,{recursive:true});
 const traceFile=resolve(c.caseDirectory,'native-display-trace.json'),traceBytes=readFileSync(traceFile),trace=JSON.parse(traceBytes),e=read(resolve(c.caseDirectory,'native-webview-evidence.json')),visibleBytes=readFileSync(resolve(c.caseDirectory,'native-display-visible-output.utf8')),visible=visibleBytes.toString('utf8');assert.equal(sha(traceBytes),e.uploads.trace.sha256);assert.equal(sha(visibleBytes),e.uploads['visible-output'].sha256);assert(trace.replayable);
 const start=trace.events.find(x=>x.type==='checkpoint'&&x.label==='printed-output'),failure=trace.events.find(x=>x.type==='checkpoint'&&x.label==='failure');assert(start&&failure);const expected=JSON.parse(start.stateJson).selection;assert(expected.length>1000);assert.equal(JSON.parse(failure.stateJson).selection,'');
 const runtime=process.argv[4]?read(resolve(process.argv[4])):undefined,root=runtime?owner:read(resolve(batch,'baseline.json')).root;

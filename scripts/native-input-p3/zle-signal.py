@@ -16,7 +16,7 @@ import time
 import uuid
 
 root = Path(__file__).resolve().parents[2]
-directory = root / '.artifacts/tests/native-input-p3/signals' / str(uuid.uuid4())
+directory = root / 'artifacts/tests/native-input-p3/signals' / str(uuid.uuid4())
 directory.mkdir(parents=True)
 profile = {'shell': 'zsh', 'shellVersion': '5.9', 'editor': 'zle', 'editorVersion': '5.9',
            'editorNumericVersion': 509, 'adapterVersion': '1',
@@ -34,7 +34,7 @@ for native in [False, True]:
     peer = None
     rc = "PROMPT='P3-SIGNAL> '\n"
     if native:
-        rc += (f"module_path=({quote(root / '.artifacts/tests/native-input-p3')} $module_path)\nzmodload ss_nip\n"
+        rc += (f"module_path=({quote(root / 'artifacts/tests/native-input-p3')} $module_path)\nzmodload ss_nip\n"
                f"builtin ss_nip open {quote(sockpath)} {quote(json.dumps(profile))} 1 || return\n"
                f"source {quote(root / 'src-tauri/native-input-editors/zle.zsh')}\n")
     (home / '.zshrc').write_text(rc)
@@ -103,6 +103,6 @@ for native in [False, True]:
 (directory / 'result.json').write_text(json.dumps({'checks': results,
     'scriptSha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
     'shellSha256': hashlib.sha256(Path('/bin/zsh').read_bytes()).hexdigest(),
-    'moduleSha256': hashlib.sha256((root / '.artifacts/tests/native-input-p3/ss_nip.so').read_bytes()).hexdigest()}, indent=2))
+    'moduleSha256': hashlib.sha256((root / 'artifacts/tests/native-input-p3/ss_nip.so').read_bytes()).hexdigest()}, indent=2))
 print(json.dumps({'directory': str(directory), 'checks': results}))
 assert all(value['ok'] for value in results)

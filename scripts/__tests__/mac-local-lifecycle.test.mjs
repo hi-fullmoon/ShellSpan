@@ -6,7 +6,7 @@ import {expect,it} from 'vitest';
 import {isMacLocalLifecycle,macLifecycleEvidenceClockEnabled,macLifecycleVisualCheckpoints,macLifecycleSnapshotCheckpoints} from '../native-input-p3/mac-local-lifecycle.mjs';
 import {attachMacDailyCheckpoints} from '../native-input-p3/mac-daily.mjs';
 
-const directory=resolve(import.meta.dirname,'../../.artifacts/tests/native-input-p3/local-lifecycle-selection',randomUUID());
+const directory=resolve(import.meta.dirname,'../../artifacts/tests/native-input-p3/local-lifecycle-selection',randomUUID());
 const paths={evidence:directory,data:resolve(directory,'data'),home:resolve(directory,'home')};
 for(const path of [paths.data,paths.home])mkdirSync(path,{recursive:true,mode:0o700});
 const localIt=process.platform==='darwin'&&process.arch==='arm64'?it:it.skip;
@@ -71,7 +71,7 @@ it('leaves the original lifecycle work clock unchanged unless its exact local mo
 
 it('archives actual lifecycle HTTP bytes once while refusing human/EOF labels and creating no image receipt',async()=>{
  const fs=await import('node:fs/promises'),{createHash}=await import('node:crypto'),{createServer}=await import('node:http'),{createServer:createViteServer}=await import('vite');
- const root=resolve(import.meta.dirname,'../..'),directory=resolve(root,'.artifacts/tests/mac-lifecycle-snapshot-http',randomUUID()),token=randomUUID();await fs.mkdir(directory,{recursive:true,mode:0o700});
+ const root=resolve(import.meta.dirname,'../..'),directory=resolve(root,'artifacts/tests/mac-lifecycle-snapshot-http',randomUUID()),token=randomUUID();await fs.mkdir(directory,{recursive:true,mode:0o700});
  const source=resolve(root,'src/components/terminal/__tests__/mac-late-lifecycle.native.ts'),bytes=await fs.readFile(source);
  const payload=JSON.stringify({kind:'mac-human-capture-snapshot',token,label:'lifecycle-complete',role:'automatic',retentionOnly:true,source,hex:bytes.toString('hex'),scope:'Actual source-byte HTTP archive regression only. No native session, image, clock or human receipt.'});
  const vite=await createViteServer({root:directory,configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true},plugins:[{name:'actual-lifecycle-http-archive',configureServer(server){attachMacDailyCheckpoints(server,token,directory,undefined,{visualLabels:macLifecycleVisualCheckpoints,snapshotLabels:macLifecycleSnapshotCheckpoints});}}]});

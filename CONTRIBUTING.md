@@ -27,16 +27,21 @@ pnpm test
 
 ## Generated Artifacts
 
-- `.artifacts/tests/` holds test and acceptance output, including screenshots,
+- `artifacts/tests/` holds test and acceptance output, including screenshots,
   logs, isolated snapshots and acceptance installers.
 - `src-tauri/target/native-input/` holds generated native resources.
 - `src-tauri/target/dependencies/` holds dependency rebuild output.
 - `src-tauri/target/releases/` holds release inputs, Tauri overrides, staged
   bundles and publication output.
 
-Git and Vitest exclude `.artifacts/` and `src-tauri/target/`. Keep tool-managed `node_modules`,
+Git and Vitest exclude `artifacts/` and `src-tauri/target/`. Keep tool-managed `node_modules`,
 `dist` and Cargo `target` in their standard locations. Committed regression
 captures remain beside their tests.
+
+For an existing checkout, rename `.artifacts` to `artifacts` once. If an old
+report records absolute paths, a local `.artifacts` symlink pointing to
+`artifacts` can keep those paths readable; Git ignores the alias. Keep sealed
+metadata as captured and create fresh snapshots with the new layout.
 
 ## Commit Guidelines
 

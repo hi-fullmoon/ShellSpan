@@ -11,7 +11,7 @@ import { createIndexReader } from '../native-input-p3/index-reader.mjs';
 import { editorValidationEnvironment } from '../native-input-p3/editor-validation.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
-const artifactRoot = path.join(root, '.artifacts/tests/artifact-layout');
+const artifactRoot = path.join(root, 'artifacts/tests/artifact-layout');
 
 async function withArtifactDirectory(check) {
   await mkdir(artifactRoot, { recursive: true });
@@ -34,7 +34,7 @@ describe('generated artifact layout', () => {
       await mkdir(path.dirname(path.join(snapshot, source)), { recursive: true });
       for (const file of ['.gitignore', source]) await copyFile(path.join(root, file), path.join(snapshot, file));
       await copyFile(path.join(root, 'scripts/__tests__/native-input-runner.test.mjs'), path.join(snapshot, 'ordinary.test.mjs'));
-      const meta = path.join(snapshot, '.artifacts/tests/native-input-p3'), originalIndex = readValidationGit(root, ['rev-parse', '--path-format=absolute', '--git-path', 'index']).toString().trim(), head = readValidationGit(root, ['rev-parse', 'HEAD']).toString().trim();
+      const meta = path.join(snapshot, 'artifacts/tests/native-input-p3'), originalIndex = readValidationGit(root, ['rev-parse', '--path-format=absolute', '--git-path', 'index']).toString().trim(), head = readValidationGit(root, ['rev-parse', 'HEAD']).toString().trim();
       const {gitDirectory, index} = createIndexReader(meta, originalIndex, head);await chmod(index, 0o400);
       const indexSha256 = createHash('sha256').update(await readFile(index)).digest('hex');await writeFile(path.join(meta, 'snapshot-index.json'), JSON.stringify({version: 1, root: snapshot, gitDirectory, index, indexSha256}));
       const before = captureValidationSources(snapshot);expect(Object.keys(before).sort()).toEqual(['.gitignore', 'ordinary.test.mjs', source].sort());
@@ -46,7 +46,7 @@ describe('generated artifact layout', () => {
   }, 25000);
   it('freezes the actual selected resource tree instead of the default producer inputs', async () => {
     await withArtifactDirectory(async directory => {
-      const snapshot=path.join(directory,'ShellSpan'),defaultResources=path.join(snapshot,'.artifacts/tests/native-input-p2/resources/native-input'),selected=path.join(snapshot,'.artifacts/tests/rebuilt/native-input'),sibling=path.join(directory,'other');
+      const snapshot=path.join(directory,'ShellSpan'),defaultResources=path.join(snapshot,'artifacts/tests/native-input-p2/resources/native-input'),selected=path.join(snapshot,'artifacts/tests/rebuilt/native-input'),sibling=path.join(directory,'other');
       for(const folder of [defaultResources,selected,sibling])await mkdir(folder,{recursive:true});
       await writeFile(path.join(defaultResources,'module.dll'),'old');await writeFile(path.join(selected,'module.dll'),'rebuilt');
       expect(captureValidationAssets(nativeValidationResourceDirectory(snapshot,selected))).toEqual({'module.dll':createHash('sha256').update('rebuilt').digest('hex')});
@@ -59,7 +59,7 @@ describe('generated artifact layout', () => {
       const snapshot = path.join(directory, 'ShellSpan');
       await mkdir(snapshot, { recursive: true });
       await copyFile(path.join(root, '.gitignore'), path.join(snapshot, '.gitignore'));
-      const meta = path.join(snapshot, '.artifacts/tests/native-input-p3');
+      const meta = path.join(snapshot, 'artifacts/tests/native-input-p3');
       const originalIndex = readValidationGit(root, ['rev-parse', '--path-format=absolute', '--git-path', 'index']).toString().trim();
       const head = readValidationGit(root, ['rev-parse', 'HEAD']).toString().trim();
       const { gitDirectory, index } = createIndexReader(meta, originalIndex, head);
@@ -95,7 +95,7 @@ describe('generated artifact layout', () => {
     });
   });
   it('ignores real copied test sources in Git, frozen inventories and Vitest discovery', async () => {
-    expect(frontend.test.exclude).toContain('**/.artifacts/**');
+    expect(frontend.test.exclude).toContain('**/artifacts/**');
     expect(frontend.test.exclude).toContain('**/src-tauri/target/**');
     await withArtifactDirectory(async directory => {
       const before = captureValidationSources(root);
@@ -119,7 +119,7 @@ describe('generated artifact layout', () => {
       await mkdir(path.dirname(path.join(snapshot, source)), { recursive: true });
       for (const file of ['.gitignore', source]) await copyFile(path.join(root, file), path.join(snapshot, file));
 
-      const meta = path.join(snapshot, '.artifacts/tests/native-input-p3');
+      const meta = path.join(snapshot, 'artifacts/tests/native-input-p3');
       const originalIndex = readValidationGit(root, ['rev-parse', '--path-format=absolute', '--git-path', 'index']).toString().trim();
       const head = readValidationGit(root, ['rev-parse', 'HEAD']).toString().trim();
       const { gitDirectory, index } = createIndexReader(meta, originalIndex, head);
@@ -130,7 +130,7 @@ describe('generated artifact layout', () => {
 
       const before = captureValidationSources(snapshot);
       expect(Object.keys(before)).toEqual(['.gitignore', source]);
-      for (const generated of ['.artifacts/tests/copied-source.test.mjs', 'src-tauri/target/native-input/copied-source.test.mjs']) {
+      for (const generated of ['artifacts/tests/copied-source.test.mjs', 'src-tauri/target/native-input/copied-source.test.mjs']) {
         await mkdir(path.dirname(path.join(snapshot, generated)), { recursive: true });
         await copyFile(path.join(root, 'scripts/__tests__/native-input-runner.test.mjs'), path.join(snapshot, generated));
         expect(readValidationGit(snapshot, ['check-ignore', '--no-index', generated]).toString().trim()).toBe(generated);
@@ -145,30 +145,36 @@ describe('generated artifact layout', () => {
     await withArtifactDirectory(async directory => {
       expect(artifactWorkspace(directory)).toBe(root);
       const snapshot = path.join(directory, 'ShellSpan');
-      const producer = path.join(snapshot, '.artifacts/tests/native-input-p3/paired-runtime');
+      const producer = path.join(snapshot, 'artifacts/tests/native-input-p3/paired-runtime');
       await mkdir(producer, { recursive: true });
       expect(artifactWorkspace(producer)).toBe(snapshot);
-      expect(() => artifactWorkspace(path.parse(root).root)).toThrow('inside a workspace .artifacts directory');
+      expect(artifactWorkspace(path.join(producer, 'artifacts', 'output.json'))).toBe(snapshot);
+      expect(() => artifactWorkspace(path.parse(root).root)).toThrow('inside a workspace artifacts/tests directory');
     });
   });
 
   it('keeps CI resource transfers and release staging in the build directory', async () => {
     const workflow = parse(await readFile(path.join(root, '.github/workflows/release.yml'), 'utf8'));
-    const nativeUpload = workflow.jobs['build-native-bash'].steps.find(step => step.with?.name === 'native-linux-bash');
-    const nativeDownload = workflow.jobs.build.steps.find(step => step.with?.name === 'native-linux-bash');
+    const nativeBuild = workflow.jobs['build-native-bash'];
+    const buildSteps = workflow.jobs.build.steps;
+    const nativeUpload = nativeBuild.steps.find(step => step.uses?.startsWith('actions/upload-artifact@'));
+    expect(nativeUpload.with.name).toBe('native-linux-bash-${{ matrix.arch }}');
     expect(nativeUpload.with.path).toBe('src-tauri/target/native-input/native-input-p2/resources/native-input');
-    expect(nativeDownload.with.path).toBe(nativeUpload.with.path);
     expect(nativeUpload.with['include-hidden-files']).toBe(true);
+    const cacheIndex = buildSteps.findIndex(step => step.name === 'Cache Rust build');
+    expect(cacheIndex).toBeGreaterThanOrEqual(0);
+    for (const arch of ['amd64', 'arm64']) {
+      expect(nativeBuild.strategy.matrix.include).toContainEqual(expect.objectContaining({ arch }));
+      const download = buildSteps.find(step => step.with?.name === `native-linux-bash-${arch}`);
+      expect(download?.with.path).toBe(nativeUpload.with.path);
+      expect(buildSteps.indexOf(download)).toBeGreaterThan(cacheIndex);
+    }
 
     const editorUpload = workflow.jobs['build-native-macos-editor'].steps.find(step => step.with?.name === 'native-macos-editor');
     const editorDownload = workflow.jobs.build.steps.find(step => step.with?.name === editorUpload.with.name);
     expect(editorDownload.with.path).toBe('src-tauri/target/native-input');
     expect(editorUpload.with.path.trim().split('\n').every(entry => entry.startsWith(`${editorDownload.with.path}/`))).toBe(true);
     expect(editorUpload.with['include-hidden-files']).toBe(true);
-    const buildSteps = workflow.jobs.build.steps;
-    const cacheIndex = buildSteps.findIndex(step => step.name === 'Cache Rust build');
-    expect(cacheIndex).toBeGreaterThanOrEqual(0);
-    expect(buildSteps.indexOf(nativeDownload)).toBeGreaterThan(cacheIndex);
     expect(buildSteps.indexOf(editorDownload)).toBeGreaterThan(cacheIndex);
 
     const bundleUpload = workflow.jobs.build.steps.find(step => step.name === 'Upload bundle artifact');

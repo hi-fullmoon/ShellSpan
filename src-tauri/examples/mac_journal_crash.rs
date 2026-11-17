@@ -37,7 +37,7 @@ fn main() {
         .join("..")
         .canonicalize()
         .unwrap();
-    assert!(root.starts_with(project.join(".artifacts/tests/agent-terminal-input")));
+    assert!(root.starts_with(project.join("artifacts/tests/agent-terminal-input")));
     assert_eq!(root.file_name().unwrap(), "data");
     assert_eq!(
         root.parent().unwrap().file_name().unwrap(),

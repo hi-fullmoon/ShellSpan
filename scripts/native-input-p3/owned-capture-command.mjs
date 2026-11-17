@@ -7,7 +7,7 @@ import {dirname,isAbsolute,join,resolve,sep} from 'node:path';
 // Test infrastructure only. Persist the actual child exit before callers inspect
 // metadata or propagate a capture failure. No environment or model input is saved.
 export function runOwnedCaptureCommand({program,args,evidence,timeoutMs}) {
-  const allowed=resolve(import.meta.dirname,'../../.artifacts/tests');
+  const allowed=resolve(import.meta.dirname,'../../artifacts/tests');
   assert(isAbsolute(evidence)&&resolve(evidence).startsWith(allowed+sep));
   let cursor=resolve(evidence);
   for(;;){const info=fs.lstatSync(cursor);assert(info.isDirectory()&&!info.isSymbolicLink()&&resolve(fs.realpathSync(cursor))===cursor);if(cursor===allowed)break;cursor=dirname(cursor);}

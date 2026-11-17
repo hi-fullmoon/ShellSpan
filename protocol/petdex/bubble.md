@@ -1,6 +1,6 @@
 # Petdex 0.8.0 气泡契约
 
-契约于 2026-09-29 核验。阶段 9 生产传输及阶段 10 原生设置于 2026-09-30 复验。实际操作和显示证据见[气泡验收记录](../../docs/design/petdex-message-integration-acceptance.md)。
+本文记录 ShellSpan 的气泡行为及其在 Petdex Desktop 0.8.0 上的显示限制。动作通道见[联动契约](integration.md)。
 
 ## ShellSpan 气泡行为
 
@@ -12,11 +12,9 @@
 
 客户端重试调度：动作与气泡均在共享退避截止时间之后进入发送尝试，退避期间仍处理取消、配置变化和内容到期。进入尝试后保留1500ms总预算及发送前的节流复查；若手动请求或并发请求在已有失败退避期间超时，不增加共享失败计数，也不推迟已有恢复截止时间。
 
-- 安装：`/Applications/Petdex.app`，Info.plist版本0.8.0，实际进程36116。二进制SHA-256：`878448e0e0a742608df3d9f7048796e7b362166a5a648d5c676c089dc0fa7522`。
 - 官方tag `desktop-v0.8.0`，commit `f2ea48aac6f89fbaeedd6a639faf4e208864ae5d`。
 - [hook_server.zig](https://github.com/crafter-station/petdex/blob/f2ea48aac6f89fbaeedd6a639faf4e208864ae5d/packages/petdex-desktop-native/src/hook_server.zig)：完整route、Bubble、setBubbleWithMetadata、jsonString、bubbleSessionKey、mirrorBubble。
 - [main.zig](https://github.com/crafter-station/petdex/blob/f2ea48aac6f89fbaeedd6a639faf4e208864ae5d/packages/petdex-desktop-native/src/main.zig)：poll_tick、bubbleActive、agentArtBytes/agentIconIndex、bubbleExpiryMs/bubbleLifetimeExpired、syncBubbleDeadlines、expireBubbles、collapseToNewest、bubbleCard与设置处理。
-- 本轮重新下载与既有缓存逐字节相同。hook源码SHA-256 `8dc82d501fe6e700987a9f266af96b7b2ee066bf09e282182b816509ee507150`；main源码SHA-256 `d8f8030d214202d5532cc37e5e65a1ea2a7e9314b20f86c6d89c01fc1e4b6bf0`。未建立安装二进制与源码的可复现构建对应，不将静态结论冒充安装版显示结果。
 
 ## 请求与响应
 
@@ -50,7 +48,7 @@ jsonString扫描并跳过合法JSON转义，但返回未反转义的原始切片
 - 固定句同时含中文弯引号、英文双引号、反斜杠和换行：请求接受，解析镜像等于输入；随后[用户原生截图](../../docs/design/assets/petdex-stage6-escaped-text.png)确认英文引号前的反斜杠、双反斜杠及字面量`\n`直接显示，换行未还原。尾部因显示宽度省略，不能声称完整next可读。镜像解码正确不能证明显示正确，必须规范化。
 - 同样busy=true，compact JSON镜像true，默认带空格编码镜像false；compact false镜像false。不能把普通JSON语义正确等同于该版本正确处理busy。
 
-阶段8硬约束：采用成熟Markdown解析器和serde_json，不复制对端脆弱解析器。先敏感检测与字段整体回退，再提取普通文字、控制字符/换行归一空格、ASCII双引号换可读弯引号、反斜杠换全角字符，最后UTF-8边界裁剪并再次验证。输出不含需转义的字符，转义前后字节一致；这也避免任意内容干扰busy字面量识别。不得只按JS字符串length限制，不手动拼JSON，不发ASCII-only的\u编码替代原生UTF-8。[规范化截图](../../docs/design/assets/petdex-stage6-normalized-text.png)已确认可见部分的弯引号及单个反斜杠正常，没有多余JSON转义符；尾部next被显示省略，未独立确认其可读。不将本轮固定探针视为详情业务已实现。
+生产实现先对不超过 32 KiB 的完整候选做敏感检测，失败时整字段回退。通过后用 Markdown 解析器提取普通文字，把控制字符和换行归一为空格，ASCII 双引号换成弯引号，反斜杠换成全角字符，再按 UTF-8 字节边界裁剪并用 `serde_json` 紧凑编码。内联 HTML 保守回退，内部归属和运行标识不会序列化。[规范化截图](../../docs/design/assets/petdex-stage6-normalized-text.png)展示可见部分的效果；气泡仍可能省略尾部。
 
 ## 同键、多槽与显示
 
@@ -76,16 +74,8 @@ GET /bubble读取最后写入镜像，不是所有槽清单、生命周期状态
 
 busy=false不提供删除保证；寿命0或waiting时可长期残留。不能用修改全局寿命、关闭显示或clearBubble代替自己的关闭结算。
 
-## 安全和未来客户端约束
+## 传输与关闭结算
 
-阶段11可靠性续验：同一生产客户端对真实Petdex测得关闭墙钟1502ms，以及1500ms内两个槽结算成功、第三槽未完成，返回unconfirmed但消息关闭，之后己方三槽全部正常结算。名义1500ms deadline不意味着操作系统调度零误差；没有按槽重开预算。官方受控重启前后令牌只在内存比较，确认变化，未输出令牌或哈希。Disabled无通信仍按生产门禁/请求锁与有限日志证据说明，网络级抓包受当前BPF权限限制。
+气泡复用动作通道的固定回环地址、匿名兼容检查、请求锁、取消和限流。客户端拒绝代理和重定向；匿名检查不提供服务身份认证。气泡接受要求响应不超过 1024 字节，且能解析为 `ok=true` 和正整数 `counter`。
 
-阶段11复验补充（2026-09-30）：真实SSH/SFTP/AI已触发生产通道，用户截图确认三张等待气泡；CUA原生窗口确认“另有 2 个会话或连接，2 项任务进行中”摘要、摘要退出及活动退出后三条“ShellSpan 活动已结束”。追加单/双传输、有限标题/基本名、关闭详情回固定模板、英文等待、规范化最终回复及固定测试文字实际显示。部分英文及测试文字被当前气泡宽度省略，AX完整不等于全部文字均在截图可读。退出后卡片可残留且有等待标记，再次支持busy=false不等于删除。真实Petdex不可用时总开关仍关闭，恢复后持续开启能自动连通；精确预算、其他客户端共存及未补播内容等仍按[阶段11审计](../../docs/design/petdex-message-integration-acceptance.md#阶段11检查与待续审计)限定证据，不扩大协议保证。
-
-固定loopback、禁代理/重定向、有界响应与超时。复用现有匿名health/whoami兼容门禁、取消/请求锁；真实探针额外核对whoami PID对应官方可执行路径，token读取前及认证请求前再次核查。不输出token或摘要。这仍不是原子服务身份绑定，TOCTOU保留。
-
-动作/消息共享100ms写入间隔及429退避；每槽最新版本、普通300ms合并。关闭消息/总开关/正常退出只对已用槽busy=false，全部结算共享1500ms预算，失败也确认关闭，Disabled后无通信。配置生效与cleanup未确认分离。上述客户端行为已在阶段9–10实现并通过生产回归，不能据此推断全部真实业务及显示验收通过；阶段11状态见[待续审计](../../docs/design/petdex-message-integration-acceptance.md#阶段11检查与待续审计)。
-
-阶段8实现说明：安全内容边界已落在 `src-tauri/src/petdex/message_content.rs`，共享双语资源为 `src/locales/petdex-messages.json`。有限详情先对≤32KiB完整候选做redaction检查，再以pulldown-cmark/linkify提取允许文本，按上文规范化与字节上限裁剪，最后紧凑serde_json编码。内联HTML保守整字段回退。对外仅允许SafeMessage的五个字段，不序列化内部归属/运行；两消息偏好默认false。此为生产内容模型和本地回归，不是新HTTP/显示证据，网络发送尚未接入。接口和代际规则见[阶段8交接](../../docs/design/petdex-message-integration-acceptance.md#阶段8实现与交接验收)。
-
-阶段9实现说明：`petdex/message_delivery.rs` 现已复用协调循环及 `transport.rs` 的锁、客户端与匿名门禁发送 `/bubble`。成功响应必须≤1024字节且serde解析为 `ok=true`、正整数counter；HTTP200本身不确认接受。动作、气泡和一次token轮换重试共用100ms写入间隔、429至少1秒退避及有界失败退避。普通尝试与全部关闭槽分别共享1500ms总预算。安装持久化在阻塞worker执行，用单调写入版本保护迟到结算。真实Petdex0.8.0/PID72831的三个固定测试槽已通过生产发送和关闭，最终均非忙碌；无新显示截图，不据此声称可见或已删除，详见[阶段9验收](../../docs/design/petdex-message-integration-acceptance.md#阶段9实现与交接验收)。
+动作、气泡及令牌轮换后的单次重试共享 100ms 最短写入间隔与退避，429 至少退避 1 秒。各槽只提交最新版本，普通更新合并窗口为 300ms。关闭消息、关闭总开关或正常退出时，只对已用槽发送 `busy=false`；所有槽共享 1500ms 结算预算。关闭仍可生效，未确认的结算另行反馈。安装状态在阻塞任务中持久化，以单调版本防止迟到结算覆盖新状态。

@@ -8,7 +8,7 @@ import tailwindcss from '@tailwindcss/vite';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const capture = JSON.parse(await readFile(join(root, 'src/tests/fixtures/tool-result-read-recovery.json'), 'utf8'));
-const artifacts = join(root, '.artifacts/tests/tool-error-icon');
+const artifacts = join(root, 'artifacts/tests/tool-error-icon');
 await mkdir(artifacts, { recursive: true });
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',

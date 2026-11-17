@@ -16,15 +16,15 @@ assert(fixture!=='history'||zleAppHistoryModes.includes(historyMode),'An exact i
 const sshFixturePath=process.env.SHELLSPAN_P3_SSH_FIXTURE?resolve(process.env.SHELLSPAN_P3_SSH_FIXTURE):undefined;
 const ssh=sshFixturePath?JSON.parse(readFileSync(sshFixturePath,'utf8')):undefined;
 if(ssh){
- assert(fixture==='jobs'&&sshFixturePath.startsWith(resolve(root,'.artifacts/tests/native-input-p2/ssh')+'/'));
+ assert(fixture==='jobs'&&sshFixturePath.startsWith(resolve(root,'artifacts/tests/native-input-p2/ssh')+'/'));
  assert(ssh.root===root&&ssh.host==='127.0.0.1'&&Number.isInteger(ssh.port)&&ssh.port>1024&&ssh.shell==='zsh'&&ssh.username==='nativeZle');
  assert(/^shellspan-nip-p2-[a-f0-9-]{36}$/.test(ssh.container));
  const label=execFileSync('docker',['inspect','--format','{{index .Config.Labels "shellspan.native-input-p2"}}',ssh.container],{encoding:'utf8'}).trim();
  assert.equal(ssh.container,`shellspan-nip-p2-${label}`);
 }
-assert(existsSync(resolve(root,'.artifacts/tests/native-input-p3/snapshot-index.json')),'Run application acceptance in a complete immutable P3 source copy');
+assert(existsSync(resolve(root,'artifacts/tests/native-input-p3/snapshot-index.json')),'Run application acceptance in a complete immutable P3 source copy');
 assert(process.platform==='darwin'&&process.arch==='arm64','This entry owns the actual macOS ZLE application case');
-const directory=resolve(root,'.artifacts/tests/native-input-p2/app-p3-zsh',randomUUID());
+const directory=resolve(root,'artifacts/tests/native-input-p2/app-p3-zsh',randomUUID());
 for(const name of ['home','data'])mkdirSync(resolve(directory,name),{recursive:true,mode:0o700});
 const sources=captureValidationSources(root);writeFileSync(resolve(directory,'sources-before.json'),JSON.stringify(sources,null,2));
 const originalHome=process.env.HOME;
@@ -50,10 +50,10 @@ if(fixture==='submit-fault'){
  writeFileSync(resolve(home,'.zshrc'),readFileSync(resolve(home,'.zshrc'),'utf8')+"autoload -Uz add-zsh-hook\np3_stop_before_exec() {\n [[ ! -e $HOME/p3-stop-used ]] || return 0\n setopt localtraps\n trap '' INT\n builtin printf 1 > $HOME/p3-stop-used\n builtin print -rn -- \"$1\" > $HOME/p3-stop-source\n local gate_value\n IFS= read -r gate_value < $HOME/p3-stop-gate\n}\nadd-zsh-hook preexec p3_stop_before_exec\n");
  writeFileSync(resolve(directory,'submit-fault-program.json'),JSON.stringify({program,sha256:submittedProgramSha256,sourceSha256:createHash('sha256').update(readFileSync(resolve(root,'scripts/native-input-p3/signal-target.c'))).digest('hex'),gate:'public user preexec, local INT trap held until explicit FIFO release',productionShellOrUserConfigurationChanged:false},null,2));
 }
-const validation=await editorValidationEnvironment(root,resolve(root,'.artifacts/tests/native-input-p2/resources/native-input'),ssh?['macos-arm64','linux-aarch64-glibc-2.36']:['macos-arm64']);
-const localArtifact=JSON.parse(readFileSync(resolve(root,'.artifacts/tests/native-input-p2/resources/native-input/editors-macos-arm64.json'),'utf8')).profiles[0];
+const validation=await editorValidationEnvironment(root,resolve(root,'artifacts/tests/native-input-p2/resources/native-input'),ssh?['macos-arm64','linux-aarch64-glibc-2.36']:['macos-arm64']);
+const localArtifact=JSON.parse(readFileSync(resolve(root,'artifacts/tests/native-input-p2/resources/native-input/editors-macos-arm64.json'),'utf8')).profiles[0];
 assert(localArtifact.shell&&localArtifact.profile.shell==='zsh');
-const localShell=resolve(root,'.artifacts/tests/native-input-p2/resources/native-input',localArtifact.shell);
+const localShell=resolve(root,'artifacts/tests/native-input-p2/resources/native-input',localArtifact.shell);
 assert.equal(createHash('sha256').update(readFileSync(localShell)).digest('hex'),localArtifact.shellSha256);
 const environment={...process.env,...validation,SHELLSPAN_DATA_DIR:resolve(directory,'data'),SHELLSPAN_LOCAL_HOME:resolve(directory,'home'),SHELLSPAN_LOCAL_SHELL:localShell,SHELL:localShell,LC_ALL:'en_US.UTF-8',
   ...(ssh?{SHELLSPAN_P2_CREDENTIAL_REFERENCE:`native-p2-secret-${randomUUID()}`,SHELLSPAN_P2_SSH_USER:'nativeZle'}:{}),

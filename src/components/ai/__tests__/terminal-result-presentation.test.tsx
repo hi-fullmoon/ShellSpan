@@ -86,7 +86,7 @@ describe('terminal result presentation', () => {
 
   it('keeps a shared capture authoritative even when separate streams are also supplied', () => {
     const result = execute('console.log(process.cwd()); console.error(process.version)');
-    const artifacts = join(process.cwd(), '.artifacts/tests/terminal-result-presentation');
+    const artifacts = join(process.cwd(), 'artifacts/tests/terminal-result-presentation');
     mkdirSync(artifacts, { recursive: true });
     const capture = join(mkdtempSync(join(artifacts, 'combined-')), 'output.txt');
     const fd = openSync(capture, 'wx');

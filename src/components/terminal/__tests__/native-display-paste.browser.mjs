@@ -9,7 +9,7 @@ import {chromium,webkit} from 'playwright';
 import ts from 'typescript';
 import {createServer as createViteServer} from 'vite';
 import {attachDisplayTraceChannel} from '../../../../scripts/native-input-p3/display-trace-channel.mjs';
-const directory=resolve('.artifacts/tests/native-input-p3/display-paste-checks',randomUUID());mkdirSync(directory,{recursive:true,mode:0o700});
+const directory=resolve('artifacts/tests/native-input-p3/display-paste-checks',randomUUID());mkdirSync(directory,{recursive:true,mode:0o700});
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const source=readFileSync(new URL('./native-display-trace.ts',import.meta.url),'utf8');
 const module=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;

@@ -7,7 +7,7 @@ import { chromium, webkit } from 'playwright';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const server = await createServer({ root, configFile: false, appType: 'custom',
-  cacheDir: `${root}.artifacts/tests/terminal-busy-feedback/vite-cache`,
+  cacheDir: `${root}artifacts/tests/terminal-busy-feedback/vite-cache`,
   optimizeDeps: { entries: ['src/components/ai/__tests__/terminal-busy-feedback.browser-entry.tsx'] },
   plugins: [react(), tailwindcss()], resolve: { alias: { '@': `${root}src/` } },
   server: { host: '127.0.0.1', port: 0, watch: null, hmr: false } });

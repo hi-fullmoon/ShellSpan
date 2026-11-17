@@ -73,8 +73,8 @@ async function main() {
   assert(!keychain || isAbsolute(keychain), 'Development signing keychain must be an absolute path');
   const keychainArguments = keychain ? ['--keychain', keychain] : [];
   const frozen = frozenManifest ? JSON.parse(await readFile(frozenManifest, 'utf8')) : undefined;
-  const isolatedP3=frozen?.root.includes('.artifacts/tests/native-input-p3/acceptance-source/');
-  const freshSshWindow = isolatedP3 && /^\.artifacts\/tests\/native-input-p2\/ssh-recovery\/[a-f0-9-]{36}$/.test(relative(frozen.root, evidenceDirectory));
+  const isolatedP3=frozen?.root.includes('artifacts/tests/native-input-p3/acceptance-source/');
+  const freshSshWindow = isolatedP3 && /^artifacts\/tests\/native-input-p2\/ssh-recovery\/[a-f0-9-]{36}$/.test(relative(frozen.root, evidenceDirectory));
   if (!isolatedP3) {
     const signed = await launch('/usr/bin/codesign', ['--force', '--sign', identity,
       ...keychainArguments, '--identifier', config.identifier, '--timestamp=none', executable]).done;

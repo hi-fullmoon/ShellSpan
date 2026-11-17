@@ -8,7 +8,7 @@ import shutil
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / '.artifacts/tests/native-input-p0/p1-protocol-build'
+OUT = ROOT / 'artifacts/tests/native-input-p0/p1-protocol-build'
 
 def main():
     if platform.system() != 'Darwin' or platform.machine() != 'arm64':
@@ -27,15 +27,15 @@ def main():
     # The P0 builder owns pinned GNU archive/Readline patch verification. It is
     # invoked from source; no timestamped capture/build directory is required.
     run(['python3', 'scripts/native-input-p0/build.py', '--upstream', '--versions', '5.3'],
-        env={**os.environ, 'SHELLSPAN_NATIVE_BUILD_ROOT': '.artifacts/tests'})
+        env={**os.environ, 'SHELLSPAN_NATIVE_BUILD_ROOT': 'artifacts/tests'})
     profile='gnu-bash-5.3-readline-8.3.6-macos-arm64-prototype'
     run(['cargo', 'build', '--locked', '--manifest-path', 'scripts/native-input-p0/Cargo.toml', '--target-dir', OUT / 'rust'],env={**os.environ,'SHELLSPAN_NIP_VERIFIED_PROFILE':profile})
     source = OUT / 'bridge.c'
     shutil.copy2(ROOT / 'scripts/native-input-p0/bridge.c', source)
     for patch in ['scripts/native-input-p0/inband-display.patch', 'scripts/native-input-p1/display.patch']:
         run(['patch', '--batch', '-p1', '-i', ROOT / patch], OUT)
-    build = ROOT / '.artifacts/tests/native-input-p0/build-darwin'
-    upstream = ROOT / '.artifacts/tests/native-input-p0/upstream/bash-5.3'
+    build = ROOT / 'artifacts/tests/native-input-p0/build-darwin'
+    upstream = ROOT / 'artifacts/tests/native-input-p0/upstream/bash-5.3'
     includes = [build / 'readline-8.3.6/install/include', build / 'bash-5.3-readline-8.3.6', upstream, upstream / 'include']
     library = OUT / 'rust/debug/libshellspan_native_input_p0.a'
     run(['cc', '-bundle', '-undefined', 'dynamic_lookup', *[f'-I{p}' for p in includes], *[f'-I{p / "lib"}' for p in includes],

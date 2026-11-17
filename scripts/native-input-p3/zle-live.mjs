@@ -11,7 +11,7 @@ import {captureValidationSources} from '../native-input-p2/frozen-validation.mjs
 const root=resolve(import.meta.dirname,'../..');assert.equal(process.platform,'darwin');
 const ordinaryInput=process.env.SHELLSPAN_P3_ORDINARY_ZLE_EVIDENCE;
 assert(ordinaryInput||process.env.CARGO_TARGET_DIR);
-const directory=resolve(root,'.artifacts/tests/native-input-p3/live-geometry',randomUUID());await mkdir(directory,{recursive:true});
+const directory=resolve(root,'artifacts/tests/native-input-p3/live-geometry',randomUUID());await mkdir(directory,{recursive:true});
 const sources=captureValidationSources(root);const runtime=await installedRuntimeManifest();
 const experiment=process.env.SHELLSPAN_P3_XTERM_EXPERIMENT?JSON.parse(await readFile(process.env.SHELLSPAN_P3_XTERM_EXPERIMENT,'utf8')):undefined;
 const unicode11=process.env.SHELLSPAN_P3_UNICODE11_ASSET;
@@ -55,7 +55,7 @@ const server=createServer(async(request,response)=>{
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const browser=await chromium.launch({headless:true});const results=[];
 try{
-  const actual=ordinaryInput?resolve(ordinaryInput,'ordinary-zle-baseline'):resolve(root,'.artifacts/tests/native-input-p3/production-zle');await mkdir(actual,{recursive:true});
+  const actual=ordinaryInput?resolve(ordinaryInput,'ordinary-zle-baseline'):resolve(root,'artifacts/tests/native-input-p3/production-zle');await mkdir(actual,{recursive:true});
   for(const columns of[32,40,100,180]){
     active=undefined;const page=await browser.newPage({viewport:{width:1500,height:640}});let child;
     try{

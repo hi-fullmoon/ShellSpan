@@ -17,7 +17,7 @@ it('separates a two-call launch turn from management only after independent obse
  expect(continuation).toContain('within this same runtime turn');expect(continuation).toContain('without waiting for another user message');expect(continuation).toContain('After the expected stdin rejection, continue directly to wait_process.');expect(continuation).toContain('Return final text only after HISTORY has returned.');
 });
 it.skipIf(process.platform!=='win32').each(['C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe','D:/Programs/PowerShell/7/pwsh.exe'])('parses the complete descendant source with the actual host without executing it: %s',async executable=>{
- const directory=path.resolve(import.meta.dirname,'../../../../.artifacts/tests/native-job-descendant-parser',randomUUID());fs.mkdirSync(directory,{recursive:true});
+ const directory=path.resolve(import.meta.dirname,'../../../../artifacts/tests/native-job-descendant-parser',randomUUID());fs.mkdirSync(directory,{recursive:true});
  const source=path.join(directory,'source.ps1'),parser=path.join(directory,'parse.ps1'),home=path.join(directory,'home');fs.mkdirSync(home);
  fs.writeFileSync(source,nativeJobDescendantPlan(marker).sources[1]);
  fs.writeFileSync(parser,"param([string]$Source)\n$tokens=$null;$errors=$null;$null=[System.Management.Automation.Language.Parser]::ParseFile($Source,[ref]$tokens,[ref]$errors);if($errors.Count){[Console]::Error.WriteLine(($errors|ForEach-Object {$_.Message})-join [Environment]::NewLine);exit 1}\n");

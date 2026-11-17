@@ -6,7 +6,7 @@ import tailwindcss from '@tailwindcss/vite';
 import {packageInputGuard,guardPackageWatchInputs,packageCssInputGuard} from '../native-input-p3/package-frontend.mjs';
 import {inside} from '../native-input-p3/acceptance-inputs.mjs';
 
-const base=resolve(import.meta.dirname,'../../.artifacts/tests/package-frontend-guard'),roots=[];
+const base=resolve(import.meta.dirname,'../../artifacts/tests/package-frontend-guard'),roots=[];
 async function fixture(files){
   await mkdir(base,{recursive:true});const root=await mkdtemp(resolve(base,'case-'));roots.push(root);
   for(const [name,content]of Object.entries(files)){const path=resolve(root,name);await mkdir(dirname(path),{recursive:true});await writeFile(path,content);}

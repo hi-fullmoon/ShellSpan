@@ -16,7 +16,7 @@ import {legacyTiming,compareTimings} from '../native-input-p3/acceptance-timings
 import {productionDependencyInputs,assertReusableBuild,assertArtifactSourceContext} from '../native-input-p3/acceptance-package-reuse.mjs';
 import {foreignNativeValidations} from '../native-input-p3/acceptance-gui-readiness.mjs';
 
-const base=resolve(import.meta.dirname,'../../.artifacts/tests/acceptance-batch-regression');
+const base=resolve(import.meta.dirname,'../../artifacts/tests/acceptance-batch-regression');
 const roots=[];
 async function fresh(){await mkdir(base,{recursive:true});const root=await mkdtemp(resolve(base,'case-'));roots.push(root);return root;}
 afterEach(async()=>{for(const root of roots.splice(0))await rm(root,{recursive:true,force:true});});
@@ -133,8 +133,8 @@ it('keeps controller-only source freezes out of artifact admission',()=>{
 it('recognizes foreign native acceptance across frozen roots without blocking unrelated desktop apps or static checks',()=>{
   const owner=resolve(import.meta.dirname,'../..'),path=owner.replaceAll('\\','/');
   const records=[{pid:10,name:'node.exe',commandLine:`node ${path}/scripts/native-input-p3/windows-package-batch.mjs`},
-    {pid:11,name:'node.exe',commandLine:`node ${path}/.artifacts/tests/p3/other/s/scripts/verify-ai-session-stream.mjs --no-model`},
-    {pid:12,name:'ShellSpan.exe',executablePath:`${path}/.artifacts/tests/p3/other/s/image/ShellSpan.exe`},
+    {pid:11,name:'node.exe',commandLine:`node ${path}/artifacts/tests/p3/other/s/scripts/verify-ai-session-stream.mjs --no-model`},
+    {pid:12,name:'ShellSpan.exe',executablePath:`${path}/artifacts/tests/p3/other/s/image/ShellSpan.exe`},
     {pid:13,name:'ShellSpan.exe',executablePath:`${path}/src-tauri/target/debug/ShellSpan.exe`},
     {pid:14,name:'node.exe',commandLine:`node ${path}/scripts/native-input-p3/windows-package-batch.mjs --list-only`},
     {pid:15,name:'node.exe',commandLine:`node ${path}-unrelated/scripts/verify-ai-session-stream.mjs`}];
@@ -160,12 +160,12 @@ it('allocates fresh nonoverlapping case identities and data/home/WebView directo
 
 it('reserves a short exclusive Cargo output and never adopts another batch or the shared target',async()=>{
   const checkout=resolve(import.meta.dirname,'../..');let owner=await realpath(checkout);
-  const stageText=await readFile(resolve(checkout,'.artifacts/tests/native-input-p3/candidate-stage.json'),'utf8').catch(error=>{if(error.code==='ENOENT')return undefined;throw error;});
-  if(stageText){const stage=JSON.parse(stageText);expect(stage.root).toBe(checkout);expect(stage.sealed&&stage.completeOwnerSnapshot).toBe(true);owner=await realpath(stage.owner);expect(relative(owner,checkout).replaceAll('\\','/')).toMatch(/^\.artifacts\/tests\/(?:p3\/[a-f0-9]{8}\/s|native-input-p3\/acceptance-source\/[a-f0-9-]{36}\/ShellSpan)$/);}
+  const stageText=await readFile(resolve(checkout,'artifacts/tests/native-input-p3/candidate-stage.json'),'utf8').catch(error=>{if(error.code==='ENOENT')return undefined;throw error;});
+  if(stageText){const stage=JSON.parse(stageText);expect(stage.root).toBe(checkout);expect(stage.sealed&&stage.completeOwnerSnapshot).toBe(true);owner=await realpath(stage.owner);expect(relative(owner,checkout).replaceAll('\\','/')).toMatch(/^artifacts\/tests\/(?:p3\/[a-f0-9]{8}\/s|native-input-p3\/acceptance-source\/[a-f0-9-]{36}\/ShellSpan)$/);}
   const id=randomUUID(),location=packageCargoLocation(owner,id),target=await reservePackageCargo(owner,id,checkout);
-  const actualBase=await realpath(resolve(owner,'.artifacts/tests/cb'));expect(relative(owner,actualBase).replaceAll('\\','/')).toBe('.artifacts/tests/cb');expect(dirname(await realpath(location.directory))).toBe(actualBase);
+  const actualBase=await realpath(resolve(owner,'artifacts/tests/cb'));expect(relative(owner,actualBase).replaceAll('\\','/')).toBe('artifacts/tests/cb');expect(dirname(await realpath(location.directory))).toBe(actualBase);
   const marker=JSON.parse(await readFile(resolve(location.directory,'owner.json'),'utf8'));expect(marker.batchId).toBe(id);expect(marker.sourceRoot).toBe(checkout);roots.push(location.directory);
-  expect(target).toBe(location.target);expect(relative(owner,target).replaceAll('\\','/')).toBe(`.artifacts/tests/cb/${id.slice(0,8)}/t`);
+  expect(target).toBe(location.target);expect(relative(owner,target).replaceAll('\\','/')).toBe(`artifacts/tests/cb/${id.slice(0,8)}/t`);
   await expect(reservePackageCargo(owner,id,'other-root')).rejects.toThrow();expect(JSON.parse(await readFile(resolve(location.directory,'owner.json'),'utf8'))).toEqual(marker);
   expect(()=>packageCargoLocation(resolve(owner,'long'.repeat(40)),id)).toThrow('path budget');expect(()=>packageCargoLocation(owner,'../outside')).toThrow('identity');
 });

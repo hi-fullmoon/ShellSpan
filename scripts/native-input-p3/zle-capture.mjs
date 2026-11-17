@@ -8,8 +8,8 @@ import {captureValidationSources} from '../native-input-p2/frozen-validation.mjs
 import {auditEditorResources} from './editor-resources.mjs';
 import {evaluateZleCapture} from './zle-capture-evidence.mjs';
 assert.equal(process.platform,'darwin');
-const root=resolve(import.meta.dirname,'../..');const directory=resolve(root,'.artifacts/tests/native-input-p3/geometry-capture',randomUUID());await mkdir(directory,{recursive:true});
-assert.equal(JSON.parse(await readFile(resolve(root,'.artifacts/tests/native-input-p3/snapshot-index.json'),'utf8')).root,root,'Use a complete isolated source snapshot');
+const root=resolve(import.meta.dirname,'../..');const directory=resolve(root,'artifacts/tests/native-input-p3/geometry-capture',randomUUID());await mkdir(directory,{recursive:true});
+assert.equal(JSON.parse(await readFile(resolve(root,'artifacts/tests/native-input-p3/snapshot-index.json'),'utf8')).root,root,'Use a complete isolated source snapshot');
 const eof=process.argv[2]==='eof',guards=process.argv[2]==='guards';assert(process.argv.length===2||eof||guards);
 const mode=guards?'guards':eof?'eof':'geometry';
 const resourcesBefore=auditEditorResources(root,'macos-arm64');assert(resourcesBefore.selectedValid);
@@ -24,11 +24,11 @@ for await(const line of createInterface({input:build.stdout})){
 }
 const buildCode=await built;await writeFile(resolve(directory,'build.log'),Buffer.concat(diagnostics));assert.equal(buildCode,0);assert(executable);
 const hash=async path=>createHash('sha256').update(await readFile(path)).digest('hex');
-const catalogue=JSON.parse(await readFile(resolve(root,'.artifacts/tests/native-input-p2/resources/native-input/editors-macos-arm64.json'),'utf8'));
-const shell=resolve(root,'.artifacts/tests/native-input-p2/resources/native-input',catalogue.profiles[0].shell);
+const catalogue=JSON.parse(await readFile(resolve(root,'artifacts/tests/native-input-p2/resources/native-input/editors-macos-arm64.json'),'utf8'));
+const shell=resolve(root,'artifacts/tests/native-input-p2/resources/native-input',catalogue.profiles[0].shell);
 const shellSha256=await hash(shell);assert.equal(shellSha256,catalogue.profiles[0].shellSha256);
 const binary=resolve(directory,'native-zle-tests');const digest=await hash(executable);await copyFile(executable,binary);await chmod(binary,0o700);assert.equal(await hash(binary),digest);
-const actual=resolve(root,guards?'.artifacts/tests/native-input-p3/zle-guards':eof?'.artifacts/tests/native-input-p3/zle-eof':'.artifacts/tests/native-input-p3/production-zle');await mkdir(actual,{recursive:true});
+const actual=resolve(root,guards?'artifacts/tests/native-input-p3/zle-guards':eof?'artifacts/tests/native-input-p3/zle-eof':'artifacts/tests/native-input-p3/production-zle');await mkdir(actual,{recursive:true});
 const results=[];
 for(const entry of(guards?[{columns:100,stage:'guards'}]:eof?[{columns:100,stage:'eof'}]:[...[32,40,100,180].map(columns=>({columns,stage:'running'})),{columns:100,stage:'handoff'}])){
   const before=new Set(await readdir(actual));const log=await open(resolve(directory,`${entry.columns}-${entry.stage}.log`),'wx');

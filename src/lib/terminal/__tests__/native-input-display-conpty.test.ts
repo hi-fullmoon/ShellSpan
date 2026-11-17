@@ -19,7 +19,7 @@ it('preserves an ordinary long prompt over the observed private ConPTY width cha
   const {value, close} = terminal();const previous = value.unicode.activeVersion;
   value.loadAddon(new UnicodeGraphemesAddon());value.unicode.activeVersion = previous;
   const display = attachNativeInputDisplay(value, {...NATIVE_INPUT_DISPLAY, ownedReflowCursorLine: false}, {unicodeVersion: '15-graphemes', unicodeScope: 'session'});
-  const prompt = 'PS D:\\owned\\native-display-validation\\long-workspace-name\\.artifacts\\tests\\native-input-p2\\isolated-host\\home>';
+  const prompt = 'PS D:\\owned\\native-display-validation\\long-workspace-name\\artifacts\\tests\\native-input-p2\\isolated-host\\home>';
   const methods = [value.getSelection, value.selectAll, value.buffer.normal.getLine];const input: string[] = [];const stop = value.onData(data => input.push(data));
   try {
     await write(value, prompt);

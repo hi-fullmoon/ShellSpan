@@ -4,7 +4,7 @@ import {readFileSync,writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {createIndexReader} from './index-reader.mjs';
 import {captureValidationSources} from '../native-input-p2/frozen-validation.mjs';
-const root=resolve(process.argv[2]);const meta=resolve(root,'.artifacts/tests/native-input-p3');
+const root=resolve(process.argv[2]);const meta=resolve(root,'artifacts/tests/native-input-p3');
 const source=JSON.parse(readFileSync(resolve(meta,'import.json'),'utf8'));
 const {index,gitDirectory}=createIndexReader(meta,resolve(meta,'imported-index'),source.head);
 const indexSha256=createHash('sha256').update(readFileSync(index)).digest('hex');

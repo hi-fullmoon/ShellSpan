@@ -6,7 +6,7 @@ import {prepareWindowsHistoryProfile} from '../native-input-p3/windows-history-p
 import {readWindowsHistoryDisk, readWindowsHistoryExit, windowsHistoryReaderArtifacts} from '../native-input-p3/windows-history-witness.mjs';
 
 function fixture() {
-  const base = p.resolve(import.meta.dirname, '../../.artifacts/tests/windows-history-witness');
+  const base = p.resolve(import.meta.dirname, '../../artifacts/tests/windows-history-witness');
   fs.mkdirSync(base, {recursive: true});
   const evidence = fs.mkdtempSync(p.join(base, 'case-'));
   const plan = prepareWindowsHistoryProfile({host: 'powerShell7', mode: 'history-custom', evidence, home: p.join(evidence, 'home'), data: p.join(evidence, 'data')});

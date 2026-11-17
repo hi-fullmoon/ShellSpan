@@ -8,19 +8,19 @@ import {captureValidationAssets} from './frozen-validation.mjs';
 import {BASH_READLINE_VERSIONS,RELEASE_BASH_VERSION} from './bash-profiles.mjs';
 
 const root=resolve(import.meta.dirname,'../..');
-const owned=resolve(root,'.artifacts/tests/native-input-p2');
+const owned=resolve(root,'artifacts/tests/native-input-p2');
 const {values}=parseArgs({options:{matrix:{type:'string',multiple:true},run:{type:'string',multiple:true},'require-frozen':{type:'boolean'},'require-auxiliary':{type:'boolean'},'source-root':{type:'string',multiple:true},'include-legacy':{type:'boolean'}}});
 const validationRoots=values['source-root']?.map(path=>resolve(path))??[root];
 const sourceSnapshots=new Map();
 for(const validationRoot of validationRoots)if(validationRoot!==root){
   assert(validationRoot.startsWith(resolve(owned,'acceptance-source')+'/'));
-  const sourceSnapshot=JSON.parse(readFileSync(resolve(validationRoot,'.artifacts/tests/native-input-p2/source-snapshot.json'),'utf8'));
+  const sourceSnapshot=JSON.parse(readFileSync(resolve(validationRoot,'artifacts/tests/native-input-p2/source-snapshot.json'),'utf8'));
   assert(sourceSnapshot.ownerRoot===root&&sourceSnapshot.sourceRoot===validationRoot&&sourceSnapshot.sharedDriftReviewed===true,'Isolated source must have its exact P2/shared-source correspondence reviewed');
   sourceSnapshots.set(validationRoot,sourceSnapshot);
 }
 const sha=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
 const json=path=>JSON.parse(readFileSync(path,'utf8'));
-const own=path=>{const absolute=resolve(path);assert([owned,...validationRoots.map(path=>resolve(path,'.artifacts/tests/native-input-p2'))].some(base=>absolute.startsWith(base+'/')),'Evidence must belong to the isolated P2 directory');return absolute;};
+const own=path=>{const absolute=resolve(path);assert([owned,...validationRoots.map(path=>resolve(path,'artifacts/tests/native-input-p2'))].some(base=>absolute.startsWith(base+'/')),'Evidence must belong to the isolated P2 directory');return absolute;};
 const candidates=[];const matrices=[];
 for(const input of values.matrix??[]){
   const path=own(input);const summary=json(path);
@@ -54,7 +54,7 @@ for(const {directory,expected} of candidates){
     const validationRoot=validationRoots.find(base=>Object.entries(sourceHashes).every(([path,digest])=>{try{return sha(resolve(base,path))===digest;}catch{return false;}})
       &&(!inputs.sourceSnapshot||sha(resolve(base,inputs.sourceSnapshot.path))===inputs.sourceSnapshot.sha256));
     assert(validationRoot,'No recorded immutable source version matches every production hash of this actual run');
-    const validationOwned=resolve(validationRoot,'.artifacts/tests/native-input-p2');
+    const validationOwned=resolve(validationRoot,'artifacts/tests/native-input-p2');
     for(const [path,digest] of Object.entries(sourceHashes))assert.equal(sha(resolve(validationRoot,path)),digest,`Production source drift: ${path}`);
     const target=transport==='ssh'?'linux-aarch64-glibc-2.36':'macos-arm64';
     const producer=inputs.producers.find(value=>value.profile.includes(`-${target}-`));assert(producer,'Actual target producer missing');
@@ -134,7 +134,7 @@ const auxiliary=Object.fromEntries(requiredAuxiliary.map(name=>[name,[...cases.v
 const missingAuxiliary=requiredAuxiliary.filter(name=>!auxiliary[name]);
 const directory=resolve(owned,'evidence-summary',randomUUID());mkdirSync(directory,{recursive:true,mode:0o700});
 const summary={capturedAt:new Date().toISOString(),scope:'Cumulative verified actual application evidence; original matrix failures remain failures',
-  sourceValidationRoots:validationRoots,sourceSnapshots:[...sourceSnapshots].map(([path,snapshot])=>({path:relative(root,resolve(path,'.artifacts/tests/native-input-p2/source-snapshot.json')),sha256:sha(resolve(path,'.artifacts/tests/native-input-p2/source-snapshot.json')),scope:snapshot.scope,sharedDrift:snapshot.sharedDrift})),
+  sourceValidationRoots:validationRoots,sourceSnapshots:[...sourceSnapshots].map(([path,snapshot])=>({path:relative(root,resolve(path,'artifacts/tests/native-input-p2/source-snapshot.json')),sha256:sha(resolve(path,'artifacts/tests/native-input-p2/source-snapshot.json')),scope:snapshot.scope,sharedDrift:snapshot.sharedDrift})),
   requiredCases:required.length,coveredCases:required.length-missing.length,requiredLifecycleCases:lifecycle.length,
   coveredLifecycleCases:lifecycle.length-missingLifecycle.length,coverageComplete:missing.length===0&&missingLifecycle.length===0,
   frozenCases,frozenLifecycleCases,frozenCoverageComplete:frozenCases===required.length&&frozenLifecycleCases===lifecycle.length,

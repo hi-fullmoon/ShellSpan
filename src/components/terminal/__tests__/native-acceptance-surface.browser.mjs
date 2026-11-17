@@ -1,7 +1,7 @@
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createServer} from 'node:http';import {createHash,randomUUID} from 'node:crypto';
 import {chromium} from 'playwright';import ts from 'typescript';
-const root=path.resolve(import.meta.dirname,'../../../..'),output=path.resolve(process.argv[2]??path.join(root,'.artifacts/tests/native-acceptance-surface',randomUUID()));
-assert(output.startsWith(path.join(root,'.artifacts/tests')+path.sep),'Layout evidence must stay inside test artifacts');fs.mkdirSync(output,{recursive:true});
+const root=path.resolve(import.meta.dirname,'../../../..'),output=path.resolve(process.argv[2]??path.join(root,'artifacts/tests/native-acceptance-surface',randomUUID()));
+assert(output.startsWith(path.join(root,'artifacts/tests')+path.sep),'Layout evidence must stay inside test artifacts');fs.mkdirSync(output,{recursive:true});
 const helper=fs.readFileSync(path.join(import.meta.dirname,'native-acceptance-surface.ts'),'utf8'),css=fs.readFileSync(path.join(root,'src/styles/base.css'),'utf8'),rootRule=css.match(/html,\r?\nbody,\r?\n#root \{[\s\S]*?\}/)?.[0];assert(rootRule);
 const module=ts.transpileModule(helper,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const server=createServer((request,response)=>{if(request.url==='/surface.mjs'){response.setHeader('Content-Type','application/javascript');response.end(module);}else{response.setHeader('Content-Type','text/html');response.end('<!doctype html><style>'+rootRule+'</style><div id="root"></div>');}});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));

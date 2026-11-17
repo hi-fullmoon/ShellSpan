@@ -4,7 +4,7 @@ param(
 )
 $ErrorActionPreference='Stop'
 $project=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
-$allowed=[IO.Path]::GetFullPath((Join-Path $project '.artifacts/tests')).TrimEnd('\')+'\'
+$allowed=[IO.Path]::GetFullPath((Join-Path $project 'artifacts/tests')).TrimEnd('\')+'\'
 if(-not [IO.Path]::IsPathRooted($Plan)-or -not [IO.Path]::GetFullPath($Plan).StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase)){throw 'History reuse plan escaped test evidence'}
 $info=Get-Item -LiteralPath $Plan -Force
 if($info.PSIsContainer-or ($info.Attributes-band [IO.FileAttributes]::ReparsePoint)-ne 0-or $info.Length-gt 65536){throw 'Invalid history reuse plan'}

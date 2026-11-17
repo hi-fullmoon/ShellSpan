@@ -22,13 +22,13 @@ const themes=values.theme?[values.theme]:(transport==='ssh'?['plain']:['walters'
 const widths=values.columns?values.columns.split(',').map(Number):[32,40,100,180];assert(widths.length&&widths.every(x=>[32,40,100,180].includes(x)));
 const engine=values.engine??'chromium',renderer=values.renderer??'dom';assert(['chromium','webkit'].includes(engine)&&['dom','webgl'].includes(renderer));
 const target=transport==='ssh'?'linux-aarch64-glibc-2.36':'macos-arm64';
-const infrastructureOwner=JSON.parse(await readFile(resolve(root,'.artifacts/tests/native-input-p3/candidate-stage.json'),'utf8')).owner;
+const infrastructureOwner=JSON.parse(await readFile(resolve(root,'artifacts/tests/native-input-p3/candidate-stage.json'),'utf8')).owner;
 const marker={startup:transport==='ssh'?'P3-SSH-INITIALIZED':'P3-STARTUP:env:profile:rc:login',parent:transport==='ssh'?'P3-SSH-PERSISTED':'P3-PARENT:父Shell',background:transport==='ssh'?'P3-SSH-BG-':'P3-BACKGROUND-'};
-const validation=await editorValidationEnvironment(root,resolve(root,'.artifacts/tests/native-input-p2/resources/native-input'),[target]);
+const validation=await editorValidationEnvironment(root,resolve(root,'artifacts/tests/native-input-p2/resources/native-input'),[target]);
 const resourceAudit=auditEditorResources(root,target);assert(resourceAudit.selectedValid);
 const sources=captureValidationSources(root),runtime=await installedRuntimeManifest();
 const hash=async path=>createHash('sha256').update(await readFile(path)).digest('hex');
-const directory=resolve(root,'.artifacts/tests/native-input-p3/history-live',randomUUID());await mkdir(directory,{recursive:true});
+const directory=resolve(root,'artifacts/tests/native-input-p3/history-live',randomUUID());await mkdir(directory,{recursive:true});
 const buildLog=await open(resolve(directory,'build.log'),'wx');
 const build=spawn('cargo',['test','--locked','--manifest-path','src-tauri/Cargo.toml','--lib','--no-run','--message-format=json-render-diagnostics'],{cwd:root,stdio:['ignore','pipe',buildLog.fd]});
 const built=new Promise((resolve,reject)=>{build.once('error',reject);build.once('exit',resolve);});let executable;
@@ -127,14 +127,14 @@ try{for(const theme of themes)for(const columns of widths){
     }})().catch(error=>{s.failure=String(error);});
    },{columns,renderer,role,scenario,marker});
   }
-  const production=resolve(root,transport==='ssh'?'.artifacts/tests/native-input-p3/production-ssh-zle':'.artifacts/tests/native-input-p3/production-zle');await mkdir(production,{recursive:true});const before=new Set(await readdir(production));const log=await open(resolve(directory,`${theme}-${columns}.log`),'wx');
+  const production=resolve(root,transport==='ssh'?'artifacts/tests/native-input-p3/production-ssh-zle':'artifacts/tests/native-input-p3/production-zle');await mkdir(production,{recursive:true});const before=new Set(await readdir(production));const log=await open(resolve(directory,`${theme}-${columns}.log`),'wx');
   const environment={...process.env,...validation,SHELLSPAN_P3_TEST_PROMPT_THEME:theme,SHELLSPAN_P3_TEST_COLUMNS:String(columns),SHELLSPAN_P3_TRACE_SCHEDULE:'1',SHELLSPAN_P3_GEOMETRY_BACKGROUND_OUTPUT:scenario==='input'?'0':'1',SHELLSPAN_P3_HISTORY_PREFILL:'1',SHELLSPAN_P3_OBSERVE_FULL_INPUT:'1',SHELLSPAN_P3_INTERRUPT_STAGE:'running'};
   if(scenario==='background-resize')environment.SHELLSPAN_P3_GEOMETRY_DYNAMIC_ROWS='1';else delete environment.SHELLSPAN_P3_GEOMETRY_DYNAMIC_ROWS;
   if(scenario==='input'||transport==='ssh')environment.SHELLSPAN_P3_LIVE_GEOMETRY='1';else delete environment.SHELLSPAN_P3_LIVE_GEOMETRY;
   if(transport==='ssh'){
    fixturePath=execFileSync(process.execPath,[resolve(root,'scripts/native-input-p3/linux-peer.mjs'),root],{cwd:root,encoding:'utf8'}).trim();
-   runDirectory=resolve(root,'.artifacts/tests/native-input-p3/scoped-ssh-runs',randomUUID());await mkdir(runDirectory,{recursive:true});const image=resolve(runDirectory,'actual-scoped-ssh-tests');await copyFile(binary,image);await chmod(image,0o700);assert.equal(await hash(image),binarySha256);
-   child=spawn(resolve(infrastructureOwner,'.artifacts/tests/native-input-p3/venv/bin/python'),['-B',resolve(root,'scripts/native-input-p3/linux-run.py'),fixturePath],{cwd:root,env:{...environment,SHELLSPAN_P3_SSH_TEST_IMAGE:image,SHELLSPAN_P3_SSH_PLANNED_OPERATIONS:'10'},stdio:['ignore',log.fd,log.fd]});
+   runDirectory=resolve(root,'artifacts/tests/native-input-p3/scoped-ssh-runs',randomUUID());await mkdir(runDirectory,{recursive:true});const image=resolve(runDirectory,'actual-scoped-ssh-tests');await copyFile(binary,image);await chmod(image,0o700);assert.equal(await hash(image),binarySha256);
+   child=spawn(resolve(infrastructureOwner,'artifacts/tests/native-input-p3/venv/bin/python'),['-B',resolve(root,'scripts/native-input-p3/linux-run.py'),fixturePath],{cwd:root,env:{...environment,SHELLSPAN_P3_SSH_TEST_IMAGE:image,SHELLSPAN_P3_SSH_PLANNED_OPERATIONS:'10'},stdio:['ignore',log.fd,log.fd]});
   }else child=spawn(binary,['terminal_command::zle_tests::native_zle_production_startup_parent_parser_and_jobs','--ignored','--exact'],{cwd:root,env:environment,stdio:['ignore',log.fd,log.fd]});
   ended=new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve);});
   const deadline=Date.now()+30000;while(!active){const created=(await readdir(production)).filter(name=>!before.has(name));assert(created.length<=1);if(created.length)active=resolve(production,created[0]);else{assert(Date.now()<deadline);await new Promise(resolve=>setTimeout(resolve,5));}}

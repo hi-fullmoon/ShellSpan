@@ -4,7 +4,7 @@ import {execFileSync} from 'node:child_process';
 import {createAiCredentialWitness} from '../native-input-p3/ai-credential-lifecycle.mjs';
 const workspace = p.resolve(import.meta.dirname, '../..');
 function fixture() {
-  const base = p.join(workspace, '.artifacts/tests/ai-credential-lifecycle');fs.mkdirSync(base, {recursive: true});const directory = fs.mkdtempSync(p.join(base, 'case-'));fs.mkdirSync(p.join(directory, 'data'));
+  const base = p.join(workspace, 'artifacts/tests/ai-credential-lifecycle');fs.mkdirSync(base, {recursive: true});const directory = fs.mkdtempSync(p.join(base, 'case-'));fs.mkdirSync(p.join(directory, 'data'));
   const originalPath = p.join(directory, 'original.db'), file = p.join(directory, 'data/shellspan-main.db');
   for (const path of [originalPath, file]) { const db = new DatabaseSync(path);db.exec('CREATE TABLE preferences(key TEXT,value TEXT);CREATE TABLE key_credentials(id TEXT)');db.prepare('INSERT INTO preferences VALUES(?,?)').run('llm.routes.v1', JSON.stringify({schemaVersion: 1, revision: 1, routes: []}));db.close(); }
   const runId = randomUUID();return {directory, originalPath, file, runId, token: randomUUID(), workspace};

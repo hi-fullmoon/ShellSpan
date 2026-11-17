@@ -11,10 +11,10 @@ import {captureValidationSources} from '../native-input-p2/frozen-validation.mjs
 import {editorValidationEnvironment} from './editor-validation.mjs';
 import {auditEditorResources} from './editor-resources.mjs';
 const owner=resolve(import.meta.dirname,'../..'),root=resolve(process.argv[2]);assert.equal(resolve(process.cwd()),root);assert(process.env.CARGO_TARGET_DIR);
-const stage=JSON.parse(await readFile(resolve(root,'.artifacts/tests/native-input-p3/candidate-stage.json'),'utf8'));assert(stage.sealed&&stage.root===root);
-const validation=await editorValidationEnvironment(root,resolve(root,'.artifacts/tests/native-input-p2/resources/native-input'),['linux-aarch64-glibc-2.36']);
+const stage=JSON.parse(await readFile(resolve(root,'artifacts/tests/native-input-p3/candidate-stage.json'),'utf8'));assert(stage.sealed&&stage.root===root);
+const validation=await editorValidationEnvironment(root,resolve(root,'artifacts/tests/native-input-p2/resources/native-input'),['linux-aarch64-glibc-2.36']);
 const resourceAudit=auditEditorResources(root,'linux-aarch64-glibc-2.36');assert(resourceAudit.selectedValid);
-const directory=resolve(root,'.artifacts/tests/native-input-p3/ssh-live',randomUUID());await mkdir(directory,{recursive:true});
+const directory=resolve(root,'artifacts/tests/native-input-p3/ssh-live',randomUUID());await mkdir(directory,{recursive:true});
 const sources=captureValidationSources(root);const runtime=await installedRuntimeManifest();
 const experiment=process.env.SHELLSPAN_P3_XTERM_EXPERIMENT?JSON.parse(await readFile(process.env.SHELLSPAN_P3_XTERM_EXPERIMENT,'utf8')):undefined;
 const unicode11=process.env.SHELLSPAN_P3_UNICODE11_ASSET;
@@ -58,7 +58,7 @@ const server=createServer(async(request,response)=>{
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const browser=await chromium.launch({headless:true});const results=[];
 try{
-  const actual=resolve(root,'.artifacts/tests/native-input-p3/production-ssh-zle');await mkdir(actual,{recursive:true});
+  const actual=resolve(root,'artifacts/tests/native-input-p3/production-ssh-zle');await mkdir(actual,{recursive:true});
   for(const columns of[32,40,100,180]){
     active=undefined;const page=await browser.newPage({viewport:{width:1500,height:640}});let child,ended,fixturePath,runDirectory;
     try{
@@ -111,8 +111,8 @@ try{
       },{columns,unicode11:Boolean(unicode11)});
       const before=new Set(await readdir(actual));const log=await open(resolve(directory,`${columns}.log`),'wx');
       fixturePath=execFileSync(process.execPath,[resolve(owner,'scripts/native-input-p3/linux-peer.mjs'),root],{cwd:owner,encoding:'utf8'}).trim();
-      runDirectory=resolve(root,'.artifacts/tests/native-input-p3/scoped-ssh-runs',randomUUID());await mkdir(runDirectory,{recursive:true});const image=resolve(runDirectory,'actual-scoped-ssh-tests');await copyFile(binary,image);await chmod(image,0o700);assert.equal(await hash(image),binarySha256);
-      child=spawn(resolve(owner,'.artifacts/tests/native-input-p3/venv/bin/python'),['-B',resolve(owner,'scripts/native-input-p3/linux-run.py'),fixturePath],{cwd:owner,stdio:['ignore',log.fd,log.fd],env:{...process.env,...validation,SHELLSPAN_P3_SSH_TEST_IMAGE:image,SHELLSPAN_P3_SSH_PLANNED_OPERATIONS:'10',SHELLSPAN_P3_TEST_COLUMNS:String(columns),SHELLSPAN_P3_LIVE_GEOMETRY:'1'}});
+      runDirectory=resolve(root,'artifacts/tests/native-input-p3/scoped-ssh-runs',randomUUID());await mkdir(runDirectory,{recursive:true});const image=resolve(runDirectory,'actual-scoped-ssh-tests');await copyFile(binary,image);await chmod(image,0o700);assert.equal(await hash(image),binarySha256);
+      child=spawn(resolve(owner,'artifacts/tests/native-input-p3/venv/bin/python'),['-B',resolve(owner,'scripts/native-input-p3/linux-run.py'),fixturePath],{cwd:owner,stdio:['ignore',log.fd,log.fd],env:{...process.env,...validation,SHELLSPAN_P3_SSH_TEST_IMAGE:image,SHELLSPAN_P3_SSH_PLANNED_OPERATIONS:'10',SHELLSPAN_P3_TEST_COLUMNS:String(columns),SHELLSPAN_P3_LIVE_GEOMETRY:'1'}});
       ended=new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve);});
       const deadline=Date.now()+5000;while(!active){const created=(await readdir(actual)).filter(name=>!before.has(name));assert(created.length<=1);if(created.length)active=resolve(actual,created[0]);else{assert(Date.now()<deadline);await new Promise(resolve=>setTimeout(resolve,5));}}
       const exitCode=await ended;await log.close();

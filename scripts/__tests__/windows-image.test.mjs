@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { windowsValidationPaths } from '../native-input-p3/windows-profiles.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
-const artifacts = path.join(root, '.artifacts/tests/windows-image');
+const artifacts = path.join(root, 'artifacts/tests/windows-image');
 const execute = promisify(execFile);
 
 describe.runIf(process.platform === 'win32')('owned Windows image inspection', () => {

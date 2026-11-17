@@ -10,7 +10,7 @@ const digest = value => createHash('sha256').update(value).digest('hex');
 function objectWithKeys(value, keys) { assert(value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).sort().join(',') === [...keys].sort().join(','), 'Invalid safe AI credential checkpoint'); }
 export function createAiCredentialWitness({mode, directory, token, runId, originalPath, workspace}) {
   assert(['provision', 'verify-absence'].includes(mode) && uuid.test(token) && uuid.test(runId) && isAbsolute(directory) && isAbsolute(originalPath), 'Exact owned AI credential context required');
-  const artifacts = resolve(workspace, '.artifacts/tests');assert(resolve(directory).toLowerCase().startsWith(artifacts.toLowerCase() + sep));
+  const artifacts = resolve(workspace, 'artifacts/tests');assert(resolve(directory).toLowerCase().startsWith(artifacts.toLowerCase() + sep));
   for (let cursor = resolve(directory);; cursor = dirname(cursor)) { const info = lstatSync(cursor);assert(info.isDirectory() && !info.isSymbolicLink());if (cursor.toLowerCase() === artifacts.toLowerCase()) break;assert(cursor !== dirname(cursor)); }
   const file = join(directory, 'data/shellspan-main.db'), routeId = 'e07-ai-' + runId;
   const read = name => { const path = join(directory, name), info = lstatSync(path);assert(info.isFile() && !info.isSymbolicLink() && info.nlink === 1 && info.size < 131072);return JSON.parse(readFileSync(path, 'utf8')); };

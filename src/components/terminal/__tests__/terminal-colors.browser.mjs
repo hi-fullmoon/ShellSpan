@@ -6,7 +6,7 @@ import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import { createCanvas, loadImage } from 'canvas';
 
-const artifacts = resolve('.artifacts/tests/terminal-colors');
+const artifacts = resolve('artifacts/tests/terminal-colors');
 await mkdir(artifacts, { recursive: true });
 const server = await createServer({
   configFile: false, logLevel: 'error', appType: 'custom',

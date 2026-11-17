@@ -166,7 +166,7 @@ describe('AI tool presentation', () => {
   it.each(['zh-CN', 'en-US'] as const)('does not repeat input when a large patch falls back to plain output in %s', async locale => {
     useAppStore.setState({ locale });
     await initI18n(locale);
-    const artifacts = join(process.cwd(), '.artifacts/tests/ai-tool-presentation');
+    const artifacts = join(process.cwd(), 'artifacts/tests/ai-tool-presentation');
     mkdirSync(artifacts, { recursive: true });
     const directory = mkdtempSync(join(artifacts, 'large-diff-'));
     const before = join(directory, 'before.txt'), after = join(directory, 'after.txt');
@@ -622,7 +622,7 @@ describe('AI tool presentation', () => {
     const path = 'src/components/ai/workspace/ai-tool-presentation.tsx';
     // Use a real Git diff of owned files, without depending on repository
     // discovery, commit objects or the caller's mutable working tree.
-    const parent = join(process.cwd(), '.artifacts/tests/ai-tool-diff');
+    const parent = join(process.cwd(), 'artifacts/tests/ai-tool-diff');
     mkdirSync(parent, { recursive: true });
     const directory = mkdtempSync(join(parent, 'case-'));
     const before = join(directory, 'before.tsx'), after = join(directory, 'after.tsx');

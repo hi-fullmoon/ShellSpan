@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {readFileSync,readdirSync} from 'node:fs';
 import {resolve} from 'node:path';
 export function auditEditorResources(root,selectedTarget){
-  const resources=resolve(root,'.artifacts/tests/native-input-p2/resources/native-input');
+  const resources=resolve(root,'artifacts/tests/native-input-p2/resources/native-input');
   const hash=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
   const entries=[];
   for(const name of readdirSync(resources).filter(name=>/^editors-.*\.json$/.test(name))){

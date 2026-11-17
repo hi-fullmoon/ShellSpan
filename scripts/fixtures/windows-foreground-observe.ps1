@@ -1,7 +1,7 @@
 param([Parameter(Mandatory=$true)][string]$Output,[int]$MaxEntries=2048)
 $ErrorActionPreference='Stop'
 $project=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
-$artifactRoot=[IO.Path]::GetFullPath((Join-Path $project '.artifacts/tests'))
+$artifactRoot=[IO.Path]::GetFullPath((Join-Path $project 'artifacts/tests'))
 $outputPath=[IO.Path]::GetFullPath($Output)
 if(-not $outputPath.StartsWith($artifactRoot+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){
   throw 'Foreground observation output must be owned test evidence'

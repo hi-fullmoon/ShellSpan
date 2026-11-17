@@ -38,7 +38,7 @@ test('expired observation cannot resume work or accept a late result',async()=>{
 });
 
 test('real HTTP abort resumes only the remaining work without creating an observation',async()=>{
- const base=resolve(import.meta.dirname,'../../.artifacts/tests/mac-eof-evidence-clock');await mkdir(base,{recursive:true});
+ const base=resolve(import.meta.dirname,'../../artifacts/tests/mac-eof-evidence-clock');await mkdir(base,{recursive:true});
  const directory=await mkdtemp(resolve(base,'http-')),token=randomUUID();let timeout;
  const clock=createMacEofEvidenceClock({workMs:700,observationMs:3000,onTimeout:value=>{timeout=value;}});
  const vite=await createViteServer({root:directory,configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true},plugins:[{name:'actual-eof-evidence-clock-http',configureServer(server){

@@ -8,7 +8,7 @@ import {copyNativeRebuildSources} from '../native-input-p2/rebuild-sources.mjs';
 const root = path.resolve(import.meta.dirname, '../..');
 
 it('packs an unsupported target twice and rejects a missing catalogue for an admitted target', async () => {
-  const artifacts = path.join(root, '.artifacts/tests/native-resource-packaging');
+  const artifacts = path.join(root, 'artifacts/tests/native-resource-packaging');
   await mkdir(artifacts, { recursive: true });
   const directory = await mkdtemp(path.join(artifacts, 'run-'));
   try {
@@ -27,7 +27,7 @@ it('packs an unsupported target twice and rejects a missing catalogue for an adm
     const output = JSON.parse(first.stdout);
     expect(output.directory).toBe(nativeInputReleaseDirectory(directory));
     expect(output.directory).toBe(path.join(directory, 'src-tauri/target/native-input/generated'));
-    await expect(readdir(path.join(directory, '.artifacts'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readdir(path.join(directory, 'artifacts'))).rejects.toMatchObject({ code: 'ENOENT' });
     const manifest = JSON.parse(await readFile(path.join(output.directory, 'resource-manifest.json'), 'utf8'));
     expect(manifest).toMatchObject({ targets: [], unsupportedHost: true, validationOnly: false });
     expect(await readdir(output.directory)).toEqual(['resource-manifest.json']);
@@ -50,7 +50,7 @@ it('packs an unsupported target twice and rejects a missing catalogue for an adm
 });
 
 it('ships the Windows example capture include and excludes build/cache output',async()=>{
-  const artifacts=path.join(root,'.artifacts/tests/native-resource-packaging');await mkdir(artifacts,{recursive:true});const directory=await mkdtemp(path.join(artifacts,'sources-'));
+  const artifacts=path.join(root,'artifacts/tests/native-resource-packaging');await mkdir(artifacts,{recursive:true});const directory=await mkdtemp(path.join(artifacts,'sources-'));
   try{
     const input=path.join(directory,'input'),output=path.join(directory,'output');
     for(const name of ['src-tauri/native-input-editors/examples','src-tauri/native-input-adapter','src-tauri/vendor/portable-pty','src-tauri/src/terminal_command','src-tauri/native-input-editors/target','src-tauri/native-input-editors/__pycache__'])await mkdir(path.join(input,name),{recursive:true});

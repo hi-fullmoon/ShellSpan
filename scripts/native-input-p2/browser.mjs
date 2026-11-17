@@ -8,9 +8,9 @@ import {displayModuleJavaScript,installedRuntimeManifest} from '../native-input-
 
 const root=resolve(import.meta.dirname,'../..');
 const linux=process.argv.includes('--linux');
-const pointer=JSON.parse(await readFile(resolve(root,linux?'.artifacts/tests/native-input-p2/latest-linux-geometry.json':'.artifacts/tests/native-input-p2/latest-geometry.json'),'utf8'));
+const pointer=JSON.parse(await readFile(resolve(root,linux?'artifacts/tests/native-input-p2/latest-linux-geometry.json':'artifacts/tests/native-input-p2/latest-geometry.json'),'utf8'));
 const target=linux?'linux-aarch64-glibc-2.36':'macos-arm64';
-const catalogue=JSON.parse(await readFile(resolve(root,`.artifacts/tests/native-input-p2/resources/native-input/catalogue-${target}.json`),'utf8'));
+const catalogue=JSON.parse(await readFile(resolve(root,`artifacts/tests/native-input-p2/resources/native-input/catalogue-${target}.json`),'utf8'));
 const entries=JSON.parse(await readFile(pointer.summary,'utf8'));
 assert(catalogue.profiles.length>0,'No native Bash profiles in the geometry catalogue');
 const sizes=linux?['oversize']:['normal','oversize'];
@@ -18,7 +18,7 @@ const expectedGeometry=catalogue.profiles.flatMap(({bashVersion})=>[32,40,100,18
 assert.deepEqual(entries.map(({version,columns,size})=>`${version}/${columns}/${size}`).sort(),expectedGeometry.sort(),'Geometry evidence must cover the built profiles');
 const expectedCases=entries.length*4;
 const installed=await installedRuntimeManifest();
-const directory=resolve(root,'.artifacts/tests/native-input-p2/browser',randomUUID());await mkdir(directory,{recursive:true,mode:0o700});
+const directory=resolve(root,'artifacts/tests/native-input-p2/browser',randomUUID());await mkdir(directory,{recursive:true,mode:0o700});
 const assets={'/xterm.js':['node_modules/@xterm/xterm/lib/xterm.js','application/javascript'],'/xterm.css':['node_modules/@xterm/xterm/css/xterm.css','text/css'],'/webgl.js':['node_modules/@xterm/addon-webgl/lib/addon-webgl.js','application/javascript'],'/search.js':['node_modules/@xterm/addon-search/lib/addon-search.js','application/javascript']};
 const server=createServer(async(request,response)=>{
   try{if(request.url==='/display.js'){response.setHeader('Content-Type','application/javascript');response.end(await displayModuleJavaScript());return;}

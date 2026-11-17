@@ -10,7 +10,7 @@ export function prepareWindowsHistoryReuseProfile(options) {
   const {evidence, reuseId} = options;
   assert(typeof reuseId === 'string' && /^[a-f0-9-]{36}$/.test(reuseId), 'Exact owned history reuse identity required');
   const project = p.resolve(import.meta.dirname, '../..');
-  const relative = p.relative(p.join(project, '.artifacts/tests'), p.resolve(evidence));
+  const relative = p.relative(p.join(project, 'artifacts/tests'), p.resolve(evidence));
   assert(relative && !relative.startsWith('..') && !p.isAbsolute(relative), 'History reuse requires project test evidence');
   let cursor = p.resolve(evidence);
   while (fs.existsSync(cursor)) {

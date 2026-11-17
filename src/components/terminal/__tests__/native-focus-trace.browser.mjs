@@ -7,7 +7,7 @@ import {createServer} from 'vite';
 import {chromium,webkit} from 'playwright';
 import ts from 'typescript';
 import {attachFocusTraceChannel} from '../../../../scripts/native-input-p3/focus-trace-channel.mjs';
-const directory=resolve('.artifacts/tests/native-input-p3/focus-trace-checks',randomUUID());await mkdir(directory,{recursive:true,mode:0o700});
+const directory=resolve('artifacts/tests/native-input-p3/focus-trace-checks',randomUUID());await mkdir(directory,{recursive:true,mode:0o700});
 const source=await readFile(new URL('./native-focus-trace.ts',import.meta.url),'utf8');
 const channelSource=await readFile('scripts/native-input-p3/focus-trace-channel.mjs');
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');

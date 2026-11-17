@@ -9,11 +9,11 @@ import {captureValidationSources} from '../native-input-p2/frozen-validation.mjs
 import {assertNativeGuiAllowed} from '../native-input-p2/gui-lock.mjs';
 assertNativeGuiAllowed();
 const root=resolve(import.meta.dirname,'../..');
-assert(process.platform==='darwin'&&existsSync(resolve(root,'.artifacts/tests/native-input-p3/snapshot-index.json')));
+assert(process.platform==='darwin'&&existsSync(resolve(root,'artifacts/tests/native-input-p3/snapshot-index.json')));
 const [action,inputPath]=process.argv.slice(2);assert(['prepare','export'].includes(action));
 const input=JSON.parse(readFileSync(inputPath,'utf8'));assert(/^[a-f0-9-]{36}$/.test(input.runId));
-const directory=action==='prepare'?resolve(root,'.artifacts/tests/native-input-p2/credential-source',randomUUID()):input.sourceDirectory;
-assert(directory.startsWith(resolve(root,'.artifacts/tests/native-input-p2/credential-source')+'/'));
+const directory=action==='prepare'?resolve(root,'artifacts/tests/native-input-p2/credential-source',randomUUID()):input.sourceDirectory;
+assert(directory.startsWith(resolve(root,'artifacts/tests/native-input-p2/credential-source')+'/'));
 const environment={...process.env,CARGO_INCREMENTAL:'0',SHELLSPAN_DATA_DIR:resolve(directory,'data'),SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:directory,SHELLSPAN_ACCEPTANCE_RUN_ID:input.runId,SHELLSPAN_DEV_SIGNING_KEYCHAIN:resolve(process.env.HOME,'Library/Keychains/login.keychain-db')};
 async function run(name,mode,configuration){
  const fd=openSync(resolve(directory,`${name}.log`),'wx',0o600);

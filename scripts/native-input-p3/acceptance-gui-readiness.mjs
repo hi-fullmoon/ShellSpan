@@ -9,7 +9,7 @@ export function foreignNativeValidations(processes,owner,runnerPid){
     if(value.pid===runnerPid)return [];
     const name=value.name??'',command=(value.commandLine??'').replaceAll('\\','/').toLowerCase();
     const executable=(value.executablePath??'').replaceAll('\\','/').toLowerCase();
-    const app=/^shellspan.*\.exe$/i.test(name)&&executable.startsWith(prefix+'.artifacts/tests/');
+    const app=/^shellspan.*\.exe$/i.test(name)&&executable.startsWith(prefix+'artifacts/tests/');
     const driver=/^node\.exe$/i.test(name)&&command.includes(prefix)
       &&/\/scripts\/(?:verify-ai-session-stream\.mjs|native-input-p3\/(?:windows-package-(?:batch|smoke)\.mjs|app\.mjs))(?=[\s"']|$)/.test(command)
       &&!/(?:^|\s)--(?:list-only|frontend-only)(?:\s|$)/.test(command);

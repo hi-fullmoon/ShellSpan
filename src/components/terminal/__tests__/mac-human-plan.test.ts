@@ -18,7 +18,7 @@ it('tells the real operator to use the system copy shortcut for every default-mo
  for(const key of ['terminal.human.step4','terminal.human.step5','terminal.human.step6'] as const){expect(zhCN[key]).toContain('⌘C');expect(enUS[key]).toContain('⌘C');}
 });
 it.runIf(process.platform==='darwin'&&process.arch==='arm64')('prints exact independent human command results through a real Shell, including unchanged NFD bytes',()=>{
- const directory=resolve(import.meta.dirname,'../../../../.artifacts/tests/mac-human-plan');mkdirSync(directory,{recursive:true});const home=mkdtempSync(resolve(directory,'home-')),plan=macHumanPlan(token);
+ const directory=resolve(import.meta.dirname,'../../../../artifacts/tests/mac-human-plan');mkdirSync(directory,{recursive:true});const home=mkdtempSync(resolve(directory,'home-')),plan=macHumanPlan(token);
  const sources=[plan.inputs[0].source.replace('EDIT_BAD','EDIT_BAK'),plan.inputs[1].source+"中文'",plan.inputs[2].source.replace(/_X$/,'_K')];
  for(const [i,source]of sources.entries())expect(execFileSync('/bin/sh',['-c',source],{env:{...process.env,HOME:home}})).toEqual(Buffer.from(plan.inputs[i].expected.replace(/\r\n/g,'\n')));
  expect(plan.unicodeRaw).toContain('\t');expect(plan.unicodeCopy).toContain('A        B  中文 e\u0301');expect(plan.nativeCopy).toContain('A        B  中文 e\u0301');

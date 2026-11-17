@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFile,writeFile,lstat,realpath,readdir} from 'node:fs/promises';
 import {resolve,relative,isAbsolute,sep} from 'node:path';
-const evidenceRoot=resolve(import.meta.dirname,'../../.artifacts/tests/native-input-p2');
+const evidenceRoot=resolve(import.meta.dirname,'../../artifacts/tests/native-input-p2');
 const uuid=/^[a-f0-9-]{36}$/;
 const stateName='native-scratch-restart.json';
 const pathIdentity=path=>process.platform==='win32'?resolve(path).toLowerCase():resolve(path);

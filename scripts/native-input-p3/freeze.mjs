@@ -5,7 +5,7 @@ import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {captureValidationSources} from '../native-input-p2/frozen-validation.mjs';
 const root=resolve(import.meta.dirname,'../..');
-const directory=resolve(root,'.artifacts/tests/native-input-p3/source-revisions',randomUUID());
+const directory=resolve(root,'artifacts/tests/native-input-p3/source-revisions',randomUUID());
 mkdirSync(directory,{recursive:true,mode:0o700});
 const git=(...args)=>execFileSync('git',args,{cwd:root,maxBuffer:128*1024*1024});
 const sources=captureValidationSources(root);

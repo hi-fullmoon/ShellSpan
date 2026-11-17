@@ -69,7 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("Absolute owned evidence directory required".into());
     }
     let base = std::env::current_dir()?
-        .join(".artifacts/tests")
+        .join("artifacts/tests")
         .canonicalize()?;
     let parent = directory
         .parent()

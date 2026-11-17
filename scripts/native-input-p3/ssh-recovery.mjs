@@ -28,9 +28,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
 // The frozen App and its normal runner still own build, signature and receipts.
 export async function runMountedSshRecoveryCase(root, id, fixtureFile, bash = false) {
   root = realpathSync(root);
-  assert(root.startsWith(resolve(checkout, '.artifacts/tests/native-input-p3/acceptance-source') + '/'));
+  assert(root.startsWith(resolve(checkout, 'artifacts/tests/native-input-p3/acceptance-source') + '/'));
   assert(Object.hasOwn(sshNativeCases, id) && id !== 'crash-restart');
-  const stage = JSON.parse(readFileSync(resolve(root, '.artifacts/tests/native-input-p3/candidate-stage.json'), 'utf8'));
+  const stage = JSON.parse(readFileSync(resolve(root, 'artifacts/tests/native-input-p3/candidate-stage.json'), 'utf8'));
   assert(stage.sealed && stage.root === root, 'Mounted evidence requires an owned sealed source root');
   const fixture = readOwnedSshFixture(root, fixtureFile, bash);
   await runCase(root, id, fixture, true);
@@ -42,7 +42,7 @@ async function runCase(root, id, fixture, mountedEvidence = false) {
   assert.equal(fixture.sftpEnabled === false, id === 'raw-no-sftp', 'Fixture SFTP configuration must match the selected case');
   const unknownMain = id === 'raw-unapproved-shell';
   assert.equal(fixture.mainVariant === 'unknown', unknownMain, 'Fixture Main digest variant must match the selected case');
-  const resources = resolve(root, '.artifacts/tests/native-input-p2/resources/native-input');
+  const resources = resolve(root, 'artifacts/tests/native-input-p2/resources/native-input');
   const targets = ['macos-arm64', 'linux-aarch64-glibc-2.36'];
   const bash = fixture.shell === 'bash';
   const audits = targets.map(target => requireEditorResources(root, target));
@@ -58,7 +58,7 @@ async function runCase(root, id, fixture, mountedEvidence = false) {
   assert.equal(peer.mainSha256 === linux.shellSha256, !unknownMain, 'Actual SSH shell digest does not match the selected fixture variant');
 
   // A fixture is consumed by one case only, including a failed attempt.
-  const directory = resolve(root, '.artifacts/tests/native-input-p2/ssh-recovery', fixture.id);
+  const directory = resolve(root, 'artifacts/tests/native-input-p2/ssh-recovery', fixture.id);
   if (mountedEvidence) {
     assert.equal(realpathSync(directory), directory, 'Case mount path must not be redirected');
     const info = statSync(directory);
