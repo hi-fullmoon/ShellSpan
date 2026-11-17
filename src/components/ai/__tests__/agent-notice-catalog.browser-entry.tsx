@@ -100,14 +100,16 @@ export const cases: NoticeCase[] = [
   { id: 'supplement', label: '子 Agent · 补充输入不可用', group: 'availability', source: 'src/components/ai/workspace/ai-composer-seat.tsx', selector: '[role="status"][data-slot="alert"]' },
   { id: 'skills-stale', label: '技能列表 · 使用缓存', group: 'availability', source: 'src/components/ai/workspace/use-skill-completion.tsx', selector: '[role="note"]' },
   { id: 'terminal-unavailable', label: '终端执行通道不可用', group: 'availability', source: 'src/components/ai/agent-terminal-busy-notice.tsx', selector: '[data-slot="terminal-busy-notice"]' },
+  { id: 'terminal-unavailable-focus', label: 'Focus · 终端执行通道不可用', group: 'availability', source: 'src/components/ai/agent-terminal-busy-notice.tsx', selector: '[data-slot="terminal-busy-notice"]' },
   ...['waiting', 'stopping', 'stopped', 'reconnecting'].map((stage, index) => ({
     id: `recovery-${stage}`, label: ['终端恢复 · 先停止任务', '终端恢复 · 正在停止', '终端恢复 · 可重新连接', '终端恢复 · 正在连接'][index],
     group: 'recovery' as const, source: 'src/components/ai/workspace/ai-terminal-recovery-notice.tsx', selector: '[data-terminal-recovery-notice]',
   })),
+  { id: 'operation-error', label: '操作失败 · 可关闭', group: 'errors', source: 'src/components/ai/workspace/ai-workspace-error-notices.tsx', selector: '[data-ai-error-notice]' },
+  { id: 'draft-error', label: '失败草稿 · 未发送', group: 'errors', source: 'src/components/ai/workspace/ai-failed-draft-recovery.tsx', selector: '[data-ai-failed-draft]' },
   ...[
-    ['operation-error', '操作失败 · 可关闭'], ['draft-error', '失败草稿 · 可重试'],
     ['sync-error', '消息同步中断'], ['sync-persistent', '消息同步持续失败'], ['sync-retrying', '正在重试消息同步'],
-  ].map(([id, label]) => ({ id, label, group: 'errors' as const, source: 'src/components/ai/workspace/ai-workspace-error-notices.tsx', selector: id === 'draft-error' ? '[data-ai-failed-draft]' : '[data-ai-error-notice]' })),
+  ].map(([id, label]) => ({ id, label, group: 'errors' as const, source: 'src/components/ai/workspace/ai-workspace-error-notices.tsx', selector: '[data-ai-error-notice]' })),
   ...[
     ['queue-conflict', '队列内容发生版本冲突'], ['queue-error', '队列操作失败'],
   ].map(([id, label]) => ({ id, label, group: 'errors' as const, source: 'src/components/ai/workspace/ai-queue-notice.tsx', selector: '[data-slot="alert"]' })),
@@ -165,6 +167,7 @@ function renderCase(id: string): ReactNode {
   if (id === 'focus') return <FocusNoTarget />;
   if (id === 'skills-stale') return <AiSkillStaleNotice />;
   if (id === 'terminal-unavailable') return <AgentTerminalBusyNotice disabled={false} state="unavailable" onSwitchDirect={record} />;
+  if (id === 'terminal-unavailable-focus') return <AgentTerminalBusyNotice disabled={false} state="unavailable" focusMode />;
   if (id === 'supplement') return <AiComposerSeat phase="active" status="idle" inputMode="supplement" currentSessionId={budget.summary.id}
     unavailableReason={t('agent.availability.needsTerminal')} />;
   if (id === 'file-reference') return <FileReferencePanelPreview />;
@@ -186,7 +189,7 @@ function renderCase(id: string): ReactNode {
     return workspace({ composerState, onRetryFailedDraft: record,
       pendingNodes: withOptimisticConversationNodes([], submissions, budget.summary.scopeKey, budget.summary.id) });
   }
-  if (id.startsWith('queue-')) return <AiQueueNotice conflict={id === 'queue-conflict'} error={id === 'queue-error' ? error!.message : null} />;
+  if (id.startsWith('queue-')) return <AiQueueNotice conflict={id === 'queue-conflict'} error={id === 'queue-error' ? error!.message : null} onRetry={record} />;
   if (id === 'permission') return <AgentPermissionSelector sessionId={approval!.sessionId} mode="fullAccess" disabled />;
   if (id.startsWith('approval-')) return <AiApprovalPanel approval={approvals[id.slice(9)] ?? approval!}
     decision={null} argumentsLoading={id === 'approval-loading'} error={id === 'approval-error' ? error!.message : null} onApprove={record} onReject={record} onOpenDetails={record} />;

@@ -11,7 +11,8 @@ useAppStore.setState({ locale });
 await initI18n(locale);
 
 // Replay the runtime error captured in the user's screenshot through the real UI.
-createRoot(document.getElementById('root')!).render(<AiQueueDock items={[{
+const host = document.getElementById('root')!;
+createRoot(host).render(<AiQueueDock onRetry={() => { host.dataset.retried = 'true'; }} items={[{
   id: '1278', content: '12', lane: 'nextTurn', state: 'queued', source: 'user',
 }]} mutation={{
   intent: { type: 'remove', itemId: '1278' },

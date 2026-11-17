@@ -158,7 +158,8 @@ it.each(['zh-CN', 'en-US'] as const)('keeps failed-send recovery beside its mess
   expect(screen.getAllByText(t('ai.workspace.messageNotSent'))).toHaveLength(1);
   expect(screen.getAllByText(state.failedDrafts[0].content)).toHaveLength(1);
   const retry = within(row as HTMLElement).getByRole('button', { name: t('common.retry') });
-  expect(retry).toHaveClass('size-6', 'shrink-0');
+  expect(retry).toHaveClass('h-6', 'p-0', 'shrink-0');
+  expect(retry).toHaveTextContent(t('common.retry'));
   retry.focus();
   await userEvent.setup().keyboard('{Enter}');
   expect(retried).toEqual([state.failedDrafts[0].id]);
@@ -554,8 +555,9 @@ describe('AiWorkspaceRoot conversation structure', () => {
     const availabilityNotice = screen.getByText(/The current model configuration/).closest('[role="status"]');
     expect(availabilityNotice).toHaveAttribute('data-size', 'sm');
     const dismiss = screen.getByRole('button', { name: 'Dismiss error' });
-    expect(dismiss.parentElement).toHaveClass('shrink-0', 'items-center');
-    expect(operationError?.querySelector('[data-slot="alert-description"]')).toContainElement(dismiss);
+    const description = operationError?.querySelector('[data-slot="alert-description"]');
+    expect(description).toHaveClass('flex-wrap', 'items-start', 'justify-end');
+    expect(description).toContainElement(dismiss);
     expect(dismiss).toHaveTextContent('Dismiss error');
     expect(dismiss.querySelector('svg')).toBeNull();
     expect(operationError).toHaveClass('bg-destructive/5', 'items-center');

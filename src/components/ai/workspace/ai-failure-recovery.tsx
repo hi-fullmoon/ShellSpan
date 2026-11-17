@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiFailureRecovery } from '@/lib/ai/failure-recovery';
+import { AiNoticeAction } from './ai-notice-action';
 
 export const AiFailureRecoveryContext = createContext<{
   recovery: AiFailureRecovery | null;
@@ -31,14 +31,14 @@ export function AiFailureRecoveryAction({ turnId }: { readonly turnId: string | 
     return <span className="block text-muted-foreground">{t(recovery.kind === 'verify' ? 'ai.error.recovery.verify' : 'ai.error.recovery.input')}</span>;
   }
   if (recovery.kind === 'settings') {
-    return context.onSettings && <Button type="button" variant="ghost" size="xs" disabled={context.busy} onClick={context.onSettings}>
+    return context.onSettings && <AiNoticeAction disabled={context.busy} onClick={context.onSettings}>
       {t('ai.error.recovery.settings')}
-    </Button>;
+    </AiNoticeAction>;
   }
   if (!context.onRetry) return null;
   const seconds = Math.max(0, Math.ceil(((retryAt ?? 0) - now) / 1000));
-  return <Button type="button" variant="ghost" size="xs" disabled={context.busy || seconds > 0}
+  return <AiNoticeAction disabled={context.busy || seconds > 0}
     aria-busy={context.busy || undefined} onClick={() => context.onRetry?.(recovery.turnId)}>
     {context.busy ? t('ai.error.recovery.retrying') : seconds > 0 ? t('ai.error.recovery.cooldown', { seconds }) : t('common.retry')}
-  </Button>;
+  </AiNoticeAction>;
 }

@@ -18,6 +18,7 @@ try {
     const { default: React } = await import(reactUrl);
     const { default: ReactDOM } = await import(domUrl);
     const { AiWorkspaceRoot } = await import('/src/components/ai/workspace/ai-workspace-root.tsx');
+    const { createAiComposerState } = await import('/src/lib/ai/composer-machine.ts');
     const { AgentTerminalBusyNotice } = await import('/src/components/ai/agent-terminal-busy-notice.tsx');
     const { AiTaskStrip } = await import('/src/components/ai/workspace/ai-task-strip.tsx');
     const { Alert, AlertDescription } = await import('/src/components/ui/alert.tsx');
@@ -33,11 +34,16 @@ try {
       const [direct, setDirect] = React.useState(false);
       const [sent, setSent] = React.useState('');
       const [unavailable, setUnavailable] = React.useState(true);
+      const [showError, setShowError] = React.useState(action === 'continue' && longText);
       return h('main', { className: 'ai-panel-shell p-4', 'data-ai-scope': 'terminal' },
         h(AiWorkspaceRoot, {
           scope: 'terminal', view: null, canStartAgent: true,
           readOnlySession: action === 'history',
-          agentUnavailableReason: unavailable ? t(action === 'history' ? 'ai.workspace.sessions.previousTerminalReadOnly'
+          composerState: showError ? createAiComposerState({
+            lastError: { kind: 'unknown', message: t('ai.workspace.reconnectUnsettled'), retryable: false },
+          }) : undefined,
+          onDismissError: () => setShowError(false),
+          agentUnavailableReason: unavailable && !(action === 'continue' && longText) ? t(action === 'history' ? 'ai.workspace.sessions.previousTerminalReadOnly'
             : longText ? 'terminal.occupancy.conflict' : 'agent.availability.needsTerminal') : null,
           onReconnectTerminal: unavailable && action === 'reconnect' ? () => setUnavailable(false) : undefined,
           onContinueOnReconnectedTerminal: unavailable && action === 'continue' ? () => setUnavailable(false) : undefined,
@@ -58,7 +64,8 @@ try {
     ReactDOM.createRoot(document.getElementById('root')).render(h(Preview));
     return { action: t(action === 'reconnect' ? 'ai.workspace.status.reconnect'
       : action === 'continue' ? 'ai.workspace.continueOnReconnectedTerminal' : 'ai.workspace.status.openSettings'),
-      direct: t('agent.executionSurface.v1.switchDirect'), notice: t('agent.executionSurface.v1.unavailableDescription') };
+      direct: t('agent.executionSurface.v1.switchDirect'), notice: t('agent.executionSurface.v1.unavailableDescription'),
+      dismiss: t('ai.workspace.recovery.dismiss') };
   }, { locale, action, longText });
   const notice = page.locator('[data-slot="terminal-busy-notice"]');
   await notice.waitFor({ timeout: 10000 }).catch(error => assert.fail(`${error.message}\n${errors.join('\n')}`));
@@ -71,6 +78,8 @@ try {
   assert.ok((await notice.textContent()).includes(labels.notice));
   for (const width of [1000, 640, 420, 320]) {
     await page.setViewportSize({ width, height: longText ? 900 : 640 });
+    await page.waitForFunction(() => [...document.querySelectorAll('[data-slot="ai-notice-transition"][data-open]')]
+      .every(panel => panel.getBoundingClientRect().height >= panel.scrollHeight - 1));
     const wrapping = await page.locator('[data-slot="ai-composer-notices"] [data-slot="alert-description"]').evaluateAll(elements =>
       elements.map(el => ({ wrap: getComputedStyle(el).textWrap,
         fits: el.scrollWidth <= el.clientWidth })));
@@ -112,21 +121,29 @@ try {
       assert.equal(geometry.gap, 4);
       await availability.screenshot({ path: `/tmp/shellspan-availability-${action}-${locale}-${width}${longText ? '-long' : ''}.png` });
     }
-    for (const target of action === 'none' || action === 'history' ? [notice] : [notice, availability]) {
+    const actionableNotices = action === 'none' || action === 'history' ? [notice] : [notice, availability];
+    if (action === 'continue' && longText) {
+      actionableNotices.push(page.locator('[data-slot="ai-workspace-error-notices"] [data-ai-error-notice]'));
+    }
+    for (const target of actionableNotices) {
       assert.equal(await target.locator('button svg').count(), 0, 'Notice actions must remain text-only');
       const geometry = await target.evaluate(el => {
         const box = el.getBoundingClientRect();
         const button = el.querySelector('button').getBoundingClientRect();
         const text = el.querySelector('[data-slot="alert-description"] > span');
         const textBox = text.getBoundingClientRect();
-        const description = el.querySelector('[data-slot="alert-description"]').getBoundingClientRect();
+        const description = el.querySelector('[data-slot="alert-description"]');
+        const descriptionBox = description.getBoundingClientRect();
+        const inlineWidth = parseFloat(getComputedStyle(text).flexBasis) + button.width + parseFloat(getComputedStyle(description).columnGap);
         const icon = el.querySelector(':scope > svg')?.getBoundingClientRect();
         const firstLineCenter = textBox.y + parseFloat(getComputedStyle(text).paddingTop) + parseFloat(getComputedStyle(text).lineHeight) / 2;
         return { height: box.height, buttonHeight: button.height,
           buttonFontSize: getComputedStyle(el.querySelector('button')).fontSize,
           buttonOffset: button.y + button.height / 2 - firstLineCenter,
           wrapped: button.top >= textBox.bottom,
-          rightInset: description.right - button.right,
+          needsWrap: inlineWidth > descriptionBox.width,
+          rightInset: descriptionBox.right - button.right,
+          iconSize: icon ? [icon.width, icon.height] : null,
           iconOffset: icon ? icon.y + icon.height / 2 - firstLineCenter : null,
           gap: icon ? textBox.x - icon.right : null,
           fits: el.scrollWidth <= el.clientWidth && button.right <= box.right && button.bottom <= box.bottom };
@@ -134,26 +151,30 @@ try {
       assert.equal(geometry.buttonHeight, 24, `Compact action height at ${width}px`);
       assert.equal(geometry.buttonFontSize, '11px', 'Notice actions use smaller text');
       assert.ok(geometry.fits, `Action must remain inside the notice at ${width}px`);
-      if (geometry.wrapped) assert.ok(Math.abs(geometry.rightInset) < 1,
-        `Wrapped action must align with the description's right edge at ${width}px`);
+      assert.ok(Math.abs(geometry.rightInset) < 1,
+        `Action must align with the description's right edge at ${width}px`);
       if (geometry.iconOffset !== null) {
-        assert.equal(geometry.iconOffset, -1, 'Info icon keeps the existing optical correction relative to the first line');
+        assert.deepEqual(geometry.iconSize, [14, 14]);
+        assert.ok(Math.abs(geometry.iconOffset) <= 1, 'Notice icon aligns with the first text line');
         assert.equal(geometry.gap, 4);
       }
       if (width === 1000) {
         if (locale === 'zh-CN' && !longText) assert.equal(geometry.height, 38, 'Single-line action notice remains compact');
-        assert.equal(geometry.buttonOffset, 0, 'Action and first text line centers match');
       }
-      if (width === 320) {
-        assert.ok(geometry.wrapped, 'Narrow notice actions must wrap below the text');
-        assert.ok(geometry.height > 38, 'Narrow notices wrap without clipping');
-      }
+      assert.equal(geometry.wrapped, geometry.needsWrap, 'Actions wrap when the text and button do not fit together');
+      if (geometry.wrapped) assert.ok(geometry.height > 38, 'Narrow notices wrap without clipping');
+      else assert.equal(geometry.buttonOffset, 0, 'Action and first text line centers match');
     }
     await page.screenshot({ path: `/tmp/shellspan-terminal-action-notices-${locale}-${action}-${width}${longText ? '-long' : ''}.png` });
   }
   if (action === 'none' || action === 'history') {
     await page.close();
     continue;
+  }
+  if (action === 'continue' && longText) {
+    const dismiss = page.getByRole('button', { name: labels.dismiss, exact: true });
+    await dismiss.press('Enter');
+    await dismiss.waitFor({ state: 'detached' });
   }
   await page.getByRole('button', { name: labels.action, exact: true }).focus();
   await page.keyboard.press('Enter');

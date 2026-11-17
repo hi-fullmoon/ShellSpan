@@ -1,9 +1,9 @@
-import { Button } from '@/components/ui/button';
 import { useI18n } from '@/hooks/useI18n';
 import { aiErrorMessage } from '@/lib/ai/error-message';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
 import type { AiSessionError, AiSessionSyncRecovery } from '@/lib/ai/session-adapter';
 import { AiErrorNotice } from './ai-error-notice';
+import { AiNoticeAction } from './ai-notice-action';
 import { AiNoticeTransition } from './ai-notice-transition';
 
 export interface AiWorkspaceErrorNoticesProps {
@@ -36,7 +36,14 @@ export function AiWorkspaceErrorNotices({
     >
       <AiNoticeTransition>
         {syncError ? (
-          <AiErrorNotice title={t('ai.workspace.recovery.title')}>
+          <AiErrorNotice
+            title={t('ai.workspace.recovery.title')}
+            action={onRetrySync && <AiNoticeAction
+              disabled={syncRecovery?.retrying} aria-busy={syncRecovery?.retrying || undefined}
+              onClick={() => { void onRetrySync(); }}>
+              {t(syncRecovery?.retrying ? 'ai.error.streamSyncRetrying' : 'ai.error.streamSyncRetry')}
+            </AiNoticeAction>}
+          >
             <span className="flex min-w-0 flex-col gap-1">
               <span>{t((syncRecovery?.attempts ?? 0) >= 3 ? 'ai.error.streamSyncPersistent' : 'ai.error.streamSyncFailed')}</span>
               {syncRecovery && <span className="text-muted-foreground">
@@ -46,11 +53,6 @@ export function AiWorkspaceErrorNotices({
                     .format(syncRecovery.lastSyncedAt),
                 })}</>}
               </span>}
-              {onRetrySync && <Button type="button" variant="ghost" size="xs" className="self-start text-[11px]"
-                disabled={syncRecovery?.retrying} aria-busy={syncRecovery?.retrying || undefined}
-                onClick={() => { void onRetrySync(); }}>
-                {t(syncRecovery?.retrying ? 'ai.error.streamSyncRetrying' : 'ai.error.streamSyncRetry')}
-              </Button>}
             </span>
           </AiErrorNotice>
         ) : null}
@@ -60,15 +62,12 @@ export function AiWorkspaceErrorNotices({
           <AiErrorNotice
             title={t('ai.workspace.recovery.title')}
             action={onDismissError && (
-              <Button
-                variant="ghost"
-                size="xs"
-                className="text-[11px]"
+              <AiNoticeAction
                 aria-label={t('ai.workspace.recovery.dismiss')}
                 onClick={onDismissError}
               >
                 {t('ai.workspace.recovery.dismiss')}
-              </Button>
+              </AiNoticeAction>
             )}
           >
             {aiErrorMessage(operationError.message, t)}

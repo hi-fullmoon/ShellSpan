@@ -2,7 +2,6 @@ import { Activity, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { CircleAlertIcon, InfoIcon, MessageCircleQuestionIcon, TriangleAlertIcon } from 'lucide-react';
 import { ShellSpanGlyph } from '@/components/brand/shellspan-mark';
 import { Spinner } from '@/components/ui/spinner';
-import { Button } from '@/components/ui/button';
 
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
@@ -48,6 +47,7 @@ import type { AiQueueMutationState } from './use-ai-session-controller';
 import { AiWorkspaceErrorNotices } from './ai-workspace-error-notices';
 import { AiFailedDraftRecoveryContext } from './ai-failed-draft-recovery';
 import { AiNoticeTransition } from './ai-notice-transition';
+import { AiNoticeAction } from './ai-notice-action';
 
 export interface AiWorkspaceSubmitInput {
   readonly content: string;
@@ -553,14 +553,13 @@ export function AiWorkspaceRoot({
 
   // Update the icon inset and text padding in the same render as the action.
   const availabilityAction = terminalConflict ? null
-    : onReconnectTerminal ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
-      onClick={onReconnectTerminal}>{t('ai.workspace.status.reconnect')}</Button>
-      : onContinueOnReconnectedTerminal ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
+    : onReconnectTerminal ? <AiNoticeAction onClick={onReconnectTerminal}>{t('ai.workspace.status.reconnect')}</AiNoticeAction>
+      : onContinueOnReconnectedTerminal ? <AiNoticeAction
         disabled={terminalReconnectBusy}
         onClick={onContinueOnReconnectedTerminal}>{t(terminalReconnectBusy
-          ? 'ai.workspace.reconnectChecking' : 'ai.workspace.continueOnReconnectedTerminal')}</Button>
-        : !readOnlySession && canStartAgent && onOpenModel ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
-          onClick={onOpenModel}>{t('ai.workspace.status.openSettings')}</Button> : null;
+          ? 'ai.workspace.reconnectChecking' : 'ai.workspace.continueOnReconnectedTerminal')}</AiNoticeAction>
+        : !readOnlySession && canStartAgent && onOpenModel
+          ? <AiNoticeAction onClick={onOpenModel}>{t('ai.workspace.status.openSettings')}</AiNoticeAction> : null;
 
   return (
     <section

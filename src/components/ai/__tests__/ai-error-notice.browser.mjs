@@ -47,6 +47,7 @@ try {
     await page.setViewportSize({ width, height: 800 });
     const geometry = await page.locator('#notice-check').evaluate(host => {
       const alerts = [...host.querySelectorAll('[data-slot="alert"]')];
+      const text = alerts[0].querySelector('[data-slot="alert-description"] > span');
       const rect = element => {
         const { x, y, width, height, right, bottom } = element.getBoundingClientRect();
         return { x, y, width, height, right, bottom };
@@ -56,16 +57,17 @@ try {
         descriptions: alerts.map(alert => rect(alert.querySelector('[data-slot="alert-description"]'))),
         icons: alerts.map(alert => rect(alert.querySelector(':scope > svg'))),
         lineHeights: alerts.map(alert => parseFloat(getComputedStyle(alert.querySelector('[data-slot="alert-description"]')).lineHeight)),
-        description: rect(alerts[0].querySelector('[data-slot="alert-description"] > span')),
+        errorText: rect(text),
+        errorTextPadding: parseFloat(getComputedStyle(text).paddingTop),
         button: rect(host.querySelector('button')),
         overflow: host.scrollWidth > host.clientWidth,
       };
     });
     const [error, status, plainError] = geometry.alerts;
     if (width === 1280) {
-      assert.equal(error.height, status.height, 'Single-line error and status heights must match');
-      assert.equal(error.height, plainError.height, 'Dismiss control must not increase height');
-      wideHeight = error.height;
+      assert.equal(status.height, plainError.height, 'Single-line notices without actions stay compact');
+      assert.equal(error.height, status.height + 8, 'Action uses the same vertical inset as its text');
+      wideHeight = plainError.height;
     }
     if (width === 320) {
       assert.ok(plainError.height > wideHeight, 'Long errors must wrap');
@@ -84,12 +86,19 @@ try {
       }
       assert.ok(Math.abs(text.y + text.height / 2 - alert.y - alert.height / 2) < 0.1,
         'Text must remain centered without a fixed optical offset');
-      assert.ok(Math.abs(icon.y + icon.height / 2 - text.y - geometry.lineHeights[index] / 2) < 0.1,
+      const firstLine = text.y + (index === 0 ? geometry.errorTextPadding : 0) + geometry.lineHeights[index] / 2;
+      assert.ok(Math.abs(icon.y + icon.height / 2 - firstLine) < 0.1,
         'Icons must align with the first text line, including wrapped notices');
     });
-    assert.ok(geometry.description.right <= geometry.button.x, 'Text must not overlap the button');
+    assert.equal(geometry.button.right, geometry.descriptions[0].right, 'Action stays right-aligned');
+    if (width === 320) {
+      assert.ok(geometry.button.y >= geometry.errorText.bottom, 'Action wraps below the text');
+    } else {
+      const firstLine = geometry.errorText.y + geometry.errorTextPadding + geometry.lineHeights[0] / 2;
+      assert.equal(geometry.button.y + geometry.button.height / 2, firstLine, 'Action aligns with the first line');
+      assert.ok(geometry.errorText.right <= geometry.button.x, 'Text must not overlap the button');
+    }
     assert.ok(geometry.button.y >= error.y && geometry.button.bottom <= error.bottom);
-    assert.ok(Math.abs(geometry.button.y + geometry.button.height / 2 - error.y - error.height / 2) < 1);
     assert.equal(geometry.button.height, 24, 'Keep the dismiss hit area');
     if (width === 640) await page.locator('#notice-check').screenshot({ path: '/tmp/shellspan-notice-alignment.png' });
   }
@@ -111,16 +120,26 @@ try {
   });
   const retry = page.locator('#sync-notice-check button');
   await retry.waitFor();
-  for (const width of [640, 320]) {
+  for (const width of [640, 320, 240]) {
     await page.setViewportSize({ width, height: 800 });
     const style = await retry.evaluate(button => {
       const css = getComputedStyle(button);
-      return { height: button.getBoundingClientRect().height, fontSize: css.fontSize,
+      const row = button.parentElement;
+      const text = row.querySelector(':scope > span');
+      const textStyle = getComputedStyle(text);
+      const box = button.getBoundingClientRect();
+      const copy = text.getBoundingClientRect();
+      const firstLine = copy.top + parseFloat(textStyle.paddingTop) + parseFloat(textStyle.lineHeight) / 2;
+      return { height: box.height, fontSize: css.fontSize, rightGap: row.getBoundingClientRect().right - box.right,
+        firstLineOffset: box.top + box.height / 2 - firstLine, wrapped: box.top >= copy.bottom,
         border: css.borderTopWidth, fits: button.closest('[role="alert"]').scrollWidth <= button.closest('[role="alert"]').clientWidth };
     });
     assert.equal(style.height, 24);
     assert.equal(style.fontSize, '11px');
     assert.equal(style.border, '0px', 'Retry uses the same borderless notice action style');
+    assert.equal(style.rightGap, 0, 'Retry button stays at the right edge');
+    if (width === 240) assert.equal(style.wrapped, true, 'Retry moves below the copy in a narrow panel');
+    if (width === 640) assert.equal(style.firstLineOffset, 0, 'Retry aligns with the first line of copy');
     assert.ok(style.fits);
     await page.locator('#sync-notice-check').screenshot({ path: `/tmp/shellspan-sync-notice-${width}.png` });
   }

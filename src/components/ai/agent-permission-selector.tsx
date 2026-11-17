@@ -298,6 +298,7 @@ export function AgentPermissionSelector({
       )}
 
       <ConfirmationDialog
+        contentClassName="ai-permission-dialog"
         textOnlyActions
         open={fullAccessDialogOpen}
         onOpenChange={(open) => {

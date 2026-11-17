@@ -40,6 +40,7 @@ import { AiProcessingStatus } from './ai-processing-status';
 import { AiCompactionStatus } from './ai-compaction-status';
 import { AiQuestionHistory } from './ai-question-panel';
 import { AiFailureRecoveryAction } from './ai-failure-recovery';
+import { AiNoticeAction } from './ai-notice-action';
 import { AiFailedDraftRecovery, AiFailedDraftRecoveryContext, failedDraftForMessage } from './ai-failed-draft-recovery';
 import { isReadingProcess, processDisclosureKey, processFoldsOnCompletion, storeProcessDisclosure, useProcessDisclosure } from './ai-process-disclosure';
 import {
@@ -513,7 +514,7 @@ function ErrorNodeView({ node }: { readonly node: AiConversationNodeOf<'error'> 
         <span>{errorNodeMessage(node, t)}</span>
         <Collapsible className="ai-error-details">
           <div className="flex min-w-0 flex-wrap items-center gap-1">
-            <CollapsibleTrigger className="text-muted-foreground underline underline-offset-4">{t('ai.error.details')}</CollapsibleTrigger>
+            <CollapsibleTrigger render={<AiNoticeAction className="text-muted-foreground" />}>{t('ai.error.details')}</CollapsibleTrigger>
             <AiFailureRecoveryAction turnId={node.turnId} />
           </div>
           <CollapsibleContent>

@@ -68,6 +68,10 @@
   --ai-elevation-soft: var(--ai-elevation-stroke), 0 4px 16px 0 rgba(0, 0, 0, 0.03), 0 0 24px 0 rgba(0, 0, 0, 0.03);
 }
 
+:is(.ai-panel-shell, .ai-completion-popup, .ai-permission-dialog) [data-slot='alert-description'] {
+  text-wrap: wrap;
+}
+
 @supports (corner-shape: superellipse(1.5)) {
   .ai-panel-shell {
     --ai-corner-shape: superellipse(1.5);

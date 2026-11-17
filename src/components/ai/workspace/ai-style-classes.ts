@@ -1,4 +1,10 @@
-/** Shared transcript layout hooks. Visual states remain in ai-panel CSS. */
+/** Shared layout classes for Agent content. Visual states remain in ai-panel CSS. */
+export const AI_NOTICE_ACTION_ROW_CLASS = 'flex min-w-0 flex-wrap items-start justify-end gap-1';
+
+export const AI_NOTICE_COPY_CLASS = 'min-w-0 flex-1 break-words';
+
+export const AI_NOTICE_COPY_WITH_ACTION_CLASS = 'basis-48 py-1';
+
 export const AI_CONTENT_HEADER_CLASS =
   'ai-content-header flex min-h-6 min-w-0 shrink-0 items-center gap-1 px-3.5';
 

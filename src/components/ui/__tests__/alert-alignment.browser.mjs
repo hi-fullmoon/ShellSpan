@@ -8,6 +8,7 @@ import { chromium, webkit } from 'playwright';
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const server = await createServer({ root, configFile: false, appType: 'custom', logLevel: 'error',
   cacheDir: `/tmp/shellspan-alert-alignment-${process.pid}`,
+  optimizeDeps: { entries: ['src/components/ui/__tests__/alert-alignment.browser-entry.tsx'] },
   plugins: [react(), tailwindcss()], resolve: { alias: { '@': `${root}src` } },
   server: { host: '127.0.0.1', port: 0, hmr: false } });
 server.middlewares.use('/alert-alignment', async (_request, response) => {
@@ -42,6 +43,7 @@ try {
           return {
             delta: icon.y + icon.height / 2 - box.y - parseFloat(style.paddingTop) - parseFloat(style.lineHeight) / 2,
             gap: box.x - icon.right,
+            textWrap: getComputedStyle(description).textWrap,
             overflow: alert.scrollWidth > alert.clientWidth,
           };
         }));
@@ -49,16 +51,22 @@ try {
         for (const [index, result] of measurements.entries()) {
           assert.ok(Math.abs(result.delta) < 0.1, `${engine}/${theme}/${locale}/${width}: sample ${index} first-line offset ${result.delta}`);
           assert.equal(result.gap, 4, `Sample ${index}: icon/text gap`);
+          assert.equal(result.textWrap, 'wrap', `Sample ${index}: notice uses the available text width at ${width}px`);
           assert.equal(result.overflow, false, `Sample ${index}: horizontal overflow`);
         }
         const transcript = await page.locator('[data-cases="transcript"] .ai-transcript-notice, [data-cases="transcript"] .ai-turn-error').evaluateAll(notices => notices.map(notice => {
           const icon = notice.querySelector('svg').getBoundingClientRect();
           const text = notice.querySelector('.ai-disclosure-title, .ai-turn-error-copy');
-          return { kind: notice.className, delta: icon.y + icon.height / 2 - text.getBoundingClientRect().y - parseFloat(getComputedStyle(text).lineHeight) / 2 };
+          const label = text.getBoundingClientRect();
+          return { kind: notice.className, gap: label.left - icon.right,
+            delta: icon.y + icon.height / 2 - label.y - parseFloat(getComputedStyle(text).lineHeight) / 2 };
         }));
         assert.ok(transcript.some(item => item.kind.includes('ai-transcript-notice')), 'Exercise a recorded approval notice');
         assert.ok(transcript.some(item => item.kind.includes('ai-turn-error')), 'Exercise a recorded error notice');
-        for (const item of transcript) assert.ok(Math.abs(item.delta) < 0.1, `${item.kind}: first-line offset ${item.delta}`);
+        for (const item of transcript) {
+          assert.ok(Math.abs(item.delta) < 0.1, `${item.kind}: first-line offset ${item.delta}`);
+          assert.equal(item.gap, 4, `${item.kind}: status icon and label gap`);
+        }
         await page.locator('[data-case="availability-true"] [role="status"][aria-label]').last().screenshot({
           path: `/tmp/shellspan-availability-${engine}-${theme}-${locale}-${width}.png`,
         });

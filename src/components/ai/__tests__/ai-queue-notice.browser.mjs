@@ -14,7 +14,7 @@ const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
   resolve: { alias: { '@': `${root}src` } },
   esbuild: { jsx: 'automatic' },
-  optimizeDeps: { include: ['react', 'react-dom/client'] },
+  optimizeDeps: { entries: ['src/components/ai/__tests__/ai-queue-notice.browser.tsx'], include: ['react', 'react-dom/client'] },
   server: { host: '127.0.0.1', port: 0 },
   plugins: [tailwindcss(), {
     name: 'queue-notice-check',
@@ -32,11 +32,29 @@ try {
   await server.listen();
   browser = await chromium.launch();
   for (const locale of ['zh-CN', 'en-US']) {
-    for (const width of [320, 900]) {
+    for (const width of [240, 320, 900]) {
       const page = await browser.newPage({ viewport: { width, height: 320 } });
       await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/?locale=${locale}`);
       const details = page.getByRole('button', { name: locale === 'zh-CN' ? '技术详情' : 'Technical details' });
       await details.waitFor();
+      const retry = page.getByRole('button', { name: locale === 'zh-CN' ? '重试' : 'Retry', exact: true });
+      const action = await retry.evaluate(button => {
+        const row = button.parentElement;
+        const text = row.querySelector(':scope > span');
+        const copy = text.getBoundingClientRect();
+        const target = button.getBoundingClientRect();
+        const css = getComputedStyle(text);
+        const firstLine = copy.top + parseFloat(css.paddingTop) + parseFloat(css.lineHeight) / 2;
+        return { rightGap: row.getBoundingClientRect().right - target.right, height: target.height,
+          firstLineOffset: target.top + target.height / 2 - firstLine, wrapped: target.top >= copy.bottom,
+          fontSize: getComputedStyle(button).fontSize };
+      });
+      assert.equal(action.rightGap, 0, 'Retry button stays at the right edge');
+      assert.equal(action.height, 24);
+      assert.equal(action.fontSize, '11px');
+      assert.equal(action.fontSize, await details.evaluate(button => getComputedStyle(button).fontSize));
+      if (width === 240) assert.equal(action.wrapped, true, 'Retry moves below the copy in a narrow panel');
+      if (width === 900) assert.equal(action.firstLineOffset, 0, 'Retry aligns with the first line of copy');
       assert.equal(await details.locator('svg').count(), 0, 'Notice details action stays text-only');
       assert.equal(await details.getAttribute('aria-expanded'), 'false');
       assert.equal(await page.getByText('Agent Runtime revision conflict:', { exact: false }).count(), 0);
@@ -65,6 +83,10 @@ try {
       await checkPlacement();
       await page.screenshot({ path: join(screenshots, `${locale}-${width}.png`) });
       await page.keyboard.press('Tab');
+      assert.equal(await retry.evaluate(element => element === document.activeElement), true);
+      await page.keyboard.press('Enter');
+      assert.equal(await page.locator('#root').getAttribute('data-retried'), 'true');
+      await page.keyboard.press('Tab');
       assert.equal(await details.evaluate(element => element === document.activeElement), true);
       await page.keyboard.press('Enter');
       await page.getByText('Agent Runtime revision conflict:', { exact: false }).waitFor();
@@ -77,7 +99,7 @@ try {
       await page.close();
     }
   }
-  console.log(`Queue notice layout and keyboard checks passed in both locales at 320px and 900px. Screenshots: ${screenshots}`);
+  console.log(`Queue notice layout and keyboard checks passed in both locales at 240px, 320px and 900px. Screenshots: ${screenshots}`);
 } finally {
   await browser?.close();
   await server.close();

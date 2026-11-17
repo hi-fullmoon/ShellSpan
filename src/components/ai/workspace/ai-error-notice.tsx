@@ -2,6 +2,7 @@ import { CircleAlertIcon } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
+import { AI_NOTICE_ACTION_ROW_CLASS, AI_NOTICE_COPY_CLASS, AI_NOTICE_COPY_WITH_ACTION_CLASS } from './ai-style-classes';
 
 export interface AiErrorNoticeProps
   extends Omit<React.ComponentProps<typeof Alert>, 'children' | 'size' | 'variant'> {
@@ -25,13 +26,13 @@ export function AiErrorNotice({
       data-ai-error-notice=""
       variant="destructiveSubtle"
       size="sm"
-      className={cn('items-center', className)}
+      className={cn('items-center', action && '[--alert-icon-inset:--spacing(1)]', className)}
       {...props}
     >
       <CircleAlertIcon aria-hidden="true" />
       <AlertTitle className="sr-only">{title}</AlertTitle>
-      <AlertDescription className="flex min-w-0 items-center gap-1.5">
-        <span className="min-w-0 flex-1 break-words">
+      <AlertDescription className={AI_NOTICE_ACTION_ROW_CLASS}>
+        <span className={cn(AI_NOTICE_COPY_CLASS, action && AI_NOTICE_COPY_WITH_ACTION_CLASS)}>
           {label && (
             <>
               <strong className="font-medium text-foreground">{label}</strong>
@@ -40,7 +41,7 @@ export function AiErrorNotice({
           )}
           <span>{children}</span>
         </span>
-        {action && <span className="-my-1 flex shrink-0 items-center">{action}</span>}
+        {action}
       </AlertDescription>
     </Alert>
   );

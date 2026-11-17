@@ -103,6 +103,11 @@
   transform: rotate(-90deg);
 }
 
+/* Keep the label at its existing column and align the SVG to the end of its 16px slot. */
+:is(.ai-transcript-notice, .ai-turn-process-trigger, .ai-turn-status[data-ai-processing]) > .ai-disclosure-leading > svg {
+  margin-inline-end: 0;
+}
+
 .ai-disclosure-row[aria-expanded]:is([aria-expanded='true'], :hover, :focus-visible) > .ai-disclosure-leading > :not(.ai-disclosure-chevron),
 .ai-tool-row[aria-expanded]:is([aria-expanded='true'], :hover, :focus-visible) > .ai-disclosure-leading > :not(.ai-disclosure-chevron) {
   opacity: 0;

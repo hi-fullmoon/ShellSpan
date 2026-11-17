@@ -103,10 +103,10 @@ describe('localized workspace errors', () => {
     const retried: string[] = [];
     const { container } = render(<FailedMessageWorkspace composerState={state} onRetryFailedDraft={id => retried.push(id)} />);
     const retry = screen.getByRole('button', { name: t('common.retry') });
-    expect(retry).toHaveClass('size-6', 'shrink-0', 'focus-visible:ring-0', 'focus-visible:bg-accent');
+    expect(retry).toHaveClass('h-6', 'p-0', 'm-0', 'border-0', 'shrink-0', 'focus-visible:ring-0', 'focus-visible:underline');
     expect(retry).not.toHaveClass('focus-visible:ring-2');
-    expect(retry.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
-    expect(retry).toHaveTextContent('');
+    expect(retry.querySelector('svg')).toBeNull();
+    expect(retry).toHaveTextContent(t('common.retry'));
     expect(screen.queryByRole('button', { name: t('ai.workspace.recovery.dismiss') })).toBeNull();
     expect(screen.getAllByRole('alert')).toHaveLength(1);
     expect(container.querySelector('[data-slot="alert"]')).toBeNull();
@@ -134,7 +134,7 @@ describe('localized workspace errors', () => {
     const button = screen.getByRole('button');
     expect(button).toHaveTextContent(t(retrying ? 'ai.error.streamSyncRetrying' : 'ai.error.streamSyncRetry'));
     expect(button.querySelector('svg')).toBeNull();
-    expect(button).toHaveClass('h-6', 'px-2', 'text-[11px]', 'hover:bg-accent');
+    expect(button).toHaveClass('h-6', 'p-0', 'm-0', 'border-0', 'text-[11px]', 'hover:underline');
     expect(button).not.toHaveClass('border', 'bg-background');
     if (retrying) expect(button).toBeDisabled();
     else expect(button).toBeEnabled();
@@ -170,7 +170,7 @@ describe('localized workspace errors', () => {
     form.rerender(<FailedMessageWorkspace {...props} failedDraftRetryBlockedReason={t('ai.error.childRecoveryBudgetExhausted')} />);
     expect(retry).toBeDisabled();
     expect(screen.getByText(t('ai.error.childRecoveryBudgetExhausted'))).toBeVisible();
-    expect(screen.getByText(t('ai.error.childRecoveryBudgetExhausted'))).toHaveClass('col-start-2', 'col-span-2');
+    expect(screen.getByText(t('ai.error.childRecoveryBudgetExhausted'))).toHaveClass('col-start-2', '-col-end-1');
     expect(retry).toHaveAccessibleDescription(t('ai.error.childRecoveryBudgetExhausted'));
     fireEvent.click(retry);
     expect(retries).toEqual([]);
@@ -210,7 +210,8 @@ describe('localized workspace errors', () => {
     expect(check).toBeDisabled();
     expect(check).toHaveAttribute('aria-busy', 'true');
     expect(check).toHaveAccessibleName(t('ai.workspace.messageConfirming'));
-    expect(check.querySelector('[data-slot="spinner"]')).not.toBeNull();
+    expect(check).toHaveTextContent(t('ai.workspace.messageConfirming'));
+    expect(check.querySelector('svg')).toBeNull();
     finishCheck();
     await waitFor(() => expect(check).toBeEnabled());
     expect(check).toHaveAccessibleName(t('ai.workspace.checkReceipt'));

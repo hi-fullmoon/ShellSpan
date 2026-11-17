@@ -1,13 +1,13 @@
 import { createContext, useId, useRef, useState } from 'react';
-import { CircleAlertIcon, RefreshCwIcon } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Spinner } from '@/components/ui/spinner';
+import { CircleAlertIcon } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import { aiErrorMessage } from '@/lib/ai/error-message';
+import { cn } from '@/lib/utils';
 import type { AiComposerState, AiFailedDraft } from '@/lib/ai/composer-machine';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import type { AiSessionSyncRecovery } from '@/lib/ai/session-adapter';
+import { AiNoticeAction } from './ai-notice-action';
 
 export interface AiFailedDraftRecoveryProps {
   readonly composerState?: AiComposerState;
@@ -46,6 +46,7 @@ export function AiFailedDraftRecovery({
   const checkingRef = useRef(false);
   const [checking, setChecking] = useState(false);
   const confirmationOnly = Boolean(failedDraftRetryBlockedReason && failed.error.deliveryUnknown);
+  const showRetry = failed.error.retryable && Boolean(confirmationOnly ? onRetrySync : onRetryFailedDraft);
   const actionLabel = t(confirmationOnly
     ? checking ? 'ai.workspace.messageConfirming' : 'ai.workspace.checkReceipt'
     : failed.error.deliveryUnknown ? 'ai.workspace.retryOriginal' : 'common.retry');
@@ -58,7 +59,8 @@ export function AiFailedDraftRecovery({
   };
   return (
     <div role="alert" data-ai-failed-draft={failed.id}
-      className="ai-turn-error grid max-w-full min-w-0 grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-x-1 py-0.5">
+      className={cn('ai-turn-error grid max-w-full min-w-0 items-center gap-x-1 rounded-lg bg-card px-2 py-0.5',
+        showRetry ? 'grid-cols-[14px_minmax(0,1fr)_auto]' : 'grid-cols-[14px_minmax(0,1fr)]')}>
       <CircleAlertIcon aria-hidden="true" />
       <div className="flex min-h-6 min-w-0 items-center [overflow-wrap:anywhere]">
         {failed.error.deliveryUnknown ? <span>{t('ai.workspace.messageUnconfirmed')}</span> : <Tooltip open={detailsOpen} onOpenChange={setDetailsOpen}>
@@ -72,21 +74,17 @@ export function AiFailedDraftRecovery({
           </TooltipContent>
         </Tooltip>}
       </div>
-      {failed.error.retryable && (confirmationOnly ? onRetrySync : onRetryFailedDraft) && <Tooltip>
-        <TooltipTrigger render={<Button
+      {showRetry && <AiNoticeAction
           data-ai-failed-retry=""
-          type="button" variant="ghost" size="icon-xs" className="shrink-0 focus-visible:ring-0 focus-visible:bg-accent"
-          aria-label={actionLabel}
+          className="shrink-0 focus-visible:ring-0"
           disabled={composerState?.phase === 'stopping' || (confirmationOnly
             ? checking || syncRecovery?.retrying : Boolean(failedDraftRetryBlockedReason))}
           aria-busy={confirmationOnly && checking || undefined}
           aria-describedby={failedDraftRetryBlockedReason ? reasonId : undefined}
           onClick={() => { if (confirmationOnly) void confirmReceipt(); else onRetryFailedDraft?.(failed.id); }}>
-          {checking ? <Spinner aria-hidden="true" /> : <RefreshCwIcon aria-hidden="true" />}
-        </Button>} />
-        <TooltipContent role="tooltip">{actionLabel}</TooltipContent>
-      </Tooltip>}
-      {failed.error.retryable && failedDraftRetryBlockedReason && <span id={reasonId} className="col-span-2 col-start-2 text-muted-foreground [overflow-wrap:anywhere]">
+          {actionLabel}
+        </AiNoticeAction>}
+      {failed.error.retryable && failedDraftRetryBlockedReason && <span id={reasonId} className="col-start-2 -col-end-1 text-muted-foreground [overflow-wrap:anywhere]">
         {failedDraftRetryBlockedReason}
       </span>}
     </div>

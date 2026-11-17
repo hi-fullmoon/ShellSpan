@@ -8,6 +8,7 @@ import { chromium } from 'playwright';
 // UI state boundaries using the real composer reducer and native session recording.
 const projectRoot = path.resolve(import.meta.dirname, '../../../..');
 const server = await createServer({ root: projectRoot, configFile: false, logLevel: 'error',
+  optimizeDeps: { entries: ['src/components/ai/__tests__/ai-composer-error-dedup.browser.tsx'] },
   resolve: { alias: { '@': path.join(projectRoot, 'src') } },
   plugins: [react(), tailwindcss(), {
     name: 'composer-error-review',
@@ -39,9 +40,8 @@ try {
       assert.equal(await host.locator('[data-ai-failed-draft]').count(), 3);
       assert.equal(await host.locator('[data-slot="ai-workspace-error-notices"]').innerText(), '');
       const retry = host.locator('[data-ai-failed-retry]').last();
-      assert.equal(await retry.innerText(), '', 'Retry is an icon-only action');
-      assert.equal(await retry.locator('svg').count(), 1);
-      assert.equal(await retry.getAttribute('aria-label'), locale === 'zh-CN' ? '重试' : 'Retry');
+      assert.equal(await retry.innerText(), locale === 'zh-CN' ? '重试' : 'Retry');
+      assert.equal(await retry.locator('svg').count(), 0);
       const geometry = await host.evaluate(element => ({
         overflow: element.scrollWidth > element.clientWidth,
         rows: [...element.querySelectorAll('[data-ai-failed-draft]')].map(row => {
@@ -49,10 +49,12 @@ try {
           const icon = row.querySelector(':scope > svg').getBoundingClientRect();
           const retryButton = row.querySelector('[data-ai-failed-retry]');
           const button = retryButton.getBoundingClientRect();
-          const retryIcon = retryButton.querySelector('svg').getBoundingClientRect();
+          const box = row.getBoundingClientRect();
           return { overflow: row.scrollWidth > row.clientWidth, gap: text.left - icon.right,
+            padding: [icon.left - box.left, box.right - button.right],
+            radius: getComputedStyle(row).borderTopLeftRadius,
             iconOffset: icon.y + icon.height / 2 - text.y - text.height / 2,
-            retryOffset: retryIcon.y + retryIcon.height / 2 - text.y - text.height / 2,
+            retryOffset: button.y + button.height / 2 - text.y - text.height / 2,
             height: row.getBoundingClientRect().height,
             buttonHeight: button.height, overlaps: button.left < text.right && button.top < text.bottom };
         }),
@@ -61,9 +63,11 @@ try {
       for (const row of geometry.rows) {
         assert.equal(row.overflow, false, `${locale} ${width}: recovery row overflows`);
         assert.equal(row.gap, 4, 'Keep 4px between the error icon and text');
+        assert.deepEqual(row.padding, [8, 8], 'Keep 8px of padding outside the icon and retry button');
+        assert.equal(row.radius, '6px', 'A failed draft with a retry button uses the same corner radius');
         assert.equal(row.buttonHeight, 24);
         assert.ok(Math.abs(row.iconOffset) < 0.1, `${locale} ${width}: failure icon must align with the status text`);
-        assert.ok(Math.abs(row.retryOffset) < 0.1, `${locale} ${width}: retry icon must align with the status text`);
+        assert.ok(Math.abs(row.retryOffset) < 0.1, `${locale} ${width}: retry label must align with the status text`);
         assert.ok(row.height <= 28, `${locale} ${width}: collapsed failures must stay on one compact line`);
         assert.equal(row.overlaps, false, `${locale} ${width}: retry overlaps error text`);
       }
@@ -91,20 +95,24 @@ try {
       await page.keyboard.press('Escape');
       await content.waitFor({ state: 'hidden' });
       await page.keyboard.press('Tab');
-      assert.ok(await retry.evaluate(button => button === document.activeElement), 'Tab reaches the retry icon');
+      assert.ok(await retry.evaluate(button => button === document.activeElement), 'Tab reaches the retry button');
       await page.keyboard.press('Enter');
       assert.equal(await host.getAttribute('data-retried'), 'token-budget-review:2');
       await page.waitForFunction(() => {
         const button = [...document.querySelectorAll('[data-ai-failed-retry]')].at(-1);
-        return button?.matches(':focus-visible') && getComputedStyle(button).backgroundColor !== 'rgba(0, 0, 0, 0)';
+        return button?.matches(':focus-visible') && getComputedStyle(button).textDecorationLine === 'underline';
       });
       const focusedStyle = await retry.evaluate(button => {
         const css = getComputedStyle(button);
-        return { border: css.borderTopWidth, outline: css.outlineStyle, shadow: css.boxShadow };
+        return { border: css.borderTopWidth, outline: css.outlineStyle, shadow: css.boxShadow,
+          padding: css.padding, margin: css.margin, background: css.backgroundColor };
       });
       assert.equal(focusedStyle.border, '0px', 'Retry remains borderless');
       assert.equal(focusedStyle.outline, 'none');
       assert.doesNotMatch(focusedStyle.shadow, /[1-9][\d.]*px/, 'Focused retry must not draw an outer ring');
+      assert.equal(focusedStyle.padding, '0px');
+      assert.equal(focusedStyle.margin, '0px');
+      assert.equal(focusedStyle.background, 'rgba(0, 0, 0, 0)');
       await page.keyboard.press('Escape');
       await retry.evaluate(button => button.blur());
       await details.evaluate(element => element.blur());

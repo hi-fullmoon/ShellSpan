@@ -1,6 +1,6 @@
 import { InfoIcon } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
+import { AiNoticeAction } from '@/components/ai/workspace/ai-notice-action';
 import { useI18n } from '@/hooks/useI18n';
 import { useFocusStore } from '@/stores/focusStore';
 import { useTerminalStore } from '@/stores/terminalStore';
@@ -19,7 +19,7 @@ export function FocusNoTarget(): React.ReactNode {
     <span className="min-w-0 flex-1 basis-48 py-1">{targetUnavailable
       ? t(target ? 'focus.targetDisconnected' : 'focus.targetClosed') : null}{candidate
       ? t('focus.useTerminalHint', { terminal: candidate.title }) : t('focus.connectFirst')}</span>
-    <Button type="button" size="xs" variant="ghost" className="shrink-0 text-[11px]" disabled={busy} onClick={() => {
+    <AiNoticeAction className="shrink-0" disabled={busy} onClick={() => {
       const focus = useFocusStore.getState();
       if (candidate) focus.setTarget(candidate.sessionId);
       else {
@@ -28,6 +28,6 @@ export function FocusNoTarget(): React.ReactNode {
       }
     }}>
       {t(candidate ? 'focus.useTerminal' : 'focus.connect')}
-    </Button>
+    </AiNoticeAction>
   </AlertDescription></Alert>;
 }

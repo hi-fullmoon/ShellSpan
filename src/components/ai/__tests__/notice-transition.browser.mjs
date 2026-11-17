@@ -20,7 +20,7 @@ try {
           dom.window.close();
         });
         await page.goto(process.env.SHELLSPAN_TEST_URL ?? 'http://localhost:1420');
-        const labels = await page.evaluate(async locale => {
+        const notices = await page.evaluate(async locale => {
           const source = await (await fetch('/src/hooks/useI18n.ts')).text();
           const reactUrl = source.match(/from "([^"]*\/react\.js\?v=[^"]+)"/)[1];
           const mainSource = await (await fetch('/src/main.tsx')).text();
@@ -29,7 +29,6 @@ try {
           const { default: ReactDOM } = await import(domUrl);
           const { AiWorkspaceRoot } = await import('/src/components/ai/workspace/ai-workspace-root.tsx');
           const { createAiComposerState } = await import('/src/lib/ai/composer-machine.ts');
-          const { taskTokenBudgetView } = await import('/src/tests/fixtures/task-token-budget.ts');
           const { initI18n, t } = await import('/src/locales/index.ts');
           const { useAppStore } = await import('/src/stores/appStore.ts');
           await import('/src/styles/base.css');
@@ -37,7 +36,9 @@ try {
           useAppStore.setState({ locale });
           await initI18n(locale);
           const h = React.createElement;
-          const failure = taskTokenBudgetView();
+          const errorNotice = { action: t('ai.workspace.recovery.dismiss'), message: t('ai.workspace.reconnectUnsettled'), id: 'error' };
+          const reconnectNotice = { action: t('ai.workspace.continueOnReconnectedTerminal'), message: t('ai.workspace.reconnectAvailable'), id: 'reconnect' };
+          const notices = [errorNotice, reconnectNotice];
           // Pause the real entrance transitions before they finish, including first mount.
           const entered = new Set();
           const captureEntrance = event => {
@@ -49,48 +50,52 @@ try {
               animation.pause();
               animation.currentTime = 90;
             }
-            if (entered.size === 3) document.removeEventListener('transitionrun', captureEntrance);
+            if (entered.size === notices.length) document.removeEventListener('transitionrun', captureEntrance);
           };
           document.addEventListener('transitionrun', captureEntrance);
           function Preview() {
             const [error, setError] = React.useState(true);
             const [reconnect, setReconnect] = React.useState(true);
-            const [failed, setFailed] = React.useState(true);
             React.useEffect(() => {
-              const restore = () => { setError(true); setReconnect(true); };
+              const restore = ({ detail }) => {
+                if (!detail || detail === errorNotice.id) setError(true);
+                if (!detail || detail === reconnectNotice.id) setReconnect(true);
+              };
               document.addEventListener('restore-notices', restore);
               return () => document.removeEventListener('restore-notices', restore);
             }, []);
             return h('main', { className: 'ai-panel-shell p-4', 'data-ai-scope': 'terminal' },
               h(AiWorkspaceRoot, {
                 scope: 'terminal', view: null, canStartAgent: true,
-                composerState: {
-                  ...createAiComposerState({ phase: 'idle', runtimeStatus: 'idle', draft: t('ai.workspace.reconnectAvailable') }),
-                  lastError: error ? { message: t('ai.workspace.reconnectUnsettled') } : null,
-                  failedDrafts: failed ? [{ id: failure.summary.id, content: failure.snapshot.value.header.goal,
-                    mode: 'nextTurn', error: failure.error }] : [],
-                },
-                onRetryFailedDraft: () => setFailed(false),
+                composerState: createAiComposerState({
+                  phase: 'idle', runtimeStatus: 'idle', draft: reconnectNotice.message,
+                  lastError: error ? { kind: 'unknown', message: errorNotice.message, retryable: false } : null,
+                }),
                 onDismissError: () => setError(false),
                 onContinueOnReconnectedTerminal: reconnect ? () => setReconnect(false) : undefined,
               }));
           }
           ReactDOM.createRoot(document.getElementById('root')).render(h(Preview));
-          return { dismiss: t('ai.workspace.recovery.dismiss'),
-            continue: t('ai.workspace.continueOnReconnectedTerminal'), retry: t('common.retry') };
+          return notices;
         }, locale);
-        const panels = page.locator('[data-slot="ai-notice-transition"]');
-        await panels.first().waitFor();
+        const panels = page.locator('[data-slot="ai-composer-notices"] [data-slot="ai-notice-transition"]');
+        const checkVisibleNotices = async () => {
+          for (const { action, message } of notices) {
+            const panel = panels.filter({ hasText: message });
+            await panel.getByRole('button', { name: action, exact: true }).waitFor();
+          }
+          assert.equal(await panels.count(), notices.length, 'The composer shows the error and reconnect notices');
+        };
+        await checkVisibleNotices();
         await page.evaluate(() => document.fonts.ready);
-        assert.equal(await panels.count(), 3);
         if (reducedMotion === 'no-preference') {
-          await page.waitForFunction(() => document.querySelectorAll('[data-entrance-captured]').length === 3);
+          await page.waitForFunction(count => document.querySelectorAll('[data-entrance-captured]').length === count, notices.length);
           const entrances = await panels.evaluateAll(elements => elements.map(el => ({
             height: el.getBoundingClientRect().height, fullHeight: el.scrollHeight,
             opacity: Number(getComputedStyle(el).opacity), inert: el.inert,
           })));
           assert.ok(entrances.every(panel => panel.height > 0 && panel.height < panel.fullHeight),
-            'Initially present errors, failed drafts and reconnect notices expand during entrance');
+            'The error and reconnect notices expand during entrance');
           assert.ok(entrances.every(panel => panel.opacity > 0 && panel.opacity < 1 && !panel.inert),
             'Notices fade in while their controls remain available');
           await page.screenshot({ path: `/tmp/shellspan-notice-transition-${locale}-${width}-entering.png` });
@@ -112,11 +117,9 @@ try {
         if (reducedMotion === 'no-preference') {
           await page.screenshot({ path: `/tmp/shellspan-notice-transition-${locale}-${width}-before.png` });
         }
-        await page.getByRole('button', { name: labels.retry, exact: true }).click();
-        assert.equal(await panels.count(), 2);
-        for (const label of [labels.dismiss, labels.continue]) {
-          const button = page.locator('button').filter({ hasText: label });
-          const panel = button.locator('xpath=ancestor::*[@data-slot="ai-notice-transition"]');
+        for (const [index, { action, message, id }] of notices.entries()) {
+          const panel = panels.filter({ hasText: message });
+          const button = panel.locator('button').filter({ hasText: action });
           const before = await panel.evaluate(el => ({ height: el.getBoundingClientRect().height, text: el.textContent }));
           // Start the real action and inspect the browser's actual CSS transition.
           await button.evaluate(el => el.click());
@@ -136,25 +139,20 @@ try {
             assert.equal(middle.inert, true, 'Departing controls cannot receive focus or clicks');
             assert.equal(middle.hidden, 'true');
             assert.equal(middle.text, before.text, 'Exit keeps the original notice text and action');
-            await page.screenshot({ path: `/tmp/shellspan-notice-transition-${locale}-${width}-${label === labels.dismiss ? 'error' : 'reconnect'}-exiting.png` });
+            await page.screenshot({ path: `/tmp/shellspan-notice-transition-${locale}-${width}-${id}-exiting.png` });
             // Restore the notice during exit to cover cancellation and rapid state changes.
-            await page.evaluate(() => document.dispatchEvent(new Event('restore-notices')));
+            await page.evaluate(id => document.dispatchEvent(new CustomEvent('restore-notices', { detail: id })), id);
             await page.waitForFunction(() => !document.querySelector('[data-slot="ai-notice-transition"][data-ending-style]'));
             assert.equal(await panel.getAttribute('inert'), null);
+            assert.equal(await panels.count(), notices.length - index, 'Only the departing notice is restored');
             await button.evaluate(el => el.click());
             await page.waitForFunction(() => document.querySelector('[data-slot="ai-notice-transition"][data-ending-style]')?.getAnimations().length > 0);
             await panel.evaluate(el => el.getAnimations().forEach(animation => animation.finish()));
           }
-          await button.waitFor({ state: 'detached' });
+          await panel.waitFor({ state: 'detached' });
+          assert.equal(await panels.count(), notices.length - index - 1, 'The dismissed notice is removed');
           assert.equal(await page.getByRole('textbox').textContent(), draft, 'Exit preserves the unsent draft');
         }
-        // Restoration above also restores the first notice; dismiss it if necessary.
-        const dismiss = page.locator('button').filter({ hasText: labels.dismiss });
-        if (await dismiss.count()) {
-          await dismiss.click();
-          await dismiss.waitFor({ state: 'detached' });
-        }
-        assert.equal(await panels.count(), 0, 'No hidden panels remain after exit');
         assert.equal(await page.locator('[data-slot="ai-workspace-error-notices"]').isVisible(), false);
         assert.equal(await page.locator('[data-slot="ai-workspace-status-notices"]').isVisible(), false);
         // Notices arriving after the workspace is already mounted also animate.
@@ -168,9 +166,9 @@ try {
           document.addEventListener('transitionrun', capture);
           document.dispatchEvent(new Event('restore-notices'));
         });
-        await panels.first().waitFor();
+        await checkVisibleNotices();
         if (reducedMotion === 'no-preference') {
-          await page.waitForFunction(() => document.querySelectorAll('[data-reentry-captured]').length === 2);
+          await page.waitForFunction(count => document.querySelectorAll('[data-reentry-captured]').length === count, notices.length);
           const opacity = await panels.evaluateAll(elements => elements.map(el => Number(getComputedStyle(el).opacity)));
           assert.ok(opacity.every(value => value > 0 && value < 1), 'Restored notices fade in again');
         }

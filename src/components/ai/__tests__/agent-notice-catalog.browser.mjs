@@ -46,6 +46,7 @@ async function recordedNotices() {
 const events = await recordedNotices();
 const server = await createServer({ root, configFile: false, appType: 'custom', logLevel: 'error',
   cacheDir: `/tmp/shellspan-notice-catalog-${process.pid}`,
+  optimizeDeps: { entries: [entry.slice(1)] },
   plugins: [react(), tailwindcss()], resolve: { alias: { '@': `${root}src` } },
   server: { host: '127.0.0.1', port: 0, hmr: false } });
 server.middlewares.use(async (request, response, next) => {
@@ -74,7 +75,7 @@ try {
   await server.listen();
   const browser = await engine.launch();
   try {
-    const page = await browser.newPage({ deviceScaleFactor: 2 });
+    const page = await browser.newPage({ deviceScaleFactor: 2, reducedMotion: 'reduce' });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/`);
@@ -123,16 +124,22 @@ try {
                 : element.classList.contains('bg-app-warning/10') ? 'warning'
                   : element.classList.contains('bg-destructive/5') ? 'error'
                     : element.classList.contains('ai-queue-failure-notice') ? 'neutral' : null;
-              return { size: element.dataset.size, tone,
-                iconSize: icon.getBoundingClientRect().width, fontSize: getComputedStyle(description).fontSize };
+              const { fontSize, textWrap } = getComputedStyle(description);
+              return { size: element.dataset.size, tone, iconSize: icon.getBoundingClientRect().width, fontSize, textWrap };
             });
             if (style) {
               assert.equal(measurements.gap, 4, `${sample.id}: notice must retain the shared 4px icon gap`);
               assert.ok(style.tone, `${sample.id}: callout must use its semantic surface`);
-              assert.deepEqual(style, { size: 'sm', tone: style.tone, iconSize: 14, fontSize: '12px' },
-                `${sample.id}: callout must use the shared compact typography and icon size`);
+              assert.deepEqual(style, { size: 'sm', tone: style.tone, iconSize: 14, fontSize: '12px', textWrap: 'wrap' },
+                `${sample.id}: callout must use compact typography, a 14px icon and natural wrapping`);
               if (['file-reference', 'approval-loading', 'trash-success'].includes(sample.id)) assert.equal(style.tone, 'info');
-              if (['permission', 'skills-stale', 'terminal-unavailable'].includes(sample.id)) assert.equal(style.tone, 'warning');
+              if (['permission', 'skills-stale', 'terminal-unavailable', 'terminal-unavailable-focus'].includes(sample.id)) assert.equal(style.tone, 'warning');
+              if (sample.id === 'terminal-unavailable-focus') {
+                assert.equal(await element.getByRole('button').count(), 0);
+                const copy = element.locator('[data-slot="alert-description"] > span');
+                const padding = await copy.evaluate(el => [getComputedStyle(el).paddingTop, getComputedStyle(el).paddingBottom]);
+                assert.deepEqual(padding, ['0px', '0px'], 'The Focus notice needs no button inset');
+              }
               if (sample.id === 'approval-destructive') assert.equal(style.tone, 'error');
               if (sample.id === 'queue-error') {
                 assert.equal(style.tone, 'neutral');
@@ -150,6 +157,33 @@ try {
                 assert.deepEqual(surface, { matches: true, radius: '12px' }, 'Queue errors keep a neutral surface and semantic error icon');
               }
             }
+            if (style || sample.id === 'transcript-error') {
+              const actions = await element.getByRole('button').evaluateAll(buttons => buttons.map(button => {
+                const css = getComputedStyle(button);
+                return { hasText: Boolean(button.textContent.trim()), hasIcon: Boolean(button.querySelector('svg')),
+                  height: button.getBoundingClientRect().height, border: css.borderWidth, background: css.backgroundColor,
+                  padding: css.padding, margin: css.margin };
+              }));
+              for (const action of actions) assert.deepEqual(action, {
+                hasText: true, hasIcon: false, height: 24, border: '0px', background: 'rgba(0, 0, 0, 0)', padding: '0px', margin: '0px',
+              }, `${sample.id}: notice actions use borderless text with no padding or margin`);
+            }
+            if (sample.id === 'draft-error') {
+              assert.equal(await element.getByRole('button').count(), 0, 'The recorded failure cannot be retried');
+              const geometry = await element.evaluate(row => {
+                const box = row.getBoundingClientRect();
+                const icon = row.querySelector(':scope > svg').getBoundingClientRect();
+                const copy = row.querySelector(':scope > div').getBoundingClientRect();
+                const style = getComputedStyle(row);
+                return { padding: [icon.left - box.left, box.right - copy.right], radius: style.borderTopLeftRadius,
+                  matchesPanel: style.backgroundColor === getComputedStyle(row.closest('.ai-workspace-root')).backgroundColor };
+              });
+              assert.deepEqual(geometry, { padding: [8, 8], radius: '6px', matchesPanel: true },
+                'The rounded failed draft row keeps the panel color and 8px of horizontal padding');
+            }
+            if (sample.group === 'transcript' && measurements.gap !== null) {
+              assert.equal(measurements.gap, 4, `${sample.id}: status icon must be 4px from the label`);
+            }
             if (sample.id === 'approval-panel') {
               const geometry = await element.evaluate(element => {
                 const header = element.querySelector('.ai-approval-panel-header');
@@ -161,7 +195,11 @@ try {
               assert.equal(geometry.gap, 4, 'Approval heading must keep a 4px gap from the SVG boundary');
               if (width === 360) assert.equal(geometry.badgeOffset, 0, 'Narrow approval badge aligns with the heading');
             }
-            await element.screenshot({ path: join(output, 'samples', name), animations: 'disabled' });
+            await element.screenshot({ path: join(output, 'samples', name), animations: 'disabled',
+              ...(sample.id === 'draft-error' && {
+                omitBackground: true,
+                style: 'html, body, .ai-workspace-root { background-color: transparent !important; }',
+              }) });
             report.push({ ...sample, theme, locale, width, ...measurements, image: `samples/${name}` });
           }
         }

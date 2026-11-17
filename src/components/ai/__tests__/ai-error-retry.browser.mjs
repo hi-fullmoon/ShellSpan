@@ -64,7 +64,8 @@ try {
       const button = page.getByRole('button', { name: locale === 'zh-CN' ? '重试' : 'Retry', exact: true });
       await button.waitFor();
       await page.evaluate(() => document.fonts.ready);
-      assert.equal(await page.locator('[data-ai-failed-draft] button svg').count(), 1);
+      assert.equal(await button.innerText(), locale === 'zh-CN' ? '重试' : 'Retry');
+      assert.equal(await button.locator('svg').count(), 0);
       const details = page.locator('[data-ai-failed-details]');
       await details.hover();
       await page.getByRole('tooltip').waitFor();
@@ -79,8 +80,7 @@ try {
         const style = getComputedStyle(el);
         return { height: rect.height, border: style.borderTopWidth,
           fits: rect.top >= notice.top && rect.bottom <= notice.bottom && rect.right <= notice.right,
-          gap: style.columnGap, iconSize: el.querySelector('svg').getBoundingClientRect().width,
-          icons: el.querySelectorAll('svg').length,
+          padding: style.padding, margin: style.margin, background: style.backgroundColor,
           icon: (() => {
             const icon = el.closest('[data-ai-failed-draft]').querySelector(':scope > svg').getBoundingClientRect();
             const copy = el.closest('[data-ai-failed-draft]').querySelector(':scope > div');
@@ -89,11 +89,11 @@ try {
           })() };
       });
       assert.equal(geometry.height, 24);
-      assert.equal(geometry.icons, 1);
       assert.ok(Math.abs(geometry.icon.center - geometry.icon.textCenter) < 0.1, JSON.stringify(geometry));
       assert.equal(geometry.border, '0px');
-      assert.equal(geometry.gap, '4px');
-      assert.equal(geometry.iconSize, 12);
+      assert.equal(geometry.padding, '0px');
+      assert.equal(geometry.margin, '0px');
+      assert.equal(geometry.background, 'rgba(0, 0, 0, 0)');
       assert.equal(geometry.fits, true);
       await page.screenshot({ path: `/tmp/shellspan-retry-${engine.name()}-${locale}-${width}.png` });
       await button.focus();

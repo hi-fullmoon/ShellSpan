@@ -1,12 +1,12 @@
 import { CircleAlertIcon, TriangleAlertIcon } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
 import { AiToolCopyButton } from './ai-tool-presentation';
-import { AI_CONTENT_CODE_CLASS } from './ai-style-classes';
+import { AiNoticeAction } from './ai-notice-action';
+import { AI_CONTENT_CODE_CLASS, AI_NOTICE_ACTION_ROW_CLASS, AI_NOTICE_COPY_CLASS, AI_NOTICE_COPY_WITH_ACTION_CLASS } from './ai-style-classes';
 
 export function AiQueueNotice({ conflict, error, onRetry }: {
   readonly conflict: boolean;
@@ -22,12 +22,16 @@ export function AiQueueNotice({ conflict, error, onRetry }: {
         {t(conflict ? 'ai.workspace.queue.conflict' : 'ai.workspace.queue.failure')}
       </AlertTitle>
       <AlertDescription className="min-w-0">
-        {t(conflict ? 'ai.workspace.queue.conflictHint' : 'ai.workspace.queue.failureHint')}
-        {onRetry && <Button type="button" variant="ghost" size="xs" onClick={onRetry}>
-          {t('common.retry')}
-        </Button>}
-        {error && <Collapsible key={error} className="mt-1 min-w-0">
-          <CollapsibleTrigger render={<Button variant="ghost" size="xs" />} className="group gap-1 text-[11px]">
+        <div className={AI_NOTICE_ACTION_ROW_CLASS}>
+          <span className={cn(AI_NOTICE_COPY_CLASS, onRetry && AI_NOTICE_COPY_WITH_ACTION_CLASS)}>
+            {t(conflict ? 'ai.workspace.queue.conflictHint' : 'ai.workspace.queue.failureHint')}
+          </span>
+          {onRetry && <AiNoticeAction onClick={onRetry}>
+            {t('common.retry')}
+          </AiNoticeAction>}
+        </div>
+        {error && <Collapsible key={error} className="min-w-0">
+          <CollapsibleTrigger render={<AiNoticeAction />}>
             {t('ai.workspace.queue.errorDetails')}
           </CollapsibleTrigger>
           <CollapsibleContent>
