@@ -23,6 +23,14 @@ missing collection separately from host health and return missing capabilities t
 their parent instead of repeatedly attempting blocked file paths. Parent takeover
 is model guidance, not automatic execution or an expansion of authorization.
 
+For saved zsh history, model guidance directs `run_terminal_command` to run
+zsh on the selected execution surface, including when the active shell is Bash.
+Use `zsh -f` with `fc -R` to load the file and `fc -l` to list decoded entries.
+When a pasted command includes a raw zsh history lookup, the Agent replaces that
+part with the zsh reader and preserves the other operations. Filter the decoded
+entries and leave the history file untouched. A session with only file tools
+reports that the lookup requires terminal command execution.
+
 ## Managed temporary execution files
 
 The existing model-facing `read_file`, `list_directory`, `search_text`,

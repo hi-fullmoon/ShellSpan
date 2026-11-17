@@ -640,7 +640,9 @@ async fn skill_sensitive_complete_body_is_rejected_and_budget_blocks_oversized_f
             "password=super-sensitive-value".to_string(),
             32768,
         ),
-        ("budget", "long instruction ".repeat(4000), 16384),
+        // Keep the fixed system and tool instructions within budget so that
+        // loading the skill is what makes the first request too large.
+        ("budget", "long instruction ".repeat(4000), 20480),
     ] {
         let model = FakeAdapter::new(vec![reply("done", &[])]);
         let (_storage, runtime) = configured(model.clone());
