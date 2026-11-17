@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -6,6 +7,8 @@ import tailwindcss from '@tailwindcss/vite';
 import { chromium, webkit } from 'playwright';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
+const stylePaths = execFileSync('git', ['ls-files', 'src/components/ai/styles'], { cwd: root, encoding: 'utf8' }).trimEnd().split('\n');
+const longCommand = ['git ls-files --', ...stylePaths].join(' \\\n  ');
 const entry = '/src/components/ai/__tests__/ai-approval-action.browser-entry.tsx';
 const server = await createServer({ root, configFile: false, appType: 'custom',
   optimizeDeps: { entries: [entry.slice(1)] },
@@ -29,7 +32,9 @@ try {
     const browser = await engine.launch();
     try {
       for (const width of [360, 760]) {
-        const page = await browser.newPage({ viewport: { width, height: 720 } });
+        const page = await browser.newPage({ viewport: { width, height: 720 },
+          permissions: engine === chromium ? ['clipboard-read', 'clipboard-write'] : [],
+        });
         const errors = [];
         page.on('pageerror', error => errors.push(error.message));
         await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/approval`);
@@ -88,6 +93,44 @@ try {
         assert.equal(await action.count(), 0);
         assert.ok(await page.getByText('pwd', { exact: true }).isVisible());
         assert.ok(await page.getByText('此命令尚无沙箱隔离，将以当前账户权限执行，可能影响工作目录之外的数据。', { exact: true }).isVisible());
+        const commandCard = page.locator('.ai-approval-command-card');
+        const fade = commandCard.locator('.ai-native-code-fade');
+        assert.equal(await fade.isVisible(), false, 'A short command must stay clear');
+        for (const [locale, theme, heading, copyLabel, cancelLabel, approveLabel] of [
+          ['zh-CN', 'light', '将执行', '复制命令', '取消', '允许执行一次'],
+          ['en-US', 'dark', 'Command', 'Copy command', 'Cancel', 'Allow once'],
+        ]) {
+          const context = `${engine.name()}/${width}/${locale}`;
+          await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+          await show({ toolName: 'run_terminal_command', arguments: { command: longCommand } }, locale);
+          assert.equal(await commandCard.locator('.ai-content-header').textContent(), heading);
+          const viewport = commandCard.locator('pre');
+          assert.equal(await viewport.textContent(), longCommand, `${context}: the complete command must be shown`);
+          assert.equal(await viewport.getAttribute('aria-label'), heading);
+          assert.equal(await viewport.evaluate(element => getComputedStyle(element).whiteSpace), 'pre-wrap');
+          const footer = page.locator('.ai-approval-panel-footer');
+          const footerBefore = await footer.boundingBox();
+          await fade.waitFor({ state: 'visible' });
+          await viewport.focus();
+          assert.equal(await viewport.getAttribute('tabindex'), '0', `${context}: preview remains keyboard scrollable`);
+          await viewport.evaluate(element => element.scrollTo({ top: element.scrollHeight, behavior: 'instant' }));
+          await fade.waitFor({ state: 'hidden' });
+          assert.ok(await viewport.evaluate(element => element.scrollTop > 0), `${context}: the last command line is reachable`);
+          assert.deepEqual(await footer.boundingBox(), footerBefore, `${context}: approval controls stay fixed`);
+          await viewport.evaluate(element => element.scrollTo({ top: 0, behavior: 'instant' }));
+          await fade.waitFor({ state: 'visible' });
+          if (engine === chromium) {
+            await commandCard.getByRole('button', { name: copyLabel, exact: true }).press('Enter');
+            await page.waitForFunction(expected => navigator.clipboard.readText().then(value => value === expected), longCommand);
+          }
+          for (const [label, expected] of [[cancelLabel, 'reject'], [approveLabel, 'approve']]) {
+            await footer.getByRole('button', { name: label, exact: true }).click();
+            assert.equal(await page.locator('body').getAttribute('data-action'), expected);
+          }
+          await commandCard.locator('.ai-content-header').scrollIntoViewIfNeeded();
+          await page.screenshot({ path: `/tmp/ai-approval-command-${engine.name()}-${width}-${theme}.png` });
+        }
+        await page.evaluate(() => { delete document.documentElement.dataset.theme; });
         for (const [locale, approvalLabel, title, passwordLabel, submitLabel] of [
           ['zh-CN', '批准并执行', '需要提权执行器认证', '执行器 SSH 密码', '认证并继续'],
           ['en-US', 'Approve and run', 'Elevation runner authentication required', 'Runner SSH password', 'Authenticate and continue'],

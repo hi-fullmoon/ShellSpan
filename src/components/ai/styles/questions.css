@@ -193,3 +193,7 @@
   color: var(--ai-text);
   font: var(--ai-font-markdown-code-block);
 }
+
+.ai-approval-command-card {
+  color: var(--ai-text-secondary);
+}

@@ -60,7 +60,7 @@
     pointer-events: none;
   }
 
-  :is(.ai-approval-command, .ai-semantic-note-body, .ai-queue-notice-preview, .ai-detail-code-wrap):hover :is(.ai-tool-copy-button, .ai-detail-copy),
+  :is(.ai-semantic-note-body, .ai-queue-notice-preview, .ai-detail-code-wrap):hover :is(.ai-tool-copy-button, .ai-detail-copy),
   [data-ai-copy-region]:hover > :is(.ai-tool-copy-button, .ai-markdown-code-copy),
   [data-ai-copy-region]:hover > [data-ai-copy-anchor] > .ai-tool-copy-button,
   :is(.ai-tool-copy-button, .ai-markdown-code-copy, .ai-detail-copy):focus-visible {

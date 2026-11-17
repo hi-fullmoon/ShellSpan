@@ -25,8 +25,9 @@ import type { AgentSessionEffect } from '@/types/agent-session';
 import { AiErrorNotice } from './ai-error-notice';
 import { AiToolCopyButton } from './ai-tool-presentation';
 import { AiContentTitle } from './ai-content-title';
+import { AiNativeCodeFade } from './ai-native-code-fade';
 import { AiSubmissionButtonLabel, submissionFeedbackMs } from './ai-submission-button-label';
-import { AI_CONTENT_CODE_CLASS } from './ai-style-classes';
+import { AI_CONTENT_CODE_CLASS, AI_CONTENT_HEADER_CLASS } from './ai-style-classes';
 
 export interface AiApprovalPanelProps {
   readonly approval: AiPendingApproval;
@@ -174,6 +175,24 @@ function approvalDescriptionKey(approval: AiPendingApproval, command: string | n
     : 'ai.workspace.approval.commandDescription.local';
 }
 
+function ApprovalCommandPreview({ text, label, copyLabel }: {
+  readonly text: string;
+  readonly label: string;
+  readonly copyLabel: string;
+}) {
+  const viewportRef = useRef<HTMLPreElement>(null);
+  return (
+    <div className="ai-approval-command ai-approval-command-card min-w-0 overflow-hidden">
+      <p className={AI_CONTENT_HEADER_CLASS}>{label}</p>
+      <div className="ai-tool-content-region relative min-w-0" data-ai-copy-region>
+        <pre ref={viewportRef} className={cn(AI_CONTENT_CODE_CLASS, 'max-h-65 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]')} tabIndex={0} aria-label={label}><code>{text}</code></pre>
+        <AiToolCopyButton text={text} label={copyLabel} />
+        <AiNativeCodeFade viewportRef={viewportRef} text={text} />
+      </div>
+    </div>
+  );
+}
+
 export function AiApprovalPanel({
   approval,
   decision,
@@ -308,15 +327,17 @@ export function AiApprovalPanel({
               </div>
             )}
 
-            {exactValue && (
+            {exactValue && (command ? (
+              <ApprovalCommandPreview text={exactValue} label={t(exactValueLabel)} copyLabel={t('ai.workspace.tool.copyCommand')} />
+            ) : (
               <div className="flex min-w-0 flex-col gap-1">
                 <p className="text-xs font-medium text-muted-foreground">{t(exactValueLabel)}</p>
                 <div className="ai-approval-command ai-tool-content-region relative min-w-0 overflow-hidden" data-ai-copy-region>
                   <pre className={cn(AI_CONTENT_CODE_CLASS, 'max-h-65 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]')} tabIndex={0}><code>{exactValue}</code></pre>
-                  <AiToolCopyButton text={exactValue} label={t(command ? 'ai.workspace.tool.copyCommand' : 'ai.workspace.tool.copyInput')} />
+                  <AiToolCopyButton text={exactValue} label={t('ai.workspace.tool.copyInput')} />
                 </div>
               </div>
-            )}
+            ))}
 
             {volatileArgumentsMissing && argumentsLoading && !volatileArgumentsError && (
               <Alert variant="info" size="sm" role="status">
