@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
 
-const browser = await chromium.launch();
+const engine = process.env.SHELLSPAN_BROWSER_ENGINE === 'webkit' ? webkit : chromium;
+const browser = await engine.launch();
 try {
   const page = await browser.newPage();
   for (const locale of ['en-US', 'zh-CN']) {
@@ -30,11 +31,12 @@ try {
         sessionId: 'menu-layout', variant: 'composer',
       })));
     }, locale);
-    await page.locator('[data-slot="agent-permission-trigger-content"]').waitFor();
+    const trigger = page.locator('[data-slot="agent-permission-selector"]').getByRole('button');
+    await trigger.waitFor();
     await page.evaluate(() => document.fonts.ready);
     for (const width of [720, 320, 240]) {
       await page.setViewportSize({ width, height: 800 });
-      await page.locator('[data-slot="dropdown-menu-trigger"]').click();
+      await trigger.click();
       const menu = page.locator('.ai-permission-menu');
       await menu.waitFor();
       assert.equal(await menu.locator('[data-slot="agent-permission-option-title"]').first().textContent(),
@@ -74,11 +76,46 @@ try {
       }
       if (locale === 'en-US' && width === 720) {
         assert.ok(layout.badges.every(badge => badge.left >= badge.titleRight), 'Wide menu should keep badges beside titles');
-        await menu.screenshot({ path: '/tmp/shellspan-permission-menu-en.png' });
+        if (engine === chromium) await menu.screenshot({ path: '/tmp/shellspan-permission-menu-en.png' });
       }
       await page.keyboard.press('Escape');
       await menu.waitFor({ state: 'hidden' });
     }
+
+    await page.setViewportSize({ width: 720, height: 800 });
+    await trigger.click();
+    await page.getByRole('menuitemradio', { name: locale === 'en-US' ? /^Full access/ : /^完全访问权限/ }).click();
+    const dialog = page.getByRole('alertdialog', {
+      name: locale === 'en-US' ? 'Allow Agent full access to this terminal?' : '允许 Agent 完全访问此终端？',
+    });
+    const warning = dialog.locator('[data-slot="alert-dialog-description"]');
+    await warning.waitFor();
+
+    for (const width of [720, 320]) {
+      await page.setViewportSize({ width, height: 800 });
+      const layout = await warning.evaluate(element => {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const lines = range.getClientRects();
+        const bounds = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return {
+          wrap: style.textWrap,
+          lineCount: lines.length,
+          firstLineGap: bounds.right - lines[0].right,
+          fontSize: parseFloat(style.fontSize),
+          overflow: element.scrollWidth > element.clientWidth,
+        };
+      });
+      assert.equal(layout.wrap, 'wrap', `${locale}/${width}: dialog warning must use ordinary wrapping`);
+      assert.ok(layout.lineCount > 1 && !layout.overflow, `${locale}/${width}: warning must wrap within the body`);
+      if (locale === 'zh-CN') {
+        assert.ok(layout.firstLineGap <= layout.fontSize * 2, `${locale}/${width}: first warning line must use the available width`);
+      }
+    }
+
+    await dialog.getByRole('button', { name: locale === 'en-US' ? 'Cancel' : '取消' }).click();
+    await dialog.waitFor({ state: 'hidden' });
   }
 } finally {
   await browser.close();

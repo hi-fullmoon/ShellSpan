@@ -72,6 +72,10 @@
   text-wrap: wrap;
 }
 
+.ai-permission-dialog [data-slot='alert-dialog-description'] {
+  text-wrap: wrap;
+}
+
 @supports (corner-shape: superellipse(1.5)) {
   .ai-panel-shell {
     --ai-corner-shape: superellipse(1.5);
