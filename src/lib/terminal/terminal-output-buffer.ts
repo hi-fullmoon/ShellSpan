@@ -175,7 +175,9 @@ export function stripAnsi(value: string): string {
 const ZSH_DEFAULT_EOL_REDRAW = /\u001b\[1m\u001b\[7m[%#]\u001b\[27m\u001b\[1m\u001b\[0m +\r \r$/u;
 
 export function renderTerminalTranscript(value: string): string {
-  const text = stripAnsi(value.replace(ZSH_DEFAULT_EOL_REDRAW, ''));
+  // Keep tabs and line breaks, plus backspace and carriage return for redraws.
+  const text = stripAnsi(value.replace(ZSH_DEFAULT_EOL_REDRAW, ''))
+    .replace(/[\u0000-\u0007\u000b\u000c\u000e-\u001f\u007f-\u009f]/gu, '');
   if (!/\r(?!\n)/u.test(text) && !text.includes('\b')) return text;
 
   // Keep the recorded separators and whitespace on lines without edits.

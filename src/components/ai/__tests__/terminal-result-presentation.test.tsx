@@ -166,6 +166,18 @@ describe('terminal result presentation', () => {
     expect(screen.queryByText('No output')).toBeNull();
   });
 
+  it('omits nonprinting controls from displayed and copied command output', () => {
+    const result = execute(
+      "process.stdout.write('文件\\t路径 □\\r\\n'); process.stderr.write('!\\x07' + process.platform + '\\n\\x18');",
+    );
+    const node = terminalNode(result.command, { combinedOutput: result.stdout + result.stderr });
+    const { container } = render(<AiToolExpandedContent node={node} />);
+
+    expect([...container.querySelectorAll('[data-ai-terminal-output] .ai-block-line')]
+      .map(line => line.textContent)).toEqual(['文件\t路径 □', '!' + process.platform]);
+    expect(toolOutputForCopy(node)).toBe('文件\t路径 □\r\n!' + process.platform + '\n');
+  });
+
   it.each([
     [zshCapture.withNewline, '100%\r\n%\r\n', ['100%', '%']],
     [zshCapture.withoutNewline, '%', ['%']],

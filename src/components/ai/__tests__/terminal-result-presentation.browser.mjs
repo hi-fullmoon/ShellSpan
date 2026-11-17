@@ -21,9 +21,10 @@ function capture(command) {
     execution: 'completed', exitCode: result.status, stdout: '', stderr: '', combinedOutput: result.stdout + result.stderr } };
 }
 
-const completed = capture('git log -5 --format=fuller --color=always');
+const completed = capture(String.raw`git log -5 --format=fuller --color=always && printf "\030"`);
 const plainOutput = capture('git log -5 --format=fuller --color=never').output.combinedOutput;
 assert.ok(completed.output.combinedOutput.includes('\u001b['));
+assert.ok(completed.output.combinedOutput.endsWith('\u0018'));
 const empty = capture(':');
 const { withNewline } = JSON.parse(await readFile(new URL('./fixtures/zsh-terminal-result.json', import.meta.url), 'utf8'));
 const zsh = { command: withNewline.command, output: { execution: 'completed', exitCode: 0, combinedOutput: withNewline.output } };
