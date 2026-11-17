@@ -114,7 +114,6 @@ const SessionTab: React.FC<SessionTabProps> = ({
       aria-selected={active}
       aria-busy={session.pendingConnection || undefined}
       aria-label={session.title}
-      title={`${session.title}\n${session.username}@${session.host}:${session.port}`}
       data-session-tab={session.sessionId}
       // Activate on pointerdown (like browser tabs) instead of click: dnd-kit
       // swallows the click after any drag, so a trackpad tap that jitters past
@@ -174,8 +173,8 @@ const SessionTab: React.FC<SessionTabProps> = ({
         ) : (
           <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full ring-1 ring-app-bg/60', sessionStatusDotClass(session.status))} />
         )}
-        <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{session.title}</span>
-        {agentTarget && (session.pinned || session.pendingConnection) && <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} title={t('focus.agentTarget')} className="flex size-4 shrink-0 items-center justify-center text-app-success">
+        <span className="block flex-1 truncate text-left text-xs leading-none font-normal">{session.title}</span>
+        {agentTarget && (session.pinned || session.pendingConnection) && <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} className="flex size-4 shrink-0 items-center justify-center text-app-success">
           <Link2Icon aria-hidden="true" className="size-3" />
         </span>}
       </div>
@@ -197,7 +196,6 @@ const SessionTab: React.FC<SessionTabProps> = ({
           <button
             type="button"
             aria-label={canCancel ? t('terminal.tab.cancelConnection') : 'close'}
-            title={canCancel ? t('terminal.tab.cancelConnection') : agentTarget ? t('focus.agentTarget') : undefined}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
@@ -718,17 +716,23 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
       {!shouldHide && onNewTabClick && (
         <DropdownMenu onOpenChange={setActionsOpen}>
           <DropdownMenuTrigger
-            render={<Button type="button" variant="ghost" size="icon-xs" className="mx-1 shrink-0 self-center hover:bg-app-border" />}
+            render={(
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="mx-1 shrink-0 self-center hover:bg-app-border aria-expanded:bg-app-border"
+              />
+            )}
             aria-label={actionsLabel}
-            title={actionsLabel}
             onPointerDown={(event) => event.stopPropagation()}
             onDoubleClick={(event) => event.stopPropagation()}
           >
-            <EllipsisIcon aria-hidden="true" />
+            <EllipsisIcon aria-hidden="true" className="text-app-text-soft" />
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
-            className="w-auto min-w-40"
+            className="w-auto min-w-40 font-normal **:data-[slot=dropdown-menu-item]:text-xs/5"
             onPointerDown={(event) => event.stopPropagation()}
             onDoubleClick={(event) => event.stopPropagation()}
           >

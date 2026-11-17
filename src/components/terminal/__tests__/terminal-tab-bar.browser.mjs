@@ -75,7 +75,9 @@ try {
       React.createElement(TerminalTabBar), React.createElement(SftpTabBar)));
   }, { username: userInfo().username, shell: basename(userInfo().shell || process.env.SHELL) });
   await page.locator('[data-terminal-tab-bar] [role="tab"]').waitFor();
-  await page.locator('[data-sftp-tab-bar] [role="tab"]').waitFor();
+  const sftpBar = page.locator('[data-sftp-tab-bar]');
+  await sftpBar.getByRole('tab', { selected: true }).getByRole('button', { name: 'close', exact: true }).waitFor();
+  assert.equal(await page.locator('[data-sftp-tab-bar][title], [data-sftp-tab-bar] [title]').count(), 0);
   await page.evaluate(async () => {
     const { useAppStore } = await import('/tab-runtime.js');
     useAppStore.getState().setTerminalTabTitleTemplate('${user}@${host} #${index}');
@@ -83,7 +85,7 @@ try {
   const terminalTab = page.locator('[data-terminal-tab-bar] [role="tab"]');
   await terminalTab.getByText(`${userInfo().username}@localhost #1`, { exact: true }).waitFor();
   assert.equal(await terminalTab.getAttribute('aria-label'), `${userInfo().username}@localhost #1`);
-  assert.ok((await terminalTab.getAttribute('title')).includes(`${userInfo().username}@localhost:22`));
+  assert.equal(await terminalTab.getAttribute('title'), null);
   for (const width of [400, 1280]) {
     await page.setViewportSize({ width, height: 720 });
     for (const selector of ['[data-terminal-tab-bar]', '[data-sftp-tab-bar]']) {
@@ -502,8 +504,19 @@ try {
   });
   await page.mouse.click(300, 300);
   await closeTarget.getByRole('img', { name: 'Agent target', exact: true }).waitFor({ state: 'visible' });
+  assert.equal(await closeTarget.getAttribute('title'), null);
   await closeTarget.click();
   await page.getByRole('alertdialog').waitFor();
+  await page.keyboard.press('Escape');
+  await page.getByRole('alertdialog').waitFor({ state: 'hidden' });
+  await page.evaluate(async () => {
+    const { useTerminalStore, useFocusStore } = await import('/tab-runtime.js');
+    useTerminalStore.getState().togglePin(useFocusStore.getState().targetSessionId);
+  });
+  await targetTab.getByRole('button', { name: 'unpin' }).waitFor();
+  const pinnedTargetIcon = targetTab.getByRole('img', { name: 'Agent target', exact: true });
+  await pinnedTargetIcon.waitFor();
+  assert.equal(await pinnedTargetIcon.getAttribute('title'), null);
   console.log('Terminal and SFTP appearance, keyboard actions, pinning, target icon hover, tab colors and terminal surfaces verified.');
 } finally {
   await browser?.close();

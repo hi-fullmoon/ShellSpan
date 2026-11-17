@@ -1030,11 +1030,11 @@ try {
     window.disposeWheelCheck = () => {
       root.unmount();
       for (const id of ids) { terminalRegistry.dispose(id); store.removeSession(id); }
+      useTerminalStore.setState({ sessions, activeSessionId, restoredLayout });
       host.remove();
     };
     flushSync(() => root.render(React.createElement(TerminalWorkspace)));
     const frame = () => new Promise(requestAnimationFrame);
-      useTerminalStore.setState({ sessions, activeSessionId, restoredLayout });
     for (let i = 0; i < 10; i++) await frame();
     await new Promise((resolve) => terminalRegistry.get(ids[1]).terminal.write(output.replace(/\n/g, '\r\n'), resolve));
     let terminalMounts = 0;
@@ -1078,10 +1078,6 @@ try {
         return buffer.viewportY < buffer.baseY;
       }, active);
     }
-    await host.locator(`[data-session-tab="${neighbor}"]`).click();
-    await host.locator(`[data-terminal-pane-session="${neighbor}"] .xterm-helper-textarea:focus`).waitFor({ state: 'attached' });
-  } finally {
-    await page.evaluate(() => window.disposeWheelCheck());
 
     const tabBar = host.locator('[data-terminal-tab-bar]');
     const actions = tabBar.getByRole('button', { name: '终端页签操作', exact: true });
@@ -1115,8 +1111,23 @@ try {
     });
     assert.ok(scrollRange > 0, 'The tabs should remain horizontally scrollable');
     assert.deepEqual(await actions.boundingBox(), fixedButton, 'Scrolling tabs must not move the actions menu');
+    const selectedTab = tabBar.getByRole('tab', { selected: true });
+    const selectedTitle = selectedTab.getByText(await selectedTab.getAttribute('aria-label'), { exact: true });
+    const tabTypography = await selectedTitle.evaluate(element => {
+      const { fontFamily, fontSize, fontWeight } = getComputedStyle(element);
+      return { fontFamily, fontSize, fontWeight };
+    });
+    assert.equal(tabTypography.fontWeight, '400', 'Terminal tab titles use regular weight');
+    const inactiveTab = tabBar.getByRole('tab', { selected: false });
     for (const theme of ['light', 'dark']) {
       await page.evaluate(theme => document.documentElement.setAttribute('data-theme', theme), theme);
+      await actions.blur();
+      await page.mouse.move(0, 50);
+      await tabBar.screenshot({ animations: 'disabled',
+        path: `${root}artifacts/tests/terminal-tab-actions/icon-${theme}.png` });
+      const iconColor = await actions.locator('svg').evaluate(icon => getComputedStyle(icon).color);
+      assert.equal(iconColor, await inactiveTab.evaluate(tab => getComputedStyle(tab).color),
+        `The actions icon should use the same subdued color as inactive tabs in ${theme} mode`);
       await actions.hover();
       await tabBar.screenshot({ animations: 'disabled',
         path: `${root}artifacts/tests/terminal-tab-actions/overflow-hover-${theme}.png` });
@@ -1128,6 +1139,25 @@ try {
       assert.deepEqual(await actions.boundingBox(), fixedButton, 'Hover must not move the actions button');
       assert.equal(await tabViewport.evaluate(element => element.scrollLeft), scrollRange,
         'Hovering the actions button must preserve the tab bar scroll position');
+
+      await actions.click();
+      await actionsMenu.waitFor();
+      await page.mouse.move(0, 50);
+      await page.screenshot({ animations: 'disabled', clip: { x: 0, y: 0, width: 320, height: 224 },
+        path: `${root}artifacts/tests/terminal-tab-actions/menu-${theme}.png` });
+      const openStyle = await actions.evaluate(element => ({
+        hovered: element.matches(':hover'),
+        fill: getComputedStyle(element).backgroundColor,
+      }));
+      assert.deepEqual(openStyle, { hovered: false, fill: hoverStyle.actual },
+        `The open actions button must keep the hover fill in ${theme} mode`);
+      const menuTypography = await actionsMenu.getByRole('menuitem').evaluateAll(items => items.map(item => {
+        const { fontFamily, fontSize, fontWeight } = getComputedStyle(item.querySelector('[data-slot="menu-item-label"]'));
+        return { fontFamily, fontSize, fontWeight };
+      }));
+      for (const itemTypography of menuTypography) assert.deepEqual(itemTypography, tabTypography);
+      await page.keyboard.press('Escape');
+      await actionsMenu.waitFor({ state: 'hidden' });
     }
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
     await actions.click();
@@ -1166,6 +1196,10 @@ try {
     await actionsMenu.getByRole('menuitem', { name: '退出分屏', exact: true }).click();
     await groups.first().waitFor({ state: 'detached' });
 
+    await host.locator(`[data-session-tab="${neighbor}"]`).click();
+    await host.locator(`[data-terminal-pane-session="${neighbor}"] .xterm-helper-textarea:focus`).waitFor({ state: 'attached' });
+  } finally {
+    await page.evaluate(() => window.disposeWheelCheck());
   }
   assert.deepEqual(errors, []);
   process.stdout.write('Terminal experience regressions passed with real xterm and WebKit at wide and narrow sizes.\n');

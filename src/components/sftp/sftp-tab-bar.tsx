@@ -16,9 +16,7 @@ import { createPortal } from 'react-dom';
 import { PinIcon, XIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
-import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
-import { getShortcutKeys } from '@/lib/shortcuts';
-import { usePlatform } from '@/hooks/usePlatform';
+import { useAppStore } from '@/stores/appStore';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
@@ -57,9 +55,6 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
   onClose,
   onTogglePin,
 }) => {
-  const { t } = useI18n();
-  const platform = usePlatform();
-  const closeBinding = useAppStore((state) => state.shortcuts.closeSftpTab ?? DEFAULT_SHORTCUTS.closeSftpTab);
   return (
     <div
       role="tab"
@@ -135,7 +130,6 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
           <button
             type="button"
             aria-label="close"
-            title={active && closeBinding ? `${t('common.close')} (${getShortcutKeys(closeBinding, platform).join('+')})` : t('common.close')}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();

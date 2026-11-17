@@ -55,7 +55,9 @@ describe('TerminalTabBar', () => {
       render(<TerminalTabBar />);
       const tab = screen.getByRole('tab', { name: 'Connecting host' });
       expect(tab).toHaveAttribute('aria-busy', 'true');
-      fireEvent.click(within(tab).getByRole('button', { name: 'terminal.tab.cancelConnection' }));
+      const cancelButton = within(tab).getByRole('button', { name: 'terminal.tab.cancelConnection' });
+      expect(cancelButton).not.toHaveAttribute('title');
+      fireEvent.click(cancelButton);
       expect(attempt.signal.aborted).toBe(true);
       expect(screen.queryByRole('tab', { name: 'Connecting host' })).not.toBeInTheDocument();
     } finally {
@@ -242,6 +244,7 @@ describe('TerminalTabBar', () => {
       />,
     );
 
+    expect(screen.getByRole('button', { name: 'terminal.tab.moreActions' })).not.toHaveAttribute('title');
     const closeButtons = screen.getAllByLabelText('close');
     expect(closeButtons[0]).toHaveAttribute('aria-label', 'close');
 
