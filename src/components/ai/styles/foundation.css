@@ -74,6 +74,8 @@
 
 .ai-permission-dialog [data-slot='alert-dialog-description'] {
   text-wrap: wrap;
+  word-break: normal;
+  overflow-wrap: anywhere;
 }
 
 @supports (corner-shape: superellipse(1.5)) {

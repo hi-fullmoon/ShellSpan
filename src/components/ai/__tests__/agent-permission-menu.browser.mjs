@@ -93,22 +93,33 @@ try {
 
     for (const width of [720, 320]) {
       await page.setViewportSize({ width, height: 800 });
-      const layout = await warning.evaluate(element => {
+      const layout = await warning.evaluate((element, locale) => {
         const range = document.createRange();
         range.selectNodeContents(element);
         const lines = range.getClientRects();
         const bounds = element.getBoundingClientRect();
         const style = getComputedStyle(element);
+        const splitWords = [];
+        if (locale === 'en-US') {
+          const text = element.firstChild;
+          for (const { 0: word, index } of text.textContent.matchAll(/[a-z]+/gi)) {
+            range.setStart(text, index);
+            range.setEnd(text, index + word.length);
+            if (range.getClientRects().length > 1) splitWords.push(word);
+          }
+        }
         return {
           wrap: style.textWrap,
           lineCount: lines.length,
           firstLineGap: bounds.right - lines[0].right,
           fontSize: parseFloat(style.fontSize),
           overflow: element.scrollWidth > element.clientWidth,
+          splitWords,
         };
-      });
+      }, locale);
       assert.equal(layout.wrap, 'wrap', `${locale}/${width}: dialog warning must use ordinary wrapping`);
       assert.ok(layout.lineCount > 1 && !layout.overflow, `${locale}/${width}: warning must wrap within the body`);
+      assert.deepEqual(layout.splitWords, [], `${locale}/${width}: warning must not split English words across lines`);
       if (locale === 'zh-CN') {
         assert.ok(layout.firstLineGap <= layout.fontSize * 2, `${locale}/${width}: first warning line must use the available width`);
       }
