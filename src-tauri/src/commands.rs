@@ -384,6 +384,7 @@ pub(crate) fn publish_terminal_integration_state(
         integration_state_revision: session.integration_state_revision,
         state,
         prompt_ready: session.prompt_ready,
+        prompt_ready_revision: session.prompt_ready_revision,
         shell: session.integration_shell,
         reason,
     };

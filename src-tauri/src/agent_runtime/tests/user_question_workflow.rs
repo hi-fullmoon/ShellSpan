@@ -1,6 +1,7 @@
 use super::*;
 use crate::agent_runtime::{
-    AgentSubagentModel, AgentToolResultStatus, ModelToolCall, RecordedToolCall,
+    AgentSubagentModel, AgentToolExecutionStatus, AgentToolResultStatus, ModelToolCall,
+    RecordedToolCall,
 };
 
 fn identity() -> QuestionIdentity {
@@ -102,7 +103,7 @@ fn command(id: &str, command: &str) -> ModelToolCall {
     }
 }
 
-fn record_execution(events: &mut Vec<AgentSessionEvent>, call: &ModelToolCall, exit_code: i32) {
+fn record_call(events: &mut Vec<AgentSessionEvent>, call: &ModelToolCall) {
     events.push(event(
         events.len(),
         AgentSessionEventPayload::ToolCall {
@@ -118,6 +119,10 @@ fn record_execution(events: &mut Vec<AgentSessionEvent>, call: &ModelToolCall, e
             },
         },
     ));
+}
+
+fn record_execution(events: &mut Vec<AgentSessionEvent>, call: &ModelToolCall, exit_code: i32) {
+    record_call(events, call);
     events.push(event(
         events.len(),
         AgentSessionEventPayload::ToolResult {
@@ -251,6 +256,55 @@ fn real_foreground_verification_is_required_before_dependent_work() {
     let replay: Vec<AgentSessionEvent> =
         serde_json::from_slice(&serde_json::to_vec(&events).unwrap()).unwrap();
     assert!(check_call(&replay, "turn", &dependent, 1).is_ok());
+}
+
+#[test]
+fn frontend_readiness_rejection_allows_one_fresh_verification() {
+    let source = "test -r /etc/hosts";
+    let verify = command("verify", source);
+    let retry = command("retry", source);
+    let dependent = command("dependent", "printf dependent");
+    let mut events = selected(source);
+    events.push(answered(
+        2,
+        submission(Some(UserActionResponse::Completed)),
+        true,
+    ));
+    for call in [&verify, &retry] {
+        record_call(&mut events, call);
+        events.push(event(
+            events.len(),
+            AgentSessionEventPayload::ToolExecution {
+                call_id: call.call_id.clone(),
+                status: AgentToolExecutionStatus::Dispatched,
+                idempotency: "conditional".into(),
+            },
+        ));
+        assert!(check_call(&events, "turn", &retry, 1).is_err());
+        events.push(event(
+            events.len(),
+            AgentSessionEventPayload::ToolResult {
+                call_id: call.call_id.clone(),
+                name: call.name.clone(),
+                status: AgentToolResultStatus::Failed,
+                summary: "Rejected before terminal submission".into(),
+                data: Some(json!({
+                    "execution":"notStarted",
+                    "error":"TERMINAL_FRONTEND_PENDING_INPUT: terminal has unsubmitted user input",
+                })),
+                duration_ms: None,
+                evidence_refs: vec![],
+            },
+        ));
+        assert!(check_call(&events, "turn", &dependent, 1).is_err());
+        assert!(check_call(&events, "turn", &retry, 2).is_err());
+        if call.call_id == verify.call_id {
+            assert!(check_call(&events, "turn", &retry, 1).is_ok());
+        }
+    }
+    assert!(check_call(&events, "turn", &command("third", source), 1)
+        .unwrap_err()
+        .starts_with("USER_ACTION_VERIFICATION_FAILED"));
 }
 
 #[test]

@@ -55,6 +55,7 @@ async function refreshTerminalIntegrationState(sessionId: string): Promise<void>
           ? 'unavailable'
           : integrated.integrationState,
       promptReady: integrated.promptReady,
+      promptReadyRevision: integrated.promptReadyRevision,
       shell: integrated.integrationShell,
       reason: integrated.integrationState === 'ready' && executionRolloutMissing
         ? remoteRolloutMissing ? 'remoteBoundTerminalDisabled' : 'terminalExecuteDisabled'
@@ -583,12 +584,14 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         takeoverFailed: false,
         requestTakeover: () => requestTakeover(lease.sessionId, lease.operationId),
       });
-      void refreshTerminalIntegrationState(lease.sessionId);
+      const integrationRefresh = refreshTerminalIntegrationState(lease.sessionId);
 
       let outputListenerReady = false;
       if (controller) {
         try {
           await controller.whenOutputReady();
+          // A prompt can reach the broker before its state event reaches this view.
+          if (controller.hasPendingUserInput()) await integrationRefresh;
           const current = activeLeases.get(lease.sessionId);
           outputListenerReady = !disposed
             && current?.lease.operationId === lease.operationId

@@ -127,8 +127,10 @@ to `run_terminal_command` in the foreground. The command retains normal native
 classification, approval, cancellation and redaction checks. If it returns a
 process handle, only `wait_process` for that handle may observe its completion.
 Dependent tools remain blocked until a committed native result confirms exit
-code zero. A failed verification cannot be retried in a polling loop; request
-fresh user work while preserving the selected plan. Verification evidence is
+code zero. A frontend rejection for pending input or an unverified submission
+permits one fresh verification call if the native result confirms that execution
+did not start. A second rejection or a failed verification requires fresh user
+work while preserving the selected plan. Verification evidence is
 scoped to the confirmed operation and cannot predate completion. Asking an
 unrelated question cannot clear an outstanding verification requirement.
 

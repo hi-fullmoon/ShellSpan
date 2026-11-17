@@ -28,6 +28,8 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <time.h>
+#include "externs.h"
+#include "parser.h"
 #ifdef __GLIBC__
 #include <gnu/libc-version.h>
 #endif
@@ -384,6 +386,9 @@ static int control_dispatch_key(int count, int key) {
   finish_control_redraw();
   ss_native_control_returned();
   return result;
+}
+int p0_at_primary_prompt(void) {
+  return current_command_line_count == 0 && get_current_prompt_level() == 1;
 }
 static int editor_ready(void) {
   /* A fresh native input line is also a safe fallback restoration boundary. */

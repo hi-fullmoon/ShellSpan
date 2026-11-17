@@ -29,6 +29,7 @@ extern "C" {
     fn p0_uninstall_input();
     fn p0_refresh_input();
     fn p0_bindings_valid() -> c_int;
+    fn p0_at_primary_prompt() -> c_int;
     fn p0_begin_display(geometry: c_int) -> c_int;
     fn p0_display_rebases() -> c_int;
     fn p0_preview_bytes() -> c_int;
@@ -309,7 +310,7 @@ impl Bridge {
                         }
                         _ => false,
                     });
-            if !valid || self.draft.is_some() || !line().is_empty() {
+            if !valid || self.draft.is_some() || !line().is_empty() || p0_at_primary_prompt() != 1 {
                 self.emit(Some(&request), "Rejected", json!("binding/busy/user-draft"));
                 return;
             }
@@ -718,6 +719,11 @@ pub unsafe extern "C" fn p0_service() {
 }
 #[no_mangle]
 pub unsafe extern "C" fn p0_editor_ready(bindings_valid: c_int) {
+    // Readline also opens an empty buffer for PS2 while Bash still owns
+    // previously accepted lines. That buffer cannot accept an Agent command.
+    if p0_at_primary_prompt() != 1 {
+        return;
+    }
     if let Some(bridge) = BRIDGE.as_mut().filter(|bridge| bridge.native_mode) {
         if let Some(request) = bridge.native_connection.clone() {
             bridge.reply_connection(

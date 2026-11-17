@@ -119,6 +119,17 @@ async function verify() {
         return;
       }
       await eventually(() => Boolean(useTerminalStore.getState().sessions.find(item => item.sessionId === id)?.promptReady), 'Shell did not return to its real prompt');
+      const editedMarker = `edited-${crypto.randomUUID()}`;
+      assert(await controller.writeUserInput(`printf '%s%s\\n' '${editedMarker.slice(0, 6)}' '${editedMarker.slice(6)}''`), 'Shell rejected the editing regression input');
+      // Delete the accidental quote from within the line using the real shell editor.
+      assert(await controller.writeUserInput('\u001b[D\u001b[3~\r'), 'Shell rejected cursor editing and Enter');
+      await eventually(() => output.includes(editedMarker) && !controller.hasUnconfirmedLineBreak(), 'Edited command did not execute and return to a confirmed prompt');
+      assert(!controller.hasPendingUserInput(), 'A fresh native prompt left the submitted command marked as pending');
+      assert(await controller.writeUserInput('unsent-draft'), 'Shell rejected a new draft');
+      await eventually(() => visible().includes('unsent-draft'), 'Shell did not echo the new draft');
+      assert(controller.hasPendingUserInput(), 'Prompt reconciliation discarded a new draft');
+      assert(await controller.writeUserInput('\u0015'), 'Shell rejected clearing the draft');
+      await eventually(() => !visible().includes('unsent-draft'), 'Shell did not clear the new draft');
       if (session.title === 'zsh') {
         // Keep the user's actual Zsh prompt/theme and production ZLE hooks.
         // Themes can recompute PS1 in precmd, so do not substitute shell state.
@@ -196,6 +207,7 @@ async function verify() {
       terminal.input('\u0015', true);
       await eventually(() => !visible().includes('second-multiline'), 'Real shell did not clear the current continuation line');
       assert(controller.hasUnconfirmedLineBreak(), 'Ctrl+U incorrectly forgot accepted continuation lines');
+      assert(controller.hasPendingUserInput(), 'Clearing the current line forgot real pending continuation text');
       const afterKill = visible();
       assert(await clearTerminalScreen(terminal, id) === 'unavailable', 'Ctrl+U must not make a continuation command safe to erase');
       assert(visible() === afterKill, 'Clearing after Ctrl+U changed continuation input');

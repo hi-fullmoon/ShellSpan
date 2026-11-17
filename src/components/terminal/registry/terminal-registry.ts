@@ -467,6 +467,7 @@ class TerminalControllerImpl implements TerminalController {
   private readonly userInputSuppressions = new Set<{ onBlocked?: () => void; shouldBlock?: () => boolean }>();
   private agentInputBlockedFeedbackRef = false;
   private pendingUserInputText = '';
+  private submittedContinuationText = '';
   private lastInputLineBreak: { terminalSessionId?: string; generation?: number; revision?: number } | null = null;
   private unverifiedUserSubmission = false;
   private recentOutputTail = '';
@@ -1301,7 +1302,8 @@ class TerminalControllerImpl implements TerminalController {
   }
 
   hasPendingUserInput(): boolean {
-    return this.pendingUserInputText.length > 0;
+    this.reconcileSubmittedContinuation();
+    return this.pendingUserInputText.length > 0 || this.submittedContinuationText.length > 0;
   }
 
   hasUnconfirmedLineBreak(): boolean {
@@ -1309,8 +1311,16 @@ class TerminalControllerImpl implements TerminalController {
     const session = useTerminalStore.getState().sessions.find(item => item.sessionId === this.sessionId);
     return !session?.promptReady || session.terminalSessionId !== this.lastInputLineBreak.terminalSessionId
       || session.terminalGeneration !== this.lastInputLineBreak.generation
-      || session.integrationStateRevision === undefined || this.lastInputLineBreak.revision === undefined
-      || session.integrationStateRevision <= this.lastInputLineBreak.revision;
+      || session.promptReadyRevision === undefined || this.lastInputLineBreak.revision === undefined
+      || session.promptReadyRevision <= this.lastInputLineBreak.revision;
+  }
+
+  private reconcileSubmittedContinuation(): void {
+    // The shell can finish a command whose edited text differs from the input cache.
+    // A fresh prompt retires submitted lines while preserving the current draft.
+    if (this.submittedContinuationText && !this.hasUnconfirmedLineBreak()) {
+      this.submittedContinuationText = '';
+    }
   }
 
   hasUnverifiedUserSubmission(): boolean {
@@ -1402,19 +1412,23 @@ class TerminalControllerImpl implements TerminalController {
         }
         continue;
       }
-      if (character === '\u0003' || character === '\u0015') {
+      if (character === '\u0003') {
+        this.submittedContinuationText = '';
+        this.pendingUserInputText = '';
+      } else if (character === '\u0015') {
         this.pendingUserInputText = '';
       } else if (character === '\u007f' || character === '\b') {
         this.pendingUserInputText = [...this.pendingUserInputText].slice(0, -1).join('');
       } else if (character === '\r' || character === '\n') {
         if (character === '\r' && data[index + 1] === '\n') index += 1;
-        const submittedInput = this.pendingUserInputText;
+        const submittedInput = this.submittedContinuationText + this.pendingUserInputText;
         if (this.inputLineNeedsContinuation(submittedInput)) {
-          this.pendingUserInputText = `${submittedInput}\n`;
+          this.submittedContinuationText = `${submittedInput}\n`;
         } else {
           if (submittedInput.trim()) this.unverifiedUserSubmission = true;
-          this.pendingUserInputText = '';
+          this.submittedContinuationText = '';
         }
+        this.pendingUserInputText = '';
       } else if (character === '\t' || character >= ' ') {
         this.pendingUserInputText += character;
       }
@@ -1487,6 +1501,7 @@ class TerminalControllerImpl implements TerminalController {
     if (!this.canWriteUserInput()) return Promise.resolve(false);
     const session = useTerminalStore.getState().sessions.find(item => item.sessionId === this.sessionId);
     if (session?.foregroundHandoffActive) return this.writeInput(data).then(() => true);
+    this.reconcileSubmittedContinuation();
     if (/[\r\n\u0003]/.test(data)) {
       // Do not parse shell syntax to decide whether Enter completed a command.
       // Only a newer, trusted prompt event confirms that no accepted
@@ -1619,6 +1634,7 @@ class TerminalControllerImpl implements TerminalController {
     }
     this.pendingOutputCharacters = 0;
     this.pendingUserInputText = '';
+    this.submittedContinuationText = '';
     this.lastInputLineBreak = null;
     this.unverifiedUserSubmission = false;
     this.recentOutputTail = '';

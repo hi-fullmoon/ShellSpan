@@ -178,6 +178,9 @@ leaseGeneration、agentSessionId、taskId、operationId、commandId、sourceRevi
 afterCommand 非空时须为完整合法身份且与连接终端代次相同；它须匹配最后实际准备的操作。
 已运行操作要在可信结束后等真实编辑器重新就绪；提示符文本不够。
 此消息永远不能清除 sticky recovery。
+原生 Bash 只在主提示符报告编辑器就绪，续行提示符下即使 Readline 当前行为空也不能准备 Agent 命令。
+终端集成状态的 `promptReadyRevision` 只在可信提示符完成或原生编辑器确认空闲时更新。
+前端用同一终端代次下的新版本结束对已交给 Shell 的续行跟踪，并保留之后输入的草稿。
 
 ## 编码、限制和期限
 

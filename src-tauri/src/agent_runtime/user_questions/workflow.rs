@@ -348,7 +348,9 @@ pub(crate) fn check_call(
         })
         .unwrap_or(events.len());
     let mut verification_calls = HashSet::new();
+    let mut dispatched = HashSet::new();
     let mut handles = HashSet::new();
+    let mut readiness_rejected = false;
     let mut attempted = false;
     let mut failed = false;
     let is_verification = |name: &str, arguments: &Value| {
@@ -368,7 +370,7 @@ pub(crate) fn check_call(
             AgentSessionEventPayload::ToolExecution { call_id, .. }
                 if verification_calls.contains(&(event.step_id.clone(), call_id.clone())) =>
             {
-                attempted = true
+                dispatched.insert((event.step_id.clone(), call_id.clone()));
             }
             AgentSessionEventPayload::ToolCall { call }
                 if call.name == "wait_process"
@@ -387,6 +389,25 @@ pub(crate) fn check_call(
                 ..
             } if verification_calls.contains(&(event.step_id.clone(), call_id.clone())) => {
                 if *status == super::super::AgentToolResultStatus::Rejected {
+                    continue;
+                }
+                dispatched.remove(&(event.step_id.clone(), call_id.clone()));
+                // A readiness rejection happens before native submission. Allow one
+                // new verification call after it, without relaxing the exit-code gate.
+                if !readiness_rejected
+                    && *status == super::super::AgentToolResultStatus::Failed
+                    && data.as_ref().is_some_and(|data| {
+                        data.get("execution").and_then(Value::as_str) == Some("notStarted")
+                            && data
+                                .get("error")
+                                .and_then(Value::as_str)
+                                .is_some_and(|error| {
+                                    error.starts_with("TERMINAL_FRONTEND_PENDING_INPUT:")
+                                        || error.starts_with("TERMINAL_FRONTEND_UNVERIFIED_INPUT:")
+                                })
+                    })
+                {
+                    readiness_rejected = true;
                     continue;
                 }
                 attempted = true;
@@ -433,7 +454,11 @@ pub(crate) fn check_call(
     if failed {
         return Err("USER_ACTION_VERIFICATION_FAILED: explain the failed verification and request user action again; do not poll or repeat the plan question".into());
     }
-    if !attempted && batch_len == 1 && is_verification(&call.name, &call.arguments) {
+    if !attempted
+        && dispatched.is_empty()
+        && batch_len == 1
+        && is_verification(&call.name, &call.arguments)
+    {
         Ok(())
     } else {
         Err(format!("USER_ACTION_VERIFICATION_REQUIRED: run this exact command alone in foreground and confirm exitCode=0 before dependent work: {}", action.verification_command))

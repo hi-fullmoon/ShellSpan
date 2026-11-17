@@ -375,6 +375,7 @@ pub(crate) struct TerminalBrokerSessionSnapshot {
     pub(crate) integration_state_revision: u64,
     pub(crate) integration_capabilities: Vec<&'static str>,
     pub(crate) prompt_ready: bool,
+    pub(crate) prompt_ready_revision: u64,
     /// Next admissible input when the integration most recently confirmed a prompt.
     #[cfg(test)]
     #[serde(skip)]
@@ -506,6 +507,7 @@ pub(crate) struct TerminalIntegrationStateEvent {
     pub(crate) integration_state_revision: u64,
     pub(crate) state: TerminalIntegrationState,
     pub(crate) prompt_ready: bool,
+    pub(crate) prompt_ready_revision: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) shell: Option<TerminalShellKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1700,6 +1702,7 @@ struct SessionRecord {
     integration_state_revision: u64,
     prompt_started: bool,
     prompt_ready: bool,
+    prompt_ready_revision: u64,
     prompt_start_input_sequence: u64,
     prompt_next_input_sequence: u64,
     interactive_input: Option<InteractiveInput>,
@@ -1787,6 +1790,7 @@ impl SessionRecord {
             integration_state_revision: 0,
             prompt_started: false,
             prompt_ready: false,
+            prompt_ready_revision: 0,
             prompt_start_input_sequence: 0,
             prompt_next_input_sequence: 0,
             interactive_input: None,
@@ -1926,6 +1930,7 @@ impl SessionRecord {
                 Vec::new()
             },
             prompt_ready: self.prompt_ready,
+            prompt_ready_revision: self.prompt_ready_revision,
             #[cfg(test)]
             prompt_next_input_sequence: self.prompt_next_input_sequence,
             current_directory: self.current_directory.clone(),
@@ -3195,6 +3200,7 @@ impl TerminalSessionBroker {
             return Err(counter_exhausted());
         }
         let through_output_sequence = record.next_output_sequence.saturating_sub(1);
+        let confirms_prompt = matches!(&event, TerminalIntegrationControlEvent::PromptEnd);
         match event {
             TerminalIntegrationControlEvent::NativeTyping { enabled } => {
                 require_ready_integration(record)?;
@@ -3630,6 +3636,9 @@ impl TerminalSessionBroker {
         }
         record.integration_event_sequence = event_sequence;
         advance_integration_state_revision(record)?;
+        if confirms_prompt {
+            record.prompt_ready_revision = record.integration_state_revision;
+        }
         if let Some((handle, line, rejected)) = job_submission_event {
             if let Some(job) = state.jobs.get_mut(&handle) {
                 if rejected {

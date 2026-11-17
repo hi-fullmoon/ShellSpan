@@ -26,6 +26,7 @@ export interface TerminalSession {
   integrationReason?: string;
   integrationStateRevision?: number;
   promptReady?: boolean;
+  promptReadyRevision?: number;
   foregroundHandoffActive?: boolean;
   title: string;
   baseTitle?: string;
@@ -504,6 +505,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
           && session.integrationReason === event.reason
           && session.integrationStateRevision === event.integrationStateRevision
           && session.promptReady === event.promptReady
+          && session.promptReadyRevision === event.promptReadyRevision
         ) return session;
         changed = true;
         return {
@@ -514,6 +516,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
           integrationReason: event.reason,
           integrationStateRevision: event.integrationStateRevision,
           promptReady: event.promptReady,
+          promptReadyRevision: event.promptReadyRevision,
           foregroundHandoffActive: event.inputObservation?.foregroundHandoffActive,
         };
       });

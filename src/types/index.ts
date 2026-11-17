@@ -389,6 +389,8 @@ export interface TerminalBrokerSessionSnapshot {
     | 'nativeJobControl'
   )[];
   promptReady: boolean;
+  /** Integration revision of the last confirmed shell prompt or empty native editor. */
+  promptReadyRevision?: number;
   currentDirectory?: string;
   activeCommandId?: string;
   /** Absent on older backends; absence and unavailable observations mean unknown. */
@@ -488,6 +490,7 @@ export interface TerminalIntegrationStateEvent {
   integrationStateRevision: number;
   state: TerminalBrokerIntegrationState;
   promptReady: boolean;
+  promptReadyRevision?: number;
   shell?: TerminalBrokerSessionSnapshot['integrationShell'];
   reason?: string;
 }

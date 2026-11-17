@@ -294,6 +294,9 @@ impl TerminalSessionBroker {
         record.command_input_pending =
             record.native_recovery_required || record.native_clear_pending.is_some();
         advance_integration_state_revision(record)?;
+        if record.prompt_ready {
+            record.prompt_ready_revision = record.integration_state_revision;
+        }
         drop(state);
         if let Some(operation) = ready_operation {
             operation.notify();
