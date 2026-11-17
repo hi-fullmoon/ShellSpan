@@ -81,8 +81,12 @@ fn real_ssh_bash_startup_fallback_preserves_predecessor_until_attachment() {
     .unwrap();
     let ready_profile = "export LC_ALL=en_US.UTF-8\nPS1='shellspan-ssh-regression> '\n";
     set_profile(ready_profile);
-    let resources = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../.artifacts/tests/native-input-p2/resources/native-input");
+    let resources = std::env::var_os("SHELLSPAN_SSH_STARTUP_RESOURCES")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../.artifacts/tests/native-input-p2/resources/native-input")
+        });
     let broker = TerminalSessionBroker::phase5_enabled_for_test(65_536);
     let sessions = SessionManager::default();
 
@@ -131,7 +135,13 @@ fn real_ssh_bash_startup_fallback_preserves_predecessor_until_attachment() {
                 },
             )
             .unwrap();
-        let mut native = RemoteNativeBash::prepare(&session, "native53", &resources).unwrap();
+        let mut native = RemoteNativeBash::prepare(
+            &session,
+            "native53",
+            &resources,
+            &mut SftpStartupTimings::default(),
+        )
+        .unwrap();
         assert!(native.as_ref().unwrap().uses_private_bash());
         let root = native.as_ref().unwrap().root.clone();
         let mut pty = open_remote_pty_channel(&session, &request, transport).unwrap();
@@ -377,6 +387,7 @@ fn remote_early_core_preserved(session: &Session, owner: &Path, evidence: &Path)
         session,
         "nativeZle",
         &owner.join(".artifacts/tests/native-input-p2/resources/native-input"),
+        &mut SftpStartupTimings::default(),
     )
     .unwrap()
     .unwrap();
@@ -532,6 +543,7 @@ fn production_remote_zle_parent_parser_and_background() {
         &session,
         username,
         &owner.join(".artifacts/tests/native-input-p2/resources/native-input"),
+        &mut SftpStartupTimings::default(),
     )
     .unwrap()
     .expect("Actual remote profile absent");

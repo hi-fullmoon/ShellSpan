@@ -4,6 +4,7 @@ import { TerminalTabBar } from '../terminal-tab-bar';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useAppStore } from '@/stores/appStore';
 import { resolveTerminalTheme } from '../registry/terminal-registry';
+import { beginSshConnection } from '@/lib/terminal/ssh-connection-attempt';
 
 vi.mock('@/lib/ipc/tauri', () => ({
   invokeCloseSession: vi.fn().mockResolvedValue(undefined),
@@ -42,6 +43,43 @@ describe('TerminalTabBar', () => {
 
   afterEach(async () => {
     await new Promise((resolve) => setTimeout(resolve, 60));
+  });
+
+  it('cancels a pending SSH tab and removes its placeholder', () => {
+    const store = useTerminalStore.getState();
+    const id = store.beginConnectionAttempt({
+      title: 'Connecting host', host: 'localhost', port: 22, username: 'operator', profileId: 'profile',
+    });
+    const attempt = beginSshConnection(id);
+    try {
+      render(<TerminalTabBar />);
+      const tab = screen.getByRole('tab', { name: 'Connecting host' });
+      expect(tab).toHaveAttribute('aria-busy', 'true');
+      fireEvent.click(within(tab).getByRole('button', { name: 'terminal.tab.cancelConnection' }));
+      expect(attempt.signal.aborted).toBe(true);
+      expect(screen.queryByRole('tab', { name: 'Connecting host' })).not.toBeInTheDocument();
+    } finally {
+      attempt.finish();
+    }
+  });
+
+  it('cancels the replacement connection while keeping the source tab', () => {
+    const store = useTerminalStore.getState();
+    const id = 'original-ssh';
+    store.addSession({ sessionId: id, title: 'SSH terminal', host: 'localhost', port: 22, username: 'operator' }, 'profile');
+    store.setStatus(id, { sessionId: id, status: 'connected' });
+    store.setReconnecting(id, true);
+    const attempt = beginSshConnection(id);
+    try {
+      render(<TerminalTabBar />);
+      const tab = screen.getByRole('tab', { name: 'SSH terminal' });
+      fireEvent.click(within(tab).getByRole('button', { name: 'terminal.tab.cancelConnection' }));
+      expect(attempt.signal.aborted).toBe(true);
+      expect(screen.getByRole('tab', { name: 'SSH terminal' })).toBeInTheDocument();
+      expect(useTerminalStore.getState().sessions[0]?.status).toBe('connected');
+    } finally {
+      attempt.finish();
+    }
   });
 
   it('renders tabs and switches active session on click', () => {

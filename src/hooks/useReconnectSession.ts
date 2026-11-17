@@ -5,7 +5,6 @@ import {
   buildSessionCreateRequest,
   invokeCloseSession,
   invokeCreateLocalSession,
-  invokeCreateSession,
 } from '@/lib/ipc/tauri';
 import { createLogger } from '@/lib/logger';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
@@ -20,6 +19,8 @@ import { usePortForwardStore } from '@/stores/portForwardStore';
 import { useAppStore } from '@/stores/appStore';
 import { useToastStore } from '@/stores/toastStore';
 import { useI18n } from '@/hooks/useI18n';
+import { beginSshConnection } from '@/lib/terminal/ssh-connection-attempt';
+import type { SessionSummary } from '@/types';
 
 const logger = createLogger('reconnect');
 
@@ -47,15 +48,18 @@ function retryableConnectionError(error: unknown): boolean {
   return /connect|network|offline|unreachable|timeout|timed out|reset|refused|broken pipe/i.test(message);
 }
 
-function waitForConnectionRetry(delayMs: number): Promise<void> {
+function waitForConnectionRetry(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) => {
     const finish = (): void => {
       window.clearTimeout(timer);
       window.removeEventListener('online', finish);
+      signal.removeEventListener('abort', finish);
       resolve();
     };
     const timer = window.setTimeout(finish, delayMs);
     window.addEventListener('online', finish, { once: true });
+    signal.addEventListener('abort', finish, { once: true });
   });
 }
 
@@ -75,6 +79,7 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
     }
 
     reconnectInFlight.add(sessionId);
+    let connection: ReturnType<typeof beginSshConnection> | undefined;
     try {
       const { setReconnecting, setStatus, reconnectSession } = useTerminalStore.getState();
       // Create the replacement session at the terminal's current size so the
@@ -144,6 +149,8 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
 
       const preparedProfile = profileWithKey;
       let activeProfile = preparedProfile;
+      if (!useTerminalStore.getState().sessions.some((item) => item.sessionId === sessionId)) return;
+      connection = beginSshConnection(sessionId, 'replacement');
 
       setReconnecting(sessionId, true);
       logger.info(`Reconnecting session ${sessionId} (${profile.host}:${profile.port})`);
@@ -153,7 +160,7 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
         if (!predecessorConnected()) setStatus(sessionId, { sessionId, status, message });
       };
       const replaceSession = async (
-        summary: Awaited<ReturnType<typeof invokeCreateSession>>,
+        summary: SessionSummary,
       ): Promise<void> => {
         if (!useTerminalStore.getState().sessions.some((item) => item.sessionId === sessionId)) {
           logger.info(`Discarding replacement session ${summary.sessionId}; source ${sessionId} was closed`);
@@ -186,7 +193,8 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
         if (attempt > 0) {
           const delayMs = AUTO_RECONNECT_DELAYS_MS[attempt];
           updateReconnectStatus('connecting', t('terminal.notice.reconnectRetryIn', { seconds: delayMs / 1_000 }));
-          await waitForConnectionRetry(delayMs);
+          await waitForConnectionRetry(delayMs, connection.signal);
+          if (connection.signal.aborted) return;
           if (!useTerminalStore.getState().sessions.some((item) => item.sessionId === sessionId)) return;
           if (!useAppStore.getState().terminalAutoReconnect) {
             updateReconnectStatus('disconnected', t('terminal.notice.pressEnterReconnect'));
@@ -195,12 +203,14 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
         }
         updateReconnectStatus('connecting', t('terminal.notice.reconnectingLabel'));
         try {
-          const summary = await invokeCreateSession(
+          const summary = await connection.connect(
             buildSessionCreateRequest(activeProfile, cols, rows, replacesSessionId),
           );
+          if (!summary) return;
           await replaceSession(summary);
           return;
         } catch (failure) {
+          if (connection.signal.aborted) return;
           let error: unknown = failure;
           const missingKeyTarget = !keyRecoveryUsed
             ? getMissingKeychainKeyTarget(activeProfile, getErrorMessage(error)) : null;
@@ -214,9 +224,10 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
             }
             activeProfile = recoveredProfile;
             try {
-              const summary = await invokeCreateSession(
+              const summary = await connection.connect(
                 buildSessionCreateRequest(activeProfile, cols, rows, replacesSessionId),
               );
+              if (!summary) return;
               await replaceSession(summary);
               return;
             } catch (retryError) {
@@ -235,7 +246,16 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
         }
       }
     } finally {
-      useTerminalStore.getState().setReconnecting(sessionId, false);
+      const terminal = useTerminalStore.getState();
+      if (connection?.signal.aborted && terminal.sessions.some(
+        (item) => item.sessionId === sessionId && item.status === 'connecting',
+      )) {
+        terminal.setStatus(sessionId, {
+          sessionId, status: 'disconnected', message: t('terminal.notice.pressEnterReconnect'),
+        });
+      }
+      connection?.finish();
+      terminal.setReconnecting(sessionId, false);
       reconnectInFlight.delete(sessionId);
     }
   }, [t]);

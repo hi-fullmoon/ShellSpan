@@ -116,6 +116,34 @@ enum RemoteShellStartup {
     Zle,
 }
 
+#[derive(Default)]
+pub(super) struct SftpStartupTimings {
+    pub(super) upload: Duration,
+    pub(super) readback: Duration,
+}
+
+impl SftpStartupTimings {
+    fn upload(
+        &mut self,
+        sftp: &ssh2::Sftp,
+        path: &str,
+        bytes: &[u8],
+        mode: u32,
+    ) -> Result<(), String> {
+        let started = Instant::now();
+        let result = upload(sftp, path, bytes, mode);
+        self.upload += started.elapsed();
+        result
+    }
+
+    fn readback(&mut self, sftp: &ssh2::Sftp, path: &str) -> Result<(String, u64), String> {
+        let started = Instant::now();
+        let result = remote_sha_and_length(sftp, path);
+        self.readback += started.elapsed();
+        result
+    }
+}
+
 pub(super) struct RemoteNativeBash {
     pub profile: VerifiedNativeProfile,
     pub control: Channel,
@@ -184,14 +212,16 @@ impl RemoteNativeBash {
         Path::new(&self.root)
     }
 
-    pub fn prepare(
+    pub(super) fn prepare(
         session: &Session,
         username: &str,
         resources: &Path,
+        timings: &mut SftpStartupTimings,
     ) -> Result<Option<Self>, String> {
+        let _timeout = terminal_deadline::native_preparation_timeout(session)?;
         let identity = detect_remote_login_shell_identity(session, username)?;
         if identity.shell == TerminalShellKind::Zsh {
-            return Self::prepare_zle(session, resources, &identity).map(Some);
+            return Self::prepare_zle(session, resources, &identity, timings).map(Some);
         }
         if identity.shell != TerminalShellKind::Bash {
             return Ok(None);
@@ -201,7 +231,7 @@ impl RemoteNativeBash {
             .sftp()
             .map_err(|_| "TERMINAL_NATIVE_SFTP_UNAVAILABLE")?;
         let system_shell_sha = if target == RemoteBashTarget::Arm64 {
-            Some(remote_sha(&sftp, &identity.executable)?)
+            Some(timings.readback(&sftp, &identity.executable)?.0)
         } else {
             None
         };
@@ -239,8 +269,8 @@ impl RemoteNativeBash {
             let relay_path = format!("{root}/relay");
             let (executable, shell_sha, startup) = if let Some(bytes) = private_shell {
                 let path = format!("{root}/bash");
-                upload(&sftp, &path, &bytes, 0o500)?;
-                let sha = remote_sha(&sftp, &path)?;
+                timings.upload(&sftp, &path, &bytes, 0o500)?;
+                let (sha, _) = timings.readback(&sftp, &path)?;
                 (path, sha, RemoteShellStartup::PrivateBash)
             } else {
                 (
@@ -249,23 +279,23 @@ impl RemoteNativeBash {
                     RemoteShellStartup::Bash,
                 )
             };
-            upload(
+            timings.upload(
                 &sftp,
                 &module_path,
                 &std::fs::read(&module).map_err(|_| "TERMINAL_NATIVE_ARTIFACTS_UNAVAILABLE")?,
                 0o500,
             )?;
-            upload(
+            timings.upload(
                 &sftp,
                 &relay_path,
                 &std::fs::read(&relay).map_err(|_| "TERMINAL_NATIVE_ARTIFACTS_UNAVAILABLE")?,
                 0o500,
             )?;
-            let relay_readback = remote_sha_and_length(&sftp, &relay_path)?;
+            let relay_readback = timings.readback(&sftp, &relay_path)?;
             if relay_readback.0 != artifact.relay_sha256 {
                 return Err("TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH".into());
             }
-            let module_readback = remote_sha_and_length(&sftp, &module_path)?;
+            let module_readback = timings.readback(&sftp, &module_path)?;
             let profile = VerifiedNativeProfile::verify_remote(
                 &artifact.id,
                 &artifact.shell_sha256,
@@ -279,14 +309,14 @@ impl RemoteNativeBash {
                 Path::new(&module_path),
                 Path::new(&socket),
             )?;
-            upload(
+            timings.upload(
                 &sftp,
                 &format!("{root}/native-init"),
                 bootstrap.as_bytes(),
                 0o600,
             )?;
             let init_path = format!("{root}/native-init");
-            let init_readback = remote_sha_and_length(&sftp, &init_path)?;
+            let init_readback = timings.readback(&sftp, &init_path)?;
             let init_expected = nip::sha(&bootstrap);
             if init_readback.0 != init_expected {
                 return Err("TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH".into());
@@ -371,12 +401,13 @@ impl RemoteNativeBash {
         session: &Session,
         resources: &Path,
         identity: &RemoteLoginShellIdentity,
+        timings: &mut SftpStartupTimings,
     ) -> Result<Self, String> {
         use crate::terminal_command::editors;
         let sftp = session
             .sftp()
             .map_err(|_| "TERMINAL_NATIVE_SFTP_UNAVAILABLE")?;
-        let shell_sha = remote_sha(&sftp, &identity.executable)?;
+        let (shell_sha, _) = timings.readback(&sftp, &identity.executable)?;
         let artifact = editors::read_catalogue(resources, "linux-aarch64-glibc-2.36")?
             .into_iter()
             .find(|p| p.shell_sha256 == shell_sha)
@@ -437,31 +468,31 @@ impl RemoteNativeBash {
             let core_path = format!("{root}/scoped/zsh/zle.so");
             let module_path = format!("{root}/ss_nip.so");
             let relay_path = format!("{root}/relay");
-            upload(
+            timings.upload(
                 &sftp,
                 &core_path,
                 &std::fs::read(&core).map_err(|_| "TERMINAL_NATIVE_SCOPED_CORE_UNAVAILABLE")?,
                 0o500,
             )?;
-            let core_readback = remote_sha_and_length(&sftp, &core_path)?;
+            let core_readback = timings.readback(&sftp, &core_path)?;
             if core_readback.0 != *core_sha {
                 return Err("TERMINAL_NATIVE_SCOPED_CORE_MISMATCH".into());
             }
-            upload(
+            timings.upload(
                 &sftp,
                 &module_path,
                 &std::fs::read(&module).map_err(|_| "TERMINAL_NATIVE_ARTIFACTS_UNAVAILABLE")?,
                 0o500,
             )?;
-            upload(
+            timings.upload(
                 &sftp,
                 &relay_path,
                 &std::fs::read(resources.join(relay_name))
                     .map_err(|_| "TERMINAL_NATIVE_ARTIFACTS_UNAVAILABLE")?,
                 0o500,
             )?;
-            let module_readback = remote_sha_and_length(&sftp, &module_path)?;
-            let relay_readback = remote_sha_and_length(&sftp, &relay_path)?;
+            let module_readback = timings.readback(&sftp, &module_path)?;
+            let relay_readback = timings.readback(&sftp, &relay_path)?;
             if module_readback.0 != artifact.module_sha256 || relay_readback.0 != *relay_sha {
                 return Err("TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH".into());
             }
@@ -490,7 +521,7 @@ impl RemoteNativeBash {
                 Path::new(&identity.executable),
                 &artifact.profile,
             )?;
-            upload(
+            timings.upload(
                 &sftp,
                 &format!("{root}/native-init"),
                 startup.as_bytes(),
@@ -500,7 +531,7 @@ impl RemoteNativeBash {
             let core_loader=format!("() {{\n local -a old_path=(\"${{module_path[@]}}\")\n if builtin zmodload -e zsh/zle; then return 1; fi\n module_path=({} \"${{old_path[@]}}\")\n builtin zmodload zsh/zle\n local core_result=$?\n module_path=(\"${{old_path[@]}}\")\n return $core_result\n}}",quote_remote_posix(&format!("{root}/scoped")));
             let initializer=format!("__shellspan_nip_initialize() {{\n precmd_functions=(\"${{(@)precmd_functions:#__shellspan_nip_initialize}}\"); unfunction __shellspan_nip_initialize\n source {}\n}}\nprecmd_functions=(__shellspan_nip_initialize \"${{precmd_functions[@]}}\")\n",quote_remote_posix(&format!("{root}/native-init")));
             let wrapper=format!("{original_env}if {core_loader}; then\n{initializer}else\n builtin printf '%s\\n' TERMINAL_NATIVE_SCOPED_CORE_CONFLICT >&2\nfi\n");
-            upload(&sftp, &format!("{root}/.zshenv"), wrapper.as_bytes(), 0o600)?;
+            timings.upload(&sftp, &format!("{root}/.zshenv"), wrapper.as_bytes(), 0o600)?;
             let (control, boundary) = start_native_relay(session, &root)?;
             Ok(Self {
                 profile,
@@ -644,10 +675,6 @@ fn upload(sftp: &ssh2::Sftp, path: &str, bytes: &[u8], mode: u32) -> Result<(), 
     )
     .map_err(|_| "TERMINAL_NATIVE_UPLOAD_FAILED".into())
 }
-fn remote_sha(sftp: &ssh2::Sftp, path: &str) -> Result<String, String> {
-    remote_sha_and_length(sftp, path).map(|(sha, _)| sha)
-}
-
 fn remote_sha_and_length(sftp: &ssh2::Sftp, path: &str) -> Result<(String, u64), String> {
     let mut file = sftp
         .open(Path::new(path))

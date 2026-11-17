@@ -260,7 +260,7 @@ describe('useReconnectSession', () => {
     );
     expect(invokeCreateSession).toHaveBeenCalledWith(expect.not.objectContaining({
       replacesSessionId: expect.anything(),
-    }));
+    }), undefined, expect.any(Function));
   });
 
   it('requests rollover only for a valid process-local broker identity', async () => {

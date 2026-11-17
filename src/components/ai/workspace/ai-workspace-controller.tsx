@@ -58,6 +58,9 @@ export function AiWorkspaceController({
   const activeTerminalStatus = useTerminalStore((state) => state.sessions.find(
     (candidate) => candidate.sessionId === activeTerminalId,
   )?.status);
+  const nativeStartupTimedOut = useTerminalStore((state) => state.sessions.find(
+    (candidate) => candidate.sessionId === activeTerminalId,
+  )?.integrationReason === 'nativeStartupTimedOut');
   const terminalReconnecting = useTerminalStore((state) => state.sessions.find(
     candidate => candidate.sessionId === activeTerminalId,
   )?.reconnecting ?? false);
@@ -173,6 +176,8 @@ export function AiWorkspaceController({
             <AgentExecutionSurfaceSelector
               surface={controller.selectedExecutionSurface}
               realTerminalState={realTerminalState}
+              nativeStartupTimedOut={activeTerminalStatus === 'connected' && nativeStartupTimedOut}
+              glibcMismatch={controller.glibcMismatch}
               disabled={executionSurfaceLocked}
               onSurfaceChange={controller.selectExecutionSurface}
             />

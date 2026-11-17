@@ -40,8 +40,12 @@ pub(crate) struct TransferTimeoutGuard<'a> {
 
 impl<'a> TransferTimeoutGuard<'a> {
     pub(crate) fn new(session: &'a Session) -> Self {
+        Self::with_timeout(session, SSH_TRANSFER_IO_TIMEOUT_MS)
+    }
+
+    fn with_timeout(session: &'a Session, timeout_ms: u32) -> Self {
         let previous_timeout_ms = session.timeout();
-        session.set_timeout(SSH_TRANSFER_IO_TIMEOUT_MS);
+        session.set_timeout(timeout_ms);
         Self {
             session,
             previous_timeout_ms,

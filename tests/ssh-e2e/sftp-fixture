@@ -1,4 +1,9 @@
 #!/bin/sh
+startup_delay="$HOME/.shellspan-delay-next-startup-sftp"
+if [ -f "$startup_delay" ]; then
+    rm -f -- "$startup_delay"
+    sleep 17
+fi
 delay="$HOME/.shellspan-delay-next-sftp"
 if [ -f "$delay" ]; then
     rm -f -- "$delay"

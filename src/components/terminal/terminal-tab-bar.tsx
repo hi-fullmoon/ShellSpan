@@ -21,6 +21,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
 import { Link2Icon, PinIcon, XIcon } from 'lucide-react';
 import { useCloseTerminal } from '@/hooks/useCloseTerminal';
+import { cancelSshConnection } from '@/lib/terminal/ssh-connection-attempt';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
@@ -87,6 +88,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
   onTogglePin,
 }) => {
   const { t } = useI18n();
+  const canCancel = Boolean(session.profileId && (session.pendingConnection || session.reconnecting));
   const colorScheme = useAppStore((state) => state.terminalColorScheme);
   const colorOverrides = useAppStore((state) => state.terminalColorOverrides);
   const agentTarget = useFocusStore(state => state.enabled && state.targetSessionId === session.sessionId);
@@ -163,8 +165,8 @@ const SessionTab: React.FC<SessionTabProps> = ({
           <Link2Icon aria-hidden="true" className="size-3" />
         </span>}
       </div>
-      {!session.pendingConnection &&
-        (session.pinned ? (
+      {(!session.pendingConnection || canCancel) &&
+        (session.pinned && !canCancel ? (
           <button
             type="button"
             aria-label="unpin"
@@ -180,8 +182,8 @@ const SessionTab: React.FC<SessionTabProps> = ({
         ) : (
           <button
             type="button"
-            aria-label="close"
-            title={agentTarget ? t('focus.agentTarget') : undefined}
+            aria-label={canCancel ? t('terminal.tab.cancelConnection') : 'close'}
+            title={canCancel ? t('terminal.tab.cancelConnection') : agentTarget ? t('focus.agentTarget') : undefined}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
@@ -189,13 +191,13 @@ const SessionTab: React.FC<SessionTabProps> = ({
             }}
             className={cn(
               'group/close flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
-              agentTarget || (!dragging && active) ? 'visible' : 'invisible group-hover:visible group-focus-within:visible',
+              canCancel || agentTarget || (!dragging && active) ? 'visible' : 'invisible group-hover:visible group-focus-within:visible',
             )}
           >
-            {agentTarget && <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} className="flex size-4 items-center justify-center text-app-success group-hover:hidden group-focus-visible/close:hidden">
+            {agentTarget && !canCancel && <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} className="flex size-4 items-center justify-center text-app-success group-hover:hidden group-focus-visible/close:hidden">
               <Link2Icon aria-hidden="true" className="size-3" />
             </span>}
-            <XIcon aria-hidden="true" className={cn('size-3', agentTarget && 'hidden group-hover:block group-focus-visible/close:block')} strokeWidth={1.5} />
+            <XIcon aria-hidden="true" className={cn('size-3', agentTarget && !canCancel && 'hidden group-hover:block group-focus-visible/close:block')} strokeWidth={1.5} />
           </button>
         ))}
     </div>
@@ -347,12 +349,16 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
       if (requestedId && !sessions.some((session) => session.sessionId === requestedId)) return;
       if (!requestedId && !activeGroup) return;
       const closeId = requestedId ?? activeSessionId;
-      if (sessions.some((session) => session.sessionId === closeId && session.pendingConnection)) return;
+      const pending = sessions.find((session) => session.sessionId === closeId && session.pendingConnection);
+      if (pending) {
+        if (pending.profileId) void closeTerminal(pending.sessionId);
+        return;
+      }
       if (closeId) setClosingSessionId(closeId);
     };
     document.addEventListener('shellspan:close-terminal-tab', handleCloseTabRequest);
     return () => document.removeEventListener('shellspan:close-terminal-tab', handleCloseTabRequest);
-  }, [activeGroup, activeSessionId, sessions]);
+  }, [activeGroup, activeSessionId, closeTerminal, sessions]);
 
   // Auto-scroll the overflowed tab bar while dragging near its edges. Runs on
   // an interval so holding the pointer still at the edge keeps scrolling.
@@ -429,7 +435,15 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   };
 
   const handleCloseSession = (sessionId: string): void => {
-    if (sessions.some((session) => session.sessionId === sessionId && session.pendingConnection)) return;
+    const session = sessions.find((item) => item.sessionId === sessionId);
+    if (session?.pendingConnection) {
+      if (session.profileId) void closeTerminal(sessionId);
+      return;
+    }
+    if (session?.profileId && session.reconnecting) {
+      cancelSshConnection(sessionId);
+      return;
+    }
     setClosingSessionId(sessionId);
   };
 

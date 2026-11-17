@@ -1861,6 +1861,23 @@ impl SessionManager {
         self.close_with_completion(session_id).map(|_| ())
     }
 
+    pub(crate) fn cancel_pending_ssh(&self, session_id: &str) -> Result<bool, String> {
+        let mut guard = self
+            .registry
+            .lock()
+            .map_err(|_| "session registry poisoned".to_string())?;
+        // Readiness commits under this same lock and may already have retired
+        // the predecessor. A completed replacement must reach the caller.
+        if !guard.sessions.get(session_id).is_some_and(|session| {
+            session.terminal_kind == SessionTerminalKind::Remote
+                && session.status.status == SessionStatus::Connecting
+        }) {
+            return Ok(false);
+        }
+        let _ = Self::remove_and_close_session(&mut guard, session_id);
+        Ok(true)
+    }
+
     pub(crate) fn close_with_completion(
         &self,
         session_id: &str,
@@ -1869,9 +1886,14 @@ impl SessionManager {
             .registry
             .lock()
             .map_err(|_| "session registry poisoned".to_string())?;
-        let Some(managed) = guard.sessions.remove(session_id) else {
-            return Ok(None);
-        };
+        Ok(Self::remove_and_close_session(&mut guard, session_id))
+    }
+
+    fn remove_and_close_session(
+        guard: &mut SessionRegistry,
+        session_id: &str,
+    ) -> Option<EventReceiver<()>> {
+        let managed = guard.sessions.remove(session_id)?;
         let completion = guard.worker_shutdowns.remove(session_id);
         guard.native_inflight.remove(session_id);
         // A disconnected command channel means its worker has already exited.
@@ -1881,7 +1903,7 @@ impl SessionManager {
                 waker.wake();
             }
         }
-        Ok(completion)
+        completion
     }
 
     pub(crate) fn status(&self, session_id: &str) -> Result<StatusEvent, String> {
@@ -2154,6 +2176,36 @@ mod session_manager_tests {
             ))
             .unwrap_err()
             .contains("cancelled"));
+    }
+
+    #[test]
+    fn ssh_cancellation_and_readiness_have_a_single_winner() {
+        for committed in [false, true] {
+            let manager = SessionManager::default();
+            let (sender, receiver) = unbounded::<SessionCommand>();
+            let mut session = managed_session(sender);
+            session.terminal_kind = SessionTerminalKind::Remote;
+            let id = session.status.session_id.clone();
+            manager.insert(id.clone(), session).unwrap();
+
+            if committed {
+                manager.commit_connection_ready(&id, || Ok(())).unwrap();
+            }
+            assert_eq!(manager.cancel_pending_ssh(&id).unwrap(), !committed);
+            if committed {
+                assert_eq!(
+                    manager.status(&id).unwrap().status,
+                    SessionStatus::Connected
+                );
+                assert!(receiver.try_recv().is_err());
+            } else {
+                assert!(matches!(
+                    receiver.try_recv().unwrap(),
+                    SessionCommand::Close
+                ));
+                assert!(manager.commit_connection_ready(&id, || Ok(())).is_err());
+            }
+        }
     }
 
     #[test]

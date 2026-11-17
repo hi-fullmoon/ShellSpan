@@ -17,6 +17,7 @@ import type { LocaleKey } from '@/locales';
 import {
   resolveTerminalSurfacePresentation,
   type RealTerminalPresentationState,
+  type RemoteGlibcMismatch,
   type TerminalSurfaceRuntimeFallbackSignal,
 } from '@/lib/terminal/terminal-surface-semantics';
 import type { AgentExecutionSurface } from '@/types/agent-session';
@@ -67,6 +68,8 @@ export interface AgentExecutionSurfaceSelectorProps {
   readonly disabled?: boolean;
   readonly surface: AgentExecutionSurface;
   readonly realTerminalState?: RealTerminalPresentationState;
+  readonly nativeStartupTimedOut?: boolean;
+  readonly glibcMismatch?: RemoteGlibcMismatch | null;
   /** Reserved for a future authoritative runtime routing result. */
   readonly runtimeFallback?: TerminalSurfaceRuntimeFallbackSignal;
   readonly onSurfaceChange?: (surface: AgentExecutionSurface) => void;
@@ -77,6 +80,8 @@ export function AgentExecutionSurfaceSelector({
   disabled = false,
   surface,
   realTerminalState = 'unavailable',
+  nativeStartupTimedOut = false,
+  glibcMismatch,
   runtimeFallback,
   onSurfaceChange,
 }: AgentExecutionSurfaceSelectorProps): React.ReactNode {
@@ -92,10 +97,15 @@ export function AgentExecutionSurfaceSelector({
   const CurrentIcon = current.icon;
   const disabledHint = disabled ? t('agent.executionSurface.switchHint') : undefined;
   const realTerminalCopy = REAL_TERMINAL_STATE_COPY[presentation.realTerminalState];
+  const realTerminalDescription = presentation.realTerminalState !== 'unavailable'
+    ? t(realTerminalCopy.description)
+    : glibcMismatch
+      ? t('agent.executionSurface.v1.remoteGlibcTooOld', { ...glibcMismatch })
+      : t(nativeStartupTimedOut ? 'agent.executionSurface.v1.nativeSshStartupTimedOut' : realTerminalCopy.description);
   const currentStateDescription = presentation.state === 'directFallback'
     ? t(DIRECT_FALLBACK_COPY.description)
     : surface === 'boundTerminal'
-      ? t(realTerminalCopy.description)
+      ? realTerminalDescription
       : t(current.description);
   const accessibleDescription = [currentStateDescription, disabledHint]
     .filter((value): value is string => Boolean(value))
@@ -156,8 +166,9 @@ export function AgentExecutionSurfaceSelector({
                 ? realTerminalCopy
                 : undefined;
               const statusCopy = directFallback ? DIRECT_FALLBACK_COPY : terminalState;
-              const description = terminalState?.description
-                ?? (directFallback ? DIRECT_FALLBACK_COPY.description : option.description);
+              const description = terminalState
+                ? realTerminalDescription
+                : t(directFallback ? DIRECT_FALLBACK_COPY.description : option.description);
               return (
                 <DropdownMenuRadioItem
                   key={option.surface}
@@ -166,7 +177,7 @@ export function AgentExecutionSurfaceSelector({
                   disabled={option.surface === 'boundTerminal'
                     && presentation.realTerminalState !== 'ready'}
                   className="ai-execution-surface-menu-option min-h-12 items-start gap-1 py-2 pr-8 pl-2"
-                  aria-description={t(description)}
+                  aria-description={description}
                 >
                   <Icon className="mt-0.5" strokeWidth={1.6} />
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -183,7 +194,7 @@ export function AgentExecutionSurfaceSelector({
                       )}
                     </span>
                     <span className="text-[11px] leading-4 text-muted-foreground" aria-hidden="true">
-                      {t(description)}
+                      {description}
                     </span>
                   </span>
                 </DropdownMenuRadioItem>

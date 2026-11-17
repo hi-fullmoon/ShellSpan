@@ -498,6 +498,7 @@ pub fn run() {
             petdex::petdex_check_health,
             petdex::petdex_test_connection,
             commands::create_session,
+            commands::cancel_pending_ssh_connection,
             commands::create_local_session,
             commands::get_local_terminal_options,
             commands::write_session,

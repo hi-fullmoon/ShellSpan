@@ -823,9 +823,10 @@
     #[test]
     fn ssh_connect_result_wait_allows_bounded_deadline_cleanup() {
         use crate::connection::terminal_deadline::{
-            PLAIN_SSH_FALLBACK_TIMEOUT, TERMINAL_CONNECT_TIMEOUT,
+            NATIVE_SSH_STARTUP_TIMEOUT, PLAIN_SSH_FALLBACK_TIMEOUT, TERMINAL_CONNECT_TIMEOUT,
         };
-        let max_connection_budget = TERMINAL_CONNECT_TIMEOUT + PLAIN_SSH_FALLBACK_TIMEOUT;
+        let max_connection_budget =
+            TERMINAL_CONNECT_TIMEOUT + NATIVE_SSH_STARTUP_TIMEOUT + PLAIN_SSH_FALLBACK_TIMEOUT;
         assert!(
             SSH_CONNECT_RESULT_WAIT > max_connection_budget
                 && SSH_CONNECT_RESULT_WAIT <= max_connection_budget + Duration::from_secs(1),

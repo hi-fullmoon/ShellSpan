@@ -3,6 +3,7 @@ import { invokeCloseSession } from '@/lib/ipc/tauri';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useI18n } from './useI18n';
 import { useToast } from './useToast';
+import { cancelSshConnection } from '@/lib/terminal/ssh-connection-attempt';
 
 const pendingCloses = new Map<string, Promise<void>>();
 
@@ -13,6 +14,11 @@ export function useCloseTerminal(): (sessionId: string) => Promise<void> {
     const pending = pendingCloses.get(sessionId);
     if (pending) return pending;
     const session = useTerminalStore.getState().sessions.find(item => item.sessionId === sessionId);
+    cancelSshConnection(sessionId);
+    if (session?.pendingConnection && session.profileId) {
+      useTerminalStore.getState().endConnectionAttempt(sessionId);
+      return Promise.resolve();
+    }
     const close = (async () => {
       try {
         await invokeCloseSession(sessionId);

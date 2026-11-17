@@ -10,7 +10,12 @@ const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const server = await createServer({ root, configFile: false, appType: 'custom', logLevel: 'error',
   cacheDir: `/tmp/shellspan-composer-alignment-${process.pid}`,
   plugins: [react(), tailwindcss()], resolve: { alias: { '@': `${root}src/` } },
-  server: { host: '127.0.0.1', port: 0 } });
+  optimizeDeps: { entries: [
+    'src/components/ai/agent-execution-surface-selector.tsx',
+    'src/components/ai/agent-permission-selector.tsx',
+    'src/components/ai/workspace/ai-composer-seat.tsx',
+  ], include: ['react', 'react-dom/client', 'react/jsx-runtime'] },
+  server: { host: '127.0.0.1', port: 0, hmr: false, watch: null } });
 server.middlewares.use(async (request, response, next) => {
   if (request.url !== '/') return next();
   response.setHeader('Content-Type', 'text/html');
@@ -55,22 +60,25 @@ try {
         const permissionControl = () => h(AgentPermissionSelector, {
           sessionId: 'alignment-session', mode: 'fullAccess', variant: 'composer',
         });
-        const executionSurfaceControl = () => h(AgentExecutionSurfaceSelector, {
-          surface: 'boundTerminal', realTerminalState: 'ready',
+        const executionSurfaceControl = (fallback) => h(AgentExecutionSurfaceSelector, {
+          surface: fallback ? 'direct' : 'boundTerminal',
+          realTerminalState: fallback ? 'unavailable' : 'ready',
+          nativeStartupTimedOut: fallback === 'timeout',
+          glibcMismatch: fallback === 'glibc' ? { actual: '2.27', minimum: '2.28' } : null,
         });
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        const render = (status = 'idle') => root.render(
+        const render = (status = 'idle', fallback = null) => root.render(
           h('main', {
             className: 'ai-panel-shell @container/ai-workspace flex flex-col gap-4 p-4',
             'data-ai-scope': 'terminal',
           },
           h('div', { className: 'flex items-center gap-1', 'data-testid': 'alignment-row' },
             permissionControl(),
-            executionSurfaceControl(),
+            executionSurfaceControl(fallback),
           ),
           h(AiComposerSeat, {
             phase: 'active', status, modelLabel: 'MiniMax-M3 · Default',
-            permissionControl: permissionControl(), executionSurfaceControl: executionSurfaceControl(),
+            permissionControl: permissionControl(), executionSurfaceControl: executionSurfaceControl(fallback),
           })),
         );
         window.setComposerStatus = render;
@@ -197,6 +205,36 @@ try {
         if (width === 664) await page.screenshot({ path: `/tmp/shellspan-composer-priority-${engine.name()}-${locale}.png` });
       }
       assert.ok(preservedSurface, 'Execution text must remain visible after queue text collapses');
+
+      const visibleCommandLabel = locale === 'zh-CN' ? '可视命令' : 'Visible command';
+      const directLabel = locale === 'zh-CN' ? '直接执行' : 'Direct';
+      const timeoutCopy = locale === 'zh-CN'
+        ? '终端集成初始化超时，已使用普通 SSH。请改用直接执行。'
+        : 'Terminal integration timed out. Connected via standard SSH. Choose Direct instead.';
+      const glibcCopy = locale === 'zh-CN'
+        ? '远端 glibc 为 2.27，可视命令要求 glibc 2.28 或更新版本。请在终端 Agent 中使用直接执行。'
+        : 'Remote glibc is 2.27. Visible command requires glibc 2.28 or later. Use Direct in the terminal Agent.';
+      for (const [width, reason, copy] of [
+        [320, 'timeout', timeoutCopy], [760, 'timeout', timeoutCopy],
+        [320, 'glibc', glibcCopy], [760, 'glibc', glibcCopy],
+      ]) {
+        await page.evaluate(reason => window.setComposerStatus('idle', reason), reason);
+        await page.setViewportSize({ width, height: 400 });
+        const trigger = composer.locator('[data-execution-surface="direct"]');
+        await trigger.focus();
+        await page.keyboard.press('Enter');
+        const menu = page.getByRole('menu');
+        const visibleCommand = menu.getByRole('menuitemradio', { name: visibleCommandLabel });
+        await visibleCommand.waitFor();
+        assert.equal(await visibleCommand.getAttribute('aria-disabled'), 'true');
+        assert.equal(await visibleCommand.getAttribute('aria-description'), copy);
+        assert.ok((await visibleCommand.innerText()).includes(copy));
+        const direct = menu.getByRole('menuitemradio', { name: directLabel });
+        assert.equal(await direct.getAttribute('aria-checked'), 'true');
+        assert.equal(await visibleCommand.evaluate(element => element.scrollWidth <= element.clientWidth), true);
+        await page.keyboard.press('Escape');
+        await menu.waitFor({ state: 'hidden' });
+      }
     } finally {
       await browser.close();
     }

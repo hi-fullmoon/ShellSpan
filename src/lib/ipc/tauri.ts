@@ -213,11 +213,13 @@ export function parseRemoteFsError(error: unknown): RemoteFsError | null {
 export async function invokeCreateSession(
   request: SessionCreateRequest,
   nativeInputProtocol: 'shellspan.native-input' | null = 'shellspan.native-input',
+  onStarted?: (sessionId: string) => void,
 ): Promise<SessionSummary> {
   const wireRequest={...request};
   if(nativeInputProtocol) wireRequest.nativeInputProtocol=nativeInputProtocol;
   else delete wireRequest.nativeInputProtocol;
-  return invokeLogged<SessionSummary>('create_session', { request: wireRequest }).catch((error) => {
+  const connectionStarted = onStarted ? new Channel<string>(onStarted) : undefined;
+  return invokeLogged<SessionSummary>('create_session', { request: wireRequest, ...(connectionStarted ? { connectionStarted } : {}) }).catch((error) => {
     throw error as CreateSessionError;
   });
 }
@@ -462,6 +464,10 @@ export function invokeResizeSession(
   rows: number,
 ): Promise<void> {
   return invokeTerminalHotPath('resize_session', { sessionId, cols, rows });
+}
+
+export function invokeCancelPendingSshConnection(sessionId: string): Promise<boolean> {
+  return invokeLogged<boolean>('cancel_pending_ssh_connection', { sessionId });
 }
 
 export async function invokeCloseSession(sessionId: string): Promise<void> {

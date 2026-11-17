@@ -232,7 +232,7 @@ describe('useConnectSession', () => {
 
     expect(invokeCreateSession).toHaveBeenCalledWith(expect.objectContaining({
       initialDirectory: "/srv/Release Candidate/O'Brien",
-    }));
+    }), undefined, expect.any(Function));
     expect(invokeWriteSession).not.toHaveBeenCalled();
     expect(useTerminalStore.getState().sessions).toHaveLength(1);
   });
@@ -568,7 +568,7 @@ describe('useConnectSession', () => {
     expect(invokeRetrieveProfilePassword).toHaveBeenCalledWith('p1');
     expect(invokeCreateSession).toHaveBeenCalledWith(expect.objectContaining({
       password: 'saved-secret',
-    }));
+    }), undefined, expect.any(Function));
     expect(invokeStoreProfilePassword).not.toHaveBeenCalled();
     expect(useTerminalStore.getState().sessions).toHaveLength(1);
   });

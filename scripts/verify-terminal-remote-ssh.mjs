@@ -91,6 +91,7 @@ try {
   cargoTest('session::tests::ordinary_ssh_unsupported_shell_is_unavailable_without_a_second_transport', ['--ignored', '--exact']);
   cargoTest('session::tests::ordinary_ssh_without_sftp_falls_back_to_a_usable_shell', ['--ignored', '--exact']);
   cargoTest('session::tests::stalled_native_startup_reconnects_to_a_usable_plain_ssh_pty', ['--ignored', '--exact']);
+  cargoTest('session::tests::slow_startup_sftp_uses_the_native_budget_and_can_be_cancelled', ['--ignored', '--exact']);
   cargoTest(
     'session::tests::remote_integration_scope_cleans_resources_after_post_prepare_failure',
     ['--ignored', '--exact'],

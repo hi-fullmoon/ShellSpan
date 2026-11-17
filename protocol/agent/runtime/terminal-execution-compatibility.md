@@ -122,6 +122,18 @@ ordinary SSH connection startup; failure starts a normal usable shell and marks
 visible commands unavailable. No alternate terminal is created and no implicit
 Direct fallback is permitted.
 
+The client has 30 seconds to connect and authenticate, followed by up to 60
+seconds for native SSH startup. SFTP preparation uses the remaining native
+budget. If native startup expires, the client retires the transport and allows
+up to 10 seconds for one ordinary SSH attempt. A successful retry reports
+`nativeStartupTimedOut` for terminal integration. If the native probe declined
+before a plain shell attempt timed out, the retry preserves the original native
+reason. The terminal UI receives the transport ID before the network attempt.
+Cancellation and readiness share the session registry lock. Cancellation can
+close a pending transport, and a replacement that already committed readiness
+is published to the UI. Cancellation and authentication timeout do not trigger
+a retry.
+
 Readiness requires `integrationState = ready`, `promptReady = true`, no active
 command, the current generation, and user lease ownership before Agent
 acquisition. The frontend turn guard protects the same source terminal from

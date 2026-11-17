@@ -2352,7 +2352,8 @@
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
     fn stalled_native_startup_reconnects_to_a_usable_plain_ssh_pty() {
         use crate::connection::terminal_deadline::{
-            complete, mark_native_startup_started, run_with_plain_ssh_fallback, TerminalStartupMode,
+            complete, mark_native_startup_started, run_with_plain_ssh_fallback,
+            PlainSshRetryReason, TerminalStartupMode,
         };
 
         let connection = crate::execution::fixture::isolated_ssh_connection();
@@ -2363,7 +2364,7 @@
             Instant::now() + Duration::from_secs(2),
             || false,
             |mode| -> Result<String, String> {
-                attempts.push(mode);
+                attempts.push(mode.clone());
                 let session = crate::connection::open_authenticated_session(
                     crate::connection::connect_tcp_stream(&connection.host, connection.port)?,
                     &connection.username,
@@ -2380,8 +2381,8 @@
                     .channel_session()
                     .map_err(|error| error.to_string())?;
                 if mode == TerminalStartupMode::Initial {
-                    mark_native_startup_started()?;
-                    // Hold an actual SSH channel read beyond the initial deadline.
+                    mark_native_startup_started(Duration::from_secs(2))?;
+                    // Hold an actual SSH channel read beyond the native deadline.
                     pty.exec("exec sleep 10")
                         .map_err(|error| error.to_string())?;
                     pty.read(&mut [0]).map_err(|error| error.to_string())?;
@@ -2403,11 +2404,94 @@
             attempts,
             [
                 TerminalStartupMode::Initial,
-                TerminalStartupMode::PlainAfterNativeTimeout
+                TerminalStartupMode::PlainRetry(PlainSshRetryReason::NativeTimeout)
             ]
         );
         assert_eq!(deadline_failure, None);
         assert!(output.unwrap().contains("plain-fallback-ready"));
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn slow_startup_sftp_uses_the_native_budget_and_can_be_cancelled() {
+        use crate::connection::terminal_deadline::{
+            complete, mark_native_startup_started, native_preparation_timeout,
+            run_with_plain_ssh_fallback, TerminalStartupMode,
+        };
+
+        let connection = crate::execution::fixture::isolated_ssh_connection();
+        let (_known_hosts, known_hosts_path) =
+            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
+        let open = || {
+            crate::connection::open_authenticated_session(
+                crate::connection::connect_tcp_stream(&connection.host, connection.port)?,
+                &connection.username,
+                connection.auth_method,
+                connection.password.as_deref(),
+                None,
+                None,
+                &connection.host,
+                connection.port,
+                Some(&known_hosts_path),
+            )
+            .map_err(|error| error.message())
+        };
+        let control = open().unwrap();
+        for cancel_during_sftp in [false, true] {
+            run_ssh_setup_command(
+                &control,
+                r#"touch "$HOME/.shellspan-delay-next-startup-sftp""#,
+            )
+            .unwrap();
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let watched = Arc::clone(&cancelled);
+            let mut cancel_worker = None;
+            let mut seen_modes = Vec::new();
+            let start = Instant::now();
+            let (result, failure) = run_with_plain_ssh_fallback(
+                Instant::now() + Duration::from_secs(5),
+                move || watched.load(AtomicOrdering::SeqCst),
+                |mode| {
+                    seen_modes.push(mode);
+                    let session = open()?;
+                    let original_timeout = session.timeout();
+                    assert_eq!(original_timeout, 15_000);
+                    mark_native_startup_started(Duration::from_secs(25))?;
+                    let sftp_started = Instant::now();
+                    let identity = {
+                        let _transfer = native_preparation_timeout(&session)?;
+                        if cancel_during_sftp {
+                            let flag = Arc::clone(&cancelled);
+                            cancel_worker = Some(thread::spawn(move || {
+                                thread::sleep(Duration::from_secs(1));
+                                flag.store(true, AtomicOrdering::SeqCst);
+                            }));
+                        }
+                        detect_remote_login_shell_identity(&session, &connection.username)
+                    };
+                    assert_eq!(session.timeout(), original_timeout);
+                    let identity = identity?;
+                    assert_eq!(identity.shell, TerminalShellKind::Bash);
+                    assert!(sftp_started.elapsed() >= Duration::from_secs(16));
+                    complete()
+                },
+            );
+            assert_eq!(seen_modes, [TerminalStartupMode::Initial]);
+            if cancel_during_sftp {
+                cancel_worker.unwrap().join().unwrap();
+                assert!(result.is_err());
+                assert_eq!(failure.as_deref(), Some("SSH connection cancelled"));
+                assert!(start.elapsed() < Duration::from_secs(8));
+                run_ssh_setup_command(
+                    &control,
+                    r#"test ! -e "$HOME/.shellspan-delay-next-startup-sftp""#,
+                )
+                .expect("the remote SFTP subsystem must have entered its wait");
+            } else {
+                assert_eq!(result, Ok(()));
+                assert_eq!(failure, None);
+            }
+        }
     }
 
     #[test]

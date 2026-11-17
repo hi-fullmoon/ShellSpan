@@ -46,8 +46,9 @@ const LOCAL_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES: usize = 1_000_000;
 const LOCAL_READER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 #[cfg(windows)]
 const LOCAL_SHELL_ENVIRONMENT_VARIABLE: &str = "SHELLSPAN_LOCAL_SHELL";
-/// Wait for the initial attempt, its optional plain SSH retry, and cleanup.
+/// Wait for authentication, optional native startup, plain SSH retry, and cleanup.
 pub(crate) const SSH_CONNECT_RESULT_WAIT: Duration = terminal_deadline::TERMINAL_CONNECT_TIMEOUT
+    .saturating_add(terminal_deadline::NATIVE_SSH_STARTUP_TIMEOUT)
     .saturating_add(terminal_deadline::PLAIN_SSH_FALLBACK_TIMEOUT)
     .saturating_add(Duration::from_secs(1));
 
@@ -464,10 +465,12 @@ pub(crate) struct KeyCredentialResponse {
 #[tauri::command]
 pub(crate) async fn create_session(
     app: AppHandle,
+    webview: tauri::Webview,
     state: State<'_, SessionManager>,
     pool: State<'_, SftpPool>,
     credentials: State<'_, crate::keychain::CredentialManager>,
     request: SessionCreateRequest,
+    connection_started: Option<tauri::ipc::JavaScriptChannelId>,
 ) -> Result<SessionSummary, CreateSessionError> {
     create_remote_terminal_session(
         app,
@@ -475,6 +478,7 @@ pub(crate) async fn create_session(
         pool.inner(),
         credentials.inner(),
         request,
+        connection_started.map(|id| id.channel_on(webview)),
     )
     .await
 }
@@ -485,6 +489,7 @@ async fn create_remote_terminal_session(
     pool: &SftpPool,
     credentials: &crate::keychain::CredentialManager,
     mut request: SessionCreateRequest,
+    connection_started: Option<tauri::ipc::Channel<String>>,
 ) -> Result<SessionSummary, CreateSessionError> {
     validate_connection_fields(&request.host, &request.username).map_err(|message| {
         error!("SSH session validation failed: {message}");
@@ -570,6 +575,17 @@ async fn create_remote_terminal_session(
             error!("Failed to register SSH session session_id={session_id}: {message}");
             CreateSessionError::Other { message }
         })?;
+
+    // Give the caller the registered transport ID before network startup so
+    // closing it cancels the same worker even while libssh2 is blocked.
+    if let Some(started) = connection_started {
+        if let Err(error) = started.send(session_id.clone()) {
+            let _ = state.close(&session_id);
+            return Err(CreateSessionError::Other {
+                message: format!("failed to publish SSH connection handle: {error}"),
+            });
+        }
+    }
 
     info!(
         "Created SSH session session_id={} title={} host={} port={} username={}",
@@ -2185,6 +2201,18 @@ pub(crate) async fn control_terminal_acceptance_input_lease(
         let _ = (agent_runtime, agent_session_id, release);
         Err("TERMINAL_ACCEPTANCE_DISABLED".into())
     }
+}
+
+#[tauri::command]
+pub(crate) fn cancel_pending_ssh_connection(
+    state: State<'_, SessionManager>,
+    session_id: String,
+) -> Result<bool, String> {
+    let cancelled = state.cancel_pending_ssh(&session_id)?;
+    if cancelled {
+        info!("Cancelled pending SSH connection session_id={session_id}");
+    }
+    Ok(cancelled)
 }
 
 #[tauri::command]
@@ -4337,10 +4365,22 @@ pub(crate) fn spawn_ssh_thread(
         );
         let (run_result, connection_failure) = terminal_deadline::run_with_plain_ssh_fallback(
             connection_deadline,
-            cancelled,
+            cancelled.clone(),
             |startup_mode| {
-                if startup_mode == TerminalStartupMode::PlainAfterNativeTimeout {
-                    warn!("Native SSH startup timed out; retrying ordinary SSH session_id={session_id}");
+                if cancelled() {
+                    return Err(ConnectionError::Other {
+                        message: "SSH connection cancelled".into(),
+                    });
+                }
+                if let TerminalStartupMode::PlainRetry(reason) = &startup_mode {
+                    match reason {
+                        terminal_deadline::PlainSshRetryReason::NativeTimeout => {
+                            warn!("Native SSH startup timed out; retrying ordinary SSH session_id={session_id}");
+                        }
+                        terminal_deadline::PlainSshRetryReason::NativeUnavailable(_) => {
+                            warn!("Ordinary SSH startup timed out after native setup was declined; retrying ordinary SSH session_id={session_id}");
+                        }
+                    }
                 }
                 run_ssh_session(
                     &app,

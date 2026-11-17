@@ -3,19 +3,41 @@ use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 pub(crate) const TERMINAL_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const NATIVE_SSH_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 pub(crate) const PLAIN_SSH_FALLBACK_TIMEOUT: Duration = Duration::from_secs(10);
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum TerminalStartupMode {
     Initial,
-    PlainAfterNativeTimeout,
+    PlainRetry(PlainSshRetryReason),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum PlainSshRetryReason {
+    NativeTimeout,
+    NativeUnavailable(String),
+}
+
+enum StartupPhase {
+    Connecting,
+    Native(Instant),
+    StartingPlain { deadline: Instant, reason: String },
+}
+
+impl StartupPhase {
+    fn deadline(&self, connection_deadline: Instant) -> Instant {
+        match self {
+            Self::Connecting => connection_deadline,
+            Self::Native(deadline) | Self::StartingPlain { deadline, .. } => *deadline,
+        }
+    }
 }
 
 struct Attempt {
-    deadline: Instant,
+    connection_deadline: Instant,
+    phase: Mutex<StartupPhase>,
     cancellation: CancellationToken,
     ready: AtomicBool,
-    native_startup_started: AtomicBool,
     finished: AtomicBool,
     closed: AtomicBool,
     sockets: Mutex<Vec<TcpStream>>,
@@ -23,8 +45,15 @@ struct Attempt {
 }
 
 impl Attempt {
+    fn deadline(&self) -> Instant {
+        self.phase
+            .lock()
+            .expect("SSH startup deadline")
+            .deadline(self.connection_deadline)
+    }
+
     fn check(&self) -> Result<(), String> {
-        if Instant::now() >= self.deadline {
+        if Instant::now() >= self.deadline() {
             return Err("SSH connection timed out".into());
         }
         if self.cancellation.is_cancelled() {
@@ -57,10 +86,10 @@ pub(crate) struct TerminalConnectionGuard {
 impl TerminalConnectionGuard {
     pub(crate) fn new(deadline: Instant, cancelled: impl Fn() -> bool + Send + 'static) -> Self {
         let attempt = Arc::new(Attempt {
-            deadline,
+            connection_deadline: deadline,
+            phase: Mutex::new(StartupPhase::Connecting),
             cancellation: CancellationToken::new(),
             ready: AtomicBool::new(false),
-            native_startup_started: AtomicBool::new(false),
             finished: AtomicBool::new(false),
             closed: AtomicBool::new(false),
             sockets: Mutex::new(Vec::new()),
@@ -76,8 +105,17 @@ impl TerminalConnectionGuard {
         let watched = attempt.clone();
         let watcher = thread::spawn(move || {
             while !watched.finished.load(AtomicOrdering::SeqCst) {
-                if cancelled() || Instant::now() >= watched.deadline {
-                    watched.cancellation.cancel();
+                let user_cancelled = cancelled();
+                let expired = {
+                    // Commit cancellation under the same lock used to change phases.
+                    let phase = watched.phase.lock().expect("SSH startup deadline");
+                    let expired = Instant::now() >= phase.deadline(watched.connection_deadline);
+                    if user_cancelled || expired {
+                        watched.cancellation.cancel();
+                    }
+                    expired
+                };
+                if user_cancelled || expired {
                     watched.interrupt();
                     break;
                 }
@@ -123,20 +161,30 @@ pub(crate) fn run_with_plain_ssh_fallback<T, E>(
         let guard = TerminalConnectionGuard::new(deadline, cancelled.clone());
         let result = run(TerminalStartupMode::Initial);
         let failure = failure_reason();
-        let retry = result.is_err()
-            && guard
-                .attempt
-                .native_startup_started
-                .load(AtomicOrdering::SeqCst)
-            && !guard.attempt.ready.load(AtomicOrdering::SeqCst)
-            && Instant::now() >= deadline;
+        let retry = if result.is_err() && !guard.attempt.ready.load(AtomicOrdering::SeqCst) {
+            let phase = guard.attempt.phase.lock().expect("SSH startup deadline");
+            let expired = Instant::now() >= phase.deadline(deadline);
+            match &*phase {
+                StartupPhase::Native(deadline) if expired => {
+                    Some((*deadline, PlainSshRetryReason::NativeTimeout))
+                }
+                StartupPhase::StartingPlain { deadline, reason } if expired => Some((
+                    *deadline,
+                    PlainSshRetryReason::NativeUnavailable(reason.clone()),
+                )),
+                _ => None,
+            }
+        } else {
+            None
+        };
         (result, failure, retry)
     };
-    if !retry || cancelled() {
+    let Some((retry_deadline, reason)) = retry.filter(|_| !cancelled()) else {
         return (result, failure);
-    }
-    let _fallback = TerminalConnectionGuard::new(deadline + PLAIN_SSH_FALLBACK_TIMEOUT, cancelled);
-    let result = run(TerminalStartupMode::PlainAfterNativeTimeout);
+    };
+    let _fallback =
+        TerminalConnectionGuard::new(retry_deadline + PLAIN_SSH_FALLBACK_TIMEOUT, cancelled);
+    let result = run(TerminalStartupMode::PlainRetry(reason));
     (result, failure_reason())
 }
 
@@ -173,27 +221,58 @@ pub(crate) fn failure_reason() -> Option<String> {
 }
 
 /// Only optional native work on an authenticated transport enables a retry.
-pub(crate) fn mark_native_startup_started() -> Result<(), String> {
+pub(crate) fn mark_native_startup_started(budget: Duration) -> Result<(), String> {
     if let Some(attempt) = active() {
-        attempt.check()?;
-        attempt
-            .native_startup_started
-            .store(true, AtomicOrdering::SeqCst);
+        let mut phase = attempt.phase.lock().expect("SSH startup deadline");
+        let now = Instant::now();
+        if now >= attempt.connection_deadline {
+            return Err("SSH connection timed out".into());
+        }
+        if attempt.cancellation.is_cancelled() {
+            return Err("SSH connection cancelled".into());
+        }
+        *phase = StartupPhase::Native(now + budget);
     }
     Ok(())
 }
 
-pub(crate) fn finish_native_probe_without_startup() {
+pub(crate) fn finish_native_probe_without_startup(reason: &str) {
     if let Some(attempt) = active() {
-        // A quick rejection leaves ordinary SSH its budget on this transport.
-        // Keep the reserved retry if optional work already used most of it.
-        if attempt.deadline.saturating_duration_since(Instant::now()) >= PLAIN_SSH_FALLBACK_TIMEOUT
-        {
-            attempt
-                .native_startup_started
-                .store(false, AtomicOrdering::SeqCst);
+        let mut phase = attempt.phase.lock().expect("SSH startup deadline");
+        let now = Instant::now();
+        if let StartupPhase::Native(deadline) = *phase {
+            if now >= deadline {
+                return;
+            }
+            // A quick rejection can use the original connection budget. If
+            // that budget is nearly spent, give this transport a short chance
+            // to open a plain shell before retiring it.
+            let plain_deadline = now + PLAIN_SSH_FALLBACK_TIMEOUT;
+            *phase = if attempt.connection_deadline >= plain_deadline {
+                StartupPhase::Connecting
+            } else {
+                StartupPhase::StartingPlain {
+                    deadline: deadline.min(plain_deadline),
+                    reason: reason.to_owned(),
+                }
+            };
         }
     }
+}
+
+pub(crate) fn native_preparation_timeout(
+    session: &Session,
+) -> Result<Option<TransferTimeoutGuard<'_>>, String> {
+    let Some(attempt) = active() else {
+        return Ok(None);
+    };
+    attempt.check()?;
+    let remaining = attempt.deadline().saturating_duration_since(Instant::now());
+    // Millisecond rounding must never select zero (libssh2's unlimited timeout).
+    let timeout_ms = (remaining.as_nanos().div_ceil(1_000_000)).clamp(1, u32::MAX as u128) as u32;
+    Ok(Some(TransferTimeoutGuard::with_timeout(
+        session, timeout_ms,
+    )))
 }
 
 pub(super) fn handshake(session: &mut Session) -> Result<(), String> {
@@ -221,7 +300,7 @@ pub(super) fn handshake(session: &mut Session) -> Result<(), String> {
     };
     let operation_deadline = attempt
         .as_ref()
-        .map(|value| value.deadline)
+        .map(|value| value.deadline())
         .into_iter()
         .chain(scoped.as_ref().map(|value| value.deadline))
         .min()
@@ -286,7 +365,7 @@ pub(super) fn resolve(address: &str) -> Option<Result<Vec<SocketAddr>, String>> 
         tokio::select! {
             biased;
             _ = attempt.cancellation.cancelled() => Err("SSH connection cancelled or timed out".into()),
-            result = tokio::time::timeout_at(tokio::time::Instant::from_std(attempt.deadline), tokio::net::lookup_host(address)) => {
+            result = tokio::time::timeout_at(tokio::time::Instant::from_std(attempt.deadline()), tokio::net::lookup_host(address)) => {
                 result.map_err(|_| "SSH DNS lookup timed out".to_string())?
                     .map(|addresses| addresses.take(32).collect()).map_err(|error| error.to_string())
             }
@@ -296,7 +375,7 @@ pub(super) fn resolve(address: &str) -> Option<Result<Vec<SocketAddr>, String>> 
 
 pub(super) fn connect(address: &SocketAddr) -> Option<Result<TcpStream, String>> {
     active().map(|attempt| {
-        let deadline = (Instant::now() + TCP_CONNECT_ATTEMPT_TIMEOUT).min(attempt.deadline);
+        let deadline = (Instant::now() + TCP_CONNECT_ATTEMPT_TIMEOUT).min(attempt.deadline());
         attempt.check()?;
         let stream = tauri::async_runtime::block_on(async {
             tokio::select! {
@@ -327,6 +406,76 @@ mod tests {
     }
 
     #[test]
+    fn authenticated_native_startup_preserves_the_socket_past_the_connection_deadline() {
+        let (mut client, mut peer) = socket_pair();
+        client
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let original_deadline = Instant::now() + Duration::from_millis(200);
+        let server = thread::spawn(move || {
+            thread::sleep(
+                original_deadline.saturating_duration_since(Instant::now())
+                    + Duration::from_millis(40),
+            );
+            peer.write_all(b"ready")
+        });
+        let (result, failure) = run_with_plain_ssh_fallback(
+            original_deadline,
+            || false,
+            |mode| {
+                assert_eq!(mode, TerminalStartupMode::Initial);
+                register(&client)?;
+                mark_native_startup_started(Duration::from_secs(3))?;
+                let mut ready = [0; 5];
+                client
+                    .read_exact(&mut ready)
+                    .map_err(|error| error.to_string())?;
+                assert_eq!(&ready, b"ready");
+                complete()
+            },
+        );
+        result.unwrap();
+        assert_eq!(failure, None);
+        server.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn plain_retry_after_native_rejection_preserves_the_original_reason() {
+        let (mut client, _peer) = socket_pair();
+        client
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let reason = "remoteGlibcTooOld:2.27:2.28";
+        let mut attempts = Vec::new();
+        let (result, failure) = run_with_plain_ssh_fallback(
+            Instant::now() + Duration::from_secs(1),
+            || false,
+            |mode| {
+                attempts.push(mode.clone());
+                if mode == TerminalStartupMode::Initial {
+                    register(&client)?;
+                    mark_native_startup_started(Duration::from_millis(150))?;
+                    finish_native_probe_without_startup(reason);
+                    assert_eq!(client.read(&mut [0]).unwrap(), 0);
+                    return Err("plain startup interrupted".into());
+                }
+                complete()
+            },
+        );
+        assert_eq!(result, Ok(()));
+        assert_eq!(failure, None);
+        assert_eq!(
+            attempts,
+            [
+                TerminalStartupMode::Initial,
+                TerminalStartupMode::PlainRetry(PlainSshRetryReason::NativeUnavailable(
+                    reason.into()
+                )),
+            ]
+        );
+    }
+
+    #[test]
     fn plain_fallback_does_not_retry_early_timeouts_or_user_cancellation() {
         for cancel_during_native in [false, true] {
             let (mut client, mut peer) = socket_pair();
@@ -353,7 +502,7 @@ mod tests {
                     assert_eq!(mode, TerminalStartupMode::Initial);
                     register(&client).unwrap();
                     if cancel_during_native {
-                        mark_native_startup_started().unwrap();
+                        mark_native_startup_started(Duration::from_secs(3)).unwrap();
                     }
                     client.write_all(b"x").unwrap();
                     let _ = client.read(&mut [0]);

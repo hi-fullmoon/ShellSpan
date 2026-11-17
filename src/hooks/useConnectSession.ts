@@ -6,7 +6,6 @@ import type { ConnectionProfile, LocalTerminalProfile } from '@/types';
 import {
   buildSessionCreateRequest,
   invokeCreateLocalSession,
-  invokeCreateSession,
 } from '@/lib/ipc/tauri';
 import { useToastStore } from '@/stores/toastStore';
 import { createLogger } from '@/lib/logger';
@@ -22,6 +21,7 @@ import { useProfileStore } from '@/stores/profileStore';
 import { usePortForwardStore } from '@/stores/portForwardStore';
 import { t } from '@/locales';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
+import { beginSshConnection } from '@/lib/terminal/ssh-connection-attempt';
 
 export interface ConnectSessionOptions {
   insertAfterId?: string;
@@ -85,6 +85,7 @@ export function useConnectSession(): {
     const originalSessionId = useTerminalStore.getState().activeSessionId;
     let connectionAttemptId = options?.connectionAttemptId;
     let cancelled = false;
+    let attempt: ReturnType<typeof beginSshConnection> | undefined;
     logger.info(`Connecting to ${profile.host}:${profile.port} as ${profile.username}`);
 
     try {
@@ -92,6 +93,7 @@ export function useConnectSession(): {
       let keyPromptShown = false;
 
       while (true) {
+        if (attempt?.signal.aborted) return;
         const profileWithSavedSecrets = await useProfileStore
           .getState()
           .ensurePassword(currentProfile);
@@ -110,6 +112,7 @@ export function useConnectSession(): {
         }
 
         const preparedProfile = ensuredProfile;
+        if (attempt?.signal.aborted) return;
         connectionAttemptId = beginConnectionAttempt({
           title: profile.name || profile.host,
           host: profile.host,
@@ -120,15 +123,17 @@ export function useConnectSession(): {
           pinned: options?.pinned,
           color: options?.color,
         }, connectionAttemptId);
+        attempt ??= beginSshConnection(connectionAttemptId);
         setActiveSection('terminal');
 
         try {
-          const summary = await invokeCreateSession(
+          const summary = await attempt.connect(
             {
               ...buildSessionCreateRequest(preparedProfile, 120, 30),
               initialDirectory: options?.initialDirectory,
             },
           );
+          if (!summary) return;
           resolveConnectionAttempt(connectionAttemptId, summary, profile.id);
           await persistPromptedPassword(profileWithSavedSecrets, preparedProfile);
           void usePortForwardStore
@@ -174,6 +179,7 @@ export function useConnectSession(): {
         }
       }
     } finally {
+      attempt?.finish();
       if (connectionAttemptId) {
         const terminal = useTerminalStore.getState();
         // Only restore navigation while this attempt still owns the selection.
