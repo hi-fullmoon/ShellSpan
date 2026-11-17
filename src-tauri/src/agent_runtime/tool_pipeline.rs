@@ -601,6 +601,21 @@ pub(crate) enum AgentToolDecision {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AgentToolDecisionSettlement {
+    Resolved,
+    Expired,
+}
+
+impl AgentToolDecisionSettlement {
+    pub(crate) fn acknowledge(self) -> Result<(), String> {
+        match self {
+            Self::Resolved => Ok(()),
+            Self::Expired => Err("Approval expired".into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ToolPipelineSettlement {
     Completed,
     Waiting,
@@ -1049,7 +1064,7 @@ impl AgentToolPipeline {
                     self.finish_native(&request, &preparation, result)?;
                     committed += 1;
                 }
-                let cancelled = entry.cancellation().is_cancelled();
+                let cancelled = !entry.is_admitting() || entry.cancellation().is_cancelled();
                 if !cancelled
                     && !budget_exhausted
                     && !draining_barrier
@@ -1131,7 +1146,7 @@ impl AgentToolPipeline {
                                 call.clone(),
                             )?;
                         } else {
-                            self.process_orchestration_call(
+                            if !self.process_orchestration_call(
                                 entry,
                                 turn_id,
                                 step_id,
@@ -1139,7 +1154,7 @@ impl AgentToolPipeline {
                                 target.clone(),
                                 call.clone(),
                             )
-                            .await?;
+                            .await? { continue; }
                         }
                         next += 1;
                         committed += 1;
@@ -1197,7 +1212,7 @@ impl AgentToolPipeline {
                             .unwrap_or(AgentSessionEffect::Unknown),
                         &request.target.target_id,
                     )?;
-                    if entry.cancellation().is_cancelled() {
+                    if !entry.is_admitting() || entry.cancellation().is_cancelled() {
                         continue;
                     }
                     if entry.subagent.is_some() {
@@ -1241,19 +1256,22 @@ impl AgentToolPipeline {
                         continue;
                     }
                     if preparation.requires_approval {
-                        let settlement = self
-                            .process_prepared(
+                        let settlement = entry.with_input_admission(|| {
+                            self.process_prepared(
                                 entry,
                                 request,
                                 preparation,
                                 calls[next + 1..].to_vec(),
                             )
-                            .await?;
+                        })?;
+                        let Some(settlement) = settlement else { continue; };
                         lease.transfer();
                         return Ok(settlement);
                     }
-                    self.append_auto_approved_call(&request, &preparation)?;
-                    self.append_execution_dispatch(&request, &preparation)?;
+                    if entry.with_input_admission(|| {
+                        self.append_auto_approved_call(&request, &preparation)?;
+                        self.append_execution_dispatch(&request, &preparation)
+                    })?.is_none() { continue; }
                     // spawn_blocking starts now; the pool owns its join until actual completion.
                     let native = self.native.clone();
                     let token = preparation.token.clone();
@@ -1856,7 +1874,7 @@ impl AgentToolPipeline {
         request_id: &str,
         target: AgentSessionTarget,
         call: ModelToolCall,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         let effect = orchestration_effect(&call.name);
         self.ensure_capability(entry, &call.name, effect, &target.target_id)?;
         let recorded = RecordedToolCall {
@@ -1870,39 +1888,46 @@ impl AgentToolPipeline {
             target: Some(target.clone()),
         };
         let expires_at_unix_ms = current_unix_ms().saturating_add(DEFAULT_NATIVE_APPROVAL_TTL_MS);
-        self.sessions.append_batch(
-            &entry.session_id,
-            vec![
-                AgentScopedPayload {
-                    turn_id: Some(turn_id.into()),
-                    step_id: Some(step_id.into()),
-                    payload: AgentSessionEventPayload::ToolCall { call: recorded },
-                },
-                AgentScopedPayload {
-                    turn_id: Some(turn_id.into()),
-                    step_id: Some(step_id.into()),
-                    payload: AgentSessionEventPayload::ToolApproval {
-                        request_id: request_id.into(),
-                        call_id: call.call_id.clone(),
-                        approval_id: None,
-                        status: AgentToolApprovalStatus::Approved,
-                        risk: Some(effect),
-                        reason: Some("orchestrationCapabilityAuthorized".into()),
-                        expires_at_unix_ms: Some(expires_at_unix_ms),
-                        prompt: None,
-                    },
-                },
-                AgentScopedPayload {
-                    turn_id: Some(turn_id.into()),
-                    step_id: Some(step_id.into()),
-                    payload: AgentSessionEventPayload::ToolExecution {
-                        call_id: call.call_id.clone(),
-                        status: AgentToolExecutionStatus::Dispatched,
-                        idempotency: "conditional".into(),
-                    },
-                },
-            ],
-        )?;
+        if entry
+            .with_input_admission(|| {
+                self.sessions.append_batch(
+                    &entry.session_id,
+                    vec![
+                        AgentScopedPayload {
+                            turn_id: Some(turn_id.into()),
+                            step_id: Some(step_id.into()),
+                            payload: AgentSessionEventPayload::ToolCall { call: recorded },
+                        },
+                        AgentScopedPayload {
+                            turn_id: Some(turn_id.into()),
+                            step_id: Some(step_id.into()),
+                            payload: AgentSessionEventPayload::ToolApproval {
+                                request_id: request_id.into(),
+                                call_id: call.call_id.clone(),
+                                approval_id: None,
+                                status: AgentToolApprovalStatus::Approved,
+                                risk: Some(effect),
+                                reason: Some("orchestrationCapabilityAuthorized".into()),
+                                expires_at_unix_ms: Some(expires_at_unix_ms),
+                                prompt: None,
+                            },
+                        },
+                        AgentScopedPayload {
+                            turn_id: Some(turn_id.into()),
+                            step_id: Some(step_id.into()),
+                            payload: AgentSessionEventPayload::ToolExecution {
+                                call_id: call.call_id.clone(),
+                                status: AgentToolExecutionStatus::Dispatched,
+                                idempotency: "conditional".into(),
+                            },
+                        },
+                    ],
+                )
+            })?
+            .is_none()
+        {
+            return Ok(false);
+        }
         let request = OrchestrationToolRequest {
             parent_session_id: entry.session_id.clone(),
             turn_id: turn_id.into(),
@@ -1937,7 +1962,7 @@ impl AgentToolPipeline {
                 },
             )?;
         }
-        Ok(())
+        Ok(true)
     }
 
     fn ensure_capability(
@@ -2047,97 +2072,85 @@ impl AgentToolPipeline {
         Ok(preparation)
     }
 
-    async fn process_prepared(
+    fn process_prepared(
         &self,
         entry: &Arc<AgentEntry>,
         request: NativeToolRequest,
         preparation: NativeToolPreparation,
         remaining_calls: Vec<ModelToolCall>,
     ) -> Result<ToolPipelineSettlement, String> {
-        if preparation.requires_approval {
-            let waiting_turn_id = request.turn_id.clone();
-            if !self.has_unadmitted_call(&request, &preparation.call)? {
-                self.sessions.append(
-                    &request.session_id,
-                    Some(request.turn_id.clone()),
-                    Some(request.step_id.clone()),
-                    AgentSessionEventPayload::ToolCall {
-                        call: preparation.call.clone(),
-                    },
-                )?;
-            }
-            let approval_id = format!("approval-{}", Uuid::new_v4().simple());
-            self.sessions.append_batch(
+        debug_assert!(preparation.requires_approval);
+        let waiting_turn_id = request.turn_id.clone();
+        if !self.has_unadmitted_call(&request, &preparation.call)? {
+            self.sessions.append(
                 &request.session_id,
-                vec![
-                    AgentScopedPayload {
-                        turn_id: Some(request.turn_id.clone()),
-                        step_id: Some(request.step_id.clone()),
-                        payload: AgentSessionEventPayload::ToolApproval {
-                            request_id: request.request_id.clone(),
-                            call_id: request.model_call.call_id.clone(),
-                            approval_id: Some(approval_id.clone()),
-                            status: AgentToolApprovalStatus::Requested,
-                            risk: preparation.call.effect,
-                            reason: Some("nativePolicyRequiresApproval".into()),
-                            expires_at_unix_ms: Some(preparation.expires_at_unix_ms),
-                            prompt: Some(preparation.prompt.clone()),
-                        },
-                    },
-                    AgentScopedPayload {
-                        turn_id: Some(request.turn_id.clone()),
-                        step_id: Some(request.step_id.clone()),
-                        payload: AgentSessionEventPayload::StepEnd {
-                            reason: "waitingForTool".into(),
-                        },
-                    },
-                    AgentScopedPayload {
-                        turn_id: None,
-                        step_id: None,
-                        payload: AgentSessionEventPayload::AgentStatus {
-                            status: AgentSessionStatus::Waiting,
-                            reason: Some("toolApprovalPending".into()),
-                        },
-                    },
-                ],
+                Some(request.turn_id.clone()),
+                Some(request.step_id.clone()),
+                AgentSessionEventPayload::ToolCall {
+                    call: preparation.call.clone(),
+                },
             )?;
-            self.pending
-                .lock()
-                .map_err(|_| "Native approval registry is unavailable".to_string())?
-                .insert(
-                    approval_key(
-                        &request.session_id,
-                        &request.step_id,
-                        &request.model_call.call_id,
-                    ),
-                    PendingTool {
-                        _lease: Arc::new(PreparedLease::new(
-                            self.native.clone(),
-                            &preparation.token,
-                        )),
-                        request,
-                        preparation,
-                        approval_id,
-                        remaining_calls,
-                        status: PendingStatus::Requested,
-                    },
-                );
-            self.changed.notify_waiters();
-            entry.set_scope(Some(AgentActiveScope {
-                turn_id: waiting_turn_id,
-                step_id: None,
-            }))?;
-            entry.set_phase(AgentLifecyclePhase::Waiting)?;
-            return Ok(ToolPipelineSettlement::Waiting);
         }
-
-        self.append_auto_approved_call(&request, &preparation)?;
-        self.append_execution_dispatch(&request, &preparation)?;
-        let result = self
-            .execute_native(&request, &preparation, true, entry.cancellation())
-            .await;
-        self.finish_native(&request, &preparation, result)?;
-        Ok(ToolPipelineSettlement::Completed)
+        let approval_id = format!("approval-{}", Uuid::new_v4().simple());
+        self.sessions.append_batch(
+            &request.session_id,
+            vec![
+                AgentScopedPayload {
+                    turn_id: Some(request.turn_id.clone()),
+                    step_id: Some(request.step_id.clone()),
+                    payload: AgentSessionEventPayload::ToolApproval {
+                        request_id: request.request_id.clone(),
+                        call_id: request.model_call.call_id.clone(),
+                        approval_id: Some(approval_id.clone()),
+                        status: AgentToolApprovalStatus::Requested,
+                        risk: preparation.call.effect,
+                        reason: Some("nativePolicyRequiresApproval".into()),
+                        expires_at_unix_ms: Some(preparation.expires_at_unix_ms),
+                        prompt: Some(preparation.prompt.clone()),
+                    },
+                },
+                AgentScopedPayload {
+                    turn_id: Some(request.turn_id.clone()),
+                    step_id: Some(request.step_id.clone()),
+                    payload: AgentSessionEventPayload::StepEnd {
+                        reason: "waitingForTool".into(),
+                    },
+                },
+                AgentScopedPayload {
+                    turn_id: None,
+                    step_id: None,
+                    payload: AgentSessionEventPayload::AgentStatus {
+                        status: AgentSessionStatus::Waiting,
+                        reason: Some("toolApprovalPending".into()),
+                    },
+                },
+            ],
+        )?;
+        self.pending
+            .lock()
+            .map_err(|_| "Native approval registry is unavailable".to_string())?
+            .insert(
+                approval_key(
+                    &request.session_id,
+                    &request.step_id,
+                    &request.model_call.call_id,
+                ),
+                PendingTool {
+                    _lease: Arc::new(PreparedLease::new(self.native.clone(), &preparation.token)),
+                    request,
+                    preparation,
+                    approval_id,
+                    remaining_calls,
+                    status: PendingStatus::Requested,
+                },
+            );
+        self.changed.notify_waiters();
+        entry.set_scope(Some(AgentActiveScope {
+            turn_id: waiting_turn_id,
+            step_id: None,
+        }))?;
+        entry.set_phase(AgentLifecyclePhase::Waiting)?;
+        Ok(ToolPipelineSettlement::Waiting)
     }
 
     fn append_auto_approved_call(
@@ -2368,21 +2381,28 @@ impl AgentToolPipeline {
 
     async fn execute_native(
         &self,
+        entry: &Arc<AgentEntry>,
         request: &NativeToolRequest,
         preparation: &NativeToolPreparation,
         approved: bool,
-        cancellation: CancellationToken,
     ) -> Result<Result<NativeToolResult, String>, String> {
         let native = Arc::clone(&self.native);
         let token = preparation.token.clone();
         let lease = PreparedLease::new(native.clone(), &token);
         let journal: Option<RunnerDispatchJournal> = is_restricted_sudo(preparation).then(|| {
             let pipeline = self.clone();
+            let entry = entry.clone();
             let request = request.clone();
             let preparation = preparation.clone();
-            Box::new(move || pipeline.append_execution_dispatch(&request, &preparation))
-                as RunnerDispatchJournal
+            Box::new(move || {
+                entry
+                    .with_input_admission(|| {
+                        pipeline.append_execution_dispatch(&request, &preparation)
+                    })?
+                    .ok_or_else(|| "Agent Session is stopping".into())
+            }) as RunnerDispatchJournal
         });
+        let cancellation = entry.cancellation();
         tokio::task::spawn_blocking(move || {
             let _lease = lease;
             native.execute_with_runner_journal(&token, approved, cancellation, journal)
@@ -2592,29 +2612,31 @@ impl AgentToolPipeline {
         entry: &Arc<AgentEntry>,
         input: AgentToolDecisionInput,
         decision: AgentToolDecision,
-    ) -> Result<(), String> {
+    ) -> Result<AgentToolDecisionSettlement, String> {
         let key = approval_key(&input.session_id, &input.step_id, &input.call_id);
-        let mut pending = {
-            let mut pending = self
-                .pending
-                .lock()
-                .map_err(|_| "Native approval registry is unavailable".to_string())?;
-            let record = pending.get_mut(&key).ok_or_else(|| {
-                "Approval is unknown, terminal, or was recovered as uncertain".to_string()
-            })?;
-            if record.status != PendingStatus::Requested
-                || record.approval_id != input.approval_id
-                || record.request.session_id != input.session_id
-                || record.request.turn_id != input.turn_id
-                || record.request.step_id != input.step_id
-                || record.request.request_id != input.request_id
-                || record.request.model_call.call_id != input.call_id
-            {
-                return Err("Approval identity or state is stale".into());
-            }
-            record.status = PendingStatus::Executing;
-            record.clone()
-        };
+        let mut pending = entry
+            .with_input_admission(|| {
+                let mut pending = self
+                    .pending
+                    .lock()
+                    .map_err(|_| "Native approval registry is unavailable".to_string())?;
+                let record = pending.get_mut(&key).ok_or_else(|| {
+                    "Approval is unknown, terminal, or was recovered as uncertain".to_string()
+                })?;
+                if record.status != PendingStatus::Requested
+                    || record.approval_id != input.approval_id
+                    || record.request.session_id != input.session_id
+                    || record.request.turn_id != input.turn_id
+                    || record.request.step_id != input.step_id
+                    || record.request.request_id != input.request_id
+                    || record.request.model_call.call_id != input.call_id
+                {
+                    return Err("Approval identity or state is stale".into());
+                }
+                record.status = PendingStatus::Executing;
+                Ok(record.clone())
+            })?
+            .ok_or("Agent Session is stopping")?;
         let _owner = PendingExecutionGuard {
             pipeline: self,
             key: key.clone(),
@@ -2631,7 +2653,7 @@ impl AgentToolPipeline {
             self.native.abandon(&pending.preparation.token);
             self.changed.notify_waiters();
             self.continue_after_pending(entry, &pending).await?;
-            return Err("Approval expired".into());
+            return Ok(AgentToolDecisionSettlement::Expired);
         }
 
         if decision == AgentToolDecision::Reject {
@@ -2644,7 +2666,7 @@ impl AgentToolPipeline {
             self.native.abandon(&pending.preparation.token);
             self.changed.notify_waiters();
             self.continue_after_pending(entry, &pending).await?;
-            return Ok(());
+            return Ok(AgentToolDecisionSettlement::Resolved);
         }
 
         // Recheck live native policy without running before_tool again or charging again.
@@ -2665,7 +2687,7 @@ impl AgentToolPipeline {
             Err(error) => {
                 self.fail_pending_revalidation(entry, &pending, &error)
                     .await?;
-                return Ok(());
+                return Ok(AgentToolDecisionSettlement::Resolved);
             }
         };
         let refreshed_lease = PreparedLease::new(self.native.clone(), &refreshed.token);
@@ -2677,7 +2699,7 @@ impl AgentToolPipeline {
         ) {
             self.fail_pending_revalidation(entry, &pending, &error)
                 .await?;
-            return Ok(());
+            return Ok(AgentToolDecisionSettlement::Resolved);
         }
         if refreshed.call != pending.preparation.call
             || refreshed.idempotency != pending.preparation.idempotency
@@ -2689,35 +2711,37 @@ impl AgentToolPipeline {
                 &pending,
                 "Approval policy changed; no operation was dispatched. Inspect current state and request a fresh call.",
             ).await?;
-            return Ok(());
+            return Ok(AgentToolDecisionSettlement::Resolved);
         }
         pending.preparation = refreshed;
 
-        self.sessions.append(
-            &pending.request.session_id,
-            Some(pending.request.turn_id.clone()),
-            Some(pending.request.step_id.clone()),
-            AgentSessionEventPayload::ToolApproval {
-                request_id: pending.request.request_id.clone(),
-                call_id: pending.request.model_call.call_id.clone(),
-                approval_id: Some(pending.approval_id.clone()),
-                status: AgentToolApprovalStatus::Approved,
-                risk: pending.preparation.call.effect,
-                reason: Some("nativeApprovalCommitted".into()),
-                expires_at_unix_ms: Some(pending.preparation.expires_at_unix_ms),
-                prompt: None,
-            },
-        )?;
-        if !is_restricted_sudo(&pending.preparation) {
-            self.append_execution_dispatch(&pending.request, &pending.preparation)?;
+        let dispatched = entry.with_input_admission(|| {
+            self.sessions.append(
+                &pending.request.session_id,
+                Some(pending.request.turn_id.clone()),
+                Some(pending.request.step_id.clone()),
+                AgentSessionEventPayload::ToolApproval {
+                    request_id: pending.request.request_id.clone(),
+                    call_id: pending.request.model_call.call_id.clone(),
+                    approval_id: Some(pending.approval_id.clone()),
+                    status: AgentToolApprovalStatus::Approved,
+                    risk: pending.preparation.call.effect,
+                    reason: Some("nativeApprovalCommitted".into()),
+                    expires_at_unix_ms: Some(pending.preparation.expires_at_unix_ms),
+                    prompt: None,
+                },
+            )?;
+            if !is_restricted_sudo(&pending.preparation) {
+                self.append_execution_dispatch(&pending.request, &pending.preparation)?;
+            }
+            Ok(())
+        })?;
+        if dispatched.is_none() {
+            self.cancel_pending_dispatch(&pending)?;
+            return Err("Agent Session is stopping".into());
         }
         let result = self
-            .execute_native(
-                &pending.request,
-                &pending.preparation,
-                true,
-                entry.cancellation(),
-            )
+            .execute_native(entry, &pending.request, &pending.preparation, true)
             .await;
         drop(refreshed_lease);
         let still_executing = self
@@ -2737,7 +2761,7 @@ impl AgentToolPipeline {
             self.changed.notify_waiters();
             self.continue_after_pending(entry, &pending).await?;
         }
-        Ok(())
+        Ok(AgentToolDecisionSettlement::Resolved)
     }
 
     async fn fail_pending_revalidation(
@@ -2885,6 +2909,16 @@ impl AgentToolPipeline {
         Ok(())
     }
 
+    fn cancel_pending_dispatch(&self, pending: &PendingTool) -> Result<(), String> {
+        self.append_terminal_approval(
+            pending,
+            AgentToolApprovalStatus::Cancelled,
+            AgentToolResultStatus::Cancelled,
+            "Agent stopped before native dispatch",
+        )?;
+        self.commit_pending_not_started(pending, "cancelled")
+    }
+
     fn settle_blocked_terminal_call(
         &self,
         entry: &Arc<AgentEntry>,
@@ -2911,6 +2945,9 @@ impl AgentToolPipeline {
     }
 
     fn resume_after_tool(&self, entry: &Arc<AgentEntry>) -> Result<(), String> {
+        if !entry.is_admitting() {
+            return Ok(());
+        }
         entry.set_phase(AgentLifecyclePhase::Running)?;
         let snapshot = self.sessions.snapshot(&entry.session_id)?;
         if snapshot.status == AgentSessionStatus::Waiting {
@@ -3403,23 +3440,25 @@ impl AgentToolPipeline {
         {
             return Err("Unresolved tool execution requires reconciliation before resuming".into());
         }
-        let candidate = {
-            let mut records = self
-                .pending
-                .lock()
-                .map_err(|_| "Native approval registry is unavailable".to_string())?;
-            let candidate = records
-                .iter_mut()
-                .find(|(_, record)| {
-                    record.request.session_id == entry.session_id
-                        && record.status == PendingStatus::Authorized
-                })
-                .map(|(key, record)| {
-                    record.status = PendingStatus::Executing;
-                    (key.clone(), record.clone())
-                });
-            candidate
-        };
+        let candidate = entry
+            .with_input_admission(|| {
+                let mut records = self
+                    .pending
+                    .lock()
+                    .map_err(|_| "Native approval registry is unavailable".to_string())?;
+                let candidate = records
+                    .iter_mut()
+                    .find(|(_, record)| {
+                        record.request.session_id == entry.session_id
+                            && record.status == PendingStatus::Authorized
+                    })
+                    .map(|(key, record)| {
+                        record.status = PendingStatus::Executing;
+                        (key.clone(), record.clone())
+                    });
+                Ok(candidate)
+            })?
+            .flatten();
         let Some((key, mut pending)) = candidate else {
             return Ok(false);
         };
@@ -3460,16 +3499,20 @@ impl AgentToolPipeline {
             &pending.request.target.target_id,
         )?;
         self.validate_preparation(&pending.request, &pending.preparation)?;
-        if !is_restricted_sudo(&pending.preparation) {
-            self.append_execution_dispatch(&pending.request, &pending.preparation)?;
+        if entry
+            .with_input_admission(|| {
+                if !is_restricted_sudo(&pending.preparation) {
+                    self.append_execution_dispatch(&pending.request, &pending.preparation)?;
+                }
+                Ok(())
+            })?
+            .is_none()
+        {
+            self.cancel_pending_dispatch(&pending)?;
+            return Ok(false);
         }
         let result = self
-            .execute_native(
-                &pending.request,
-                &pending.preparation,
-                true,
-                entry.cancellation(),
-            )
+            .execute_native(entry, &pending.request, &pending.preparation, true)
             .await;
         if let Err(error) = self.finish_native(&pending.request, &pending.preparation, result) {
             if is_terminal_call_blocked(&error) {

@@ -26,6 +26,11 @@ use std::time::{Duration, Instant};
 
 const TERMINAL: &str = "native-regression-terminal";
 
+#[path = "approval_expiry.rs"]
+mod approval_expiry;
+#[path = "conversation_controls.rs"]
+mod conversation_controls;
+
 #[test]
 fn recovery_closes_restricted_sudo_only_before_its_durable_send() {
     use crate::agent_runtime::{

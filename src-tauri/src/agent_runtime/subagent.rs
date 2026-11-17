@@ -205,6 +205,7 @@ struct FleetRuntime {
     total_waves: u32,
     budget: Option<AgentSubagentBudget>,
     targets: Vec<FleetTargetRuntime>,
+    runner: Arc<tokio::sync::Mutex<()>>,
 }
 
 struct DriverLease(Arc<AgentEntry>);
@@ -344,11 +345,7 @@ impl SubAgentManager {
     }
 
     pub(crate) async fn cancel_descendants(&self, parent_session_id: &str) -> Result<(), String> {
-        let children = self.sessions.child_session_ids(parent_session_id)?;
-        for child in children {
-            self.cancel_tree(&child).await?;
-        }
-        Ok(())
+        self.cancel_subtree(parent_session_id, false).await
     }
 
     pub(crate) fn plan_fleet(
@@ -388,14 +385,25 @@ impl SubAgentManager {
         &self,
         request: AgentFleetControlRequest,
     ) -> Result<AgentFleetInspection, String> {
-        let inspection =
-            self.set_fleet_status(&request.parent_session_id, &request.fleet_id, "aborted")?;
-        let child_ids = inspection
-            .fleet
-            .targets
-            .iter()
-            .flat_map(|target| target.child_session_ids.iter().cloned())
-            .collect::<Vec<_>>();
+        let (inspection, child_ids) = {
+            // Serialize the durable abort and the admission fence with approval
+            // restoration. Only the worker teardown needs to await outside it.
+            let _gate = self.recovery_gate.lock().await;
+            let inspection =
+                self.set_fleet_status(&request.parent_session_id, &request.fleet_id, "aborted")?;
+            let child_ids = inspection
+                .fleet
+                .targets
+                .iter()
+                .flat_map(|target| target.child_session_ids.iter().cloned())
+                .collect::<Vec<_>>();
+            for child in &child_ids {
+                if let Some(entry) = self.agents.get(child)? {
+                    entry.stop_admission()?;
+                }
+            }
+            (inspection, child_ids)
+        };
         for child in child_ids {
             let snapshot = self.sessions.snapshot(&child)?;
             if !snapshot.ended {
@@ -422,7 +430,8 @@ impl SubAgentManager {
             .get_mut(&request.fleet_id)
             .ok_or_else(|| "Fleet was not found".to_string())?;
         ensure_fleet_owner(fleet, &request.parent_session_id)?;
-        let target = fleet
+        let mut updated = fleet.clone();
+        let target = updated
             .targets
             .iter_mut()
             .find(|target| target.request.target_id == request.target_id)
@@ -432,8 +441,7 @@ impl SubAgentManager {
         if target.state == "uncertain" {
             target.state = "reconciled".into();
         }
-        let inspection = fleet_inspection(fleet);
-        drop(fleets);
+        let inspection = fleet_inspection(&updated);
         self.sessions.append_batch(
             &request.parent_session_id,
             vec![
@@ -453,6 +461,7 @@ impl SubAgentManager {
                 },
             ],
         )?;
+        *fleet = updated;
         Ok(inspection)
     }
 
@@ -530,6 +539,7 @@ impl SubAgentManager {
             total_waves,
             budget,
             targets,
+            runner: Default::default(),
         };
         let inspection = fleet_inspection(&fleet);
         self.fleets
@@ -560,14 +570,23 @@ impl SubAgentManager {
             .get_mut(fleet_id)
             .ok_or_else(|| "Fleet was not found".to_string())?;
         ensure_fleet_owner(fleet, parent_session_id)?;
+        if status == "aborted" && fleet.status == "aborted" {
+            return Ok(fleet_inspection(fleet));
+        }
         if matches!(fleet.status.as_str(), "completed" | "aborted" | "failed") {
             return Err("terminal Fleet cannot change state".into());
         }
-        fleet.status = status.into();
+        let mut updated = fleet.clone();
+        updated.status = status.into();
+        let inspection = self.persist_fleet(&updated)?;
+        *fleet = updated;
+        Ok(inspection)
+    }
+
+    fn persist_fleet(&self, fleet: &FleetRuntime) -> Result<AgentFleetInspection, String> {
         let inspection = fleet_inspection(fleet);
-        drop(fleets);
         self.sessions.append(
-            parent_session_id,
+            &fleet.parent_session_id,
             None,
             None,
             fleet_task_state(&inspection.fleet),
@@ -582,7 +601,7 @@ impl SubAgentManager {
         cancellation: CancellationToken,
     ) -> Result<AgentFleetInspection, String> {
         self.ensure_fleet_loaded(parent_session_id, fleet_id)?;
-        {
+        let _runner = {
             let mut fleets = self
                 .fleets
                 .lock()
@@ -594,27 +613,37 @@ impl SubAgentManager {
             if matches!(fleet.status.as_str(), "completed" | "aborted" | "failed") {
                 return Ok(fleet_inspection(fleet));
             }
-            fleet.status = "running".into();
-        }
-        loop {
-            let next = {
-                let fleets = self
-                    .fleets
-                    .lock()
-                    .map_err(|_| "Fleet coordinator is unavailable".to_string())?;
-                let fleet = fleets
-                    .get(fleet_id)
-                    .ok_or_else(|| "Fleet was not found".to_string())?;
-                if fleet.status != "running" {
-                    return Ok(fleet_inspection(fleet));
+            let runner = Arc::clone(&fleet.runner)
+                .try_lock_owned()
+                .map_err(|_| "Fleet already has an active scheduler")?;
+            // A previous scheduler or process stopped after admitting a role.
+            // Preserve its child IDs and require reconciliation before resuming.
+            let mut updated = fleet.clone();
+            for target in &mut updated.targets {
+                if matches!(
+                    target.state.as_str(),
+                    "exploring" | "operating" | "verifying" | "reviewing"
+                ) {
+                    target.state = "uncertain".into();
+                    target.recovery =
+                        Some("Fleet stopped before the target outcome was recorded".into());
                 }
-                fleet
-                    .targets
-                    .iter()
-                    .position(|target| target.state == "planned")
-                    .map(|index| (index, fleet.targets[index].clone()))
-            };
-            let Some((index, target)) = next else {
+            }
+            if updated
+                .targets
+                .iter()
+                .any(|target| target.state == "uncertain")
+            {
+                updated.status = "paused".into();
+                let inspection = self.persist_fleet(&updated)?;
+                *fleet = updated;
+                return Ok(inspection);
+            }
+            fleet.status = "running".into();
+            runner
+        };
+        loop {
+            let (index, target) = {
                 let mut fleets = self
                     .fleets
                     .lock()
@@ -622,34 +651,30 @@ impl SubAgentManager {
                 let fleet = fleets
                     .get_mut(fleet_id)
                     .ok_or_else(|| "Fleet was not found".to_string())?;
-                fleet.status = if fleet.failures > fleet.failure_threshold {
-                    "failed"
-                } else {
-                    "completed"
+                if fleet.status != "running" {
+                    return Ok(fleet_inspection(fleet));
                 }
-                .into();
-                let inspection = fleet_inspection(fleet);
-                drop(fleets);
-                self.sessions.append(
-                    parent_session_id,
-                    None,
-                    None,
-                    fleet_task_state(&inspection.fleet),
-                )?;
-                return Ok(inspection);
+                let index = fleet
+                    .targets
+                    .iter()
+                    .position(|target| target.state == "planned");
+                if cancellation.is_cancelled() || index.is_none() {
+                    let mut updated = fleet.clone();
+                    updated.status = if cancellation.is_cancelled() {
+                        "paused"
+                    } else if fleet.failures > fleet.failure_threshold {
+                        "failed"
+                    } else {
+                        "completed"
+                    }
+                    .into();
+                    let inspection = self.persist_fleet(&updated)?;
+                    *fleet = updated;
+                    return Ok(inspection);
+                }
+                let index = index.expect("a planned target was found");
+                (index, fleet.targets[index].request.clone())
             };
-            if cancellation.is_cancelled() {
-                return self.set_fleet_status(parent_session_id, fleet_id, "paused");
-            }
-            {
-                let mut fleets = self
-                    .fleets
-                    .lock()
-                    .map_err(|_| "Fleet coordinator is unavailable".to_string())?;
-                let fleet = fleets.get_mut(fleet_id).expect("Fleet remains registered");
-                fleet.current_wave = target.wave;
-                fleet.targets[index].state = "exploring".into();
-            }
             let mut failed = None;
             for role in [
                 AgentSubagentRole::Explorer,
@@ -657,28 +682,38 @@ impl SubAgentManager {
                 AgentSubagentRole::Verifier,
                 AgentSubagentRole::Reviewer,
             ] {
-                let child =
-                    self.create_fleet_child(parent_session_id, fleet_id, &target.request, role)?;
-                self.wake(&child)?;
-                {
+                let child = {
                     let mut fleets = self
                         .fleets
                         .lock()
                         .map_err(|_| "Fleet coordinator is unavailable".to_string())?;
                     let fleet = fleets.get_mut(fleet_id).expect("Fleet remains registered");
-                    fleet.targets[index].child_session_ids.push(child.clone());
-                    fleet.targets[index].state = match role {
-                        AgentSubagentRole::Explorer => "exploring",
-                        AgentSubagentRole::Operator => "operating",
-                        AgentSubagentRole::Verifier => "verifying",
-                        AgentSubagentRole::Reviewer => "reviewing",
-                        _ => unreachable!(),
+                    if fleet.status == "aborted"
+                        || (fleet.status == "paused" && role == AgentSubagentRole::Explorer)
+                    {
+                        return Ok(fleet_inspection(fleet));
                     }
-                    .into();
-                }
+                    if cancellation.is_cancelled() {
+                        let mut updated = fleet.clone();
+                        updated.status = "paused".into();
+                        let inspection = self.persist_fleet(&updated)?;
+                        *fleet = updated;
+                        return Ok(inspection);
+                    }
+                    self.dispatch_fleet_child(fleet, index, role)?
+                };
                 let settlement = self
                     .settle_fleet_child(parent_session_id, &child, cancellation.clone())
-                    .await?;
+                    .await;
+                let mut fleets = self
+                    .fleets
+                    .lock()
+                    .map_err(|_| "Fleet coordinator is unavailable".to_string())?;
+                let fleet = fleets.get_mut(fleet_id).expect("Fleet remains registered");
+                if fleet.status == "aborted" {
+                    return Ok(fleet_inspection(fleet));
+                }
+                let settlement = settlement?;
                 if settlement.status != AgentSessionStatus::Completed {
                     failed = Some(format!(
                         "{:?} child settled as {:?}",
@@ -697,20 +732,11 @@ impl SubAgentManager {
                             kind: "independent-fleet-verification".into(),
                             summary: format!(
                                 "Verifier Session {child} independently completed target {}",
-                                target.request.target_id
+                                target.target_id
                             ),
                         },
                     )?;
-                    let mut fleets = self
-                        .fleets
-                        .lock()
-                        .map_err(|_| "Fleet coordinator is unavailable".to_string())?;
-                    fleets
-                        .get_mut(fleet_id)
-                        .expect("Fleet remains registered")
-                        .targets[index]
-                        .evidence_refs
-                        .push(evidence_id);
+                    fleet.targets[index].evidence_refs.push(evidence_id);
                 }
             }
             let inspection = {
@@ -719,28 +745,52 @@ impl SubAgentManager {
                     .lock()
                     .map_err(|_| "Fleet coordinator is unavailable".to_string())?;
                 let fleet = fleets.get_mut(fleet_id).expect("Fleet remains registered");
+                if fleet.status == "aborted" {
+                    return Ok(fleet_inspection(fleet));
+                }
+                let mut updated = fleet.clone();
                 if let Some(reason) = failed {
-                    fleet.failures = fleet.failures.saturating_add(1);
-                    fleet.targets[index].state = "failed".into();
-                    fleet.targets[index].recovery = Some(reason);
-                    if fleet.failures > fleet.failure_threshold {
-                        fleet.status = "failed".into();
+                    updated.failures = updated.failures.saturating_add(1);
+                    updated.targets[index].state = "failed".into();
+                    updated.targets[index].recovery = Some(reason);
+                    if updated.failures > updated.failure_threshold {
+                        updated.status = "failed".into();
                     }
                 } else {
-                    fleet.targets[index].state = "completed".into();
+                    updated.targets[index].state = "completed".into();
                 }
-                fleet_inspection(fleet)
+                let inspection = self.persist_fleet(&updated)?;
+                *fleet = updated;
+                inspection
             };
-            self.sessions.append(
-                parent_session_id,
-                None,
-                None,
-                fleet_task_state(&inspection.fleet),
-            )?;
             if inspection.fleet.status.as_deref() == Some("failed") {
                 return Ok(inspection);
             }
         }
+    }
+
+    // Keep the abort check, durable child registration and wake under the same
+    // Fleet lock. Abort either prevents the wake or sees the child to cancel.
+    fn dispatch_fleet_child(
+        &self,
+        fleet: &mut FleetRuntime,
+        index: usize,
+        role: AgentSubagentRole,
+    ) -> Result<String, String> {
+        let child = self.create_fleet_child(fleet, &fleet.targets[index].request, role)?;
+        fleet.current_wave = fleet.targets[index].wave;
+        fleet.targets[index].child_session_ids.push(child.clone());
+        fleet.targets[index].state = match role {
+            AgentSubagentRole::Explorer => "exploring",
+            AgentSubagentRole::Operator => "operating",
+            AgentSubagentRole::Verifier => "verifying",
+            AgentSubagentRole::Reviewer => "reviewing",
+            _ => unreachable!(),
+        }
+        .into();
+        self.persist_fleet(fleet)?;
+        self.wake(&child)?;
+        Ok(child)
     }
 
     async fn settle_fleet_child(
@@ -861,40 +911,29 @@ impl SubAgentManager {
             total_waves: fleet.total_waves,
             budget: fleet.budget,
             targets,
+            runner: Default::default(),
         };
         self.fleets
             .lock()
             .map_err(|_| "Fleet coordinator is unavailable".to_string())?
-            .insert(fleet_id.into(), restored);
+            .entry(fleet_id.into())
+            .or_insert(restored);
         Ok(())
     }
 
     fn create_fleet_child(
         &self,
-        parent_session_id: &str,
-        fleet_id: &str,
+        fleet: &FleetRuntime,
         target: &AgentFleetTargetRequest,
         role: AgentSubagentRole,
     ) -> Result<String, String> {
-        self.ensure_fleet_loaded(parent_session_id, fleet_id)?;
-        let budget = {
-            let fleets = self
-                .fleets
-                .lock()
-                .map_err(|_| "Fleet coordinator is unavailable".to_string())?;
-            let fleet = fleets
-                .get(fleet_id)
-                .ok_or_else(|| "Fleet was not found".to_string())?;
-            ensure_fleet_owner(fleet, parent_session_id)?;
-            fleet.budget.clone().unwrap_or_else(fleet_role_budget)
-        };
         self.create_child(
-            parent_session_id,
+            &fleet.parent_session_id,
             fleet_role_goal(role, &target.goal),
             role,
             "safePrefix",
             vec![target.target_id.clone()],
-            budget,
+            fleet.budget.clone().unwrap_or_else(fleet_role_budget),
             false,
         )
     }
@@ -1047,70 +1086,77 @@ impl SubAgentManager {
             capability_scope: Some(capability_scope.clone()),
             subagent: Some(metadata),
         };
-        self.sessions.create_child_with_descriptor(
-            parent_session_id,
-            request,
-            AgentSessionEventPayload::SubagentDescriptor {
-                descriptor_id,
-                child_session_id: child_session_id.clone(),
-                parent_session_id: parent_session_id.into(),
-                parent_task_id: parent.header.task_id,
-                role,
-                continuable,
-                depth,
-                inheritance,
-                capability_scope,
-                target_scope,
-                budget,
-            },
-        )?;
-        let handle = Arc::new(match parent_model {
-            Some(parent_model) => self.agents.attach(
-                self.sessions.clone(),
-                child_session_id.clone(),
-                parent_model.provider.clone(),
-                Arc::clone(&parent_model.adapter),
-            )?,
-            #[cfg(all(
-                feature = "native-input-acceptance",
-                debug_assertions,
-                target_os = "macos",
-                target_arch = "aarch64"
-            ))]
-            None => self
-                .agents
-                .attach_without_model(self.sessions.clone(), child_session_id.clone())?,
-            #[cfg(not(all(
-                feature = "native-input-acceptance",
-                debug_assertions,
-                target_os = "macos",
-                target_arch = "aarch64"
-            )))]
-            None => return Err("MODEL_SELECTION_REQUIRED".into()),
-        });
-        *handle
-            .entry()
-            .model_registry
+        let mut handles = self
+            .handles
             .lock()
-            .map_err(|_| "MODEL_REGISTRY_UNAVAILABLE")? = Some(self.models.clone());
-        self.agents.set_owner(&handle.entry(), &parent_entry)?;
-        self.handles
-            .lock()
-            .map_err(|_| "subagent handle registry is unavailable".to_string())?
-            .insert(child_session_id.clone(), handle);
-        self.sessions.enqueue(
-            &child_session_id,
-            AgentInboxLane::NextTurn,
-            AgentInboxMessage {
-                images: Vec::new(),
-                message_id: format!("delegation-{}", Uuid::new_v4().simple()),
-                client_submission_id: None,
-                content: role_prompt(role, &goal),
-                source: AgentMessageSource::session_reference(parent_session_id.into()),
-                terminal_context: None,
-            },
-        )?;
-        Ok(child_session_id)
+            .map_err(|_| "subagent handle registry is unavailable".to_string())?;
+        // Stop closes this same gate before enumerating children. Publish the
+        // descriptor and register the live handle together under admission.
+        parent_entry
+            .with_input_admission(|| {
+                self.sessions.create_child_with_descriptor(
+                    parent_session_id,
+                    request,
+                    AgentSessionEventPayload::SubagentDescriptor {
+                        descriptor_id,
+                        child_session_id: child_session_id.clone(),
+                        parent_session_id: parent_session_id.into(),
+                        parent_task_id: parent.header.task_id,
+                        role,
+                        continuable,
+                        depth,
+                        inheritance,
+                        capability_scope,
+                        target_scope,
+                        budget,
+                    },
+                )?;
+                let handle = Arc::new(match parent_model {
+                    Some(parent_model) => self.agents.attach(
+                        self.sessions.clone(),
+                        child_session_id.clone(),
+                        parent_model.provider.clone(),
+                        Arc::clone(&parent_model.adapter),
+                    )?,
+                    #[cfg(all(
+                        feature = "native-input-acceptance",
+                        debug_assertions,
+                        target_os = "macos",
+                        target_arch = "aarch64"
+                    ))]
+                    None => self
+                        .agents
+                        .attach_without_model(self.sessions.clone(), child_session_id.clone())?,
+                    #[cfg(not(all(
+                        feature = "native-input-acceptance",
+                        debug_assertions,
+                        target_os = "macos",
+                        target_arch = "aarch64"
+                    )))]
+                    None => return Err("MODEL_SELECTION_REQUIRED".into()),
+                });
+                *handle
+                    .entry()
+                    .model_registry
+                    .lock()
+                    .map_err(|_| "MODEL_REGISTRY_UNAVAILABLE")? = Some(self.models.clone());
+                self.agents.set_owner(&handle.entry(), &parent_entry)?;
+                handles.insert(child_session_id.clone(), handle);
+                self.sessions.enqueue(
+                    &child_session_id,
+                    AgentInboxLane::NextTurn,
+                    AgentInboxMessage {
+                        images: Vec::new(),
+                        message_id: format!("delegation-{}", Uuid::new_v4().simple()),
+                        client_submission_id: None,
+                        content: role_prompt(role, &goal),
+                        source: AgentMessageSource::session_reference(parent_session_id.into()),
+                        terminal_context: None,
+                    },
+                )?;
+                Ok(child_session_id)
+            })?
+            .ok_or_else(|| "parent Agent Session is stopping".into())
     }
 
     pub(crate) async fn retry_child(
@@ -1263,6 +1309,54 @@ impl SubAgentManager {
         self.wake(child_session_id)
     }
 
+    pub(super) async fn lock_recovery(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.recovery_gate.lock().await
+    }
+
+    pub(super) fn require_open_fleet_for_child(&self, session_id: &str) -> Result<(), String> {
+        let mut child = session_id.to_owned();
+        while let Some(parent) = self.sessions.snapshot(&child)?.header.parent_session_id {
+            let aborted = self.sessions.read_events(&parent, |events| {
+                events.iter().any(|event| {
+                    matches!(&event.payload, AgentSessionEventPayload::TaskState { fleet: Some(fleet), .. }
+                        if fleet.status.as_deref() == Some("aborted")
+                            && fleet.targets.iter().any(|target| target.child_session_ids.contains(&child)))
+                })
+            })?;
+            if aborted {
+                return Err("Cannot restore approval in an aborted Fleet".into());
+            }
+            child = parent;
+        }
+        Ok(())
+    }
+
+    pub(super) fn restore_approval_entry(
+        &self,
+        session_id: &str,
+        restore: impl FnOnce(&Arc<AgentEntry>) -> Result<(), String>,
+    ) -> Result<Arc<AgentEntry>, String> {
+        if self
+            .cancelled_children
+            .lock()
+            .map_err(|_| "child cancellation registry is unavailable")?
+            .contains(session_id)
+        {
+            return Err("Agent Session is stopping".into());
+        }
+        let mut handles = self
+            .handles
+            .lock()
+            .map_err(|_| "subagent handle registry is unavailable")?;
+        let entry = self.ensure_resident(session_id, &mut handles)?;
+        if let Err(error) = restore(&entry) {
+            handles.remove(session_id);
+            self.agents.detach(session_id)?;
+            return Err(error);
+        }
+        Ok(entry)
+    }
+
     fn ensure_resident(
         &self,
         child_session_id: &str,
@@ -1363,7 +1457,7 @@ impl SubAgentManager {
         Ok(AgentChildInspection {
             snapshot,
             resident: self.agents.get(child_session_id)?.is_some(),
-            descendant_session_ids: self.descendants_postorder(child_session_id)?,
+            descendant_session_ids: self.descendants_postorder(child_session_id, |_| Ok(()))?,
             tool_calls,
             total_tokens,
             last_summary: assistant_summary(&events),
@@ -1435,10 +1529,39 @@ impl SubAgentManager {
         }
     }
 
-    fn wake(&self, session_id: &str) -> Result<(), String> {
+    pub(super) fn wake(&self, session_id: &str) -> Result<(), String> {
         let Some(entry) = self.agents.get(session_id)? else {
             return Ok(());
         };
+        self.wake_entry(entry)
+    }
+
+    pub(super) fn wake_after_approval(&self, entry: Arc<AgentEntry>) -> Result<(), String> {
+        if !entry.is_driver_active() {
+            return self.wake_entry(entry);
+        }
+        // A decision can finish before the waiting driver releases its lease.
+        // Keep the wake pending until that release without blocking the IPC.
+        let manager = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let cancellation = entry.cancellation();
+            tokio::select! {
+                _ = cancellation.cancelled() => return,
+                _ = entry.await_idle() => {}
+            }
+            if entry.phase().ok() == Some(AgentLifecyclePhase::Running) {
+                if let Err(error) = manager.wake_entry(entry) {
+                    log::warn!(
+                        "Failed to wake child Agent after approval: {}",
+                        crate::redaction::redact_sensitive_text(&error)
+                    );
+                }
+            }
+        });
+        Ok(())
+    }
+
+    fn wake_entry(&self, entry: Arc<AgentEntry>) -> Result<(), String> {
         if !entry.try_acquire_driver()? {
             return Ok(());
         }
@@ -1496,36 +1619,62 @@ impl SubAgentManager {
         Ok(())
     }
 
-    fn descendants_postorder(&self, session_id: &str) -> Result<Vec<String>, String> {
+    fn descendants_postorder(
+        &self,
+        session_id: &str,
+        before_visit: impl Fn(&str) -> Result<(), String>,
+    ) -> Result<Vec<String>, String> {
         fn visit(
             sessions: &AgentSessionStore,
             session_id: &str,
+            before_visit: &impl Fn(&str) -> Result<(), String>,
             visited: &mut HashSet<String>,
             output: &mut Vec<String>,
         ) -> Result<(), String> {
+            before_visit(session_id)?;
             for child in sessions.child_session_ids(session_id)? {
                 if visited.insert(child.clone()) {
-                    visit(sessions, &child, visited, output)?;
+                    visit(sessions, &child, before_visit, visited, output)?;
                     output.push(child);
                 }
             }
             Ok(())
         }
         let mut output = Vec::new();
-        visit(&self.sessions, session_id, &mut HashSet::new(), &mut output)?;
+        visit(
+            &self.sessions,
+            session_id,
+            &before_visit,
+            &mut HashSet::from([session_id.to_owned()]),
+            &mut output,
+        )?;
         Ok(output)
     }
 
     async fn cancel_tree(&self, child_session_id: &str) -> Result<(), String> {
-        let mut order = self.descendants_postorder(child_session_id)?;
-        order.push(child_session_id.into());
-        {
+        self.cancel_subtree(child_session_id, true).await
+    }
+
+    async fn cancel_subtree(&self, root: &str, include_root: bool) -> Result<(), String> {
+        let order = {
             let _gate = self.recovery_gate.lock().await;
+            // Fence each live parent before reading its children, including
+            // intermediate nodes whose own teardown has not started yet.
+            let mut order = self.descendants_postorder(root, |id| {
+                if let Some(entry) = self.agents.get(id)? {
+                    entry.stop_admission()?;
+                }
+                Ok(())
+            })?;
+            if include_root {
+                order.push(root.into());
+            }
             self.cancelled_children
                 .lock()
                 .map_err(|_| "child cancellation registry is unavailable")?
                 .extend(order.iter().cloned());
-        }
+            order
+        };
         for session_id in order {
             let handle = {
                 let _gate = self.recovery_gate.lock().await;
@@ -1534,9 +1683,7 @@ impl SubAgentManager {
                     .lock()
                     .map_err(|_| "subagent handle registry is unavailable".to_string())?;
                 let handle = handles.get(&session_id).cloned();
-                if let Some(handle) = &handle {
-                    handle.entry().stop_admission()?;
-                } else {
+                if handle.is_none() {
                     // Fence cold attachment until cancellation is durable too.
                     let snapshot = self.sessions.snapshot(&session_id)?;
                     if !snapshot.ended {

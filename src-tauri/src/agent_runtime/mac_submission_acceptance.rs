@@ -392,7 +392,8 @@ impl AgentRuntime {
                     AgentToolDecision::Reject
                 },
             )
-            .await?;
+            .await?
+            .acknowledge()?;
         // A normal decision wakes the model driver afterwards. This explicit
         // no-model entrance stops after that exact same production decision.
         Ok(

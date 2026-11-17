@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { AiQuestionPanel } from '../workspace/ai-question-panel';
+import { AiQuestionHistory, AiQuestionPanel } from '../workspace/ai-question-panel';
+import { createQuestionProjection } from '@/lib/ai/question-projection';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
@@ -58,13 +59,50 @@ describe('user operation within the existing question card', () => {
     await waitFor(() => expect(button).toBeEnabled());
   });
 
-  it('submits standalone completion with no question text or credentials', async () => {
+  it.each([
+    {
+      locale: 'zh-CN', complete: '继续验证', title: '提问', summary: '1/1 已回答',
+      detail: '用户已确认完成，仍需验证结果。',
+    },
+    {
+      locale: 'en-US', complete: 'Continue verification', title: 'Question', summary: '1/1 Answered',
+      detail: 'User confirmed completion; verification is required.',
+    },
+  ] as const)('counts a standalone confirmation in history in $locale', async ({ locale, complete, title, summary, detail }) => {
+    await initI18n(locale);
+    useAppStore.setState({ locale });
+    const projection = createQuestionProjection();
+    const event = {
+      version: 5, sessionId: question.identity.sessionId, turnId: question.identity.turnId,
+      stepId: question.identity.stepId, timeUnixMs: Date.parse(question.timestamp),
+    } as const;
+    projection.apply({
+      ...event, seq: 1, type: 'question/requested', data: {
+        identity: question.identity,
+        provider: { routeId: 'route', modelId: 'model' },
+        arguments: {
+          questions: [{ id: 'manual', question: action.instructions, multi_select: false, user_action: action }],
+        },
+      },
+    });
+
     const submissions: AnswerQuestionInput[] = [];
-    render(<AiQuestionPanel question={{ ...question, answers: [], questions: [
-      { id: 'manual', question: action.instructions, multi_select: false, user_action: action },
-    ] }} onAnswer={async input => { submissions.push(input); }} />);
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Continue verification' }));
+    const user = userEvent.setup();
+    const { rerender } = render(<AiQuestionPanel question={projection.snapshot()[0]}
+      onAnswer={async input => { submissions.push(input); }} />);
+    await user.click(screen.getByRole('button', { name: complete }));
+    expect(submissions).toHaveLength(1);
     expect(submissions[0].answers).toEqual([]);
     expect(submissions[0].action).toBe('completed');
+
+    projection.apply({
+      ...event, seq: 2, type: 'question/answered',
+      data: { submission: submissions[0], fingerprint: '0'.repeat(64) },
+    });
+    await act(async () => rerender(<AiQuestionHistory question={projection.snapshot()[0]} />));
+    const trigger = screen.getByRole('button', { name: `${title} ${summary}` });
+    expect(screen.getByText(summary, { exact: true })).toBeVisible();
+    await user.click(trigger);
+    expect(screen.getByText(detail, { exact: true })).toBeVisible();
   });
 });

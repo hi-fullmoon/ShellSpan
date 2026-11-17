@@ -11,11 +11,11 @@ use super::{
     drive_agent, recover_open_scope, AgentArtifactStore, AgentCompactionManager, AgentDriverConfig,
     AgentDriverSettlement, AgentHookBus, AgentInboxLane, AgentInboxMessage, AgentLifecyclePhase,
     AgentMessageSource, AgentRegistry, AgentSessionEvent, AgentSessionEventPage,
-    AgentSessionEventsRequest, AgentSessionListPage, AgentSessionListRequest, AgentSessionSnapshot,
-    AgentSessionStore, AgentToolDecision, AgentToolDecisionInput, AgentToolPipeline,
-    CreateAgentSessionRequest, ModelRegistry, NativeToolAdapter, NativeToolEngine,
-    NativeToolRuntime, NativeToolRuntimeSlot, OrchestrationToolRuntime,
-    OrchestrationToolRuntimeSlot, SubAgentManager,
+    AgentSessionEventPayload, AgentSessionEventsRequest, AgentSessionListPage,
+    AgentSessionListRequest, AgentSessionSnapshot, AgentSessionStore, AgentToolDecision,
+    AgentToolDecisionInput, AgentToolPipeline, CreateAgentSessionRequest, ModelRegistry,
+    NativeToolAdapter, NativeToolEngine, NativeToolRuntime, NativeToolRuntimeSlot,
+    OrchestrationToolRuntime, OrchestrationToolRuntimeSlot, SubAgentManager,
 };
 
 #[cfg(all(
@@ -30,7 +30,7 @@ mod mac_submission_acceptance;
 #[cfg(test)]
 use super::{
     assistant_content_text, AgentAfterToolHook, AgentBeforeToolHook, AgentPreStepHook,
-    AgentRequestReason, AgentSessionEventPayload, AgentToolFailedHook, ModelAdapterFactory,
+    AgentRequestReason, AgentToolFailedHook, ModelAdapterFactory,
 };
 
 struct TerminalAdmissionGuard {
@@ -1648,10 +1648,22 @@ impl AgentRuntime {
             .terminal_submission_gate
             .lock()
             .map_err(|_| "TERMINAL_ADMISSION_UNAVAILABLE")?;
+        self.start_under_admission(session_id, provider, api_key, true)
+    }
+
+    fn start_under_admission(
+        &self,
+        session_id: &str,
+        provider: AiProviderConfig,
+        api_key: Option<String>,
+        wake: bool,
+    ) -> Result<AgentSessionSnapshot, String> {
         self.require_session_not_stopping(session_id)?;
         self.require_open_terminal_target(session_id)?;
         if self.agents.get(session_id)?.is_some() {
-            self.wake(session_id)?;
+            if wake {
+                self.wake(session_id)?;
+            }
             return self.sessions.snapshot(session_id);
         }
         if let Some(policy) = provider.retry_policy {
@@ -1686,34 +1698,10 @@ impl AgentRuntime {
             .model_registry
             .lock()
             .map_err(|_| "MODEL_REGISTRY_UNAVAILABLE")? = Some(self.models.clone());
-        let recovery = self.sessions.snapshot(session_id)?.recovery;
-        let observing_closed_execution = recovery.kind
-            == super::AgentRecoveryCheckpointKind::ExecutionInFlight
-            && entry.subagent.is_none()
-            && self.sessions.read_events(session_id, |events| {
-                super::recovery::open_turn_id(events).is_none()
-            })?;
-        if !observing_closed_execution
-            && (matches!(
-                recovery.status,
-                super::AgentRecoveryStatus::Available | super::AgentRecoveryStatus::Required
-            ) || recovery.kind == super::AgentRecoveryCheckpointKind::WaitingApproval)
-        {
-            entry.set_phase(AgentLifecyclePhase::Waiting)?;
-        }
-        if let Err(error) = recover_open_scope(&self.sessions, &entry) {
+        if let Err(error) = self.restore_runtime_entry(&entry) {
             self.agents.detach(session_id)?;
             return Err(error);
         }
-        if let Err(error) = self.tools.restore_question_phase(&entry) {
-            self.agents.detach(session_id)?;
-            return Err(error);
-        }
-        if let Err(error) = self.tools.recover_waiting(&entry) {
-            self.agents.detach(session_id)?;
-            return Err(error);
-        }
-        self.tools.restore_skill_phase(&entry)?;
         let mut handles = match self.handles.lock() {
             Ok(handles) => handles,
             Err(_) => {
@@ -1731,8 +1719,36 @@ impl AgentRuntime {
         }
         handles.insert(session_id.to_string(), handle);
         drop(handles);
-        self.wake(session_id)?;
+        if wake {
+            self.wake(session_id)?;
+        }
         self.sessions.snapshot(session_id)
+    }
+
+    fn restore_runtime_entry(&self, entry: &Arc<super::AgentEntry>) -> Result<(), String> {
+        let session_id = &entry.session_id;
+        if entry.subagent.is_some() {
+            self.subagents.require_open_fleet_for_child(session_id)?;
+        }
+        let recovery = self.sessions.snapshot(session_id)?.recovery;
+        let observing_closed_execution = recovery.kind
+            == super::AgentRecoveryCheckpointKind::ExecutionInFlight
+            && entry.subagent.is_none()
+            && self.sessions.read_events(session_id, |events| {
+                super::recovery::open_turn_id(events).is_none()
+            })?;
+        if !observing_closed_execution
+            && (matches!(
+                recovery.status,
+                super::AgentRecoveryStatus::Available | super::AgentRecoveryStatus::Required
+            ) || recovery.kind == super::AgentRecoveryCheckpointKind::WaitingApproval)
+        {
+            entry.set_phase(AgentLifecyclePhase::Waiting)?;
+        }
+        recover_open_scope(&self.sessions, entry)?;
+        self.tools.restore_question_phase(entry)?;
+        self.tools.recover_waiting(entry)?;
+        self.tools.restore_skill_phase(entry)
     }
 
     pub(crate) fn generate_session_title(&self, session_id: &str, submission_id: String) {
@@ -2390,13 +2406,112 @@ impl AgentRuntime {
         input: AgentToolDecisionInput,
         decision: AgentToolDecision,
     ) -> Result<AgentSessionSnapshot, String> {
-        let entry = self
-            .agents
-            .get(&input.session_id)?
-            .ok_or_else(|| "Agent Session is not started".to_string())?;
-        self.tools.decide(&entry, input.clone(), decision).await?;
-        self.wake(&input.session_id)?;
-        self.sessions.snapshot(&input.session_id)
+        let entry = self.attach_for_tool_decision(&input).await?;
+        let session_id = input.session_id.clone();
+        let settlement = self.tools.decide(&entry, input, decision).await?;
+        if entry.subagent.is_some() {
+            self.subagents.wake_after_approval(entry)?;
+        } else {
+            self.wake(&session_id)?;
+        }
+        settlement.acknowledge()?;
+        self.sessions.snapshot(&session_id)
+    }
+
+    async fn attach_for_tool_decision(
+        &self,
+        input: &AgentToolDecisionInput,
+    ) -> Result<Arc<super::AgentEntry>, String> {
+        let session_id = &input.session_id;
+        let is_child = match self.agents.get(session_id)? {
+            Some(entry) => entry.subagent.is_some(),
+            None => self
+                .sessions
+                .snapshot(session_id)?
+                .header
+                .subagent
+                .is_some(),
+        };
+        let child_recovery = if is_child {
+            Some(self.subagents.lock_recovery().await)
+        } else {
+            None
+        };
+        let _gate = self
+            .terminal_submission_gate
+            .lock()
+            .map_err(|_| "TERMINAL_ADMISSION_UNAVAILABLE")?;
+        self.require_session_not_stopping(session_id)?;
+        if child_recovery.is_some() {
+            self.subagents.require_open_fleet_for_child(session_id)?;
+        }
+        if let Some(entry) = self.agents.get(session_id)? {
+            return Ok(entry);
+        }
+        // Opening a historical conversation is read-only. Only a decision for
+        // the exact persisted pending call can attach its runtime.
+        let snapshot = self.sessions.snapshot(session_id)?;
+        let recovery = &snapshot.recovery;
+        if snapshot.archived
+            || snapshot.ended
+            || recovery.kind != super::AgentRecoveryCheckpointKind::WaitingApproval
+            || recovery.turn_id.as_deref() != Some(&input.turn_id)
+            || recovery.request_id.as_deref() != Some(&input.request_id)
+            || recovery.call_id.as_deref() != Some(&input.call_id)
+            || !self.sessions.read_events(session_id, |events| {
+                events.iter().rev().find(|event| {
+                    event.turn_id.as_deref() == Some(input.turn_id.as_str())
+                        && event.step_id.as_deref() == Some(input.step_id.as_str())
+                        && matches!(&event.payload, AgentSessionEventPayload::ToolApproval { call_id, .. } if call_id == &input.call_id)
+                }).is_some_and(|event| matches!(&event.payload,
+                    AgentSessionEventPayload::ToolApproval { request_id, approval_id: Some(approval_id), status: super::AgentToolApprovalStatus::Requested, .. }
+                        if request_id == &input.request_id && approval_id == &input.approval_id))
+            })?
+        {
+            return Err("Approval identity or state is stale".into());
+        }
+        self.require_open_terminal_target(session_id)?;
+        if let Some(mut owner_id) = snapshot.header.parent_session_id {
+            if child_recovery.is_none() {
+                return Err("Agent Session stopped while restoring approval".into());
+            }
+            loop {
+                self.require_session_not_stopping(&owner_id)?;
+                let owner = self.sessions.snapshot(&owner_id)?;
+                if owner.ended || owner.archived {
+                    return Err("Cannot restore approval in a closed delegation".into());
+                }
+                if let Some(parent) = owner.header.parent_session_id {
+                    owner_id = parent;
+                } else {
+                    if self.agents.get(&owner_id)?.is_none() {
+                        let selected = owner
+                            .header
+                            .model_selection
+                            .ok_or("MODEL_SELECTION_REQUIRED")?;
+                        self.start_under_admission(
+                            &owner_id,
+                            self.models.restore_selection(&selected)?,
+                            None,
+                            false,
+                        )?;
+                    }
+                    break;
+                }
+            }
+            return self
+                .subagents
+                .restore_approval_entry(session_id, |entry| self.restore_runtime_entry(entry));
+        }
+        let selected = snapshot
+            .header
+            .model_selection
+            .ok_or("MODEL_SELECTION_REQUIRED")?;
+        let provider = self.models.restore_selection(&selected)?;
+        self.start_under_admission(session_id, provider, None, true)?;
+        self.agents
+            .get(session_id)?
+            .ok_or_else(|| "Agent Session is not started".into())
     }
 
     #[cfg(test)]
@@ -2668,7 +2783,11 @@ impl AgentRuntime {
         &self,
         session_id: &str,
     ) -> Result<AgentSessionSnapshot, String> {
-        let checkpoint = self.sessions.snapshot(session_id)?.recovery;
+        let snapshot = self.sessions.snapshot(session_id)?;
+        if snapshot.header.subagent.is_some() {
+            self.subagents.require_open_fleet_for_child(session_id)?;
+        }
+        let checkpoint = snapshot.recovery;
         let attached_entry = || {
             self.agents
                 .get(session_id)?

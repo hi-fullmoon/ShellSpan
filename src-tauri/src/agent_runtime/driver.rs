@@ -2591,21 +2591,10 @@ async fn commit_response(
         let budget_handoff = sessions.read_events(&entry.session_id, |events| {
             child_budget_requires_handoff(entry.subagent.as_ref(), events, turn_id, now)
         })?;
-        let (incomplete, continue_plan) =
-            sessions.read_turn_events(&entry.session_id, |events| {
-                let incomplete = incomplete_plan_for_turn(events, turn_id);
-                let checked = events.iter().any(|event| match &event.payload {
-                    AgentSessionEventPayload::StepEnd { reason } => {
-                        event.turn_id.as_deref() == Some(turn_id) && reason == "completionCheck"
-                    }
-                    _ => false,
-                });
-                (
-                    incomplete || budget_handoff,
-                    !budget_handoff && plan_needs_completion_check(events, turn_id) && !checked,
-                )
-            })?;
-        if continue_plan {
+        let completion = sessions.read_turn_events(&entry.session_id, |events| {
+            text_response_completion(events, turn_id, budget_handoff)
+        })?;
+        if completion == TextResponseCompletion::CheckPlan {
             payloads.push(AgentScopedPayload {
                 turn_id: Some(turn_id.to_string()),
                 step_id: Some(step_id.to_string()),
@@ -2625,12 +2614,10 @@ async fn commit_response(
             turn_id: Some(turn_id.to_string()),
             step_id: Some(step_id.to_string()),
             payload: AgentSessionEventPayload::StepEnd {
-                reason: if continue_plan {
-                    "completionCheck"
-                } else if incomplete {
-                    "incomplete"
-                } else {
-                    "completed"
+                reason: match completion {
+                    TextResponseCompletion::CheckPlan => "completionCheck",
+                    TextResponseCompletion::Incomplete => "incomplete",
+                    TextResponseCompletion::Completed => "completed",
                 }
                 .into(),
             },
@@ -2640,12 +2627,10 @@ async fn commit_response(
             turn_id: turn_id.to_string(),
             step_id: None,
         }))?;
-        return Ok(if continue_plan {
-            StepSettlement::ToolsCompleted
-        } else if incomplete {
-            StepSettlement::Incomplete
-        } else {
-            StepSettlement::Completed
+        return Ok(match completion {
+            TextResponseCompletion::CheckPlan => StepSettlement::ToolsCompleted,
+            TextResponseCompletion::Incomplete => StepSettlement::Incomplete,
+            TextResponseCompletion::Completed => StepSettlement::Completed,
         });
     }
 
@@ -2657,6 +2642,36 @@ async fn commit_response(
         ToolPipelineSettlement::Completed => Ok(StepSettlement::ToolsCompleted),
         ToolPipelineSettlement::Waiting => Ok(StepSettlement::Waiting),
         ToolPipelineSettlement::Cancelled => Ok(StepSettlement::Cancelled),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TextResponseCompletion {
+    CheckPlan,
+    Incomplete,
+    Completed,
+}
+
+pub(super) fn text_response_completion(
+    events: &[super::AgentSessionEvent],
+    turn_id: &str,
+    budget_handoff: bool,
+) -> TextResponseCompletion {
+    if budget_handoff {
+        return TextResponseCompletion::Incomplete;
+    }
+    let checked = events.iter().any(|event| {
+        event.turn_id.as_deref() == Some(turn_id)
+            && matches!(&event.payload, AgentSessionEventPayload::StepEnd { reason } if reason == "completionCheck")
+    });
+    if !checked && plan_needs_completion_check(events, turn_id) {
+        TextResponseCompletion::CheckPlan
+    } else if incomplete_plan_for_turn(events, turn_id)
+        || !super::user_questions::can_complete_turn(events, turn_id)
+    {
+        TextResponseCompletion::Incomplete
+    } else {
+        TextResponseCompletion::Completed
     }
 }
 

@@ -305,6 +305,18 @@ pub(crate) fn check_call(
     call: &super::super::ModelToolCall,
     batch_len: usize,
 ) -> Result<(), String> {
+    check_workflow(events, turn, Some((call, batch_len)))
+}
+
+pub(crate) fn can_complete_turn(events: &[AgentSessionEvent], turn: &str) -> bool {
+    check_workflow(events, turn, None).is_ok()
+}
+
+fn check_workflow(
+    events: &[AgentSessionEvent],
+    turn: &str,
+    tool: Option<(&super::super::ModelToolCall, usize)>,
+) -> Result<(), String> {
     let records = records(events);
     if records
         .iter()
@@ -320,9 +332,10 @@ pub(crate) fn check_call(
         return Ok(());
     };
     let action = record.user_action().expect("selected above");
-    if is_question_tool(&call.name)
-        || matches!(call.name.as_str(), "update_plan" | "read_tool_result")
-    {
+    if tool.is_some_and(|(call, _)| {
+        is_question_tool(&call.name)
+            || matches!(call.name.as_str(), "update_plan" | "read_tool_result")
+    }) {
         return Ok(());
     }
     if record.cancelled || record.action_response() != Some(UserActionResponse::Completed) {
@@ -371,6 +384,13 @@ pub(crate) fn check_call(
                 if verification_calls.contains(&(event.step_id.clone(), call_id.clone())) =>
             {
                 dispatched.insert((event.step_id.clone(), call_id.clone()));
+            }
+            AgentSessionEventPayload::ToolApproval {
+                call_id,
+                status: super::super::AgentToolApprovalStatus::Rejected,
+                ..
+            } if verification_calls.contains(&(event.step_id.clone(), call_id.clone())) => {
+                return Err("USER_ACTION_VERIFICATION_REJECTED: the user declined approval for this verification; do not request the same approval again. Ask for a different plan or wait for new instructions".into());
             }
             AgentSessionEventPayload::ToolCall { call }
                 if call.name == "wait_process"
@@ -441,28 +461,25 @@ pub(crate) fn check_call(
             _ => {}
         }
     }
-    if !failed
-        && call.name == "wait_process"
-        && call
-            .arguments
-            .get("processHandle")
-            .and_then(Value::as_str)
-            .is_some_and(|h| handles.contains(h))
-    {
-        return Ok(());
-    }
     if failed {
         return Err("USER_ACTION_VERIFICATION_FAILED: explain the failed verification and request user action again; do not poll or repeat the plan question".into());
     }
-    if !attempted
-        && dispatched.is_empty()
-        && batch_len == 1
-        && is_verification(&call.name, &call.arguments)
-    {
-        Ok(())
-    } else {
-        Err(format!("USER_ACTION_VERIFICATION_REQUIRED: run this exact command alone in foreground and confirm exitCode=0 before dependent work: {}", action.verification_command))
+    if let Some((call, batch_len)) = tool {
+        let observes_verification = call.name == "wait_process"
+            && call
+                .arguments
+                .get("processHandle")
+                .and_then(Value::as_str)
+                .is_some_and(|h| handles.contains(h));
+        let starts_verification = !attempted
+            && dispatched.is_empty()
+            && batch_len == 1
+            && is_verification(&call.name, &call.arguments);
+        if observes_verification || starts_verification {
+            return Ok(());
+        }
     }
+    Err(format!("USER_ACTION_VERIFICATION_REQUIRED: run this exact command alone in foreground and confirm exitCode=0 before dependent work: {}", action.verification_command))
 }
 
 #[cfg(test)]

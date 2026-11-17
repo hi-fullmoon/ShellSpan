@@ -32,6 +32,16 @@ async fn all_fleet_roles_receive_and_enforce_the_persisted_call_budget() {
             .unwrap();
         let fleet_id = plan.fleet.fleet_id.unwrap();
         manager.fleets.lock().unwrap().clear();
+        manager
+            .ensure_fleet_loaded("lifecycle-parent", &fleet_id)
+            .unwrap();
+        let fleet = manager
+            .fleets
+            .lock()
+            .unwrap()
+            .get(&fleet_id)
+            .unwrap()
+            .clone();
         let expected = budget.unwrap_or_else(fleet_role_budget);
         for role in [
             AgentSubagentRole::Explorer,
@@ -40,9 +50,7 @@ async fn all_fleet_roles_receive_and_enforce_the_persisted_call_budget() {
             AgentSubagentRole::Reviewer,
         ] {
             // Use the same creation path as run_fleet, before it starts the model driver.
-            let child = manager
-                .create_fleet_child("lifecycle-parent", &fleet_id, &target, role)
-                .unwrap();
+            let child = manager.create_fleet_child(&fleet, &target, role).unwrap();
             let snapshot = manager.sessions.snapshot(&child).unwrap();
             let metadata = snapshot.header.subagent.unwrap();
             assert_eq!(metadata.role, role);

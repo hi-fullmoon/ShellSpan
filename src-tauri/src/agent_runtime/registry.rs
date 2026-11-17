@@ -177,24 +177,22 @@ impl AgentEntry {
     }
 
     pub(crate) fn try_acquire_driver(&self) -> Result<bool, String> {
-        let _gate = self
-            .admission_gate
-            .lock()
-            .map_err(|_| "Agent admission lock is unavailable")?;
-        if !self.admitting.load(Ordering::Acquire)
-            || matches!(
-                self.phase()?,
-                AgentLifecyclePhase::Waiting
-                    | AgentLifecyclePhase::Stopping
-                    | AgentLifecyclePhase::Disposed
-            )
-        {
-            return Ok(false);
-        }
         Ok(self
-            .driver_active
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok())
+            .with_input_admission(|| {
+                if matches!(
+                    self.phase()?,
+                    AgentLifecyclePhase::Waiting
+                        | AgentLifecyclePhase::Stopping
+                        | AgentLifecyclePhase::Disposed
+                ) {
+                    return Ok(false);
+                }
+                Ok(self
+                    .driver_active
+                    .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok())
+            })?
+            .unwrap_or(false))
     }
 
     pub(crate) fn release_driver(&self) {
@@ -230,18 +228,61 @@ impl AgentEntry {
         &self,
         claim: impl FnOnce() -> Result<T, String>,
     ) -> Result<Option<T>, String> {
-        let _gate = self
-            .admission_gate
-            .lock()
-            .map_err(|_| "Agent admission lock is unavailable")?;
-        if !self.is_admitting() || self.cancellation.is_cancelled() {
+        let Some(owners) = self.admission_owners()? else {
             return Ok(None);
+        };
+        // A root stop also fences descendants before the teardown has reached
+        // them. Acquire in ownership order so siblings share that boundary.
+        let mut guards = Vec::with_capacity(owners.len() + 1);
+        for entry in owners
+            .iter()
+            .rev()
+            .map(Arc::as_ref)
+            .chain(std::iter::once(self))
+        {
+            guards.push(
+                entry
+                    .admission_gate
+                    .lock()
+                    .map_err(|_| "Agent admission lock is unavailable")?,
+            );
+            if !entry.admitting.load(Ordering::Acquire) || entry.cancellation.is_cancelled() {
+                return Ok(None);
+            }
         }
         claim().map(Some)
     }
 
     pub(crate) fn is_admitting(&self) -> bool {
         self.admitting.load(Ordering::Acquire)
+            && self.admission_owners().is_ok_and(|owners| {
+                owners.is_some_and(|owners| {
+                    owners.iter().all(|owner| {
+                        owner.admitting.load(Ordering::Acquire)
+                            && !owner.cancellation.is_cancelled()
+                    })
+                })
+            })
+    }
+
+    fn admission_owners(&self) -> Result<Option<Vec<Arc<Self>>>, String> {
+        let mut owners = Vec::new();
+        loop {
+            let entry = owners.last().map_or(self, Arc::as_ref);
+            let owner = entry
+                .owner
+                .lock()
+                .map_err(|_| "Agent ownership lock unavailable")?;
+            let Some(link) = owner.as_ref() else {
+                drop(owner);
+                return Ok(Some(owners));
+            };
+            let Some(parent) = link.upgrade() else {
+                return Ok(None);
+            };
+            drop(owner);
+            owners.push(parent);
+        }
     }
 
     pub(crate) fn cancel(&self) {

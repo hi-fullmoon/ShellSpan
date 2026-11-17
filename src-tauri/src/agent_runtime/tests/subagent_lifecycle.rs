@@ -22,6 +22,14 @@ fn setup() -> (tempfile::TempDir, SubAgentManager, Arc<AgentEntry>) {
 fn setup_with_budget(
     budget: AgentSubagentBudget,
 ) -> (tempfile::TempDir, SubAgentManager, Arc<AgentEntry>) {
+    setup_with_services(budget, "http://127.0.0.1:11434".into(), false)
+}
+
+fn setup_with_services(
+    budget: AgentSubagentBudget,
+    base_url: String,
+    native_cancellation: bool,
+) -> (tempfile::TempDir, SubAgentManager, Arc<AgentEntry>) {
     let root = tempfile::tempdir().unwrap();
     let sessions = AgentSessionStore::default();
     sessions.configure(root.path().to_path_buf()).unwrap();
@@ -31,7 +39,7 @@ fn setup_with_budget(
         id: "lifecycle-route".into(),
         kind: crate::ai::AiProviderKind::Ollama,
         profile: "ollama".into(),
-        base_url: "http://127.0.0.1:11434".into(),
+        base_url,
         model: "lifecycle-model".into(),
         model_definition: Some(crate::llm::catalog::fixture_definition(
             crate::ai::AiProviderKind::Ollama,
@@ -119,11 +127,31 @@ fn setup_with_budget(
     let artifacts = AgentArtifactStore::default();
     artifacts.configure(root.path()).unwrap();
     let hooks = AgentHookBus::default();
+    let native = Arc::new(NativeToolRuntimeSlot::default());
+    if native_cancellation {
+        use super::super::{NativeToolAdapter, NativeToolEngine, NativeToolServices};
+        native
+            .install(Arc::new(
+                NativeToolAdapter::from_services(
+                    NativeToolServices {
+                        sessions: crate::models::SessionManager::default(),
+                        database: crate::db::Database::open(&root.path().join("profiles.db"))
+                            .unwrap(),
+                        credentials: CredentialManager::new(),
+                        known_hosts_path: root.path().join("known_hosts"),
+                        data_root: root.path().to_path_buf(),
+                    },
+                    Arc::new(NativeToolEngine::default()),
+                )
+                .unwrap(),
+            ))
+            .unwrap();
+    }
     let tools = AgentToolPipeline::new(
         agents.clone(),
         sessions.clone(),
         hooks.clone(),
-        Arc::new(NativeToolRuntimeSlot::default()),
+        native,
         artifacts.clone(),
         OrchestrationToolRuntimeSlot::default(),
         Default::default(),
@@ -855,4 +883,9 @@ fn fleet_tool_budget_is_optional_validated_and_restored_from_the_log() {
 mod fleet_tool_budget_tests {
     use super::*;
     include!("fleet_tool_budget.rs");
+}
+
+mod scheduling_regressions {
+    use super::*;
+    include!("subagent_scheduling.rs");
 }

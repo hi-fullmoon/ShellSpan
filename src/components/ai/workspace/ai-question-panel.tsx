@@ -550,7 +550,8 @@ export function AiQuestionHistory({
   const [open, setOpen] = useState(false);
   const status = t(`ai.workspace.question.${question.status}`);
   const answered = question.questions.filter((item) =>
-    question.answers.some((answer) => answer.id === item.id),
+    (item.user_action && question.actionResponse !== undefined)
+    || question.answers.some((answer) => answer.id === item.id),
   ).length;
   const summary = `${answered}/${question.questions.length} ${status}`;
   useEffect(() => {

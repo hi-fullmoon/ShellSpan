@@ -185,6 +185,8 @@ fn durable_replay_preserves_selection_and_completion_receipts() {
 
 #[test]
 fn real_foreground_verification_is_required_before_dependent_work() {
+    use crate::agent_runtime::driver::{text_response_completion, TextResponseCompletion};
+
     let root = tempfile::tempdir().unwrap();
     let prerequisite = root.path().join("ready");
     let source = if cfg!(windows) {
@@ -222,6 +224,11 @@ fn real_foreground_verification_is_required_before_dependent_work() {
         submission(Some(UserActionResponse::Completed)),
         true,
     ));
+    assert_eq!(
+        text_response_completion(&events, "turn", false),
+        TextResponseCompletion::Incomplete,
+        "the user confirmed the action, but no verification has executed"
+    );
     assert!(check_call(&events, "turn", &dependent, 1).is_err());
     assert!(check_call(&events, "turn", &verify, 2).is_err());
     let mut handoff = command("handoff", &source);
@@ -240,6 +247,10 @@ fn real_foreground_verification_is_required_before_dependent_work() {
     assert!(!failure.success());
     let mut failed_events = events.clone();
     record_execution(&mut failed_events, &verify, failure.code().unwrap());
+    assert_eq!(
+        text_response_completion(&failed_events, "turn", false),
+        TextResponseCompletion::Incomplete,
+    );
     assert!(check_call(&failed_events, "turn", &dependent, 1).is_err());
     assert!(check_call(&failed_events, "turn", &verify, 1)
         .unwrap_err()
@@ -256,6 +267,10 @@ fn real_foreground_verification_is_required_before_dependent_work() {
     let replay: Vec<AgentSessionEvent> =
         serde_json::from_slice(&serde_json::to_vec(&events).unwrap()).unwrap();
     assert!(check_call(&replay, "turn", &dependent, 1).is_ok());
+    assert_eq!(
+        text_response_completion(&replay, "turn", false),
+        TextResponseCompletion::Completed,
+    );
 }
 
 #[test]

@@ -122,6 +122,14 @@ After a structured decision, speculative calls remaining in that original batch
 are rejected without execution; a fresh model step must use the actual choice.
 This also applies when the user selects an alternative or types a custom plan.
 
+Stopping closes native tool admission for the parent and its descendants before
+joining their workers. Approval and native dispatch honor the same admission
+boundary. A user can approve or reject an exact pending tool after restarting the
+app. That decision restores the saved runtime and checks the original approval
+identity, expiry, target and current policy. Opening the conversation only reads
+its history. Approvals that require a fresh request after restart stay subject
+to that rule.
+
 Completion permits only the exact declared verification command, submitted alone
 to `run_terminal_command` in the foreground. The command retains normal native
 classification, approval, cancellation and redaction checks. If it returns a
@@ -133,6 +141,10 @@ did not start. A second rejection or a failed verification requires fresh user
 work while preserving the selected plan. Verification evidence is
 scoped to the confirmed operation and cannot predate completion. Asking an
 unrelated question cannot clear an outstanding verification requirement.
+An explicit refusal on the approval card ends verification for that action.
+Preparation rejections do not count as a user decision.
+A text-only response ends the turn as incomplete while the user action or its
+verification remains unresolved, even without a recorded task plan.
 
 Cancel or change-plan responses never execute the original dependent queue.
 Changing the plan requires another explicit decision (with decision identity)

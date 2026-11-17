@@ -22,7 +22,7 @@ pub(crate) const WORKFLOW_INSTRUCTIONS: &str = concat!(
 pub(crate) const TOOL_INSTRUCTIONS: &str = "When clarification or a decision is necessary, you must call ask_user_question and wait for its answer. It displays a question card and pauses the task. Do not substitute a question in ordinary chat. Do not continue dependent actions. Ask only when necessary; do not ask again when the task supplies the answer. Answers never grant native tool permissions. Non-sensitive inputs only; never request credentials.";
 mod workflow;
 pub(crate) use workflow::{
-    check_call, check_queue, check_target, is_question_tool, standalone_schema,
+    can_complete_turn, check_call, check_queue, check_target, is_question_tool, standalone_schema,
     supports_user_action,
 };
 pub(crate) use workflow::{UserAction, UserActionResponse};
