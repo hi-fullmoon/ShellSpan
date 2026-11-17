@@ -1005,6 +1005,10 @@ fn create_local_session_blocking(
     #[cfg(windows)]
     command.set_start_suspended(true);
     configure_local_terminal_environment(&mut command);
+    #[cfg(unix)]
+    if shell_kind == TerminalShellKind::Bash {
+        configure_local_bash_locale(&mut command);
+    }
     if let Some(home) = std::env::var_os("SHELLSPAN_LOCAL_HOME") {
         let home = std::path::PathBuf::from(home);
         if !home.is_absolute() || !home.is_dir() {
@@ -4272,6 +4276,21 @@ fn configure_local_terminal_environment(command: &mut CommandBuilder) {
     command.env("COLORTERM", "truecolor");
     command.env("TERM_PROGRAM", "ShellSpan");
     command.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+}
+
+#[cfg(unix)]
+fn configure_local_bash_locale(command: &mut CommandBuilder) {
+    // A desktop launch can leave Readline in the C locale. Honor the user's
+    // character locale and default to UTF-8 only when none of its inputs is set.
+    if ["LC_ALL", "LC_CTYPE", "LANG"]
+        .into_iter()
+        .all(|key| command.get_env(key).is_none_or(|value| value.is_empty()))
+    {
+        #[cfg(target_os = "macos")]
+        command.env("LANG", "en_US.UTF-8");
+        #[cfg(not(target_os = "macos"))]
+        command.env("LANG", "C.UTF-8");
+    }
 }
 
 fn contains_shell_metacharacters(input: &str) -> bool {

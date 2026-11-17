@@ -1,5 +1,3 @@
-    #[cfg(unix)]
-    use super::rollback_local_broker_attachment_failure;
     use super::{
         collect_local_output_batch, configure_local_terminal_environment, detect_key_type,
         expand_home_path, process_profile_avatar, remove_failed_session_registration,
@@ -8,6 +6,8 @@
         LocalWorkerActivity, LOCAL_OUTPUT_DRAIN_BUDGET, LOCAL_OUTPUT_QUEUE_CAPACITY,
         LOCAL_OUTPUT_READY_TIMEOUT, SSH_CONNECT_RESULT_WAIT,
     };
+    #[cfg(unix)]
+    use super::{configure_local_bash_locale, rollback_local_broker_attachment_failure};
     use crate::models::{
         ManagedSession, SessionCommand, SessionCommandSender, SessionIdentity, SessionManager,
         SessionStatus, SessionTerminalKind, StatusEvent,
@@ -491,6 +491,34 @@
             command.get_env("TERM_PROGRAM_VERSION"),
             Some(OsStr::new(env!("CARGO_PKG_VERSION"))),
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_bash_defaults_to_utf8_without_overriding_an_explicit_locale() {
+        for explicit in [None, Some("LC_ALL"), Some("LC_CTYPE"), Some("LANG")] {
+            let mut command = CommandBuilder::new("bash");
+            command.env_clear();
+            command.env("LC_TIME", "C");
+            if let Some(key) = explicit {
+                command.env(key, "C");
+            }
+
+            configure_local_bash_locale(&mut command);
+
+            if let Some(key) = explicit {
+                assert_eq!(command.get_env(key), Some(OsStr::new("C")));
+                if key != "LANG" {
+                    assert_eq!(command.get_env("LANG"), None);
+                }
+            } else {
+                assert!(command
+                    .get_env("LANG")
+                    .and_then(OsStr::to_str)
+                    .is_some_and(|locale| locale.ends_with(".UTF-8")));
+            }
+            assert_eq!(command.get_env("LC_TIME"), Some(OsStr::new("C")));
+        }
     }
 
     #[cfg(target_os = "macos")]
