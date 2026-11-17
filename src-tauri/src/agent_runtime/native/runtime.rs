@@ -207,7 +207,8 @@ impl NativeToolEngine {
                     .accept_native_capabilities(transport, &message),
                 ConnectionPayload::EditorReady { .. } => self
                     .terminal_broker
-                    .accept_native_readiness(transport, &message),
+                    .accept_native_readiness(transport, &message)
+                    .and_then(|()| self.terminal_execute.retire_foreground_handoff(transport)),
                 ConnectionPayload::Directory { .. }
                 | ConnectionPayload::JobObservation { .. }
                 | ConnectionPayload::EditorOptions { .. } => self
@@ -2050,6 +2051,17 @@ impl NativeToolEngine {
             serde_json::from_value(call.arguments.clone())
                 .map_err(|error| format!("Invalid terminal_execute arguments: {error}"))?;
         let session_id = self.terminal_target_session_id(&call.target, sessions)?;
+        if arguments.handoff_to_user
+            && self
+                .terminal_leases
+                .turn_owner(&session_id)?
+                .is_some_and(|owner| owner != context.request.user_session_id)
+        {
+            return Err(
+                "TERMINAL_HANDOFF_UNAVAILABLE: only the terminal turn owner can hand off input"
+                    .into(),
+            );
+        }
         self.terminal_interactive.release_at_prompt(
             &session_id,
             &context.request.user_session_id,
@@ -2096,6 +2108,7 @@ impl NativeToolEngine {
                 approved_call_id: call.call_id.clone(),
                 frozen_target: call.target.clone(),
             }),
+            arguments.handoff_to_user,
             |stage| {
                 if cancellation.is_cancelled() {
                     return Err(if arguments.background {
@@ -2133,18 +2146,29 @@ impl NativeToolEngine {
                 );
             }
         };
-        let waited = if let Some(deadline) = launch_deadline {
-            self.terminal_execute.wait_management(
+        let waited = if arguments.handoff_to_user {
+            self.terminal_execute.wait_foreground_handoff(
                 sessions,
                 &session_id,
                 &operation,
-                deadline.saturating_duration_since(Instant::now()),
+                timeout.min(Duration::from_secs(10)),
+                || cancellation.is_cancelled(),
             )
+        } else if let Some(deadline) = launch_deadline {
+            self.terminal_execute
+                .wait_management(
+                    sessions,
+                    &session_id,
+                    &operation,
+                    deadline.saturating_duration_since(Instant::now()),
+                )
+                .map(|snapshot| (snapshot, false))
         } else {
             self.terminal_execute
                 .wait(sessions, &session_id, &operation, timeout)
+                .map(|snapshot| (snapshot, false))
         };
-        let snapshot = match waited {
+        let (snapshot, handed_off) = match waited {
             Ok(snapshot) => snapshot,
             Err(message) => {
                 return self.terminal_submission_failure(
@@ -2196,6 +2220,7 @@ impl NativeToolEngine {
             Some(reason) => format!("{reason}: native parser refused the approved source; no source statement was executed. Wait for the clean prompt before retrying."),
             None => match &job {
                 Some(job) => format!("Native shell job launchConfirmed={}, jobState={}; output remains shared with the terminal.",job.launch_confirmed,job.state),
+                None if handed_off => "The foreground command entered the alternate screen. Terminal input was handed to the user. Finish the turn without sending more terminal input.".into(),
                 None => format!("Visible terminal command reached {state}."),
             },
         });
@@ -2205,6 +2230,9 @@ impl NativeToolEngine {
             tool_name: call.tool_name.clone(),
             target_id: call.target.target_id().to_string(),
             status: match snapshot.state {
+                crate::terminal_broker::TerminalCommandState::Running if handed_off => {
+                    AgentToolResultStatusNative::Completed
+                }
                 crate::terminal_broker::TerminalCommandState::Completed => {
                     match job.as_ref().map(|job| job.state.as_str()) {
                         Some("rejected") => AgentToolResultStatusNative::Failed,
@@ -2241,12 +2269,13 @@ impl NativeToolEngine {
                 "commandLine": snapshot.command_line,
                 "submittedCommandLine": snapshot.submitted_command_line,
                 "inputRejection": snapshot.input_rejection,
+                "handedOffToUser": handed_off,
                 "commandObservation": snapshot.command_observation,
                 "execution": if !snapshot.may_have_submitted || snapshot.input_rejection.is_some() || job.as_ref().is_some_and(|job| job.state == "rejected") {
                     "notStarted"
                 } else if job.as_ref().is_some_and(|job| job.state == "exited") || (job.is_none() && snapshot.state == crate::terminal_broker::TerminalCommandState::Completed) {
                     "completed"
-                } else if job.as_ref().is_some_and(|job| job.launch_confirmed && job.native_active == Some(true)) {
+                } else if handed_off || job.as_ref().is_some_and(|job| job.launch_confirmed && job.native_active == Some(true)) {
                     "running"
                 } else { "unknown" },
                 "exitCode": snapshot.exit_code,
@@ -2775,6 +2804,7 @@ impl NativeToolEngine {
                     approved_call_id: call.call_id.clone(),
                     frozen_target: call.target.clone(),
                 }),
+                false,
                 |stage| {
                     if cancellation.is_cancelled() {
                         return Err("TERMINAL_JOB_WAIT_CANCELLED".into());

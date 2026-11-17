@@ -1,7 +1,7 @@
 use super::*;
 
 // Broker/coordinator unit fixtures only; no native acceptance evidence.
-fn submitted() -> NativeInputCoordinator {
+fn claimed() -> NativeInputCoordinator {
     let broker = TerminalSessionBroker::enabled_for_test(512, 1048576, 1048576);
     let attachment = broker
         .attach_transport(
@@ -23,14 +23,7 @@ fn submitted() -> NativeInputCoordinator {
         broker.counters.clone(),
     );
     operation.broker_state = Arc::downgrade(&broker.state);
-    {
-        let mut data = operation.lock().unwrap();
-        data.native_protocol = true;
-        data.lifecycle.apply(CommandEvent::ConfirmInput).unwrap();
-        data.lifecycle
-            .apply(CommandEvent::AttemptSubmission)
-            .unwrap();
-    }
+    operation.lock().unwrap().native_protocol = true;
     let operation = Arc::new(operation);
     {
         let mut state = broker.lock().unwrap();
@@ -67,6 +60,18 @@ fn submitted() -> NativeInputCoordinator {
         ))]
         readonly_first_partial: None,
     }
+}
+
+fn submitted() -> NativeInputCoordinator {
+    let coordinator = claimed();
+    {
+        let mut data = coordinator.operation.lock().unwrap();
+        data.lifecycle.apply(CommandEvent::ConfirmInput).unwrap();
+        data.lifecycle
+            .apply(CommandEvent::AttemptSubmission)
+            .unwrap();
+    }
+    coordinator
 }
 
 fn started(coordinator: &NativeInputCoordinator) {
@@ -136,6 +141,106 @@ fn running_stop_does_not_repeat_interrupt() {
     assert!(!coordinator
         .interrupt_after_started(|| panic!("already running at first stop"))
         .unwrap());
+}
+
+#[test]
+fn cancel_after_unconfirmed_takeover_preserves_recovery_without_another_interrupt() {
+    let mut coordinator = submitted();
+    started(&coordinator);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    assert!(coordinator
+        .interrupt(
+            TerminalCommandRequestedSettlement::TakenOver,
+            deadline,
+            || Ok(())
+        )
+        .unwrap());
+    coordinator
+        .broker
+        .require_native_input_recovery("stop-unit", "stop-operation")
+        .unwrap();
+    assert!(coordinator
+        .broker
+        .release_agent_lease("stop-unit", "unit-agent", "unit-task", "stop-operation")
+        .unwrap());
+    let before = coordinator
+        .broker
+        .snapshot(Some("stop-unit"))
+        .unwrap()
+        .session
+        .unwrap();
+
+    assert!(!coordinator
+        .interrupt(
+            TerminalCommandRequestedSettlement::Cancelled,
+            deadline,
+            || { panic!("a duplicate stop must not send Ctrl+C after takeover") }
+        )
+        .unwrap());
+
+    let after = coordinator
+        .broker
+        .snapshot(Some("stop-unit"))
+        .unwrap()
+        .session
+        .unwrap();
+    assert!(matches!(
+        after.lease.unwrap().owner,
+        TerminalLeaseOwner::User { .. }
+    ));
+    assert_eq!(after.next_input_sequence, before.next_input_sequence);
+    assert!(after.input_observation.native_recovery_required);
+    assert!(coordinator.operation.native_observation_pending().unwrap());
+    let command = after.input_observation.active_command.unwrap();
+    assert_eq!(command.operation_id, "stop-operation");
+    assert_eq!(command.phase, CommandPhase::Uncertain);
+    assert!(command.may_have_submitted && command.no_auto_replay);
+}
+
+#[test]
+fn cancel_again_after_takeover_before_input_does_not_require_a_lease() {
+    let mut coordinator = claimed();
+    coordinator
+        .cancel_draft_for(TerminalCommandRequestedSettlement::TakenOver, |_| {
+            panic!("no draft was enqueued")
+        })
+        .unwrap();
+    assert!(coordinator
+        .broker
+        .release_agent_lease("stop-unit", "unit-agent", "unit-task", "stop-operation")
+        .unwrap());
+
+    coordinator
+        .cancel_draft_for(TerminalCommandRequestedSettlement::Cancelled, |_| {
+            panic!("the cancelled operation must not clear the user's editor")
+        })
+        .unwrap();
+    assert!(coordinator
+        .operation
+        .takeover_settled_before_submission()
+        .unwrap());
+}
+
+#[test]
+fn first_stop_still_requires_the_original_lease() {
+    let mut coordinator = submitted();
+    started(&coordinator);
+    assert!(coordinator
+        .broker
+        .release_agent_lease("stop-unit", "unit-agent", "unit-task", "stop-operation")
+        .unwrap());
+    let error = coordinator
+        .interrupt(
+            TerminalCommandRequestedSettlement::Cancelled,
+            Instant::now() + Duration::from_secs(2),
+            || panic!("an old command must not interrupt under a user lease"),
+        )
+        .unwrap_err();
+    assert_eq!(error, "TERMINAL_BROKER_STALE_LEASE");
+    assert_eq!(
+        coordinator.operation.snapshot().unwrap().phase,
+        CommandPhase::Running
+    );
 }
 
 #[test]

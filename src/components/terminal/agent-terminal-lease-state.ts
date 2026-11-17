@@ -35,9 +35,9 @@ export const agentTerminalLeaseState = {
     return sessionId === null ? undefined : leases.get(sessionId);
   },
 
-  blocksUserInput(sessionId: string): boolean {
+  blocksUserInput(sessionId: string, foregroundHandoffActive = false): boolean {
     const lease = leases.get(sessionId);
-    return !!lease && !lease.waitingForUserAction;
+    return !!lease && !lease.waitingForUserAction && !foregroundHandoffActive;
   },
 
   set(lease: AgentTerminalLeaseView): void {

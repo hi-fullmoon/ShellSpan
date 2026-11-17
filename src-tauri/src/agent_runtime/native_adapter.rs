@@ -113,6 +113,8 @@ struct TerminalCommandArguments {
     #[serde(default)]
     background: bool,
     #[serde(default)]
+    handoff_to_user: bool,
+    #[serde(default)]
     timeout_ms: Option<u64>,
 }
 
@@ -264,6 +266,12 @@ impl NativeToolRuntime for NativeToolAdapter {
             &request.model_call.arguments,
         )?;
         let sandbox_enabled = sandbox.as_ref().is_some_and(|b| b.state.policy.is_some());
+        if request.model_call.name == "run_terminal_command"
+            && request.model_call.arguments["handoffToUser"] == json!(true)
+            && (elevated_command || sandbox_enabled)
+        {
+            return Err("TERMINAL_HANDOFF_UNAVAILABLE: sandboxed and elevated commands cannot hand off terminal input".into());
+        }
         let original_arguments = request.model_call.arguments.clone();
         let scratch_scope = super::scratch::take_scope(
             &request.model_call.name,
@@ -978,6 +986,14 @@ fn normalize_arguments(
         };
         let timeout_ms = arguments.timeout_ms;
         let background = arguments.background;
+        if arguments.handoff_to_user
+            && (background
+                || request.execution_surface != super::AgentExecutionSurface::BoundTerminal
+                || direct_lifecycle_required
+                || terminal_command_requires_direct_lifecycle(request)?)
+        {
+            return Err("TERMINAL_HANDOFF_UNAVAILABLE: handoffToUser requires cooperative foreground execution in the bound terminal".into());
+        }
         return match request.execution_surface {
             super::AgentExecutionSurface::Direct => Ok((
                 "exec_command".into(),
@@ -1004,6 +1020,7 @@ fn normalize_arguments(
                         "command": arguments.command,
                         "explanation": arguments.explanation,
                         "background": background.then_some(true),
+                        "handoffToUser": arguments.handoff_to_user.then_some(true),
                         "timeoutMs": timeout_ms
                     })),
                 )),

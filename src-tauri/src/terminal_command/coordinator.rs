@@ -386,6 +386,17 @@ impl TerminalSessionBroker {
 }
 
 impl NativeInputCoordinator {
+    fn stop_wait_finished(&self) -> Result<bool, String> {
+        let data = self.operation.lock()?;
+        let lifecycle = &data.lifecycle;
+        // Takeover can release the lease after the stop wait times out. The
+        // retained operation still accepts late receipts, but a later Agent
+        // stop must not require the old lease or send any further input.
+        Ok(lifecycle.ended()
+            || lifecycle.draft_cleared()
+            || lifecycle.is_terminal() && lifecycle.requested_settlement().is_some())
+    }
+
     fn verify_stop_scope(&self) -> Result<(), String> {
         let mut state = self.broker.lock()?;
         let attachment = current_attachment(&state, &self.transport)?.clone();
@@ -702,14 +713,8 @@ impl NativeInputCoordinator {
     ) -> Result<(), String> {
         let gate = self.operation.submission_gate.clone();
         let _gate = gate.lock().map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?;
-        {
-            let data = self.operation.lock()?;
-            // Runtime cancellation and the interrupted admission path can both
-            // request this same stop. A real clear acknowledgement already
-            // settled it; never send a second clear into the next prompt.
-            if data.lifecycle.draft_cleared() && !data.lifecycle.may_have_submitted() {
-                return Ok(());
-            }
+        if self.stop_wait_finished()? {
+            return Ok(());
         }
         self.verify_stop_scope()?;
         if self.operation.submission_may_have_occurred()? {
@@ -756,7 +761,7 @@ impl NativeInputCoordinator {
     ) -> Result<bool, String> {
         let gate = self.operation.submission_gate.clone();
         let _gate = gate.lock().map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?;
-        if self.operation.lock()?.lifecycle.ended() {
+        if self.stop_wait_finished()? {
             return Ok(false);
         }
         self.verify_stop_scope()?;

@@ -276,7 +276,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     if (currentSessionIdRef.current !== activeSessionId || session?.status !== 'connected'
       || terminalRegistry.get(activeSessionId)?.terminal !== terminal
       || terminalInputReadiness.isPreparing(activeSessionId)
-      || agentTerminalLeaseState.blocksUserInput(activeSessionId)) {
+      || agentTerminalLeaseState.blocksUserInput(activeSessionId, session.foregroundHandoffActive)) {
       showError(t('terminal.feedback.pasteUnavailable'));
       return;
     }
@@ -469,7 +469,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
             const targetSession = useTerminalStore.getState().sessions.find((session) => session.sessionId === pendingPaste.sessionId);
             if (!target || targetSession?.status !== 'connected'
               || terminalInputReadiness.isPreparing(pendingPaste.sessionId)
-              || agentTerminalLeaseState.blocksUserInput(pendingPaste.sessionId)) {
+              || agentTerminalLeaseState.blocksUserInput(pendingPaste.sessionId, targetSession.foregroundHandoffActive)) {
               showError(t('terminal.feedback.pasteUnavailable'));
             } else {
               target.terminal.paste(pendingPaste.text);

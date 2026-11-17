@@ -93,6 +93,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
                         "default": "cooperative"
                     },
                     "background": { "type": "boolean", "default": false, "description": "On boundTerminal, submit foreground source and let the runtime own background execution; do not add shell background operators (&), nohup or manual detachment. A notStarted rejection permits a corrected fresh call; unknown execution requires reconciliation without source replay." },
+                    "handoffToUser": { "type": "boolean", "default": false, "description": "Open a full-screen interactive program such as Vim for the user in the bound terminal. Run it in the foreground without a shell timeout wrapper. The command must enter the terminal alternate screen before keyboard access passes to the user. Use one foreground call and finish the turn after handoff. Use file tools for Agent file edits. Omit for manual verification and background, Direct, sandboxed or elevated execution." },
                     "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 3600000 }
                 }),
             ),

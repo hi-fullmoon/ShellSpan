@@ -532,6 +532,7 @@ pub fn validate_tool_arguments_native(
             validate_visible_command_input(&value.command)?;
             if value.explanation.trim().is_empty()
                 || value.explanation.len() > 2_048
+                || value.background && value.handoff_to_user
                 || value
                     .timeout_ms
                     .map(|timeout| timeout == 0 || timeout > 3_600_000)

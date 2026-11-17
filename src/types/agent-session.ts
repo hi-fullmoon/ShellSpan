@@ -84,6 +84,7 @@ export type AgentTerminalLeaseReleaseReason =
   | 'timedOut'
   | 'failed'
   | 'takenOver'
+  | 'handedOff'
   | 'terminalClosed'
   | 'shutdown';
 

@@ -358,6 +358,9 @@ impl TerminalExecuteRegistry {
             let mut coordinator = coordinator
                 .lock()
                 .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?;
+            if registration.operation.handed_off()? {
+                return Ok(());
+            }
             if registration.operation.submission_may_have_occurred()? {
                 let stop_deadline = Instant::now() + INTERRUPT_SETTLEMENT_TIMEOUT;
                 coordinator.interrupt(reason, stop_deadline, || {
@@ -503,6 +506,27 @@ impl TerminalExecuteRegistry {
         }
         Ok(())
     }
+
+    pub(crate) fn retire_foreground_handoff(&self, session: &str) -> Result<(), String> {
+        let registration = self
+            .operations
+            .lock()
+            .map_err(|_| "TERMINAL_EXECUTE_REGISTRY_UNAVAILABLE")?
+            .get(session)
+            .cloned();
+        if let Some(registration) = registration {
+            if registration.operation.handed_off_and_ready()? {
+                self.finish_registration(
+                    session,
+                    &registration.agent_session_id,
+                    &registration.task_id,
+                    &registration.operation_id,
+                    TerminalLeaseReleaseReason::Completed,
+                )?;
+            }
+        }
+        Ok(())
+    }
     pub(crate) fn new(leases: TerminalLeaseManager, broker: TerminalSessionBroker) -> Self {
         Self {
             operations: Arc::new(Mutex::new(HashMap::new())),
@@ -622,6 +646,7 @@ impl TerminalExecuteRegistry {
             job_submission,
             deadline,
             None,
+            false,
             &mut revalidate,
         )
         .map_err(|error| error.message)
@@ -640,6 +665,7 @@ impl TerminalExecuteRegistry {
         job_submission: Option<&str>,
         deadline: Option<Instant>,
         authorization: Option<crate::terminal_command::state::IntentAuthorization>,
+        handoff_to_user: bool,
         revalidate: impl FnMut(TerminalExecuteValidationStage) -> Result<(), String>,
     ) -> Result<Arc<TerminalCommandOperation>, TerminalSubmissionError> {
         let mut submission_attempted = false;
@@ -654,6 +680,7 @@ impl TerminalExecuteRegistry {
             job_submission,
             deadline,
             authorization,
+            handoff_to_user,
             revalidate,
             &mut submission_attempted,
         )
@@ -676,6 +703,7 @@ impl TerminalExecuteRegistry {
         job_submission: Option<&str>,
         deadline: Option<Instant>,
         authorization: Option<crate::terminal_command::state::IntentAuthorization>,
+        handoff_to_user: bool,
         mut revalidate: impl FnMut(TerminalExecuteValidationStage) -> Result<(), String>,
         submission_attempted: &mut bool,
     ) -> Result<Arc<TerminalCommandOperation>, String> {
@@ -756,6 +784,7 @@ impl TerminalExecuteRegistry {
             command,
             submission.as_deref(),
             authorization,
+            handoff_to_user,
             agent_session_id,
             task_id,
         ) {
@@ -988,6 +1017,57 @@ impl TerminalExecuteRegistry {
         timeout: Duration,
     ) -> Result<TerminalCommandSnapshot, String> {
         self.wait_bounded(sessions, session_id, operation, timeout, true)
+    }
+
+    pub(crate) fn wait_foreground_handoff(
+        &self,
+        sessions: &SessionManager,
+        session: &str,
+        operation: &Arc<TerminalCommandOperation>,
+        timeout: Duration,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<(TerminalCommandSnapshot, bool), String> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let snapshot = operation.snapshot()?;
+            if snapshot.phase.is_terminal()
+                || snapshot.state == TerminalCommandState::CancelRequested
+                || cancelled()
+                || Instant::now() >= deadline
+            {
+                break;
+            }
+            if snapshot.state == TerminalCommandState::Running {
+                // Serialize giving away input with the old owner's scoped stop.
+                if let Ok(registration) = self.registration(session, &snapshot.operation_id) {
+                    let _coordinator = registration
+                        .native
+                        .lock()
+                        .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?;
+                    if !cancelled() {
+                        if let Some(snapshot) = self.leases.release_for_foreground_handoff(
+                            session,
+                            &registration.agent_session_id,
+                            &registration.task_id,
+                            &registration.operation_id,
+                            operation,
+                        )? {
+                            return Ok((snapshot, true));
+                        }
+                    }
+                }
+            }
+            operation.wait_until_terminal(
+                WAIT_SLICE.min(deadline.saturating_duration_since(Instant::now())),
+            )?;
+        }
+        let wait = if cancelled() {
+            INTERRUPT_SETTLEMENT_TIMEOUT
+        } else {
+            Duration::ZERO
+        };
+        self.wait(sessions, session, operation, wait)
+            .map(|snapshot| (snapshot, false))
     }
 
     fn wait_bounded(

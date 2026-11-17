@@ -27,6 +27,196 @@ fn recorded_result(
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[tokio::test]
+#[ignore = "requires native shell resources and Vim"]
+async fn foreground_vim_handoff_allows_save_after_agent_stop_or_queued_turn() {
+    use crate::terminal_screen::TerminalScreenBuffer;
+
+    for (shell, queued) in [
+        (TerminalShellKind::Bash, false),
+        (TerminalShellKind::Bash, true),
+        (TerminalShellKind::Zsh, false),
+        (TerminalShellKind::Zsh, true),
+    ] {
+        let scenario = Scenario::with_native_input(shell, true);
+        let runtime = &scenario.runtime;
+        let session = "vim-handoff";
+        let entry = scenario.root(
+            session,
+            AgentExecutionSurface::BoundTerminal,
+            AgentSessionPermissionMode::Operator,
+        );
+        scenario.start(&entry, "vim-turn", "vim-step");
+        runtime
+            .native_engine
+            .begin_terminal_turn(TERMINAL, session)
+            .unwrap();
+        let launch = runtime.tools.process_model_calls(
+                &entry,
+                "vim-turn",
+                "vim-step",
+                "vim-request",
+                vec![file_call(
+                    "run_terminal_command",
+                    "open-vim",
+                    json!({
+                        "command": "while [ ! -f start-vim ]; do sleep 0.02; done; vim -Nu NONE -i NONE -n notes.txt",
+                        "explanation": "Open Vim for the user to edit notes.txt",
+                        "handoffToUser": true,
+                        "timeoutMs": 5000,
+                    }),
+                )],
+            );
+        tokio::pin!(launch);
+        let wait_for_shell_start = async {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let snapshot = scenario
+                    .broker
+                    .snapshot(Some(TERMINAL))
+                    .unwrap()
+                    .session
+                    .unwrap();
+                if snapshot
+                    .input_observation
+                    .active_command
+                    .is_some_and(|command| {
+                        command.phase == crate::terminal_command::state::CommandPhase::Running
+                    })
+                {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "{shell:?}: shell never started the command"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            // Give the handoff waiter a chance to see Started while Vim is still gated.
+            tokio::time::sleep(Duration::from_millis(150)).await;
+        };
+        tokio::select! {
+            result = &mut launch => panic!("{shell:?}: tool returned before Vim opened: {result:?}"),
+            () = wait_for_shell_start => {}
+        }
+        std::fs::write(scenario.root.path().join("work/start-vim"), []).unwrap();
+        launch.await.unwrap();
+        let (status, result) = recorded_result(&scenario, session, "open-vim");
+        assert_eq!(
+            status,
+            AgentToolResultStatus::Completed,
+            "{shell:?}: {result}"
+        );
+        assert_eq!(result["handedOffToUser"], true);
+        assert_eq!(result["execution"], "running");
+        assert!(result["exitCode"].is_null());
+        assert_eq!(
+            scenario
+                .broker
+                .submission_recovery_for_agent(session)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        assert_eq!(
+            scenario
+                .broker
+                .screen_snapshot(TERMINAL)
+                .unwrap()
+                .active_buffer,
+            TerminalScreenBuffer::Alternate
+        );
+        let write = |keys: &str| {
+            runtime.write_user_terminal_input(&scenario.transport, TERMINAL, keys.into())
+        };
+        write("i").unwrap();
+        if queued {
+            runtime
+                .sessions
+                .enqueue(
+                    session,
+                    AgentInboxLane::NextTurn,
+                    AgentInboxMessage {
+                        message_id: "queued-during-vim".into(),
+                        client_submission_id: None,
+                        content: "Continue after opening Vim".into(),
+                        source: AgentMessageSource::user(),
+                        images: vec![],
+                        terminal_context: None,
+                    },
+                )
+                .unwrap();
+            runtime
+                .sessions
+                .append(
+                    session,
+                    Some("vim-turn".into()),
+                    Some("vim-step".into()),
+                    AgentSessionEventPayload::StepEnd {
+                        reason: "completed".into(),
+                    },
+                )
+                .unwrap();
+            assert!(runtime
+                .sessions
+                .end_turn_if_no_step_input(session, "vim-turn", "completed")
+                .unwrap());
+            assert!(runtime.terminal_turn_owner(TERMINAL).unwrap().is_none());
+            scenario.start(&entry, "queued-turn", "queued-step");
+            assert_eq!(
+                runtime.terminal_turn_owner(TERMINAL).unwrap().as_deref(),
+                Some(session)
+            );
+            assert!(runtime.sessions.all_events(session).unwrap().iter().any(|event| {
+                event.turn_id.as_deref() == Some("queued-turn") && matches!(
+                    &event.payload, AgentSessionEventPayload::StepInputClaim { turn_messages, .. }
+                        if turn_messages.iter().any(|message| message.message_id == "queued-during-vim")
+                )
+            }));
+        } else {
+            // Ctrl+C from stopping the Agent would take Vim out of insert mode.
+            runtime.interrupt(session).await.unwrap();
+        }
+        write("Saved from the terminal\x1b:wq\r").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let snapshot = scenario
+                .broker
+                .snapshot(Some(TERMINAL))
+                .unwrap()
+                .session
+                .unwrap();
+            if snapshot.prompt_ready && snapshot.active_command_id.is_none() {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{shell:?}: Vim did not save and return to the shell"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            std::fs::read_to_string(scenario.root.path().join("work/notes.txt")).unwrap(),
+            "Saved from the terminal\n"
+        );
+        assert!(scenario
+            .broker
+            .submission_recovery_for_agent(session)
+            .unwrap()
+            .is_empty());
+        if queued {
+            assert!(
+                write("x")
+                    .unwrap_err()
+                    .starts_with("TERMINAL_INPUT_BLOCKED_BY_AGENT:"),
+                "the queued Agent turn must regain its normal shell input guard after Vim exits"
+            );
+        }
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[tokio::test]
 #[ignore = "requires the ShellSpan Bash development resources"]
 async fn shellspan_bash_visible_command_requires_the_selected_pty_handshake() {
     use crate::terminal_broker::{TerminalIntegrationState, TerminalVisibleCommandRoute};

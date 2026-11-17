@@ -684,6 +684,14 @@ impl AgentRuntime {
                 if let Err(error) = emitter.emit(super::AGENT_TERMINAL_LEASE_EVENT, event) {
                     log::warn!("Failed to publish Agent terminal lease event: {error}");
                 }
+                if event.reason == Some(super::TerminalLeaseReleaseReason::HandedOff) {
+                    if let Err(error) = crate::commands::publish_terminal_integration_state(
+                        &emitter,
+                        &event.session_id,
+                    ) {
+                        log::warn!("Failed to publish foreground terminal handoff: {error}");
+                    }
+                }
             }))?;
         if let Some(slot) = &self.native_slot {
             slot.install(Arc::new(NativeToolAdapter::new(

@@ -149,17 +149,24 @@ impl TerminalScreenModel {
     }
 
     pub(crate) fn observe(&mut self, frame: &TerminalRawOutputFrame) -> Result<(), String> {
+        self.observe_bytes(frame.sequence, &frame.bytes)
+    }
+
+    pub(crate) fn observe_bytes(&mut self, sequence: u64, bytes: &[u8]) -> Result<(), String> {
         let next = self
             .version
             .checked_add(1)
             .ok_or_else(|| "TERMINAL_SCREEN_COUNTER_EXHAUSTED".to_string())?;
         // Only the headless Agent screen is filtered; raw transport frames and
         // the user's terminal display retain their original bytes.
-        self.parser
-            .process(&self.private_key_filter.filter(&frame.bytes));
+        self.parser.process(&self.private_key_filter.filter(bytes));
         self.version = next;
-        self.through_output_sequence = frame.sequence;
+        self.through_output_sequence = sequence;
         Ok(())
+    }
+
+    pub(crate) fn is_alternate_screen(&self) -> bool {
+        self.parser.screen().alternate_screen()
     }
 
     pub(crate) fn observe_display(&mut self, sequence: u64, text: &str) {

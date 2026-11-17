@@ -107,7 +107,7 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
   const connected = session?.status === 'connected';
   const preparing = useSyncExternalStore(terminalInputReadiness.subscribe, () => terminalInputReadiness.isPreparing(sessionId ?? null));
   const lease = useSyncExternalStore(agentTerminalLeaseState.subscribe, () => agentTerminalLeaseState.get(sessionId ?? null));
-  const canPaste = connected && !preparing && (!lease || lease.waitingForUserAction);
+  const canPaste = connected && !preparing && (!lease || lease.waitingForUserAction || session?.foregroundHandoffActive);
   const shortcuts = useAppStore(state => state.shortcuts);
   const mac = getPlatform() === 'macos';
   const hint = (value: string): React.ReactNode => <span className="ml-auto pl-4 text-muted-foreground">{value}</span>;

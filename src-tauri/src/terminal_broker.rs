@@ -594,6 +594,7 @@ pub(crate) struct TerminalInputObservation {
     pub(crate) native_recovery_required: bool,
     pub(crate) native_clear_pending: bool,
     pub(crate) command_observation_unavailable: bool,
+    pub(crate) foreground_handoff_active: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) active_command: Option<TerminalCommandObservation>,
 }
@@ -676,6 +677,8 @@ struct TerminalCommandData {
     integration_id: Option<String>,
     revision: u64,
     takeover_pending: bool,
+    handed_off: bool,
+    handoff_screen: Option<TerminalScreenModel>,
     interrupt_sent: bool,
     input_rejection: Option<String>,
     interrupt_uncertain: bool,
@@ -806,6 +809,8 @@ impl TerminalCommandOperation {
                 integration_id,
                 revision: 1,
                 takeover_pending: false,
+                handed_off: false,
+                handoff_screen: None,
                 interrupt_sent: false,
                 input_rejection: None,
                 interrupt_uncertain: false,
@@ -830,6 +835,15 @@ impl TerminalCommandOperation {
 
     pub(crate) fn submission_may_have_occurred(&self) -> Result<bool, String> {
         Ok(self.lock()?.lifecycle.may_have_submitted())
+    }
+
+    pub(crate) fn handed_off(&self) -> Result<bool, String> {
+        Ok(self.lock()?.handed_off)
+    }
+
+    pub(crate) fn handed_off_and_ready(&self) -> Result<bool, String> {
+        let data = self.lock()?;
+        Ok(data.handed_off && data.lifecycle.ended() && data.native_editor_ready_confirmed)
     }
 
     pub(crate) fn takeover_settled_before_submission(&self) -> Result<bool, String> {
@@ -1150,8 +1164,13 @@ impl TerminalCommandOperation {
             .native_capture
             .as_mut()
             .map(|fence| fence.push(&frame.bytes));
+        if let (Some(screen), Some(bytes)) = (&mut data.handoff_screen, &native_bytes) {
+            if !bytes.is_empty() {
+                screen.observe_bytes(frame.sequence, bytes)?;
+            }
+        }
         let bytes = native_bytes.as_deref().unwrap_or(&frame.bytes);
-        if !data.capture_truncated {
+        if !data.handed_off && !data.capture_truncated {
             let remaining = data.capture_limit.saturating_sub(data.capture.len());
             let accepted = remaining.min(bytes.len());
             data.capture.extend_from_slice(&bytes[..accepted]);
@@ -1728,6 +1747,14 @@ enum InteractiveInput {
 }
 
 impl SessionRecord {
+    fn foreground_handoff_active(&self) -> bool {
+        self.active_command.as_ref().is_some_and(|command| {
+            command.lock().is_ok_and(|data| {
+                data.handed_off && !(data.lifecycle.ended() && data.native_editor_ready_confirmed)
+            })
+        })
+    }
+
     fn open(
         terminal_session_id: String,
         terminal_generation: u64,
@@ -1913,6 +1940,7 @@ impl SessionRecord {
                 native_recovery_required: self.native_recovery_required,
                 native_clear_pending: self.native_clear_pending.is_some(),
                 command_observation_unavailable,
+                foreground_handoff_active: self.foreground_handoff_active(),
                 active_command: command_observation.ok().flatten(),
             },
             screen_version: self
@@ -3687,6 +3715,7 @@ impl TerminalSessionBroker {
             submitted_command_line,
             authorization,
             false,
+            false,
             None,
         )
     }
@@ -3698,6 +3727,7 @@ impl TerminalSessionBroker {
         command_line: &str,
         submitted_command_line: Option<&str>,
         authorization: Option<crate::terminal_command::state::IntentAuthorization>,
+        handoff_to_user: bool,
         expected_agent: &str,
         expected_task: &str,
     ) -> Result<Arc<TerminalCommandOperation>, String> {
@@ -3708,6 +3738,7 @@ impl TerminalSessionBroker {
             submitted_command_line,
             authorization,
             true,
+            handoff_to_user,
             Some((expected_agent, expected_task)),
         )
     }
@@ -3720,6 +3751,7 @@ impl TerminalSessionBroker {
         submitted_command_line: Option<&str>,
         authorization: Option<crate::terminal_command::state::IntentAuthorization>,
         awaiting_ready: bool,
+        handoff_to_user: bool,
         expected_owner: Option<(&str, &str)>,
     ) -> Result<Arc<TerminalCommandOperation>, String> {
         validate_identifier(operation_id, "operation id")?;
@@ -3766,6 +3798,18 @@ impl TerminalSessionBroker {
         }
         if record.native_recovery_required || record.native_clear_pending.is_some() {
             return Err("TERMINAL_INPUT_RECOVERY_REQUIRED: native edit was not confirmed; reconnect before any further input".into());
+        }
+        if handoff_to_user
+            && (record.input_mode != InputMode::NativeInline
+                || !record
+                    .native_profile
+                    .as_ref()
+                    .is_some_and(|profile| profile.capture_fence()))
+        {
+            return Err(
+                "TERMINAL_HANDOFF_UNAVAILABLE: this terminal cannot observe the foreground screen"
+                    .into(),
+            );
         }
         if record.input_mode == InputMode::NativeInline && submitted_command_line.is_none() {
             return Err("TERMINAL_NATIVE_SUBMISSION_MISMATCH".into());
@@ -3897,6 +3941,9 @@ impl TerminalSessionBroker {
             data.native_protocol = true;
             data.requires_complete_proof = true;
             data.native_capabilities_confirmed = record.native_display_negotiated;
+            if handoff_to_user {
+                data.handoff_screen = Some(TerminalScreenModel::new(record.geometry));
+            }
         }
         record.active_command = Some(Arc::clone(&operation));
         record.native_clear_scope = None;
@@ -4624,6 +4671,9 @@ impl TerminalSessionBroker {
         let remote_interactive_enabled = state.remote_interactive_tools_rollout.enabled;
         let attachment = current_attachment(&state, transport_session_id)?.clone();
         let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
+        if record.foreground_handoff_active() {
+            return Err("TERMINAL_BROKER_LEASE_BUSY".into());
+        }
         if interactive {
             if !interactive_enabled
                 || (record.transport_kind == TerminalTransportKind::SshPty
@@ -4695,6 +4745,61 @@ impl TerminalSessionBroker {
             operation_id,
             false,
         )
+    }
+
+    pub(crate) fn handoff_running_command(
+        &self,
+        transport: &str,
+        operation: &Arc<TerminalCommandOperation>,
+    ) -> Result<Option<TerminalCommandSnapshot>, String> {
+        let mut state = self.lock()?;
+        let attachment = current_attachment(&state, transport)?.clone();
+        let record = current_record_mut(&mut state, transport, &attachment)?;
+        let mut data = operation.lock()?;
+        if data.lifecycle.phase() != CommandPhase::Running
+            || data.lifecycle.requested_settlement().is_some()
+            || data.takeover_pending
+            || !data
+                .handoff_screen
+                .as_ref()
+                .is_some_and(TerminalScreenModel::is_alternate_screen)
+        {
+            return Ok(None);
+        }
+        let identity = &data.intent.identity;
+        let lease = record
+            .lease
+            .as_ref()
+            .ok_or("TERMINAL_BROKER_LEASE_UNAVAILABLE")?;
+        if !record
+            .active_command
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, operation))
+            || record.integration_id != data.integration_id
+            || record.integration_state != TerminalIntegrationState::Ready
+            || record.native_recovery_required
+            || record.native_clear_pending.is_some()
+            || !data.native_protocol
+            || !data.submission_intent_recorded
+            || lease.lease_id != identity.lease_id
+            || lease.revision != identity.lease_generation
+            || !matches!(&lease.owner, TerminalLeaseOwner::Agent { agent_session_id, task_id, operation_id, .. }
+                if agent_session_id == &identity.agent_session_id && task_id == &identity.task_id && operation_id == &identity.operation_id)
+        {
+            return Err(
+                "TERMINAL_HANDOFF_UNAVAILABLE: foreground command ownership changed".into(),
+            );
+        }
+        let revision = next_command_revision(lease.revision)?;
+        advance_integration_state_revision(record)?;
+        data.handed_off = true;
+        data.handoff_screen = None;
+        record.lease = Some(user_lease(revision));
+        record.command_input_pending = false;
+        let mut snapshot = command_snapshot(&data);
+        snapshot.command_observation = Some(command_observation(&data));
+        self.changed.notify_all();
+        Ok(Some(snapshot))
     }
 
     pub(crate) fn release_agent_lease_checked(
@@ -4775,7 +4880,48 @@ impl TerminalSessionBroker {
     where
         F: FnOnce() -> Result<(), String>,
     {
+        self.admit_terminal_input_with_turn_guard(
+            transport_session_id,
+            source,
+            input_kind,
+            bytes,
+            false,
+            write,
+        )
+    }
+
+    pub(crate) fn admit_terminal_input_with_turn_guard<F>(
+        &self,
+        transport_session_id: &str,
+        source: TerminalBrokerInputSource,
+        input_kind: TerminalInputKind,
+        bytes: &[u8],
+        require_foreground_handoff: bool,
+        write: F,
+    ) -> Result<Option<TerminalInputReceipt>, String>
+    where
+        F: FnOnce() -> Result<(), String>,
+    {
         let mut state = self.lock()?;
+        if require_foreground_handoff {
+            let handoff_active = state
+                .transports
+                .get(transport_session_id)
+                .and_then(|attachment| {
+                    state
+                        .sessions
+                        .get(&attachment.terminal_session_id)
+                        .filter(|record| {
+                            record.open
+                                && record.transport_session_id == transport_session_id
+                                && record.terminal_generation == attachment.terminal_generation
+                        })
+                })
+                .is_some_and(SessionRecord::foreground_handoff_active);
+            if !handoff_active {
+                return Err("TERMINAL_INPUT_BLOCKED_BY_AGENT: user input is blocked while an Agent owns the terminal".into());
+            }
+        }
         // Even a lease release or trusted feature rollback must not expose a
         // partially typed command to a later user Enter. A scoped interrupt is
         // still allowed; only a trusted prompt or a new generation clears it.

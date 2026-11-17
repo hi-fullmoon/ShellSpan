@@ -210,6 +210,8 @@ pub struct TerminalExecuteArgumentsNative {
     #[serde(default)]
     pub background: bool,
     #[serde(default)]
+    pub handoff_to_user: bool,
+    #[serde(default)]
     pub timeout_ms: Option<u64>,
 }
 

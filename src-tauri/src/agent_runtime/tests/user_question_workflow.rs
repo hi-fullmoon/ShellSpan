@@ -219,6 +219,9 @@ fn real_foreground_verification_is_required_before_dependent_work() {
     ));
     assert!(check_call(&events, "turn", &dependent, 1).is_err());
     assert!(check_call(&events, "turn", &verify, 2).is_err());
+    let mut handoff = command("handoff", &source);
+    handoff.arguments["handoffToUser"] = json!(true);
+    assert!(check_call(&events, "turn", &handoff, 1).is_err());
     assert!(check_call(&events, "turn", &verify, 1).is_ok());
     let mut prepared = events.clone();
     record_execution(&mut prepared, &verify, 0);
@@ -239,6 +242,10 @@ fn real_foreground_verification_is_required_before_dependent_work() {
     std::fs::write(prerequisite, "ready").unwrap();
     let success = run_verification();
     assert!(success.success());
+    let mut history_with_handoff = events.clone();
+    record_execution(&mut history_with_handoff, &handoff, success.code().unwrap());
+    assert!(check_call(&history_with_handoff, "turn", &dependent, 1).is_err());
+    assert!(check_call(&history_with_handoff, "turn", &verify, 1).is_ok());
     record_execution(&mut events, &verify, success.code().unwrap());
     assert!(check_call(&events, "turn", &dependent, 1).is_ok());
     let replay: Vec<AgentSessionEvent> =

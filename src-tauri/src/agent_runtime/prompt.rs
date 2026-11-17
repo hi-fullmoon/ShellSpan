@@ -416,6 +416,13 @@ fn specialize_tools_for_target(tools: &mut [AgentRequestToolSchema], header: &Ag
         .find(|tool| tool.name == "run_terminal_command")
     {
         command.description.push_str(" Never edit sudoers, use visudo, or ask the user to change sudo policy to run an Agent command.");
+        if header.execution_surface == super::AgentExecutionSurface::BoundTerminal
+            && header.parent_session_id.is_none()
+        {
+            command.description.push_str(" Use handoffToUser=true when the user asks to open Vim or another full-screen interactive program for their own use. On a confirmed handoff, tell the user the terminal is theirs and finish the turn.");
+        } else if let Some(properties) = command.input_schema["properties"].as_object_mut() {
+            properties.remove("handoffToUser");
+        }
     }
     if header
         .target

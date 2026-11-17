@@ -26,6 +26,7 @@ export interface TerminalSession {
   integrationReason?: string;
   integrationStateRevision?: number;
   promptReady?: boolean;
+  foregroundHandoffActive?: boolean;
   title: string;
   baseTitle?: string;
   manualTitle?: string;
@@ -513,6 +514,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
           integrationReason: event.reason,
           integrationStateRevision: event.integrationStateRevision,
           promptReady: event.promptReady,
+          foregroundHandoffActive: event.inputObservation?.foregroundHandoffActive,
         };
       });
       return changed ? { sessions } : state;

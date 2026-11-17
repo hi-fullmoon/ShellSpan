@@ -419,7 +419,7 @@ export interface TerminalController {
   hasUnconfirmedLineBreak(): boolean;
   hasUnverifiedUserSubmission(): boolean;
   hasKnownCredentialPrompt(): boolean;
-  suppressUserInput(onBlocked?: () => void): () => void;
+  suppressUserInput(onBlocked?: () => void, shouldBlock?: () => boolean): () => void;
   writeUserInput(data: string): Promise<boolean>;
   writeInput(data: string): Promise<void>;
   whenOutputReady(): Promise<void>;
@@ -464,8 +464,7 @@ class TerminalControllerImpl implements TerminalController {
   private readonly getStatus: GetStatusCallback;
   private readonly requestReconnect: RequestReconnectCallback;
   private inputBlockedNoticeRef = false;
-  private userInputSuppressions = 0;
-  private readonly userInputBlockedListeners = new Set<() => void>();
+  private readonly userInputSuppressions = new Set<{ onBlocked?: () => void; shouldBlock?: () => boolean }>();
   private agentInputBlockedFeedbackRef = false;
   private pendingUserInputText = '';
   private lastInputLineBreak: { terminalSessionId?: string; generation?: number; revision?: number } | null = null;
@@ -1289,19 +1288,14 @@ class TerminalControllerImpl implements TerminalController {
     this.handleInput(data);
   }
 
-  suppressUserInput(onBlocked?: () => void): () => void {
+  suppressUserInput(onBlocked?: () => void, shouldBlock?: () => boolean): () => void {
     if (this.disposed) return () => {};
-    this.userInputSuppressions += 1;
-    if (onBlocked) this.userInputBlockedListeners.add(onBlocked);
-    let released = false;
+    const suppression = { onBlocked, shouldBlock };
+    this.userInputSuppressions.add(suppression);
     return () => {
-      if (released) return;
-      released = true;
-      this.userInputSuppressions = Math.max(0, this.userInputSuppressions - 1);
-      if (onBlocked) this.userInputBlockedListeners.delete(onBlocked);
-      if (this.userInputSuppressions === 0) {
+      this.userInputSuppressions.delete(suppression);
+      if (this.userInputSuppressions.size === 0) {
         this.agentInputBlockedFeedbackRef = false;
-        this.userInputBlockedListeners.clear();
       }
     };
   }
@@ -1428,14 +1422,16 @@ class TerminalControllerImpl implements TerminalController {
   }
 
   private canWriteUserInput(): boolean {
-    if (this.userInputSuppressions > 0) {
+    const blockers = [...this.userInputSuppressions].filter(({ shouldBlock }) => !shouldBlock || shouldBlock());
+    if (blockers.length > 0) {
       logger.debug(`Dropped user input while an Agent command owns session=${this.sessionId}`);
       if (!this.agentInputBlockedFeedbackRef) {
         this.agentInputBlockedFeedbackRef = true;
-        for (const listener of this.userInputBlockedListeners) listener();
+        for (const { onBlocked } of blockers) onBlocked?.();
       }
       return false;
     }
+    this.agentInputBlockedFeedbackRef = false;
     if (this.restoringDisplay || terminalInputReadiness.isPreparing(this.sessionId)) {
       return false;
     }
@@ -1489,11 +1485,12 @@ class TerminalControllerImpl implements TerminalController {
       return Promise.resolve(false);
     }
     if (!this.canWriteUserInput()) return Promise.resolve(false);
+    const session = useTerminalStore.getState().sessions.find(item => item.sessionId === this.sessionId);
+    if (session?.foregroundHandoffActive) return this.writeInput(data).then(() => true);
     if (/[\r\n\u0003]/.test(data)) {
       // Do not parse shell syntax to decide whether Enter completed a command.
       // Only a newer, trusted prompt event confirms that no accepted
       // continuation lines remain. Ctrl+U and ordinary PTY output cannot do so.
-      const session = useTerminalStore.getState().sessions.find(item => item.sessionId === this.sessionId);
       this.lastInputLineBreak = { terminalSessionId: session?.terminalSessionId,
         generation: session?.terminalGeneration, revision: session?.integrationStateRevision };
     }
@@ -1625,8 +1622,7 @@ class TerminalControllerImpl implements TerminalController {
     this.lastInputLineBreak = null;
     this.unverifiedUserSubmission = false;
     this.recentOutputTail = '';
-    this.userInputSuppressions = 0;
-    this.userInputBlockedListeners.clear();
+    this.userInputSuppressions.clear();
     this.agentInputBlockedFeedbackRef = false;
     this.outputGeneration += 1;
     this.commandDecorations.rebind();
@@ -1742,8 +1738,7 @@ class TerminalControllerImpl implements TerminalController {
     this.displayOutputListeners.clear();
     this.displayOutputParsedListeners.clear();
     this.outputFilters.clear();
-    this.userInputSuppressions = 0;
-    this.userInputBlockedListeners.clear();
+    this.userInputSuppressions.clear();
     this.agentInputBlockedFeedbackRef = false;
     this.lifecycleListeners.clear();
     this.removeFromRegistry(this.sessionId);

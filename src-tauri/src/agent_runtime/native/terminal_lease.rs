@@ -30,6 +30,7 @@ pub(crate) enum TerminalLeaseReleaseReason {
     TimedOut,
     Failed,
     TakenOver,
+    HandedOff,
     TerminalClosed,
     Shutdown,
 }
@@ -658,6 +659,47 @@ impl TerminalLeaseManager {
         }
     }
 
+    pub(crate) fn release_for_foreground_handoff(
+        &self,
+        session_id: &str,
+        agent_session_id: &str,
+        task_id: &str,
+        operation_id: &str,
+        operation: &Arc<crate::terminal_broker::TerminalCommandOperation>,
+    ) -> Result<Option<crate::terminal_broker::TerminalCommandSnapshot>, String> {
+        let (lease, snapshot) = {
+            let turn_guards = self
+                .turn_guards
+                .lock()
+                .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
+            if turn_guards
+                .get(session_id)
+                .is_some_and(|guard| guard.owner != agent_session_id)
+            {
+                return Err(TerminalLeaseError::OwnerMismatch.to_string());
+            }
+            let mut leases = self
+                .leases
+                .lock()
+                .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
+            let Some(record) = leases.get(session_id) else {
+                return Ok(None);
+            };
+            validate_owner(&record.lease, agent_session_id, Some(task_id), operation_id)?;
+            let Some(snapshot) = self.broker.handoff_running_command(session_id, operation)? else {
+                return Ok(None);
+            };
+            let lease = record.lease.clone();
+            leases.remove(session_id);
+            (lease, snapshot)
+        };
+        let reason = TerminalLeaseReleaseReason::HandedOff;
+        self.changed.notify_all();
+        log_release(&lease, reason);
+        self.publish(released_event(lease, reason));
+        Ok(Some(snapshot))
+    }
+
     pub(crate) fn set_reduced_motion(
         &self,
         session_id: &str,
@@ -982,13 +1024,10 @@ impl TerminalLeaseManager {
             .turn_guards
             .lock()
             .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
-        if matches!(source, TerminalInputSource::User)
+        let require_foreground_handoff = matches!(source, TerminalInputSource::User)
             && turn_guards
                 .get(session_id)
-                .is_some_and(|guard| !guard.manual_input)
-        {
-            return Err(TerminalLeaseError::UserInputBlocked.to_string());
-        }
+                .is_some_and(|guard| !guard.manual_input);
         let leases = self
             .leases
             .lock()
@@ -1029,11 +1068,12 @@ impl TerminalLeaseManager {
         match payload {
             TerminalInputPayload::Text(data) => {
                 let observed_bytes = data.as_bytes().to_vec();
-                self.broker.admit_terminal_input(
+                self.broker.admit_terminal_input_with_turn_guard(
                     session_id,
                     broker_source,
                     input_kind,
                     &observed_bytes,
+                    require_foreground_handoff,
                     || {
                         on_transport_admitted();
                         sessions.write_session_input(session_id, data)
@@ -1042,11 +1082,12 @@ impl TerminalLeaseManager {
             }
             TerminalInputPayload::Binary(bytes) => {
                 let observed_bytes = bytes.clone();
-                self.broker.admit_terminal_input(
+                self.broker.admit_terminal_input_with_turn_guard(
                     session_id,
                     broker_source,
                     input_kind,
                     &observed_bytes,
+                    require_foreground_handoff,
                     || {
                         on_transport_admitted();
                         sessions.write_session_bytes(session_id, bytes)

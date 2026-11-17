@@ -351,13 +351,17 @@ pub(crate) fn check_call(
     let mut handles = HashSet::new();
     let mut attempted = false;
     let mut failed = false;
+    let is_verification = |name: &str, arguments: &Value| {
+        name == "run_terminal_command"
+            && arguments.get("command").and_then(Value::as_str)
+                == Some(&action.verification_command)
+            && arguments.get("background").and_then(Value::as_bool) != Some(true)
+            && arguments.get("handoffToUser").and_then(Value::as_bool) != Some(true)
+    };
     for event in events.iter().skip(confirmed + 1) {
         match &event.payload {
             AgentSessionEventPayload::ToolCall { call }
-                if call.name == "run_terminal_command"
-                    && call.arguments.get("command").and_then(Value::as_str)
-                        == Some(&action.verification_command)
-                    && call.arguments.get("background").and_then(Value::as_bool) != Some(true) =>
+                if is_verification(&call.name, &call.arguments) =>
             {
                 verification_calls.insert((event.step_id.clone(), call.call_id.clone()));
             }
@@ -429,13 +433,7 @@ pub(crate) fn check_call(
     if failed {
         return Err("USER_ACTION_VERIFICATION_FAILED: explain the failed verification and request user action again; do not poll or repeat the plan question".into());
     }
-    if !attempted
-        && batch_len == 1
-        && call.name == "run_terminal_command"
-        && call.arguments.get("command").and_then(Value::as_str)
-            == Some(&action.verification_command)
-        && call.arguments.get("background").and_then(Value::as_bool) != Some(true)
-    {
+    if !attempted && batch_len == 1 && is_verification(&call.name, &call.arguments) {
         Ok(())
     } else {
         Err(format!("USER_ACTION_VERIFICATION_REQUIRED: run this exact command alone in foreground and confirm exitCode=0 before dependent work: {}", action.verification_command))

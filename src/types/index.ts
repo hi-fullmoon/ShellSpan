@@ -313,6 +313,7 @@ export interface TerminalInputObservation {
   nativeRecoveryRequired: boolean;
   nativeClearPending: boolean;
   commandObservationUnavailable: boolean;
+  foregroundHandoffActive?: boolean;
   activeCommand?: TerminalCommandObservation;
 }
 

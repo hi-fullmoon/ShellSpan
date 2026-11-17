@@ -160,6 +160,16 @@ input to a foreground program. For example, less accepts
 returns, the same Agent/task's next command releases its interactive lease before
 acquiring the command lease. The uncertain command result remains uncertain and
 is never replayed or retrospectively reported as completed.
+When the user asks to open a full-screen interactive program for their own use,
+`run_terminal_command` accepts `handoffToUser: true` for a cooperative foreground
+command in the bound terminal. The broker requires the native start receipt and
+alternate-screen output within that command's capture fence. The tool returns
+`handedOffToUser: true`, `execution: running`, and a null exit status. The user
+can type immediately and retains input across subsequent Agent turns until the
+command exits and the shell confirms a clean prompt. Stopping the Agent does
+not interrupt the handed-off program. Manual verification still requires a
+command with a confirmed exit status and rejects handoff mode. Normal submission
+approval and input recovery checks also apply to handoff mode.
 Vim/Neovim recovery requests a safe exit with Escape, text `:qa`, and Enter.
 If the editor refuses because a buffer is modified, leave it open and preserve
 the buffer. Saving requires task authorization; forced exit or discarding changes

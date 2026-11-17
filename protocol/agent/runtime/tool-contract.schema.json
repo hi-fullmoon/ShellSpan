@@ -204,6 +204,7 @@
         },
         "explanation": { "type": "string", "minLength": 1, "maxLength": 2048 },
         "background": { "type": "boolean", "default": false },
+        "handoffToUser": { "type": "boolean", "default": false },
         "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 3600000 }
       }
     },
@@ -797,6 +798,7 @@
       ],
       "properties": {
         "execution": { "enum": ["notStarted", "running", "completed", "unknown"] },
+        "handedOffToUser": { "type": "boolean" },
         "processHandle": { "type": ["string", "null"], "pattern": "^job-[0-9a-f]{32}$" },
         "launchState": { "enum": ["confirmed", "rejected", "uncertain", null] },
         "launchWaitTimedOut": { "type": "boolean" },

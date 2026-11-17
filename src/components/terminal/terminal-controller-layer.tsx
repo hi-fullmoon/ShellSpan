@@ -45,6 +45,7 @@ async function refreshTerminalIntegrationState(sessionId: string): Promise<void>
       || remoteRolloutMissing;
     useTerminalStore.getState().setIntegrationState({
       sessionId,
+      inputObservation: integrated.inputObservation,
       terminalSessionId: integrated.terminalSessionId,
       terminalGeneration: integrated.terminalGeneration,
       integrationStateRevision: integrated.integrationStateRevision,
@@ -150,7 +151,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
             inputBlocked: true,
           }));
         }
-      }) : () => {},
+      }, () => !useTerminalStore.getState().sessions.find((session) => session.sessionId === sessionId)?.foregroundHandoffActive) : () => {},
       removeLifecycle: controller.subscribeLifecycle((lifecycle) => {
         if (lifecycle.type === 'rebound' || lifecycle.type === 'disposed') clearTurn(agentSessionId);
       }),
@@ -432,6 +433,15 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       if (lease.state === 'acquired') {
         await pendingTurnBindings.get(lease.agentSessionId);
         if (disposed) return;
+      }
+      if (lease.state === 'released' && lease.reason === 'handedOff') {
+        const active = activeLeases.get(lease.sessionId);
+        if (active?.lease.operationId === lease.operationId) {
+          cleanup(active, true);
+          clearTurn(lease.agentSessionId);
+        }
+        await refreshTerminalIntegrationState(lease.sessionId);
+        return;
       }
       if (fencedTurns.has(lease.agentSessionId)) {
         if (lease.state === 'acquired') {
