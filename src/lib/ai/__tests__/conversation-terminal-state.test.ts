@@ -75,8 +75,8 @@ describe('conversation terminal output state', () => {
     },
   );
 
-  it('drops provisionally settled reasoning when the request fails before commit', () => {
-    const nodes = flatten(projectAgentChatNodes([
+  it('keeps failed text visible and gives a retry in the same step its own answer', () => {
+    const failed = [
       ...streamingEvents,
       sessionEvent(streamingEvents.length, {
         ...scope,
@@ -90,10 +90,55 @@ describe('conversation terminal output state', () => {
           failure: { kind: 'transport', message: 'connection lost' },
         },
       }),
-    ]));
+    ];
+    const nodes = flatten(projectAgentChatNodes(failed));
 
     expect(nodes.some((node) => node.kind === 'reasoning')).toBe(false);
-    expect(nodes.some((node) => node.kind === 'assistantMessage')).toBe(false);
+    const partial = nodes.find(node => node.kind === 'assistantMessage');
+    expect(partial).toMatchObject({ state: 'failed', partialReason: 'requestFailed',
+      blocks: [{ type: 'text', text: 'Partial response' }] });
+    const retried = projectAgentChatNodes([...failed,
+      sessionEvent(failed.length, { ...scope, type: 'assistant/chunk',
+        data: { requestId: 'request-02', textDelta: 'Retry response' } }),
+      sessionEvent(failed.length + 1, { ...scope, type: 'assistant/message',
+        data: { messageId: 'retry-message', content: [{ type: 'text', text: 'Retry response' }],
+          usage: {}, stopReason: 'stop', interrupted: false } }),
+      sessionEvent(failed.length + 2, { ...scope, type: 'turn/end', data: { reason: 'completed' } }),
+    ]);
+    expect(retried.filter(node => node.kind === 'assistantMessage')).toEqual([
+      partial,
+      expect.objectContaining({ requestId: 'request-02', state: 'completed', hasTurnTail: true,
+        blocks: [{ type: 'text', text: 'Retry response' }] }),
+    ]);
+    expect(retried.find(node => node.kind === 'turnTail')).toMatchObject({ summaryText: 'Retry response' });
+  });
+
+  it('keeps the saved prefix visible through output limit continuation without copying it as final', () => {
+    const next = { ...scope, stepId: 'step-02' };
+    const seq = streamingEvents.length;
+    const events = [...streamingEvents,
+      sessionEvent(seq, { ...scope, type: 'request/failure', data: {
+        requestId: 'request-01', attempt: 1, maxAttempts: 1, cumulativeDelayMs: 0,
+        interrupted: true, failure: { kind: 'terminal', code: 'OUTPUT_LIMIT', message: 'Length limit' },
+      } }),
+      sessionEvent(seq + 1, { ...scope, type: 'assistant/message', data: {
+        messageId: 'limited-message', content: [{ type: 'text', text: 'Partial response' }],
+        usage: {}, stopReason: 'length', interrupted: true,
+      } }),
+      sessionEvent(seq + 2, { ...scope, type: 'step/end', data: { reason: 'outputLimitContinuation' } }),
+      sessionEvent(seq + 3, { ...next, type: 'step/start' }),
+      sessionEvent(seq + 4, { ...next, type: 'assistant/chunk',
+        data: { requestId: 'request-02', textDelta: 'Continued response' } }),
+    ];
+    const before = projectAgentChatNodes(streamingEvents).find(node => node.kind === 'assistantMessage');
+    expect(projectAgentChatNodes(events).filter(node => node.kind === 'assistantMessage')).toEqual([
+      expect.objectContaining({ key: before?.key, state: 'interrupted', partialReason: 'outputLimit' }),
+      expect.objectContaining({ state: 'streaming', requestId: 'request-02' }),
+    ]);
+    const stopped = projectAgentChatNodes([...events,
+      sessionEvent(seq + 5, { ...next, type: 'turn/end', data: { reason: 'cancelled' } }),
+    ]);
+    expect(stopped.find(node => node.kind === 'turnTail')).toMatchObject({ summaryText: undefined });
   });
 
   it('settles only the ending step and preserves the next step as streaming', () => {

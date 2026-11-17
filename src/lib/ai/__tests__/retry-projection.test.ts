@@ -17,14 +17,17 @@ const events: AgentSessionEvent[] = [
 ];
 
 describe('failed request projections', () => {
-  it('withdraws failed drafts immediately and does not join them to the next streaming answer', () => {
+  it('preserves failed text separately from the next streaming answer', () => {
     expect(JSON.stringify(projectAgentChatNodes(events.slice(0, 2)))).toContain('discard text');
-    expect(JSON.stringify(projectAgentChatNodes(events.slice(0, 3)))).not.toContain('discard');
+    const failed = projectAgentChatNodes(events.slice(0, 3)).find(node => node.kind === 'assistantMessage');
+    expect(failed).toMatchObject({ state: 'failed', blocks: [{ type: 'text', text: 'discard text' }] });
     for (const end of [6, 7]) {
       const nodes = projectAgentChatNodes(events.slice(0, end));
-      expect(nodes.filter(node => node.kind === 'assistantMessage')).toHaveLength(1);
-      expect(JSON.stringify(nodes)).toContain('clean text');
-      expect(JSON.stringify(nodes)).not.toContain('discard');
+      expect(nodes.filter(node => node.kind === 'assistantMessage')).toEqual([
+        failed, expect.objectContaining({ requestId: 'success',
+          blocks: expect.arrayContaining([{ type: 'text', text: 'clean text' }]) }),
+      ]);
+      expect(JSON.stringify(nodes)).not.toContain('discard reasoning');
     }
   });
   it('retains separate failed chunk and retry audit records and replays identically', () => {

@@ -293,7 +293,7 @@ function createChatProjection() {
   const abandonedPreparations = new Set<string>();
   const turnSnapshots = new Map<string, {
     process: AiTurnProcessNode;
-    closing?: AiAssistantMessageNode;
+    outputs: readonly AiAssistantMessageNode[];
     tail?: AiTurnTailNode;
     previousStats: AiDurableSessionStats | undefined;
   }>();
@@ -425,6 +425,7 @@ function createChatProjection() {
     state: AiAssistantMessageNode['state'],
     blocks?: readonly AgentSessionAssistantContentBlock[],
     messageId?: string,
+    partialReason?: AiAssistantMessageNode['partialReason'],
   ): void => {
     const turn = ensureTurn(event);
     const turnId = eventTurnId(event);
@@ -432,9 +433,15 @@ function createChatProjection() {
     let key = `assistant:${turnId ?? 'unscoped'}:${identity}`;
     let previous = turn?.assistants.get(key) ?? unscopedNodes.get(key);
     let previousAssistant = previous?.kind === 'assistantMessage' ? previous : undefined;
+    if (requestId && previousAssistant?.requestId && previousAssistant.requestId !== requestId) {
+      key = `${key}:request:${requestId}`;
+      previous = turn?.assistants.get(key) ?? unscopedNodes.get(key);
+      previousAssistant = previous?.kind === 'assistantMessage' ? previous : undefined;
+    }
     if (blocks !== undefined
       && previousAssistant !== undefined
       && previousAssistant.state !== 'streaming'
+      && previousAssistant.partialReason === undefined
       && messageId !== undefined
       && previousAssistant.messageId !== messageId) {
       key = `assistant:${turnId ?? 'unscoped'}:${messageId}`;
@@ -458,6 +465,7 @@ function createChatProjection() {
       requestId: requestId ?? previousAssistant?.requestId ?? null,
       blocks: blocks ?? [{ type: 'text', text: content }],
       state,
+      ...(partialReason && { partialReason }),
     };
     putAssistant(turnId, node);
   };
@@ -538,6 +546,7 @@ function createChatProjection() {
             ...node,
             lastSeq: event.seq,
             state: status === 'failed' || status === 'cancelled' ? status : 'interrupted',
+            partialReason: 'interrupted',
           });
         if (node.turnId) {
           const turn = turns.get(node.turnId);
@@ -950,15 +959,19 @@ function createChatProjection() {
           request.completedAt = event.timeUnixMs;
           request.stopReason = 'error';
         }
-        // Failed chunks remain in the audit log, but are not an assistant answer.
+        // Keep the text from this attempt readable while the replacement gets
+        // its own message. Reasoning from failed attempts remains in Activity.
         const turn = event.turnId ? turns.get(event.turnId) : undefined;
         for (const nodes of [turn?.assistants, turn?.children, unscopedNodes]) {
           if (!nodes) continue;
           for (const [key, node] of nodes) {
-            if ((node.kind === 'assistantMessage' || node.kind === 'reasoning')
-              && node.requestId === event.data.requestId
-              && (node.state === 'streaming'
-                || (node.kind === 'reasoning' && node.state === 'settled'))) {
+            if ((node.kind !== 'assistantMessage' && node.kind !== 'reasoning')
+              || node.requestId !== event.data.requestId) continue;
+            if (node.kind === 'assistantMessage' && node.state === 'streaming') {
+              nodes.set(key, { ...node, lastSeq: event.seq,
+                state: event.data.failure.code === 'OUTPUT_LIMIT' ? 'interrupted' : 'failed',
+                partialReason: event.data.failure.code === 'OUTPUT_LIMIT' ? 'outputLimit' : 'requestFailed' });
+            } else if (node.kind === 'reasoning' && (node.state === 'streaming' || node.state === 'settled')) {
               nodes.delete(key);
             }
           }
@@ -967,6 +980,7 @@ function createChatProjection() {
       }
       case 'assistant/chunk': {
         const request = requests.get(event.data.requestId);
+        if (event.stepId) activeRequestByStep.set(event.stepId, event.data.requestId);
         if (event.data.toolCallDelta) requestsWithToolCalls.add(event.data.requestId);
         if (request && request.firstResponseAt === undefined
           && (event.data.reasoningDelta || event.data.textDelta || event.data.toolCallDelta)) {
@@ -1012,6 +1026,9 @@ function createChatProjection() {
           event.data.interrupted ? 'interrupted' : 'completed',
           event.data.content,
           event.data.messageId,
+          event.data.interrupted
+            ? (event.data.stopReason === 'length' ? 'outputLimit' : 'interrupted')
+            : undefined,
         );
         if (requestId) {
           updateRequestUsage(
@@ -1365,7 +1382,7 @@ function createChatProjection() {
 
       const cached = turnSnapshots.get(turn.id);
       if (cached && !dirtyTurns.has(turn.id) && cached.previousStats === sessionStats) {
-        nodes.push(...conversationTurnTimeline(users, cached.process, cached.closing));
+        nodes.push(...conversationTurnTimeline(users, cached.process, cached.outputs));
         nodes.push(...groupConversationArtifacts((scopedArtifacts.get(turn.id) ?? []).sort(topLevelSort)));
         if (cached.tail) {
           nodes.push(cached.tail);
@@ -1383,18 +1400,22 @@ function createChatProjection() {
       const candidate = assistants[assistants.length - 1];
       const latestRequestId = latestStepId ? activeRequestByStep.get(latestStepId) : undefined;
       const closing = candidate
+        && candidate.partialReason === undefined
         && candidate.stepId === latestStepId
         && (!latestRequestId || candidate.requestId === latestRequestId)
         && !requestsWithToolCalls.has(candidate.requestId ?? '')
         && textContent(candidate.blocks).trim() !== ''
         && !hasToolCall(candidate.blocks)
         ? candidate : undefined;
+      const outputs = assistants.filter(assistant => assistant.key === closing?.key
+        || (assistant.partialReason !== undefined && textContent(assistant.blocks).trim() !== ''));
+      const outputKeys = new Set(outputs.map(assistant => assistant.key));
       const questionCallIds = new Set(
         [...turn.children.values()].flatMap((child) =>
           child.kind === 'question' ? [child.question.identity.callId] : [],
         ),
       );
-      const children = markRecoveredToolReads([...turn.children.values(), ...assistants.filter((assistant) => assistant.key !== closing?.key)]
+      const children = markRecoveredToolReads([...turn.children.values(), ...assistants.filter((assistant) => !outputKeys.has(assistant.key))]
         .filter((child) => child.kind !== 'tool' || !questionCallIds.has(child.callId))
         .sort(processChildSort));
       const status: AiTurnProcessStatus = turn.startSeq === undefined
@@ -1421,8 +1442,11 @@ function createChatProjection() {
       };
       const hasTurnTail = turn.startSeq !== undefined && turn.endSeq !== undefined
         && Boolean(turn.endReason && turn.endTimestamp);
-      const closingNode = closing && (hasTurnTail ? { ...closing, hasTurnTail: true } : closing);
-      nodes.push(...conversationTurnTimeline(users, process, closingNode));
+      if (closing?.state === 'completed' && hasTurnTail) {
+        const index = outputs.indexOf(closing);
+        outputs[index] = { ...closing, hasTurnTail: true };
+      }
+      nodes.push(...conversationTurnTimeline(users, process, outputs));
       nodes.push(...groupConversationArtifacts((scopedArtifacts.get(turn.id) ?? []).sort(topLevelSort)));
 
       let tail: AiTurnTailNode | undefined;
@@ -1453,7 +1477,7 @@ function createChatProjection() {
           usage: aggregateUsage(stats),
           stats,
           sessionStats,
-          summaryText: closing ? textContent(closing.blocks) : undefined,
+          summaryText: closing?.state === 'completed' ? textContent(closing.blocks) : undefined,
           durationMs: turn.startedAt === undefined ? undefined
             : Math.max(0, Date.parse(turn.endTimestamp) - turn.startedAt),
           models: [...new Map(turn.requestIds.flatMap((requestId) => {
@@ -1465,7 +1489,7 @@ function createChatProjection() {
         };
         nodes.push(tail);
       }
-      turnSnapshots.set(turn.id, { process, closing: closingNode, tail, previousStats });
+      turnSnapshots.set(turn.id, { process, outputs, tail, previousStats });
     }
 
     dirtyTurns.clear();

@@ -64,7 +64,7 @@ pub(super) fn split_sanitized_event(event: AgentSessionEvent) -> Vec<AgentSessio
         .collect()
 }
 
-fn split_delta(value: Option<&str>) -> Vec<&str> {
+pub(in crate::agent_runtime) fn split_delta(value: Option<&str>) -> Vec<&str> {
     fn append<'a>(value: &'a str, chunks: &mut Vec<&'a str>) {
         if value.len() <= MAX_AGENT_STREAM_DELTA_BYTES && redact_sensitive_text(value) == value {
             chunks.push(value);

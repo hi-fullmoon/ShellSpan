@@ -29,8 +29,7 @@ impl StreamWriter {
                                 continue;
                             }
                             if let Err(error) = sessions.append_batch(&session_id, payloads) {
-                                *failure.lock().expect("stream writer error lock") =
-                                    Some(format!("failed to commit model stream batch: {error}"));
+                                *failure.lock().expect("stream writer error lock") = Some(error);
                             }
                         }
                         Command::Fence(reply) => {

@@ -43,6 +43,14 @@ static TERMINAL_PRIVATE_KEYS: LazyLock<Regex> =
 static TERMINAL_PRIVATE_KEY_BOUNDARY: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)-----(BEGIN|END)(?:OPENSSH|RSA|EC|DSA|ENCRYPTED)?PRIVATEKEY-----$").unwrap()
 });
+const PRIVATE_KEY_BEGIN_MARKERS: [&str; 6] = [
+    "-----BEGIN PRIVATE KEY-----",
+    "-----BEGIN OPENSSH PRIVATE KEY-----",
+    "-----BEGIN RSA PRIVATE KEY-----",
+    "-----BEGIN EC PRIVATE KEY-----",
+    "-----BEGIN DSA PRIVATE KEY-----",
+    "-----BEGIN ENCRYPTED PRIVATE KEY-----",
+];
 
 pub(crate) enum PrivateKeyBoundary {
     Begin,
@@ -57,12 +65,61 @@ pub(crate) fn terminal_private_key_boundary(value: &str) -> Option<PrivateKeyBou
         PrivateKeyBoundary::End
     })
 }
-static SENSITIVE_VALUES: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(concat!(
-        r#"(?i)(?P<prefix>\b(?:[a-z0-9]+[_-])*(?:api[_-]?key|access[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|password|passwd|passphrase|private[_-]?key|secret|token|authorization)["']?[ \t]*[:=][ \t]*|--(?:api[_-]key|access[_-]token|auth[_-]token|client[_-]secret|password|passwd|passphrase|private[_-]key|secret|token)(?:[ \t]*=[ \t]*|[ \t]+))"#,
-        r#"(?P<value>\[REDACTED(?:[ ]PRIVATE[ ]KEY)?\]|\$\{\{[^\r\n]*?\}\}|"(?:\\.|[^"\\])*(?:"|\z)|'(?:''|[^'])*(?:'|\z)|[|>][+-]?[ \t]*\r?\n(?:[ \t]+[^\r\n]*(?:\r?\n|\z))*|(?:Bearer|Basic)[ \t]+[^\s"'`,;<>]+|[^\s"'`,;<>\[\]{}]+)"#,
-    )).unwrap()
+macro_rules! credential_prefix {
+    () => {
+        r#"\b(?:[a-z0-9]+[_-])*(?:api[_-]?key|access[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|password|passwd|passphrase|private[_-]?key|secret|token|authorization)["']?[ \t]*"#
+    };
+}
+macro_rules! flag_prefix {
+    () => {
+        r"--(?:api[_-]key|access[_-]token|auth[_-]token|client[_-]secret|password|passwd|passphrase|private[_-]key|secret|token)"
+    };
+}
+macro_rules! credential_assignment {
+    () => {
+        concat!(
+            "(?:",
+            credential_prefix!(),
+            r"[:=][ \t]*|",
+            flag_prefix!(),
+            r"(?:[ \t]*=[ \t]*|[ \t]+))"
+        )
+    };
+}
+
+macro_rules! credential_values {
+    ($double_quoted:literal) => {
+        Regex::new(concat!(
+            "(?i)(?P<prefix>", credential_assignment!(), ")",
+            r#"(?P<value>\[REDACTED(?:[ ]PRIVATE[ ]KEY)?\]|\$\{\{[^\r\n]*?\}\}|"#,
+            $double_quoted,
+            r#"|'(?:''|[^'])*(?:'|\z)|[|>][+-]?[ \t]*\r?\n(?:[ \t]+[^\r\n]*(?:\r?\n|\z))*|(?:Bearer|Basic)[ \t]+[^\s"'`,;<>]+|[^\s"'`,;<>\[\]{}]+)"#,
+        )).unwrap()
+    };
+}
+
+// Keep the journal validator compatible with existing events. New model
+// output also recognizes quoted values that cross an escape boundary.
+static SENSITIVE_VALUES: LazyLock<Regex> =
+    LazyLock::new(|| credential_values!(r#""(?:\\.|[^"\\])*(?:"|\z)"#));
+static MODEL_SENSITIVE_VALUES: LazyLock<Regex> =
+    LazyLock::new(|| credential_values!(r#""(?:\\(?s:.)|[^"\\])*(?:"|\\?\z)"#));
+static OPEN_PRIVATE_KEY_MARKER: LazyLock<Regex> = LazyLock::new(|| {
+    let prefixes = PRIVATE_KEY_BEGIN_MARKERS
+        .iter()
+        .flat_map(|marker| (5..marker.len()).map(|end| &marker[..end]))
+        .collect::<Vec<_>>()
+        .join("|");
+    Regex::new(&format!(r"(?i)(?:{prefixes})\z")).unwrap()
 });
+static OPEN_CREDENTIAL: LazyLock<Regex> =
+    LazyLock::new(|| {
+        Regex::new(concat!(
+        "(?i)(?:", credential_prefix!(), "|", flag_prefix!(), r"[ \t]*|",
+        credential_assignment!(),
+        r"(?:Bearer[ \t]*|Basic[ \t]*|\$\{\{[^}\r\n]*(?:\}[^}\r\n]+)*\}?|[|>][+-]?[ \t]*\r?|))\z"
+    )).unwrap()
+    });
 static SECRET_REFERENCES: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\$\{\{[ \t]*secrets\.[A-Za-z_][A-Za-z0-9_]*[ \t]*\}\}$").unwrap()
 });
@@ -71,6 +128,77 @@ static URL_CREDENTIALS: LazyLock<Regex> = LazyLock::new(|| {
 });
 static TOKEN_CANDIDATES: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[A-Za-z0-9_][A-Za-z0-9_.-]*").unwrap());
+
+/// A preview can only publish text that no later delta can turn into a
+/// credential. Keep the unfinished word and any open multiline value.
+#[derive(Default)]
+pub(crate) struct StreamingRedactor {
+    pending: String,
+    preview_suspended: bool,
+}
+
+impl StreamingRedactor {
+    pub(crate) fn push(&mut self, delta: &str) {
+        if !self.preview_suspended {
+            self.pending.push_str(delta);
+        }
+    }
+
+    pub(crate) fn drain(&mut self, finished: bool) -> String {
+        if finished {
+            return redact_model_output_text(&std::mem::take(&mut self.pending));
+        }
+        let value = &self.pending;
+        let word = value.rfind(char::is_whitespace).map_or(0, |index| index);
+        let mut cut = if value[word..]
+            .chars()
+            .all(|c| !c.is_ascii() || c.is_whitespace())
+        {
+            value.len()
+        } else {
+            word
+        };
+        if let Some(open) = OPEN_CREDENTIAL.find(value) {
+            cut = cut.min(open.start());
+        }
+        if let Some(open) = OPEN_PRIVATE_KEY_MARKER.find(value) {
+            cut = cut.min(open.start());
+        }
+        let mut protected = PRIVATE_KEYS.find_iter(value).collect::<Vec<_>>();
+        protected.extend(
+            MODEL_SENSITIVE_VALUES
+                .captures_iter(value)
+                .filter_map(|captures| {
+                    let matched = captures.get(0)?;
+                    let field = captures.name("value")?.as_str();
+                    // A YAML block can acquire another indented line in the next delta.
+                    let tail = &value[matched.end()..];
+                    if field.starts_with(['|', '>'])
+                        && field.contains('\n')
+                        && (tail.starts_with([' ', '\t']) || matches!(tail, "" | "\r"))
+                    {
+                        cut = cut.min(matched.start());
+                    }
+                    Some(matched)
+                }),
+        );
+        protected.sort_unstable_by_key(|matched| std::cmp::Reverse(matched.start()));
+        for matched in protected {
+            if matched.start() < cut && (cut < matched.end() || matched.end() == value.len()) {
+                cut = matched.start();
+            }
+        }
+        let safe = redact_model_output_text(&value[..cut]);
+        self.pending.drain(..cut);
+        // Do not release a truncated secret when a provider sends an unusually
+        // long open value. The final message is sanitized from the full response.
+        if self.pending.len() > 128 * 1024 {
+            self.pending.clear();
+            self.preview_suspended = true;
+        }
+        safe
+    }
+}
 
 pub(crate) fn redact_terminal_rows(rows: &mut [String]) {
     // Screen rows can split even the PEM delimiters. Match across their visual
@@ -95,9 +223,17 @@ pub(crate) fn redact_terminal_rows(rows: &mut [String]) {
 }
 
 pub(crate) fn redact_sensitive_text(value: &str) -> String {
+    redact_text(value, &SENSITIVE_VALUES)
+}
+
+pub(crate) fn redact_model_output_text(value: &str) -> String {
+    redact_text(value, &MODEL_SENSITIVE_VALUES)
+}
+
+fn redact_text(value: &str, sensitive_values: &Regex) -> String {
     let redacted = PRIVATE_KEYS.replace_all(value, REDACTED_PRIVATE_KEY);
     let redacted = URL_CREDENTIALS.replace_all(&redacted, "${prefix}[REDACTED]@");
-    let redacted = SENSITIVE_VALUES.replace_all(&redacted, |captures: &Captures<'_>| {
+    let redacted = sensitive_values.replace_all(&redacted, |captures: &Captures<'_>| {
         let value = &captures["value"];
         let unquoted = value.trim_matches(['\'', '"']);
         // A GitHub Actions secret reference names a credential without exposing it.
@@ -317,6 +453,34 @@ mod tests {
         ] {
             assert_eq!(redact_sensitive_text(input), expected);
             assert_eq!(redact_sensitive_text(expected), expected);
+        }
+    }
+
+    #[test]
+    fn preview_is_equivalent_to_full_redaction_at_each_character_boundary() {
+        for input in [
+            "检查配置。 Authorization: Bearer local-only-value 结束。",
+            "Start --password  =  'local-only value' done.",
+            "Start password \t= \"local-only\\\"\nvalue\" done.",
+            "Start password=\"local-only value \\",
+            "Start password: |\r\n  local-only\r\n  value\r\nDone.",
+            "连接 https://user:local-only-value@example.test/path 完成。",
+            "输出 -----BEGIN OPENSSH PRIVATE KEY-----\nlocal-only value\n-----END OPENSSH PRIVATE KEY-----\n结束。",
+            "输出 -----BEGIN OPENſſH PRIVATE KEY-----\nlocal-only value\n-----END OPENſſH PRIVATE KEY-----\n结束。",
+            "Start sk-ant-abcdefghijklmnopqrstuvwxyz1234567890. Done.",
+            "Start token='${{ secrets.ACCESS_TOKEN }}'; Done.",
+            "纯中文不需要等到下一行。",
+        ] {
+            let expected = redact_model_output_text(input);
+            let mut stream = StreamingRedactor::default();
+            let mut preview = String::new();
+            for character in input.chars() {
+                stream.push(character.encode_utf8(&mut [0; 4]));
+                preview.push_str(&stream.drain(false));
+                assert!(expected.starts_with(&preview), "stream published unstable content for {input:?}");
+            }
+            preview.push_str(&stream.drain(true));
+            assert_eq!(preview, expected);
         }
     }
 }

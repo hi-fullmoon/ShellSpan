@@ -206,8 +206,15 @@ pub(crate) fn model_block_has_output(block: &ModelContentBlock) -> bool {
 pub(crate) fn committed_model_content(
     content: &[ModelContentBlock],
 ) -> Result<Vec<ModelContentBlock>, NormalizedModelError> {
+    let mut content = content.to_vec();
+    for block in &mut content {
+        if let ModelContentBlock::Text { text } | ModelContentBlock::Reasoning { text, .. } = block
+        {
+            *text = crate::redaction::redact_model_output_text(text);
+        }
+    }
     serde_json::from_value(crate::redaction::redact_json_value(
-        &serde_json::to_value(content)
+        &serde_json::to_value(&content)
             .map_err(|error| replay_error("REPLAY_CONTENT_INVALID", error.to_string()))?,
     ))
     .map_err(|error| replay_error("REPLAY_CONTENT_INVALID", error.to_string()))

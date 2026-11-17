@@ -61,6 +61,7 @@ export interface AiAssistantMessageNode extends AiConversationNodeBase {
   /** Provider-ordered durable blocks. */
   readonly blocks: readonly AgentSessionAssistantContentBlock[];
   readonly state: 'streaming' | 'completed' | 'interrupted' | 'failed' | 'cancelled';
+  readonly partialReason?: 'interrupted' | 'requestFailed' | 'outputLimit';
   /** The settled turn footer owns this answer's copy action and timestamp. */
   readonly hasTurnTail?: boolean;
 }

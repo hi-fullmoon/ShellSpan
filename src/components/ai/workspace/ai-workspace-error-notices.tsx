@@ -10,6 +10,7 @@ export interface AiWorkspaceErrorNoticesProps {
   readonly composerState?: AiComposerState;
   readonly syncError?: AiSessionError;
   readonly syncRecovery?: AiSessionSyncRecovery;
+  readonly storageFaultAtSeq?: number;
   readonly onRetrySync?: () => Promise<void>;
   readonly onDismissError?: () => void;
 }
@@ -19,6 +20,7 @@ export function AiWorkspaceErrorNotices({
   composerState,
   syncError,
   syncRecovery,
+  storageFaultAtSeq,
   onRetrySync,
   onDismissError,
 }: AiWorkspaceErrorNoticesProps): React.ReactNode {
@@ -35,7 +37,14 @@ export function AiWorkspaceErrorNotices({
       className="ai-workspace-error-notices flex w-full min-w-0 shrink-0 flex-col gap-1.5"
     >
       <AiNoticeTransition>
-        {syncError ? (
+        {storageFaultAtSeq !== undefined ? (
+          <AiErrorNotice title={t('ai.workspace.recovery.title')}>
+            {t('ai.error.journalSettlementUnsaved')}
+          </AiErrorNotice>
+        ) : null}
+      </AiNoticeTransition>
+      <AiNoticeTransition>
+        {syncError && storageFaultAtSeq === undefined ? (
           <AiErrorNotice
             title={t('ai.workspace.recovery.title')}
             action={onRetrySync && <AiNoticeAction

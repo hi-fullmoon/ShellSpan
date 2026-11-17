@@ -10,17 +10,18 @@ import type {
 export function conversationTurnTimeline(
   users: readonly AiUserMessageNode[],
   process: AiTurnProcessNode,
-  closing?: AiAssistantMessageNode,
+  outputs: readonly AiAssistantMessageNode[],
 ): readonly AiConversationNode[] {
   const steering = users.filter(user => user.inputKind === 'steer');
   const initial = users.filter(user => user.inputKind !== 'steer');
-  if (steering.length === 0) return [...initial, process, ...(closing ? [closing] : [])];
+  if (steering.length === 0) return [...initial, process, ...outputs];
 
   const nodes: AiConversationNode[] = [...initial];
   const segments: AiTurnProcessChildNode[][] = Array.from({ length: steering.length + 1 }, () => []);
   // Closing text can precede a correction that arrived before the turn finished.
   // In that case it belongs to the earlier segment, not below the new input.
-  for (const child of [...process.children, ...(closing ? [closing] : [])]) {
+  const outputKeys = new Set(outputs.map(output => output.key));
+  for (const child of [...process.children, ...outputs]) {
     const next = steering.findIndex(user => user.firstSeq > child.firstSeq);
     segments[next < 0 ? steering.length : next].push(child);
   }
@@ -29,8 +30,7 @@ export function conversationTurnTimeline(
     const next = steering[index];
     if (user) nodes.push(user);
     const children = segments[index];
-    const answer = children.find(child => child.key === closing?.key);
-    const processChildren = children.filter(child => child !== answer);
+    const processChildren = children.filter(child => !outputKeys.has(child.key));
     nodes.push({
       ...process,
       key: user ? `${process.key}:after:${user.messageId}` : process.key,
@@ -45,8 +45,10 @@ export function conversationTurnTimeline(
       children: processChildren,
       childKeys: processChildren.map(child => child.key),
     });
-    if (answer?.kind === 'assistantMessage') {
-      nodes.push(next && answer.hasTurnTail ? { ...answer, hasTurnTail: false } : answer);
+    for (const output of children) {
+      if (output.kind === 'assistantMessage' && outputKeys.has(output.key)) {
+        nodes.push(next && output.hasTurnTail ? { ...output, hasTurnTail: false } : output);
+      }
     }
   }
   return nodes;

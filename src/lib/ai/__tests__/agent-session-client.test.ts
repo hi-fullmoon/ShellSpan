@@ -6,6 +6,7 @@ import {
   type AgentSessionStreamTransport,
 } from '@/lib/ai/agent-session-client';
 import { agentSessionSteerFixture, sessionEvent } from '@/tests/fixtures/agent-session';
+import { agentSessionView } from '@/lib/ai/agent-session-adapter';
 import type {
   AgentSessionEvent,
   AgentSessionSnapshot,
@@ -272,6 +273,41 @@ describe('AgentSessionCommittedClient', () => {
     await vi.advanceTimersByTimeAsync(5_050);
     expect(publish).toHaveBeenCalledOnce();
     expect(client.state().events).toEqual([created, approval]);
+  });
+
+  it.each(['idle', 'ended'] as const)('publishes a storage fault and clears it at durable %s', async (settlement) => {
+    vi.useFakeTimers();
+    const status = sessionEvent(1, { type: 'agent/status', data: { status: 'running' } });
+    const chunk = sessionEvent(2, { turnId: 'turn', stepId: 'step', type: 'assistant/chunk',
+      data: { requestId: 'request', textDelta: 'Saved response' } });
+    const source = transport([created, status, chunk]);
+    let storageFaultAtSeq: number | undefined;
+    const client = createClient('session-fixture', {
+      ...source,
+      committedEvents: async request => ({ ...await source.committedEvents(request), storageFaultAtSeq }),
+    });
+    const published: AgentSessionStreamState[] = [];
+    client.onChange(state => published.push(state));
+    await client.connect();
+    storageFaultAtSeq = chunk.seq;
+    await vi.advanceTimersByTimeAsync(5_050);
+    expect(published).toHaveLength(2);
+    const fault = published[published.length - 1]!;
+    expect(fault).toMatchObject({ storageFaultAtSeq: 2, lastCommittedSeq: 2, hasTerminalEvent: false });
+    expect(fault.events).toBe(published[0]?.events);
+    const view = agentSessionView(fault);
+    expect(view).toMatchObject({ status: 'failed', storageFaultAtSeq: 2, snapshot: { value: { ended: false } } });
+    expect(view.nodes.find(node => node.kind === 'assistantMessage')).toMatchObject({ state: 'interrupted' });
+
+    const ended = settlement === 'ended';
+    const settled = ended
+      ? sessionEvent(3, { type: 'session/ended', data: { status: 'failed', reason: 'journalWriteFailed' } })
+      : sessionEvent(3, { type: 'agent/status', data: { status: 'idle', reason: 'stoppedByUser' } });
+    storageFaultAtSeq = undefined;
+    source.replace([created, status, chunk, settled]);
+    source.publish(settled);
+    expect(await client.settled()).toMatchObject({ lastCommittedSeq: 3, hasTerminalEvent: ended });
+    expect(client.state().storageFaultAtSeq).toBeUndefined();
   });
 
   it('reconciles on foreground return and unregisters timers and listeners on disconnect', async () => {

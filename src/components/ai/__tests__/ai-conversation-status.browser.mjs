@@ -8,6 +8,7 @@ import { chromium, webkit } from 'playwright';
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const server = await createServer({ root, configFile: false, appType: 'custom', logLevel: 'error',
   cacheDir: `/tmp/shellspan-conversation-status-${process.pid}`,
+  optimizeDeps: { entries: ['src/components/ai/__tests__/ai-conversation-status.browser.tsx'] },
   plugins: [react(), tailwindcss()], resolve: { alias: { '@': `${root}src` } },
   server: { host: '127.0.0.1', port: 0, hmr: false } });
 server.middlewares.use('/__status', async (_request, response) => {
@@ -70,6 +71,18 @@ try {
           for (const status of ['idle', 'completed', 'cancelled', 'failed']) {
             await page.evaluate(status => window.conversationStatus.render(status), status);
             assert.equal(await indicator.count(), 0);
+          }
+          for (const mode of ['agent', 'ask']) {
+            const text = await page.evaluate(mode => window.conversationStatus.storageFault(mode), mode);
+            const notice = page.getByText(locale === 'zh-CN' ? '结束状态尚未保存' : 'its final status could not be saved');
+            await notice.waitFor({ state: 'visible' });
+            assert.equal(await page.locator('[data-ai-running-indicator], [data-ai-thinking-indicator]').count(), 0);
+            const answer = page.locator('[data-ai-node-kind="assistantMessage"]');
+            await answer.waitFor({ state: 'visible' });
+            const shown = await answer.textContent();
+            for (const word of text.split(/\s+/)) assert.ok(shown.includes(word), 'Saved response disappeared');
+            assert.equal(await answer.locator('[data-state="interrupted"]').count(), 1);
+            assert.equal(await notice.evaluate(element => element.getBoundingClientRect().right <= innerWidth + 1), true);
           }
           assert.deepEqual(errors, []);
           await page.close();

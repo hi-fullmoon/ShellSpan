@@ -134,17 +134,7 @@ pub(crate) async fn drive_agent(
                         AgentDriverSettlement::Idle
                     }
                     Ok(()) => AgentDriverSettlement::Waiting,
-                    Err(error) => {
-                        let reason = format!("runtimeFailure: {error}");
-                        let _ = close_open_scope(&sessions, &entry, &reason);
-                        let _ = sessions.terminate(
-                            &entry.session_id,
-                            AgentSessionStatus::Failed,
-                            reason,
-                        );
-                        let _ = entry.set_phase(AgentLifecyclePhase::Stopping);
-                        AgentDriverSettlement::Failed
-                    }
+                    Err(error) => settle_failed_driver(&sessions, &entry, &error),
                 }
             }
             Err(message) if message.starts_with("toolSchedulerFailure:") => {
@@ -152,20 +142,42 @@ pub(crate) async fn drive_agent(
                 AgentDriverSettlement::Waiting
             }
             Err(_) if entry.cancellation().is_cancelled() => {
-                let _ = close_open_scope(&sessions, &entry, "cancelled");
+                if close_open_scope(&sessions, &entry, "cancelled").is_err() {
+                    sessions.record_storage_fault(&entry.session_id);
+                }
                 AgentDriverSettlement::Cancelled
             }
-            Err(message) => {
-                let reason = format!("runtimeFailure: {message}");
-                let _ = close_open_scope(&sessions, &entry, &reason);
-                let _ = sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason);
-                let _ = entry.set_phase(AgentLifecyclePhase::Stopping);
-                AgentDriverSettlement::Failed
-            }
+            Err(message) => settle_failed_driver(&sessions, &entry, &message),
         };
     sessions.settle_petdex_driver(&entry.session_id, generation, settlement);
     observation.settled = true;
     settlement
+}
+
+fn settle_failed_driver(
+    sessions: &AgentSessionStore,
+    entry: &AgentEntry,
+    message: &str,
+) -> AgentDriverSettlement {
+    let reason = if message.starts_with(super::session::JOURNAL_WRITE_FAILED) {
+        super::session::JOURNAL_WRITE_FAILED.to_string()
+    } else {
+        format!("runtimeFailure: {message}")
+    };
+    let _ = entry.set_phase(AgentLifecyclePhase::Stopping);
+    let _ = close_open_scope(sessions, entry, &reason);
+    if sessions
+        .terminate(&entry.session_id, AgentSessionStatus::Failed, reason)
+        .is_err()
+    {
+        let _ = entry.stop_admission();
+        log::warn!(
+            "Could not persist Agent Session settlement for {}",
+            entry.session_id
+        );
+        sessions.record_storage_fault(&entry.session_id);
+    }
+    AgentDriverSettlement::Failed
 }
 
 async fn drive_agent_inner(
@@ -915,13 +927,19 @@ fn model_block_has_output(block: &ModelContentBlock) -> bool {
 }
 
 fn model_response_has_output(response: &ModelResponse) -> bool {
-    response.content.iter().any(model_block_has_output)
+    response.content.iter().any(|block| {
+        (matches!(
+            response.finish_reason,
+            ModelFinishReason::Length | ModelFinishReason::ContentFilter
+        ) || !matches!(block, ModelContentBlock::Reasoning { .. }))
+            && model_block_has_output(block)
+    })
 }
 
 fn empty_model_response_error() -> NormalizedModelError {
     let mut error = NormalizedModelError::new(
         NormalizedModelErrorKind::EmptyResponse,
-        "AI provider completed without text, reasoning, or tool calls",
+        "AI provider completed without answer text or tool calls",
     );
     error.code = Some("EMPTY_RESPONSE".into());
     error
@@ -2743,7 +2761,7 @@ fn stop_reason(reason: ModelFinishReason) -> AgentStopReason {
 
 pub(crate) fn close_open_scope(
     sessions: &AgentSessionStore,
-    entry: &Arc<AgentEntry>,
+    entry: &AgentEntry,
     reason: &str,
 ) -> Result<(), String> {
     let Some(scope) = entry.scope()? else {
@@ -2923,7 +2941,10 @@ const STREAM_BATCH_MAX_EVENTS: usize = 128;
 struct StreamBatch {
     payloads: Vec<AgentScopedPayload>,
     bytes: usize,
-    last_index: Option<u32>,
+    text: crate::redaction::StreamingRedactor,
+    reasoning: crate::redaction::StreamingRedactor,
+    undrained_bytes: usize,
+    tool_indices: std::collections::HashSet<u32>,
     closed: bool,
     error: Option<String>,
 }
@@ -2942,7 +2963,6 @@ impl DurableModelStreamSink {
         }
         let payloads = std::mem::take(&mut batch.payloads);
         batch.bytes = 0;
-        batch.last_index = None;
         if let Err(error) = self.writer.append(payloads) {
             batch.error = Some(error.clone());
             return Err(error);
@@ -2958,6 +2978,7 @@ impl DurableModelStreamSink {
                 .lock()
                 .map_err(|_| "model stream buffer is unavailable")?;
             batch.closed |= close;
+            sink.drain_text_locked(&mut batch, close)?;
             sink.flush_locked(&mut batch)?;
             if let Err(error) = sink.writer.fence() {
                 batch.error = Some(error.clone());
@@ -2969,12 +2990,8 @@ impl DurableModelStreamSink {
         .map_err(|error| format!("model stream writer failed: {error}"))?
     }
 
-    fn queue(
-        &self,
-        index: Option<u32>,
-        payload: AgentSessionEventPayload,
-    ) -> Result<(), NormalizedModelError> {
-        let mut batch = self
+    fn lock_batch(&self) -> Result<std::sync::MutexGuard<'_, StreamBatch>, NormalizedModelError> {
+        let batch = self
             .pending
             .lock()
             .map_err(|_| stream_storage_error("model stream buffer is unavailable".into()))?;
@@ -2985,70 +3002,84 @@ impl DurableModelStreamSink {
             return Err(NormalizedModelError::cancelled());
         }
         self.writer.check().map_err(stream_storage_error)?;
-        let bytes = match &payload {
-            AgentSessionEventPayload::AssistantChunk {
-                text_delta,
-                reasoning_delta,
-                tool_call_delta,
-                ..
-            } => {
-                text_delta.as_ref().map_or(0, String::len)
-                    + reasoning_delta.as_ref().map_or(0, String::len)
-                    + tool_call_delta.as_ref().map_or(0, |delta| {
-                        delta.arguments_delta.as_ref().map_or(0, String::len)
-                            + delta.name_delta.as_ref().map_or(0, String::len)
-                            + delta.call_id.as_ref().map_or(0, String::len)
-                    })
+        Ok(batch)
+    }
+
+    fn drain_text_locked(&self, batch: &mut StreamBatch, close: bool) -> Result<(), String> {
+        if !close && batch.undrained_bytes == 0 {
+            return Ok(());
+        }
+        batch.undrained_bytes = 0;
+        let reasoning = batch.reasoning.drain(close);
+        let text = batch.text.drain(close);
+        for (value, is_reasoning) in [(&reasoning, true), (&text, false)] {
+            if value.is_empty() {
+                continue;
             }
-            _ => unreachable!("stream buffers contain only AssistantChunk events"),
-        };
+            for chunk in super::session::stream_chunks::split_delta(Some(value)) {
+                self.queue_locked(
+                    batch,
+                    AgentSessionEventPayload::AssistantChunk {
+                        request_id: self.request_id.clone(),
+                        text_delta: (!is_reasoning).then(|| chunk.to_owned()),
+                        reasoning_delta: is_reasoning.then(|| chunk.to_owned()),
+                        tool_call_delta: None,
+                        usage: None,
+                    },
+                    chunk.len(),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn queue_locked(
+        &self,
+        batch: &mut StreamBatch,
+        payload: AgentSessionEventPayload,
+        bytes: usize,
+    ) -> Result<(), String> {
         if batch.bytes.saturating_add(bytes) > STREAM_BATCH_MAX_BYTES
             || batch.payloads.len() >= STREAM_BATCH_MAX_EVENTS
         {
-            self.flush_locked(&mut batch)
-                .map_err(stream_storage_error)?;
+            self.flush_locked(batch)?;
         }
-        let merged = if batch.last_index == index && index.is_some() {
-            batch.payloads.last_mut().is_some_and(|previous| {
-                match (&mut previous.payload, &payload) {
-                    (
-                        AgentSessionEventPayload::AssistantChunk {
-                            text_delta: Some(previous),
-                            ..
-                        },
-                        AgentSessionEventPayload::AssistantChunk {
-                            text_delta: Some(next),
-                            ..
-                        },
-                    )
-                    | (
-                        AgentSessionEventPayload::AssistantChunk {
-                            reasoning_delta: Some(previous),
-                            ..
-                        },
-                        AgentSessionEventPayload::AssistantChunk {
-                            reasoning_delta: Some(next),
-                            ..
-                        },
-                    ) if previous.len() + next.len() <= MAX_AGENT_STREAM_DELTA_BYTES => {
-                        previous.push_str(next);
-                        true
-                    }
-                    _ => false,
-                }
-            })
-        } else {
-            false
-        };
-        if !merged {
-            batch.payloads.push(AgentScopedPayload {
-                turn_id: Some(self.turn_id.clone()),
-                step_id: Some(self.step_id.clone()),
-                payload,
-            });
-        }
+        batch.payloads.push(AgentScopedPayload {
+            turn_id: Some(self.turn_id.clone()),
+            step_id: Some(self.step_id.clone()),
+            payload,
+        });
         batch.bytes = batch.bytes.saturating_add(bytes);
-        batch.last_index = index;
+        Ok(())
+    }
+
+    fn accept_text(
+        &self,
+        text: &str,
+        index: u32,
+        reasoning: bool,
+    ) -> Result<(), NormalizedModelError> {
+        for chunk in utf8_chunks(text, MAX_AGENT_STREAM_DELTA_BYTES) {
+            let mut batch = self.lock_batch()?;
+            if reasoning {
+                batch.reasoning.push(chunk);
+            } else {
+                batch.text.push(chunk);
+            }
+            batch.undrained_bytes += chunk.len();
+            if batch.undrained_bytes >= MAX_AGENT_STREAM_DELTA_BYTES {
+                self.drain_text_locked(&mut batch, false)
+                    .map_err(stream_storage_error)?;
+            }
+            let mut collected = self.collected.lock().map_err(|_| {
+                stream_storage_error("model stream accumulator is unavailable".into())
+            })?;
+            if reasoning {
+                collected.push_reasoning(index, chunk);
+            } else {
+                collected.push_text(index, chunk);
+            }
+        }
         Ok(())
     }
 }
@@ -3077,94 +3108,30 @@ impl ModelStreamSink for DurableModelStreamSink {
             return Err(NormalizedModelError::cancelled());
         }
         match delta {
-            StreamDelta::Text { index, text } => {
-                for chunk in utf8_chunks(&text, MAX_AGENT_STREAM_DELTA_BYTES) {
-                    if self.cancellation.is_cancelled() {
-                        return Err(NormalizedModelError::cancelled());
-                    }
-                    self.queue(
-                        Some(index),
-                        AgentSessionEventPayload::AssistantChunk {
-                            request_id: self.request_id.clone(),
-                            text_delta: Some(chunk.to_owned()),
-                            reasoning_delta: None,
-                            tool_call_delta: None,
-                            usage: None,
-                        },
-                    )?;
-                    self.collected
-                        .lock()
-                        .map_err(|_| {
-                            NormalizedModelError::new(
-                                NormalizedModelErrorKind::Terminal,
-                                "model stream accumulator is unavailable",
-                            )
-                        })?
-                        .push_text(index, chunk);
-                }
-            }
-            StreamDelta::Reasoning { index, text } => {
-                for chunk in utf8_chunks(&text, MAX_AGENT_STREAM_DELTA_BYTES) {
-                    if self.cancellation.is_cancelled() {
-                        return Err(NormalizedModelError::cancelled());
-                    }
-                    self.queue(
-                        Some(index),
-                        AgentSessionEventPayload::AssistantChunk {
-                            request_id: self.request_id.clone(),
-                            text_delta: None,
-                            reasoning_delta: Some(chunk.to_owned()),
-                            tool_call_delta: None,
-                            usage: None,
-                        },
-                    )?;
-                    self.collected
-                        .lock()
-                        .map_err(|_| {
-                            NormalizedModelError::new(
-                                NormalizedModelErrorKind::Terminal,
-                                "model stream accumulator is unavailable",
-                            )
-                        })?
-                        .push_reasoning(index, chunk);
-                }
-            }
-            StreamDelta::ToolCall {
-                index,
-                call_id,
-                name_delta,
-                arguments_delta,
-            } => {
-                let argument_chunks = arguments_delta
-                    .as_deref()
-                    .map(|arguments| utf8_chunks(arguments, MAX_AGENT_STREAM_DELTA_BYTES))
-                    .unwrap_or_default();
-                let chunk_count = argument_chunks.len().max(1);
-                for position in 0..chunk_count {
-                    if self.cancellation.is_cancelled() {
-                        return Err(NormalizedModelError::cancelled());
-                    }
-                    self.queue(
-                        Some(index),
+            StreamDelta::Text { index, text } => self.accept_text(&text, index, false)?,
+            StreamDelta::Reasoning { index, text } => self.accept_text(&text, index, true)?,
+            StreamDelta::ToolCall { index, .. } => {
+                let mut batch = self.lock_batch()?;
+                if batch.tool_indices.insert(index) {
+                    self.drain_text_locked(&mut batch, false)
+                        .map_err(stream_storage_error)?;
+                    self.queue_locked(
+                        &mut batch,
                         AgentSessionEventPayload::AssistantChunk {
                             request_id: self.request_id.clone(),
                             text_delta: None,
                             reasoning_delta: None,
                             tool_call_delta: Some(AgentToolCallDelta {
                                 index,
-                                call_id: if position == 0 { call_id.clone() } else { None },
-                                name_delta: if position == 0 {
-                                    name_delta.clone()
-                                } else {
-                                    None
-                                },
-                                arguments_delta: argument_chunks
-                                    .get(position)
-                                    .map(|chunk| (*chunk).to_owned()),
+                                call_id: None,
+                                name_delta: None,
+                                arguments_delta: None,
                             }),
                             usage: None,
                         },
-                    )?;
+                        0,
+                    )
+                    .map_err(stream_storage_error)?;
                     self.collected
                         .lock()
                         .map_err(|_| {
@@ -3177,8 +3144,11 @@ impl ModelStreamSink for DurableModelStreamSink {
                 }
             }
             StreamDelta::Usage { usage } => {
-                self.queue(
-                    None,
+                let mut batch = self.lock_batch()?;
+                self.drain_text_locked(&mut batch, false)
+                    .map_err(stream_storage_error)?;
+                self.queue_locked(
+                    &mut batch,
                     AgentSessionEventPayload::AssistantChunk {
                         request_id: self.request_id.clone(),
                         text_delta: None,
@@ -3186,7 +3156,9 @@ impl ModelStreamSink for DurableModelStreamSink {
                         tool_call_delta: None,
                         usage: Some(token_usage(usage)),
                     },
-                )?;
+                    0,
+                )
+                .map_err(stream_storage_error)?;
             }
         }
         Ok(())

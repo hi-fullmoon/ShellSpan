@@ -5,6 +5,8 @@ import { AiWorkspaceRoot } from '../workspace/ai-workspace-root';
 import { createAiComposerState } from '@/lib/ai/composer-machine';
 import { terminalRecoveryView } from '@/tests/fixtures/terminal-execution-recovery';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
+import { agentSessionView } from '@/lib/ai/agent-session-adapter';
+import { conversationFoldRecording } from '@/tests/fixtures/conversation-fold-runtime';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import type { AiSessionStatus } from '@/lib/ai/conversation-node';
@@ -37,5 +39,21 @@ export async function mount(host: HTMLElement, locale: Locale) {
         onReconnectTerminal={() => { recoveryActions.push('reconnect'); }} />));
     },
     recoveryActions: () => [...recoveryActions],
+    storageFault(mode: 'agent' | 'ask') {
+      const recorded = conversationFoldRecording.direct.events;
+      const firstText = recorded.findIndex(event => event.type === 'assistant/chunk' && event.data.textDelta?.trim());
+      const events = recorded.slice(0, firstText + 1);
+      const last = events[events.length - 1];
+      if (last?.type !== 'assistant/chunk' || !last.data.textDelta) throw new Error('Recorded text required');
+      const snapshot = terminalRecoveryView('idle').snapshot.value;
+      const view = agentSessionView({
+        snapshot: { ...snapshot, ended: false, header: { ...snapshot.header, sessionId: last.sessionId },
+          recovery: { ...snapshot.recovery, status: 'none' } },
+        events, lastCommittedSeq: last.seq, hasTerminalEvent: false, storageFaultAtSeq: last.seq,
+      });
+      flushSync(() => root.render(<AiWorkspaceRoot mode={mode} scope={mode === 'ask' ? 'workbench' : 'terminal'}
+        view={view} canStartAgent submissionDisabled />));
+      return last.data.textDelta.trim();
+    },
   };
 }

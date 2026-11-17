@@ -66,10 +66,11 @@ function askConversationNodes(nodes: readonly AiConversationNode[]): readonly Ai
       || node.kind === 'runtimeArtifacts'
     ) return [node];
     if (node.kind !== 'turnProcess') return [];
-    const questionsAndErrors = node.children.filter((child) => child.kind === 'question' || child.kind === 'error');
+    const notices = node.children.filter((child) => child.kind === 'question' || child.kind === 'error'
+      || (child.kind === 'assistantMessage' && child.state !== 'streaming' && child.state !== 'completed'));
     const reasoning = node.children.filter((child) => child.kind === 'reasoning');
     const first = reasoning[0];
-    const visible: AiConversationNode[] = [...questionsAndErrors];
+    const visible: AiConversationNode[] = [...notices];
     if (first) visible.push({
       ...first,
       key: `ask-reasoning:${node.key}`,
@@ -709,6 +710,7 @@ export function AiWorkspaceRoot({
                 composerState={composerState}
                 syncError={view?.syncError}
                 syncRecovery={view?.syncRecovery}
+                storageFaultAtSeq={view?.storageFaultAtSeq}
                 onRetrySync={onRetrySync}
                 onDismissError={onDismissError}
               />

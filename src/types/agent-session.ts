@@ -785,6 +785,8 @@ export interface AgentSessionListPage {
 export interface AgentSessionEventPage {
   readonly events: readonly AgentSessionEvent[];
   readonly nextCursor?: number;
+  /** The running process could not write its settlement. This is not a journal event. */
+  readonly storageFaultAtSeq?: number;
 }
 
 export interface CreateAgentSessionRequest {

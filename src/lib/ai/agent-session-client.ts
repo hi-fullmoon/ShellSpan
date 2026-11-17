@@ -33,6 +33,7 @@ export interface AgentSessionStreamState {
   readonly events: readonly AgentSessionEvent[];
   readonly lastCommittedSeq?: number;
   readonly hasTerminalEvent: boolean;
+  readonly storageFaultAtSeq?: number;
   readonly syncError?: Error;
   readonly syncRecovery?: AiSessionSyncRecovery;
 }
@@ -71,6 +72,7 @@ export class AgentSessionCommittedClient {
   private reconciliationTimer?: ReturnType<typeof setTimeout>;
   private stopForegroundSync?: () => void;
   private childSnapshotSeq = -1;
+  private storageFaultAtSeq?: number;
 
   constructor(
     private readonly sessionId: string,
@@ -84,6 +86,7 @@ export class AgentSessionCommittedClient {
       events: this.events.snapshot(),
       lastCommittedSeq: last?.seq,
       hasTerminalEvent: this.hasTerminalEventValue,
+      storageFaultAtSeq: this.storageFaultAtSeq,
       syncError: this.syncError,
       syncRecovery: this.syncRecovery,
     };
@@ -124,7 +127,7 @@ export class AgentSessionCommittedClient {
       signal.throwIfAborted();
       this.snapshotValue = snapshot;
       this.childSnapshotSeq = snapshot.eventCount - 1;
-      await this.fetchAfter(this.events.last?.seq, signal);
+      await this.refreshCommitted(signal);
       // Keep buffering until replay is fully drained. Live work must not race
       // a buffered event's asynchronous gap repair.
       while (this.buffered.length > 0) {
@@ -231,7 +234,7 @@ export class AgentSessionCommittedClient {
     const expected = last ? last.seq + 1 : 0;
     if (event.seq !== expected) {
       try {
-        await this.fetchAfter(last?.seq, signal);
+        await this.refreshCommitted(signal);
       } catch {
         signal.throwIfAborted();
         await this.fullResync(signal);
@@ -269,17 +272,23 @@ export class AgentSessionCommittedClient {
       this.childSnapshotSeq = Math.max(event.seq, snapshot.eventCount - 1);
       this.requiredSeq = Math.max(this.requiredSeq, snapshot.eventCount - 1);
       if ((this.events.last?.seq ?? -1) < this.requiredSeq) {
-        await this.fetchAfter(this.events.last?.seq, signal);
+        await this.refreshCommitted(signal);
       }
       break;
     }
+  }
+
+  private async refreshCommitted(signal: AbortSignal): Promise<void> {
+    const storageFaultAtSeq = await this.fetchAfter(this.events.last?.seq, signal);
+    signal.throwIfAborted();
+    this.storageFaultAtSeq = storageFaultAtSeq;
   }
 
   private async fetchAfter(
     afterSeq: number | undefined,
     signal: AbortSignal,
     events = this.events,
-  ): Promise<void> {
+  ): Promise<number | undefined> {
     let cursor = afterSeq;
     for (;;) {
       signal.throwIfAborted();
@@ -291,7 +300,12 @@ export class AgentSessionCommittedClient {
       signal.throwIfAborted();
       for (const event of page.events) this.merge(event, events);
       const last = page.events[page.events.length - 1];
-      if (!last || page.nextCursor === undefined) break;
+      if (!last || page.nextCursor === undefined) {
+        if (page.storageFaultAtSeq !== undefined && (events.last?.seq ?? -1) < page.storageFaultAtSeq) {
+          throw new Error('Agent storage fault refers to a missing committed event');
+        }
+        return page.storageFaultAtSeq;
+      }
       cursor = last.seq;
     }
   }
@@ -302,7 +316,7 @@ export class AgentSessionCommittedClient {
     // Publish a complete replacement only after replay succeeds. Failed repair
     // must not erase the committed text already visible to the reader.
     const events = new CommittedEventBuffer();
-    await this.fetchAfter(undefined, signal, events);
+    const storageFaultAtSeq = await this.fetchAfter(undefined, signal, events);
     signal.throwIfAborted();
     if (events.length < this.events.length) {
       throw new Error('Committed Agent replay is shorter than the published event window');
@@ -312,6 +326,7 @@ export class AgentSessionCommittedClient {
     this.events = events;
     this.hasTerminalEventValue = false;
     for (const event of events.snapshot()) this.updateTerminalState(event);
+    this.storageFaultAtSeq = storageFaultAtSeq;
   }
 
   private clearSyncError(): void {
@@ -373,8 +388,9 @@ export class AgentSessionCommittedClient {
     const work = this.enqueue(signal, async () => {
       const previousSeq = this.events.last?.seq ?? -1;
       const previousSnapshot = this.snapshotValue;
+      const previousStorageFault = this.storageFaultAtSeq;
       try {
-        await this.fetchAfter(this.events.last?.seq, signal);
+        await this.refreshCommitted(signal);
       } catch {
         signal.throwIfAborted();
         await this.fullResync(signal);
@@ -382,7 +398,7 @@ export class AgentSessionCommittedClient {
       await this.refreshChildSnapshot(signal);
       signal.throwIfAborted();
       if (!quiet || previousSeq !== (this.events.last?.seq ?? -1)
-        || previousSnapshot !== this.snapshotValue) this.scheduleEmit();
+        || previousSnapshot !== this.snapshotValue || previousStorageFault !== this.storageFaultAtSeq) this.scheduleEmit();
     }).finally(() => {
       if (this.recoveryWork === work) this.recoveryWork = undefined;
       this.scheduleReconciliation(signal);
@@ -409,7 +425,14 @@ export class AgentSessionCommittedClient {
   }
 
   private updateTerminalState(event: AgentSessionEvent): void {
-    if (event.type === 'session/ended') this.hasTerminalEventValue = true;
+    if (event.type === 'session/ended') {
+      this.hasTerminalEventValue = true;
+      this.storageFaultAtSeq = undefined;
+    }
+    if (event.type === 'agent/status' && event.data.status === 'idle'
+      && this.storageFaultAtSeq !== undefined && event.seq > this.storageFaultAtSeq) {
+      this.storageFaultAtSeq = undefined;
+    }
     if (event.type === 'session/resumed' || event.type === 'subagent/recovery_started') this.hasTerminalEventValue = false;
   }
 

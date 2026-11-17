@@ -23,6 +23,7 @@ export function aiErrorMessage(message: string, t: (key: LocaleKey, values?: Rec
   if (message.includes('INVALID_MODEL_TOKEN_BUDGET:')) return t('ai.error.modelInputBudgetInvalid');
   if (httpProbeTimeoutKind(message)) return t('ai.workspace.tool.httpProbe.timeout');
   const diagnostic = message.trim().replace(/^Error:\s*/, '');
+  if (diagnostic.startsWith('journalWriteFailed')) return t('ai.error.journalWriteFailed');
   const taskBudget = /^taskTokenBudgetExceeded: maximum (\d+) estimated model tokens(; checkpointUnavailable)?$/.exec(diagnostic);
   if (taskBudget) {
     const summary = t('ai.error.taskTokenBudgetExceeded', { maximum: taskBudget[1] });

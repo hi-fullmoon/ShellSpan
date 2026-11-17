@@ -503,7 +503,8 @@ export function useAiSessionController({
     && !view.snapshot.value.header.subagent;
   const focusCommandsUnavailable = focusMode && activeTerminal?.status === 'connected'
     && realTerminalState === 'unavailable' && !view?.snapshot.value.header.subagent;
-  const canSubmitAgent = canStartAgent && !focusCommandsUnavailable && !needsDirectFallback;
+  const canSubmitAgent = canStartAgent && !focusCommandsUnavailable && !needsDirectFallback
+    && view?.storageFaultAtSeq === undefined;
   const terminalUnavailableReason = scope === 'terminal' && !canStartAgent && !focusMode
     && activeTerminal?.status !== 'connecting'
     ? t('agent.availability.needsTerminal')
@@ -2022,7 +2023,8 @@ export function useAiSessionController({
     setDraft: (value) => { claimWorkspace(); dispatch({ type: 'draft.changed', value }); },
     setBusyPreference: (value) => dispatch({ type: 'preference.changed', value }),
     submit: (gesture, accelerated = false) => {
-      if (terminalSessionRestoring || focusCommandsUnavailable || needsDirectFallback) return;
+      if (terminalSessionRestoring || focusCommandsUnavailable || needsDirectFallback
+        || viewRef.current?.storageFaultAtSeq !== undefined) return;
       const child = viewRef.current?.snapshot.value.header.subagent;
       if (child && readOnlySession) return;
       if (child && childBudgetExhausted(viewRef.current?.snapshot.value, now())

@@ -324,6 +324,21 @@ function terminalError(nodes: readonly AiConversationNode[]): AiSessionError | n
   };
 }
 
+function settleUnsavedOutput(node: AiConversationNode): AiConversationNode {
+  if (node.kind === 'turnProcess' && node.status === 'running') {
+    return { ...node, status: 'failed', children: node.children.map(settleProcessOutput) };
+  }
+  return settleProcessOutput(node);
+}
+
+function settleProcessOutput<Node extends AiConversationNode>(node: Node): Node {
+  if ((node.kind === 'assistantMessage' && node.state === 'streaming')
+    || (node.kind === 'reasoning' && (node.state === 'streaming' || node.state === 'settled'))) {
+    return { ...node, state: 'interrupted' };
+  }
+  return node;
+}
+
 export function agentSessionView(state: AgentSessionStreamState, projected?: {
   readonly activity: ReturnType<typeof projectAgentActivity>;
   readonly nodes: readonly AiConversationNode[];
@@ -332,7 +347,10 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
   if (!state.snapshot) throw new Error('Agent Session snapshot is unavailable');
   const events = projected?.metadataEvents ?? state.events;
   const activity = projected?.activity ?? projectAgentActivity(state.events);
-  const nodes = projected?.nodes ?? projectAgentChatNodes(state.events);
+  const committedNodes = projected?.nodes ?? projectAgentChatNodes(state.events);
+  const storageFault = state.storageFaultAtSeq !== undefined && !state.hasTerminalEvent;
+  const status = storageFault ? 'failed' : activity.status;
+  const nodes = storageFault ? committedNodes.map(settleUnsavedOutput) : committedNodes;
   const header = { ...state.snapshot.header };
   let recovery: import('@/types/agent-session').AgentSessionRecoveryState = state.snapshot.recovery;
   for (const event of events) {
@@ -352,7 +370,7 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
       ? (({ plan: _plan, ...rest }) => rest)(state.snapshot.task)
       : { ...state.snapshot.task, plan: activity.plan };
   return {
-    summary: sessionSummary({ ...state.snapshot, header }, state.events, activity.status, events),
+    summary: sessionSummary({ ...state.snapshot, header }, state.events, status, events),
     snapshot: {
       kind: 'agent',
       value: {
@@ -372,14 +390,16 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
       && agent.parentSessionId === state.snapshot?.header.sessionId
     )),
     inbox: projectAgentInbox(events),
-    pendingApproval: pendingApproval(nodes),
-    pendingQuestion: projectQuestions(events).find((q) => q.status === 'pending') ?? null,
-    status: activity.status,
-    statusReason: activity.statusReason,
+    pendingApproval: storageFault ? null : pendingApproval(nodes),
+    pendingQuestion: storageFault ? null : projectQuestions(events).find((q) => q.status === 'pending') ?? null,
+    status,
+    statusReason: storageFault ? 'journalWriteFailed' : activity.statusReason,
     recovery,
-    error: activity.status === 'failed' || activity.status === 'cancelled' ? terminalError(nodes) : null,
+    error: storageFault ? { kind: 'terminal', message: 'journalWriteFailed', retryable: false }
+      : status === 'failed' || status === 'cancelled' ? terminalError(nodes) : null,
     syncError: state.syncError ? normalizeAiSessionError(state.syncError) : undefined,
     syncRecovery: state.syncRecovery,
+    storageFaultAtSeq: storageFault ? state.storageFaultAtSeq : undefined,
     throughSeq: state.lastCommittedSeq ?? null,
     revision: state.lastCommittedSeq === undefined ? state.snapshot.eventCount : state.lastCommittedSeq + 1,
     committedOperationIds: events.flatMap((event) => {
@@ -429,6 +449,7 @@ export function createAgentSessionViewProjector(): (state: AgentSessionStreamSta
       && previous.lastCommittedSeq === state.lastCommittedSeq
       && previous.syncError === state.syncError
       && previous.syncRecovery === state.syncRecovery
+      && previous.storageFaultAtSeq === state.storageFaultAtSeq
       && previous.hasTerminalEvent === state.hasTerminalEvent) return view;
     view = agentSessionView(state, {
       activity: activity(state.events), nodes: chat(state.events), metadataEvents: metadata(state.events),

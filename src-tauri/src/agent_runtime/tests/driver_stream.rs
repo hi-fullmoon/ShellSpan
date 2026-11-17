@@ -1,5 +1,24 @@
 // These tests use the real session store and filesystem, without a model adapter.
 #[test]
+fn reasoning_only_stop_is_empty_but_length_and_refusal_keep_their_finish_reasons() {
+    let mut response = ModelResponse {
+        content: vec![ModelContentBlock::Reasoning {
+            text: "Read the execution result before answering.".into(),
+            provider_item: None,
+        }],
+        finish_reason: ModelFinishReason::Stop,
+        usage: Default::default(),
+        replay: None,
+        replay_envelope: None,
+    };
+    assert!(!model_response_has_output(&response));
+    for reason in [ModelFinishReason::Length, ModelFinishReason::ContentFilter] {
+        response.finish_reason = reason;
+        assert!(model_response_has_output(&response));
+    }
+}
+
+#[test]
 fn incremental_loop_counts_match_full_history_for_long_and_alternating_turns() {
     for period in 1..=5 {
         let mut progress = super::super::driver_progress::LoopProgress::default();
@@ -77,7 +96,7 @@ async fn bounded_writer_pressure_leaves_the_async_scheduler_responsive() {
             };
             // One batch is held at the store lock, two fill the bounded writer
             // queue, and the fourth batch blocks the producer's next flush.
-            if bytes >= STREAM_BATCH_MAX_BYTES * 4
+            if bytes >= STREAM_BATCH_MAX_BYTES * 3
                 && matches!(
                     sink.pending.try_lock(),
                     Err(std::sync::TryLockError::WouldBlock)
@@ -391,9 +410,7 @@ async fn stream_redaction_expansion_preserves_bounded_deltas_and_reopens() {
     let events = sink.sessions.all_events("stream-test").unwrap();
     let mut text = String::new();
     let mut reasoning = String::new();
-    let mut arguments = String::new();
-    let mut call_ids = Vec::new();
-    let mut names = Vec::new();
+    let mut tool_indices = Vec::new();
     for (seq, event) in events.iter().enumerate() {
         assert_eq!(event.seq, seq as u64);
         if let AgentSessionEventPayload::AssistantChunk {
@@ -403,35 +420,28 @@ async fn stream_redaction_expansion_preserves_bounded_deltas_and_reopens() {
             ..
         } = &event.payload
         {
-            let argument_delta = tool_call_delta
-                .as_ref()
-                .and_then(|delta| delta.arguments_delta.as_deref());
-            for delta in [
-                text_delta.as_deref(),
-                reasoning_delta.as_deref(),
-                argument_delta,
-            ]
-            .into_iter()
-            .flatten()
+            for delta in [text_delta.as_deref(), reasoning_delta.as_deref()]
+                .into_iter()
+                .flatten()
             {
                 assert!(delta.len() <= MAX_AGENT_STREAM_DELTA_BYTES);
                 assert_eq!(crate::redaction::redact_sensitive_text(delta), delta);
             }
             text.push_str(text_delta.as_deref().unwrap_or_default());
             reasoning.push_str(reasoning_delta.as_deref().unwrap_or_default());
-            arguments.push_str(argument_delta.unwrap_or_default());
             if let Some(delta) = tool_call_delta {
-                assert_eq!(delta.index, 2);
-                call_ids.extend(delta.call_id.iter().cloned());
-                names.extend(delta.name_delta.iter().cloned());
+                tool_indices.push(delta.index);
+                assert!(
+                    delta.arguments_delta.is_none()
+                        && delta.call_id.is_none()
+                        && delta.name_delta.is_none()
+                );
             }
         }
     }
     assert_eq!(text, expected);
     assert_eq!(reasoning, expected);
-    assert_eq!(arguments, expected);
-    assert_eq!(call_ids, ["call-1"]);
-    assert_eq!(names, ["run_command"]);
+    assert_eq!(tool_indices, [2]);
     // Redaction applies only to the durable copy, not the model's in-memory output.
     assert_eq!(
         sink.collected.lock().unwrap().content(),
@@ -454,7 +464,7 @@ async fn stream_redaction_expansion_preserves_bounded_deltas_and_reopens() {
 }
 
 #[tokio::test]
-async fn stream_large_tool_arguments_reassemble_as_json_with_metadata_once() {
+async fn stream_large_tool_arguments_only_persist_the_tool_intent_once() {
     let (root, sink) = persisted_stream();
     let input = serde_json::json!({"command": include_str!("../driver_metrics.rs").repeat(8)});
     let arguments = serde_json::to_string(&input).unwrap();
@@ -480,33 +490,74 @@ async fn stream_large_tool_arguments_reassemble_as_json_with_metadata_once() {
     reopened.configure(root.path().to_path_buf()).unwrap();
     let events = reopened.all_events("stream-test").unwrap();
     assert_eq!(events, sink.sessions.all_events("stream-test").unwrap());
-    let mut assembled = String::new();
-    let mut metadata = Vec::new();
+    let mut indices = Vec::new();
     for event in events {
         if let AgentSessionEventPayload::AssistantChunk {
             tool_call_delta: Some(delta),
             ..
         } = event.payload
         {
-            assert_eq!(delta.index, 0);
-            if delta.call_id.is_some() || delta.name_delta.is_some() {
-                metadata.push((delta.call_id, delta.name_delta));
-            }
-            if let Some(piece) = delta.arguments_delta {
-                assert!(piece.len() <= MAX_AGENT_STREAM_DELTA_BYTES);
-                assembled.push_str(&piece);
-            }
+            indices.push(delta.index);
+            assert!(
+                delta.arguments_delta.is_none()
+                    && delta.call_id.is_none()
+                    && delta.name_delta.is_none()
+            );
         }
     }
-    assert_eq!(
-        metadata,
-        [(Some("call-large".into()), Some("run_command".into()))]
-    );
-    assert_eq!(assembled, format!(" \n{arguments}\n "));
-    assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&assembled).unwrap(),
-        input
-    );
+    assert_eq!(indices, [0]);
+}
+
+#[tokio::test]
+async fn stream_redaction_holds_open_credentials_across_durable_flushes() {
+    let (root, sink) = persisted_stream();
+    let source = [
+        "已检查。 Authorization: Bear",
+        "er ",
+        "local-header-material\n-----BEGIN PRIVATE ",
+        "KEY-----\nlocal-key-material\n-----END PRIVATE KEY-----\n完成。",
+    ];
+    let expected = crate::redaction::redact_sensitive_text(&source.concat());
+    let published = Arc::new(Mutex::new(Vec::new()));
+    let observed = published.clone();
+    sink.sessions
+        .set_publisher(Arc::new(move |event| {
+            observed.lock().unwrap().push(event.clone())
+        }))
+        .unwrap();
+    for (i, part) in source.into_iter().enumerate() {
+        sink.emit(StreamDelta::Text {
+            index: 0,
+            text: part.into(),
+        })
+        .unwrap();
+        sink.emit(StreamDelta::Reasoning {
+            index: 1,
+            text: part.into(),
+        })
+        .unwrap();
+        sink.flush_async(false).await.unwrap();
+        if i == 0 {
+            assert!(persisted_text(&sink.sessions).contains("已检查。"));
+        }
+    }
+    sink.flush_async(true).await.unwrap();
+    let events = published.lock().unwrap();
+    assert_eq!(persisted_text(&sink.sessions), expected);
+    let mut reasoning = String::new();
+    for event in events.iter() {
+        if let AgentSessionEventPayload::AssistantChunk {
+            reasoning_delta: Some(delta),
+            ..
+        } = &event.payload
+        {
+            reasoning.push_str(delta);
+        }
+    }
+    assert_eq!(reasoning, expected);
+    let log = std::fs::read_to_string(root.path().join("agent-runtime/sessions/stream-test.jsonl"))
+        .unwrap();
+    assert!(!log.contains("local-header-material") && !log.contains("local-key-material"));
 }
 
 #[tokio::test]

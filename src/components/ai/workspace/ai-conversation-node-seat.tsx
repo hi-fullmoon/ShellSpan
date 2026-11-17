@@ -249,15 +249,17 @@ function AssistantMessageNodeView({ node, inTurnProcess = false, deferMessageAct
         <AssistantMessageContent blocks={node.blocks} streaming={node.state === 'streaming'} />
         {(node.state === 'interrupted' || node.state === 'failed' || node.state === 'cancelled') && (
           <span className="ai-assistant-stopped self-start px-1.5" data-state={node.state}>
-            {node.state === 'failed'
-              ? t('ai.message.failed')
-              : node.state === 'cancelled'
-                ? t('ai.message.cancelled')
-                : t('ai.workspace.messageInterrupted')}
+            {node.partialReason === 'outputLimit'
+              ? t('ai.workspace.messageOutputLimit')
+              : node.state === 'failed'
+                ? t('ai.message.failed')
+                : node.state === 'cancelled'
+                  ? t('ai.message.cancelled')
+                  : t('ai.workspace.messageInterrupted')}
           </span>
         )}
       </Bubble>
-      {!inTurnProcess && !deferMessageActions && !node.hasTurnTail && node.state !== 'streaming' && (
+      {!inTurnProcess && !deferMessageActions && !node.hasTurnTail && node.state === 'completed' && (
         <MessageActions text={text} timestamp={node.timestamp} align="start" className="ai-assistant-actions -ml-1.5 mt-2.5" />
       )}
     </Message>
@@ -769,7 +771,7 @@ export function aiConversationNodeRevision(node: AiConversationNode): string {
     case 'userMessage':
       return `${base}:${node.delivery}:${node.inputKind ?? 'initial'}`;
     case 'assistantMessage':
-      return `${base}:${node.state}:${node.hasTurnTail ?? false}`;
+      return `${base}:${node.state}:${node.hasTurnTail ?? false}:${node.partialReason ?? ''}`;
     case 'reasoning':
       return `${base}:${node.state}`;
     case 'tool':

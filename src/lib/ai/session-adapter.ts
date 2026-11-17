@@ -114,6 +114,8 @@ export interface AiSessionView {
   /** Client synchronization failure; does not change the backend task status. */
   readonly syncError?: AiSessionError;
   readonly syncRecovery?: AiSessionSyncRecovery;
+  /** The backend stopped but could not save the settlement. */
+  readonly storageFaultAtSeq?: number;
   readonly throughSeq: number | null;
   readonly revision?: number | null;
   readonly committedOperationIds?: readonly string[];

@@ -218,6 +218,148 @@ fn stream_batches_commit_atomically_and_replay_after_disk_failure() {
 }
 
 #[test]
+fn legacy_stream_text_reopens_with_stricter_redaction_for_new_messages() {
+    let (root, store) = configured();
+    create(&store);
+    begin_prepared_request(&store);
+    let source = "Example password=\"continued \\\nvalue\"";
+    let legacy = store
+        .append(
+            "session-1",
+            Some("turn-1".into()),
+            Some("step-1".into()),
+            AgentSessionEventPayload::AssistantChunk {
+                request_id: "request-1".into(),
+                text_delta: Some(source.into()),
+                reasoning_delta: None,
+                tool_call_delta: None,
+                usage: None,
+            },
+        )
+        .unwrap();
+    assert!(
+        matches!(&legacy.payload, AgentSessionEventPayload::AssistantChunk {
+        text_delta: Some(text), ..
+    } if text == source)
+    );
+    let settled = store
+        .append(
+            "session-1",
+            Some("turn-1".into()),
+            Some("step-1".into()),
+            AgentSessionEventPayload::AssistantMessage {
+                message_id: "interrupted-example".into(),
+                content: vec![AgentAssistantContentBlock::Text {
+                    text: source.into(),
+                }],
+                usage: Default::default(),
+                stop_reason: super::super::AgentStopReason::Cancelled,
+                interrupted: true,
+                replay: None,
+            },
+        )
+        .unwrap();
+    assert!(
+        matches!(&settled.payload, AgentSessionEventPayload::AssistantMessage { content, .. }
+        if matches!(&content[..], [AgentAssistantContentBlock::Text { text }]
+            if text == "Example password=[REDACTED]"))
+    );
+    let reopened = AgentSessionStore::default();
+    reopened.configure(root.path().to_path_buf()).unwrap();
+    let events = reopened.all_events("session-1").unwrap();
+    assert_eq!(&events[events.len() - 2..], &[legacy, settled]);
+}
+
+#[test]
+fn failed_settlement_is_reported_at_the_committed_cursor_until_storage_recovers() {
+    let (root, store) = configured();
+    create(&store);
+    begin_prepared_request(&store);
+    store
+        .append_batch("session-1", captured_stream_payloads())
+        .unwrap();
+    let before = store.snapshot("session-1").unwrap();
+    let path = log_path(&root);
+    let saved = path.with_extension("saved");
+    fs::rename(&path, &saved).unwrap();
+    let after_seq = Some(before.event_count - 1);
+    let read = || {
+        store
+            .committed_events_page(AgentCommittedEventsRequest {
+                session_id: "session-1".into(),
+                after_seq,
+                limit: 16,
+            })
+            .unwrap()
+    };
+    assert!(store
+        .interrupt("session-1")
+        .unwrap_err()
+        .starts_with(JOURNAL_WRITE_FAILED));
+    assert_eq!(read().storage_fault_at_seq, after_seq);
+    let end = || {
+        store.terminate(
+            "session-1",
+            AgentSessionStatus::Failed,
+            JOURNAL_WRITE_FAILED.into(),
+        )
+    };
+    assert!(end().unwrap_err().starts_with(JOURNAL_WRITE_FAILED));
+
+    let page = read();
+    assert_eq!(page.storage_fault_at_seq, after_seq);
+    assert!(page.events.is_empty());
+    assert_eq!(before, store.snapshot("session-1").unwrap());
+    assert_eq!(
+        store
+            .enqueue(
+                "session-1",
+                AgentInboxLane::NextTurn,
+                message("new", "continue")
+            )
+            .unwrap_err(),
+        JOURNAL_WRITE_FAILED
+    );
+
+    fs::rename(&saved, &path).unwrap();
+    for (step_id, payload) in [
+        (
+            Some("step-1".into()),
+            AgentSessionEventPayload::StepEnd {
+                reason: JOURNAL_WRITE_FAILED.into(),
+            },
+        ),
+        (
+            None,
+            AgentSessionEventPayload::TurnEnd {
+                reason: JOURNAL_WRITE_FAILED.into(),
+            },
+        ),
+    ] {
+        store
+            .append("session-1", Some("turn-1".into()), step_id, payload)
+            .unwrap();
+    }
+    assert_eq!(read().storage_fault_at_seq, after_seq);
+    assert!(end().unwrap().ended);
+    let page = read();
+    assert_eq!(page.storage_fault_at_seq, None);
+    assert!(matches!(
+        page.events.last().unwrap().payload,
+        AgentSessionEventPayload::SessionEnded {
+            status: AgentSessionStatus::Failed,
+            ..
+        }
+    ));
+    let reopened = AgentSessionStore::default();
+    reopened.configure(root.path().to_path_buf()).unwrap();
+    assert_eq!(
+        reopened.snapshot("session-1").unwrap(),
+        store.snapshot("session-1").unwrap()
+    );
+}
+
+#[test]
 fn log_usage_tracks_streams_archives_and_deletion() {
     let (root, store) = configured();
     create(&store);
