@@ -848,6 +848,8 @@ export default {
   'terminal.tab.noProfiles': 'No saved connections. Add one in the Workbench.',
   'terminal.tab.copyInfo': 'Copy Connection Info',
   'terminal.tab.openSftp': 'Open in SFTP',
+  'terminal.tab.moreActions': 'Terminal tab actions',
+  'terminal.tab.closeCurrent': 'Close Current Terminal',
   'terminal.tab.closeOthers': 'Close Others',
   'terminal.tab.closeToRight': 'Close to the Right',
   'terminal.tab.closeConfirmTitle': 'Close Tab',

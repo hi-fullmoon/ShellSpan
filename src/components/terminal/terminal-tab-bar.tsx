@@ -17,15 +17,25 @@ import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
-import { Link2Icon, PinIcon, XIcon } from 'lucide-react';
+import { EllipsisIcon, Link2Icon, PinIcon, XIcon } from 'lucide-react';
 import { useCloseTerminal } from '@/hooks/useCloseTerminal';
 import { cancelSshConnection } from '@/lib/terminal/ssh-connection-attempt';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { TerminalCloseDetails } from './terminal-close-details';
+import type { TerminalSplitDirection } from './terminal-split';
 import type { SessionStatus } from '@/types';
 import '@/components/ui/session-tab-bar.css';
 import { resolveTerminalTheme } from './registry/terminal-registry';
@@ -39,6 +49,10 @@ export interface TerminalTabBarProps {
   forceVisible?: boolean;
   activeGroup?: boolean;
   onNewTabClick?: () => void;
+  onSwitchTab?: () => void;
+  canSplitTab?: (direction: TerminalSplitDirection) => boolean;
+  onSplitTab?: (sessionId: string, direction: TerminalSplitDirection) => void;
+  onUnsplit?: () => void;
   onTabContextMenu?: (session: TerminalSession, x: number, y: number) => void;
   onTabActivate?: (sessionId: string) => void;
   onTabDragMove?: (sessionId: string, x: number, y: number) => void;
@@ -263,6 +277,10 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   forceVisible = false,
   activeGroup = true,
   onNewTabClick,
+  onSwitchTab,
+  canSplitTab,
+  onSplitTab,
+  onUnsplit,
   onTabContextMenu,
   onTabActivate,
   onTabDragMove,
@@ -306,6 +324,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
   const [insertIndex, setInsertIndex] = useState<number | null>(null);
   const [closingSessionId, setClosingSessionId] = useState<string | null>(null);
+  const [actionsOpen, setActionsOpen] = useState(false);
 
   const sensors = useSensors(
     useSensor(TrackpadSafePointerSensor, {
@@ -613,6 +632,10 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
 
   const focusEnabled = useFocusStore(state => state.enabled);
   const shouldHide = !forceVisible && !focusEnabled && sessions.length === 1 && terminalHideSingleTabBar && !sessions[0]?.pendingConnection;
+  const activeTab = sessions.find((session) => session.sessionId === activeSessionId);
+  const canCloseCurrent = activeTab && !activeTab.pendingConnection && !activeTab.reconnecting;
+  const splitTarget = activeTab && !activeTab.pendingConnection && sessions.length > 1 ? activeTab.sessionId : null;
+  const actionsLabel = t('terminal.tab.moreActions');
 
   return (
     <div
@@ -692,6 +715,60 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
               document.body,
             )}
       </DndContext>
+      {!shouldHide && onNewTabClick && (
+        <DropdownMenu onOpenChange={setActionsOpen}>
+          <DropdownMenuTrigger
+            render={<Button type="button" variant="ghost" size="icon-xs" className="mx-1 shrink-0 self-center hover:bg-app-border" />}
+            aria-label={actionsLabel}
+            title={actionsLabel}
+            onPointerDown={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+          >
+            <EllipsisIcon aria-hidden="true" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            className="w-auto min-w-40"
+            onPointerDown={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+          >
+            <DropdownMenuGroup>
+              <DropdownMenuItem onClick={onNewTabClick}>{t('terminal.newSession.title')}</DropdownMenuItem>
+              {onSwitchTab && <DropdownMenuItem onClick={onSwitchTab}>{t('terminal.tabSwitcher.title')}</DropdownMenuItem>}
+            </DropdownMenuGroup>
+            {onSplitTab && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuItem
+                    disabled={!splitTarget || (actionsOpen && !canSplitTab?.('right'))}
+                    onClick={() => { if (splitTarget) onSplitTab(splitTarget, 'right'); }}
+                  >
+                    {t('terminal.tab.splitRight')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={!splitTarget || (actionsOpen && !canSplitTab?.('bottom'))}
+                    onClick={() => { if (splitTarget) onSplitTab(splitTarget, 'bottom'); }}
+                  >
+                    {t('terminal.tab.splitDown')}
+                  </DropdownMenuItem>
+                  {onUnsplit && <DropdownMenuItem onClick={onUnsplit}>{t('terminal.tab.unsplit')}</DropdownMenuItem>}
+                </DropdownMenuGroup>
+              </>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem
+                variant="destructive"
+                disabled={!canCloseCurrent}
+                onClick={() => { if (canCloseCurrent) handleCloseSession(activeTab.sessionId); }}
+              >
+                {t('terminal.tab.closeCurrent')}
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
       <ConfirmationDialog
         open={!!closingSessionId}
         onOpenChange={(open) => {

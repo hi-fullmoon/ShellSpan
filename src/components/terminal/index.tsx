@@ -745,6 +745,10 @@ const Terminal: React.FC = () => {
             focusGroup(slot);
             setNewSessionDialogOpen(true);
           }}
+          onSwitchTab={() => setTabSwitcherOpen(true)}
+          canSplitTab={(direction) => canCreateSplitAt(direction, slot)}
+          onSplitTab={createOrArrangeSplit}
+          onUnsplit={() => setSplit(null)}
           onTabContextMenu={(session, x, y) => setContextMenu({ session, x, y, slot })}
           onTabActivate={(sessionId) => activateTab(slot, sessionId)}
           onTabReorder={(sessionId, index) => reorderGroupTabs(slot, sessionId, index)}
@@ -817,6 +821,9 @@ const Terminal: React.FC = () => {
       {sessions.length > 0 && !split && (
         <TerminalTabBar
           onNewTabClick={() => setNewSessionDialogOpen(true)}
+          onSwitchTab={() => setTabSwitcherOpen(true)}
+          canSplitTab={canCreateSplitAt}
+          onSplitTab={createOrArrangeSplit}
           onTabContextMenu={(session, x, y) => setContextMenu({ session, x, y, slot: null })}
           onTabActivate={(sessionId) => activateTab(null, sessionId)}
           onTabDragMove={(sessionId, x, y) => handleTabDragMove(sessionId, null, x, y)}

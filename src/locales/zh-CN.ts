@@ -848,6 +848,8 @@ export default {
   'terminal.tab.noProfiles': '暂无已保存连接，请到工作台添加。',
   'terminal.tab.copyInfo': '复制连接信息',
   'terminal.tab.openSftp': '在 SFTP 中打开',
+  'terminal.tab.moreActions': '终端页签操作',
+  'terminal.tab.closeCurrent': '关闭当前终端',
   'terminal.tab.closeOthers': '关闭其他',
   'terminal.tab.closeToRight': '关闭右侧',
   'terminal.tab.closeConfirmTitle': '关闭页签',

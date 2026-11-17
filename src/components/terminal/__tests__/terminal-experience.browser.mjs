@@ -987,6 +987,8 @@ try {
       const sessionId = crypto.randomUUID();
       store.addSession({ ...identity, sessionId });
       store.setStatus(sessionId, { sessionId, status: 'disconnected' });
+    const { sessions, activeSessionId, restoredLayout } = store;
+    useTerminalStore.setState({ sessions: [], activeSessionId: null, restoredLayout: null });
       return sessionId;
     });
     useAppStore.setState({ activeSection: 'terminal', restoreWorkspace: false });
@@ -1002,6 +1004,7 @@ try {
     };
     flushSync(() => root.render(React.createElement(TerminalWorkspace)));
     const frame = () => new Promise(requestAnimationFrame);
+      useTerminalStore.setState({ sessions, activeSessionId, restoredLayout });
     for (let i = 0; i < 10; i++) await frame();
     await new Promise((resolve) => terminalRegistry.get(ids[1]).terminal.write(output.replace(/\n/g, '\r\n'), resolve));
     let terminalMounts = 0;
@@ -1049,6 +1052,90 @@ try {
     await host.locator(`[data-terminal-pane-session="${neighbor}"] .xterm-helper-textarea:focus`).waitFor({ state: 'attached' });
   } finally {
     await page.evaluate(() => window.disposeWheelCheck());
+
+    const tabBar = host.locator('[data-terminal-tab-bar]');
+    const actions = tabBar.getByRole('button', { name: '终端页签操作', exact: true });
+    const tabViewport = tabBar.locator('[data-slot="scroll-area-viewport"]');
+    const actionsMenu = page.getByRole('menu', { name: '终端页签操作', exact: true });
+    const newSessionDialog = page.getByRole('dialog', { name: '新建会话', exact: true });
+
+    const wideBar = await tabBar.boundingBox();
+    const wideButton = await actions.boundingBox();
+    assert.equal(wideBar.x + wideBar.width - wideButton.x - wideButton.width, 4,
+      'The actions menu should sit at the right edge even when the tabs fit');
+    assert.equal(await tabViewport.evaluate(element => element.scrollWidth === element.clientWidth), true);
+    await actions.press('Enter');
+    await actionsMenu.getByRole('menuitem', { name: '新建会话', exact: true }).press('Enter');
+    await newSessionDialog.waitFor();
+    await page.keyboard.press('Escape');
+    await newSessionDialog.waitFor({ state: 'hidden' });
+    await actions.blur();
+
+    await host.evaluate(element => { element.style.width = '320px'; });
+    await tabBar.locator('[data-slot="scroll-area-thumb"]').waitFor();
+    const barBox = await tabBar.boundingBox();
+    const fixedButton = await actions.boundingBox();
+    assert.equal(barBox.x + barBox.width - fixedButton.x - fixedButton.width, 4,
+      'The actions menu should stay at the right edge when tabs overflow');
+    const scrollRange = await tabViewport.evaluate(element => {
+      element.scrollLeft = 0;
+      const start = element.scrollLeft;
+      element.scrollLeft = element.scrollWidth;
+      return element.scrollLeft - start;
+    });
+    assert.ok(scrollRange > 0, 'The tabs should remain horizontally scrollable');
+    assert.deepEqual(await actions.boundingBox(), fixedButton, 'Scrolling tabs must not move the actions menu');
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(theme => document.documentElement.setAttribute('data-theme', theme), theme);
+      await actions.hover();
+      await tabBar.screenshot({ animations: 'disabled',
+        path: `${root}artifacts/tests/terminal-tab-actions/overflow-hover-${theme}.png` });
+      const hoverStyle = await actions.evaluate(element => {
+        const style = getComputedStyle(element);
+        return { actual: style.backgroundColor, expected: style.getPropertyValue('--app-border').trim() };
+      });
+      assert.equal(hoverStyle.actual, hoverStyle.expected, `The actions button must show a hover fill with overflow in ${theme} mode`);
+      assert.deepEqual(await actions.boundingBox(), fixedButton, 'Hover must not move the actions button');
+      assert.equal(await tabViewport.evaluate(element => element.scrollLeft), scrollRange,
+        'Hovering the actions button must preserve the tab bar scroll position');
+    }
+    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
+    await actions.click();
+    await actionsMenu.waitFor();
+    await page.screenshot({ animations: 'disabled', clip: { x: 0, y: 0, width: 320, height: 224 },
+      path: `${root}artifacts/tests/terminal-tab-actions/menu.png` });
+    const switcher = page.getByRole('dialog', { name: '切换终端页签', exact: true });
+    await actionsMenu.getByRole('menuitem', { name: '切换终端页签', exact: true }).click();
+    await switcher.waitFor();
+    await page.keyboard.press('Escape');
+    await switcher.waitFor({ state: 'hidden' });
+
+    await actions.click();
+    await actionsMenu.getByRole('menuitem', { name: '关闭当前终端', exact: true }).click();
+    const closeDialog = page.getByRole('alertdialog', { name: '关闭页签', exact: true });
+    await closeDialog.waitFor();
+    await closeDialog.getByRole('button', { name: '取消', exact: true }).click();
+    await closeDialog.waitFor({ state: 'hidden' });
+    assert.equal(await tabBar.getByRole('tab').count(), 2, 'Dismissing confirmation must preserve both terminals');
+
+    await host.evaluate(element => { element.style.width = '220px'; });
+    await actions.click();
+    const splitRight = actionsMenu.getByRole('menuitem', { name: '向右分屏', exact: true });
+    assert.equal(await splitRight.isDisabled(), true, 'Side-by-side panes require enough width');
+    await page.keyboard.press('Escape');
+    await actionsMenu.waitFor({ state: 'hidden' });
+
+    await host.evaluate(element => { element.style.width = '400px'; });
+    await actions.click();
+    await splitRight.click();
+    const groups = host.locator('[data-terminal-group]');
+    await groups.nth(1).waitFor();
+    const splitActions = groups.nth(1).getByRole('button', { name: '终端页签操作', exact: true });
+    await splitActions.click();
+    assert.equal(await splitRight.isDisabled(), true, 'A group with one tab cannot split it out');
+    await actionsMenu.getByRole('menuitem', { name: '退出分屏', exact: true }).click();
+    await groups.first().waitFor({ state: 'detached' });
+
   }
   assert.deepEqual(errors, []);
   process.stdout.write('Terminal experience regressions passed with real xterm and WebKit at wide and narrow sizes.\n');
