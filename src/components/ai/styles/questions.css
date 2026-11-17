@@ -179,6 +179,11 @@
   border-radius: 10px;
 }
 
+[data-theme='dark'] .ai-approval-panel-footer [data-remote-allow-once] {
+  --color-app-warning: color-mix(in srgb, var(--app-warning) 56%, black);
+  --color-app-primary-text: white;
+}
+
 @container ai-workspace (max-width: 420px) {
   .ai-question-panel,
   .ai-approval-panel {

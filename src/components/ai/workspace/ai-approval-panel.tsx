@@ -234,9 +234,10 @@ export function AiApprovalPanel({
   const targetDescription = elevated && username && target?.host
     ? `${username}@${target.host.includes(':') ? `[${target.host}]` : target.host}:${port ?? 22}`
     : targetLabel(approval);
-  const approveLabel = t(approval.toolName === 'trash_file'
+  const approveLabelKey = approval.toolName === 'trash_file'
     ? 'ai.workspace.approval.action.trashFile'
-    : elevated ? 'ai.workspace.approval.approveAndRun' : 'ai.workspace.approval.approveOnce');
+    : elevated ? 'ai.workspace.approval.approveAndRun' : 'ai.workspace.approval.approveOnce';
+  const approveLabel = t(approveLabelKey);
   const volatileArgumentsRequired = argumentRecord?.contentPersisted === false && (
     approval.toolName === 'write_terminal_input'
       ? inputKind === 'text' || inputKind === 'paste'
@@ -263,6 +264,8 @@ export function AiApprovalPanel({
       : 'ai.workspace.approval.terminalInput';
   const intent = intentLabel(approval);
   const titleKey = approvalTitleKey(approval, command);
+  const remoteAllowOnce = titleKey === 'ai.workspace.approval.commandTitle.remote'
+    && approveLabelKey === 'ai.workspace.approval.approveOnce';
   const descriptionKey = approvalDescriptionKey(approval, command);
   const riskKeys = APPROVAL_RISK_KEYS[approval.risk];
   const recoverableDeletion = approval.toolName === 'trash_file';
@@ -389,7 +392,15 @@ export function AiApprovalPanel({
         <Button size="sm" variant="outline" disabled={pending} aria-busy={decision === 'reject' || undefined} onClick={onReject} aria-label={t('ai.workspace.approval.reject')}>
           <AiSubmissionButtonLabel label={t('ai.workspace.approval.reject')} busy={decision === 'reject'} />
         </Button>
-        <Button size="sm" variant="warning" disabled={pending || volatileArgumentsMissing} aria-busy={decision === 'approve' || argumentsLoading || undefined} onClick={onApprove} aria-label={approveLabel}>
+        <Button
+          size="sm"
+          variant="warning"
+          data-remote-allow-once={remoteAllowOnce || undefined}
+          disabled={pending || volatileArgumentsMissing}
+          aria-busy={decision === 'approve' || argumentsLoading || undefined}
+          onClick={onApprove}
+          aria-label={approveLabel}
+        >
           <AiSubmissionButtonLabel label={approveLabel} busy={decision === 'approve'} />
         </Button>
       </CardFooter>

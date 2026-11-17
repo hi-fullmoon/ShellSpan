@@ -101,6 +101,7 @@ try {
           ['en-US', 'dark', 'Command', 'Copy command', 'Cancel', 'Allow once'],
         ]) {
           const context = `${engine.name()}/${width}/${locale}`;
+          await page.mouse.move(0, 0);
           await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
           await show({ toolName: 'run_terminal_command', arguments: { command: longCommand } }, locale);
           assert.equal(await commandCard.locator('.ai-content-header').textContent(), heading);
@@ -109,6 +110,30 @@ try {
           assert.equal(await viewport.getAttribute('aria-label'), heading);
           assert.equal(await viewport.evaluate(element => getComputedStyle(element).whiteSpace), 'pre-wrap');
           const footer = page.locator('.ai-approval-panel-footer');
+          const approve = footer.getByRole('button', { name: approveLabel, exact: true });
+          const { color, background, warning } = await approve.evaluate(async element => {
+            await Promise.allSettled(element.getAnimations().map(animation => animation.finished));
+            const style = getComputedStyle(element);
+            const icon = element.closest('.ai-approval-panel').querySelector('.text-app-warning');
+            return { color: style.color, background: style.backgroundColor, warning: getComputedStyle(icon).color };
+          });
+          if (theme === 'dark') {
+            assert.equal(color, 'rgb(255, 255, 255)', `${context}: Allow once uses white text in dark mode`);
+            const contrast = await approve.evaluate(element => {
+              const canvas = document.createElement('canvas').getContext('2d');
+              canvas.fillStyle = getComputedStyle(element).backgroundColor;
+              canvas.fillRect(0, 0, 1, 1);
+              const [red, green, blue] = Array.from(canvas.getImageData(0, 0, 1, 1).data, value => {
+                const channel = value / 255;
+                return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+              });
+              return 1.05 / (0.2126 * red + 0.7152 * green + 0.0722 * blue + 0.05);
+            });
+            assert.ok(contrast >= 4.5, `${context}: white text contrast was ${contrast.toFixed(2)}:1`);
+            assert.notEqual(background, warning, `${context}: only the button uses the darker warning fill`);
+          } else {
+            assert.equal(background, warning, `${context}: light mode keeps the warning fill`);
+          }
           const footerBefore = await footer.boundingBox();
           await fade.waitFor({ state: 'visible' });
           await viewport.focus();
