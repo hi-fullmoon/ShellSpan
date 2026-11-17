@@ -588,12 +588,14 @@ fn production_remote_zle_parent_parser_and_background() {
             &mut raw,
             |m| matches!(m,nip::Message::Connection(e)if matches!(e.payload,nip::ConnectionPayload::EditorReady{editor_empty:true,..})),
         );
+        native.send(&session, b"TTY-RECOVERY 47 2\n").unwrap();
         let handle = "job-3123456789abcdef0123456789abcdef";
         let pid_file = format!("p3-ssh-group-{}.pid", Uuid::new_v4());
         let group_check=format!("import os\nfrom pathlib import Path\npid=int((Path.home()/{pid_file:?}).read_text())\nassert pid>1\ntry:\n os.killpg(pid,0)\nexcept ProcessLookupError:\n print('P3-SSH-GROUP-GONE')\nelse:\n raise AssertionError('actual stopped group still exists')");
         let background =
             std::env::var("SHELLSPAN_P3_GEOMETRY_BACKGROUND_OUTPUT").as_deref() != Ok("0");
         let mut initial_source="typeset P3_SSH_PARENT='父Shell-é-👩🏽‍💻'; command cat /proc/$$/maps > \"$HOME/p3-core-map\"; printf '%s%s\\n' P3-SSH- INITIALIZED".to_string();
+        initial_source.push_str("; [[ -f \"$__shellspan_control_path.tty-reply-47-2\" ]] && printf '%s%s\\n' P3-SSH- TTY-REPLY");
         if std::env::var_os("SHELLSPAN_P3_HISTORY_PREFILL").is_some() {
             initial_source.push_str(
                 "; for n in {1..60}; do builtin printf 'P3_HISTORY_%02d\\n' \"$n\"; done",
@@ -753,7 +755,12 @@ fn production_remote_zle_parent_parser_and_background() {
                 &mut raw,
                 |m| matches!(m,nip::Message::Operation(e)if e.request_id==commit.request_id&&matches!(e.payload,nip::Payload::CommitArmed)),
             );
-            write_all_nonblocking(&session, &mut pty, b"\x18a").unwrap();
+            write_all_nonblocking(
+                &session,
+                &mut pty,
+                crate::terminal_command::editors::ZLE_ACCEPT_KEY,
+            )
+            .unwrap();
             pump(
                 &mut native,
                 &mut pty,
@@ -772,6 +779,7 @@ fn production_remote_zle_parent_parser_and_background() {
         let text = String::from_utf8(raw.clone()).unwrap();
         assert!(text.contains("P3-SSH-INITIALIZED"));
         assert!(text.contains("P3-SSH-PERSISTED"));
+        assert!(text.contains("P3-SSH-TTY-REPLY"));
         assert!(text.contains("P3-SSH-LONG"));
         assert!(records.iter().any(|m|matches!(m,nip::Message::Connection(e)if matches!(&e.payload,nip::ConnectionPayload::JobObservation{state,..}if state=="stopRequested"))));
         assert!(records.iter().any(|m|matches!(m,nip::Message::Connection(e)if matches!(&e.payload,nip::ConnectionPayload::JobObservation{handle:h,state,exit_code:Some(143)}if h==handle&&state=="finished"))));

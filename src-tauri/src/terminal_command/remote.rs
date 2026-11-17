@@ -176,6 +176,14 @@ fn start_native_relay(session: &Session, root: &str) -> Result<(Channel, RelayBo
 }
 
 impl RemoteNativeBash {
+    pub(super) fn display_recovery_token(&self) -> &str {
+        crate::terminal_integration::recovery_token(Path::new(&self.root))
+    }
+
+    pub(super) fn tty_recovery_root(&self) -> &Path {
+        Path::new(&self.root)
+    }
+
     pub fn prepare(
         session: &Session,
         username: &str,
@@ -706,6 +714,7 @@ fn cleanup(sftp: &ssh2::Sftp, root: &str) {
                         | "control"
                         | "control.control"
                 ) || name.starts_with("control.job.job-")
+                    || crate::terminal_display_recovery::TtyRecoveryReply::is_reply_file(name)
                     || pending)
             {
                 let _ = sftp.unlink(&path);

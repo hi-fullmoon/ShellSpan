@@ -3,6 +3,8 @@ use libc::{poll, pollfd, POLLIN, POLLOUT};
 use log::{error, info, warn};
 use ssh2::{BlockDirections, Channel, ExtendedData, Session};
 use std::{
+    cell::Cell,
+    collections::VecDeque,
     io::{ErrorKind, Read, Write},
     net::{Ipv4Addr, TcpListener, TcpStream},
     path::Path,
@@ -30,8 +32,8 @@ use crate::{
     drain_decoded_output, emit_data, emit_session_error, emit_status, flush_pending_output,
     known_hosts::known_hosts_path,
     models::{
-        ClosedReasonKind, ConnectionError, SessionCommand, SessionCreateRequest, SessionErrorEvent,
-        SessionManager, SessionStatus, StatusEvent,
+        ClosedReasonKind, ConnectionError, NativeControlFrame, SessionCommand,
+        SessionCreateRequest, SessionErrorEvent, SessionManager, SessionStatus, StatusEvent,
     },
     observe_terminal_raw_output,
     petdex::{ActivityGuard, ActivityPhase},
@@ -169,11 +171,17 @@ impl RemoteSshShellIntegration {
             let mut control = session
                 .channel_session()
                 .map_err(|error| format!("failed to open remote integration channel: {error}"))?;
+            let command = if shell == TerminalShellKind::Zsh {
+                format!(
+                    "exec /bin/sh -c {} shellspan-control {}",
+                    quote_remote_posix(include_str!("terminal-ssh-control.sh")),
+                    quote_remote_posix(&fifo_path),
+                )
+            } else {
+                format!("exec 3<> {}; cat <&3", quote_remote_posix(&fifo_path))
+            };
             control
-                .exec(&format!(
-                    "exec 3<> {}; cat <&3",
-                    quote_remote_posix(&fifo_path)
-                ))
+                .exec(&command)
                 .map_err(|error| format!("failed to start remote integration reader: {error}"))?;
             Ok(control)
         })();
@@ -251,6 +259,10 @@ fn cleanup_remote_integration_files(
                 let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
                     continue;
                 };
+                if crate::terminal_display_recovery::TtyRecoveryReply::is_reply_file(name) {
+                    let _ = sftp.unlink(Path::new(&format!("{remote_root}/{name}")));
+                    continue;
+                }
                 let Some(suffix) = name.strip_prefix(&prefix) else {
                     continue;
                 };
@@ -879,12 +891,13 @@ pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
             (None, None)
         };
 
+    let aborted = Cell::new(false);
     let result = with_remote_integration_cleanup(
         &session,
         &mut remote_integration,
         |remote_integration| {
             let mut channel = open_remote_pty_channel(&session, request, session_id)?;
-            with_failure_cleanup(
+            let result = with_failure_cleanup(
                 &mut channel,
                 |channel| {
                     let mut integration_failure =
@@ -974,6 +987,8 @@ pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
 
                     if let Some(native) = native_integration.as_mut() {
                         if let Some(messages) = initial_messages {
+                            let _ = broker
+                                .arm_display_recovery(session_id, native.display_recovery_token());
                             if messages.is_empty() {
                                 crate::commands::emit_terminal_integration_state(app, session_id);
                             }
@@ -1007,6 +1022,12 @@ pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
                                 integration.close(&session);
                             }
                         } else {
+                            let _ = broker.arm_display_recovery(
+                                session_id,
+                                crate::terminal_integration::recovery_token(Path::new(
+                                    &integration.remote_root,
+                                )),
+                            );
                             crate::commands::emit_terminal_integration_state(app, session_id);
                         }
                     }
@@ -1075,15 +1096,28 @@ pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
                         remote_integration.as_mut(),
                         native_integration.as_mut(),
                         initial_output,
+                        &aborted,
                     )
                     .map_err(|message| ConnectionError::Other { message })
                 },
-                graceful_shutdown,
-            )
+                |channel| {
+                    if !aborted.get() {
+                        graceful_shutdown(channel);
+                    }
+                },
+            );
+            if aborted.get() {
+                // On cancellation with a packet in flight, the socket is
+                // already shut down. Do not start SFTP or a second SSH write.
+                drop(remote_integration.take());
+            }
+            result
         },
     );
-    if let Some(native) = native_integration.take() {
-        native.close(&session);
+    if !aborted.get() {
+        if let Some(native) = native_integration.take() {
+            native.close(&session);
+        }
     }
     result
 }
@@ -1305,6 +1339,7 @@ fn session_loop(
     remote_integration: Option<&mut RemoteSshShellIntegration>,
     native_integration: Option<&mut RemoteNativeBash>,
     initial_pty_output: Vec<u8>,
+    aborted: &Cell<bool>,
 ) -> Result<Option<String>, String> {
     let mut pending_bytes = initial_pty_output;
     let mut pending_output = String::new();
@@ -1326,6 +1361,7 @@ fn session_loop(
         &mut output_live,
         remote_integration,
         native_integration,
+        aborted,
     );
     // Emit whatever decoded output remains so the final screen state is not
     // lost when the session ends.
@@ -1355,6 +1391,142 @@ fn emit_data_tolerant(app: &AppHandle, session_id: &str, chunk: String) {
     }
 }
 
+enum SshPayload {
+    Pty(Vec<u8>),
+    Native(NativeControlFrame),
+    TtyReply { bytes: Vec<u8>, native: bool },
+}
+
+enum SshWrite {
+    Data { payload: SshPayload, offset: usize },
+    Resize { cols: u32, rows: u32 },
+}
+
+impl SshWrite {
+    fn pty(bytes: Vec<u8>) -> Self {
+        Self::Data {
+            payload: SshPayload::Pty(bytes),
+            offset: 0,
+        }
+    }
+
+    fn advance(
+        &mut self,
+        pty: &mut Channel,
+        native: Option<&mut Channel>,
+        legacy: Option<&mut Channel>,
+    ) -> std::io::Result<bool> {
+        match self {
+            Self::Resize { cols, rows } => pty
+                .request_pty_size(*cols, *rows, None, None)
+                .map(|()| true)
+                .map_err(std::io::Error::from),
+            Self::Data { payload, offset } => {
+                let target = match payload {
+                    SshPayload::Pty(_) => Some(pty),
+                    SshPayload::Native(_) | SshPayload::TtyReply { native: true, .. } => native,
+                    SshPayload::TtyReply { native: false, .. } => legacy,
+                };
+                let Some(target) = target else {
+                    return Ok(true);
+                };
+                let count = target.write(&payload.bytes()[*offset..])?;
+                if count == 0 {
+                    return Err(ErrorKind::WriteZero.into());
+                }
+                *offset += count;
+                Ok(*offset == payload.bytes().len())
+            }
+        }
+    }
+
+    fn failure_context(&self) -> &'static str {
+        match self {
+            Self::Resize { .. } => "failed to resize PTY",
+            Self::Data {
+                payload: SshPayload::Pty(_),
+                ..
+            } => "failed to write remote input",
+            _ => "failed to write SSH private control frame",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SshRetry {
+    Write,
+    NativeRead,
+    LegacyRead,
+    PtyRead,
+}
+
+impl SshPayload {
+    fn bytes(&self) -> &[u8] {
+        match self {
+            Self::Pty(bytes) | Self::TtyReply { bytes, .. } => bytes,
+            Self::Native(frame) => &frame.bytes,
+        }
+    }
+
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    fn is_traced_accept_key(&self) -> bool {
+        matches!(self, Self::Pty(bytes) if
+            bytes == crate::terminal_command::editors::ZLE_ACCEPT_KEY
+            || bytes == crate::terminal_command::editors::BASH_ACCEPT_KEY)
+            && crate::terminal_command::acceptance_trace::ssh_recovery_enabled()
+    }
+}
+
+fn advance_ssh_write_queue(
+    writes: &mut VecDeque<SshWrite>,
+    pty: &mut Channel,
+    native: Option<&mut Channel>,
+    legacy: Option<&mut Channel>,
+) -> std::io::Result<Option<SshWrite>> {
+    let Some(write) = writes.front_mut() else {
+        return Ok(None);
+    };
+    if !write.advance(pty, native, legacy)? {
+        return Ok(None);
+    }
+    let completed = writes.pop_front();
+    if matches!(
+        &completed,
+        Some(SshWrite::Data { payload: SshPayload::Native(frame), offset })
+            if frame.wake_editor && *offset == frame.bytes.len()
+    ) {
+        writes.push_front(SshWrite::pty(b"\x18\x1e".to_vec()));
+    }
+    Ok(completed)
+}
+
+fn ssh_wants_write(session: &Session) -> bool {
+    matches!(
+        session.block_directions(),
+        BlockDirections::Outbound | BlockDirections::Both
+    )
+}
+
+fn abort_ssh_transport(session: &Session, aborted: &Cell<bool>) {
+    aborted.set(true);
+    #[cfg(unix)]
+    unsafe {
+        libc::shutdown(session.as_raw_fd(), libc::SHUT_RDWR);
+    }
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::Networking::WinSock::{shutdown, SD_BOTH};
+        shutdown(session.as_raw_socket() as _, SD_BOTH);
+    }
+    #[cfg(not(any(unix, windows)))]
+    let _ = session;
+}
+
 fn session_loop_inner(
     app: &AppHandle,
     session_id: &str,
@@ -1370,29 +1542,35 @@ fn session_loop_inner(
     output_live: &mut bool,
     mut remote_integration: Option<&mut RemoteSshShellIntegration>,
     mut native_integration: Option<&mut RemoteNativeBash>,
+    aborted: &Cell<bool>,
 ) -> Result<Option<String>, String> {
     let mut buffer = [0u8; 8192];
+    let mut tty_recovery = native_integration
+        .as_deref()
+        .filter(|native| native.active && native.profile.shell() == TerminalShellKind::Zsh)
+        .map(|native| (native.tty_recovery_root(), true))
+        .or_else(|| {
+            remote_integration
+                .as_deref()
+                .filter(|integration| {
+                    integration.active && integration.shell == TerminalShellKind::Zsh
+                })
+                .map(|integration| (Path::new(&integration.remote_root), false))
+        })
+        .map(|(root, native)| {
+            (
+                crate::terminal_display_recovery::TtyRecoveryWatcher::new(root),
+                native,
+            )
+        });
+    let mut writes = VecDeque::new();
+    let mut retry = None;
     let mut next_keepalive_at =
         Instant::now() + normalize_keepalive_delay(SSH_SESSION_KEEPALIVE_INTERVAL_SECS);
 
     loop {
         let mut made_progress = false;
         let mut pending_commands = Vec::new();
-        if let Some(native) = native_integration.as_deref_mut() {
-            if native.active {
-                match native.drain(app, session_id) {
-                    Ok(progress) => made_progress |= progress,
-                    Err(_) => native.fail(app, session_id),
-                }
-            }
-        }
-
-        if let Some(integration) = remote_integration.as_deref_mut() {
-            if integration.active {
-                made_progress |=
-                    drain_remote_integration_control(app, session_id, session, integration)?;
-            }
-        }
 
         if !*output_live
             && should_release_startup_output(
@@ -1413,7 +1591,11 @@ fn session_loop_inner(
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     info!("SSH session controller dropped session_id={session_id}");
-                    graceful_shutdown(channel);
+                    if retry.is_some() {
+                        abort_ssh_transport(session, aborted);
+                    } else {
+                        graceful_shutdown(channel);
+                    }
                     return Ok(Some("session controller dropped".to_string()));
                 }
             }
@@ -1422,63 +1604,30 @@ fn session_loop_inner(
         for command in coalesce_session_commands(pending_commands) {
             match command {
                 SessionCommand::Write(data) => {
-                    write_all_nonblocking(session, channel, data.as_bytes())?;
-                    made_progress = true;
+                    if !data.is_empty() {
+                        writes.push_back(SshWrite::pty(data.into_bytes()));
+                    }
                 }
                 SessionCommand::WriteBytes(bytes) => {
-                    #[cfg(all(
-                        feature = "native-input-acceptance",
-                        debug_assertions,
-                        target_os = "macos",
-                        target_arch = "aarch64"
-                    ))]
-                    let observe_key =
-                        crate::terminal_command::acceptance_trace::ssh_recovery_enabled()
-                            && (bytes == crate::terminal_command::editors::ZLE_ACCEPT_KEY
-                                || bytes == crate::terminal_command::editors::BASH_ACCEPT_KEY);
-                    #[cfg(all(
-                        feature = "native-input-acceptance",
-                        debug_assertions,
-                        target_os = "macos",
-                        target_arch = "aarch64"
-                    ))]
-                    if observe_key {
-                        crate::terminal_command::acceptance_trace::record(
-                            "ssh-accept-key-write-attempt",
-                            serde_json::json!({"sessionId":session_id,"bytes":bytes.len()}),
-                        )?;
+                    if !bytes.is_empty() {
+                        writes.push_back(SshWrite::pty(bytes));
                     }
-                    write_all_nonblocking(session, channel, &bytes)?;
-                    #[cfg(all(
-                        feature = "native-input-acceptance",
-                        debug_assertions,
-                        target_os = "macos",
-                        target_arch = "aarch64"
-                    ))]
-                    if observe_key {
-                        crate::terminal_command::acceptance_trace::actual_accept_key_written(
-                            session_id,
-                            &bytes,
-                            bytes.len(),
-                        )?;
-                    }
-                    made_progress = true;
                 }
                 SessionCommand::NativeControl(frame) => {
-                    if let Some(native) = native_integration.as_deref_mut() {
-                        if native.send(session, &frame.bytes).is_ok() {
-                            if frame.wake_editor {
-                                write_all_nonblocking(session, channel, b"\x18\x1e")?;
-                            }
-                        } else {
-                            native.fail(app, session_id);
-                        }
+                    if native_integration
+                        .as_deref()
+                        .is_some_and(|native| native.active)
+                        && !frame.bytes.is_empty()
+                        && frame.bytes.len() <= native_protocol::MAX_MESSAGE_BYTES
+                    {
+                        writes.push_back(SshWrite::Data {
+                            payload: SshPayload::Native(frame),
+                            offset: 0,
+                        });
                     }
-                    made_progress = true;
                 }
                 SessionCommand::Resize { cols, rows } => {
-                    resize_pty_nonblocking(session, channel, cols, rows)?;
-                    made_progress = true;
+                    writes.push_back(SshWrite::Resize { cols, rows });
                 }
                 #[cfg(any(windows, test))]
                 SessionCommand::StartupReady => {
@@ -1486,13 +1635,157 @@ fn session_loop_inner(
                 }
                 SessionCommand::Close => {
                     info!("SSH session closed locally session_id={session_id}");
-                    graceful_shutdown(channel);
+                    if retry.is_some() {
+                        abort_ssh_transport(session, aborted);
+                    } else {
+                        graceful_shutdown(channel);
+                    }
                     return Ok(Some("session closed locally".to_string()));
                 }
             }
         }
 
-        if !output_paused.load(AtomicOrdering::Relaxed) {
+        // libssh2 can retain an encrypted packet for the entire session after
+        // EAGAIN. Retry its originating operation before making another one
+        // that could send on the socket, even on a different SSH channel.
+        if !writes.is_empty() && matches!(retry, None | Some(SshRetry::Write)) {
+            #[cfg(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            if retry.is_none() {
+                if let Some(SshWrite::Data { payload, offset: 0 }) = writes.front() {
+                    if payload.is_traced_accept_key() {
+                        crate::terminal_command::acceptance_trace::record(
+                            "ssh-accept-key-write-attempt",
+                            serde_json::json!({"sessionId":session_id,"bytes":payload.bytes().len()}),
+                        )?;
+                    }
+                }
+            }
+            let result = advance_ssh_write_queue(
+                &mut writes,
+                channel,
+                native_integration
+                    .as_deref_mut()
+                    .filter(|native| native.active)
+                    .map(|native| &mut native.control),
+                remote_integration
+                    .as_deref_mut()
+                    .filter(|integration| integration.active)
+                    .map(|integration| &mut integration.control),
+            );
+            match result {
+                Ok(_completed) => {
+                    retry = None;
+                    made_progress = true;
+                    #[cfg(all(
+                        feature = "native-input-acceptance",
+                        debug_assertions,
+                        target_os = "macos",
+                        target_arch = "aarch64"
+                    ))]
+                    if let Some(SshWrite::Data { payload, offset }) = _completed {
+                        if payload.is_traced_accept_key() {
+                            crate::terminal_command::acceptance_trace::actual_accept_key_written(
+                                session_id,
+                                payload.bytes(),
+                                offset,
+                            )?;
+                        }
+                    }
+                }
+                Err(error)
+                    if is_retryable_channel_error_kind(error.kind())
+                        && ssh_wants_write(session) =>
+                {
+                    retry = Some(SshRetry::Write);
+                    if let Err(error) = wait_for_session_events(
+                        session,
+                        wake,
+                        Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS),
+                    ) {
+                        abort_ssh_transport(session, aborted);
+                        return Err(error);
+                    }
+                    continue;
+                }
+                Err(error) if is_retryable_channel_error_kind(error.kind()) => {
+                    // A channel waiting for a window update or request reply
+                    // has no outbound packet pinned. Keep draining incoming data.
+                    retry = None;
+                }
+                Err(error) => {
+                    let control_eof = match writes.front() {
+                        Some(SshWrite::Data {
+                            payload:
+                                SshPayload::Native(_) | SshPayload::TtyReply { native: true, .. },
+                            ..
+                        }) => native_integration
+                            .as_deref()
+                            .is_some_and(|native| native.control.eof()),
+                        Some(SshWrite::Data {
+                            payload: SshPayload::TtyReply { native: false, .. },
+                            ..
+                        }) => remote_integration
+                            .as_deref()
+                            .is_some_and(|integration| integration.control.eof()),
+                        _ => false,
+                    };
+                    if control_eof && !ssh_wants_write(session) {
+                        // Let the control reader report and retire its EOF.
+                        // A closing private channel need not end the PTY.
+                        writes.pop_front();
+                        retry = None;
+                        made_progress = true;
+                    } else {
+                        let context = writes
+                            .front()
+                            .map_or("failed to send SSH data", SshWrite::failure_context);
+                        // A failed write can leave a partial packet or control
+                        // record in flight. Close the transport before dropping it.
+                        abort_ssh_transport(session, aborted);
+                        return Err(format_transport_error(context, &error.to_string()));
+                    }
+                }
+            }
+        }
+
+        if matches!(retry, None | Some(SshRetry::NativeRead)) {
+            retry = None;
+            if let Some(native) = native_integration
+                .as_deref_mut()
+                .filter(|native| native.active)
+            {
+                match native.drain(app, session_id) {
+                    Ok(progress) => made_progress |= progress,
+                    Err(_) => native.fail(app, session_id),
+                }
+                if native.active && ssh_wants_write(session) {
+                    retry = Some(SshRetry::NativeRead);
+                }
+            }
+        }
+        if matches!(retry, None | Some(SshRetry::LegacyRead)) {
+            retry = None;
+            if let Some(integration) = remote_integration
+                .as_deref_mut()
+                .filter(|integration| integration.active)
+            {
+                made_progress |=
+                    drain_remote_integration_control(app, session_id, session, integration)?;
+                if integration.active && ssh_wants_write(session) {
+                    retry = Some(SshRetry::LegacyRead);
+                }
+            }
+        }
+
+        if retry == Some(SshRetry::PtyRead)
+            || (retry.is_none() && !output_paused.load(AtomicOrdering::Relaxed))
+        {
+            retry = None;
             match channel.read(&mut buffer) {
                 Ok(0) => {
                     if channel.eof() {
@@ -1501,6 +1794,17 @@ fn session_loop_inner(
                     }
                 }
                 Ok(read) => {
+                    if let Some((recovery, native)) = tty_recovery.as_mut() {
+                        if let Some(reply) = recovery.observe_ssh(&buffer[..read]) {
+                            writes.push_back(SshWrite::Data {
+                                payload: SshPayload::TtyReply {
+                                    bytes: reply,
+                                    native: *native,
+                                },
+                                offset: 0,
+                            });
+                        }
+                    }
                     ssh_recovery_read(session_id, &buffer[..read]);
                     observe_terminal_raw_output(app, session_id, &buffer[..read]);
                     pending_bytes.extend_from_slice(&buffer[..read]);
@@ -1529,6 +1833,9 @@ fn session_loop_inner(
                     ));
                 }
             }
+            if ssh_wants_write(session) {
+                retry = Some(SshRetry::PtyRead);
+            }
         }
 
         if made_progress {
@@ -1537,9 +1844,36 @@ fn session_loop_inner(
             continue;
         }
 
+        if retry.is_some() {
+            if let Err(error) = wait_for_session_events(
+                session,
+                wake,
+                Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS),
+            ) {
+                abort_ssh_transport(session, aborted);
+                return Err(error);
+            }
+            continue;
+        }
+
         let now = Instant::now();
         if now >= next_keepalive_at {
-            let keepalive_delay = send_session_keepalive_nonblocking(session)?;
+            let writable = session_poll_events(BlockDirections::Outbound);
+            if poll_session_events(session, wake, writable, Duration::ZERO)? & writable == 0 {
+                next_keepalive_at = now + Duration::from_secs(1);
+                continue;
+            }
+            let result = session.keepalive_send();
+            // libssh2's keepalive API hides EAGAIN and does not retain a safe
+            // retry buffer. Abort rather than queue writes behind that packet.
+            if ssh_wants_write(session) {
+                abort_ssh_transport(session, aborted);
+                return Err("ssh transport disconnected while sending keepalive".into());
+            }
+            let seconds = result.map_err(|error| {
+                format_transport_error("failed to send ssh keepalive", &error.to_string())
+            })?;
+            let keepalive_delay = normalize_keepalive_delay(seconds);
             next_keepalive_at = Instant::now() + keepalive_delay;
             continue;
         }
@@ -1550,9 +1884,7 @@ fn session_loop_inner(
             continue;
         }
 
-        // Idle: sleep until the SSH socket becomes ready, a command wakes us
-        // through the self-pipe, or the keepalive deadline expires — whichever
-        // comes first.
+        // Wake for the socket, queued commands, or the next retry deadline.
         wait_for_terminal_session_events(
             session,
             channel,
@@ -1567,6 +1899,7 @@ fn session_loop_inner(
                         .map(|integration| &integration.control)
                 }),
             wake,
+            !writes.is_empty(),
             keepalive_due_in,
         )?;
     }
@@ -1599,37 +1932,6 @@ fn should_release_startup_output(
     output_ready
         || elapsed > SSH_OUTPUT_READY_TIMEOUT
         || buffered_bytes > SSH_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES
-}
-
-fn send_session_keepalive_nonblocking(session: &Session) -> Result<Duration, String> {
-    let wait_timeout = Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS);
-
-    loop {
-        match session.keepalive_send() {
-            Ok(next_seconds) => return Ok(normalize_keepalive_delay(next_seconds)),
-            Err(error) => {
-                let io_error: std::io::Error = error.into();
-                if is_retryable_channel_error_kind(io_error.kind()) {
-                    if io_error.kind() == ErrorKind::Interrupted {
-                        continue;
-                    }
-                    wait_for_session_socket(session, wait_timeout)?;
-                    continue;
-                }
-
-                warn!(
-                    "SSH keepalive failed kind={:?} block_directions={:?} error={}",
-                    io_error.kind(),
-                    session.block_directions(),
-                    io_error
-                );
-                return Err(format_transport_error(
-                    "failed to send ssh keepalive",
-                    &io_error.to_string(),
-                ));
-            }
-        }
-    }
 }
 
 pub(crate) fn is_retryable_channel_error_kind(kind: ErrorKind) -> bool {
@@ -1784,6 +2086,7 @@ fn wait_for_terminal_session_events(
     terminal: &Channel,
     control: Option<&Channel>,
     wake: &SessionWakeSource,
+    writes_pending: bool,
     timeout: Duration,
 ) -> Result<(), String> {
     // Reading or writing either channel can consume socket packets for the
@@ -1795,6 +2098,13 @@ fn wait_for_terminal_session_events(
     {
         return Ok(());
     }
+    // A read can consume a window adjustment without yielding any output.
+    // Retry queued writes promptly even if the socket has gone quiet again.
+    let timeout = if writes_pending {
+        timeout.min(Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS))
+    } else {
+        timeout
+    };
     wait_for_session_events(session, wake, timeout)
 }
 
@@ -1802,16 +2112,25 @@ fn wait_for_terminal_session_events(
 /// command, or `timeout` elapses. Falls back to polling inbound readiness
 /// when the last blocked direction is unknown, so incoming data can never
 /// stall until the keepalive deadline.
-#[cfg(unix)]
 fn wait_for_session_events(
     session: &Session,
     wake: &SessionWakeSource,
     timeout: Duration,
 ) -> Result<(), String> {
     let events = match session_poll_events(session.block_directions()) {
-        0 => POLLIN,
+        0 => session_poll_events(BlockDirections::Inbound),
         events => events,
     };
+    poll_session_events(session, wake, events, timeout).map(|_| ())
+}
+
+#[cfg(unix)]
+fn poll_session_events(
+    session: &Session,
+    wake: &SessionWakeSource,
+    events: i16,
+    timeout: Duration,
+) -> Result<i16, String> {
     let timeout_ms = timeout.as_millis().min(i32::MAX as u128);
     let timeout_ms = i32::try_from(timeout_ms).unwrap_or(i32::MAX);
     let mut fds = [
@@ -1831,7 +2150,7 @@ fn wait_for_session_events(
         let result = unsafe { poll(fds.as_mut_ptr(), 2, timeout_ms) };
         if result >= 0 {
             wake.drain();
-            return Ok(());
+            return Ok(fds[0].revents);
         }
 
         let error = std::io::Error::last_os_error();
@@ -1844,19 +2163,16 @@ fn wait_for_session_events(
 }
 
 #[cfg(windows)]
-fn wait_for_session_events(
+fn poll_session_events(
     session: &Session,
     wake: &SessionWakeSource,
+    events: i16,
     timeout: Duration,
-) -> Result<(), String> {
+) -> Result<i16, String> {
     use windows_sys::Win32::Networking::WinSock::{
         WSAGetLastError, WSAPoll, POLLIN, WSAEINTR, WSAPOLLFD,
     };
 
-    let events = match session_poll_events(session.block_directions()) {
-        0 => POLLIN,
-        events => events,
-    };
     let timeout_ms = timeout.as_millis().min(i32::MAX as u128);
     let timeout_ms = i32::try_from(timeout_ms).unwrap_or(i32::MAX);
     let mut fds = [
@@ -1876,7 +2192,7 @@ fn wait_for_session_events(
         let result = unsafe { WSAPoll(fds.as_mut_ptr(), 2, timeout_ms) };
         if result >= 0 {
             wake.drain();
-            return Ok(());
+            return Ok(fds[0].revents);
         }
 
         // Winsock reports errors through WSAGetLastError, not GetLastError.
@@ -1891,14 +2207,20 @@ fn wait_for_session_events(
 }
 
 #[cfg(not(any(unix, windows)))]
-fn wait_for_session_events(
+fn session_poll_events(_directions: BlockDirections) -> i16 {
+    1
+}
+
+#[cfg(not(any(unix, windows)))]
+fn poll_session_events(
     session: &Session,
     wake: &SessionWakeSource,
+    events: i16,
     timeout: Duration,
-) -> Result<(), String> {
+) -> Result<i16, String> {
     let _ = (session, wake);
     thread::sleep(timeout.min(Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS)));
-    Ok(())
+    Ok(events)
 }
 
 #[cfg(unix)]

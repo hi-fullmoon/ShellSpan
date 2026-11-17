@@ -640,6 +640,7 @@
         integration_id: String,
         agent_session_id: String,
         display: Vec<u8>,
+        tty_recovery: Option<crate::terminal_display_recovery::TtyRecoveryWatcher>,
     }
 
     impl RemoteFixtureTerminal {
@@ -717,6 +718,11 @@
                 .register_integration_channel(transport_id, &integration_id, integration.shell)
                 .expect("register isolated remote control channel");
             session.set_blocking(false);
+            let tty_recovery = (integration.shell == TerminalShellKind::Zsh).then(|| {
+                crate::terminal_display_recovery::TtyRecoveryWatcher::new(Path::new(
+                    &integration.remote_root,
+                ))
+            });
             let mut fixture = Self {
                 _known_hosts: known_hosts,
                 socket,
@@ -729,6 +735,7 @@
                 integration_id,
                 agent_session_id: "fixture-agent-session".into(),
                 display: Vec::new(),
+                tty_recovery,
             };
             fixture.pump_until(Duration::from_secs(8), |snapshot| {
                 snapshot.integration_state
@@ -761,6 +768,17 @@
                     Ok(0) => break,
                     Ok(read) => {
                         progress = true;
+                        if let Some(recovery) = self.tty_recovery.as_mut() {
+                            if let Some(frame) = recovery.observe_ssh(&output[..read]) {
+                                let integration = self.integration.as_mut().unwrap();
+                                write_all_nonblocking(
+                                    &self.session,
+                                    &mut integration.control,
+                                    &frame,
+                                )
+                                .expect("deliver tty recovery over the existing SSH channel");
+                            }
+                        }
                         self.display.extend_from_slice(&output[..read]);
                         self.broker
                             .observe_raw_output(&self.transport_id, &output[..read])
@@ -1243,6 +1261,387 @@
             snapshot.integration_state,
             crate::terminal_broker::TerminalIntegrationState::Degraded
         );
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn remote_prompt_recovers_tty_modes_after_vim_exit() {
+        for username in ["shellspan", "shellspan-zsh"] {
+            let broker =
+                crate::terminal_broker::TerminalSessionBroker::phase4_enabled_for_test(16_384);
+            let mut terminal = RemoteFixtureTerminal::connect(
+                username,
+                &format!("vim-tty-modes-{username}"),
+                None,
+                broker,
+            );
+            terminal.execute_user_command(
+                r#"work=$(mktemp -d) && cd "$work" && printf 'ivim recovered\033:wq\r' > keys; stty -ixon erase '^H'; before_vim=$(stty -g)"#,
+            );
+            let display_start = terminal.display.len();
+            let result = terminal.execute(
+                "vim-tty-modes",
+                r#"timeout 30 vim -Nu NONE -i NONE -n -s keys document < /dev/null; printf 'VIM-%s:%s:%s\n' EXIT "$?" "$(stty speed)""#,
+            );
+            assert_eq!(result.exit_code, Some(0), "{username}: {result:?}");
+            let output = String::from_utf8_lossy(&terminal.display[display_start..]);
+            assert!(output.contains("VIM-EXIT:0:0\n"), "{username}: {output:?}");
+
+            let output = terminal.execute_user_command(
+                r#"after_vim=$(stty -g); if test "$after_vim" = "$before_vim" && test "$(cat document)" = 'vim recovered'; then printf 'RECOVERY-%s\nsecond line\n' VERIFIED; else printf 'Modes before=%s after=%s\n' "$before_vim" "$after_vim"; fi"#,
+            );
+            assert!(
+                output.contains("RECOVERY-VERIFIED\r\nsecond line\r\n"),
+                "{username}: {output:?}"
+            );
+
+            terminal.execute_user_command("stty -onlcr");
+            let output =
+                terminal.execute_user_command(r#"printf 'PRESERVE-%s\nsecond line\n' ONLCR"#);
+            assert!(
+                output.contains("PRESERVE-ONLCR\nsecond line\n"),
+                "{username}: {output:?}"
+            );
+            terminal.execute_user_command(r#"stty "$before_vim""#);
+            let integration = terminal.integration.as_ref().unwrap();
+            terminal
+                .broker
+                .arm_display_recovery(
+                    &terminal.transport_id,
+                    crate::terminal_integration::recovery_token(Path::new(
+                        &integration.remote_root,
+                    )),
+                )
+                .unwrap();
+            terminal
+                .broker
+                .observe_display_output(
+                    &terminal.transport_id,
+                    &String::from_utf8_lossy(&terminal.display),
+                )
+                .unwrap();
+            let display_start = terminal.display.len();
+            let killed = terminal.execute(
+                "vim-killed",
+                r#"vim -Nu NONE -i NONE -n -c 'call timer_start(300, { -> system("kill -KILL " . getpid()) })' document || :"#,
+            );
+            assert_eq!(killed.exit_code, Some(0), "{username}: {killed:?}");
+            let raw = String::from_utf8_lossy(&terminal.display[display_start..]);
+            assert!(!raw.contains("\x1b[?1049l"), "{username}: {raw:?}");
+            let output = terminal
+                .broker
+                .observe_display_output(&terminal.transport_id, &raw)
+                .unwrap()
+                .unwrap()
+                .text;
+            assert!(
+                output.contains("\x1b[?1049h") && output.contains("\x1b[?1049l"),
+                "{username}: {output:?}"
+            );
+            terminal.execute_user_command(r#"stty "$before_vim"; before_nvim=$(stty -g)"#);
+            terminal.execute_user_command("sleep 60 & unrelated_pid=$!");
+            if username == "shellspan-zsh" {
+                // The fixture delays the next SFTP subsystem for longer than
+                // the shell's reply window. TTY recovery uses the live control channel.
+                terminal.execute_user_command(r#"touch "$HOME/.shellspan-delay-next-sftp""#);
+            }
+            let display_start = terminal.display.len();
+            let killed = terminal.execute(
+                "nvim-killed",
+                "timeout -s KILL 2 nvim --clean -i NONE -n document || :",
+            );
+            assert_eq!(killed.exit_code, Some(0), "{username}: {killed:?}");
+            let raw = String::from_utf8_lossy(&terminal.display[display_start..]);
+            assert!(
+                raw.contains("\x1b[?1049h") && !raw.contains("\x1b[?1049l"),
+                "{username}: {raw:?}"
+            );
+            let followup = terminal.execute_user_command(
+                r#"test "$(stty -g)" = "$before_nvim" && printf 'NVIM-%s\nsecond line\n' RECOVERED"#,
+            );
+            assert!(
+                followup.contains("NVIM-RECOVERED\r\nsecond line\r\n"),
+                "{username}: {followup:?}"
+            );
+            if username == "shellspan-zsh" {
+                let channel = terminal.execute_user_command(
+                    r#"test -f "$HOME/.shellspan-delay-next-sftp" && printf 'CONTROL-%s\n' REUSED; rm -f -- "$HOME/.shellspan-delay-next-sftp""#,
+                );
+                assert!(channel.contains("CONTROL-REUSED\r\n"), "{channel:?}");
+            }
+            let live = terminal.execute_user_command(r#"kill -0 "$unrelated_pid" && printf 'BACKGROUND-%s\n' ALIVE; kill "$unrelated_pid"; wait "$unrelated_pid" || :"#);
+            assert!(
+                live.contains("BACKGROUND-ALIVE\r\n"),
+                "{username}: {live:?}"
+            );
+            terminal.execute_user_command(r#"cd "$HOME" && rm -r -- "$work""#);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn remote_ssh_write_queue_resumes_pinned_control_before_pty_input() {
+        use std::sync::mpsc;
+
+        let connection = crate::execution::fixture::isolated_ssh_connection();
+        let (_known_hosts, known_hosts_path) =
+            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
+        let upstream = connect_tcp_stream(&connection.host, connection.port).unwrap();
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut downstream, _) = listener.accept().unwrap();
+        for (socket, option) in [(&client, libc::SO_SNDBUF), (&downstream, libc::SO_RCVBUF)] {
+            let size: libc::c_int = 4096;
+            assert_eq!(
+                unsafe {
+                    libc::setsockopt(
+                        socket.as_raw_fd(),
+                        libc::SOL_SOCKET,
+                        option,
+                        (&size as *const libc::c_int).cast(),
+                        std::mem::size_of_val(&size) as libc::socklen_t,
+                    )
+                },
+                0
+            );
+        }
+        downstream
+            .set_read_timeout(Some(Duration::from_millis(20)))
+            .unwrap();
+        let (pause_tx, pause_rx) = mpsc::channel();
+        let (paused_tx, paused_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let mut client_writer = downstream.try_clone().unwrap();
+        let mut server_writer = upstream.try_clone().unwrap();
+        let mut server_reader = upstream;
+        let inbound = thread::spawn(move || {
+            std::io::copy(&mut server_reader, &mut client_writer).unwrap();
+            let _ = client_writer.shutdown(std::net::Shutdown::Write);
+        });
+        let outbound = thread::spawn(move || {
+            let mut buffer = [0; 4096];
+            loop {
+                if pause_rx.try_recv().is_ok() {
+                    paused_tx.send(()).unwrap();
+                    resume_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                }
+                match downstream.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(count) => server_writer.write_all(&buffer[..count]).unwrap(),
+                    Err(error)
+                        if matches!(error.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) => {}
+                    Err(error) => panic!("SSH proxy read failed: {error}"),
+                }
+            }
+            let _ = server_writer.shutdown(std::net::Shutdown::Write);
+        });
+        let session = open_authenticated_session(
+            client,
+            &connection.username,
+            connection.auth_method,
+            connection.password.as_deref(),
+            None,
+            None,
+            &connection.host,
+            connection.port,
+            Some(&known_hosts_path),
+        )
+        .unwrap();
+        let mut pty = session.channel_session().unwrap();
+        pty.request_pty("xterm", None, Some((80, 24, 0, 0)))
+            .unwrap();
+        pty.exec("stty -echo; IFS= read -r key; printf 'PTY:%s\\n' \"$key\"")
+            .unwrap();
+        let mut control = session.channel_session().unwrap();
+        control.exec("exec wc -l").unwrap();
+        session.set_blocking(false);
+        pause_tx.send(()).unwrap();
+        paused_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+
+        let mut writes = VecDeque::new();
+        let pinned_ticket = (1..=65_536)
+            .find(|ticket| {
+                writes.push_back(SshWrite::Data {
+                    payload: SshPayload::TtyReply {
+                        bytes: format!("TTY-RECOVERY {ticket} 1\n").into_bytes(),
+                        native: true,
+                    },
+                    offset: 0,
+                });
+                match advance_ssh_write_queue(&mut writes, &mut pty, Some(&mut control), None) {
+                    Ok(Some(_)) => false,
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => true,
+                    _ => panic!("failed to send a complete control reply"),
+                }
+            })
+            .expect("SSH TCP proxy never applied backpressure");
+        assert!(ssh_wants_write(&session));
+        assert!(control.write_window().remaining > 32_768);
+        writes.push_back(SshWrite::pty(b"queued-after-control\n".to_vec()));
+        resume_tx.send(()).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut completed = Vec::new();
+        while !writes.is_empty() {
+            assert!(
+                Instant::now() < deadline,
+                "SSH write queue stalled after TCP resumed"
+            );
+            match advance_ssh_write_queue(&mut writes, &mut pty, Some(&mut control), None) {
+                Ok(Some(SshWrite::Data { payload, .. })) => {
+                    completed.push(payload.bytes().to_vec())
+                }
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                    wait_for_session_socket(&session, Duration::from_millis(20)).unwrap();
+                }
+                _ => panic!("unexpected result while resuming SSH writes"),
+            }
+        }
+        assert_eq!(
+            completed,
+            [
+                format!("TTY-RECOVERY {pinned_ticket} 1\n").into_bytes(),
+                b"queued-after-control\n".to_vec(),
+            ]
+        );
+        let mut output = Vec::new();
+        let mut bytes = [0; 1024];
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !output.ends_with(b"PTY:queued-after-control\r\n") {
+            assert!(
+                Instant::now() < deadline,
+                "PTY did not receive queued input: {output:?}"
+            );
+            match pty.read(&mut bytes) {
+                Ok(count) => output.extend_from_slice(&bytes[..count]),
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                    wait_for_session_socket(&session, Duration::from_millis(20)).unwrap();
+                }
+                Err(error) => panic!("failed to read real SSH PTY: {error}"),
+            }
+        }
+        session.set_blocking(true);
+        session.set_timeout(5000);
+        control.send_eof().unwrap();
+        let mut replies = String::new();
+        control.read_to_string(&mut replies).unwrap();
+        assert_eq!(replies.trim().parse::<usize>().unwrap(), pinned_ticket);
+        drop(control);
+        drop(pty);
+        drop(session);
+        outbound.join().unwrap();
+        inbound.join().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn remote_ssh_write_queue_retries_after_silent_window_update() {
+        let connection = crate::execution::fixture::isolated_ssh_connection();
+        let (_known_hosts, known_hosts_path) =
+            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
+        let session = open_authenticated_session(
+            connect_tcp_stream(&connection.host, connection.port).unwrap(),
+            &connection.username,
+            connection.auth_method,
+            connection.password.as_deref(),
+            None,
+            None,
+            &connection.host,
+            connection.port,
+            Some(&known_hosts_path),
+        )
+        .unwrap();
+        let mut pty = session.channel_session().unwrap();
+        pty.request_pty("xterm", None, Some((80, 24, 0, 0)))
+            .unwrap();
+        pty.exec("exec sleep 20").unwrap();
+        let mut control = session.channel_session().unwrap();
+        // Read just enough to reopen the SSH window, then stop reading. No
+        // channel output accompanies the window adjustment.
+        control
+            .exec("sleep 3; head -c 32768 >/dev/null; exec sleep 20")
+            .unwrap();
+        session.set_blocking(false);
+        let fill = [b'x'; 16_384];
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            assert!(
+                Instant::now() < deadline,
+                "control channel window did not fill"
+            );
+            match control.write(&fill) {
+                Ok(count) => assert!(count > 0),
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                    if control.write_window().remaining == 0 && !ssh_wants_write(&session) {
+                        break;
+                    }
+                    wait_for_session_socket(&session, Duration::from_millis(20)).unwrap();
+                }
+                Err(error) => panic!("failed to fill the SSH channel window: {error}"),
+            }
+        }
+
+        let reply = b"TTY-RECOVERY 1 1\n";
+        let mut writes = VecDeque::from([SshWrite::Data {
+            payload: SshPayload::TtyReply {
+                bytes: reply.to_vec(),
+                native: true,
+            },
+            offset: 0,
+        }]);
+        assert!(matches!(
+            advance_ssh_write_queue(&mut writes, &mut pty, Some(&mut control), None),
+            Err(error) if error.kind() == ErrorKind::WouldBlock
+        ));
+        assert!(!ssh_wants_write(&session));
+
+        let (_waker, wake) = session_wake_pair().unwrap();
+        let mut output = [0; 8192];
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let inbound = session_poll_events(BlockDirections::Inbound);
+        loop {
+            assert!(
+                Instant::now() < deadline,
+                "control channel window did not reopen"
+            );
+            let readable =
+                poll_session_events(&session, &wake, inbound, Duration::from_millis(100)).unwrap();
+            if readable == 0 {
+                if control.write_window().remaining > 0 {
+                    break;
+                }
+                continue;
+            }
+            assert!(
+                matches!(pty.read(&mut output), Err(error) if error.kind() == ErrorKind::WouldBlock)
+            );
+        }
+        assert_eq!(pty.read_window().available, 0);
+        assert_eq!(control.read_window().available, 0);
+        assert!(!pty.eof() && !control.eof());
+
+        let started = Instant::now();
+        wait_for_terminal_session_events(
+            &session,
+            &pty,
+            Some(&control),
+            &wake,
+            !writes.is_empty(),
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "queued write slept until the idle deadline"
+        );
+        let completed =
+            advance_ssh_write_queue(&mut writes, &mut pty, Some(&mut control), None).unwrap();
+        assert!(
+            matches!(completed, Some(SshWrite::Data { payload, .. }) if payload.bytes() == reply)
+        );
+        assert!(writes.is_empty());
     }
 
     #[test]

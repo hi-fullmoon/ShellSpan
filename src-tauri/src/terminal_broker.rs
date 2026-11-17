@@ -2632,6 +2632,23 @@ impl TerminalSessionBroker {
         Ok(())
     }
 
+    pub(crate) fn arm_display_recovery(&self, transport: &str, token: &str) -> Result<(), String> {
+        if token.is_empty() {
+            return Ok(());
+        }
+        let mut state = self.lock()?;
+        let attachment = current_attachment(&state, transport)?.clone();
+        let record = current_record_mut(&mut state, transport, &attachment)?;
+        record
+            .display_screen
+            .get_or_insert_with(|| TerminalScreenModel::new(record.geometry))
+            .arm_display_recovery(token);
+        if let Some(screen) = record.screen_model.as_mut() {
+            screen.arm_display_recovery(token);
+        }
+        Ok(())
+    }
+
     pub(crate) fn observe_display_output(
         &self,
         transport_session_id: &str,
@@ -2647,7 +2664,7 @@ impl TerminalSessionBroker {
             .display_sequence
             .checked_add(1)
             .ok_or_else(counter_exhausted)?;
-        record
+        let text = record
             .display_screen
             .get_or_insert_with(|| TerminalScreenModel::new(record.geometry))
             .observe_display(sequence, text);
@@ -2656,7 +2673,7 @@ impl TerminalSessionBroker {
             terminal_session_id: record.terminal_session_id.clone(),
             terminal_generation: record.terminal_generation,
             sequence,
-            text: text.into(),
+            text,
         }))
     }
 

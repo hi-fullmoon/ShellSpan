@@ -1,12 +1,71 @@
 //! Private SSH transport only. This process never evaluates or injects source.
 use std::{
     fs,
-    io::{self, Read, Write},
-    os::unix::{fs::PermissionsExt, net::UnixListener},
-    path::PathBuf,
+    io::{self, BufRead, Read, Write},
+    os::unix::{
+        fs::{OpenOptionsExt, PermissionsExt},
+        net::UnixListener,
+    },
+    path::{Path, PathBuf},
     thread,
     time::{Duration, Instant},
 };
+
+fn write_tty_reply(socket: &Path, frame: &[u8]) -> io::Result<()> {
+    let Ok(line) = std::str::from_utf8(frame) else {
+        return Ok(());
+    };
+    let Some((ticket, decision)) = line.trim_end_matches('\n').split_once(' ') else {
+        return Ok(());
+    };
+    let Ok(ticket) = ticket.parse::<u32>() else {
+        return Ok(());
+    };
+    if !(1..=i32::MAX as u32).contains(&ticket) || !matches!(decision, "0" | "1" | "2") {
+        return Ok(());
+    }
+    let mut path = socket.as_os_str().to_os_string();
+    path.push(format!(".tty-reply-{ticket}-{decision}"));
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)?;
+    Ok(())
+}
+
+fn forward_input(
+    mut stdin: impl BufRead,
+    mut outgoing: impl Write,
+    socket: &Path,
+) -> io::Result<()> {
+    // The existing NIP transport is newline-delimited JSON. Consume each
+    // recovery response here and pass all NIP frames through byte for byte.
+    const MAX_LINE_BYTES: u64 = 131_073;
+    let mut frame = Vec::new();
+    loop {
+        frame.clear();
+        if (&mut stdin)
+            .take(MAX_LINE_BYTES)
+            .read_until(b'\n', &mut frame)?
+            == 0
+        {
+            return Ok(());
+        }
+        if frame.last() != Some(&b'\n') {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "incomplete private control line",
+            ));
+        }
+        if let Some(reply) = frame.strip_prefix(b"TTY-RECOVERY ") {
+            // A duplicate or expired reply is best effort. It cannot close NIP.
+            let _ = write_tty_reply(socket, reply);
+        } else {
+            outgoing.write_all(&frame)?;
+        }
+    }
+}
 
 fn run() -> io::Result<()> {
     let mut args = std::env::args_os().skip(1);
@@ -41,13 +100,16 @@ fn run() -> io::Result<()> {
             Err(error) => return Err(error),
         }
     };
+    // Darwin can pass the listener's nonblocking mode to the accepted socket.
+    // The relay threads need blocking I/O for normal idle periods and writes.
+    socket.set_nonblocking(false)?;
     let mut outgoing = socket.try_clone()?;
     let mut incoming = socket;
     // Kernel pipe/socket queues supply bounded backpressure in both directions.
     // stdin EOF closes the private peer, so it cannot arm a late accept.
+    let reply_socket = path.clone();
     thread::spawn(move || {
-        let mut stdin = io::stdin().lock();
-        let _ = io::copy(&mut stdin, &mut outgoing);
+        let _ = forward_input(io::stdin().lock(), &mut outgoing, &reply_socket);
         let _ = outgoing.shutdown(std::net::Shutdown::Both);
     });
     let mut stdout = io::stdout().lock();

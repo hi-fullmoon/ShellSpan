@@ -7,10 +7,13 @@ pub(crate) fn bootstrap_source(module: &Path, socket: &Path) -> Result<String, S
             .map_err(|_| "TERMINAL_NATIVE_PATH_INVALID")
     };
     let job_helpers = crate::terminal_jobs::POSIX_HELPERS;
+    let tty_recovery = crate::terminal_integration::POSIX_TTY_RECOVERY;
     // Called by the explicit GNU post-profile startup entry. Bash itself has
     // already loaded system/user configuration with the real HOME/login flags.
     Ok(format!(
         r#"__shellspan_control_path={control_path}
+readonly __shellspan_stty_executable=$(builtin type -P stty)
+{tty_recovery}
 {job_helpers}
 __shellspan_emit() {{
   case "$1" in
@@ -47,6 +50,7 @@ __shellspan_native_control_dispatch() {{
 }}
 __shellspan_native_prompt() {{
   local __shellspan_status=$1 __shellspan_handle=${{__shellspan_job_armed_handle-}} __shellspan_pid
+  __shellspan_recover_prompt_terminal "$__shellspan_status"
   if [[ -n $__shellspan_handle ]]; then
     builtin jobs -p "%( $__shellspan_handle;" >| "${{__shellspan_control_path}}.job.$__shellspan_handle.identity" 2>/dev/null
     IFS= builtin read -r __shellspan_pid < "${{__shellspan_control_path}}.job.$__shellspan_handle.identity"

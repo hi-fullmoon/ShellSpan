@@ -409,5 +409,42 @@ pub(crate) fn zle_bootstrap(
     };
     let json = serde_json::to_string(profile).map_err(|_| "TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
     let quoted = shlex::try_quote(&json).map_err(|_| "TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
-    Ok(format!("[[ ! -o allexport ]] || return\ntypeset -ga __shellspan_nip_module_path=(\"${{module_path[@]}}\")\nmodule_path=({} \"${{module_path[@]}}\")\nzmodload ss_nip\nmodule_path=(\"${{__shellspan_nip_module_path[@]}}\")\nunset __shellspan_nip_module_path\ntypeset -gr __shellspan_nip_parser={}\ntypeset -g __shellspan_control_path={}\n{}\n__shellspan_emit() {{\n case \"$1\" in\n B) builtin ss_nip job-observation \"$2\" \"$3\" \"${{4:--}}\" ;;\n F) builtin ss_nip job-observation \"$2\" finished \"$3\" ;;\n esac\n}}\nif [[ $ZSH_VERSION == 5.9 && -o multibyte ]] && builtin ss_nip open {} {} 1; then\n{}\nfi\n",quote(module.parent().ok_or("TERMINAL_NATIVE_PATH_INVALID")?)?,quote(shell)?,quote(socket)?,crate::terminal_jobs::POSIX_HELPERS,quote(socket)?,quoted,include_str!("../../native-input-editors/zle.zsh")))
+    let tty_recovery = crate::terminal_integration::POSIX_TTY_RECOVERY;
+    Ok(format!(
+        r#"[[ ! -o allexport ]] || return
+typeset -ga __shellspan_nip_module_path=("${{module_path[@]}}")
+module_path=({module_dir} "${{module_path[@]}}")
+zmodload ss_nip
+module_path=("${{__shellspan_nip_module_path[@]}}")
+unset __shellspan_nip_module_path
+typeset -gr __shellspan_nip_parser={shell}
+typeset -g __shellspan_control_path={socket}
+{job_helpers}
+__shellspan_emit() {{
+ case "$1" in
+ B) builtin ss_nip job-observation "$2" "$3" "${{4:--}}" ;;
+ F) builtin ss_nip job-observation "$2" finished "$3" ;;
+ esac
+}}
+if [[ $ZSH_VERSION == 5.9 && -o multibyte ]] && builtin ss_nip open {socket} {quoted} 1; then
+typeset -gr __shellspan_stty_executable=$(builtin whence -p stty)
+{tty_recovery}
+__shellspan_recover_zle_prompt() {{
+  local __shellspan_status=$?
+  if ! zle; then __shellspan_recover_prompt_terminal "$__shellspan_status"; fi
+}}
+autoload -Uz add-zsh-hook
+add-zsh-hook preexec __shellspan_begin_tty_recovery
+add-zsh-hook precmd __shellspan_recover_zle_prompt
+# Local native integration can be installed during the first precmd itself.
+__shellspan_recover_prompt_tty
+{zle_startup}
+fi
+"#,
+        module_dir = quote(module.parent().ok_or("TERMINAL_NATIVE_PATH_INVALID")?)?,
+        shell = quote(shell)?,
+        socket = quote(socket)?,
+        job_helpers = crate::terminal_jobs::POSIX_HELPERS,
+        zle_startup = include_str!("../../native-input-editors/zle.zsh"),
+    ))
 }

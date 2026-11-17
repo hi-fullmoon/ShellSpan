@@ -30,6 +30,14 @@ pub(crate) struct PreparedNativeBash {
     shell_override: Option<PathBuf>,
 }
 impl PreparedNativeBash {
+    pub(crate) fn display_recovery_token(&self) -> &str {
+        crate::terminal_integration::recovery_token(self.root.path())
+    }
+
+    pub(crate) fn tty_recovery_root(&self) -> &Path {
+        self.root.path()
+    }
+
     pub fn prepare(shell: &Path, resources: &Path) -> Result<Self, String> {
         if shell.to_str().is_some_and(|path| {
             crate::terminal_integration::TerminalShellKind::detect(path)

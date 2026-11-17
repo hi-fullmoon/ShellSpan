@@ -35,6 +35,7 @@ mod sudo_policy;
 pub mod terminal_broker;
 mod terminal_command;
 pub(crate) mod terminal_display_origin;
+mod terminal_display_recovery;
 pub(crate) mod terminal_integration;
 pub(crate) mod terminal_jobs;
 #[cfg(all(test, unix))]
@@ -109,7 +110,11 @@ pub(crate) fn emit_status(
         .map_err(|error| format!("failed to emit status event: {error}"))
 }
 
-pub(crate) fn emit_data(app: &AppHandle, session_id: &str, chunk: String) -> Result<(), String> {
+pub(crate) fn emit_data(
+    app: &AppHandle,
+    session_id: &str,
+    mut chunk: String,
+) -> Result<(), String> {
     if chunk.is_empty() {
         return Ok(());
     }
@@ -118,9 +123,10 @@ pub(crate) fn emit_data(app: &AppHandle, session_id: &str, chunk: String) -> Res
             .terminal_broker()
             .observe_display_output(session_id, &chunk)
         {
-            if let Err(error) = app.emit(&format!("terminal-display:{session_id}"), frame) {
+            if let Err(error) = app.emit(&format!("terminal-display:{session_id}"), &frame) {
                 log::warn!("Failed to emit sequenced terminal display output session_id={session_id}: {error}");
             }
+            chunk = frame.text;
         }
     }
     app.emit(&format!("{SSH_DATA_EVENT_PREFIX}{session_id}"), chunk)

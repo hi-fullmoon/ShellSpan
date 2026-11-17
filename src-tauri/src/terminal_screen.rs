@@ -1,6 +1,8 @@
 use serde::Serialize;
+use std::borrow::Cow;
 
 use crate::terminal_broker::{TerminalGeometry, TerminalRawOutputFrame};
+use crate::terminal_display_recovery::DisplayRecovery;
 
 const MAX_TITLE_BYTES: usize = 4_096;
 const PRIVATE_KEY_BOUNDARY_BYTES: usize = 64;
@@ -119,6 +121,7 @@ impl vt100::Callbacks for TerminalScreenCallbacks {
 pub(crate) struct TerminalScreenModel {
     parser: vt100::Parser<TerminalScreenCallbacks>,
     private_key_filter: PrivateKeyScreenFilter,
+    recovery: Option<DisplayRecovery>,
     version: u64,
     through_output_sequence: u64,
 }
@@ -143,9 +146,14 @@ impl TerminalScreenModel {
                 TerminalScreenCallbacks::default(),
             ),
             private_key_filter: PrivateKeyScreenFilter::default(),
+            recovery: None,
             version: 1,
             through_output_sequence: 0,
         }
+    }
+
+    pub(crate) fn arm_display_recovery(&mut self, token: &str) {
+        self.recovery = Some(DisplayRecovery::new(token));
     }
 
     pub(crate) fn observe(&mut self, frame: &TerminalRawOutputFrame) -> Result<(), String> {
@@ -157,9 +165,16 @@ impl TerminalScreenModel {
             .version
             .checked_add(1)
             .ok_or_else(|| "TERMINAL_SCREEN_COUNTER_EXHAUSTED".to_string())?;
-        // Only the headless Agent screen is filtered; raw transport frames and
-        // the user's terminal display retain their original bytes.
-        self.parser.process(&self.private_key_filter.filter(bytes));
+        // Private-key masking stays in the headless Agent screen. Both screen
+        // models apply the ordered display recovery without changing raw frames.
+        let safe = self.private_key_filter.filter(bytes);
+        let display = self
+            .recovery
+            .as_mut()
+            .map_or(Cow::Borrowed(safe.as_slice()), |recovery| {
+                recovery.apply(&safe)
+            });
+        self.parser.process(&display);
         self.version = next;
         self.through_output_sequence = sequence;
         Ok(())
@@ -169,9 +184,20 @@ impl TerminalScreenModel {
         self.parser.screen().alternate_screen()
     }
 
-    pub(crate) fn observe_display(&mut self, sequence: u64, text: &str) {
-        self.parser.process(text.as_bytes());
+    pub(crate) fn observe_display(&mut self, sequence: u64, text: &str) -> String {
+        let input = text.as_bytes();
+        let display = self
+            .recovery
+            .as_mut()
+            .map_or(Cow::Borrowed(input), |recovery| recovery.apply(input));
+        self.parser.process(&display);
         self.through_output_sequence = sequence;
+        match display {
+            Cow::Borrowed(_) => text.into(),
+            Cow::Owned(bytes) => {
+                String::from_utf8(bytes).expect("recovery inserts ASCII at a parsed OSC boundary")
+            }
+        }
     }
 
     pub(crate) fn format_display(&self) -> (u64, String) {

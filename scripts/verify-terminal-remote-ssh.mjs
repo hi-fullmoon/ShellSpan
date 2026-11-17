@@ -79,6 +79,11 @@ try {
   );
   cargoTest('session::tests::remote_bound_terminal_bash_reuses_source_shell_acceptance', ['--ignored', '--exact']);
   cargoTest('session::tests::remote_bound_terminal_zsh_reuses_source_shell_smoke', ['--ignored', '--exact']);
+  cargoTest('session::tests::remote_prompt_recovers_tty_modes_after_vim_exit', ['--ignored', '--exact']);
+  if (process.platform !== 'win32') {
+    cargoTest('session::tests::remote_ssh_write_queue_resumes_pinned_control_before_pty_input', ['--ignored', '--exact']);
+    cargoTest('session::tests::remote_ssh_write_queue_retries_after_silent_window_update', ['--ignored', '--exact']);
+  }
   cargoTest('session::tests::terminal_recovery_tests::isolated_ssh_stop_restores_manual_input_on_fresh_connections', ['--ignored', '--exact']);
   cargoTest('session::tests::terminal_recovery_tests::isolated_ssh_input_timeout_disconnect_and_reconnect_do_not_replay', ['--ignored', '--exact']);
   cargoTest('session::tests::terminal_recovery_tests::isolated_ssh_buffered_editor_receipt_does_not_wait_for_more_network_input', ['--ignored', '--exact']);

@@ -1,6 +1,6 @@
 FROM alpine:3.22
 
-RUN apk add --no-cache openssh python3 bash zsh \
+RUN apk add --no-cache openssh python3 bash zsh vim neovim \
     && adduser -D -s /bin/bash shellspan \
     && adduser -D -s /bin/zsh shellspan-zsh \
     && adduser -D -s /bin/sh shellspan-sh \
@@ -59,10 +59,11 @@ RUN printf '%s\n' \
     && chown shellspan-zsh:shellspan-zsh /home/shellspan-zsh/.zshenv /home/shellspan-zsh/.zprofile /home/shellspan-zsh/.zshrc /home/shellspan-zsh/.zlogin
 
 COPY sshd_config /etc/ssh/sshd_config
+COPY sftp-fixture /usr/local/bin/shellspan-sftp-fixture
 COPY sshd_no_sftp_config /etc/ssh/sshd_no_sftp_config
 COPY shellspan-m6-service /usr/local/bin/shellspan-m6-service
 
-RUN chmod 0755 /usr/local/bin/shellspan-m6-service
+RUN chmod 0755 /usr/local/bin/shellspan-m6-service /usr/local/bin/shellspan-sftp-fixture
 
 EXPOSE 22
 

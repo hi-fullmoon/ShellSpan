@@ -13,5 +13,5 @@ KexAlgorithms curve25519-sha256,ecdh-sha2-nistp256,diffie-hellman-group14-sha256
 Ciphers aes128-ctr,aes192-ctr,aes256-ctr
 MACs hmac-sha2-256,hmac-sha2-512
 HostKeyAlgorithms ssh-ed25519,rsa-sha2-256,rsa-sha2-512
-Subsystem sftp internal-sftp
+Subsystem sftp /usr/local/bin/shellspan-sftp-fixture
 PidFile /run/sshd/sshd.pid

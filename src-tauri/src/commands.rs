@@ -1046,6 +1046,20 @@ fn create_local_session_blocking(
         }
     }
 
+    #[cfg(unix)]
+    let mut tty_recovery = if shell_kind == TerminalShellKind::Zsh {
+        prepared_native
+            .as_ref()
+            .map(|native| native.tty_recovery_root())
+            .or_else(|| {
+                prepared_integration
+                    .as_ref()
+                    .map(|shell| shell.tty_recovery_root())
+            })
+            .map(crate::terminal_display_recovery::TtyRecoveryWatcher::new)
+    } else {
+        None
+    };
     let mut terminal_integration_control = None;
     #[cfg(any(unix, windows))]
     let mut native_control = None;
@@ -1068,6 +1082,10 @@ fn create_local_session_blocking(
         #[cfg(any(unix, windows))]
         if let Some(native) = prepared_native {
             let probe = runtime.register_native_terminal(&session_id, native.profile.clone())?;
+            #[cfg(unix)]
+            let _ = runtime
+                .terminal_broker()
+                .arm_display_recovery(&session_id, native.display_recovery_token());
             #[cfg(windows)]
             {
                 native_origin =
@@ -1098,6 +1116,10 @@ fn create_local_session_blocking(
             ));
         }
         if let Some(integration) = prepared_integration {
+            #[cfg(unix)]
+            let _ = runtime
+                .terminal_broker()
+                .arm_display_recovery(&session_id, integration.display_recovery_token());
             let integration_id = integration.integration_id().to_string();
             if let Err(error) = runtime.register_terminal_integration_channel(
                 &session_id,
@@ -1437,6 +1459,10 @@ fn create_local_session_blocking(
                     break;
                 }
                 LocalWorkerActivity::Output(Ok(bytes)) => {
+                    #[cfg(unix)]
+                    if let Some(recovery) = tty_recovery.as_mut() {
+                        recovery.observe_local(&bytes);
+                    }
                     #[cfg(all(
                         feature = "native-input-acceptance",
                         debug_assertions,
@@ -1450,6 +1476,10 @@ fn create_local_session_blocking(
                         .try_iter()
                         .take(LOCAL_OUTPUT_DRAIN_BUDGET.saturating_sub(1))
                     {
+                        #[cfg(unix)]
+                        if let Some(recovery) = tty_recovery.as_mut() {
+                            recovery.observe_local(&bytes);
+                        }
                         #[cfg(all(
                             feature = "native-input-acceptance",
                             debug_assertions,

@@ -170,6 +170,47 @@ command exits and the shell confirms a clean prompt. Stopping the Agent does
 not interrupt the handed-off program. Manual verification still requires a
 command with a confirmed exit status and rejects handoff mode. Normal submission
 approval and input recovery checks also apply to handoff mode.
+Keep full-screen programs attached to the shared PTY for input and output.
+On Unix this includes `vim -s` when the Agent plays back a keystroke file.
+Use the inherited terminal input or explicitly redirect from `/dev/tty`.
+Redirecting full-screen Vim from `/dev/null` can leave the shared PTY without
+normal newline processing even when Vim saves the file and exits successfully.
+At the next primary prompt, ShellSpan's Bash and Zsh integrations restore the
+session's previous terminal modes when they detect the zeroed tty state left by
+affected Vim builds. Ordinary `stty` changes become the next saved settings.
+The terminal records display modes when a foreground program enters the
+alternate screen. At the next ordered primary-prompt marker from the integrated
+shell that confirms the application is no longer a live job, it leaves a
+lingering alternate screen and restores only the changed display modes.
+The command's final exit code can be masked by
+shell constructs such as `|| :`. Interactive command authorization and lifecycle
+continue to use the private control channel. The renderer applies recovery
+before the visible prompt, preserving main screen contents and scrollback.
+If Zsh reaches the primary prompt with changed raw tty settings, it can ask
+the transport worker whether the foreground application used the alternate
+screen and has exited. PTY recovery remains available if the application left
+the alternate screen before restoring termios. Zsh reports its live jobs at
+command start and its live and suspended jobs at the next prompt. A background
+job that was already running can remain active during recovery. If an existing
+job is suspended after an application enters the alternate screen, ShellSpan
+keeps tracking it even if `fg || :` masked the stop status or the user later
+resumes it with `bg`.
+An explicit keep records the selected tty settings when the preceding settings
+are confirmed. A restore applies the preceding `stty -g` snapshot before ZLE
+starts. After a timeout, ShellSpan preserves the snapshot and the current tty
+settings, and ignores the expired ticket. A later command can request recovery
+under a fresh ticket, and its own alternate-screen entry can confirm recovery
+even while the tty is still raw.
+
+The transport worker answers through a ticketed file in the private integration
+directory. For SSH, `TTY-RECOVERY <ticket> <decision>` is a line on the existing
+control channel. The remote relay consumes it before forwarding native JSON
+frames or serving legacy shell lifecycle output. No new SSH subsystem is opened
+to answer the request, and the shell never reads keyboard input for the reply.
+PTY and control-channel writes share one SSH queue. If libssh2 retains a
+partially sent packet, the worker retries the originating operation before
+sending further packets on the connection. Queued writes retry promptly when
+reads consume a channel window update without receiving terminal output.
 Vim/Neovim recovery requests a safe exit with Escape, text `:qa`, and Enter.
 If the editor refuses because a buffer is modified, leave it open and preserve
 the buffer. Saving requires task authorization; forced exit or discarding changes

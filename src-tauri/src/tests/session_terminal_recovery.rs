@@ -228,6 +228,7 @@ fn isolated_ssh_buffered_editor_receipt_does_not_wait_for_more_network_input() {
             &terminal.shell_channel,
             Some(&terminal.integration.as_ref().unwrap().control),
             &wake,
+            false,
             Duration::from_millis(800),
         )
         .unwrap();

@@ -1,0 +1,7 @@
+#!/bin/sh
+delay="$HOME/.shellspan-delay-next-sftp"
+if [ -f "$delay" ]; then
+    rm -f -- "$delay"
+    sleep 3
+fi
+exec /usr/lib/ssh/sftp-server

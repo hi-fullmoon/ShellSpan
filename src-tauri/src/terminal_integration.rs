@@ -18,6 +18,13 @@ use uuid::Uuid;
 
 const MAX_CONTROL_FIELD_BYTES: usize = 32_768;
 const MAX_CONTROL_BUFFER_BYTES: usize = MAX_CONTROL_FIELD_BYTES * 4;
+pub(crate) const POSIX_TTY_RECOVERY: &str = include_str!("terminal-tty-recovery.sh");
+
+pub(crate) fn recovery_token(root: &Path) -> &str {
+    root.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("")
+}
 
 #[cfg(any(windows, test))]
 const BUNDLED_PSREADLINE_FILES: &[(&str, &[u8])] = &[
@@ -652,6 +659,16 @@ impl PreparedLocalShellIntegration {
         &self.integration_id
     }
 
+    #[cfg(unix)]
+    pub(crate) fn display_recovery_token(&self) -> &str {
+        recovery_token(self.bootstrap_root.path())
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn tty_recovery_root(&self) -> &Path {
+        self.bootstrap_root.path()
+    }
+
     pub(crate) fn configure_command(&self, command: &mut CommandBuilder) -> Result<(), String> {
         #[cfg(windows)]
         if let Some(modules) = &self.bundled_powershell_modules {
@@ -863,6 +880,7 @@ fi
         ""
     };
     let job_helpers = crate::terminal_jobs::POSIX_HELPERS;
+    let tty_recovery = POSIX_TTY_RECOVERY;
     format!(
         r#"readonly __shellspan_parser_executable=$BASH
 readonly __shellspan_stty_executable=$(builtin type -P stty)
@@ -885,6 +903,7 @@ __shellspan_previous_exit_trap=$(trap -p EXIT)
 __shellspan_previous_int_trap=$(trap -p INT)
 __shellspan_exit_trap=
 __shellspan_int_trap=
+{tty_recovery}
 __shellspan_stty() {{
   local __shellspan_stty_output __shellspan_stty_status=0
   # In Bash 3, launching a short foreground job races the parent's setpgid
@@ -1030,6 +1049,9 @@ __shellspan_emit() {{
 __shellspan_prompt_cycle() {{
   local __shellspan_status=$?
   __shellspan_restore_receiver_tty
+  if [[ ${{1-}} != native-reject ]]; then
+    __shellspan_recover_prompt_terminal "$__shellspan_status"
+  fi
   __shellspan_private_descriptor=
   __shellspan_native_edit_line=
   __shellspan_native_status=$__shellspan_status
@@ -1329,7 +1351,7 @@ __shellspan_preexec() {{
     __shellspan_debug_prompt_echo_control=$__shellspan_prompt_echo_control
   fi
   case "$__shellspan_debug_command" in
-    __shellspan_prompt_cycle|__shellspan_restore_receiver_tty|__shellspan_capture_line|__shellspan_accept_native|__shellspan_native_receive|__shellspan_native_receive_frame|__shellspan_quarantine_native|__shellspan_quarantine_native\ *|__shellspan_read_private\ *|__shellspan_native_frame_checkpoint\ *|__shellspan_private_receive|__shellspan_private_commit|__shellspan_native_checkpoint|__shellspan_discard_native|__shellspan_preexec|__shellspan_on_exit|__shellspan_on_exit\ *|__shellspan_on_interrupt|__shellspan_on_interrupt\ *) return ;;
+    __shellspan_prompt_cycle|__shellspan_recover_prompt_terminal\ *|__shellspan_restore_receiver_tty|__shellspan_capture_line|__shellspan_accept_native|__shellspan_native_receive|__shellspan_native_receive_frame|__shellspan_quarantine_native|__shellspan_quarantine_native\ *|__shellspan_read_private\ *|__shellspan_native_frame_checkpoint\ *|__shellspan_private_receive|__shellspan_private_commit|__shellspan_native_checkpoint|__shellspan_discard_native|__shellspan_preexec|__shellspan_on_exit|__shellspan_on_exit\ *|__shellspan_on_interrupt|__shellspan_on_interrupt\ *) return ;;
   esac
   if [[ $__shellspan_prompt_ready -eq 1 && ${{BASH_SUBSHELL:-0}} -eq 0 ]]; then
     local __shellspan_line
@@ -1399,10 +1421,12 @@ add-zle-hook-widget line-init __shellspan_line_init
 "#
     };
     let job_helpers = crate::terminal_jobs::POSIX_HELPERS;
+    let tty_recovery = POSIX_TTY_RECOVERY;
     format!(
         r#"typeset -gr __shellspan_parser_executable={parser_executable}
 typeset -gr __shellspan_stty_executable=$(builtin whence -p stty)
-{user_rc}__shellspan_stty() {{
+{user_rc}{tty_recovery}
+__shellspan_stty() {{
   local __shellspan_stty_output __shellspan_stty_status=0
   # Keep this private helper in the shell's process group, as in the Bash
   # integration. A foreground external stty can race ZLE's tty ownership when
@@ -1434,6 +1458,7 @@ __shellspan_emit() {{
 }}
 __shellspan_precmd() {{
   local __shellspan_status=$?
+  __shellspan_recover_prompt_terminal "$__shellspan_status"
   __shellspan_private_descriptor=
   __shellspan_native_edit_line=
   __shellspan_native_redraw_before_accept=0
@@ -1485,6 +1510,7 @@ __shellspan_publish_native_capabilities() {{
 }}
 __shellspan_preexec() {{
   local REPLY
+  __shellspan_begin_tty_recovery
   __shellspan_command_active=1
   # Only the native accept widget arms a one-use child marker. A normal Enter
   # on a cancelled, previously typed group gets an inert marker instead.
