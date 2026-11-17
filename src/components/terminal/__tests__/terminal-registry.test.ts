@@ -6,7 +6,6 @@ import type { SessionPtyInfo } from '@/types';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useToastStore } from '@/stores/toastStore';
 import { t } from '@/locales';
-import {formatTerminalStatusLine} from '@/lib/terminal/terminal';
 import {
   appendTerminalOutput,
   getRecentTerminalOutput,
@@ -19,58 +18,6 @@ import {
   terminalRegistry,
 } from '../registry/terminal-registry';
 import baseCss from '../../../styles/base.css?raw';
-
-const webglMocks = vi.hoisted(() => {
-  type Behavior = 'success' | 'constructor-throw' | 'activate-throw';
-  let behavior: Behavior = 'activate-throw';
-  const instances: MockWebglAddon[] = [];
-
-  class MockWebglAddon {
-    private readonly contextLossListeners = new Set<() => void>();
-    readonly activate = vi.fn(() => {
-      if (behavior === 'activate-throw') throw new Error('WebGL unavailable');
-    });
-    readonly rawDispose = vi.fn(() => {
-      this.contextLossListeners.clear();
-    });
-    readonly onContextLoss = vi.fn((listener: () => void) => {
-      this.contextLossListeners.add(listener);
-      return {
-        dispose: vi.fn(() => this.contextLossListeners.delete(listener)),
-      };
-    });
-
-    constructor() {
-      if (behavior === 'constructor-throw') throw new Error('WebGL initialization failed');
-      instances.push(this);
-    }
-
-    dispose(): void {
-      this.rawDispose();
-    }
-
-    emitContextLoss(): void {
-      for (const listener of [...this.contextLossListeners]) listener();
-    }
-
-    get contextLossListenerCount(): number {
-      return this.contextLossListeners.size;
-    }
-  }
-
-  return {
-    MockWebglAddon,
-    instances,
-    reset(nextBehavior: Behavior = 'activate-throw') {
-      behavior = nextBehavior;
-      instances.length = 0;
-    },
-  };
-});
-
-vi.mock('@xterm/addon-webgl', () => ({
-  WebglAddon: webglMocks.MockWebglAddon,
-}));
 
 // xterm + addons work in jsdom for write/buffer; fit yields 0x0 (harmless).
 // Polyfill ResizeObserver if undefined.
@@ -135,19 +82,18 @@ describe('terminalRegistry', () => {
       urlDetection: true,
       bellStyle: 'none',
     });
-    webglMocks.reset();
     vi.clearAllMocks();
   });
 
-  it('observes actual startup status and filtered session display bytes separately from original output', async () => {
+  it('keeps startup connection status out of the display and observes filtered session bytes separately', async () => {
     const ipc = await import('@/lib/ipc/tauri');
     const controller = terminalRegistry.create('display-observer', vi.fn(), vi.fn(), () => 'connecting', vi.fn()), visible: {source: string; data: string}[] = [], original: string[] = [];
     const apis = [controller.terminal.write, controller.terminal.writeln, controller.terminal.getSelection];
     const stop = controller.subscribeDisplayOutput(value => visible.push(value));
     const stopRaw = controller.subscribeOutput(value => original.push(value));
     await controller.whenOutputReady();await new Promise<void>(resolve => controller.terminal.write('', resolve));
-    expect(visible).toContainEqual({source: 'local', data: formatTerminalStatusLine('connected', 'ready') + '\r\n'});
-    expect(original).toEqual([]);visible.length = 0;
+    expect(visible).toEqual([]);
+    expect(original).toEqual([]);
     const removeFilter = controller.subscribeOutputFilter({push: value => value.replace('private-frame', 'visible'), finish: () => 'filter-tail'});
     const calls = vi.mocked(ipc.listenToSshData).mock.calls, onData = calls[calls.length - 1][1];
     onData({event: 'ssh-data:display-observer', id: 1, payload: 'private-frame\t中 é 👩🏽‍💻\r\n'});
@@ -541,84 +487,6 @@ describe('terminalRegistry', () => {
     // Tailwind compiles the descendant variant into `container .xterm-viewport { opacity: 0 }`,
     // so the generating class lives on the container; jsdom has no compiled stylesheet.
     expect(controller.container).toHaveClass('[&_.xterm-viewport]:opacity-0');
-  });
-
-  it('activates WebGL once without revealing xterm 6 legacy viewport', () => {
-    webglMocks.reset('success');
-    const controller = createController('s1');
-    const host1 = document.createElement('div');
-    const host2 = document.createElement('div');
-
-    controller.attach(host1);
-
-    expect(webglMocks.instances).toHaveLength(1);
-    expect(webglMocks.instances[0].activate).toHaveBeenCalledOnce();
-    expect(webglMocks.instances[0].contextLossListenerCount).toBe(1);
-    expect(controller.container).toHaveClass('[&_.xterm-viewport]:opacity-0');
-
-    controller.detach();
-    controller.attach(host2);
-
-    expect(webglMocks.instances).toHaveLength(1);
-    expect(webglMocks.instances[0].activate).toHaveBeenCalledOnce();
-    expect(webglMocks.instances[0].contextLossListenerCount).toBe(1);
-    expect(controller.container).toHaveClass('[&_.xterm-viewport]:opacity-0');
-  });
-
-  it.each(['constructor-throw', 'activate-throw'] as const)(
-    'keeps the DOM renderer when WebGL %s fails',
-    (behavior) => {
-      webglMocks.reset(behavior);
-      const controller = createController('s1');
-
-      expect(() => controller.attach(document.createElement('div'))).not.toThrow();
-      expect(controller.container).toHaveClass('[&_.xterm-viewport]:opacity-0');
-      if (behavior === 'activate-throw') {
-        expect(webglMocks.instances[0].activate).toHaveBeenCalledOnce();
-        expect(webglMocks.instances[0].rawDispose).toHaveBeenCalledOnce();
-        expect(webglMocks.instances[0].contextLossListenerCount).toBe(0);
-      } else {
-        expect(webglMocks.instances).toHaveLength(0);
-      }
-    },
-  );
-
-  it('falls back to DOM after context loss without replacing the terminal or buffer', async () => {
-    webglMocks.reset('success');
-    const controller = createController('s1');
-    controller.attach(document.createElement('div'));
-    const terminal = controller.terminal;
-    await new Promise<void>((resolve) => terminal.write('history-before-context-loss\r\n', resolve));
-    const bufferLength = terminal.buffer.active.length;
-
-    webglMocks.instances[0].emitContextLoss();
-
-    expect(controller.terminal).toBe(terminal);
-    expect(controller.terminal.buffer.active.length).toBe(bufferLength);
-    expect(webglMocks.instances[0].rawDispose).toHaveBeenCalledOnce();
-    expect(webglMocks.instances[0].contextLossListenerCount).toBe(0);
-    expect(controller.container).toHaveClass('[&_.xterm-viewport]:opacity-0');
-  });
-
-  it('keeps one WebGL addon through rebind and disposes its context listener once', () => {
-    webglMocks.reset('success');
-    const controller = createController('s1');
-    controller.attach(document.createElement('div'));
-    const addon = webglMocks.instances[0];
-
-    terminalRegistry.rebindSession('s1', 's2');
-    controller.detach();
-    controller.attach(document.createElement('div'));
-
-    expect(webglMocks.instances).toHaveLength(1);
-    expect(addon.activate).toHaveBeenCalledOnce();
-    expect(addon.contextLossListenerCount).toBe(1);
-
-    terminalRegistry.dispose('s2');
-    controller.dispose();
-
-    expect(addon.rawDispose).toHaveBeenCalledOnce();
-    expect(addon.contextLossListenerCount).toBe(0);
   });
 
   it('detach keeps buffer intact; reattach to a different host preserves buffer', () => {

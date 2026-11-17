@@ -69,9 +69,6 @@ importers:
       '@xterm/addon-unicode11':
         specifier: 0.9.0
         version: 0.9.0
-      '@xterm/addon-webgl':
-        specifier: ^0.19.0
-        version: 0.19.0
       '@xterm/xterm':
         specifier: 6.0.0
         version: 6.0.0(patch_hash=944a2191fc1c4dc3d194935c3be3147ea4c027fe878a50bfb108137290448e15)
@@ -172,6 +169,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^6.1.1
         version: 6.1.1(vite@8.3.1(@types/node@26.6.3)(jiti@2.7.0)(yaml@2.9.1))
+      '@xterm/addon-webgl':
+        specifier: ^0.19.0
+        version: 0.19.0
       ajv:
         specifier: ^8.20.0
         version: 8.20.0

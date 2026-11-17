@@ -4,7 +4,6 @@ import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
-import { WebglAddon } from '@xterm/addon-webgl';
 import { createTerminalResizeHandler, installTerminalScrollbarVisibility, measureTerminalGeometry, TERMINAL_CONTAINER_CLASS } from './terminal-geometry';
 import { installTerminalEdgeBackground } from './terminal-edge-background';
 import { installTerminalCommandDecorations } from './terminal-command-decorations';
@@ -486,12 +485,9 @@ class TerminalControllerImpl implements TerminalController {
   private queuedResizeDimensions: { cols: number; rows: number } | null = null;
   private resizeRetryTimer: number | null = null;
   private resizeRetryAttempts = 0;
-  private rendererInitialized = false;
   private edgeBackground?: IDisposable;
   private commandDecorations: ReturnType<typeof installTerminalCommandDecorations>;
   private scrollbarVisibility?: IDisposable;
-  private webglAddon?: WebglAddon;
-  private webglContextLossDisposable?: IDisposable;
   private pendingOutputCharacters = 0;
   private outputPaused = false;
   private outputGeneration = 0;
@@ -686,44 +682,6 @@ class TerminalControllerImpl implements TerminalController {
     }
   }
 
-  // Renderer addons need the terminal element, so WebGL is attempted once
-  // after the first successful open(). Keeping the attempt controller-scoped
-  // prevents detach/reattach and reconnect from accumulating addons.
-  private setupRenderer(): void {
-    if (this.rendererInitialized) return;
-    this.rendererInitialized = true;
-
-    try {
-      const addon = new WebglAddon();
-      this.webglAddon = addon;
-      this.webglContextLossDisposable = addon.onContextLoss(() => {
-        if (this.disposed || this.webglAddon !== addon) return;
-        logger.warn(`WebGL context lost for session ${this.sessionId}; falling back to DOM renderer`);
-        this.disposeWebglRenderer(addon);
-      });
-      this.terminal.loadAddon(addon);
-    } catch (error) {
-      // loadAddon wraps dispose before calling activate, so disposing here
-      // also removes a partially activated addon from xterm's addon manager.
-      this.disposeWebglRenderer();
-      logger.warn(`WebGL renderer unavailable for session ${this.sessionId}; using DOM renderer`, error);
-    }
-  }
-
-  private disposeWebglRenderer(expectedAddon?: WebglAddon): void {
-    const addon = this.webglAddon;
-    if (!addon || (expectedAddon && addon !== expectedAddon)) return;
-
-    this.webglAddon = undefined;
-    this.webglContextLossDisposable?.dispose();
-    this.webglContextLossDisposable = undefined;
-    try {
-      addon.dispose();
-    } catch (error) {
-      logger.warn(`Failed to dispose WebGL renderer for session ${this.sessionId}`, error);
-    }
-  }
-
   private writeSystemLine(line: string): void {
     if (this.disposed) return;
     this.emitDisplayOutput(line + '\r\n', 'local');
@@ -788,6 +746,17 @@ class TerminalControllerImpl implements TerminalController {
   private resetNoticeState(): void {
     this.inputBlockedNoticeRef = false;
     this.reconnectRequestedRef = false;
+  }
+
+  private applySessionStatus(sessionId: string, payload: StatusEvent): void {
+    this.setStatus(sessionId, payload);
+    if (payload.status === 'connected') {
+      this.resetNoticeState();
+    } else if (payload.status === 'error' && payload.message) {
+      this.writeConnectionFailure(payload.message);
+    } else {
+      this.writeSystemLine(formatTerminalStatusLine(payload.status, payload.message));
+    }
   }
 
   private clearListeners(): number {
@@ -867,15 +836,7 @@ class TerminalControllerImpl implements TerminalController {
       logger.info(`Session ${sessionId} status: ${event.payload.status}`);
       this.emitLifecycle({ type: 'status', sessionId, payload: event.payload });
       if (this.restoringDisplay && event.payload.status === 'connected') return;
-      this.setStatus(sessionId, event.payload);
-      if (event.payload.status === 'error' && event.payload.message) {
-        this.writeConnectionFailure(event.payload.message);
-      } else {
-        this.writeSystemLine(formatTerminalStatusLine(event.payload.status, event.payload.message));
-      }
-      if (event.payload.status === 'connected') {
-        this.resetNoticeState();
-      }
+      this.applySessionStatus(sessionId, event.payload);
     });
     if (this.disposed || generation !== this.listenerGeneration) {
       statusUnlisten();
@@ -939,15 +900,7 @@ class TerminalControllerImpl implements TerminalController {
       if (!this.disposed && generation === this.listenerGeneration && this.getStatus(sessionId) === 'connecting') {
         logger.info(`Session ${sessionId} reconciled status: ${snapshot.status}`);
         this.emitLifecycle({ type: 'status', sessionId, payload: snapshot });
-        this.setStatus(sessionId, snapshot);
-        if (snapshot.status === 'error' && snapshot.message) {
-          this.writeConnectionFailure(snapshot.message);
-        } else if (!restore || snapshot.status !== 'connected') {
-          this.writeSystemLine(formatTerminalStatusLine(snapshot.status, snapshot.message));
-        }
-        if (snapshot.status === 'connected') {
-          this.resetNoticeState();
-        }
+        this.applySessionStatus(sessionId, snapshot);
       }
     } catch (error) {
       if (restore) {
@@ -1118,6 +1071,8 @@ class TerminalControllerImpl implements TerminalController {
 
     if (!this.opened) {
       try {
+        // Keep xterm's DOM renderer so grid changes don't clear a WebGL canvas
+        // before the next paint during pane resize.
         this.terminal.open(this.container);
         this.opened = true;
       } catch {
@@ -1127,7 +1082,6 @@ class TerminalControllerImpl implements TerminalController {
     }
 
     if (this.opened) {
-      this.setupRenderer();
       this.edgeBackground ??= installTerminalEdgeBackground(this.terminal);
       this.scrollbarVisibility ??= installTerminalScrollbarVisibility(this.terminal);
     }
@@ -1253,8 +1207,7 @@ class TerminalControllerImpl implements TerminalController {
     // section activation must synchronously fit before the user can press
     // Enter to reconnect. Otherwise the delayed resize lands after the new
     // shell has printed its prompt and SIGWINCH can leave duplicated glyphs.
-    // A full refresh also repaints WebGL content that was first opened under a
-    // display:none ancestor.
+    // Also refresh the rows when a previously hidden terminal becomes visible.
     if (this.host) {
       this.cancelPendingResize();
       const previousCols = this.terminal.cols;
@@ -1741,7 +1694,6 @@ class TerminalControllerImpl implements TerminalController {
     this.detach();
     this.clearListeners();
     this.linkProviderDisposable?.dispose();
-    this.disposeWebglRenderer();
     this.edgeBackground?.dispose();
     this.commandDecorations.dispose();
     this.nativeDisplay?.dispose();
