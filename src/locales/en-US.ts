@@ -2016,6 +2016,7 @@ export default {
   'ai.workspace.tool.noOutput': 'No output',
   'ai.workspace.tool.execution.running': 'Process running',
   'ai.workspace.tool.execution.completed': 'Process exited',
+  'ai.workspace.tool.execution.succeeded': 'Succeeded',
   'ai.workspace.tool.execution.notStarted': 'Not started',
   'ai.workspace.tool.diffSimplified': 'Large change shown as a whole block; line totals are omitted.',
   'ai.workspace.tool.expand': 'Show {count} hidden lines',

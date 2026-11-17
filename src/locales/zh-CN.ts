@@ -2014,6 +2014,7 @@ export default {
   'ai.workspace.tool.noOutput': '无输出',
   'ai.workspace.tool.execution.running': '进程运行中',
   'ai.workspace.tool.execution.completed': '进程已退出',
+  'ai.workspace.tool.execution.succeeded': '成功',
   'ai.workspace.tool.execution.notStarted': '尚未启动',
   'ai.workspace.tool.diffSimplified': '变更较大，已按整段显示；行数统计已省略。',
   'ai.workspace.tool.expand': '显示隐藏的 {count} 行',

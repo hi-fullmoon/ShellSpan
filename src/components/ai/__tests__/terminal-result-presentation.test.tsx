@@ -53,12 +53,16 @@ describe('terminal result presentation', () => {
     const { container, rerender } = render(<AiToolExpandedContent node={node} />);
     expect([...container.querySelectorAll('[data-ai-terminal-output] .ai-block-line')].map(line => line.textContent).join('\n')).toBe(result.stdout.trimEnd());
     expect(container.querySelector('[data-ai-terminal-output]')).not.toHaveTextContent('commandLine');
-    expect(container.querySelector('[data-ai-terminal-execution]')).toHaveTextContent(locale === 'zh-CN' ? '进程已退出' : 'Process exited');
+    expect(container.querySelector('.ai-terminal-footer')).toHaveTextContent(locale === 'zh-CN' ? /^成功$/u : /^Succeeded$/u);
+    expect(container.querySelector('.ai-terminal-footer svg')).toBeInTheDocument();
+    expect(container.querySelector('.ai-terminal-header')).toHaveTextContent(/^Shell$/u);
     expect(container.querySelector('[data-ai-terminal-execution]')).not.toHaveClass('ai-terminal-exit');
     expect(toolOutputForCopy(node)).toBe(result.stdout);
 
     rerender(<AiToolDetails node={node} onBack={() => undefined} />);
     const sections = container.querySelectorAll('.ai-detail-section');
+    expect(sections[1].querySelector('.ai-terminal-header [data-ai-terminal-execution]')).toHaveTextContent(locale === 'zh-CN' ? '进程已退出' : 'Process exited');
+    expect(sections[1].querySelector('.ai-terminal-footer')).not.toBeInTheDocument();
     expect(sections[1]).not.toHaveTextContent('commandLine');
     expect(sections[2].querySelector('h3')).toHaveTextContent(locale === 'zh-CN' ? '执行信息' : 'Execution details');
     expect(sections[2].querySelector('code')?.textContent).toBe(JSON.stringify(metadata, null, 2));
@@ -75,6 +79,7 @@ describe('terminal result presentation', () => {
     const node = terminalNode(result.command, output);
     const { container } = render(<AiToolExpandedContent node={node} />);
     expect(screen.getByText('No output')).toBeInTheDocument();
+    expect(container.querySelector('.ai-terminal-footer')).toHaveTextContent(/^Succeeded$/u);
     expect(container.querySelector('[data-ai-terminal-output]')).not.toHaveTextContent('exitCode');
     expect(toolOutputForCopy(node)).toBe('');
   });
@@ -148,7 +153,8 @@ describe('terminal result presentation', () => {
       job: { state: 'exited', exitCode: result.status },
     });
     const { container } = render(<AiToolExpandedContent node={node} />);
-    expect(container.querySelector('.ai-terminal-header')).toHaveTextContent('Exit 7');
+    expect(container.querySelector('.ai-terminal-footer')).toHaveTextContent(/^Exit 7$/u);
+    expect(container.querySelector('.ai-terminal-footer svg')).not.toBeInTheDocument();
   });
 
   it('preserves whitespace in an actual terminal capture', () => {
@@ -198,9 +204,10 @@ describe('terminal result presentation', () => {
         exitCode: 0, combinedOutput: '', stdout: '', stderr: '',
       });
       const { container } = render(<AiToolExpandedContent node={node} />);
-      expect(container.querySelector('[data-ai-terminal-execution="running"]')).toHaveTextContent('Process running');
-      expect(container.querySelector('.ai-terminal-header')).not.toHaveTextContent('Process exited');
-      expect(container.querySelector('.ai-terminal-header')).not.toHaveTextContent('Exit 0');
+      const footer = container.querySelector('.ai-terminal-footer');
+      expect(footer?.querySelector('[data-ai-terminal-execution="running"]')).toHaveTextContent('Process running');
+      expect(footer?.querySelector('svg')).not.toBeInTheDocument();
+      expect(footer).not.toHaveTextContent(/Process exited|Exit 0/u);
     } finally {
       const exited = once(child, 'exit');
       child.stdin.end();

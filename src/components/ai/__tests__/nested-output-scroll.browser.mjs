@@ -20,6 +20,7 @@ const server = await createServer({
   root, configFile: false, appType: 'custom', logLevel: 'error',
   cacheDir: `/tmp/shellspan-nested-output-scroll-${process.pid}`,
   plugins: [react(), tailwindcss()], resolve: { alias: { '@': `${root}src` } },
+  optimizeDeps: { entries: ['src/components/ai/__tests__/nested-output-scroll.browser.tsx'], include: ['react', 'react-dom/client'] },
   server: { host: '127.0.0.1', port: 0, hmr: false },
 });
 server.middlewares.use('/__nested-output', async (_request, response) => {

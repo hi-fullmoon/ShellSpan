@@ -295,7 +295,12 @@ function TerminalOutputText({ text }: { text: string }) {
   );
 }
 
-export function AiToolCopyButton({ text, label, className }: { readonly text: string; readonly label?: string; readonly className?: string }) {
+export function AiToolCopyButton({ text, label, className, showCopiedTooltip = true }: {
+  readonly text: string;
+  readonly label?: string;
+  readonly className?: string;
+  readonly showCopiedTooltip?: boolean;
+}) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   return (
@@ -320,7 +325,9 @@ export function AiToolCopyButton({ text, label, className }: { readonly text: st
       >
         {copied ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />}
       </TooltipTrigger>
-      <TooltipContent>{copied ? t('common.copied') : (label ?? t('common.copy'))}</TooltipContent>
+      {(!copied || showCopiedTooltip) && (
+        <TooltipContent>{copied ? t('common.copied') : (label ?? t('common.copy'))}</TooltipContent>
+      )}
     </Tooltip>
   );
 }
@@ -344,24 +351,26 @@ function ToolSurfaceHeader({ title, icon: Icon, copyText, copyLabel, className, 
   );
 }
 
-function AiToolContentRegion({ children, text, label, className }: {
+function AiToolContentRegion({ children, text, label, className, showCopiedTooltip }: {
   readonly children: ReactNode;
   readonly text?: string;
   readonly label?: string;
   readonly className?: string;
+  readonly showCopiedTooltip?: boolean;
 }) {
   return (
     <div className={cn('ai-tool-content-region relative min-w-0', className)} data-ai-copy-region>
       {children}
-      {text && <AiToolCopyButton text={text} label={label} className="top-1 right-3.5" />}
+      {text && <AiToolCopyButton text={text} label={label} className="top-1 right-3.5" showCopiedTooltip={showCopiedTooltip} />}
     </div>
   );
 }
 
-function ToolScrollArea({ children, className, contentClassName, scrollable, view, label, horizontal = true }: {
+function ToolScrollArea({ children, className, contentClassName, viewportClassName, scrollable, view, label, horizontal = true }: {
   readonly children: ReactNode;
   readonly className: string;
   readonly contentClassName?: string;
+  readonly viewportClassName?: string;
   readonly scrollable: boolean;
   readonly view?: 'generic' | 'diff';
   readonly label?: string;
@@ -374,7 +383,7 @@ function ToolScrollArea({ children, className, contentClassName, scrollable, vie
       className={cn('ai-tool-scroll-area flex min-h-0 flex-col overflow-hidden', className)}
       data-ai-tool-view={view}
       horizontal={horizontal}
-      viewportRender={<div className="ai-tool-scroll-viewport h-auto min-h-0 min-w-0 flex-1" aria-label={label} style={horizontal ? undefined : { overflowX: 'hidden' }} />}
+      viewportRender={<div className={cn('ai-tool-scroll-viewport h-auto min-h-0 min-w-0 flex-1', viewportClassName)} aria-label={label} style={horizontal ? undefined : { overflowX: 'hidden' }} />}
     >
       <ScrollAreaContent className={cn('min-w-0', contentClassName)} style={{ minWidth: 0 }}>
         {children}
@@ -399,8 +408,13 @@ function TerminalSurface({ node, showCopyActions, scrollable, showInput }: { nod
   const job = asRecord(outputRecord?.job);
   const exitCode = execution && execution !== 'completed' ? null
     : firstNumber(execution === 'completed' && job ? job : outputRecord, ['exitCode', 'exit_code', 'code']);
+  const hasFailedExit = exitCode !== null && exitCode !== 0;
+  const succeeded = exitCode === 0;
+  const showSuccessIcon = succeeded || (execution === null && exitCode === null && node.state === 'succeeded');
+  const exitStatus = hasFailedExit && <span className="ai-terminal-exit shrink-0">{t('ai.workspace.tool.exitCode', { code: exitCode })}</span>;
+  const footerLabel = succeeded ? 'ai.workspace.tool.execution.succeeded' : executionLabel ?? `ai.workspace.tool.${node.state}`;
   const commandTitle = <>
-    <AiToolContentRegion text={showCopyActions ? command : undefined} label={t('ai.workspace.tool.copyCommand')}>
+    <AiToolContentRegion text={showCopyActions ? command : undefined} label={t('ai.workspace.tool.copyCommand')} showCopiedTooltip={false}>
       <div className="ai-terminal-command-row flex min-w-0 items-start gap-1 py-1 pl-3.5">
         <span className="ai-terminal-prompt shrink-0 select-none" aria-hidden="true">$</span>
         <AiContentTitle className="flex-1" buttonClassName="ai-terminal-command pr-3.5" collapsible customScrollbar expandLabel={t('ai.workspace.tool.expandCommand')} collapseLabel={t('ai.workspace.tool.collapseCommand')}>
@@ -412,19 +426,32 @@ function TerminalSurface({ node, showCopyActions, scrollable, showInput }: { nod
   return (
     <div className="ai-terminal-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="terminal" data-running={node.state === 'running' || undefined}>
       <ToolSurfaceHeader className="ai-terminal-header" title={t('ai.workspace.tool.shell')}>
-        {executionLabel && <span className="shrink-0" data-ai-terminal-execution={execution}>{t(executionLabel)}</span>}
-        {exitCode !== null && exitCode !== 0 && <span className="ai-terminal-exit shrink-0">{t('ai.workspace.tool.exitCode', { code: exitCode })}</span>}
+        {!showInput && <>
+          {executionLabel && <span className="shrink-0" data-ai-terminal-execution={execution}>{t(executionLabel)}</span>}
+          {exitStatus}
+        </>}
       </ToolSurfaceHeader>
       <div className="ai-terminal-output relative m-0 min-w-0 max-w-full">
         {showInput && commandTitle}
-        {(output || node.state !== 'running') && <div data-ai-terminal-output>
-          <AiToolContentRegion text={showCopyActions ? output : undefined} label={t('ai.workspace.tool.copyOutput')}>
-            <ToolScrollArea className="ai-terminal-transcript max-h-65 min-w-0 max-w-full" scrollable={scrollable} label={t('ai.workspace.tool.shell')}>
+        {(output || node.state !== 'running') && <div className={showInput ? 'mt-2' : undefined} data-ai-terminal-output>
+          <AiToolContentRegion text={showCopyActions ? output : undefined} label={t('ai.workspace.tool.copyOutput')} showCopiedTooltip={false}>
+            <ToolScrollArea
+              className="ai-terminal-transcript max-h-65 min-w-0 max-w-full"
+              viewportClassName={showInput ? 'data-[overflow-y-end]:scroll-fade-b' : undefined}
+              scrollable={scrollable}
+              label={t('ai.workspace.tool.shell')}
+            >
               <div className="px-3.5 pb-3">{output ? <TerminalOutputText text={output} /> : t('ai.workspace.tool.noOutput')}</div>
             </ToolScrollArea>
           </AiToolContentRegion>
         </div>}
       </div>
+      {showInput && (
+        <div className={cn(AI_CONTENT_HEADER_CLASS, 'ai-terminal-footer flex-wrap justify-end py-1.5')}>
+          {showSuccessIcon && <CheckIcon className="size-3 shrink-0" aria-hidden="true" />}
+          {hasFailedExit ? exitStatus : <span data-ai-terminal-execution={execution}>{t(footerLabel)}</span>}
+        </div>
+      )}
     </div>
   );
 }
