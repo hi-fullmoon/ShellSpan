@@ -125,6 +125,7 @@ describe('AI tool presentation', () => {
       if (entry.name === 'run_terminal_command') expect(container.querySelector('.ai-terminal-command-row')).toHaveTextContent(`node ${codePath}`);
       else if (entry.name === 'run_code') {
         expect(container.querySelector('.ai-code-content pre')?.textContent).toBe(code);
+        expect(container.querySelectorAll('[data-ai-tool-view="code"] .ai-tool-surface-header')).toHaveLength(1);
         expect(container.querySelector('.ai-code-footer')).toHaveTextContent(locale === 'zh-CN' ? /^成功$/u : /^Succeeded$/u);
       }
       else if (entry.name === 'trash_file') expect(container.querySelector('.ai-io-input')).toBeInTheDocument();

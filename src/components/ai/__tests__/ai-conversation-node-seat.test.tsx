@@ -533,8 +533,7 @@ describe('AiConversationNodeList', () => {
       ['added', `3${longLine}`],
     ]);
     expect(diff.querySelector('section')).toHaveClass('min-w-0', 'max-w-full');
-    expect(diff.querySelector('.ai-block-banner')).toHaveClass('ai-content-header', 'ai-tool-surface-header', 'min-h-8', 'px-3.5');
-    expect(diff.querySelector('.ai-block-banner')).not.toHaveClass('min-h-6');
+    expect(diff.querySelector('.ai-block-banner')).toHaveClass('ai-content-header', 'ai-tool-surface-header', 'min-h-6', 'px-3.5');
     expect(diff).toHaveClass('overflow-hidden');
     expect(diff.querySelector('.ai-diff-content')).toHaveClass('max-h-65');
     expect(diff.querySelector('[data-slot="scroll-area-viewport"]')).toHaveStyle({ overflow: 'scroll' });

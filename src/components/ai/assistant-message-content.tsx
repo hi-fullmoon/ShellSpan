@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { Check, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AiContentTitle } from './workspace/ai-content-title';
+import { AiNativeCodeFade } from './workspace/ai-native-code-fade';
 import { AI_CONTENT_CODE_CLASS, AI_CONTENT_HEADER_CLASS } from './workspace/ai-style-classes';
 
 import {
@@ -175,28 +176,6 @@ function MarkdownCodeBlock({
   const [copied, setCopied] = useState(false);
   const resetTimerRef = useRef<number | null>(null);
   const viewportRef = useRef<HTMLPreElement>(null);
-  const fadeRef = useRef<HTMLDivElement>(null);
-
-  const updateFade = useCallback(() => {
-    const viewport = viewportRef.current;
-    const fade = fadeRef.current;
-    if (!viewport || !fade) return;
-    fade.hidden = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 1;
-    if (!fade.hidden) {
-      // Keep the overlay inside the native scrollbars.
-      fade.style.right = `${viewport.offsetWidth - viewport.clientWidth}px`;
-      fade.style.bottom = `${viewport.offsetHeight - viewport.clientHeight}px`;
-    }
-  }, []);
-
-  useLayoutEffect(updateFade, [code, updateFade]);
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    const observer = new ResizeObserver(updateFade);
-    observer.observe(viewport);
-    return () => observer.disconnect();
-  }, [updateFade]);
 
   useEffect(() => () => {
     if (resetTimerRef.current !== null) window.clearTimeout(resetTimerRef.current);
@@ -229,8 +208,8 @@ function MarkdownCodeBlock({
             {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
           </Button>
         )}
-        <pre ref={viewportRef} tabIndex={0} onScroll={updateFade} className={cn(AI_CONTENT_CODE_CLASS, 'ai-code-block-pre max-h-65 overflow-auto overscroll-x-contain whitespace-pre')}>{children}</pre>
-        <div ref={fadeRef} aria-hidden="true" hidden className="ai-markdown-code-fade pointer-events-none absolute left-0 h-8" />
+        <pre ref={viewportRef} tabIndex={0} className={cn(AI_CONTENT_CODE_CLASS, 'ai-code-block-pre max-h-65 overflow-auto overscroll-x-contain whitespace-pre')}>{children}</pre>
+        <AiNativeCodeFade viewportRef={viewportRef} text={code} />
       </div>
     </div>
   );

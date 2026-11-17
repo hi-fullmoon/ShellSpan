@@ -136,6 +136,24 @@ try {
                 }
                 await button.blur();
               }
+              const readBody = read.locator('.ai-read-lines');
+              const readFade = read.locator('.ai-native-code-fade');
+              assert.equal(await readBody.evaluate(element => getComputedStyle(element).whiteSpace), 'pre', context);
+              assert.equal(await read.locator('.ai-read-line-number').last().textContent(), String(data[scenario].file.split('\n').length));
+              if (scenario === 'long') {
+                await readFade.waitFor({ state: 'visible' });
+                const anchoredCopy = await outputCopy.boundingBox();
+                const position = await readBody.evaluate(element => {
+                  element.scrollTo({ top: element.scrollHeight, left: element.scrollWidth, behavior: 'instant' });
+                  return { top: element.scrollTop, left: element.scrollLeft };
+                });
+                assert.ok(position.top > 0, `${context}: file preview must scroll vertically`);
+                if (width === 320) assert.ok(position.left > 0, `${context}: file preview must scroll horizontally`);
+                await readFade.waitFor({ state: 'hidden' });
+                assert.deepEqual(await outputCopy.boundingBox(), anchoredCopy, `${context}: file copy stays fixed while scrolling`);
+                await readBody.evaluate(element => element.scrollTo({ top: 0, left: 0, behavior: 'instant' }));
+                await readFade.waitFor({ state: 'visible' });
+              } else assert.equal(await readFade.isVisible(), false, `${context}: short preview must stay clear`);
               const assertRegionCopy = async (card, region, activeIndex) => {
                 const copies = card.locator('.ai-tool-copy-button');
                 await region.hover({ position: { x: 24, y: 8 } });
@@ -153,9 +171,10 @@ try {
                 [terminal.locator('[data-ai-terminal-output] .ai-block-line').first(), 1],
               ]) await assertRegionCopy(terminal, region, index);
               const code = page.locator('[data-ai-tool-view="code"]');
+              assert.equal(await code.locator('.ai-tool-surface-header').count(), 1, `${context}: the language is the only visible heading`);
               for (const [region, index] of [
                 [code.locator(':scope > .ai-tool-surface-header'), -1], [code.locator('.ai-code-block-pre'), 0],
-                [code.locator('.ai-io-section .ai-tool-surface-header'), -1], [code.locator('.ai-io-text'), 1],
+                [code.locator('.ai-io-text'), 1],
               ]) await assertRegionCopy(code, region, index);
               const codeInput = code.locator('.ai-code-content [data-slot="scroll-area-viewport"]');
               const codeOutput = code.locator('.ai-code-output [data-slot="scroll-area-viewport"]');
@@ -168,6 +187,7 @@ try {
               const statusBox = await footer.locator('span').boundingBox();
               const cardBox = await code.boundingBox();
               assert.ok(outputSection.y - inputBox.y - inputBox.height >= 8, `${context}: source and result should have a gap`);
+              assert.equal(outputBox.y, outputSection.y, `${context}: the result begins directly after the gap`);
               assert.ok(footerBox.y >= outputBox.y + outputBox.height, `${context}: execution status should follow the result`);
               assert.ok(cardBox.x + cardBox.width - statusBox.x - statusBox.width <= 16, `${context}: status should align right`);
               for (const viewport of [codeInput, codeOutput]) {

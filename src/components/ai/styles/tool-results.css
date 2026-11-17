@@ -36,6 +36,10 @@
   font: inherit;
 }
 
+.ai-native-code-fade {
+  background: linear-gradient(to bottom, transparent, var(--ai-code-block));
+}
+
 .ai-terminal-prompt {
   color: var(--ai-text-muted);
 }
@@ -106,16 +110,16 @@
   color: var(--ai-error);
 }
 
-.ai-terminal-output,
-.ai-search-results,
-.ai-read-lines,
-.ai-diff-body {
+.ai-search-results {
   color: var(--ai-text);
   font: inherit;
 }
 
-.ai-terminal-output {
+.ai-terminal-output,
+.ai-read-lines,
+.ai-diff-body {
   color: var(--ai-text-secondary);
+  font: inherit;
 }
 
 .ai-read-line-number {

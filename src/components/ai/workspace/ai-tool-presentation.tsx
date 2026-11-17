@@ -1,4 +1,4 @@
-import { useMemo, useState, type ComponentType, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { diffLines, parsePatch } from 'diff';
 import hljs from 'highlight.js/lib/common';
 import {
@@ -37,6 +37,7 @@ import { renderTerminalTranscript } from '@/lib/terminal/terminal-output-buffer'
 import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
 import { AiContentTitle } from './ai-content-title';
+import { AiNativeCodeFade } from './ai-native-code-fade';
 import {
   AI_CONTENT_CODE_CLASS,
   AI_CONTENT_HEADER_CLASS,
@@ -478,13 +479,15 @@ function ReadSurface({ node, showCopyActions, showInput, scrollable }: { node: T
   const label = path
     ?? (node.state === 'failed' || node.state === 'rejected' ? t('ai.workspace.tool.title.read') : node.summary || node.name);
   const output = outputText(node);
-  const lines = bounded(output).split('\n');
+  const preview = bounded(output);
+  const lines = preview.split('\n');
+  const viewportRef = useRef<HTMLPreElement>(null);
   return (
     <div className="ai-read-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="read">
       {showInput && <ToolSurfaceHeader title={label} copyText={showCopyActions ? inputText : undefined} copyLabel={t('ai.workspace.tool.copyInput')} />}
       <div className="relative min-w-0" data-ai-copy-region>
         {showCopyActions && output && <AiToolCopyButton text={output} label={t('ai.workspace.tool.copyOutput')} className="top-1 right-3.5" />}
-        <pre className={cn(AI_CONTENT_CODE_CLASS, 'ai-read-lines pr-12 whitespace-pre', scrollable ? 'max-h-65 overflow-auto' : 'overflow-visible')} tabIndex={0}>
+        <pre ref={viewportRef} className={cn(AI_CONTENT_CODE_CLASS, 'ai-read-lines pr-12 whitespace-pre', scrollable ? 'max-h-65 overflow-auto' : 'overflow-visible')} tabIndex={0}>
           {lines.map((line, index) => (
             <span key={index} className="ai-read-line grid min-h-[18px] grid-cols-[34px_minmax(max-content,1fr)]">
               <span className="ai-read-line-number" aria-hidden="true">{index + 1}</span>
@@ -492,6 +495,7 @@ function ReadSurface({ node, showCopyActions, showInput, scrollable }: { node: T
             </span>
           ))}
         </pre>
+        {scrollable && <AiNativeCodeFade viewportRef={viewportRef} text={preview} />}
       </div>
     </div>
   );
@@ -776,14 +780,14 @@ function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAc
     <div className="ai-diff-block my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col gap-px overflow-hidden" data-ai-tool-view="diff">
       {files.map((hunk, index) => (
         <section key={`${hunk.path}:${index}`} className="min-w-0 max-w-full shrink-0">
-          <ToolSurfaceHeader title={hunk.path} className="min-h-8">
+          <ToolSurfaceHeader title={hunk.path} className={showInput ? undefined : 'min-h-8'}>
             {hunk.exact && currentModel.totalsKnown && <span className="ai-diff-counts shrink-0">
               <span data-diff-count="added">+{hunk.lines.filter((line) => line.kind === 'added').length}</span>{' '}
               <span data-diff-count="removed">-{hunk.lines.filter((line) => line.kind === 'removed').length}</span>
             </span>}
           </ToolSurfaceHeader>
           <AiToolContentRegion text={showCopyActions && index === 0 ? copyText : undefined} label={t('ai.workspace.tool.copyOutput')}>
-            <ToolScrollArea className="ai-diff-content max-h-65 min-w-0 max-w-full" scrollable={scrollable}>
+            <ToolScrollArea className="ai-diff-content max-h-65 min-w-0 max-w-full" viewportClassName={showInput ? TOOL_OUTPUT_FADE_CLASS : undefined} scrollable={scrollable}>
               {!hunk.exact && <div className="px-2.5 py-1 text-xs text-muted-foreground" data-diff-simplified>
                 {t('ai.workspace.tool.diffSimplified')}
               </div>}
@@ -842,7 +846,6 @@ function CodeSurface({ node, showCopyActions, scrollable, showInput }: { node: T
       </>}
       {node.output !== null && (
         <div className={cn('ai-io-section min-w-0', showInput && 'mt-2')}>
-          {(showInput || showCopyActions) && <ToolSurfaceHeader title={outputLabel} titleClassName="ai-io-label" />}
           <AiToolContentRegion text={showCopyActions ? output : undefined} label={t('ai.workspace.tool.copyOutput')} showCopiedTooltip={!showInput}>
             <ToolScrollArea className="ai-code-output max-h-65 min-w-0 max-w-full" viewportClassName={showInput ? TOOL_OUTPUT_FADE_CLASS : undefined} scrollable={scrollable} label={outputLabel}>
               <pre className={cn(AI_CONTENT_CODE_CLASS, 'ai-io-text whitespace-pre-wrap [overflow-wrap:anywhere]')}>{bounded(output)}</pre>

@@ -61,7 +61,7 @@ try {
           await page.locator('.ai-markdown-code-block').first().waitFor();
           const blocks = page.locator('.ai-markdown-code-block');
           assert.equal(await blocks.count(), 5);
-          assert.equal(await blocks.last().locator('.ai-markdown-code-fade').isVisible(), false);
+          assert.equal(await blocks.last().locator('.ai-native-code-fade').isVisible(), false);
           assert.equal(await blocks.nth(2).locator('.ai-markdown-code-toolbar').count(), 0);
           assert.equal(await blocks.nth(3).locator('.ai-code-block-language').innerText(), 'markdown');
           const toolbarHeights = [];
@@ -128,7 +128,7 @@ try {
             const button = block.locator('button');
             await block.scrollIntoViewIfNeeded();
             const before = await button.boundingBox();
-            const fade = block.locator('.ai-markdown-code-fade');
+            const fade = block.locator('.ai-native-code-fade');
             await fade.waitFor({ state: 'visible' });
             assert.ok(await fade.evaluate(element => {
               const pre = element.previousElementSibling;

@@ -330,10 +330,6 @@
   color: var(--ai-text-secondary);
 }
 
-.ai-markdown-code-fade {
-  background: linear-gradient(to bottom, transparent, var(--ai-code-block));
-}
-
 .ai-markdown-table-scroll table {
   width: max-content;
   min-width: 100%;

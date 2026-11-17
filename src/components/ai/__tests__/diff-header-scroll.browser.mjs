@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from 'playwright';
 import { createServer } from 'vite';
+import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -20,7 +21,8 @@ assert.ok(patch.length, 'Use a real repository patch');
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
   cacheDir: join(artifacts, 'vite-cache'), resolve: { alias: { '@': `${root}src` } },
-  esbuild: { jsx: 'automatic' }, plugins: [tailwindcss()],
+  optimizeDeps: { entries: ['src/components/ai/workspace/ai-tool-details.tsx'], include: ['react', 'react-dom/client'] },
+  plugins: [react(), tailwindcss()],
   server: { host: '127.0.0.1', port: 0, hmr: false },
 });
 server.middlewares.use('/__diff', (_request, response) => {
@@ -84,14 +86,14 @@ try {
               await copy.focus();
               assert.equal(await copy.evaluate(element => getComputedStyle(element).opacity), '1',
                 `${context}: keyboard focus reveals the body copy`);
-              if (engine === chromium && detail) {
+              if (engine === chromium) {
                 await copy.click();
-                assert.equal(await page.evaluate(() => navigator.clipboard.readText()), JSON.stringify({ diff: patch }, null, 2),
-                  `${context}: moving the detail copy preserves the complete output`);
+                const expected = detail ? JSON.stringify({ diff: patch }, null, 2) : patch;
+                await page.waitForFunction(text => navigator.clipboard.readText().then(value => value === text), expected);
               }
               await copy.blur();
             }
-            if (width === 720) assert.equal(before.height, 32, `${context}: single-line diff headers use the roomier 32px height`);
+            if (width === 720) assert.equal(before.height, detail ? 32 : 24, `${context}: the conversation uses the shared code header height`);
             await body.evaluate(element => { element.scrollLeft = element.scrollWidth; });
             assert.ok(await body.evaluate(element => element.scrollLeft > 0), `${context}: diff body scrolls horizontally`);
             assert.deepEqual(await header.boundingBox(), before, `${context}: file header stays fixed`);
@@ -160,10 +162,31 @@ try {
           }
           if (!detail) {
             const viewport = page.locator('.ai-diff-content [data-slot="scroll-area-viewport"]').first();
+            const overflowing = viewport.and(page.locator('[data-overflow-y-end]'));
+            const mask = () => viewport.evaluate(element => getComputedStyle(element).maskImage);
             assert.ok((await page.locator('.ai-diff-content').first().boundingBox()).height <= 260);
+            await overflowing.waitFor();
+            assert.notEqual(await mask(), 'none', `${context}: more lines should fade at the bottom`);
             await viewport.evaluate(element => { element.scrollTop = element.scrollHeight; });
             assert.ok(await viewport.evaluate(element => element.scrollTop > 0), `${context}: vertical scrolling is retained`);
-            await viewport.evaluate(element => { element.scrollTop = 0; });
+            await overflowing.waitFor({ state: 'detached' });
+            assert.equal(await mask(), 'none', `${context}: the last lines should be clear`);
+            await viewport.evaluate(element => element.scrollTo({ top: 0, left: 0, behavior: 'instant' }));
+            for (const theme of ['light', 'dark']) {
+              await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+              const body = page.locator('.ai-diff-body').first();
+              assert.equal(await body.evaluate(element => getComputedStyle(element).whiteSpace), 'pre');
+              for (const kind of ['added', 'removed']) {
+                const row = page.locator(`.ai-diff-body [data-diff="${kind}"]`).first();
+                const number = row.locator('.ai-diff-line-number');
+                const count = row.locator('xpath=ancestor::section').locator(`[data-diff-count="${kind}"]`);
+                assert.ok(Number(await number.textContent()) > 0, `${context}/${theme}: line numbers remain visible`);
+                assert.equal(await number.evaluate(element => getComputedStyle(element).color),
+                  await count.evaluate(element => getComputedStyle(element).color));
+                assert.notEqual(await row.evaluate(element => getComputedStyle(element).backgroundColor), 'rgba(0, 0, 0, 0)');
+              }
+              await page.locator('.ai-diff-block').screenshot({ path: join(artifacts, `${context.replaceAll('/', '-')}-${theme}.png`) });
+            }
           }
           await page.screenshot({ path: join(artifacts, `${context.replaceAll('/', '-')}.png`) });
           assert.deepEqual(errors, []);
