@@ -888,8 +888,9 @@ pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
             (Ok(None), None) => "unsupported",
             (Err(_), None) => "failed",
         };
+        let failure = interruption.as_ref().or_else(|| preparation.as_ref().err());
         info!(
-            "Native SSH preparation session_id={session_id} outcome={outcome} elapsed_ms={} upload_ms={} readback_ms={}",
+            "Native SSH preparation session_id={session_id} outcome={outcome} elapsed_ms={} upload_ms={} readback_ms={} failure={failure:?}",
             started.elapsed().as_millis(),
             timings.upload.as_millis(),
             timings.readback.as_millis()

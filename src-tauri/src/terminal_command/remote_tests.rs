@@ -309,6 +309,11 @@ fn real_ssh_bash_startup_fallback_preserves_predecessor_until_attachment() {
     assert_eq!(next.terminal_generation, old.terminal_generation + 2);
     assert_eq!(next.input_mode, nip::InputMode::NativeInline);
     assert!(next.prompt_ready);
+    let capabilities = broker.execution_capabilities("ssh-next").unwrap();
+    assert!(!capabilities.input_recovery_required);
+    assert!(capabilities
+        .integration_capabilities
+        .contains(&"nativeScriptInput"));
 
     graceful_shutdown(&mut next_pty);
     next_native.unwrap().close(&next_session);
