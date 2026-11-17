@@ -888,7 +888,7 @@ describe('AgentSessionAdapter', () => {
     expect(dependencies.answerQuestion).toHaveBeenCalledWith(input);
     expect(reconnect).toHaveBeenCalledOnce();
     reconnect.mockResolvedValueOnce(stale);
-    await expect(adapter.answerQuestion(input)).rejects.toThrow('not visible');
+    await expect(adapter.answerQuestion({ ...input, clientOperationId: 'unconfirmed-operation' })).rejects.toThrow('not visible');
     adapter.dispose();
   });
   it('retains the warm subscription on navigation and releases it on disposal without stopping Runtime', async () => {

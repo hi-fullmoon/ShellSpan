@@ -64,6 +64,11 @@ and releases the held queue without resending that head. All user enqueue
 receipts remain available for reconciliation after consumption/removal.
 Admission acknowledgement does not synthesize a running runtime. Processing is
 shown only for a running runtime with a committed user input or admitted turn.
+The submission still accepts a successful native reply while receipt backfill
+is in flight. A stalled backfill cannot replace that reply with an unconfirmed
+result or keep the subsequent admissions waiting.
+A missing receipt can confirm rejection only if the read started after the IPC
+reported failure.
 
 Admission queues, frozen inputs and composer submission state are owned by the
 application and shared through the session adapter. Closing a panel releases its
@@ -134,7 +139,9 @@ inspection and explicit follow-up rather than replaying tool calls.
 Question answers retain their original operation ID and payload until a committed
 `question/answered` receipt is visible. The client backfills the session after both
 successful and failed answer IPC calls; a durable receipt acknowledges a lost
-reply. A read-only status refresh never resubmits answers or bypasses recovery.
+reply, even if the command or backfill has not returned. Question answers, Inbox
+mutations and session renames have an 18-second confirmation deadline, including
+any backfill. A read-only status refresh never resubmits answers or bypasses recovery.
 Cancelled, ended, obsolete and conflicting questions offer status refresh rather
 than resubmission. Required recovery must be resolved before retrying. Explicit
 answer-validation rejection permits editing only after successful state

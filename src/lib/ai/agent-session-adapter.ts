@@ -2,13 +2,14 @@ import { AgentSessionCommittedClient, type AgentSessionStreamState } from '@/lib
 import { createCommittedEventProjection } from './committed-event-projection';
 import { projectContextUsage } from './context-usage';
 import { fallbackSessionTitle } from './session-title';
-import { AiAdmissionUnconfirmedError, normalizeAiSessionError } from './session-error';
+import { normalizeAiSessionError } from './session-error';
 import { invokeAnswerAgentRuntimeQuestion, invokeListAgentRuntimeSkills, invokeListAgentFileReferences } from '@/lib/ipc/tauri';
 import { projectQuestions } from './question-projection';
-import { QuestionSubmissionError, questionSubmissionIssue, reconcileQuestionSubmission, type QuestionSubmissionIssue } from './question-submission';
+import { QuestionSubmissionError, questionSubmissionIssue, reconcileQuestionSubmission } from './question-submission';
+import type { AnswerQuestionInput } from '@/types/agent-question';
 import { modelRetryConfirmation } from './failure-recovery';
 import { childBudgetExhausted } from './subagent-continuation';
-import { awaitMutationAcknowledgement } from './mutation-acknowledgement';
+import { awaitInboxAdmission, awaitMutationAcknowledgement, withOperationDeadline } from './mutation-acknowledgement';
 import { invokeSubmitAgentImages } from '@/lib/ipc/tauri';
 import { requireVision } from '@/lib/ai/vision-contract';
 import {
@@ -552,13 +553,18 @@ export function createAgentSessionAdapter(
   const resumeEndedSession = async (
     sessionId: string,
     current?: AiSessionView,
+    signal?: AbortSignal,
   ): Promise<AiSessionView> => {
     const view = current ?? await openEntry(sessionId);
+    signal?.throwIfAborted();
     if (!view.snapshot.value.ended
       && !['cancelled', 'failed', 'completed'].includes(view.status)) return view;
     await (dependencies.resume ?? invokeResumeAgentRuntime)({ sessionId });
+    signal?.throwIfAborted();
     const entry = ensureEntry(sessionId);
-    const resumed = entry.project(await entry.client.reconnect());
+    const state = await entry.client.reconnect();
+    signal?.throwIfAborted();
+    const resumed = entry.project(state);
     entry.view = resumed;
     for (const listener of entry.listeners) listener(resumed);
     return resumed;
@@ -567,91 +573,69 @@ export function createAgentSessionAdapter(
   const waitForCommittedOperation = async (
     sessionId: string,
     clientOperationId: string,
-    command: () => Promise<unknown>,
-    recovery?: { readonly confirmed: (view: AiSessionView) => boolean },
+    command: (view: AiSessionView, signal: AbortSignal) => Promise<unknown>,
+    options: { readonly confirmed?: (view: AiSessionView) => boolean; readonly question?: AnswerQuestionInput } = {},
   ): Promise<void> => {
     const entry = ensureEntry(sessionId);
-    await openEntry(sessionId);
-    const confirmed = (view?: AiSessionView): boolean => Boolean(view && (recovery
-      ? recovery.confirmed(view) : view.committedOperationIds?.includes(clientOperationId)));
-    if (!recovery && confirmed(entry.view)) return;
-    let settled = false;
-    let resolveCommit: (() => void) | undefined;
-    let rejectCommit: ((error: Error) => void) | undefined;
-    const committed = new Promise<void>((resolve, reject) => {
-      resolveCommit = resolve;
-      rejectCommit = reject;
-    });
-    // A timeout can fire while the IPC command is still pending.
-    void committed.catch(() => undefined);
-    const listener: AiSessionListener = (next) => {
-      if (!confirmed(next) || settled) return;
-      settled = true;
-      entry.listeners.delete(listener);
-      resolveCommit?.();
+    const question = options.question;
+    const confirmationError = (error: unknown): Error => question
+      ? new QuestionSubmissionError(questionSubmissionIssue(error, 'confirm'))
+      : error instanceof Error ? error : new Error(String(error));
+    const timedOut = () => confirmationError(new Error('Committed Agent Runtime operation confirmation timed out'));
+    const confirmed = options.confirmed ?? ((view: AiSessionView) => view.committedOperationIds?.includes(clientOperationId) === true);
+    let canConfirm = !options.confirmed;
+    let hasReceipt = false;
+    let acknowledge!: () => void;
+    const committed = new Promise<void>(resolve => { acknowledge = resolve; });
+    const listener: AiSessionListener = next => {
+      if (canConfirm && confirmed(next)) {
+        hasReceipt = true;
+        acknowledge();
+      }
     };
     entry.listeners.add(listener);
-    let recoveryTimeout: ReturnType<typeof globalThis.setTimeout> | undefined;
-    const timeout = globalThis.setTimeout(() => {
-      if (settled) return;
-      if (recovery) recoveryTimeout = globalThis.setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        entry.listeners.delete(listener);
-        rejectCommit?.(new Error('Model retry recovery confirmation timed out'));
-      }, 3_000);
-      void entry.client.reconnect().then((state) => {
-        if (settled) return;
-        const refreshed = entry.project(state);
-        entry.view = refreshed;
-        for (const subscribed of entry.listeners) subscribed(refreshed);
-        if (confirmed(refreshed)) return;
-        settled = true;
-        entry.listeners.delete(listener);
-        rejectCommit?.(new Error('Committed Agent Runtime mutation event timed out'));
-      }, () => {
-        if (settled) return;
-        settled = true;
-        entry.listeners.delete(listener);
-        rejectCommit?.(new Error('Committed Agent Runtime mutation event timed out'));
-      });
-    }, 15_000);
     try {
-      // The durable receipt can arrive before the IPC response, or after the
-      // response is lost entirely. It is sufficient to settle the operation.
-      const running = command();
-      if (recovery && entry.view) listener(entry.view);
-      await awaitMutationAcknowledgement(running, committed, () => {
-        if (entry.view) listener(entry.view);
-      });
-    } catch (error) {
-      // IPC may fail after durable append. Reconnect before reporting failure,
-      // so retries can acknowledge the original operation, even after consumption.
-      if (!confirmed(entry.view)) {
-        try {
-          const reconnect = entry.client.reconnect();
-          const state = recovery ? await Promise.race([reconnect, committed.then(() => {
-            throw new Error('Model retry was confirmed while reconnecting');
-          })]) : await reconnect;
+      await withOperationDeadline(18_000, timedOut, async (signal) => {
+        const view = entry.view ?? await Promise.race([openEntry(sessionId), committed.then(() => undefined)]);
+        signal.throwIfAborted();
+        if (!view || hasReceipt || (canConfirm && confirmed(view))) return;
+        // Let a live receipt settle the operation independently of the command
+        // reply or a backfill that is already in flight.
+        await awaitMutationAcknowledgement(() => {
+          signal.throwIfAborted();
+          if (hasReceipt) return Promise.resolve();
+          const request = command(view, signal);
+          canConfirm = true;
+          if (entry.view) listener(entry.view);
+          return request;
+        }, committed, async trigger => {
+          signal.throwIfAborted();
+          if (entry.view && confirmed(entry.view)) return;
+          const failure = trigger.kind === 'error' ? trigger.error : undefined;
+          let state: AgentSessionStreamState;
+          try { state = await entry.client.reconnect(); }
+          catch (error) {
+            if (!question && trigger.kind === 'error') throw failure;
+            throw confirmationError(error);
+          }
+          signal.throwIfAborted();
           const refreshed = entry.project(state);
           entry.view = refreshed;
           for (const subscribed of entry.listeners) subscribed(refreshed);
-        } catch {
-          // Preserve the original error; the caller retries the same identity.
-        }
-      }
-      if (confirmed(entry.view)) {
-        entry.listeners.delete(listener);
-        return;
-      }
-      if (!settled) {
-        settled = true;
-        entry.listeners.delete(listener);
-      }
-      throw error;
+          if (confirmed(refreshed)) return;
+          if (question) {
+            const issue = reconcileQuestionSubmission(question, refreshed, trigger.kind === 'error'
+              ? questionSubmissionIssue(failure)
+              : questionSubmissionIssue('Committed question answer is not visible yet', 'confirm'));
+            if (issue) throw new QuestionSubmissionError(issue);
+            return;
+          }
+          if (trigger.kind === 'error') throw failure;
+          throw timedOut();
+        }, { backfillAfterMs: 15_000, backfillOnSuccess: Boolean(question), signal });
+      });
     } finally {
-      globalThis.clearTimeout(timeout);
-      if (recoveryTimeout !== undefined) globalThis.clearTimeout(recoveryTimeout);
+      entry.listeners.delete(listener);
     }
   };
 
@@ -680,53 +664,25 @@ export function createAgentSessionAdapter(
     ));
     const isPaused = (snapshot: AgentSessionSnapshot | null | undefined): boolean => snapshot?.status === 'failed'
       || Boolean(snapshot?.inbox.pausedIds?.includes(input.clientOperationId));
-    let resolveObserved!: (result: { kind: 'observed'; paused: boolean }) => void;
-    const observed = new Promise<{ kind: 'observed'; paused: boolean }>(resolve => { resolveObserved = resolve; });
+    let resolveObserved!: (paused: boolean) => void;
+    const observed = new Promise<boolean>(resolve => { resolveObserved = resolve; });
     const listener: AiSessionListener = view => {
       if (view.committedOperationIds?.includes(input.clientOperationId)) {
-        resolveObserved({ kind: 'observed', paused: isPaused(view.snapshot.value) });
+        resolveObserved(view.status === 'failed' || view.inbox.some(item => item.clientSubmissionId === input.clientOperationId && item.paused));
       }
     };
     entry.listeners.add(listener);
-    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
-    let pollTimer: ReturnType<typeof setTimeout> | undefined;
-    const deadline = new Promise<never>((_, reject) => {
-      deadlineTimer = setTimeout(() => reject(new AiAdmissionUnconfirmedError()), 15_000);
-    });
     try {
-      const request = command().then(snapshot => ({ kind: 'accepted' as const, snapshot }), error => ({ kind: 'error' as const, error: error as unknown }));
-      // A live durable receipt also settles a missing IPC reply immediately.
-      for (;;) {
-        const result = await Promise.race([request, observed, deadline, new Promise<{ kind: 'pending' }>(resolve => {
-          pollTimer = setTimeout(() => resolve({ kind: 'pending' }), 3000);
-        })]);
-        clearTimeout(pollTimer);
-        if (result.kind === 'observed') return result.paused;
-        if (result.kind === 'accepted') return isPaused(result.snapshot);
-        if (result.kind === 'error' && /different payload|SUBMISSION_CONFLICT/.test(String(result.error))) throw result.error;
+      return await awaitInboxAdmission(async () => isPaused(await command()), observed, async signal => {
         let refreshed: AgentSessionStreamState;
-        try {
-          const refresh = await Promise.race([
-            entry.client.reconnect().then(state => ({ kind: 'refreshed' as const, state })), observed, deadline,
-          ]);
-          if (refresh.kind === 'observed') return refresh.paused;
-          refreshed = refresh.state;
-        } catch (error) {
-          if (error instanceof AiAdmissionUnconfirmedError) throw error;
-          // Unreachable storage cannot establish that the message was rejected.
-          await Promise.race([observed, deadline, new Promise<void>(resolve => {
-            pollTimer = setTimeout(resolve, 3000);
-          })]);
-          continue;
-        }
+        try { refreshed = await entry.client.reconnect(); }
+        catch { return { kind: 'unavailable' }; }
+        signal.throwIfAborted();
         entry.view = entry.project(refreshed);
         for (const subscribed of entry.listeners) subscribed(entry.view);
-        if (confirmed(refreshed.events)) return isPaused(refreshed.snapshot);
-        if (result.kind === 'error') throw result.error;
-      }
+        return confirmed(refreshed.events) ? { kind: 'found', paused: isPaused(refreshed.snapshot) } : { kind: 'missing' };
+      });
     } finally {
-      clearTimeout(deadlineTimer);
-      clearTimeout(pollTimer);
       entry.listeners.delete(listener);
     }
   };
@@ -743,24 +699,8 @@ export function createAgentSessionAdapter(
       return { sessions, nextCursor: page.nextCursor };
     },
     async answerQuestion(input): Promise<void> {
-      let failure: QuestionSubmissionIssue | undefined;
-      try { await dependencies.answerQuestion(input); }
-      catch (error) { failure = questionSubmissionIssue(error); }
-      // IPC success alone is not the UI acknowledgement: a lost live event must
-      // be repaired before the form discards its retryable draft.
-      const entry = ensureEntry(input.identity.sessionId);
-      let view: AiSessionView;
-      try { view = entry.project(await entry.client.reconnect()); }
-      catch (error) {
-        const syncFailure = questionSubmissionIssue(error, 'confirm');
-        throw new QuestionSubmissionError(failure
-          ? { ...syncFailure, detail: [failure.detail, syncFailure.detail].filter(Boolean).join('\n') }
-          : syncFailure);
-      }
-      entry.view = view;
-      for (const listener of entry.listeners) listener(view);
-      const issue = reconcileQuestionSubmission(input, view, failure ?? questionSubmissionIssue('Committed question answer is not visible yet', 'confirm'));
-      if (issue) throw new QuestionSubmissionError(issue);
+      await waitForCommittedOperation(input.identity.sessionId, input.clientOperationId,
+        () => dependencies.answerQuestion(input), { question: input });
     },
     async listFileReferences(sessionId, query, signal) {
       if (signal.aborted) throw new Error('Cancelled');
@@ -968,19 +908,18 @@ export function createAgentSessionAdapter(
         : type === 'remove' || type === 'steer' || type === 'resume'
           ? { type, itemId: input.itemId }
           : { type, lane: input.lane, orderedItemIds: input.orderedItemIds };
-      if (type === 'resume') {
-        const view = await resumeEndedSession(sessionId);
-        const selection = view.snapshot.value.header.modelSelection;
-        if (!selection) throw new Error('Select a model before resuming queued input');
-        await dependencies.start({ sessionId, selection });
-      }
-      const revision = type === 'resume' ? ensureEntry(sessionId).view?.revision ?? expectedRevision : expectedRevision;
-      await waitForCommittedOperation(sessionId, clientOperationId, () => dependencies.mutateInbox({
-        sessionId,
-        expectedRevision: revision,
-        clientOperationId,
-        mutation,
-      }));
+      await waitForCommittedOperation(sessionId, clientOperationId, async (current, signal) => {
+        let revision = expectedRevision;
+        if (type === 'resume') {
+          const view = await resumeEndedSession(sessionId, current, signal);
+          const selection = view.snapshot.value.header.modelSelection;
+          if (!selection) throw new Error('Select a model before resuming queued input');
+          await dependencies.start({ sessionId, selection });
+          signal.throwIfAborted();
+          revision = ensureEntry(sessionId).view?.revision ?? expectedRevision;
+        }
+        return dependencies.mutateInbox({ sessionId, expectedRevision: revision, clientOperationId, mutation });
+      });
     },
     async rename(input: AiSessionRenameInput): Promise<void> {
       await waitForCommittedOperation(input.sessionId, input.clientOperationId, () => (
@@ -989,11 +928,14 @@ export function createAgentSessionAdapter(
     },
     async refresh(sessionId: string): Promise<AiSessionView> {
       const entry = ensureEntry(sessionId);
-      const state = await entry.client.reconnect();
-      const view = entry.project(state);
-      entry.view = view;
-      for (const listener of entry.listeners) listener(view);
-      return view;
+      return withOperationDeadline(18_000, () => new Error('Agent Runtime refresh timed out'), async signal => {
+        const state = await entry.client.reconnect();
+        signal.throwIfAborted();
+        const view = entry.project(state);
+        entry.view = view;
+        for (const listener of entry.listeners) listener(view);
+        return view;
+      });
     },
     async retrySync(sessionId: string): Promise<AiSessionView> {
       const entry = ensureEntry(sessionId);
