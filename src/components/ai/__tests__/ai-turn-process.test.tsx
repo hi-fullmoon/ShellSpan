@@ -112,10 +112,10 @@ describe('AI Turn Process renderer', () => {
       '.ai-turn-process > [data-slot="collapsible-content"]',
     );
     expect(processPanel).toBeVisible();
-    expect(getComputedStyle(processPanel!).transitionProperty).toBe('height, opacity');
+    expect(getComputedStyle(processPanel!).transitionProperty).toBe('height');
     expect(getComputedStyle(processPanel!).overflow).toBe('hidden');
     expect(getComputedStyle(processPanel!).transitionDuration).toBe(
-      'var(--ai-transition-duration-slow), var(--ai-transition-duration)',
+      'var(--ai-transition-duration-slow)',
     );
     const reasoning = screen.getByRole('button', {
       name: 'Reasoning Read the frozen context. Answer directly.',

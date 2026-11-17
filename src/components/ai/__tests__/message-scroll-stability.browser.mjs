@@ -12,11 +12,15 @@ const documents = await Promise.all([
   'README.md', 'AGENTS.md', 'CONTRIBUTING.md', 'docs/releasing.md',
   'protocol/agent/runtime/turn-and-task-plan.md',
 ].map(async name => ({ name, text: await readFile(join(root, name), 'utf8') })));
+const contributing = documents.find(({ name }) => name === 'CONTRIBUTING.md');
+const excerpt = { ...contributing, text: contributing.text.split('## Generated Artifacts')[0] };
 const server = await createServer({
   configFile: false, root, appType: 'custom',
+  cacheDir: `${root}artifacts/tests/message-scroll-stability/vite-cache`,
+  optimizeDeps: { entries: ['src/components/ai/__tests__/message-scroll-stability.browser.tsx'] },
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': `${root}src/` } },
-  server: { host: '127.0.0.1', port: 0 },
+  server: { host: '127.0.0.1', port: 0, watch: null, hmr: false },
 });
 server.middlewares.use('/__scroll-stability', async (_request, response) => {
   response.setHeader('Content-Type', 'text/html');
@@ -37,10 +41,31 @@ try {
         page.on('pageerror', error => errors.push(error.message));
         await page.goto(`http://127.0.0.1:${address.port}/__scroll-stability`);
         await page.waitForFunction(() => Boolean(window.renderScrollDocuments));
+        const viewport = page.locator('[data-message-scroller-viewport]');
+        await page.evaluate(excerpt => window.renderScrollDocuments([excerpt]), excerpt);
+        await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
+        await page.evaluate(() => document.fonts.ready);
+        const layout = () => viewport.evaluate(element => {
+          const content = element.querySelector('[data-slot="message-scroller-content"]').getBoundingClientRect();
+          return {
+            overflowing: element.scrollHeight > element.clientHeight,
+            width: element.clientWidth,
+            contentWidth: content.width,
+            contentLeft: content.left,
+          };
+        });
+        const fitting = await layout();
+        assert.equal(fitting.overflowing, false, 'The excerpt must fit in the taller viewport');
+        await page.setViewportSize({ width, height: 180 });
+        assert.deepEqual(await layout(), { ...fitting, overflowing: true },
+          `${browserType.name()} ${width}px: showing the scrollbar must preserve the transcript width and position`);
+        await page.setViewportSize({ width, height: 720 });
+        assert.deepEqual(await layout(), fitting,
+          `${browserType.name()} ${width}px: hiding the scrollbar must preserve the transcript width and position`);
+
         await page.evaluate(documents => window.renderScrollDocuments(documents), documents);
         await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
         await page.evaluate(() => document.fonts.ready);
-        const viewport = page.locator('[data-message-scroller-viewport]');
         const metrics = () => viewport.evaluate(element => ({
           top: element.scrollTop, height: element.scrollHeight, client: element.clientHeight,
         }));

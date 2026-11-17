@@ -60,6 +60,23 @@ export function registerProcessMember(node: AiConversationNodeOf<'turnProcess'>,
   };
 }
 
+export function setProcessPanelHeightTiming(panelIds: string, opening: boolean): void {
+  const panels = panelIds.split(' ').flatMap(id => {
+    const panel = document.getElementById(id);
+    const height = panel?.firstElementChild?.getBoundingClientRect().height ?? 0;
+    return panel && height > 0 ? [{ panel, height }] : [];
+  });
+  const totalHeight = panels.reduce((total, { height }) => total + height, 0);
+  let offset = 0;
+  // The scroll items stay mounted in their original seats. Each row moves only
+  // for the part of the group's height transition that crosses that row.
+  for (const { panel, height } of opening ? panels : panels.reverse()) {
+    panel.style.setProperty('--ai-process-height-start', `${100 * offset / totalHeight}%`);
+    offset += height;
+    panel.style.setProperty('--ai-process-height-end', `${100 * offset / totalHeight}%`);
+  }
+}
+
 export function isReadingProcess(node: AiConversationNodeOf<'turnProcess'>, body: HTMLElement | null): boolean {
   const selection = window.getSelection();
   const elements = [...(members.get(processDisclosureKey(node)) ?? []), ...(body ? [body] : [])];

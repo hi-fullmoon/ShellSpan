@@ -7,6 +7,8 @@ import { conversationFoldRecording } from '@/tests/fixtures/conversation-fold-ru
 import { childFailureEvents } from '@/tests/fixtures/child-recovery-recording';
 import { inboxTimelineEvidence } from '@/tests/fixtures/agent-inbox-timeline';
 import { initI18n } from '@/locales';
+import { useAppStore } from '@/stores/appStore';
+import type { Locale } from '@/types';
 import type { AgentSessionEvent } from '@/types/agent-session';
 import type { AiScrollAnchor } from '@/lib/ai/panel-route';
 import '@/styles/base.css';
@@ -36,7 +38,10 @@ function replay(events: readonly AgentSessionEvent[]) {
 
 Object.assign(window, {
   foldingRecordings: recordings,
-  setFoldingLocale: initI18n,
+  async setFoldingLocale(locale: Locale) {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+  },
   replayFoldingEvents: replay,
   foldingAnchor: () => lastAnchor,
   replayFoldingRecording(name: keyof typeof recordings, length?: number) {

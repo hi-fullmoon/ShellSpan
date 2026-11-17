@@ -16,7 +16,7 @@ Object.assign(window, {
   renderScrollDocuments(documents: { name: string; text: string }[]) {
     revision += 1;
     flushSync(() => root.render(
-      <main className="ai-panel-shell h-dvh w-full min-w-0" data-ai-scope="workbench">
+      <main className="ai-panel-shell h-dvh w-full min-w-0" data-ai-scope="terminal">
         <MessageScroller key={revision} followKey="documents"
           initialAnchor={{ nodeKey: documents[0]?.name ?? '', atBottom: false, offset: 0, scrollTop: 0 }}>
           {documents.map(({ name, text }) => (

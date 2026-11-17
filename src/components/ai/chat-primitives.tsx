@@ -631,9 +631,11 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
       onPointerDownCapture={handlePointerDown}
     >
       {/* Overflow already clips the viewport. A second paint-containment clip
-          can leave newly exposed WebKit scroll tiles unpainted after updates. */}
+          can leave newly exposed WebKit scroll tiles unpainted after updates.
+          WebKit drops the custom scrollbar's gutter when an auto viewport
+          fits its content, so keep the track allocated in the terminal chat. */}
       <MessageScrollerViewport
-        className="flex flex-col overscroll-none contain-none [overflow-anchor:none]"
+        className="flex flex-col overscroll-none contain-none [overflow-anchor:none] in-[[data-ai-scope=terminal]]:overflow-y-scroll"
         ref={viewportRef}
         onScrollCapture={handleScrollCapture}
         onScroll={readAnchor}

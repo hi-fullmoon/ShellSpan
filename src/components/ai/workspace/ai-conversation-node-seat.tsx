@@ -42,7 +42,7 @@ import { AiQuestionHistory } from './ai-question-panel';
 import { AiFailureRecoveryAction } from './ai-failure-recovery';
 import { AiNoticeAction } from './ai-notice-action';
 import { AiFailedDraftRecovery, AiFailedDraftRecoveryContext, failedDraftForMessage } from './ai-failed-draft-recovery';
-import { isReadingProcess, processDisclosureKey, processFoldsOnCompletion, storeProcessDisclosure, useProcessDisclosure } from './ai-process-disclosure';
+import { isReadingProcess, processDisclosureKey, processFoldsOnCompletion, setProcessPanelHeightTiming, storeProcessDisclosure, useProcessDisclosure } from './ai-process-disclosure';
 import {
   AI_DISCLOSURE_LEADING_CLASS,
   AI_DISCLOSURE_ROW_CLASS,
@@ -570,6 +570,7 @@ function TurnProcessDisclosure({
   const { t } = useI18n();
   const stateKey = turnProcessDisclosureKey(node);
   const { open, stored } = useProcessDisclosure(node);
+  const previousOpen = useRef(open);
   const foldOnCompletion = processFoldsOnCompletion(node);
   const bodyRef = useRef<HTMLDivElement>(null);
   const label = t(turnProcessLabelKey(node.status));
@@ -586,6 +587,12 @@ function TurnProcessDisclosure({
       storeProcessDisclosure(stateKey, { open: !foldOnCompletion || isReadingProcess(node, bodyRef.current) });
     }
   }, [foldOnCompletion, stateKey]);
+
+  useLayoutEffect(() => {
+    if (previousOpen.current === open) return;
+    previousOpen.current = open;
+    if (processPanelIds) setProcessPanelHeightTiming(processPanelIds, open);
+  }, [open, processPanelIds]);
 
   return (
     <Collapsible open={open} onOpenChange={updateOpen}>

@@ -14,6 +14,7 @@ const runtimeEvents = process.argv[2]
   ? (await readFile(process.argv[2], 'utf8')).trim().split('\n').map(JSON.parse) : undefined;
 const server = await createServer({ root, configFile: false, appType: 'custom', logLevel: 'error',
   cacheDir: `/tmp/shellspan-process-folding-${process.pid}`,
+  optimizeDeps: { entries: ['src/components/ai/__tests__/ai-process-folding.browser.tsx'] },
   resolve: { alias: { '@': `${root}src` } }, plugins: [react(), tailwindcss()],
   server: { host: '127.0.0.1', port: 0, hmr: false } });
 server.middlewares.use('/__process-folding', async (_request, response) => {
@@ -93,10 +94,57 @@ try {
         await prose.waitFor();
         assert.equal(await prose.evaluate(element => Boolean(element.closest('[data-ai-process-owner]'))), true);
         assert.equal(await page.locator('[data-ai-node-kind="assistantMessage"]').count(), 2);
-        await process.click();
+        const panels = (await processRows()).locator('.ai-conversation-row-panel');
+        const sampleMotion = direction => panels.evaluateAll(async (panels, direction) => {
+          const trigger = document.querySelector('.ai-turn-process-trigger');
+          const sample = () => {
+            const triggerTop = trigger.getBoundingClientRect().top;
+            return panels.map(panel => {
+              const { height, top } = panel.getBoundingClientRect();
+              return {
+                height, top: top - triggerTop, opacity: Number(getComputedStyle(panel).opacity),
+                bodyHeight: panel.firstElementChild.getBoundingClientRect().height,
+              };
+            });
+          };
+          const before = sample();
+          trigger.click();
+          const transitioning = panel => direction === 'open'
+            ? panel.hasAttribute('data-open') && !panel.hasAttribute('data-starting-style')
+            : panel.hasAttribute('data-ending-style');
+          for (let frame = 0; frame < 10 && !panels.every(transitioning); frame++) {
+            await new Promise(resolve => requestAnimationFrame(resolve));
+          }
+          const transitions = panels.flatMap(panel => panel.getAnimations());
+          for (const transition of transitions) transition.pause();
+          const frames = [50, 100, 150, 200, 250].map(time => {
+            for (const transition of transitions) transition.currentTime = time;
+            return sample();
+          });
+          for (const transition of transitions) transition.finish();
+          return { before, frames };
+        }, direction);
+        const { before: expandedRows, frames: closing } = await sampleMotion('close');
+        assert.ok(expandedRows.length > 1, 'The recording must exercise multiple process rows');
         await prose.waitFor({ state: 'hidden' });
-        await process.press('Enter');
+        const { frames: opening } = await sampleMotion('open');
         await prose.waitFor();
+        const expandedHeight = expandedRows.reduce((total, row) => total + row.height, 0);
+        for (const frame of [...closing, ...opening]) {
+          let remaining = frame.reduce((total, row) => total + row.height, 0);
+          assert.ok(remaining > 0 && remaining < expandedHeight, 'The process boundary must move between its endpoints');
+          for (const [index, expanded] of expandedRows.entries()) {
+            const row = frame[index];
+            assert.equal(row.opacity, 1, 'Process details must remain opaque while clipping');
+            assert.ok(Math.abs(row.height - Math.max(0, Math.min(remaining, expanded.height))) < 1,
+              `Process rows must share one clipping boundary: ${JSON.stringify({ frame, expandedRows })}`);
+            if (row.height > 1) {
+              assert.ok(Math.abs(row.top - expanded.top) < 1 && Math.abs(row.bodyHeight - expanded.bodyHeight) < 1,
+                'Visible process details must retain their original positions and size');
+            }
+            remaining -= expanded.height;
+          }
+        }
         await reset();
         await page.evaluate(() => {
           const events = window.foldingRecordings.completed;
@@ -120,6 +168,7 @@ try {
         await page.evaluate(() => window.getSelection().removeAllRanges());
         await page.waitForFunction(() => document.querySelector('.ai-turn-process-trigger')?.getAttribute('aria-expanded') === 'false');
         await (await processRows()).first().waitFor({ state: 'hidden' });
+        assert.equal(await process.getAttribute('aria-label'), locale === 'zh-CN' ? '处理完成' : 'Process complete');
         await page.getByText(/COMPACT-CHECK-4719/).waitFor();
         assert.equal(await page.locator('[data-ai-node-kind="assistantMessage"]:visible').count(), 1);
         await page.screenshot({ path: `${output}/${engine.name()}-${width}-${locale}-completed.png`, animations: 'disabled' });
