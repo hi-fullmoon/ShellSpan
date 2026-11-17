@@ -10,7 +10,13 @@ const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const text = readFileSync(`${root}src/components/ui/split-pane.tsx`, 'utf8');
 const listing = execFileSync('ls', ['-1', 'src/components/terminal/registry'], { cwd: root, encoding: 'utf8' }).trimEnd();
 const server = await createServer({
-  root, configFile: false, logLevel: 'error',
+  root, configFile: false, appType: 'custom', logLevel: 'error',
+  cacheDir: `${root}artifacts/tests/terminal-divider/vite-cache`,
+  optimizeDeps: {
+    entries: ['src/components/ai/ai-panel.tsx', 'src/components/focus/focus-workspace.tsx',
+      'src/components/terminal/registry/terminal-registry.ts'],
+    include: ['react', 'react-dom/client', '@xterm/xterm', '@xterm/addon-fit'],
+  },
   resolve: { alias: { '@': `${root}src` } },
   plugins: [tailwindcss(), {
     name: 'terminal-divider-regression',
@@ -40,7 +46,7 @@ const server = await createServer({
       });
     },
   }],
-  server: { host: '127.0.0.1', port: 0 },
+  server: { host: '127.0.0.1', port: 0, hmr: false, watch: null },
 });
 
 async function checkTerminalDrag(page, width) {

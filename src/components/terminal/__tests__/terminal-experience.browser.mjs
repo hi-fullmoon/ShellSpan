@@ -19,6 +19,11 @@ const server = await createServer({
   configFile: false,
   appType: 'custom',
   logLevel: 'error',
+  cacheDir: `${root}artifacts/tests/terminal-experience/vite-cache`,
+  optimizeDeps: {
+    entries: ['src/components/terminal/index.tsx'],
+    include: ['react', 'react-dom/client', '@xterm/xterm', '@xterm/addon-search', '@xterm/addon-fit'],
+  },
   resolve: { alias: { '@': `${root}src` } },
   plugins: [tailwindcss(), {
     name: 'terminal-experience-test',

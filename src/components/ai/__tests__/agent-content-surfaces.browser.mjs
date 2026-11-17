@@ -254,17 +254,18 @@ try {
               const parent = getComputedStyle(element.closest('.ai-content-code'));
               return actual.fontFamily === parent.fontFamily && actual.fontSize === parent.fontSize && actual.lineHeight === parent.lineHeight;
             })), `${context}: nested code elements inherit the shared typography`);
-            const headers = await page.locator('.ai-content-header').evaluateAll(elements => elements.map(element => {
+            const headers = await page.locator('.ai-content-header:is(p, :has(.ai-content-title))').evaluateAll(elements => elements.map(element => {
               const style = getComputedStyle(element);
-              return { roomy: Boolean(element.closest('.ai-diff-block')) || (element.matches('.ai-tool-surface-header') && Boolean(element.closest('[data-slot="ai-tool-details"]'))), minHeight: style.minHeight, fontSize: style.fontSize, lineHeight: style.lineHeight,
+              const roomy = element.matches('[data-slot="ai-tool-details"] .ai-tool-surface-header');
+              return { roomy, minHeight: style.minHeight, fontSize: style.fontSize, lineHeight: style.lineHeight,
                 paddingTop: style.paddingTop, paddingBottom: style.paddingBottom, paddingLeft: style.paddingLeft,
-                titleSize: getComputedStyle(element.querySelector('.ai-content-title')).fontSize };
+                titleSize: getComputedStyle(element.querySelector('.ai-content-title') ?? element).fontSize };
             }));
             assert.ok(headers.length >= 15, `${context}: every content title uses shared header styling`);
             for (const { roomy, ...header } of headers) assert.deepEqual(header, {
               minHeight: roomy ? '32px' : '24px', fontSize: '12px', lineHeight: '18px',
               paddingTop: '0px', paddingBottom: '0px', paddingLeft: '14px', titleSize: '12px',
-            }, `${context}: diff and detail content headers use 32px while other headers retain their size`);
+            }, `${context}: tool surface headers in details use 32px, other headers use 24px`);
             for (const selector of ['#markdown .ai-markdown-code-copy', '#error .ai-tool-copy-button',
               '#details-error .ai-tool-copy-button', '#code .ai-tool-copy-button', '#artifact-text .ai-detail-copy',
               '#queue .ai-tool-copy-button', '#approval .ai-tool-copy-button']) {

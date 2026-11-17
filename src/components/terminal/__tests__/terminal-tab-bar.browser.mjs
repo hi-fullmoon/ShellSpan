@@ -13,6 +13,12 @@ const server = await createServer({
   configFile: false,
   appType: 'custom',
   logLevel: 'error',
+  cacheDir: `${root}artifacts/tests/terminal-tab-bar/vite-cache`,
+  optimizeDeps: {
+    entries: ['src/components/terminal/terminal-tab-bar.tsx', 'src/components/sftp/sftp-tab-bar.tsx',
+      'src/components/terminal/registry/terminal-registry.ts'],
+    include: ['react', 'react-dom/client'],
+  },
   resolve: { alias: { '@': `${root}src` } },
   plugins: [tailwindcss(), {
     name: 'terminal-tab-bar-layout',
@@ -40,7 +46,7 @@ const server = await createServer({
       });
     },
   }],
-  server: { host: '127.0.0.1', port: 0 },
+  server: { host: '127.0.0.1', port: 0, hmr: false, watch: null },
 });
 
 let browser;
