@@ -578,9 +578,8 @@ try {
       });
       assert.equal(geometry.overflow, false, `Lease bar must fit ${locale} at ${width}px`);
       const [status, task, action] = geometry.items;
-      const inset = width < 420 ? 12 : 16;
-      assert.equal(status.left - geometry.left, inset, `Status inset at ${locale} ${width}px`);
-      assert.equal(geometry.right - action.right, inset, `Action inset at ${locale} ${width}px`);
+      assert.equal(status.left - geometry.left, 4, `Status inset at ${locale} ${width}px`);
+      assert.equal(geometry.right - action.right, 4, `Action inset at ${locale} ${width}px`);
       assert.ok(task.left >= status.right && action.left >= task.right, 'Status and actions must not overlap');
       assert.equal(task.height, action.height, 'Actions must have equal heights');
       assert.ok(Math.abs(status.y + status.height / 2 - action.y - action.height / 2) < 1,

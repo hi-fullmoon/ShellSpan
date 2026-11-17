@@ -92,7 +92,7 @@ const AgentTerminalLeaseBar: React.FC<{
       data-terminal-owned={lease.terminalOwned || undefined}
       data-input-blocked={lease.inputBlocked || undefined}
     >
-      <div className="flex min-w-0 items-center gap-2 px-3 py-0.5 @min-[420px]/terminal-lease:px-4">
+      <div className="flex min-w-0 items-center gap-2 px-1 py-0.5">
         <div className="agent-terminal-lease-status flex min-w-0 flex-1 items-center gap-2">
           <TooltipProvider>
             <Tooltip>
