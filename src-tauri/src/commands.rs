@@ -832,6 +832,15 @@ fn create_local_session_blocking(
     #[cfg(not(any(unix, windows)))]
     let native_mode: Option<crate::terminal_command::protocol::InputMode> = None;
     summary.pty_info.input_mode = native_mode;
+    #[cfg(unix)]
+    let local_zle_bootstrap = prepared_native.as_ref().and_then(|native| {
+        let bootstrap = native.zle_bootstrap_lifetime()?;
+        // The verified ZLE Core measures the whole PTY stream. Give the
+        // renderer its width policy before the login files finish; only the
+        // broker can grant native input after the private handshake.
+        summary.pty_info.native_display_binding = Some(native.profile.display_binding());
+        Some(bootstrap)
+    });
     #[cfg(windows)]
     if let Some(native) = prepared_native.as_ref() {
         // Selected local rendering is verified independently of peer readiness.
@@ -1234,6 +1243,8 @@ fn create_local_session_blocking(
             #[cfg(windows)]
             let _native_bootstrap = native_bootstrap;
             let wait_result = child.wait();
+            #[cfg(unix)]
+            drop(local_zle_bootstrap);
             #[cfg(windows)]
             if wait_result.is_ok() {
                 if let Some(bootstrap) = &_native_bootstrap {
@@ -1675,7 +1686,9 @@ fn create_local_session_blocking(
     });
     info!("Created local session session_id={session_id} shell={shell}");
     #[cfg(unix)]
-    if native_mode == Some(crate::terminal_command::protocol::InputMode::NativeInline) {
+    if native_mode == Some(crate::terminal_command::protocol::InputMode::NativeInline)
+        && summary.pty_info.native_display_binding.is_none()
+    {
         if let Some(runtime) = initialization_app.try_state::<crate::agent_runtime::AgentRuntime>()
         {
             summary.pty_info.native_display_binding =

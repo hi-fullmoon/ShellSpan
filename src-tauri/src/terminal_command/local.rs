@@ -1,4 +1,4 @@
-//! Verified local Bash startup and its private, bounded duplex transport.
+//! Verified local Bash/Zsh startup and its private, bounded duplex transport.
 //! Call preparation from a blocking connection worker, never the UI thread.
 use super::bash::bootstrap_source;
 use super::{
@@ -22,7 +22,7 @@ use std::{
 };
 
 pub(crate) struct PreparedNativeBash {
-    root: tempfile::TempDir,
+    root: Arc<tempfile::TempDir>,
     listener: UnixListener,
     bootstrap: PathBuf,
     pub profile: VerifiedNativeProfile,
@@ -85,7 +85,7 @@ impl PreparedNativeBash {
         fs::set_permissions(&bootstrap, fs::Permissions::from_mode(0o600))
             .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
         Ok(Self {
-            root,
+            root: Arc::new(root),
             listener,
             bootstrap,
             profile,
@@ -192,7 +192,7 @@ impl PreparedNativeBash {
         )
         .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
         Ok(Self {
-            root,
+            root: Arc::new(root),
             listener,
             bootstrap,
             profile,
@@ -203,6 +203,10 @@ impl PreparedNativeBash {
     pub(crate) fn shell_override(&self) -> Option<&Path> {
         self.shell_override.as_deref()
     }
+    pub(crate) fn zle_bootstrap_lifetime(&self) -> Option<Arc<tempfile::TempDir>> {
+        self.zle.then(|| Arc::clone(&self.root))
+    }
+
     pub fn configure(&self, command: &mut portable_pty::CommandBuilder) -> Result<(), String> {
         if self.zle {
             let quote = |value: &str| {
@@ -227,7 +231,9 @@ impl PreparedNativeBash {
             // Existing early Core/widgets are preserved: decline native and
             // continue normal profile/rc/login loading instead of returning.
             let original_env=format!("{restore}\n[[ -r ${{ZDOTDIR-$HOME}}/.zshenv ]] && source \"${{ZDOTDIR-$HOME}}/.zshenv\"\n");
-            let initializer=format!("__shellspan_nip_initialize() {{\n precmd_functions=(\"${{(@)precmd_functions:#__shellspan_nip_initialize}}\")\n unfunction __shellspan_nip_initialize\n source {}\n}}\nprecmd_functions=(__shellspan_nip_initialize \"${{precmd_functions[@]}}\")\n",quote(self.bootstrap.to_str().ok_or("TERMINAL_NATIVE_PATH_INVALID")?)?);
+            let socket = self.root.path().join("control");
+            let socket = quote(socket.to_str().ok_or("TERMINAL_NATIVE_PATH_INVALID")?)?;
+            let initializer=format!("__shellspan_nip_initialize() {{\n precmd_functions=(\"${{(@)precmd_functions:#__shellspan_nip_initialize}}\")\n unfunction __shellspan_nip_initialize\n if [[ -S {socket} ]]; then\n  builtin source {}\n fi\n}}\nprecmd_functions=(__shellspan_nip_initialize \"${{precmd_functions[@]}}\")\n",quote(self.bootstrap.to_str().ok_or("TERMINAL_NATIVE_PATH_INVALID")?)?);
             let wrapper=format!("{original_env}if {core_loader}; then\n{initializer}else\n builtin printf '%s\\n' TERMINAL_NATIVE_SCOPED_CORE_CONFLICT >&2\nfi\n");
             fs::write(self.root.path().join(".zshenv"), wrapper)
                 .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
@@ -262,11 +268,16 @@ impl PreparedNativeBash {
         ))]
         let trace_control_id = probe.connection.control_id.clone();
         let thread = thread::spawn(move || {
-            let _root = self.root;
+            let root = self.root;
             let result = (|| -> Result<(), String> {
-                let deadline = Instant::now() + Duration::from_secs(5);
+                // ZLE connects at the first prompt, after the user's login
+                // files have run. Its deadline is independent of opening the PTY.
+                let deadline = Instant::now() + Duration::from_secs(if self.zle { 30 } else { 5 });
                 let mut stream = loop {
-                    if done.load(Ordering::Acquire) || Instant::now() >= deadline {
+                    if done.load(Ordering::Acquire) {
+                        return Ok(());
+                    }
+                    if Instant::now() >= deadline {
                         return Err("TERMINAL_NATIVE_CONNECT_TIMEOUT".into());
                     }
                     match self.listener.accept() {
@@ -439,6 +450,12 @@ impl PreparedNativeBash {
                 }
                 Ok(())
             })();
+            if self.zle {
+                // The shell still owns the startup files. Unpublish just the
+                // socket so a late first prompt can skip native setup quietly.
+                drop(self.listener);
+                let _ = fs::remove_file(root.path().join("control"));
+            }
             #[cfg(all(
                 feature = "native-input-acceptance",
                 debug_assertions,

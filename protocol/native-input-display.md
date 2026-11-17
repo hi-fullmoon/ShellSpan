@@ -28,7 +28,7 @@ Windows 私有 PSReadLine `2.4.5-shellspan6` 保留空输入缩放修复，并�
 
 P3 受控验证可在后端已校验的 ZLE Core/profile 对应 `nativeDisplayBinding` 中附加只读
 `unicodeVersion: "11"`。该字段来自本地资源的实际 Core 校验，不接受 peer 自报、OSC、前端
-ready 或版本字符串作为证明。快照与本地 Session 启动等待必须使用同一 binding 生成函数。
+ready 或版本字符串作为证明。Broker 快照与本地 Session 创建响应使用同一 binding 生成函数。
 registry 仅据该元数据按需注册官方 provider，注册不改变普通默认；显示模块仅在完整 owned
 enter 时保存原 provider 并启用选择，exit、有序关闭及销毁时恢复。重复 enter 不覆盖原值，
 期间显式发生的外部 provider 切换予以保留。未选该配置时不访问或改变 provider。
@@ -52,7 +52,11 @@ registry 先提交实际渲染尺寸，再发送既有 ready 通知。后端同�
 创建响应中的 binding 来自本地已校验的加载器和已创建的 ConPTY，是显示配置，
 不表示 peer/编辑器就绪；Windows 不再在创建响应中等待挂起 Shell 的协商。
 实际私有 capabilities、peer 摘要、promptReady 及输入准入仍独立核验，尚未协商时不能提交 Agent 输入。
-Unix/SSH 启动保持既有行为，ready 通知也不是输入证明或执行回执。
+
+已校验的 macOS 本地 Zsh 在创建响应中提供显示 binding，供前端在接收 PTY 输出前应用宽度规则。
+控制通道独立等待首个提示符，最多等待 30 秒建立连接，以便用户的登录脚本正常加载。Broker
+仍在真实协商后才报告原生能力。启动文件保留至 Zsh 退出；控制通道关闭后，迟到的首个提示符跳过
+原生初始化并保留普通终端能力。
 
 同一后端验证的binding还可声明 `ownedReflowCursorLine: false`：该编辑器自行处理SIGWINCH
 与原生重画，owned enter也保持公开reflow选项为false。字段缺省仍为true，保持既有Bash

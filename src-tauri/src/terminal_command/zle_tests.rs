@@ -1239,7 +1239,8 @@ fn native_zle_actual_broker_display_binding() {
          alias p3_alias_completion='print -r -- P3_ALIAS_EXPANDED'\n\
          p3_completion_snapshot() { builtin print -rn -- \"$BUFFER\" > $HOME/completion-buffer; }\n\
          zle -N p3_completion_snapshot\n\
-         bindkey '^Xg' p3_completion_snapshot\n",
+         bindkey '^Xg' p3_completion_snapshot\n\
+         /bin/sleep 6\n",
     )
     .unwrap();
     let resources = super::editors::validation_resource_root()
@@ -1252,6 +1253,7 @@ fn native_zle_actual_broker_display_binding() {
     )
     .unwrap();
     let prepared = PreparedNativeBash::prepare(shell, &resources).unwrap();
+    let initial_binding = prepared.profile.display_binding();
     let broker =
         TerminalSessionBroker::phase3_with_journal_for_test(65536, &evidence.join("journal"));
     let transport = "p3-real-display-binding";
@@ -1285,6 +1287,7 @@ fn native_zle_actual_broker_display_binding() {
         .unwrap();
     let mut command = CommandBuilder::new(prepared.shell_override().expect("expected private Zsh"));
     command.env("HOME", &home);
+    command.env("ZDOTDIR", &home);
     command.env("LC_ALL", "en_US.UTF-8");
     command.env("TERM", "xterm-256color");
     command.cwd(&home);
@@ -1353,6 +1356,7 @@ fn native_zle_actual_broker_display_binding() {
             .wait_native_initialization(transport, Duration::from_secs(1))
             .unwrap()
             .unwrap();
+        assert_eq!(binding, initial_binding);
         let snapshot = broker.snapshot(Some(transport)).unwrap().session.unwrap();
         assert_eq!(snapshot.native_display_binding, Some(binding.clone()));
         writer.write_all(b"p3_alias_completion\x18a\x18g").unwrap();
@@ -1443,6 +1447,106 @@ fn native_zle_actual_broker_display_binding() {
     if let Err(error) = outcome {
         std::panic::resume_unwind(error);
     }
+}
+
+#[test]
+#[ignore = "requires production macOS Zsh resources and the full startup deadline"]
+fn native_zle_timeout_during_startup_keeps_ordinary_terminal() {
+    use crate::terminal_broker::{TerminalGeometry, TerminalSessionBroker, TerminalTransportKind};
+
+    require_macos_arm64();
+    let home = tempfile::tempdir().unwrap();
+    let resources = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../.artifacts/tests/native-input-p2/resources/native-input");
+    fs::write(
+        home.path().join(".zshrc"),
+        "IFS= read -r startup_release\nPROMPT='FALLBACK> '\n",
+    )
+    .unwrap();
+    let prepared =
+        PreparedNativeBash::prepare(std::path::Path::new("/bin/zsh"), &resources).unwrap();
+    let bootstrap = prepared.zle_bootstrap_lifetime().unwrap();
+    let bootstrap_path = bootstrap.path().to_owned();
+    let broker =
+        TerminalSessionBroker::phase3_with_journal_for_test(65536, &home.path().join("journal"));
+    let transport = "zle-timeout-during-startup";
+    broker
+        .attach_transport_with_mode(
+            transport,
+            None,
+            TerminalTransportKind::LocalPty,
+            TerminalGeometry::new(80, 24),
+            nip::InputMode::NativeInline,
+        )
+        .unwrap()
+        .unwrap();
+    let probe = broker
+        .register_native_channel(transport, prepared.profile.clone())
+        .unwrap();
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .unwrap();
+    let mut command = CommandBuilder::new(prepared.shell_override().unwrap());
+    command.env("HOME", home.path());
+    command.env("ZDOTDIR", home.path());
+    command.env("LC_ALL", "en_US.UTF-8");
+    command.env("TERM", "xterm-256color");
+    command.cwd(home.path());
+    prepared.configure(&mut command).unwrap();
+    let mut child = pair.slave.spawn_command(command).unwrap();
+    drop(pair.slave);
+    let mut reader = pair.master.try_clone_reader().unwrap();
+    let mut writer = pair.master.take_writer().unwrap();
+    let read_output = thread::spawn(move || {
+        let mut raw = Vec::new();
+        let _ = reader.read_to_end(&mut raw);
+        String::from_utf8_lossy(&raw).into_owned()
+    });
+    // The shell cannot reach its first prompt until the PTY input releases .zshrc.
+    let (closed, closure) = mpsc::channel();
+    let control = prepared.start(
+        probe,
+        |_| Err("unexpected native message".into()),
+        move || {
+            let _ = closed.send(());
+        },
+    );
+    let timed_out = closure.recv_timeout(Duration::from_secs(35)).is_ok();
+    drop(control);
+    let files_retained = bootstrap_path.join("native-init").is_file();
+    let socket_removed = !bootstrap_path.join("control").exists();
+    writer
+        .write_all(b"continue\r(( ! ${+builtins[ss_nip]} )) && print -r -- ORDINARY_TERMINAL_''READY\rexit\r")
+        .unwrap();
+    writer.flush().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break Some(status);
+        }
+        if Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            break None;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    let output = read_output.join().unwrap();
+    drop(bootstrap);
+    assert!(timed_out, "The control worker did not enforce its deadline");
+    assert!(status.is_some_and(|status| status.success()), "{output}");
+    assert!(files_retained && socket_removed);
+    assert!(!bootstrap_path.exists());
+    assert!(
+        output.lines().any(|line| line == "ORDINARY_TERMINAL_READY"),
+        "{output}"
+    );
+    assert!(!output.contains("no such file or directory"), "{output}");
 }
 
 #[test]

@@ -31,6 +31,7 @@ import { useToast } from '@/hooks/useToast';
 import type { AiInboxItem } from '@/lib/ai/session-adapter';
 import { decodeDocumentMessage, documentMessageSummary, encodeDocumentMessage } from '@/lib/ai/document-message';
 import { DOCUMENT_LIMITS, documentErrorKey } from '@/lib/ai/document-import';
+import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
 import { AiQueueNotice } from './ai-queue-notice';
 import type { AiQueueMutationState } from './use-ai-session-controller';
@@ -180,7 +181,8 @@ export function AiQueueDock({
       {items.length > 0 && <section
       data-slot="ai-queue-dock"
       aria-label={t('ai.workspace.queue.title')}
-      className="ai-queue-dock relative w-full min-w-0 shrink-0 overflow-hidden box-border pb-0.5"
+      className={cn('ai-queue-dock relative w-full min-w-0 shrink-0 overflow-hidden box-border',
+        items.length === 1 ? 'py-px' : 'pb-0.5')}
     >
       {items.length > 1 && (
         <Button

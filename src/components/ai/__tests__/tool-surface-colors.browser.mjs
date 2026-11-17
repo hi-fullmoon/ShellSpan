@@ -55,17 +55,22 @@ try {
     await import('/src/components/ai/styles/styles.css');
     const { AiToolRow, AiToolExpandedContent } = await import('/src/components/ai/workspace/ai-tool-presentation.tsx');
     const { projectAgentChatNodes } = await import('/src/lib/ai/conversation-projection.ts');
+    const { default: terminalCapture } = await import('/src/tests/fixtures/terminal-unknown-execution.json');
     const { initI18n } = await import('/src/locales/index.ts');
     await initI18n('zh-CN');
     const shared = { kind: 'tool', nativeName: null, state: 'succeeded', error: null, target: null };
     const failure = projectAgentChatNodes(capture.slice(0, 2))
       .flatMap(node => node.kind === 'turnProcess' ? node.children : []).find(node => node.kind === 'tool');
     if (!failure) throw new Error('Recorded tool failure is missing');
+    const running = projectAgentChatNodes(terminalCapture.slice(0, -1))
+      .flatMap(node => node.kind === 'turnProcess' ? node.children : []).find(node => node.kind === 'tool');
+    if (running?.state !== 'running' || running.output !== null) throw new Error('Recorded running command is missing');
     createRoot(document.getElementById('root')).render(React.createElement(React.Fragment, null,
       React.createElement(AiToolRow, { onInspect: () => {}, node: { ...shared, name: 'exec_command', input: { command: commandText, cwd: '~' }, output: commandOutput } }),
       React.createElement(AiToolRow, { onInspect: () => {}, node: { ...shared, name: 'read_file', input: { path }, output: fileOutput } }),
       React.createElement(AiToolRow, { onInspect: () => {}, node: failure }),
       React.createElement(AiToolExpandedContent, { node: { ...shared, name: 'git', input: { command: commandText }, output: commandOutput } }),
+      React.createElement(AiToolRow, { onInspect: () => {}, node: running }),
     ));
   }, { path, commandText, commandOutput, fileOutput, capture });
   await page.locator('.ai-tool-row').first().click();
@@ -253,6 +258,16 @@ try {
       }
       await page.screenshot({ path: join(screenshots, `${theme}-${width}.png`) });
     }
+  }
+  const runningRow = page.locator('[data-tool-state="running"][data-tool-variant="terminal"]');
+  await runningRow.locator('.ai-tool-row').press('Enter');
+  for (const width of [380, 720]) {
+    await page.setViewportSize({ width, height: 720 });
+    const shell = runningRow.locator('.ai-terminal-block');
+    assert.ok(await shell.locator('.ai-terminal-command').isVisible(), `${width}: running command must be visible`);
+    assert.equal(await runningRow.getByText('查看详情', { exact: true }).count(), 0, `${width}: running command must not show a details action`);
+    assert.equal((await shell.locator('..').boundingBox()).height, (await shell.boundingBox()).height + 8,
+      `${width}: the running command should only retain the card's vertical margins`);
   }
   console.log(`Tool surface colors and hover geometry passed in light/dark themes at 380px, 529px and 720px. Screenshots: ${screenshots}`);
 } finally {

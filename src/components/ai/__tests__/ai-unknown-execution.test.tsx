@@ -16,6 +16,30 @@ import capture from '@/tests/fixtures/terminal-unknown-execution.json';
 afterEach(cleanup);
 
 it.each([
+  ['zh-CN', '查看详情', '复制命令'], ['en-US', 'View details', 'Copy command'],
+] as const)('shows the command inline without a details action before its result in %s', async (locale, detailsLabel, copyLabel) => {
+  useAppStore.setState({ locale });
+  await initI18n(locale);
+  const events = capture as readonly AgentSessionEvent[];
+  const user = userEvent.setup();
+  for (const [eventCount, state] of [[1, 'preparing'], [3, 'running']] as const) {
+    const tool = projectAgentChatNodes(events.slice(0, eventCount))
+      .flatMap(node => node.kind === 'turnProcess' ? node.children : [])
+      .find((node): node is AiConversationNodeOf<'tool'> => node.kind === 'tool');
+    expect(tool?.state).toBe(state);
+    expect(tool?.output).toBeNull();
+    const { container, unmount } = render(<AiToolRow node={tool!} onInspect={() => undefined} />);
+    const row = screen.getByRole('button');
+    row.focus();
+    await user.keyboard('{Enter}');
+    expect(container.querySelector('.ai-terminal-command')).toBeVisible();
+    expect(screen.getByRole('button', { name: copyLabel })).toBeVisible();
+    expect(screen.queryByText(detailsLabel)).not.toBeInTheDocument();
+    unmount();
+  }
+});
+
+it.each([
   ['zh-CN', '执行结果未知'], ['en-US', 'Execution outcome unknown'],
 ] as const)('labels the recorded unknown outcome inline without a confirmation form in %s', async (locale, label) => {
   useAppStore.setState({ locale });

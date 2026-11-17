@@ -641,7 +641,7 @@ describe('AiConversationNodeList', () => {
     expect(diff.querySelector('.ai-diff-content')).toHaveClass('max-h-65');
   });
 
-  it('covers running, completed, and failed tool rows, inline expansion, details, and fallback', async () => {
+  it('expands running commands inline and renders completed and failed tool rows', async () => {
     const user = userEvent.setup();
     const openTool = vi.fn();
     const running = toolNode();
@@ -687,9 +687,8 @@ describe('AiConversationNodeList', () => {
     );
     expect(getComputedStyle(toolPanel!).transitionProperty).toBe('height, opacity');
     expect(getComputedStyle(toolPanel!).overflow).toBe('hidden');
-    const inspect = within(runningSeat).getByRole('button', { name: 'Open details for terminal.exec' });
-    await user.click(inspect);
-    expect(openTool).toHaveBeenCalledWith(running);
+    expect(within(runningSeat).getByRole('button', { name: 'Show full command' })).toHaveTextContent('printf ready');
+    expect(within(runningSeat).queryByRole('button', { name: 'Open details for terminal.exec' })).not.toBeInTheDocument();
 
     await user.click(within(failedSeat).getByRole('button', { name: 'Tool call: Call failed; expand for details' }));
     expect(failedSeat.querySelector('[data-ai-tool-view="generic"]')).toHaveTextContent('Provider rejected the call');

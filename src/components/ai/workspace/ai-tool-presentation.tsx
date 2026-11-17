@@ -932,9 +932,10 @@ export function AiToolRow({
   const uncertaintyOnly = node.state === 'uncertain' && typeof node.output === 'string'
     && node.output.trim() === node.error?.trim();
   const hasOutput = node.output !== null && (node.output !== '' || variant === 'terminal');
+  const hasPendingCommand = variant === 'terminal' && (node.state === 'preparing' || node.state === 'running');
   const hasSuccessPreview = node.state === 'succeeded' && (node.name === 'trash_file' || Boolean(model?.hunks.length));
-  const hasInlineResult = node.state !== 'approval' && !failureOnly(node) && !uncertaintyOnly
-    && (hasOutput || hasSuccessPreview);
+  const hasInlinePreview = node.state !== 'approval' && !failureOnly(node) && !uncertaintyOnly
+    && (hasPendingCommand || hasOutput || hasSuccessPreview);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div
@@ -983,7 +984,7 @@ export function AiToolRow({
         <CollapsibleContent>
           <div className="ai-tool-body flex min-w-0 max-w-full flex-col">
             <AiToolExpandedContent node={node} compact diffModel={model ?? undefined} />
-            {onInspect && !hasInlineResult && (
+            {onInspect && !hasInlinePreview && (
               <Tooltip>
                 <TooltipTrigger
                   render={(
