@@ -174,6 +174,29 @@ function MarkdownCodeBlock({
   const language = languageFromNode(children);
   const [copied, setCopied] = useState(false);
   const resetTimerRef = useRef<number | null>(null);
+  const viewportRef = useRef<HTMLPreElement>(null);
+  const fadeRef = useRef<HTMLDivElement>(null);
+
+  const updateFade = useCallback(() => {
+    const viewport = viewportRef.current;
+    const fade = fadeRef.current;
+    if (!viewport || !fade) return;
+    fade.hidden = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 1;
+    if (!fade.hidden) {
+      // Keep the overlay inside the native scrollbars.
+      fade.style.right = `${viewport.offsetWidth - viewport.clientWidth}px`;
+      fade.style.bottom = `${viewport.offsetHeight - viewport.clientHeight}px`;
+    }
+  }, []);
+
+  useLayoutEffect(updateFade, [code, updateFade]);
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const observer = new ResizeObserver(updateFade);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [updateFade]);
 
   useEffect(() => () => {
     if (resetTimerRef.current !== null) window.clearTimeout(resetTimerRef.current);
@@ -200,13 +223,14 @@ function MarkdownCodeBlock({
             size="icon-xs"
             className="ai-markdown-code-copy ai-content-copy absolute top-1 right-3.5 z-10"
             aria-label={copied ? copiedLabel : copyLabel}
-            title={copied ? copiedLabel : copyLabel}
+            title={copied ? undefined : copyLabel}
             onClick={copy}
           >
             {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
           </Button>
         )}
-        <pre tabIndex={0} className={cn(AI_CONTENT_CODE_CLASS, 'ai-code-block-pre max-h-65 overflow-auto overscroll-x-contain whitespace-pre')}>{children}</pre>
+        <pre ref={viewportRef} tabIndex={0} onScroll={updateFade} className={cn(AI_CONTENT_CODE_CLASS, 'ai-code-block-pre max-h-65 overflow-auto overscroll-x-contain whitespace-pre')}>{children}</pre>
+        <div ref={fadeRef} aria-hidden="true" hidden className="ai-markdown-code-fade pointer-events-none absolute left-0 h-8" />
       </div>
     </div>
   );

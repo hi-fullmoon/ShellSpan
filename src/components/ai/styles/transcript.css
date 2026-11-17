@@ -305,7 +305,6 @@
 
 .ai-code-block-language {
   color: var(--ai-text-secondary);
-  font-family: var(--ai-font-family-code);
 }
 
 .ai-code-block-copy {
@@ -320,16 +319,19 @@
   font: var(--ai-font-markdown-code-block);
 }
 
-.ai-markdown-code-toolbar {
-  color: var(--ai-text-muted);
-  font: 12px/18px var(--ai-font-family-code);
-}
-
 .ai-markdown-code-block .ai-code-block-pre {
   background: transparent;
   overflow-wrap: normal;
   word-break: normal;
   tab-size: 2;
+}
+
+:is(.ai-markdown-code-block, .ai-tool-code-block) .ai-code-block-pre {
+  color: var(--ai-text-secondary);
+}
+
+.ai-markdown-code-fade {
+  background: linear-gradient(to bottom, transparent, var(--ai-code-block));
 }
 
 .ai-markdown-table-scroll table {

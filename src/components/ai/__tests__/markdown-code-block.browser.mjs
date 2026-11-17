@@ -7,9 +7,11 @@ import { chromium, webkit } from 'playwright';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const source = (await readFile(new URL('../../../../AGENTS.md', import.meta.url), 'utf8')).trimEnd();
+const shortSource = (await readFile(new URL('../../../vite-env.d.ts', import.meta.url), 'utf8')).trimEnd();
 const server = await createServer({
   root, configFile: false, appType: 'custom', logLevel: 'error',
   resolve: { alias: { '@': `${root}src` } },
+  optimizeDeps: { entries: ['src/components/ai/assistant-message-content.tsx'], include: ['react', 'react-dom/client'] },
   plugins: [tailwindcss(), {
     name: 'markdown-code-browser-test',
     resolveId(id) { if (id === '/code-runtime.js') return id; },
@@ -40,7 +42,7 @@ try {
         for (const theme of ['light', 'dark']) {
           const page = await browser.newPage({ viewport: { width, height: 640 } });
           await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/`);
-          await page.evaluate(async ({ source, theme }) => {
+          await page.evaluate(async ({ source, shortSource, theme }) => {
             await import('/src/styles/base.css');
             await import('/src/components/ai/styles/styles.css');
             document.documentElement.dataset.theme = theme;
@@ -50,11 +52,16 @@ try {
                 key: String(showCodeBlockActions), copyLabel: '复制', copiedLabel: '已复制', showCodeBlockActions,
                 children: '### AGENTS.md\n\n~~~\n' + source + '\n~~~\n\n~~~markdown\n' + source + '\n~~~',
               })),
+              React.createElement(MarkdownContent, {
+                copiedLabel: '已复制', copyLabel: '复制', showCodeBlockActions: true,
+                children: '~~~typescript\n' + shortSource + '\n~~~',
+              }),
             ));
-          }, { source, theme });
+          }, { source, shortSource, theme });
           await page.locator('.ai-markdown-code-block').first().waitFor();
           const blocks = page.locator('.ai-markdown-code-block');
-          assert.equal(await blocks.count(), 4);
+          assert.equal(await blocks.count(), 5);
+          assert.equal(await blocks.last().locator('.ai-markdown-code-fade').isVisible(), false);
           assert.equal(await blocks.nth(2).locator('.ai-markdown-code-toolbar').count(), 0);
           assert.equal(await blocks.nth(3).locator('.ai-code-block-language').innerText(), 'markdown');
           const toolbarHeights = [];
@@ -121,9 +128,20 @@ try {
             const button = block.locator('button');
             await block.scrollIntoViewIfNeeded();
             const before = await button.boundingBox();
+            const fade = block.locator('.ai-markdown-code-fade');
+            await fade.waitFor({ state: 'visible' });
+            assert.ok(await fade.evaluate(element => {
+              const pre = element.previousElementSibling;
+              const rect = pre.getBoundingClientRect();
+              const fadeRect = element.getBoundingClientRect();
+              return Math.abs(fadeRect.bottom - rect.top - pre.clientHeight) < 1
+                && Math.abs(fadeRect.right - rect.left - pre.clientWidth) < 1;
+            }), 'Fade must not cover the native scrollbars');
             await block.locator('pre').evaluate(element => element.scrollTo({ top: element.scrollHeight, left: element.scrollWidth, behavior: 'instant' }));
+            await fade.waitFor({ state: 'hidden' });
             assert.deepEqual(await button.boundingBox(), before, 'Scrolling content must not move its copy action');
             await block.locator('pre').evaluate(element => element.scrollTo({ top: 0, left: 0, behavior: 'instant' }));
+            await fade.waitFor({ state: 'visible' });
           }
           if (width < 1000) assert.ok(metrics.scrollWidth > metrics.clientWidth);
           const pre = blocks.first().locator('pre');
@@ -141,6 +159,7 @@ try {
             assert.equal(await blocks.first().locator('button').evaluate(element => getComputedStyle(element).opacity), '1');
             await page.getByRole('button', { name: '复制', exact: true }).first().click();
             await page.getByRole('button', { name: '已复制', exact: true }).waitFor();
+            assert.equal(await blocks.first().locator('button').getAttribute('title'), null);
             assert.equal(await page.evaluate(() => navigator.clipboard.readText()), source);
           }
           if (engine === chromium && width === 560) {

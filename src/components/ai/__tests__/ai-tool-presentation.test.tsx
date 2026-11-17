@@ -123,13 +123,32 @@ describe('AI tool presentation', () => {
       rerender(<AiToolRow node={tool} onInspect={(inspected) => opened.push(inspected)} />);
       await user.click(screen.getByRole('button'));
       if (entry.name === 'run_terminal_command') expect(container.querySelector('.ai-terminal-command-row')).toHaveTextContent(`node ${codePath}`);
-      else if (entry.name === 'run_code') expect(container.querySelector('.ai-code-content pre')?.textContent).toBe(code);
+      else if (entry.name === 'run_code') {
+        expect(container.querySelector('.ai-code-content pre')?.textContent).toBe(code);
+        expect(container.querySelector('.ai-code-footer')).toHaveTextContent(locale === 'zh-CN' ? /^成功$/u : /^Succeeded$/u);
+      }
       else if (entry.name === 'trash_file') expect(container.querySelector('.ai-io-input')).toBeInTheDocument();
       else expect(container.querySelector('.ai-tool-surface-header')).toBeInTheDocument();
       expect(container.querySelector(entry.selector), entry.name).toBeVisible();
       expect(screen.queryByText(locale === 'zh-CN' ? '查看详情' : 'View details'), entry.name).not.toBeInTheDocument();
       unmount();
     }
+  });
+
+  it('shows the exit code when code execution fails after producing output', () => {
+    const code = 'throw new Error(process.version)';
+    const execution = spawnSync(process.execPath, ['--eval', code], { encoding: 'utf8' });
+    expect(execution.status).toBe(1);
+    const { container } = render(<AiToolExpandedContent node={{
+      ...node,
+      name: 'run_code',
+      input: { language: 'javascript', code },
+      output: { stderr: execution.stderr, exitCode: execution.status },
+      state: 'failed',
+    }} />);
+    expect(container.querySelector('.ai-code-output pre')?.textContent).toBe(execution.stderr);
+    expect(container.querySelector('.ai-code-footer')).toHaveTextContent(/^Exit 1$/u);
+    expect(container.querySelector('.ai-code-footer svg')).not.toBeInTheDocument();
   });
 
   it.each(['run_terminal_command', 'run_code', 'read_file', 'search_text', 'web_fetch', 'trash_file'])('keeps %s input separate while running and after failure', name => {

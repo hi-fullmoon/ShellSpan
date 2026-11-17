@@ -230,7 +230,7 @@ describe('AssistantMessageContent', () => {
     expect(writeText).toHaveBeenCalledWith('df -h');
     const copiedButton = await screen.findByRole('button', { name: 'common.copied' });
     expect(copiedButton.textContent).toBe('');
-    expect(copiedButton).toHaveAttribute('title', 'common.copied');
+    expect(copiedButton).not.toHaveAttribute('title');
   });
 
   it('renders fenced code blocks without actions when disabled', () => {

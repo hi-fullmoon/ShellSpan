@@ -6,21 +6,23 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from 'playwright';
 import { createServer } from 'vite';
+import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const screenshots = join(tmpdir(), 'shellspan-tool-copy-alignment');
 await mkdir(screenshots, { recursive: true });
 const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8' });
-const codePath = 'scripts/check-ai-panel-styles.mjs';
 const toolPath = 'src/components/ai/workspace/ai-tool-presentation.tsx';
 const workingPatch = git(['diff', '--', toolPath]);
 const revision = git(['log', '-1', '--format=%H', '--', toolPath]).trim();
+const styleFiles = git(['ls-files', 'src/components/ai/styles']).trimEnd().split('\n');
+const longCode = `const styleFiles = ${JSON.stringify(styleFiles, null, 2)};\nprocess.stdout.write(styleFiles.join('\\n') + '\\n');\n`;
 const data = {
   short: { command: 'git rev-parse --short HEAD', output: git(['rev-parse', '--short', 'HEAD']), path: 'src/vite-env.d.ts' },
   long: { command: 'git log --oneline -100', output: git(['log', '--oneline', '-100']), path: 'package.json' },
-  code: await readFile(join(root, codePath), 'utf8'),
-  codeOutput: execFileSync(process.execPath, [codePath], { cwd: root, encoding: 'utf8' }),
+  code: longCode,
+  codeOutput: execFileSync(process.execPath, ['--eval', longCode], { cwd: root, encoding: 'utf8' }),
   shortCode: 'process.version',
   shortCodeOutput: execFileSync(process.execPath, ['--print', 'process.version'], { encoding: 'utf8' }),
   patch: workingPatch || git(['show', '--format=', revision, '--', toolPath]),
@@ -33,10 +35,10 @@ assert.ok(data.patch.length > 0, 'Alignment coverage requires a real tool-presen
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
   cacheDir: join(screenshots, 'vite-cache'),
-  resolve: { alias: { '@': `${root}src` } }, esbuild: { jsx: 'automatic' },
-  optimizeDeps: { include: ['react', 'react-dom/client'] },
+  resolve: { alias: { '@': `${root}src` } },
+  optimizeDeps: { entries: ['src/components/ai/workspace/ai-tool-presentation.tsx', 'src/lib/ai/conversation-projection.ts'], include: ['react', 'react-dom/client'] },
   server: { host: '127.0.0.1', port: 0, watch: null, hmr: false },
-  plugins: [tailwindcss(), {
+  plugins: [react(), tailwindcss(), {
     name: 'tool-copy-alignment',
     configureServer(vite) {
       vite.middlewares.use((request, response, next) => {
@@ -155,6 +157,41 @@ try {
                 [code.locator(':scope > .ai-tool-surface-header'), -1], [code.locator('.ai-code-block-pre'), 0],
                 [code.locator('.ai-io-section .ai-tool-surface-header'), -1], [code.locator('.ai-io-text'), 1],
               ]) await assertRegionCopy(code, region, index);
+              const codeInput = code.locator('.ai-code-content [data-slot="scroll-area-viewport"]');
+              const codeOutput = code.locator('.ai-code-output [data-slot="scroll-area-viewport"]');
+              const footer = code.locator('.ai-code-footer');
+              assert.equal(await footer.textContent(), locale === 'zh-CN' ? '成功' : 'Succeeded', context);
+              const inputBox = await codeInput.boundingBox();
+              const outputSection = await code.locator('.ai-io-section').boundingBox();
+              const outputBox = await codeOutput.boundingBox();
+              const footerBox = await footer.boundingBox();
+              const statusBox = await footer.locator('span').boundingBox();
+              const cardBox = await code.boundingBox();
+              assert.ok(outputSection.y - inputBox.y - inputBox.height >= 8, `${context}: source and result should have a gap`);
+              assert.ok(footerBox.y >= outputBox.y + outputBox.height, `${context}: execution status should follow the result`);
+              assert.ok(cardBox.x + cardBox.width - statusBox.x - statusBox.width <= 16, `${context}: status should align right`);
+              for (const viewport of [codeInput, codeOutput]) {
+                assert.equal(await viewport.locator('pre').evaluate(element => getComputedStyle(element).whiteSpace), 'pre-wrap', context);
+                const fadeMask = () => viewport.evaluate(element => getComputedStyle(element).maskImage);
+                if (scenario === 'long') {
+                  const moreBelow = viewport.and(page.locator('[data-overflow-y-end]'));
+                  await moreBelow.waitFor();
+                  assert.notEqual(await fadeMask(), 'none', context);
+                  await viewport.evaluate(element => element.scrollTo({ top: element.scrollHeight, behavior: 'instant' }));
+                  await moreBelow.waitFor({ state: 'detached' });
+                  assert.equal(await fadeMask(), 'none', context);
+                  await viewport.evaluate(element => element.scrollTo({ top: 0, behavior: 'instant' }));
+                } else assert.equal(await fadeMask(), 'none', `${context}: short content should stay clear`);
+              }
+              if (engine === chromium && width === 380) {
+                const expected = scenario === 'long' ? [data.code, data.codeOutput] : [data.shortCode, data.shortCodeOutput];
+                for (const [index, text] of expected.entries()) {
+                  const copy = code.locator('.ai-tool-copy-button').nth(index);
+                  await copy.press('Enter');
+                  await page.waitForFunction(expected => navigator.clipboard.readText().then(value => value === expected), text);
+                  await copy.blur();
+                }
+              }
               for (const card of await page.locator('[data-ai-tool-view="generic"]').all()) {
                 const sections = card.locator('.ai-io-section');
                 for (let index = 0; index < await sections.count(); index++) {
@@ -190,7 +227,7 @@ try {
               }
               assert.ok(await page.locator('.ai-tool-scroll-area').evaluateAll(elements => elements.every(element => element.getBoundingClientRect().height <= 260)), `${context}: content height must remain capped`);
               if (locale === 'zh-CN' && scenario === 'long') {
-                for (const type of ['terminal', 'generic']) {
+                for (const type of ['terminal', 'code', 'generic']) {
                   const card = page.locator(`[data-ai-tool-view="${type}"]`).first();
                   await card.locator(type === 'terminal' ? '.ai-terminal-header' : '.ai-tool-surface-header').first().hover();
                   await card.screenshot({ path: join(screenshots, `${engine.name()}-${theme}-${width}-${type}.png`) });
