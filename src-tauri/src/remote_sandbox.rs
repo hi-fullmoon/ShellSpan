@@ -121,6 +121,9 @@ impl Binding {
         {
             return Err("SANDBOX_POLICY_CHANGED: request fresh authorization".into());
         }
+        if live.policy.is_some() {
+            db.require_agent_sandbox_enabled()?;
+        }
         Ok(())
     }
 
@@ -195,6 +198,7 @@ pub(crate) fn binding_for_target(
 }
 
 pub(crate) fn guard_tool(
+    db: &Database,
     binding: Option<&Binding>,
     name: &str,
     args: &Value,
@@ -202,6 +206,7 @@ pub(crate) fn guard_tool(
     let Some(policy) = binding.and_then(|b| b.state.policy.as_ref()) else {
         return Ok(());
     };
+    db.require_agent_sandbox_enabled()?;
     match name {
         "run_terminal_command" | "exec_command" if args["background"] != true => Ok(()),
         "read_file" | "list_directory" | "search_text" => Ok(()),

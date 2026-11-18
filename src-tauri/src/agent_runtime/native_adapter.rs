@@ -261,6 +261,7 @@ impl NativeToolRuntime for NativeToolAdapter {
             crate::remote_sandbox::binding_for_target(&owner_target, database, known_hosts_path)?
         };
         crate::remote_sandbox::guard_tool(
+            database,
             sandbox.as_ref(),
             &request.model_call.name,
             &request.model_call.arguments,

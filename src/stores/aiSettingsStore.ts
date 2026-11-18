@@ -21,6 +21,7 @@ import type { AgentPermissionMode } from '@/types/agent-approval';
 import type { AgentExecutionSurface } from '@/types/agent-session';
 
 const logger = createLogger('aiSettingsStore');
+const AGENT_SANDBOX_ENABLED_KEY = 'ai.agentSandboxEnabled';
 
 export interface AiProviderPresetDefinition {
   preset: AiProviderPreset;
@@ -119,6 +120,8 @@ interface AiPreferences {
 
 interface AiSettingsState extends AiPreferences {
   initialized: boolean;
+  agentSandboxEnabled: boolean;
+  agentSandboxSaving: boolean;
   persistenceStatus: 'idle' | 'pending' | 'saving' | 'saved' | 'error';
   hydrateFromDb: () => Promise<void>;
   addProvider: (
@@ -131,6 +134,7 @@ interface AiSettingsState extends AiPreferences {
   setContextLines: (lines: number) => void;
   setAgentPermissionMode: (mode: AgentPermissionMode) => void;
   setAgentExecutionSurface: (surface: AgentExecutionSurface) => void;
+  setAgentSandboxEnabled: (enabled: boolean) => Promise<void>;
   getProviderConfig: (id?: string) => AiProviderConfig;
 }
 
@@ -252,6 +256,8 @@ export const useAiSettingsStore = create<AiSettingsState>()(
   subscribeWithSelector((set, get) => ({
     ...defaults,
     initialized: false,
+    agentSandboxEnabled: false,
+    agentSandboxSaving: false,
     persistenceStatus: 'idle',
     hydrateFromDb: async () => {
       try {
@@ -259,7 +265,10 @@ export const useAiSettingsStore = create<AiSettingsState>()(
         const preferences = parseAiPreferences(entries);
         // Keep initialization false while applying the loaded snapshot so the
         // persistence subscriber never rewrites unchanged preferences during hydration.
-        set(preferences);
+        set({
+          ...preferences,
+          agentSandboxEnabled: entries.some(([key, value]) => key === AGENT_SANDBOX_ENABLED_KEY && value === 'true'),
+        });
         set({ initialized: true });
       } catch (error) {
         logger.error('failed to load AI preferences', error);
@@ -310,6 +319,16 @@ export const useAiSettingsStore = create<AiSettingsState>()(
     setContextLines: (contextLines) => set({ contextLines }),
     setAgentPermissionMode: (agentPermissionMode) => set({ agentPermissionMode }),
     setAgentExecutionSurface: (agentExecutionSurface) => set({ agentExecutionSurface }),
+    setAgentSandboxEnabled: async (agentSandboxEnabled) => {
+      if (get().agentSandboxSaving) return;
+      set({ agentSandboxSaving: true });
+      try {
+        await invokeSavePreferences([[AGENT_SANDBOX_ENABLED_KEY, String(agentSandboxEnabled)]]);
+        set({ agentSandboxEnabled });
+      } finally {
+        set({ agentSandboxSaving: false });
+      }
+    },
     getProviderConfig: (id) => {
       const state = get();
       const provider = state.providers.find((item) => item.id === (id ?? state.defaultProviderId))

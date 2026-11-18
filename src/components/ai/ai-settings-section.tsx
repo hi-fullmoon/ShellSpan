@@ -11,6 +11,7 @@ import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Field } from '@/components/ui/field';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import { cn } from '@/lib/utils';
@@ -86,6 +87,11 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const setDefaultProvider = useAiSettingsStore((state) => state.setDefaultProvider);
   const contextLines = useAiSettingsStore((state) => state.contextLines);
   const setContextLines = useAiSettingsStore((state) => state.setContextLines);
+  const sandboxControlId = React.useId();
+  const preferencesReady = useAiSettingsStore((state) => state.initialized);
+  const agentSandboxEnabled = useAiSettingsStore((state) => state.agentSandboxEnabled);
+  const agentSandboxSaving = useAiSettingsStore((state) => state.agentSandboxSaving);
+  const setAgentSandboxEnabled = useAiSettingsStore((state) => state.setAgentSandboxEnabled);
   const [selectedProviderId, setSelectedProviderId] = useState(defaultProviderId);
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -297,6 +303,28 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
           </Select>
         </SettingRow>
       </SettingsGroup>
+
+      {nativeRouteMode && (
+        <SettingsGroup title={t('settings.ai.agent.title')}>
+          <SettingRow
+            controlId={sandboxControlId}
+            label={t('settings.ai.agent.sandbox')}
+            description={t('settings.ai.agent.sandboxDescription')}
+            descriptionId={`${sandboxControlId}-description`}
+          >
+            <Switch
+              id={sandboxControlId}
+              aria-label={t('settings.ai.agent.sandbox')}
+              aria-describedby={`${sandboxControlId}-description`}
+              checked={agentSandboxEnabled}
+              disabled={!preferencesReady || agentSandboxSaving}
+              onCheckedChange={(enabled) => {
+                void setAgentSandboxEnabled(enabled).catch(() => showError(t('settings.ai.agent.sandboxSaveFailed')));
+              }}
+            />
+          </SettingRow>
+        </SettingsGroup>
+      )}
 
       <SettingsGroup
         title={t('settings.ai.records.title')}

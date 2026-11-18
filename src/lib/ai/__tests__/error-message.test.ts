@@ -37,6 +37,7 @@ describe.each([['zh-CN', zhCN], ['en-US', enUS]] as const)('AI error messages in
     ['providerFailure: status=401 code=HTTP_401', 'ai.error.authentication'],
     ['runtimeFailure: unspecified', 'ai.error.generic'],
     ['AGENT_UNSAFE_FILE_ROOT: symlink ancestor', 'ai.error.unsafeFileRoot'],
+    ['AGENT_SANDBOX_DISABLED: enable Agent sandbox in AI Settings', 'ai.error.sandboxDisabled'],
     ['TERMINAL_AGENT_CONFLICT: agent-owning-task', 'terminal.occupancy.conflict'],
     ['Error: TERMINAL_AGENT_CONFLICT', 'terminal.occupancy.conflict'],
     ['ephemeralInputUnavailable: no input was executed', 'ai.error.ephemeralInputUnavailable'],

@@ -69,6 +69,7 @@ fn profile_identity_roundtrip_and_policy_roundtrip_invalidate_old_approval() {
     let db = Database::open(&temp.path().join("db")).unwrap();
     let profile = profile(2222);
     db.insert_profile(&profile).unwrap();
+    db.set_agent_sandbox_enabled(true).unwrap();
     set_policy(&db, &profile, Mode::WorkspaceWrite);
     let saved = db.profile_sandbox(&profile.id).unwrap();
     let mut changed = profile.clone();
@@ -96,6 +97,60 @@ fn profile_identity_roundtrip_and_policy_roundtrip_invalidate_old_approval() {
         db.save_profile_sandbox(&profile.id, &saved.binding, None)
             .unwrap_err(),
         "SANDBOX_POLICY_CHANGED"
+    );
+}
+
+#[test]
+fn agent_sandbox_is_opt_in_and_rechecks_before_ssh_dispatch() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("db");
+    let db = Database::open(&path).unwrap();
+    let profile = profile(2222);
+    db.insert_profile(&profile).unwrap();
+    let target = AgentToolTargetNative::Remote {
+        target_id: "remote".into(),
+        session_id: "terminal".into(),
+        profile_id: Some(profile.id.clone()),
+        host: profile.host.clone(),
+        port: profile.port,
+        username: profile.username.clone(),
+        root_path: Some(WORKSPACE.into()),
+        local_root: None,
+    };
+    let known_hosts = temp.path().join("known_hosts");
+    let unsandboxed = binding_for_target(&target, &db, &known_hosts)
+        .unwrap()
+        .unwrap();
+    let args = json!({"command":"pwd"});
+    assert!(!db.agent_sandbox_enabled().unwrap());
+    guard_tool(&db, Some(&unsandboxed), "exec_command", &args).unwrap();
+    guard_tool(&db, None, "exec_command", &args).unwrap();
+
+    set_policy(&db, &profile, Mode::WorkspaceWrite);
+    let binding = binding_for_target(&target, &db, &known_hosts)
+        .unwrap()
+        .unwrap();
+    assert!(guard_tool(&db, Some(&binding), "exec_command", &args)
+        .unwrap_err()
+        .starts_with("AGENT_SANDBOX_DISABLED:"));
+    assert!(binding
+        .check(&db, &known_hosts)
+        .unwrap_err()
+        .starts_with("AGENT_SANDBOX_DISABLED:"));
+
+    db.set_agent_sandbox_enabled(true).unwrap();
+    let db = Database::open(&path).unwrap();
+    guard_tool(&db, Some(&binding), "exec_command", &args).unwrap();
+    binding.check(&db, &known_hosts).unwrap();
+
+    db.set_agent_sandbox_enabled(false).unwrap();
+    assert!(binding
+        .write::<()>(&db, &known_hosts, || panic!("disabled sandbox dispatched"))
+        .unwrap_err()
+        .starts_with("AGENT_SANDBOX_DISABLED:"));
+    assert_eq!(
+        db.profile_sandbox(&profile.id).unwrap().policy,
+        binding.state.policy
     );
 }
 
@@ -164,6 +219,7 @@ fn linux_ssh_bubblewrap_acceptance() {
     let temp = tempfile::tempdir().unwrap();
     let db = Database::open(&temp.path().join("db")).unwrap();
     db.insert_profile(&profile).unwrap();
+    db.set_agent_sandbox_enabled(true).unwrap();
     set_policy(&db, &profile, Mode::WorkspaceWrite);
     let credentials = CredentialManager::in_memory_for_tests();
     credentials
@@ -493,6 +549,16 @@ fn linux_ssh_bubblewrap_acceptance() {
     assert!(ordinary
         .lstat(Path::new(&format!("{WORKSPACE}/stale.txt")))
         .is_err());
+    let pending = cmd("printf blocked > disabled.txt").unwrap();
+    db.set_agent_sandbox_enabled(false).unwrap();
+    assert!(adapter
+        .execute(&pending.token, true, CancellationToken::new())
+        .unwrap_err()
+        .contains("AGENT_SANDBOX_DISABLED"));
+    assert!(ordinary
+        .lstat(Path::new(&format!("{WORKSPACE}/disabled.txt")))
+        .is_err());
+    db.set_agent_sandbox_enabled(true).unwrap();
     assert!(report(Mode::ReadOnly).passed);
     let read_only = command("cat seed.txt; ! (printf forbidden > blocked.txt)");
     assert_eq!(

@@ -44,6 +44,7 @@ export function aiErrorMessage(message: string, t: (key: LocaleKey, values?: Rec
   if (code === 'MODEL_RETRY_COOLDOWN') return t('ai.error.childRetryCooldown');
   if (code === 'AGENT_PREPARATION_TIMEOUT') return t('ai.workspace.error.preparationTimeout');
   if (code === 'AGENT_CRITICAL_OPERATION_DENIED') return t('ai.error.criticalOperationDenied');
+  if (code === 'AGENT_SANDBOX_DISABLED') return t('ai.error.sandboxDisabled');
   if (code === 'AUTO_REVIEW_CHANGED') return t('ai.error.autoReviewChanged');
   if (code === 'AGENT_UNSAFE_FILE_ROOT') return t('ai.error.unsafeFileRoot');
   if (code?.startsWith('IMAGE_')) {

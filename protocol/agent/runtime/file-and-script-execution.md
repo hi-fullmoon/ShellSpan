@@ -228,6 +228,8 @@ capability checks still apply.
 
 ## Execution safety, first release
 
+The experimental Agent sandbox requires the user to enable it in AI Settings. It is off by default. An SSH profile keeps its saved policy when the setting is off, and Agent operations that require the sandbox are rejected before dispatch, including calls authorized before the setting was turned off. Local Direct and ordinary SSH profiles keep their existing execution behavior.
+
 ### Automatic review in “Approve for me”
 
 `scopedAutopilot` runs deterministic native review after target, tool, capability

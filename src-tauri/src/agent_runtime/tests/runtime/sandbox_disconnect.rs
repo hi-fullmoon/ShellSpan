@@ -44,6 +44,7 @@ async fn linux_bubblewrap_disconnect_reaches_session_recovery() {
         updated_at: 1,
     };
     database.insert_profile(&profile).unwrap();
+    database.set_agent_sandbox_enabled(true).unwrap();
     let saved = database.profile_sandbox(SESSION).unwrap();
     database
         .save_profile_sandbox(

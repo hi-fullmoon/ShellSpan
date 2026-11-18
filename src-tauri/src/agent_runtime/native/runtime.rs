@@ -3091,7 +3091,12 @@ fn call_sandbox_binding(
         _ => &call.target,
     };
     let binding = crate::remote_sandbox::binding_for_target(owner, database, known_hosts)?;
-    crate::remote_sandbox::guard_tool(binding.as_ref(), &call.tool_name, &call.arguments)?;
+    crate::remote_sandbox::guard_tool(
+        database,
+        binding.as_ref(),
+        &call.tool_name,
+        &call.arguments,
+    )?;
     if let Some(policy) = binding.as_ref().and_then(|b| b.state.policy.as_ref()) {
         if call.tool_name == "exec_command" {
             if call.arguments["cwd"]

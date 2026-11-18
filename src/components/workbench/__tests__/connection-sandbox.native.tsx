@@ -1,9 +1,11 @@
 import { createRoot } from 'react-dom/client';
+import { AiSettingsSection } from '@/components/ai/ai-settings-section';
 import { ConnectionFormDrawer } from '@/components/workbench/connection-form-drawer';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { invokeAddProfile, invokeDeleteProfilePassword, invokeGetProfileSandbox, invokeRemoveProfile, invokeSaveProfileSandbox, invokeStoreProfilePassword, isTauriRuntime } from '@/lib/ipc/tauri';
+import { invokeAddProfile, invokeDeleteProfilePassword, invokeGetProfileSandbox, invokeLoadPreferences, invokeRemoveProfile, invokeSaveProfileSandbox, invokeStoreProfilePassword, isTauriRuntime } from '@/lib/ipc/tauri';
 import { initI18n, t, type LocaleKey } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
+import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import '@/styles/base.css';
 
 const workspace = '/srv/shellspan-workspaces/project';
@@ -81,6 +83,24 @@ async function verify() {
       || trigger.getAttribute('aria-expanded') === 'false' ? true : undefined, 'saved settings close');
     const saved = await invokeGetProfileSandbox(id);
     assert(saved.policy?.workspace === `${workspace}-changed` && saved.binding !== initial.binding, 'Rust persisted the new workspace and policy revision');
+
+    const readEnabled = async () => (await invokeLoadPreferences())
+      .find(([key]) => key === 'ai.agentSandboxEnabled')?.[1];
+    assert(await readEnabled() === undefined, 'A new database has no sandbox opt-in');
+    await useAiSettingsStore.getState().hydrateFromDb();
+    root.render(<TooltipProvider><AiSettingsSection /></TooltipProvider>);
+    const sandboxSwitch = await until(() => [...document.querySelectorAll<HTMLElement>('[role="switch"]')]
+      .find((node) => node.getAttribute('aria-label') === t('settings.ai.agent.sandbox')), 'localized sandbox switch');
+    assert(sandboxSwitch.getAttribute('aria-checked') === 'false', 'The Agent sandbox is off by default');
+    const switchBounds = sandboxSwitch.getBoundingClientRect();
+    assert(switchBounds.width > 0 && switchBounds.left >= 0 && switchBounds.right <= innerWidth, 'The switch fits the settings viewport');
+    sandboxSwitch.click();
+    await until(() => sandboxSwitch.getAttribute('aria-checked') === 'true', 'sandbox enabled');
+    assert(await readEnabled() === 'true', 'Enabling persisted through native IPC');
+    sandboxSwitch.click();
+    await until(() => sandboxSwitch.getAttribute('aria-checked') === 'false', 'sandbox disabled');
+    assert(await readEnabled() === 'false', 'Disabling persisted through native IPC');
+    assert((await invokeGetProfileSandbox(id)).binding === saved.binding, 'The global switch preserves the connection policy');
     return { ok: true, locale, width: innerWidth, height: innerHeight, result: config.available ? 'passed' : 'missing' };
   } finally {
     root.unmount();
