@@ -105,11 +105,13 @@ const SessionTab: React.FC<SessionTabProps> = ({
 }) => {
   const { t } = useI18n();
   const canCancel = Boolean(session.profileId && (session.pendingConnection || session.reconnecting));
+  const hasAction = !session.pendingConnection || canCancel;
+  const canUnpin = session.pinned && !canCancel;
   const colorScheme = useAppStore((state) => state.terminalColorScheme);
   const colorOverrides = useAppStore((state) => state.terminalColorOverrides);
   const agentTarget = useFocusStore(state => state.enabled && state.targetSessionId === session.sessionId);
   const terminalTheme = colorScheme === 'app' ? colorOverrides : resolveTerminalTheme(colorScheme, colorOverrides);
-  return (
+  const tab = (
     <div
       role="tab"
       tabIndex={0}
@@ -144,7 +146,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
         }
       }}
       className={cn(
-        'session-tab group relative flex h-8 w-42 shrink-0 cursor-default items-center gap-1 rounded-t-md border-x border-transparent px-1.5 text-left text-xs outline-none transition-[background-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
+        'session-tab relative flex h-8 w-42 shrink-0 cursor-default items-center gap-1 rounded-t-md border-x border-transparent px-1.5 text-left text-xs outline-none transition-[background-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
         dragPreview && 'bg-app-surface-muted text-app-text ring-1 ring-app-text/20 shadow-md',
         !dragPreview && (active
           ? 'border-app-border/50 bg-app-surface text-app-text'
@@ -170,7 +172,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
           className="pointer-events-none absolute right-0 top-1/2 z-10 h-6 w-0.5 -translate-y-1/2 rounded-full bg-app-primary"
         />
       )}
-      <div className="flex min-w-0 flex-1 items-center gap-1">
+      <div className={cn('flex min-w-0 flex-1 items-center gap-1', hasAction && 'mr-6')}>
         {session.pendingConnection ? (
           <Spinner className="size-3 shrink-0 text-app-warning" />
         ) : (
@@ -181,41 +183,40 @@ const SessionTab: React.FC<SessionTabProps> = ({
           <Link2Icon aria-hidden="true" className="size-3" />
         </span>}
       </div>
-      {(!session.pendingConnection || canCancel) &&
-        (session.pinned && !canCancel ? (
-          <button
-            type="button"
-            aria-label="unpin"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              onTogglePin?.(session.sessionId);
-            }}
-            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-accent hover:text-app-text"
-          >
-            <PinIcon className="size-3" strokeWidth={1.5} />
-          </button>
-        ) : (
-          <button
-            type="button"
-            aria-label={canCancel ? t('terminal.tab.cancelConnection') : 'close'}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose(session.sessionId);
-            }}
-            className={cn(
-              'group/close flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-accent hover:text-app-text',
-              canCancel || agentTarget || (!dragging && active) ? 'visible' : 'invisible group-hover:visible group-focus-within:visible',
-            )}
-          >
-            {agentTarget && !canCancel && <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} className="flex size-4 items-center justify-center text-app-success group-hover:hidden group-focus-visible/close:hidden">
-              <Link2Icon aria-hidden="true" className="size-3" />
-            </span>}
-            <XIcon aria-hidden="true" className={cn('size-3', agentTarget && !canCancel && 'hidden group-hover:block group-focus-visible/close:block')} strokeWidth={1.5} />
-          </button>
-        ))}
     </div>
+  );
+
+  return (
+    <>
+      {tab}
+      {hasAction && (
+        <button
+          type="button"
+          data-slot="session-tab-action"
+          aria-label={canCancel ? t('terminal.tab.cancelConnection') : t(canUnpin ? 'sessionTab.unpin' : 'sessionTab.close', { title: session.title })}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (canUnpin) onTogglePin?.(session.sessionId);
+            else onClose(session.sessionId);
+          }}
+          className={cn(
+            'session-tab-action group/close',
+            !canUnpin && !canCancel && !agentTarget && (dragging || !active)
+              && 'invisible group-hover/session-tab-slot:visible group-focus-within/session-tab-slot:visible',
+          )}
+        >
+          {canUnpin ? <PinIcon aria-hidden="true" className="size-3" strokeWidth={1.5} /> : (
+            <>
+              {agentTarget && !canCancel && <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} className="flex size-4 items-center justify-center text-app-success group-hover/session-tab-slot:hidden group-focus-visible/close:hidden">
+                <Link2Icon aria-hidden="true" className="size-3" />
+              </span>}
+              <XIcon aria-hidden="true" className={cn('size-3', agentTarget && !canCancel && 'hidden group-hover/session-tab-slot:block group-focus-visible/close:block')} strokeWidth={1.5} />
+            </>
+          )}
+        </button>
+      )}
+    </>
   );
 };
 
@@ -240,17 +241,25 @@ const SortableTab: React.FC<SortableTabProps> = ({
   showDropIndicatorLeft,
   showDropIndicatorRight,
 }) => {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
     id: session.sessionId,
     disabled: session.pendingConnection,
+    attributes: { role: 'group' },
   });
+  const setSortableRef = React.useCallback((element: HTMLDivElement | null) => {
+    setNodeRef(element);
+    setActivatorNodeRef(element);
+  }, [setNodeRef, setActivatorNodeRef]);
 
   return (
     <div
-      ref={setNodeRef}
-      className="session-tab-slot h-8 shrink-0"
+      ref={setSortableRef}
+      className="session-tab-slot group/session-tab-slot relative h-8 shrink-0"
       {...attributes}
       {...listeners}
+      aria-label={session.title}
+      aria-disabled={undefined}
+      tabIndex={session.pendingConnection ? undefined : attributes.tabIndex}
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
@@ -702,16 +711,17 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
           : createPortal(
               <DragOverlay dropAnimation={null} modifiers={[snapOverlayTopLeftToCursor]}>
                 {draggingSession && (
-                  <SessionTab
-                    session={draggingSession}
-                    active={activeSessionId === draggingSession.sessionId}
-                    dragging
-                    dragPreview
-                    onActivate={() => {}}
-                    onContextMenu={() => {}}
-                    onClose={() => {}}
-                    onTogglePin={() => {}}
-                  />
+                  <div className="group/session-tab-slot relative" inert>
+                    <SessionTab
+                      session={draggingSession}
+                      active={activeSessionId === draggingSession.sessionId}
+                      dragging
+                      dragPreview
+                      onActivate={() => {}}
+                      onContextMenu={() => {}}
+                      onClose={() => {}}
+                    />
+                  </div>
                 )}
               </DragOverlay>,
               document.body,

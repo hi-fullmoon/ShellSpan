@@ -84,6 +84,7 @@ type DateFilterOption = (typeof DATE_FILTER_OPTIONS)[number]['key'];
 const LOG_LEVELS = ['INFO', 'WARN', 'ERROR', 'DEBUG'] as const;
 type LogLevel = (typeof LOG_LEVELS)[number];
 const LOG_ACTION_ITEM_CLASS = "[&_svg:not([class*='size-'])]:size-3.5 [&>svg]:translate-y-px [&>svg]:stroke-muted-foreground";
+const LOG_COLUMNS = 'grid-cols-[8.75rem_4.5rem_minmax(0,1fr)] @min-[760px]:grid-cols-[8.75rem_4.5rem_8rem_minmax(0,1fr)]';
 
 function getDaysDifference(dateString: string, today: Date): number {
   const [year, month, day] = dateString.split('-').map(Number);
@@ -225,7 +226,9 @@ const LogLine: React.FC<LogLineProps> = ({
       onClick={onSelect}
       onDoubleClick={onDoubleClick}
       className={cn(
-        'relative grid w-full cursor-default grid-cols-[8.75rem_4.5rem_minmax(0,1fr)] items-start gap-2 px-3 py-1.5 text-left font-mono text-xs transition-colors before:absolute before:inset-y-0 before:left-0 before:w-0.5 hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-app-primary/50 @min-[760px]:grid-cols-[8.75rem_4.5rem_8rem_minmax(0,1fr)]',
+        'relative grid w-full cursor-default items-start gap-2 px-3 py-1.5 text-left font-mono text-xs transition-colors before:absolute before:inset-y-0 before:left-0 before:w-0.5 hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-app-primary/50',
+        LOG_COLUMNS,
+        '@max-[420px]:grid-cols-[minmax(0,max-content)_minmax(3.5rem,1fr)] @max-[420px]:gap-y-1',
         selected && 'bg-muted/80',
         getLevelRailClass(line.level),
       )}
@@ -242,7 +245,7 @@ const LogLine: React.FC<LogLineProps> = ({
         <TooltipContent>{line.target ?? `#${originalIndex + 1}`}</TooltipContent>
       </Tooltip>
       <span
-        className="min-w-0 truncate whitespace-nowrap leading-5 text-foreground"
+        className="min-w-0 truncate whitespace-nowrap leading-5 text-foreground @max-[420px]:col-span-full"
       >
         {renderHighlightedText(message, query)}
       </span>
@@ -650,6 +653,7 @@ export const LogPanel: React.FC = () => {
               {activeFile && <span> · {formatBytes(activeFile.size)}</span>}
             </>
           )}
+          actionsClassName="@max-[360px]:h-auto @max-[360px]:basis-full @max-[360px]:flex-wrap @max-[360px]:justify-start @max-[360px]:overflow-visible"
           actions={(
             <>
               <ToggleGroup
@@ -658,39 +662,42 @@ export const LogPanel: React.FC = () => {
                 variant="outline"
                 size="sm"
                 spacing={0}
+                className="@max-[360px]:max-w-full"
                 aria-label={t('workbench.logs.source')}
               >
-                <ToggleGroupItem value="frontend">{t('workbench.logs.frontend')}</ToggleGroupItem>
-                <ToggleGroupItem value="backend">{t('workbench.logs.backend')}</ToggleGroupItem>
+                <ToggleGroupItem value="frontend" className="@max-[360px]:h-8 @max-[360px]:shrink @max-[360px]:leading-tight @max-[360px]:whitespace-normal">{t('workbench.logs.frontend')}</ToggleGroupItem>
+                <ToggleGroupItem value="backend" className="@max-[360px]:h-8 @max-[360px]:shrink @max-[360px]:leading-tight @max-[360px]:whitespace-normal">{t('workbench.logs.backend')}</ToggleGroupItem>
               </ToggleGroup>
-              <Button variant="outline" size="sm" onClick={handleRefresh}>
-                <RefreshCwIcon data-icon="inline-start" />
-                {t('common.refresh')}
-              </Button>
-              <DropdownMenu>
-                <Tooltip>
-                  <TooltipTrigger render={
-                    <DropdownMenuTrigger render={
-                      <Button variant="secondary" size="icon-sm" aria-label={t('workbench.logs.actions')} />
-                    } />
-                  }>
-                    <EllipsisIcon aria-hidden data-icon="inline-start" />
-                  </TooltipTrigger>
-                  <TooltipContent>{t('workbench.logs.actions')}</TooltipContent>
-                </Tooltip>
-                <DropdownMenuContent align="end" className="w-max">
-                  <DropdownMenuGroup>
-                    <DropdownMenuItem className={LOG_ACTION_ITEM_CLASS} disabled={!content} onClick={handleExport}>
-                      <ArrowDownToLineIcon aria-hidden />
-                      {t('workbench.logs.export')}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem className={LOG_ACTION_ITEM_CLASS} onClick={handleDiagnosticBundle}>
-                      <BugIcon aria-hidden />
-                      {t('workbench.logs.diagnostic')}
-                    </DropdownMenuItem>
-                  </DropdownMenuGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button variant="outline" size="sm" onClick={handleRefresh}>
+                  <RefreshCwIcon data-icon="inline-start" />
+                  {t('common.refresh')}
+                </Button>
+                <DropdownMenu>
+                  <Tooltip>
+                    <TooltipTrigger render={
+                      <DropdownMenuTrigger render={
+                        <Button variant="secondary" size="icon-sm" aria-label={t('workbench.logs.actions')} />
+                      } />
+                    }>
+                      <EllipsisIcon aria-hidden data-icon="inline-start" />
+                    </TooltipTrigger>
+                    <TooltipContent>{t('workbench.logs.actions')}</TooltipContent>
+                  </Tooltip>
+                  <DropdownMenuContent align="end" className="w-max">
+                    <DropdownMenuGroup>
+                      <DropdownMenuItem className={LOG_ACTION_ITEM_CLASS} disabled={!content} onClick={handleExport}>
+                        <ArrowDownToLineIcon aria-hidden />
+                        {t('workbench.logs.export')}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem className={LOG_ACTION_ITEM_CLASS} onClick={handleDiagnosticBundle}>
+                        <BugIcon aria-hidden />
+                        {t('workbench.logs.diagnostic')}
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </>
           )}
         />
@@ -777,9 +784,9 @@ export const LogPanel: React.FC = () => {
 
         <div className="relative flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
-            <div className="grid h-8 shrink-0 grid-cols-[8.75rem_4.5rem_minmax(0,1fr)] items-center gap-2 border-b border-border bg-muted/35 px-3 font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground @min-[760px]:grid-cols-[8.75rem_4.5rem_8rem_minmax(0,1fr)]">
-              <span>{t('workbench.logs.columns.time')}</span>
-              <span>{t('workbench.logs.level')}</span>
+            <div className={cn('grid h-8 shrink-0 items-center gap-2 border-b border-border bg-muted/35 px-3 font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground @max-[420px]:grid-cols-1', LOG_COLUMNS)}>
+              <span className="@max-[420px]:hidden">{t('workbench.logs.columns.time')}</span>
+              <span className="@max-[420px]:hidden">{t('workbench.logs.level')}</span>
               <span className="hidden @min-[760px]:block">{t('workbench.logs.columns.target')}</span>
               <span>{t('workbench.logs.columns.message')}</span>
             </div>

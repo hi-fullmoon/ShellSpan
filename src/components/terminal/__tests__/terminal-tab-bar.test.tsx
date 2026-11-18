@@ -55,7 +55,7 @@ describe('TerminalTabBar', () => {
       render(<TerminalTabBar />);
       const tab = screen.getByRole('tab', { name: 'Connecting host' });
       expect(tab).toHaveAttribute('aria-busy', 'true');
-      const cancelButton = within(tab).getByRole('button', { name: 'terminal.tab.cancelConnection' });
+      const cancelButton = screen.getByRole('button', { name: 'terminal.tab.cancelConnection' });
       expect(cancelButton).not.toHaveAttribute('title');
       fireEvent.click(cancelButton);
       expect(attempt.signal.aborted).toBe(true);
@@ -75,7 +75,8 @@ describe('TerminalTabBar', () => {
     try {
       render(<TerminalTabBar />);
       const tab = screen.getByRole('tab', { name: 'SSH terminal' });
-      fireEvent.click(within(tab).getByRole('button', { name: 'terminal.tab.cancelConnection' }));
+      expect(tab).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'terminal.tab.cancelConnection' }));
       expect(attempt.signal.aborted).toBe(true);
       expect(screen.getByRole('tab', { name: 'SSH terminal' })).toBeInTheDocument();
       expect(useTerminalStore.getState().sessions[0]?.status).toBe('connected');
@@ -143,7 +144,7 @@ describe('TerminalTabBar', () => {
     // If WKWebView drops the pointerdown for this tap, only the release reaches
     // the close button. The fallback activation handler must leave the active
     // session alone so the button action does not also switch tabs.
-    fireEvent.pointerUp(screen.getAllByLabelText('close')[0], { button: 0 });
+    fireEvent.pointerUp(screen.getAllByLabelText('sessionTab.close')[0], { button: 0 });
     expect(useTerminalStore.getState().activeSessionId).toBe('s2');
   });
 
@@ -245,8 +246,8 @@ describe('TerminalTabBar', () => {
     );
 
     expect(screen.getByRole('button', { name: 'terminal.tab.moreActions' })).not.toHaveAttribute('title');
-    const closeButtons = screen.getAllByLabelText('close');
-    expect(closeButtons[0]).toHaveAttribute('aria-label', 'close');
+    const closeButtons = screen.getAllByLabelText('sessionTab.close');
+    expect(closeButtons[0]).toHaveAttribute('aria-label', 'sessionTab.close');
 
     fireEvent.click(closeButtons[0]);
     // Session is kept until the dialog is confirmed
@@ -262,7 +263,7 @@ describe('TerminalTabBar', () => {
     addSession('s1', 'A');
     render(<TerminalTabBar />);
 
-    fireEvent.click(screen.getByLabelText('close'));
+    fireEvent.click(screen.getByLabelText('sessionTab.close'));
     fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
 
     expect(useTerminalStore.getState().sessions.some((s) => s.sessionId === 's1')).toBe(true);
@@ -549,7 +550,7 @@ describe('TerminalTabBar', () => {
     expect(document.body.classList.contains('tab-dragging')).toBe(true);
     const overlayTab = Array.from(document.querySelectorAll<HTMLElement>('[data-session-tab="s1"]'))
       .find((tab) => tab !== tabs[0]);
-    expect(overlayTab?.parentElement?.style.transform)
+    expect(overlayTab?.closest('[inert]')?.parentElement?.style.transform)
       .toContain('translate3d(152px, 12px, 0)');
 
     await act(async () => {
@@ -595,7 +596,7 @@ describe('TerminalTabBar', () => {
 
     render(<TerminalTabBar />);
 
-    const closeButtons = screen.getAllByLabelText('close');
+    const closeButtons = screen.getAllByLabelText('sessionTab.close');
     fireEvent.pointerDown(closeButtons[0], { clientX: 5, clientY: 5 });
     fireEvent.click(closeButtons[0]);
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'common.close' })); });
@@ -616,7 +617,7 @@ describe('TerminalTabBar', () => {
 
     render(<TerminalTabBar />);
 
-    const pinButton = screen.getByLabelText('unpin');
+    const pinButton = screen.getByLabelText('sessionTab.unpin');
     expect(pinButton).toBeInTheDocument();
     expect(pinButton.querySelector('svg')).toHaveClass('size-3');
 
@@ -629,8 +630,8 @@ describe('TerminalTabBar', () => {
 
     render(<TerminalTabBar />);
 
-    expect(screen.getByLabelText('close')).toBeInTheDocument();
-    expect(screen.queryByLabelText('unpin')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('sessionTab.close')).toBeInTheDocument();
+    expect(screen.queryByLabelText('sessionTab.unpin')).not.toBeInTheDocument();
   });
 
   it('reserves the close action width and reveals it for keyboard focus', () => {
@@ -639,12 +640,14 @@ describe('TerminalTabBar', () => {
     useTerminalStore.getState().setActiveSession('s1');
     render(<TerminalTabBar />);
     const tabs = screen.getAllByRole('tab');
-    const close = within(tabs[1]).getByLabelText('close');
-    expect(close).toHaveClass('flex', 'h-5', 'w-5', 'invisible', 'group-focus-within:visible');
+    const close = tabs[1].nextElementSibling;
+    expect(close).toHaveAttribute('aria-label', 'sessionTab.close');
+    expect(tabs[1].firstElementChild).toHaveClass('mr-6');
+    expect(close).toHaveClass('session-tab-action', 'invisible', 'group-focus-within/session-tab-slot:visible');
     expect(close).not.toHaveClass('hidden');
     fireEvent.keyDown(tabs[1], { key: 'Enter' });
     expect(useTerminalStore.getState().activeSessionId).toBe('s2');
-    expect(close).toHaveClass('visible');
+    expect(close).not.toHaveClass('invisible');
     fireEvent.keyDown(tabs[0], { key: ' ' });
     expect(useTerminalStore.getState().activeSessionId).toBe('s1');
   });

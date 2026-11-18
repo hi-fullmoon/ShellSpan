@@ -158,6 +158,7 @@ export function AiWorkspaceController({
           disabled={modelSettingsLocked}
           selection={controller.selectedProvider}
           onSelect={controller.view && !configuringContinuation ? controller.selectModel : undefined}
+          onConfigureModel={scope === 'workbench' ? openAiSettings : undefined}
         />
       )}
       permissionControl={scope === 'terminal' && activeTerminalId

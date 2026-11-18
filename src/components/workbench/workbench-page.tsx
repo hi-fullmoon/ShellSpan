@@ -66,6 +66,7 @@ interface WorkbenchPageHeaderProps extends Omit<React.ComponentProps<'header'>, 
   description?: React.ReactNode;
   titleMeta?: React.ReactNode;
   actions?: React.ReactNode;
+  actionsClassName?: string;
 }
 
 export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
@@ -74,6 +75,7 @@ export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
   description,
   titleMeta,
   actions,
+  actionsClassName,
   children,
   className,
   ...props
@@ -111,6 +113,7 @@ export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
             '-m-1 flex h-10 min-w-0 flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>button]:shrink-0',
             // Reserve enough room for the controls before wrapping, then fill the available row.
             'flex-[1_1_min-content] justify-end-safe',
+            actionsClassName,
           )}
         >
           {actions}

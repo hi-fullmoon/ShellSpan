@@ -42,7 +42,7 @@ describe('SftpTabBar', () => {
     });
     render(<SftpTabBar />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'sessionTab.close' }));
 
     expect(screen.getByText('sftp.tab.closeTransferWarning')).toBeInTheDocument();
   });
@@ -193,7 +193,7 @@ describe('SftpTabBar', () => {
     // If WKWebView drops the pointerdown for this tap, only the release reaches
     // the close button. The fallback activation handler must leave the active
     // connection alone so the button action does not also switch tabs.
-    fireEvent.pointerUp(screen.getAllByRole('button', { name: 'close' })[0], { button: 0 });
+    fireEvent.pointerUp(screen.getAllByRole('button', { name: 'sessionTab.close' })[0], { button: 0 });
     expect(useSftpStore.getState().activeConnectionId).toBe(idB);
   });
 
@@ -307,7 +307,7 @@ describe('SftpTabBar', () => {
     const draggedId = tabs[0].dataset.sftpTab;
     const overlayTab = Array.from(document.querySelectorAll<HTMLElement>(`[data-sftp-tab="${draggedId}"]`))
       .find((tab) => tab !== tabs[0]);
-    expect(overlayTab?.parentElement?.style.transform)
+    expect(overlayTab?.closest('[inert]')?.parentElement?.style.transform)
       .toContain('translate3d(332px, 12px, 0)');
 
     await act(async () => {
@@ -324,7 +324,7 @@ describe('SftpTabBar', () => {
         onTabContextMenu={vi.fn()}
       />,
     );
-    const closeButton = screen.getByRole('button', { name: 'close' });
+    const closeButton = screen.getByRole('button', { name: 'sessionTab.close' });
     await userEvent.click(closeButton);
     // Connection is kept until the dialog is confirmed
     expect(useSftpStore.getState().connections).toHaveLength(1);
@@ -341,7 +341,7 @@ describe('SftpTabBar', () => {
         onTabContextMenu={vi.fn()}
       />,
     );
-    await userEvent.click(screen.getByRole('button', { name: 'close' }));
+    await userEvent.click(screen.getByRole('button', { name: 'sessionTab.close' }));
     await userEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
     expect(useSftpStore.getState().connections).toHaveLength(1);
   });
@@ -357,7 +357,7 @@ describe('SftpTabBar', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'unpin' }).querySelector('svg')).toHaveClass(
+    expect(screen.getByRole('button', { name: 'sessionTab.unpin' }).querySelector('svg')).toHaveClass(
       'size-3',
     );
   });
@@ -395,8 +395,10 @@ describe('SftpTabBar', () => {
     }
     expect(tabs[0]).toHaveClass('h-8', 'rounded-t-md', 'border-x', 'border-app-border/50', 'bg-app-surface', 'text-app-text');
     expect(tabs[0]).not.toHaveClass('border', 'border-t', 'shadow-xs');
-    const close = tabs[1].querySelector('[aria-label="close"]');
-    expect(close).toHaveClass('flex', 'invisible', 'group-hover:visible', 'group-focus-within:visible');
+    const close = tabs[1].nextElementSibling;
+    expect(close).toHaveAttribute('aria-label', 'sessionTab.close');
+    expect(tabs[1].firstElementChild).toHaveClass('mr-6');
+    expect(close).toHaveClass('session-tab-action', 'invisible', 'group-hover/session-tab-slot:visible', 'group-focus-within/session-tab-slot:visible');
     expect(close).not.toHaveClass('hidden');
     expect(tabs[1]).toHaveClass('border-transparent', 'bg-transparent', 'hover:bg-app-surface-muted');
   });

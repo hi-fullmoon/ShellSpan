@@ -55,7 +55,8 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
   onClose,
   onTogglePin,
 }) => {
-  return (
+  const { t } = useI18n();
+  const tab = (
     <div
       role="tab"
       tabIndex={0}
@@ -89,7 +90,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         }
       }}
       className={cn(
-        'session-tab group relative flex h-8 w-42 shrink-0 cursor-default items-center gap-1 rounded-t-md border-x border-transparent px-1.5 text-left text-xs outline-none transition-[background-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
+        'session-tab relative flex h-8 w-42 shrink-0 cursor-default items-center gap-1 rounded-t-md border-x border-transparent px-1.5 text-left text-xs outline-none transition-[background-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
         active
           ? 'border-app-border/50 bg-app-surface text-app-text'
           : 'border-transparent bg-transparent text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
@@ -108,42 +109,39 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
           className="pointer-events-none absolute right-0 top-1/2 z-10 h-6 w-0.5 -translate-y-1/2 rounded-full bg-app-primary"
         />
       )}
-      <div className="flex min-w-0 flex-1 items-center gap-1">
+      <div className={cn('flex min-w-0 flex-1 items-center gap-1', !connection.pendingConnection && 'mr-6')}>
         {connection.pendingConnection && <Spinner className="size-3 text-app-warning" />}
         <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{connection.title}</span>
       </div>
-      {!connection.pendingConnection &&
-        (connection.pinned ? (
-          <button
-            type="button"
-            aria-label="unpin"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              onTogglePin?.(connection.id);
-            }}
-            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-accent hover:text-app-text"
-          >
-            <PinIcon className="size-3" strokeWidth={1.5} />
-          </button>
-        ) : (
-          <button
-            type="button"
-            aria-label="close"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose(connection.id);
-            }}
-            className={cn(
-              'flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-accent hover:text-app-text',
-              !dragging && active ? 'visible' : 'invisible group-hover:visible group-focus-within:visible',
-            )}
-          >
-            <XIcon className="h-3 w-3" strokeWidth={1.5} />
-          </button>
-        ))}
     </div>
+  );
+
+  return (
+    <>
+      {tab}
+      {!connection.pendingConnection && (
+        <button
+          type="button"
+          data-slot="session-tab-action"
+          aria-label={t(connection.pinned ? 'sessionTab.unpin' : 'sessionTab.close', { title: connection.title })}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (connection.pinned) onTogglePin?.(connection.id);
+            else onClose(connection.id);
+          }}
+          className={cn(
+            'session-tab-action',
+            !connection.pinned && (dragging || !active)
+              && 'invisible group-hover/session-tab-slot:visible group-focus-within/session-tab-slot:visible',
+          )}
+        >
+          {connection.pinned
+            ? <PinIcon aria-hidden="true" className="size-3" strokeWidth={1.5} />
+            : <XIcon aria-hidden="true" className="size-3" strokeWidth={1.5} />}
+        </button>
+      )}
+    </>
   );
 };
 
@@ -168,7 +166,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
   showDropIndicatorLeft,
   showDropIndicatorRight,
 }) => {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: connection.id,
     disabled: connection.pinned || connection.pendingConnection,
   });
@@ -176,8 +174,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
   return (
     <div
       ref={setNodeRef}
-      className="session-tab-slot h-8 shrink-0"
-      {...attributes}
+      className="session-tab-slot group/session-tab-slot relative h-8 shrink-0"
       {...listeners}
       style={{
         transform: CSS.Transform.toString(transform),
@@ -527,15 +524,16 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
           : createPortal(
               <DragOverlay dropAnimation={null} modifiers={[snapOverlayTopLeftToCursor]}>
                 {draggingConnection && (
-                  <ConnectionTab
-                    connection={draggingConnection}
-                    active={activeConnectionId === draggingConnection.id}
-                    dragging
-                    onActivate={() => {}}
-                    onContextMenu={() => {}}
-                    onClose={() => {}}
-                    onTogglePin={() => {}}
-                  />
+                  <div className="group/session-tab-slot relative" inert>
+                    <ConnectionTab
+                      connection={draggingConnection}
+                      active={activeConnectionId === draggingConnection.id}
+                      dragging
+                      onActivate={() => {}}
+                      onContextMenu={() => {}}
+                      onClose={() => {}}
+                    />
+                  </div>
                 )}
               </DragOverlay>,
               document.body,

@@ -32,6 +32,7 @@ type ModelMenuPane = 'root' | 'model' | 'reasoning';
 
 /** Model pane height cap; keep in sync with the max-h utility on the menu. */
 const MODEL_MENU_HEIGHT_LIMIT = 380;
+const MODEL_TRIGGER_CLASS = 'ai-model-trigger h-7 min-w-0 max-w-full flex-[0_1_auto] overflow-hidden pr-1.5 pl-2 @max-[400px]/ai-workspace:px-1';
 
 const REASONING_LABEL_KEYS: Record<string, LocaleKey> = {
   off: 'ai.reasoningEffort.off',
@@ -71,6 +72,7 @@ export interface AiComposerModelSelectorProps {
   readonly disabled?: boolean;
   readonly selection?: AiProviderConfig;
   readonly onSelect?: (provider: AiProviderConfig) => Promise<void>;
+  readonly onConfigureModel?: () => void;
 }
 
 /** Provider-backed model and reasoning selector using the current persisted AI configuration. */
@@ -78,6 +80,7 @@ export function AiComposerModelSelector({
   disabled = false,
   selection,
   onSelect,
+  onConfigureModel,
 }: AiComposerModelSelectorProps): React.ReactNode {
   const { t } = useI18n();
   const providers = useAiSettingsStore((state) => state.providers);
@@ -187,6 +190,17 @@ export function AiComposerModelSelector({
     setOpen(false);
   };
 
+  if (!disabled && onConfigureModel && !current?.model.trim()
+    && (!nativeRouteMode || routeStatus === 'ready' || routeStatus === 'error')) {
+    return (
+      <AiControlTooltip className="max-w-full flex-[0_1_auto]" label={t('ai.modelMissing')}>
+        <Button type="button" variant="ghost" size="xs" className={MODEL_TRIGGER_CLASS} onClick={onConfigureModel}>
+          <span className="ai-model-trigger-name min-w-0 truncate">{t('ai.workspace.model.configure')}</span>
+        </Button>
+      </AiControlTooltip>
+    );
+  }
+
   return (
     <DropdownMenu
       open={open}
@@ -217,7 +231,7 @@ export function AiComposerModelSelector({
           <Button
             variant="ghost"
             size="xs"
-            className="ai-model-trigger h-7 min-w-0 max-w-full flex-[0_1_auto] overflow-hidden pr-1.5 pl-2 @max-[400px]/ai-workspace:px-1"
+            className={MODEL_TRIGGER_CLASS}
             disabled={disabled || current === undefined || groups.length === 0}
             aria-label={t('ai.workspace.model.trigger', { selection: triggerLabel })}
           />

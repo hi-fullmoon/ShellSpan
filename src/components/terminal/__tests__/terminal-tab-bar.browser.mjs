@@ -82,7 +82,7 @@ try {
   }, { username: userInfo().username, shell: basename(userInfo().shell || process.env.SHELL) });
   await page.locator('[data-terminal-tab-bar] [role="tab"]').waitFor();
   const sftpBar = page.locator('[data-sftp-tab-bar]');
-  await sftpBar.getByRole('tab', { selected: true }).getByRole('button', { name: 'close', exact: true }).waitFor();
+  await sftpBar.getByRole('button', { name: /^关闭页签 / }).waitFor();
   assert.equal(await page.locator('[data-sftp-tab-bar][title], [data-sftp-tab-bar] [title]').count(), 0);
   await page.evaluate(async () => {
     const { useAppStore } = await import('/tab-runtime.js');
@@ -189,9 +189,7 @@ try {
     }
     const tabs = page.locator('[data-terminal-tab-bar] [role="tab"]');
     for (let index = 0; index < 3; index++) {
-      // Pending tabs disable sorting via aria-disabled on their wrapper, but
-      // remain selectable. Use the pointer as a user would, without treating
-      // the sortable wrapper's state as a disabled tab action.
+      // Pending tabs disable sorting and remain selectable.
       await tabs.nth(index).scrollIntoViewIfNeeded();
       const tabBox = await tabs.nth(index).boundingBox();
       assert.ok(tabBox);
@@ -324,17 +322,24 @@ try {
     const { useSftpStore } = await import('/tab-runtime.js');
     useSftpStore.getState().togglePin(useSftpStore.getState().connections[0].id);
   });
-  // Pinned sortable wrappers are aria-disabled for dragging; their unpin
-  // action remains usable by the pointer.
-  const unpin = page.locator('[data-sftp-tab-bar] button[aria-label="unpin"]');
+  const unpin = sftpBar.getByRole('button', { name: /^取消固定页签 / });
   await unpin.waitFor();
-  const unpinBox = await unpin.boundingBox();
-  assert.ok(unpinBox);
-  await page.mouse.click(unpinBox.x + unpinBox.width / 2, unpinBox.y + unpinBox.height / 2);
+  await sftpTabs.first().focus();
+  await page.keyboard.press('Alt+Tab');
+  assert.ok(await unpin.evaluate(button => button === document.activeElement), 'SFTP unpin is the next keyboard stop');
+  await page.keyboard.press('Space');
   assert.equal(await page.evaluate(async () => {
     const { useSftpStore } = await import('/tab-runtime.js');
     return useSftpStore.getState().connections.some((connection) => connection.pinned);
   }), false);
+  const sftpClose = sftpTabs.first().locator('xpath=following-sibling::button');
+  await sftpTabs.first().focus();
+  await page.keyboard.press('Alt+Tab');
+  assert.ok(await sftpClose.evaluate(button => button === document.activeElement), 'SFTP close is the next keyboard stop');
+  await page.keyboard.press('Enter');
+  await page.getByRole('alertdialog').waitFor();
+  await page.keyboard.press('Escape');
+  await page.getByRole('alertdialog').waitFor({ state: 'hidden' });
   for (const { theme, width } of appearances) {
     await page.setViewportSize({ width, height: 720 });
     await page.evaluate((theme) => document.documentElement.setAttribute('data-theme', theme), theme);
@@ -503,7 +508,7 @@ try {
     useFocusStore.setState({ enabled: true, targetSessionId: sessionId });
   });
   const targetTab = page.locator('[data-terminal-tab-bar] [role="tab"]').first();
-  const closeTarget = targetTab.locator('button[aria-label="close"]');
+  const closeTarget = targetTab.locator('xpath=following-sibling::button');
   const targetIcon = closeTarget.locator('[data-slot="focus-tab-target"]');
   const closeIcon = closeTarget.locator('svg.lucide-x');
   for (const { theme, width } of appearances) {
@@ -533,7 +538,7 @@ try {
         await page.locator('[data-terminal-tab-bar]').screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-target-${theme}-${width}-${active}.png` });
       }
       assert.equal(await closeIcon.isVisible(), false);
-      assert.equal(await targetTab.locator('[data-slot="focus-tab-target"]').count(), 1);
+      assert.equal(await closeTarget.locator('[data-slot="focus-tab-target"]').count(), 1);
       const before = await closeTarget.boundingBox();
       assert.equal(before.width, 20);
       assert.equal(before.height, 20);
@@ -554,7 +559,10 @@ try {
   await page.mouse.click(300, 300);
   await closeTarget.getByRole('img', { name: 'Agent target', exact: true }).waitFor({ state: 'visible' });
   assert.equal(await closeTarget.getAttribute('title'), null);
-  await closeTarget.click();
+  await targetTab.focus();
+  await page.keyboard.press('Alt+Tab');
+  assert.ok(await closeTarget.evaluate(button => button === document.activeElement), 'Terminal close is the next keyboard stop');
+  await page.keyboard.press('Enter');
   await page.getByRole('alertdialog').waitFor();
   await page.keyboard.press('Escape');
   await page.getByRole('alertdialog').waitFor({ state: 'hidden' });
@@ -562,10 +570,15 @@ try {
     const { useTerminalStore, useFocusStore } = await import('/tab-runtime.js');
     useTerminalStore.getState().togglePin(useFocusStore.getState().targetSessionId);
   });
-  await targetTab.getByRole('button', { name: 'unpin' }).waitFor();
+  await closeTarget.and(page.getByRole('button', { name: /^Unpin tab / })).waitFor();
   const pinnedTargetIcon = targetTab.getByRole('img', { name: 'Agent target', exact: true });
   await pinnedTargetIcon.waitFor();
   assert.equal(await pinnedTargetIcon.getAttribute('title'), null);
+  await targetTab.focus();
+  await page.keyboard.press('Alt+Tab');
+  assert.ok(await closeTarget.evaluate(button => button === document.activeElement), 'Terminal unpin is the next keyboard stop');
+  await page.keyboard.press('Space');
+  await closeTarget.and(page.getByRole('button', { name: /^Close tab / })).waitFor();
   console.log('Terminal and SFTP appearance, keyboard actions, pinning, target icon hover, tab colors and terminal surfaces verified.');
 } finally {
   await browser?.close();

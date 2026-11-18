@@ -261,6 +261,25 @@ describe('AiComposerSeat interactions', () => {
     clock.mockRestore();
   });
 
+  it('opens AI settings from the keyboard when the Ask Assistant has no model', async () => {
+    const user = userEvent.setup();
+    const { providers, defaultProviderId } = useAiSettingsStore.getState();
+    const { settingsDialogOpen, activeSettingsSection } = useAppStore.getState();
+    useAiSettingsStore.setState({ providers: [], defaultProviderId: undefined });
+    useAppStore.getState().setSettingsDialogOpen(false);
+    try {
+      render(<AiComposerModelSelector onConfigureModel={() => useAppStore.getState().openSettings('ai')} />);
+      const configure = screen.getByRole('button', { name: 'Configure model' });
+      await user.tab();
+      expect(configure).toHaveFocus();
+      await user.keyboard('{Enter}');
+      expect(useAppStore.getState()).toMatchObject({ settingsDialogOpen: true, activeSettingsSection: 'ai' });
+    } finally {
+      useAiSettingsStore.setState({ providers, defaultProviderId });
+      useAppStore.setState({ settingsDialogOpen, activeSettingsSection });
+    }
+  });
+
   it('selects persisted provider profiles and supported reasoning effort', async () => {
     const user = userEvent.setup();
     const deepseek = {

@@ -99,7 +99,7 @@ function submitDraft(focus: boolean) {
 }
 
 async function confirmTabClose(id: string) {
-  const button = document.querySelector<HTMLButtonElement>(`[data-session-tab="${id}"] button[aria-label="close"]`);
+  const button = document.querySelector<HTMLButtonElement>(`[data-session-tab="${id}"] + [data-slot="session-tab-action"]`);
   assert(button, 'Production close button is missing');
   flushSync(() => button.click());
   await eventually(() => !!document.querySelector('[role="alertdialog"]'), 'Close confirmation is missing');
