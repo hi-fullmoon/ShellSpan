@@ -53,33 +53,44 @@ const ChevronIcon: React.FC = () => (
   </svg>
 );
 
-interface BreadcrumbSegmentProps {
-  segment: PathSegment;
+interface BreadcrumbSegmentProps extends PathSegment {
+  isRoot?: boolean;
   onNavigate: (path: string) => void;
 }
 
-const BreadcrumbSegment: React.FC<BreadcrumbSegmentProps> = ({ segment, onNavigate }) => (
-  <>
-    <ChevronIcon />
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={(event) => navigateFromButton(event, segment.path, onNavigate)}
-            onDoubleClick={(event) => event.stopPropagation()}
-            className="h-6 px-1 text-muted-foreground hover:text-app-text [&_svg]:size-3"
-          />
-        }
+const BreadcrumbSegment: React.FC<BreadcrumbSegmentProps> = ({ name, path, isRoot, onNavigate }) => {
+  const labelRef = useRef<HTMLSpanElement>(null);
+
+  return (
+    <>
+      {!isRoot && <ChevronIcon />}
+      <Tooltip
+        onOpenChange={(open, details) => {
+          const label = labelRef.current;
+          if (open && (!label || label.scrollWidth <= label.clientWidth)) {
+            details.cancel();
+          }
+        }}
       >
-        <FolderIcon data-icon="inline-start" className="text-app-primary" />
-        <span className="max-w-[200px] truncate leading-none">{segment.name}</span>
-      </TooltipTrigger>
-      <TooltipContent>{segment.name}</TooltipContent>
-    </Tooltip>
-  </>
-);
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(event) => navigateFromButton(event, path, onNavigate)}
+              onDoubleClick={(event) => event.stopPropagation()}
+              className={cn('h-6 px-1 text-muted-foreground hover:text-app-text', !isRoot && '[&_svg]:size-3')}
+            />
+          }
+        >
+          {!isRoot && <FolderIcon data-icon="inline-start" className="text-app-primary" />}
+          <span ref={labelRef} className="max-w-[200px] truncate leading-none">{name}</span>
+        </TooltipTrigger>
+        <TooltipContent>{name}</TooltipContent>
+      </Tooltip>
+    </>
+  );
+};
 
 export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate, pathKind = 'remote', className }) => {
   const { t } = useI18n();
@@ -202,32 +213,17 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate
         />
       ) : (
         <>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={(event) => navigateFromButton(event, rootPath, onNavigate)}
-                  onDoubleClick={(event) => event.stopPropagation()}
-                  className="h-6 gap-1 px-1 text-muted-foreground hover:text-app-text"
-                />
-              }
-            >
-              <span className="truncate max-w-[200px] leading-none">{rootLabel}</span>
-            </TooltipTrigger>
-            <TooltipContent>{rootLabel}</TooltipContent>
-          </Tooltip>
+          <BreadcrumbSegment key={rootPath} name={rootLabel} path={rootPath} isRoot onNavigate={onNavigate} />
           {!isRoot && (
             <>
               {!currentSegment ? (
                 segments.map((segment) => (
-                  <BreadcrumbSegment key={segment.path} segment={segment} onNavigate={onNavigate} />
+                  <BreadcrumbSegment key={segment.path} {...segment} onNavigate={onNavigate} />
                 ))
               ) : (
                 <>
                   {leadingSegments.map((segment) => (
-                    <BreadcrumbSegment key={segment.path} segment={segment} onNavigate={onNavigate} />
+                    <BreadcrumbSegment key={segment.path} {...segment} onNavigate={onNavigate} />
                   ))}
                   <ChevronIcon />
                   <DropdownMenu>
@@ -259,7 +255,7 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate
                       </DropdownMenuGroup>
                     </DropdownMenuContent>
                   </DropdownMenu>
-                  <BreadcrumbSegment segment={currentSegment} onNavigate={onNavigate} />
+                  <BreadcrumbSegment key={currentSegment.path} {...currentSegment} onNavigate={onNavigate} />
                 </>
               )}
             </>
