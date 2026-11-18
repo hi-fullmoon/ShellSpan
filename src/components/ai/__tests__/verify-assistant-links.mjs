@@ -145,16 +145,30 @@ try {
   });
   const remoteMenu = remotePage.getByRole('menu', { name: '文件操作' });
   const remotePath = remotePage.getByRole('link', { name: '/root', exact: true });
-  for (const width of [1000, 320]) {
-    await remotePage.setViewportSize({ width, height: 440 });
-    await remotePath.click({ button: 'right' });
-    await remoteMenu.waitFor();
-    assert.deepEqual(await remoteMenu.getByRole('menuitem').allTextContents(), ['复制路径', '在 SFTP 中定位']);
-    const box = await remoteMenu.boundingBox();
-    assert(box && box.x >= 0 && box.x + box.width <= width + 1, 'remote menu fits in the viewport');
-    await remoteMenu.getByRole('menuitem', { name: '复制路径' }).click();
-    assert.equal(await remotePage.evaluate(() => navigator.clipboard.readText()), '/root');
-    await remoteMenu.waitFor({ state: 'hidden' });
+  for (const [locale, name, copy, reveal] of [
+    ['en-US', 'File actions', 'Copy path', 'Show in SFTP'],
+    ['zh-CN', '文件操作', '复制路径', '在 SFTP 中定位'],
+  ]) {
+    await remotePage.evaluate(async locale => {
+      const { initI18n } = await import('/src/locales/index.ts');
+      const { useAppStore } = await import('/src/stores/appStore.ts');
+      await initI18n(locale);
+      useAppStore.setState({ locale });
+    }, locale);
+    const menu = remotePage.getByRole('menu', { name });
+    for (const width of [1000, 320]) {
+      await remotePage.setViewportSize({ width, height: 440 });
+      await remotePath.click({ button: 'right' });
+      await menu.waitFor();
+      assert.deepEqual(await menu.getByRole('menuitem').allTextContents(), [copy, reveal]);
+      const box = await menu.boundingBox();
+      assert(box && box.x >= 0 && box.x + box.width <= width + 1, 'remote menu fits in the viewport');
+      assert(await menu.evaluate(element => element.offsetWidth <= 160 && element.scrollWidth <= element.clientWidth),
+        'the two remote actions fit in a compact menu');
+      await menu.getByRole('menuitem', { name: copy }).click();
+      assert.equal(await remotePage.evaluate(() => navigator.clipboard.readText()), '/root');
+      await menu.waitFor({ state: 'hidden' });
+    }
   }
   const remoteLink = remotePage.getByRole('link', { name: '服务器根目录' });
   await remoteLink.focus();

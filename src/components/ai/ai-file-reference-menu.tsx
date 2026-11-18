@@ -144,7 +144,7 @@ export function AiFileReferenceMenu({
   return (
     <ContextMenu open={open} onOpenChange={setOpen}>
       <ContextMenuTrigger render={<Tag {...triggerProps}>{children}</Tag>} />
-      <ContextMenuContent className="file-action-menu w-56 min-w-0" aria-label={t('ai.path.menu')}>
+      <ContextMenuContent className={cn('file-action-menu', !remote && 'w-56 min-w-0')} aria-label={t('ai.path.menu')}>
         {remote ? (
           <ContextMenuGroup>
             {copyPathItem}
