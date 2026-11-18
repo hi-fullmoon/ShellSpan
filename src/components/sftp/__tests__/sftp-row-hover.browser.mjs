@@ -62,6 +62,90 @@ const waitForColor = async (row, alpha) => {
   }), alpha);
 };
 
+function tabKey(engineName) {
+  // macOS WebKit uses Option+Tab to include buttons in keyboard traversal by default.
+  return engineName === 'webkit' && process.platform === 'darwin' ? 'Alt+Tab' : 'Tab';
+}
+
+async function assertFocusOutline(target, theme, description) {
+  const expectedColor = theme === 'dark' ? 'rgb(179, 179, 184)' : 'rgb(40, 40, 40)';
+  const outline = await target.evaluate(async (element) => {
+    getComputedStyle(element).outlineWidth;
+    await Promise.allSettled(element.getAnimations().map(animation => animation.finished));
+    const { outlineStyle, outlineWidth, outlineOffset, outlineColor } = getComputedStyle(element);
+    return [outlineStyle, outlineWidth, outlineOffset, outlineColor];
+  });
+  assert.deepEqual(outline, ['solid', '1px', '-1px', expectedColor], description);
+}
+
+async function assertTabFocusColors(page, engineName, locale, width) {
+  await page.setViewportSize({ width, height: 480 });
+  const navigation = page.getByRole('navigation').getByRole('button');
+  const headerViewport = page.getByTestId('sftp-file-list-header-viewport');
+  const headers = headerViewport.getByRole('button');
+  const list = page.getByRole('listbox');
+  const focusableButtons = [...await navigation.all(), ...await headers.all()];
+  const tab = tabKey(engineName);
+
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    await list.evaluate(element => { element.scrollLeft = 0; });
+    await focusableButtons[1].focus();
+    await page.keyboard.press(`Shift+${tab}`);
+    for (const button of focusableButtons) {
+      assert.ok(await button.evaluate(element => element.matches(':focus-visible')), 'Tab visits each navigation and sort button');
+      await assertFocusOutline(button, theme, `${theme}: ${await button.innerText()} uses the shared thin outline`);
+      await page.keyboard.press(tab);
+    }
+    assert.ok(await list.evaluate(element => element === document.activeElement), 'The scroll viewport is the next keyboard stop');
+    await assertFocusOutline(list, theme, 'The file list uses the shared thin outline');
+    const headerOffset = await headerViewport.evaluate(element => element.scrollLeft);
+    if (width === 380) assert.ok(headerOffset > 0, 'Tab brings offscreen sort columns into view');
+    await page.waitForFunction(offset => document.querySelector('[role="listbox"]').scrollLeft === offset, headerOffset);
+    await page.screenshot({ path: join(artifacts, `${engineName}-${locale}-${theme}-${width}-keyboard-focus.png`) });
+    await page.keyboard.press(tab);
+    assert.ok(await list.getByRole('checkbox').first().evaluate(element => element === document.activeElement),
+      'Tab advances directly from the scroll viewport to the first actionable checkbox');
+  }
+}
+
+async function assertFileListFocus(page, row, selected, locale) {
+  await page.setViewportSize({ width: 960, height: 480 });
+  const nav = page.getByRole('navigation');
+  const list = page.getByRole('listbox');
+  const terminalTab = nav.getByRole('button', { name: locale === 'en-US' ? 'Terminal' : '终端' });
+  const sftpTab = nav.getByRole('button', { name: 'SFTP' });
+  const dragHandle = row.getByRole('button');
+  const lastColumn = page.getByTestId('sftp-file-list-header-viewport').getByRole('button').last();
+
+  await lastColumn.focus();
+  await page.keyboard.press('Tab');
+  assert.ok(await list.evaluate(element => element === document.activeElement), 'Tab focuses the file list');
+  assert.equal(await dragHandle.evaluate(element => element.tabIndex), -1, 'Pointer-only draggable rows are skipped by Tab');
+
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await list.getAttribute('aria-activedescendant'), await page.getByRole('option').first().getAttribute('id'), 'Keyboard navigation announces the parent row');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await list.getAttribute('aria-activedescendant'), await selected.getAttribute('id'), 'Keyboard navigation announces the focused file');
+  assert.notEqual(await selected.evaluate(element => getComputedStyle(element).boxShadow), 'none', 'Arrow navigation highlights the focused row');
+
+  await terminalTab.click();
+  await list.waitFor({ state: 'hidden' });
+  await sftpTab.click();
+  await list.waitFor();
+  assert.equal(await list.getAttribute('aria-activedescendant'), null, 'Changing sections clears the active option');
+  assert.equal(await selected.evaluate(element => getComputedStyle(element).boxShadow), 'none', 'Returning to SFTP leaves no stale row focus ring');
+  assert.equal(await selected.getAttribute('aria-selected'), 'true', 'Switching sections preserves selection');
+  await assertSelectedBorders(page, [selected, row], 'After switching sections');
+
+  await row.click({ position: { x: 80, y: 16 } });
+  assert.ok(await list.evaluate(element => element === document.activeElement), 'A click leaves keyboard focus on the listbox');
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await list.getAttribute('aria-activedescendant'), await page.getByRole('option').first().getAttribute('id'),
+    'Keyboard navigation announces the active option after a pointer click');
+}
+
 async function assertFilterBorders(page, width, locale) {
   await page.setViewportSize({ width, height: 480 });
   await page.getByRole('button', { name: locale === 'en-US' ? 'Show Filter' : '显示筛选' }).click();
@@ -139,9 +223,6 @@ try {
         }
         await row.click({ position: { x: 80, y: 16 } });
         await waitForColor(row, '0.1');
-        // The draggable row receives native focus on click; inspect selection
-        // borders after blur so the browser's focus outline is measured separately.
-        await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
         for (const theme of ['light', 'dark']) {
           await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
           await row.locator('[data-sftp-file-cell]').first().evaluate(cell => {
@@ -150,6 +231,8 @@ try {
           });
           await assertSelectedBorders(page, [selected, row], `${theme}: adjacent selected rows share one divider`);
         }
+        for (const width of [960, 380]) await assertTabFocusColors(page, engine.name(), locale, width);
+        await assertFileListFocus(page, row, selected, locale);
         await page.evaluate(async (root) => {
           document.documentElement.dataset.theme = 'light';
           const { mountLocalPane } = await import('/src/components/sftp/__tests__/sftp-row-hover.browser.tsx');

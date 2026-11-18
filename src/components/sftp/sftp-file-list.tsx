@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
@@ -94,10 +94,11 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
   const presentationSide: SftpSide = isLocal ? 'local' : 'remote';
   const parentRef = useRef<HTMLDivElement>(null);
   const headerViewportRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
   const [sortColumn, setSortColumn] = useState<SftpFileListSortColumn>('name');
   const [sortDirection, setSortDirection] = useState<SftpFileListSortDirection>('default');
   const lastSelectedIndexRef = useRef<number | undefined>(undefined);
-  const [focusedIndex, setFocusedIndex] = useState<number | undefined>(undefined);
+  const [focusedPath, setFocusedPath] = useState<string | null | undefined>(undefined);
   const selectedPathsRef = useRef(selectedPaths);
   selectedPathsRef.current = selectedPaths;
 
@@ -107,10 +108,9 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
     lastSelectedIndexRef.current = undefined;
   }, [currentPath, filterQuery]);
 
-  // Keyboard focus also indexes into the displayed rows, so drop it whenever
-  // the directory, filter, or sorting reshapes that listing.
+  // Start keyboard navigation afresh when the user changes the listing.
   useEffect(() => {
-    setFocusedIndex(undefined);
+    setFocusedPath(undefined);
   }, [currentPath, filterQuery, sortColumn, sortDirection]);
 
   const filteredEntries = useMemo(() => {
@@ -143,12 +143,24 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
     if (!contentViewport || !headerViewport) return;
 
     const syncHeaderScroll = (): void => {
-      headerViewport.scrollLeft = contentViewport.scrollLeft;
+      if (headerViewport.scrollLeft !== contentViewport.scrollLeft) {
+        headerViewport.scrollLeft = contentViewport.scrollLeft;
+      }
+    };
+    // Tabbing to an offscreen sort button can scroll the header independently.
+    const syncContentScroll = (): void => {
+      if (contentViewport.scrollLeft !== headerViewport.scrollLeft) {
+        contentViewport.scrollLeft = headerViewport.scrollLeft;
+      }
     };
 
     syncHeaderScroll();
     contentViewport.addEventListener('scroll', syncHeaderScroll, { passive: true });
-    return () => contentViewport.removeEventListener('scroll', syncHeaderScroll);
+    headerViewport.addEventListener('scroll', syncContentScroll, { passive: true });
+    return () => {
+      contentViewport.removeEventListener('scroll', syncHeaderScroll);
+      headerViewport.removeEventListener('scroll', syncContentScroll);
+    };
   }, []);
 
   const entryLookup = useMemo(() => {
@@ -158,6 +170,10 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
     });
     return lookup;
   }, [sortedEntries]);
+
+  const focusedEntry = typeof focusedPath === 'string' ? entryLookup.get(focusedPath) : undefined;
+  const focusedIndex = focusedEntry ? focusedEntry.index + Number(showParent)
+    : showParent && focusedPath === null ? 0 : undefined;
 
   const handledReveal = useRef<SftpFileListProps['revealRequest']>(undefined);
   useEffect(() => {
@@ -262,24 +278,19 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
   // context only registers a PointerSensor, so keyboard focus never starts a
   // drag.
   const handleListKeyDown = useCallback(
-    (e: React.KeyboardEvent): void => {
+    (e: React.KeyboardEvent<HTMLDivElement>): void => {
       if (displayCount === 0) return;
       const parentOffset = showParent ? 1 : 0;
-      const focusedEntryIndex =
-        focusedIndex === undefined ? undefined : focusedIndex - parentOffset;
-      const focusedEntry =
-        focusedEntryIndex === undefined || focusedEntryIndex < 0
-          ? undefined
-          : sortedEntries[focusedEntryIndex];
-
       switch (e.key) {
         case 'ArrowDown':
         case 'ArrowUp': {
           e.preventDefault();
+          if (e.target !== e.currentTarget) e.currentTarget.focus({ preventScroll: true });
           const delta = e.key === 'ArrowDown' ? 1 : -1;
           const base = focusedIndex ?? (delta > 0 ? -1 : displayCount);
           const next = Math.min(Math.max(base + delta, 0), displayCount - 1);
-          setFocusedIndex(next);
+          const entry = sortedEntries[next - parentOffset];
+          setFocusedPath(entry?.path ?? null);
           virtualizer.scrollToIndex(next, { align: 'auto' });
           if (e.shiftKey) {
             const entryIndex = next - parentOffset;
@@ -288,20 +299,20 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
           break;
         }
         case 'Enter': {
-          if (focusedIndex === undefined) break;
+          if (e.target !== e.currentTarget || focusedIndex === undefined) break;
           e.preventDefault();
           // The parent row has no entry; Enter mirrors its double-click.
           if (showParent && focusedIndex === 0) {
             handleParentDirectory();
           } else if (focusedEntry) {
-            onDoubleClick(focusedEntry);
+            onDoubleClick(focusedEntry.entry);
           }
           break;
         }
         case ' ': {
-          if (!focusedEntry) break;
+          if (e.target !== e.currentTarget || !focusedEntry) break;
           e.preventDefault();
-          handleSelect(focusedEntry, { shiftKey: false });
+          handleSelect(focusedEntry.entry, { shiftKey: false });
           break;
         }
         case 'Escape': {
@@ -316,6 +327,7 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
       displayCount,
       showParent,
       focusedIndex,
+      focusedEntry,
       sortedEntries,
       virtualizer,
       extendSelectionToIndex,
@@ -328,6 +340,7 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
   );
 
   const virtualItems = virtualizer.getVirtualItems();
+  const activeOption = virtualItems.find((item) => item.index === focusedIndex);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -344,13 +357,19 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
         />
       </div>
       <ScrollArea
-        className="relative flex-1 outline-none"
+        className="relative flex-1"
         viewportRef={parentRef}
+        viewportRender={
+          <div
+            role="listbox"
+            tabIndex={0}
+            aria-multiselectable={batchMode || undefined}
+            aria-activedescendant={activeOption && `${listId}-${activeOption.index}`}
+            onKeyDown={handleListKeyDown}
+            onBlur={() => setFocusedPath(undefined)}
+          />
+        }
         horizontal
-        role="listbox"
-        aria-multiselectable={batchMode || undefined}
-        tabIndex={0}
-        onKeyDown={handleListKeyDown}
         onContextMenu={(e) => {
           e.preventDefault();
           onBlankContextMenu?.(e);
@@ -378,6 +397,7 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
               return (
                 <div
                   key={isParent ? '..' : entry!.path}
+                  id={`${listId}-${virtualItem.index}`}
                   role="option"
                   aria-selected={isParent ? false : selectedPaths.has(entry!.path)}
                   className={cn(

@@ -210,6 +210,8 @@ export const SftpFileListRow = React.memo(function SftpFileListRow({
     id: `sftp-row-${side}-${entry.path}`,
     data: dragPayload,
     disabled: false,
+    // The file list handles keyboard navigation. Rows only need pointer drag.
+    attributes: { tabIndex: -1 },
   });
 
   const handleClick = (e: React.MouseEvent): void => {
@@ -263,7 +265,7 @@ export const SftpFileListRow = React.memo(function SftpFileListRow({
         // suppresses that autoscroll without affecting click, drag, or focus.
         if (e.button === 0) {
           e.preventDefault();
-          e.currentTarget.focus();
+          e.currentTarget.closest<HTMLElement>('[role="listbox"]')?.focus({ preventScroll: true });
         }
       }}
       onClick={handleClick}
