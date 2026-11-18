@@ -306,7 +306,7 @@ export function RemoteHealthSection(): React.JSX.Element {
                 </p>
                 {entry.lastResult.error && (
                   <details>
-                    <summary className="cursor-pointer text-xs">{t('common.errorDetails')}</summary>
+                    <summary className="cursor-default text-xs">{t('common.errorDetails')}</summary>
                     <code className="mt-1 block break-all text-xs">{entry.lastResult.error}</code>
                   </details>
                 )}

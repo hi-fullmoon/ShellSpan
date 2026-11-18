@@ -228,7 +228,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
                         <Badge
                           render={<button type="button" />}
                           variant="secondary"
-                          className="cursor-pointer"
+                          className="cursor-default"
                           aria-label={modelsExpanded ? t('settings.ai.collapseModels') : t('settings.ai.showMoreModels', { count: routeModels.length - 3 })}
                           title={modelsExpanded ? t('settings.ai.collapseModels') : t('settings.ai.showMoreModels', { count: routeModels.length - 3 })}
                           aria-expanded={modelsExpanded}

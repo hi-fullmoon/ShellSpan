@@ -68,6 +68,11 @@ export async function show(locale: Locale, theme: 'light' | 'dark') {
   await document.fonts.ready;
 }
 
-export function showToast(variant: 'success' | 'error') {
-  return useToastStore.getState().addToast(t('agent.availability.needsTerminal'), variant, Infinity);
+export function showToast(variant: 'success' | 'error', withAction = false) {
+  const store = useToastStore.getState();
+  const id = store.addToast(t('agent.availability.needsTerminal'), variant, Infinity, withAction ? {
+    label: t('common.close'),
+    onClick: () => store.removeToast(id),
+  } : undefined);
+  return id;
 }

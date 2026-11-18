@@ -445,7 +445,7 @@ export const MonitorPanel: React.FC = () => {
                   <AlertDescription>
                     <p>{t('common.loadFailedDescription')}</p>
                     <details className="mt-1">
-                      <summary className="cursor-pointer text-xs">
+                      <summary className="cursor-default text-xs">
                         {t('common.errorDetails')}
                       </summary>
                       <code className="mt-1 block break-all text-xs">{error}</code>

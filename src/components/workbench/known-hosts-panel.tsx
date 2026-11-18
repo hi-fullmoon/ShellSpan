@@ -149,7 +149,7 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
             <AlertDescription>
               <p>{t('common.loadFailedDescription')}</p>
               <details className="mt-1">
-                <summary className="cursor-pointer text-xs">{t('common.errorDetails')}</summary>
+                <summary className="cursor-default text-xs">{t('common.errorDetails')}</summary>
                 <code className="mt-1 block break-all text-xs">{error}</code>
               </details>
             </AlertDescription>

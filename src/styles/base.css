@@ -9,6 +9,13 @@
 
 @custom-variant dark (&:is([data-theme="dark"] *));
 
+/* Match the app cursor on xterm links and scrollbar arrows. */
+:root .xterm.xterm-cursor-pointer:not(:where(.column-select.focus)),
+:root .xterm .xterm-cursor-pointer,
+:root .xterm .xterm-scrollable-element > .scrollbar > .scra {
+  cursor: default;
+}
+
 .xterm[data-no-scrollback] .xterm-scrollable-element > .scrollbar.vertical {
   opacity: 0;
   pointer-events: none;
@@ -598,6 +605,9 @@ textarea,
   html {
     @apply font-sans;
   }
+  a:any-link {
+    cursor: default;
+  }
 }
 
 /* Global toast: antd-message style filled status icons (solid colored disc, glyph cut out in surface color) */
@@ -607,6 +617,10 @@ textarea,
 
 .toast-icon-filled :is(path, line, polyline) {
   stroke: var(--popover);
+}
+
+[data-sonner-toast][data-styled='true'] :is([data-button], [data-close-button]):not([data-disabled='true']) {
+  cursor: default;
 }
 
 /* Toast enter animation: slide in horizontally from the edge matching data-x-position.

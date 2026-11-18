@@ -23,7 +23,7 @@ const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
   cacheDir: join(artifacts, 'vite-cache'),
   resolve: { alias: { '@': join(root, 'src') } }, esbuild: { jsx: 'automatic' },
-  optimizeDeps: { include: ['react', 'react-dom/client'] },
+  optimizeDeps: { entries: ['src/components/sftp/__tests__/sftp-row-hover.browser.tsx'], include: ['react', 'react-dom/client'] },
   plugins: [tailwindcss()], server: { host: '127.0.0.1', port: 0, hmr: false },
 });
 server.middlewares.use('/__sftp_row_hover', (_request, response) => {
@@ -79,6 +79,7 @@ try {
         const row = page.getByTestId('sftp-row').filter({ hasText: 'package.json' });
         const selected = page.getByTestId('sftp-row').filter({ hasText: 'AGENTS.md' });
         const parent = page.getByTestId('sftp-parent-row').last();
+        const sortByName = page.getByTestId('sftp-file-list-header-viewport').getByRole('button').first();
         await row.waitFor();
         for (const theme of ['light', 'dark']) {
           await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
@@ -88,6 +89,8 @@ try {
           });
           for (const width of [960, 380]) {
             await page.setViewportSize({ width, height: 480 });
+            await sortByName.hover();
+            assert.equal(await sortByName.evaluate(element => getComputedStyle(element).cursor), 'default', 'Sortable column uses the default cursor');
             await page.mouse.move(width - 1, 450);
             const initial = await colors(row);
             const selectedColor = await colors(selected);

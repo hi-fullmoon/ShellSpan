@@ -423,7 +423,7 @@ function ArtifactNodeView({
       </span>}
       <button
         type="button"
-        className="ai-produced-file m-0 flex min-w-0 max-w-full cursor-pointer items-center justify-self-start gap-2 overflow-hidden px-2 py-0"
+        className="ai-produced-file m-0 flex min-w-0 max-w-full cursor-default items-center justify-self-start gap-2 overflow-hidden px-2 py-0"
         data-ai-node-action=""
         aria-label={t('ai.workspace.details.openArtifact', { artifact: title })}
         onClick={() => onOpenArtifact?.(node)}

@@ -12,10 +12,10 @@ export const AI_CONTENT_CODE_CLASS =
   'ai-content-code m-0 min-w-0 max-w-full px-3.5 py-2';
 
 export const AI_DISCLOSURE_ROW_CLASS =
-  'ai-disclosure-row relative flex h-auto min-h-6 w-full min-w-0 cursor-pointer items-center justify-start gap-0 overflow-hidden p-0 text-left';
+  'ai-disclosure-row relative flex h-auto min-h-6 w-full min-w-0 cursor-default items-center justify-start gap-0 overflow-hidden p-0 text-left';
 
 export const AI_TOOL_ROW_CLASS =
-  'ai-tool-row relative flex h-auto min-h-6 w-full min-w-0 cursor-pointer items-center justify-start gap-0 overflow-hidden p-0 text-left';
+  'ai-tool-row relative flex h-auto min-h-6 w-full min-w-0 cursor-default items-center justify-start gap-0 overflow-hidden p-0 text-left';
 
 export const AI_DISCLOSURE_LEADING_CLASS =
   'ai-disclosure-leading relative mr-1 inline-flex size-4 shrink-0 items-center justify-center';

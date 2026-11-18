@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { webkit } from 'playwright';
 import { createServer } from 'vite';
+import tailwindcss from '@tailwindcss/vite';
 
 // Run with: node src/components/ai/__tests__/verify-assistant-links.mjs
 // Exercise real links and popup navigation without replacing browser or IPC APIs.
@@ -13,9 +14,9 @@ const server = await createServer({
   logLevel: 'error',
   resolve: { alias: { '@': `${root}src` } },
   esbuild: { jsx: 'automatic' },
-  optimizeDeps: { include: ['react', 'react-dom/client'] },
+  optimizeDeps: { entries: ['src/components/ai/assistant-message-content.tsx'], include: ['react', 'react-dom/client'] },
   server: { host: '127.0.0.1', port: 0 },
-  plugins: [{
+  plugins: [tailwindcss(), {
     name: 'assistant-links-check',
     configureServer(vite) {
       vite.middlewares.use((request, response, next) => {
@@ -37,6 +38,7 @@ try {
   const page = await context.newPage();
   await page.goto(origin);
   await page.evaluate(async (origin) => {
+    await import('/src/styles/base.css');
     const { default: React } = await import('/node_modules/.vite/deps/react.js');
     const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js');
     const { AssistantMessageContent } = await import('/src/components/ai/assistant-message-content.tsx');
@@ -50,6 +52,8 @@ try {
   }, origin);
   const link = page.getByRole('link', { name: 'Open preview' });
   await link.waitFor();
+  await link.hover();
+  assert.equal(await link.evaluate(element => getComputedStyle(element).cursor), 'default', 'Markdown links use the default cursor');
   assert.equal(await link.getAttribute('href'), `${origin}/destination`);
   for (const modifiers of [[], ['Meta']]) {
     const popupPromise = context.waitForEvent('page');

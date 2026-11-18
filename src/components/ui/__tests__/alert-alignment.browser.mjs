@@ -94,6 +94,15 @@ try {
         assert.ok(Math.abs(delta) < 0.1, `${engine}/${theme}/${locale}/${width}: after reconnect first-line offset ${delta}`);
         await availability.screenshot({ path: `/tmp/shellspan-availability-after-reconnect-${engine}-${theme}-${locale}-${width}.png` });
       }
+      const actionableToast = page.getByTestId(await page.evaluate(async () => {
+        const entry = await import('/src/components/ui/__tests__/alert-alignment.browser-entry.tsx');
+        return entry.showToast('success', true);
+      }));
+      const action = actionableToast.getByRole('button');
+      await action.hover();
+      assert.equal(await action.evaluate(element => getComputedStyle(element).cursor), 'default', 'Toast action uses the default cursor');
+      await action.click();
+      await actionableToast.waitFor({ state: 'detached' });
       for (const variant of ['success', 'error']) {
         const id = await page.evaluate(async variant => {
           const entry = await import('/src/components/ui/__tests__/alert-alignment.browser-entry.tsx');

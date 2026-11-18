@@ -77,7 +77,7 @@ export const UserProfileDialog: React.FC<UserProfileDialogProps> = ({
             aria-label={t('settings.profile.changeAvatar')}
             title={t('settings.profile.changeAvatar')}
             onClick={() => void handlePickAvatar()}
-            className="relative block cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
+            className="relative block cursor-default rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <UserAvatar
               avatar={avatar}
@@ -94,7 +94,7 @@ export const UserProfileDialog: React.FC<UserProfileDialogProps> = ({
           {avatar && (
             <button
               type="button"
-              className="-mt-1 cursor-pointer text-xs text-muted-foreground/80 underline-offset-4 outline-none hover:text-destructive hover:underline focus-visible:text-destructive focus-visible:underline"
+              className="-mt-1 cursor-default text-xs text-muted-foreground/80 underline-offset-4 outline-none hover:text-destructive hover:underline focus-visible:text-destructive focus-visible:underline"
               onClick={() => setAvatar('')}
             >
               {t('settings.profile.removeAvatar')}

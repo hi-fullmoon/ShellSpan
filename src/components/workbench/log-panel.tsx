@@ -225,7 +225,7 @@ const LogLine: React.FC<LogLineProps> = ({
       onClick={onSelect}
       onDoubleClick={onDoubleClick}
       className={cn(
-        'relative grid w-full cursor-pointer grid-cols-[8.75rem_4.5rem_minmax(0,1fr)] items-start gap-2 px-3 py-1.5 text-left font-mono text-xs transition-colors before:absolute before:inset-y-0 before:left-0 before:w-0.5 hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-app-primary/50 @min-[760px]:grid-cols-[8.75rem_4.5rem_8rem_minmax(0,1fr)]',
+        'relative grid w-full cursor-default grid-cols-[8.75rem_4.5rem_minmax(0,1fr)] items-start gap-2 px-3 py-1.5 text-left font-mono text-xs transition-colors before:absolute before:inset-y-0 before:left-0 before:w-0.5 hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-app-primary/50 @min-[760px]:grid-cols-[8.75rem_4.5rem_8rem_minmax(0,1fr)]',
         selected && 'bg-muted/80',
         getLevelRailClass(line.level),
       )}

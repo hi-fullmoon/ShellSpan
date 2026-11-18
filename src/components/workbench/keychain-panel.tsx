@@ -543,7 +543,7 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ onFileContent }) => {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       className={cn(
-        'flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed px-4 py-5 text-center transition-colors',
+        'flex cursor-default flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed px-4 py-5 text-center transition-colors',
         isDragging
           ? 'border-app-primary bg-app-primary/5 text-app-primary'
           : 'border-app-border bg-app-surface-muted text-muted-foreground hover:border-app-primary/50 hover:text-app-text',

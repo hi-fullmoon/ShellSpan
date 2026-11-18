@@ -82,7 +82,7 @@ try {
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/`);
-  await page.evaluate(async ({ output, identity }) => {
+  await page.evaluate(async (identity) => {
     const runtime = await import('/experience-runtime.js');
     window.runtime = runtime;
     window.observeReboundOutput = (controller) => controller.whenOutputReady().catch((error) => {
@@ -101,7 +101,6 @@ try {
     document.getElementById('terminal').className = TERMINAL_CONTAINER_CLASS;
     terminal.open(document.getElementById('terminal'));
     fit.fit();
-    await new Promise((resolve) => terminal.write(output.replace(/\n/g, '\r\n'), resolve));
     window.terminal = terminal;
     window.addon = addon;
     window.fit = fit;
@@ -113,7 +112,26 @@ try {
       addon,
       onClose: () => { controls.render(null); terminal.focus(); },
     }));
-  }, { output, identity });
+  }, identity);
+
+  // Exercise an actual xterm hyperlink, then plain terminal text.
+  const linkPosition = await page.evaluate(async () => {
+    const terminal = window.terminal;
+    const url = new URL('/package.json', location.href).href;
+    await new Promise(resolve => terminal.write(`\x1b]8;;${url}\x1b\\package.json\x1b]8;;\x1b\\`, resolve));
+    const rect = terminal.element.querySelector('.xterm-screen').getBoundingClientRect();
+    return { x: rect.x + 1.5 * rect.width / terminal.cols, y: rect.y + 0.5 * rect.height / terminal.rows };
+  });
+  const terminalSurface = page.locator('#terminal .xterm-screen');
+  await page.mouse.move(linkPosition.x, linkPosition.y);
+  await page.locator('#terminal .xterm-cursor-pointer').waitFor();
+  assert.equal(await terminalSurface.evaluate(element => getComputedStyle(element).cursor), 'default', 'Terminal links use the default cursor');
+  await page.mouse.move(0, 400);
+  await page.evaluate(async (output) => {
+    window.terminal.reset();
+    await new Promise(resolve => window.terminal.write(output.replace(/\n/g, '\r\n'), resolve));
+  }, output);
+  assert.equal(await terminalSurface.evaluate(element => getComputedStyle(element).cursor), 'text', 'Plain terminal text retains the text cursor');
 
   const search = page.getByRole('textbox', { name: '搜索...' });
   await search.fill('terminal');
@@ -1136,8 +1154,13 @@ try {
       await tabBar.screenshot({ animations: 'disabled',
         path: `${root}artifacts/tests/terminal-tab-actions/overflow-hover-${theme}.png` });
       const hoverStyle = await actions.evaluate(element => {
-        const style = getComputedStyle(element);
-        return { actual: style.backgroundColor, expected: style.getPropertyValue('--app-border').trim() };
+        const reference = document.createElement('span');
+        reference.style.backgroundColor = 'var(--accent)';
+        element.append(reference);
+        const actual = getComputedStyle(element).backgroundColor;
+        const expected = getComputedStyle(reference).backgroundColor;
+        reference.remove();
+        return { actual, expected };
       });
       assert.equal(hoverStyle.actual, hoverStyle.expected, `The actions button must show a hover fill with overflow in ${theme} mode`);
       assert.deepEqual(await actions.boundingBox(), fixedButton, 'Hover must not move the actions button');

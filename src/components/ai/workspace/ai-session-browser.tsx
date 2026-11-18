@@ -169,7 +169,7 @@ function SessionRow({
     >
       <button
         type="button"
-        className="ai-session-row-main flex h-[34px] min-w-0 flex-1 cursor-pointer items-center gap-0 overflow-hidden px-2"
+        className="ai-session-row-main flex h-[34px] min-w-0 flex-1 cursor-default items-center gap-0 overflow-hidden px-2"
         onClick={onOpen}
         aria-current={selected ? 'page' : undefined}
       >
@@ -187,7 +187,7 @@ function SessionRow({
                   render={(
                     <button
                       type="button"
-                      className="ai-session-row-menu mr-[3px] size-7 shrink-0 cursor-pointer items-center justify-center p-0"
+                      className="ai-session-row-menu mr-[3px] size-7 shrink-0 cursor-default items-center justify-center p-0"
                       aria-label={t('ai.workspace.sessions.actions', { title: summary.title })}
                       disabled={busy}
                     />

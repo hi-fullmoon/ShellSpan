@@ -51,7 +51,7 @@ const AppErrorFallback: React.FC<AppErrorFallbackProps> = ({
         </div>
         <div className="flex min-w-0 flex-col gap-3 px-4 py-3">
           <details className="text-xs text-app-text-soft">
-            <summary className="cursor-pointer select-none font-medium text-app-text">
+            <summary className="cursor-default select-none font-medium text-app-text">
               {t('app.errorBoundary.details')}
             </summary>
             <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-all rounded-md bg-app-surface-muted p-3 font-mono text-[11px] leading-4">
