@@ -77,7 +77,7 @@ export const UserProfileDialog: React.FC<UserProfileDialogProps> = ({
             aria-label={t('settings.profile.changeAvatar')}
             title={t('settings.profile.changeAvatar')}
             onClick={() => void handlePickAvatar()}
-            className="relative block cursor-default rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="relative block cursor-default rounded-full outline-none"
           >
             <UserAvatar
               avatar={avatar}

@@ -261,7 +261,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
         </DialogHeader>
 
         <div className="shrink-0 px-4 pb-4">
-          <InputGroup className="h-10 has-[[data-slot=input-group-control]:focus-visible]:ring-1">
+          <InputGroup className="h-10">
             <InputGroupInput
               type="search"
               aria-label={t('terminal.newSession.searchPlaceholder')}

@@ -66,7 +66,7 @@ export function AiFailedDraftRecovery({
         {failed.error.deliveryUnknown ? <span>{t('ai.workspace.messageUnconfirmed')}</span> : <Tooltip open={detailsOpen} onOpenChange={setDetailsOpen}>
           <TooltipTrigger data-ai-failed-details=""
             aria-describedby={detailsOpen ? detailsId : undefined}
-            render={<span tabIndex={0} className="cursor-help focus-visible:outline-none focus-visible:underline" />}>
+            render={<span tabIndex={0} className="cursor-help focus-visible:underline" />}>
             {t('ai.workspace.messageNotSent')}
           </TooltipTrigger>
           <TooltipContent id={detailsId} role="tooltip" className="max-h-40 max-w-[min(20rem,calc(100vw-2rem))] overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere]">
@@ -76,7 +76,7 @@ export function AiFailedDraftRecovery({
       </div>
       {showRetry && <AiNoticeAction
           data-ai-failed-retry=""
-          className="shrink-0 focus-visible:ring-0"
+          className="shrink-0"
           disabled={composerState?.phase === 'stopping' || (confirmationOnly
             ? checking || syncRecovery?.retrying : Boolean(failedDraftRetryBlockedReason))}
           aria-busy={confirmationOnly && checking || undefined}

@@ -69,22 +69,6 @@
   }
 }
 
-/* Read-only previews retain keyboard scrolling without a focus border. */
-:is(
-  .ai-tool-scroll-area [data-slot='scroll-area-viewport'],
-  .ai-details-root [data-slot='scroll-area-viewport'],
-  .ai-markdown-code-block .ai-code-block-pre,
-  .ai-content-code[tabindex],
-  .ai-detail-code-wrap > .ai-detail-code,
-  .ai-read-lines,
-  .ai-search-results,
-  .ai-web-content,
-  .ai-reasoning-viewport
-):focus-visible {
-  outline: none;
-  box-shadow: none;
-}
-
 .ai-tool-content-region > .ai-tool-copy-button {
   right: 14px;
 }

@@ -101,7 +101,7 @@ export function AiDocumentAttachments({ documents, pending = [], onRemove, onCan
       const chat = document.chatTitle !== undefined;
       const title = document.chatTitle ?? document.name;
       return <Dialog key={document.id}>
-      <Attachment size="sm" orientation={composer && !chat ? 'vertical' : 'horizontal'} className={chat ? 'ai-chat-reference' : composer ? 'ai-composer-file-card focus-within:ring-0' : 'max-w-64'} data-document-name={document.name} data-file-kind={chat ? 'chat' : documentKind(document.name)}>
+      <Attachment size="sm" orientation={composer && !chat ? 'vertical' : 'horizontal'} className={chat ? 'ai-chat-reference' : composer ? 'ai-composer-file-card' : 'max-w-64'} data-document-name={document.name} data-file-kind={chat ? 'chat' : documentKind(document.name)}>
         <AttachmentMedia>{chat ? <MessageCircleIcon aria-hidden="true" /> : <DocumentKindIcon kind={documentKind(document.name)} />}</AttachmentMedia>
         <AttachmentContent>
           <AttachmentTitle>{title}</AttachmentTitle>
@@ -121,7 +121,7 @@ export function AiDocumentAttachments({ documents, pending = [], onRemove, onCan
       </DialogContent>
     </Dialog>;
     })}
-    {pending.map((file, index) => <Attachment key={`${index}:${file.name}`} state="processing" aria-busy="true" size="sm" orientation={composer ? 'vertical' : 'horizontal'} className={composer ? 'ai-composer-file-card focus-within:ring-0' : 'max-w-64'} data-file-kind={documentKind(file.name)}>
+    {pending.map((file, index) => <Attachment key={`${index}:${file.name}`} state="processing" aria-busy="true" size="sm" orientation={composer ? 'vertical' : 'horizontal'} className={composer ? 'ai-composer-file-card' : 'max-w-64'} data-file-kind={documentKind(file.name)}>
       <AttachmentMedia>{composer ? <><DocumentKindIcon kind={documentKind(file.name)} /><span className="ai-composer-file-loading"><Spinner className="size-3" /></span></> : <Spinner />}</AttachmentMedia>
       <AttachmentContent><AttachmentTitle>{file.name}</AttachmentTitle><AttachmentDescription className={composer ? 'sr-only' : undefined}>{description(file)} · {t('ai.workspace.documents.processing')}</AttachmentDescription></AttachmentContent>
       {onCancel && <AttachmentActions className={composer ? 'absolute' : undefined}><AttachmentAction variant={composer ? 'secondary' : 'outline'} size={composer ? 'icon-xs' : 'xs'} className={composer ? 'ai-composer-file-remove size-5' : 'h-5 px-1'} aria-label={composer ? t('common.cancel') : undefined} onClick={onCancel}>{composer ? <XIcon /> : t('common.cancel')}</AttachmentAction></AttachmentActions>}

@@ -88,10 +88,7 @@ describe('SftpNewConnectionMenu', () => {
     await waitFor(() => {
       expect(searchInput).toHaveFocus();
     });
-    expect(searchInput.parentElement).toHaveClass(
-      'h-10',
-      'has-[[data-slot=input-group-control]:focus-visible]:ring-1',
-    );
+    expect(searchInput.parentElement).toHaveClass('h-10');
     expect(screen.getByRole('button', { name: 'common.close' })).toBeInTheDocument();
   });
 

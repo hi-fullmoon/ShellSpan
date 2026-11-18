@@ -19,7 +19,7 @@ function PendingImage({ file, onCancel }: { file: File; onCancel?: () => void })
     setSource(url);
     return () => URL.revokeObjectURL(url);
   }, [file]);
-  return <AiImagePreview source={source} name={file.name}><Attachment orientation="vertical" className="ai-image-thumbnail isolate size-16 min-w-16 focus-within:ring-0 has-data-[slot=attachment-media]:p-0" state="processing" aria-busy="true">
+  return <AiImagePreview source={source} name={file.name}><Attachment orientation="vertical" className="ai-image-thumbnail isolate size-16 min-w-16 has-data-[slot=attachment-media]:p-0" state="processing" aria-busy="true">
     <AttachmentMedia variant="image" className="ai-image-thumbnail-media size-full">
       <Skeleton className="absolute inset-0 size-full motion-reduce:animate-none" />
       {source && <img className="relative h-full" src={source} alt={file.name} />}
@@ -113,7 +113,7 @@ export function AiImageDraftRail({ images, pendingFiles = [], busy, locked, erro
       {images.map((image, index) => {
         const source = sources[index];
         return <AiImagePreview key={`${index}:${image.name}`} source={source} name={image.name}>
-          <Attachment orientation="vertical" className="ai-image-thumbnail isolate size-16 min-w-16 focus-within:ring-0 has-data-[slot=attachment-media]:p-0" state={error ? 'error' : 'done'}>
+          <Attachment orientation="vertical" className="ai-image-thumbnail isolate size-16 min-w-16 has-data-[slot=attachment-media]:p-0" state={error ? 'error' : 'done'}>
             <AttachmentMedia variant="image" className="ai-image-thumbnail-media size-full">
               <img className="h-full" src={source} alt={image.name} />
             </AttachmentMedia>

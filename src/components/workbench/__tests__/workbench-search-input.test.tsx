@@ -3,20 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { WorkbenchSearchInput } from '../workbench-page';
 
 describe('WorkbenchSearchInput', () => {
-  it('uses the shared input-group focus treatment', () => {
+  it('wraps the search field in the shared compact input group', () => {
     render(<WorkbenchSearchInput aria-label="Search" value="" onChange={() => {}} />);
 
     const group = screen.getByRole('textbox', { name: 'Search' }).parentElement;
-    expect(group).toHaveClass(
-      'h-8',
-      'has-[[data-slot=input-group-control]:focus-visible]:border-input',
-      'has-[[data-slot=input-group-control]:focus-visible]:ring-1',
-      'has-[[data-slot=input-group-control]:focus-visible]:ring-ring',
-    );
-    expect(group).not.toHaveClass(
-      'has-[[data-slot=input-group-control]:focus-visible]:border-ring',
-      'has-[[data-slot=input-group-control]:focus-visible]:ring-3',
-    );
+    expect(group).toHaveAttribute('data-slot', 'input-group');
+    expect(group).toHaveClass('h-8');
   });
 
   it('keeps the optional clear action inside the shared focus container', () => {

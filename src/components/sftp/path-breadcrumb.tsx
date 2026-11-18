@@ -209,7 +209,7 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate
           onBlur={handleBlur}
           autoFocus
           onFocus={(e) => e.target.select()}
-          className="h-6 w-full rounded-none border-0 bg-transparent px-0 py-0 text-xs leading-none shadow-none focus-visible:ring-0"
+          className="h-6 w-full rounded-none border-0 bg-transparent px-0 py-0 text-xs leading-none shadow-none"
         />
       ) : (
         <>

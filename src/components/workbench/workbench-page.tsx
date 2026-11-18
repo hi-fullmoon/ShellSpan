@@ -25,7 +25,7 @@ export const WorkbenchSearchInput: React.FC<WorkbenchSearchInputProps> = ({
   <InputGroup
     variant="transparent"
     className={cn(
-      'h-8 w-64 max-w-full flex-none has-[[data-slot=input-group-control]:focus-visible]:border-input has-[[data-slot=input-group-control]:focus-visible]:ring-1 has-[[data-slot=input-group-control]:focus-visible]:ring-ring',
+      'h-8 w-64 max-w-full flex-none',
       'in-data-[slot=workbench-page-header-actions]:w-32 in-data-[slot=workbench-page-header-actions]:max-w-64 in-data-[slot=workbench-page-header-actions]:flex-1',
     )}
   >

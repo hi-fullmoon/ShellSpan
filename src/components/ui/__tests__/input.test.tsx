@@ -14,18 +14,11 @@ describe('Input', () => {
     expect(input).not.toHaveClass('shadow-lg');
   });
 
-  it('uses a single focus ring', () => {
-    render(<Input placeholder="Test input" />);
-    const input = screen.getByPlaceholderText('Test input');
-    expect(input).toHaveClass('focus-visible:ring-1');
-    expect(input).not.toHaveClass('focus-visible:ring-2');
-  });
-
-  it('uses the shared input surface, border and focus ring for single-line and multiline fields', () => {
+  it('uses the shared input surface and border for single-line and multiline fields', () => {
     render(<><Input aria-label="Name" /><Textarea aria-label="Notes" /></>);
 
     for (const input of screen.getAllByRole('textbox')) {
-      expect(input).toHaveClass('bg-input-surface', 'border-input', 'focus-visible:ring-1', 'focus-visible:ring-ring');
+      expect(input).toHaveClass('bg-input-surface', 'border-input');
     }
   });
 

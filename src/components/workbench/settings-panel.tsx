@@ -1143,7 +1143,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               tabIndex={0}
               autoFocus
               onKeyDown={handleShortcutCapture}
-              className="flex min-h-24 flex-col items-center justify-center gap-2.5 rounded-md border border-dashed bg-muted/40 px-4 text-center outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+              className="flex min-h-24 flex-col items-center justify-center gap-2.5 rounded-md border border-dashed bg-muted/40 px-4 text-center outline-none"
             >
               <KeyboardIcon className="size-6 text-muted-foreground" />
               <p className="text-sm font-medium">{t('settings.shortcuts.recordPrompt')}</p>

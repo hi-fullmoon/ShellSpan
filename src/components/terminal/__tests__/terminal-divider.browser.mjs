@@ -49,6 +49,42 @@ const server = await createServer({
   server: { host: '127.0.0.1', port: 0, hmr: false, watch: null },
 });
 
+async function checkAiDividerFocus(page, width) {
+  await page.evaluate(async () => {
+    const { React, createRoot, AiPanelShell, initI18n } = window.runtime;
+    await initI18n('zh-CN');
+    const root = document.getElementById('root');
+    root.style.display = 'flex';
+    createRoot(root).render(React.createElement(React.Fragment, null,
+      React.createElement('div', { style: { flex: '1', minWidth: 0 } },
+        React.createElement('input', { 'aria-label': 'Search' })),
+      React.createElement(AiPanelShell, { open: true, panelTitle: 'AI', scope: 'workbench', onOpenChange() {} }),
+    ));
+  });
+
+  const handle = page.locator('[data-slot="ai-panel-resize-handle"]');
+  await handle.waitFor();
+  const handleBeforeFocus = await handle.boundingBox();
+  await page.getByRole('textbox', { name: 'Search' }).focus();
+  await page.keyboard.press(process.platform === 'darwin' ? 'Alt+Tab' : 'Tab');
+  assert.ok(await handle.evaluate(element => element.matches(':focus-visible')), 'Tab focuses the AI resize handle');
+  assert.deepEqual(await handle.boundingBox(), handleBeforeFocus, 'Keyboard focus keeps the full drag target and panel layout');
+  for (const [theme, color] of [['light', 'rgb(40, 40, 40)'], ['dark', 'rgb(179, 179, 184)']]) {
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    const appearance = await handle.evaluate(element => {
+      const stroke = getComputedStyle(element, '::after');
+      return [getComputedStyle(element).outlineStyle, stroke.width, stroke.borderLeftWidth, stroke.borderLeftColor];
+    });
+    assert.deepEqual(appearance, ['none', '1px', '1px', color], `${width}px/${theme}: focus marks only the divider line`);
+  }
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+  await page.screenshot({ path: `${root}artifacts/tests/terminal-divider/ai-divider-focus-${width}.png` });
+  await handle.press('ArrowLeft');
+  assert.ok((await handle.boundingBox()).x < handleBeforeFocus.x, 'Arrow Left widens the AI panel');
+  await handle.press('ArrowRight');
+  assert.deepEqual(await handle.boundingBox(), handleBeforeFocus, 'Arrow Right restores the AI panel width');
+}
+
 async function checkTerminalDrag(page, width) {
   const firstLine = listing.split('\n')[0];
   await page.evaluate(async listing => {
@@ -179,6 +215,9 @@ try {
     const page = await browser.newPage({ viewport: { width, height: 700 } });
     try {
       await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/divider`);
+      await page.waitForFunction(() => window.runtime);
+      await checkAiDividerFocus(page, width);
+      await page.reload();
       await page.waitForFunction(() => window.runtime);
       await checkTerminalDrag(page, width);
     } finally {

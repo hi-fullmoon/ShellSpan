@@ -127,7 +127,6 @@ describe('document attachment surfaces', () => {
     expect(screen.getByText(/MD · .*Ready/)).toBeVisible();
     const card = screen.getByText('README.md').closest('[data-slot="attachment"]');
     expect(card).toHaveAttribute('data-orientation', 'vertical');
-    expect(card).toHaveClass('focus-within:ring-0');
     expect(card?.querySelector('[data-slot="attachment-content"] svg')).toBeNull();
     expect(card?.parentElement).toHaveAttribute('data-slot', 'attachment-group');
     expect(card?.parentElement?.parentElement).toHaveAttribute('data-unified-attachments', 'true');
@@ -178,7 +177,6 @@ describe('document attachment surfaces', () => {
     expect(card?.parentElement).toBe(rail);
     expect(rail.parentElement).toHaveAttribute('data-unified-attachments', 'true');
     expect(screen.queryByRole('button', { name: 'Remove README.md' })).toBeNull();
-    expect(card).toHaveClass('has-[:focus-visible]:ring-1');
     await user.click(screen.getByRole('button', { name: 'Preview README.md' }));
     const dialog = await screen.findByRole('dialog');
     expect(dialog).toHaveTextContent('# ShellSpan');

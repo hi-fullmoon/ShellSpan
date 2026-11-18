@@ -25,18 +25,21 @@ for (const browserType of [chromium, webkit]) {
       const nickname = dialog.getByRole('textbox', { name: /^(昵称|Display name)$/ });
       const focused = await nickname.evaluate(input => {
         const style = getComputedStyle(input);
-        return { background: style.backgroundColor, height: style.height, ring: style.boxShadow };
+        return { background: style.backgroundColor, height: style.height, outline: style.outlineStyle, width: style.outlineWidth };
       });
       assert.equal(focused.background, 'rgba(0, 0, 0, 0)');
       assert.equal(focused.height, '32px');
+      assert.equal(focused.outline, 'solid');
+      assert.equal(focused.width, '1px');
       await nickname.press('Tab');
-      assert.notEqual(focused.ring, await nickname.evaluate(input => getComputedStyle(input).boxShadow));
+      assert.equal(await nickname.evaluate(input => getComputedStyle(input).outlineStyle), 'none');
       await dialog.getByRole('button', { name: /^(取消|Cancel)$/ }).click();
       await dialog.waitFor({ state: 'hidden' });
       await trigger.focus();
       await page.keyboard.press('ArrowDown');
       await about.waitFor();
       await page.keyboard.press('End');
+      await page.getByRole('menuitem', { name: /^(退出|Quit)$/ }).and(page.locator(':focus')).waitFor();
       await page.keyboard.press('ArrowUp');
       await about.and(page.locator(':focus')).waitFor();
       assert.equal(await about.evaluate((item) => getComputedStyle(item).borderRadius), '6px');

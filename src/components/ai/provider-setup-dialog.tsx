@@ -160,7 +160,7 @@ const ENDPOINT_SUFFIXES = [
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 const SYSTEM_INPUT_CLASS = 'bg-transparent';
 const SYSTEM_INPUT_GROUP_CLASS =
-  'h-9 bg-transparent has-[[data-slot=input-group-control]:disabled]:bg-transparent has-[[data-slot=input-group-control]:focus-visible]:border-input has-[[data-slot=input-group-control]:focus-visible]:ring-1 has-[[data-slot=input-group-control]:focus-visible]:ring-ring dark:bg-transparent dark:has-[[data-slot=input-group-control]:disabled]:bg-transparent';
+  'h-9 bg-transparent has-[[data-slot=input-group-control]:disabled]:bg-transparent dark:bg-transparent dark:has-[[data-slot=input-group-control]:disabled]:bg-transparent';
 
 function parseProviderBaseUrl(baseUrl: string): URL | undefined {
   try {

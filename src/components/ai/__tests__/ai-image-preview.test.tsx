@@ -35,7 +35,6 @@ describe('chat image previews', () => {
     const attachment = thumbnail.closest('[data-slot="attachment"]');
     expect(thumbnail).toHaveAttribute('src', source);
     expect(attachment).not.toHaveClass('focus-within:ring-1', 'has-[>a,>button]:hover:bg-muted/50');
-    expect(attachment).toHaveClass('has-[:focus-visible]:ring-1');
     await openPreview();
     expect(screen.getByRole('dialog')).toBeVisible();
     expect(preview).toHaveBeenCalledWith({ sessionId: 'session-a', sha256: image.sha256 });
@@ -102,7 +101,6 @@ describe('chat image previews', () => {
     const attachment = screen.getByRole('img', { name: image.name }).closest('[data-slot="attachment"]');
     expect(attachment).toHaveClass('has-data-[slot=attachment-media]:p-0');
     expect(attachment).not.toHaveClass('has-data-[slot=attachment-media]:p-2');
-    expect(attachment).toHaveClass('focus-within:ring-0');
     expect(attachment).not.toHaveClass('focus-within:ring-1');
     const actions = screen.getByRole('button', { name: 'Remove image screenshot.png' }).closest('[data-slot="attachment-actions"]');
     expect(actions).toHaveClass('absolute', 'group-data-[orientation=vertical]/attachment:top-0.75', 'group-data-[orientation=vertical]/attachment:right-0.75');

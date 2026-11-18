@@ -42,7 +42,7 @@ function MessageScrollerViewport({
       data-message-scroller-viewport=""
       role="region"
       className={cn(
-        "native-scrollbar-default size-full min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto scroll-fade-b overscroll-contain rounded-[inherit] [scrollbar-gutter:stable] contain-content outline-none transition-[color,box-shadow] focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1",
+        "native-scrollbar-default size-full min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto scroll-fade-b overscroll-contain rounded-[inherit] [scrollbar-gutter:stable] contain-content outline-none transition-[color,box-shadow]",
         className
       )}
       {...props}

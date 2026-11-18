@@ -78,7 +78,7 @@ describe('Button', () => {
     render(<Button variant="outline">Refresh</Button>);
 
     const button = screen.getByRole('button', { name: 'Refresh' });
-    expect(button).toHaveClass('border', 'border-input', 'bg-transparent', 'hover:bg-accent', 'focus-visible:ring-2');
+    expect(button).toHaveClass('border', 'border-input', 'bg-transparent', 'hover:bg-accent');
     expect(button).not.toHaveClass('bg-background');
   });
 

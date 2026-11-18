@@ -647,7 +647,7 @@ textarea,
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border;
   }
   body {
     @apply bg-background text-foreground;
@@ -658,6 +658,38 @@ textarea,
   a:any-link {
     cursor: default;
   }
+}
+
+/* Use a single inset keyboard outline for native and shared controls. Draw it
+   on the visible frame when the focus target is an input or scroll viewport. */
+:where(
+  :focus-visible,
+  [data-slot='input-group']:has([data-slot='input-group-control']:focus-visible),
+  [data-slot='sftp-filter']:has(input:focus-visible),
+  .ai-detail-section:has([data-slot='scroll-area-viewport']:focus-visible),
+  .xterm:has(.xterm-helper-textarea:focus-visible)
+) {
+  outline: 1px solid var(--ring);
+  outline-offset: -1px;
+}
+
+:where(
+  [data-slot='input-group'] [data-slot='input-group-control'],
+  [data-slot='sftp-filter'] input,
+  .ai-detail-section [data-slot='scroll-area-viewport'],
+  .xterm-helper-textarea
+):focus-visible {
+  outline: none;
+}
+
+[data-slot='resizable-handle']:focus-visible,
+[data-slot='split-pane-divider']:focus-visible {
+  outline-offset: 0;
+}
+
+/* Filled controls can share the outline color with their background. */
+:where([data-slot='button'][data-variant='default'], [data-slot='checkbox'], [data-slot='switch']):focus-visible {
+  outline-offset: 1px;
 }
 
 /* Global toast: antd-message style filled status icons (solid colored disc, glyph cut out in surface color) */

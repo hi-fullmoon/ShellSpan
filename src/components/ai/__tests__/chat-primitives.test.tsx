@@ -137,7 +137,6 @@ describe('MessageScroller', () => {
       expect(content).toHaveClass('gap-2', 'px-3', 'py-3');
       expect(content).not.toHaveClass('gap-5', 'px-4', 'py-5');
       expect(viewport).toHaveClass('overflow-y-auto', 'overflow-x-hidden', 'native-scrollbar-default');
-      expect(viewport).toHaveClass('focus-visible:ring-[3px]', 'focus-visible:ring-ring/50');
       expect(container.querySelector('[data-slot="scroll-area"]')).not.toBeInTheDocument();
       expect(container.querySelector('[data-slot="message-scroller-button"]'))
         .toHaveClass('rounded-full');

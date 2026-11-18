@@ -103,8 +103,7 @@ describe('localized workspace errors', () => {
     const retried: string[] = [];
     const { container } = render(<FailedMessageWorkspace composerState={state} onRetryFailedDraft={id => retried.push(id)} />);
     const retry = screen.getByRole('button', { name: t('common.retry') });
-    expect(retry).toHaveClass('h-6', 'p-0', 'm-0', 'border-0', 'shrink-0', 'focus-visible:ring-0', 'focus-visible:underline');
-    expect(retry).not.toHaveClass('focus-visible:ring-2');
+    expect(retry).toHaveClass('h-6', 'p-0', 'm-0', 'border-0', 'shrink-0', 'focus-visible:underline');
     expect(retry.querySelector('svg')).toBeNull();
     expect(retry).toHaveTextContent(t('common.retry'));
     expect(screen.queryByRole('button', { name: t('ai.workspace.recovery.dismiss') })).toBeNull();

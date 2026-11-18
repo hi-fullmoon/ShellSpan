@@ -142,12 +142,7 @@ describe('NewSessionDialog', () => {
     await waitFor(() => {
       expect(searchInput).toHaveFocus();
     });
-    expect(searchInput.parentElement).toHaveClass(
-      'has-[[data-slot=input-group-control]:focus-visible]:ring-1',
-    );
-    expect(searchInput.parentElement).not.toHaveClass(
-      'has-[[data-slot=input-group-control]:focus-visible]:ring-3',
-    );
+    expect(searchInput.parentElement).toHaveAttribute('data-slot', 'input-group');
   });
 
   it('navigates with arrow keys and connects on enter', () => {

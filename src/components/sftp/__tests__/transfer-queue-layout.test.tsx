@@ -51,7 +51,7 @@ describe('compact transfer queue with the real scheduler', () => {
       expect(screen.queryByText('first-waiting')).not.toBeInTheDocument();
       const toggle = screen.getByRole('button', { name: expand });
       expect(toggle).toHaveTextContent(waiting);
-      expect(toggle).toHaveClass('hover:bg-accent', 'focus-visible:ring-2', 'h-6');
+      expect(toggle).toHaveClass('hover:bg-accent', 'h-6');
       expect(toggle).toHaveAttribute('aria-expanded', 'false');
       const queue = document.getElementById(toggle.getAttribute('aria-controls')!);
       expect(queue).toHaveClass('max-h-64', 'overflow-y-auto');

@@ -124,7 +124,7 @@ export const TerminalTabSwitcher: React.FC<TerminalTabSwitcherProps> = ({
         </DialogHeader>
 
         <div className="px-4 pb-3">
-          <InputGroup className="h-9 has-[[data-slot=input-group-control]:focus-visible]:ring-1">
+          <InputGroup className="h-9">
             <InputGroupInput
               autoFocus
               type="search"

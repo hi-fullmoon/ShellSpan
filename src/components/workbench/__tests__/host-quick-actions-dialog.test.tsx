@@ -59,8 +59,8 @@ describe('HostQuickActionsDialog', () => {
     const formTitle = await screen.findByText('Add quick action', {
       selector: '[data-slot="card-title"]',
     });
-    expect(screen.getByLabelText('Label')).toHaveClass('bg-input-surface', 'focus-visible:ring-1');
-    expect(screen.getByLabelText('Remote path')).toHaveClass('bg-input-surface', 'focus-visible:ring-1');
+    expect(screen.getByLabelText('Label')).toHaveClass('bg-input-surface');
+    expect(screen.getByLabelText('Remote path')).toHaveClass('bg-input-surface');
     expect(formTitle.closest('[data-slot="card"]')).toHaveClass('shrink-0');
     expect(document.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
     const viewport = document.querySelector('[data-slot="scroll-area-viewport"]');
@@ -69,8 +69,8 @@ describe('HostQuickActionsDialog', () => {
     expect(viewport?.firstElementChild).toHaveClass('flex', 'flex-col', 'gap-3', 'px-4', 'py-3');
 
     fireEvent.click(screen.getByRole('button', { name: 'Command snippet' }));
-    expect(screen.getByLabelText('Label')).toHaveClass('bg-input-surface', 'focus-visible:ring-1');
-    expect(screen.getByLabelText('Command text')).toHaveClass('bg-input-surface', 'focus-visible:ring-1');
+    expect(screen.getByLabelText('Label')).toHaveClass('bg-input-surface');
+    expect(screen.getByLabelText('Command text')).toHaveClass('bg-input-surface');
   });
 
   it('blocks secret-bearing snippets before persistence', async () => {

@@ -37,7 +37,7 @@ describe('SelectTrigger', () => {
     expect(screen.getByTestId('trigger')).toHaveClass('data-[size=sm]:h-8');
   });
 
-  it('uses a single focus ring', () => {
+  it('uses a one-pixel invalid-state ring', () => {
     render(
       <Select defaultValue="a">
         <SelectTrigger data-testid="trigger">
@@ -50,8 +50,6 @@ describe('SelectTrigger', () => {
     );
 
     const trigger = screen.getByTestId('trigger');
-    expect(trigger).toHaveClass('focus-visible:ring-1');
-    expect(trigger).not.toHaveClass('focus-visible:ring-3');
     expect(trigger).toHaveClass('aria-invalid:ring-1');
     expect(trigger).not.toHaveClass('aria-invalid:ring-3');
   });

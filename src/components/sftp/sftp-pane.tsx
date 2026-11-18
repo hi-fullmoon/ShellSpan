@@ -513,6 +513,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
             {/* The fixed-width inner row is revealed by the transition.
                 Paint the frame above it so the button hover cannot cover the border. */}
             <div
+              data-slot="sftp-filter"
               className={cn(
                 'relative h-[30px] overflow-hidden rounded-md transition-[width,background-color] duration-200 ease-out',
                 showSearch

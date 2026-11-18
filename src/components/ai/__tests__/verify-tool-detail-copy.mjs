@@ -189,8 +189,8 @@ try {
               assert.ok(focus.visible, 'Keyboard focus must remain visible');
               assert.equal(focus.viewportOutline, 'none', 'The scroll viewport must not add a line beneath the section header');
               assert.equal(focus.viewportShadow, 'none', 'A clipped viewport focus ring must not overlap the header');
-              assert.equal(focus.sectionOutline, '2px', 'Focus must outline the whole section');
-              assert.equal(focus.sectionOffset, '2px', 'The section focus outline must remain outside the header and content');
+              assert.equal(focus.sectionOutline, '1px', 'Focus must use the shared outline around the whole section');
+              assert.equal(focus.sectionOffset, '-1px', 'The inset focus outline avoids clipping');
               await viewport.evaluate(element => element.scrollTo({ top: element.scrollHeight, behavior: 'instant' }));
               assert.ok(await viewport.evaluate(element => element.scrollTop > 0), 'Overflowing content must scroll');
               assert.equal(await viewports.nth((index + 1) % 3).evaluate(element => element.scrollTop), 0, 'Scrolling must stay within its section');

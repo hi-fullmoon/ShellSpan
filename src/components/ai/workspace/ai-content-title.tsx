@@ -35,7 +35,7 @@ export function AiContentTitle({ children, className, buttonClassName, expandLab
   const text = <span ref={textRef} className={cn('whitespace-pre-wrap [overflow-wrap:anywhere]', expanded ? 'block' : 'line-clamp-2')}>{children}</span>;
   const content = interactive ? <button
     type="button"
-    className={cn('block w-full min-w-0 cursor-default p-0 text-left whitespace-pre-wrap [overflow-wrap:anywhere] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', buttonClassName)}
+    className={cn('block w-full min-w-0 cursor-default p-0 text-left whitespace-pre-wrap [overflow-wrap:anywhere]', buttonClassName)}
     aria-expanded={expanded}
     aria-label={expanded ? collapseLabel ?? t('ai.workspace.tool.collapseTitle') : expandLabel ?? t('ai.workspace.tool.expandTitle')}
     onClick={() => setExpanded(value => !value)}

@@ -154,9 +154,7 @@ describe('ProviderSetupDialog', () => {
 
     const dialog = screen.getByRole('dialog');
     const scrollArea = dialog.querySelector('[data-slot="provider-dialog-scroll-area"]');
-    const providerControl = screen.getByRole('combobox', {
-      name: 'settings.ai.chooseProvider',
-    }).closest('[data-slot="input-group"]');
+    const providerControl = screen.getByRole('combobox', { name: 'settings.ai.chooseProvider' });
     const inputs = dialog.querySelectorAll('[data-slot="input"]');
     const inputGroups = dialog.querySelectorAll('[data-slot="input-group"]');
     const fieldGroups = scrollArea?.querySelectorAll('[data-slot="field-group"]');
@@ -180,29 +178,15 @@ describe('ProviderSetupDialog', () => {
     expect(screen.getByRole('button', { name: 'common.cancel' })).toHaveClass('h-8');
     expect(screen.getByRole('button', { name: 'common.save' })).toHaveClass('h-8');
     expect(fieldGroups?.[0]).toHaveClass('gap-4');
-    expect(providerControl).toHaveClass(
-      'has-[[data-slot=input-group-control]:focus-visible]:border-input',
-      'has-[[data-slot=input-group-control]:focus-visible]:ring-1',
-      'has-[[data-slot=input-group-control]:focus-visible]:ring-ring',
-    );
-    expect(providerControl).not.toHaveClass(
-      'has-[[data-slot=input-group-control]:focus-visible]:border-ring',
-      'has-[[data-slot=input-group-control]:focus-visible]:ring-3',
-    );
+    expect(providerControl).toHaveAttribute('data-slot', 'input-group-control');
     expect(inputGroups).toHaveLength(1);
     inputGroups.forEach((inputGroup) => {
       expect(inputGroup).toHaveClass(
         'h-9',
         'bg-transparent',
         'has-[[data-slot=input-group-control]:disabled]:bg-transparent',
-        'has-[[data-slot=input-group-control]:focus-visible]:border-input',
-        'has-[[data-slot=input-group-control]:focus-visible]:ring-1',
       );
-      expect(inputGroup).not.toHaveClass(
-        'has-[[data-slot=input-group-control]:disabled]:bg-input/50',
-        'has-[[data-slot=input-group-control]:focus-visible]:border-ring',
-        'has-[[data-slot=input-group-control]:focus-visible]:ring-3',
-      );
+      expect(inputGroup).not.toHaveClass('has-[[data-slot=input-group-control]:disabled]:bg-input/50');
     });
     inputs.forEach((input) => {
       expect(input).toHaveClass('bg-transparent');
