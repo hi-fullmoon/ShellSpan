@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   createPreviewDataUrl,
-  formatHexPreview,
+  formatHexPreviewRows,
   getFileExtension,
   getSftpPreviewDescriptor,
 } from '@/lib/sftp/sftp-preview';
@@ -55,8 +55,7 @@ describe('SFTP preview helpers', () => {
 
   it('formats binary content into offset, hex, and ASCII columns', () => {
     const encoded = btoa('ABC\0');
-    expect(formatHexPreview(encoded)).toContain('00000000  41 42 43 00');
-    expect(formatHexPreview(encoded)).toContain('|ABC.');
+    expect(formatHexPreviewRows(encoded)).toEqual([{ offset: '00000000', hex: '41 42 43 00', ascii: 'ABC.' }]);
   });
 
   it('only decodes the base64 prefix needed by the hex view', () => {
@@ -64,9 +63,10 @@ describe('SFTP preview helpers', () => {
     const atobSpy = vi.fn(originalAtob);
     vi.stubGlobal('atob', atobSpy);
     try {
-      formatHexPreview(btoa('A'.repeat(12_000)), 48);
+      const rows = formatHexPreviewRows(btoa('A'.repeat(12_000)), 48);
       expect(atobSpy).toHaveBeenCalledOnce();
       expect(atobSpy.mock.calls[0]?.[0]).toHaveLength(64);
+      expect(rows.map(row => row.offset)).toEqual(['00000000', '00000010', '00000020']);
     } finally {
       vi.stubGlobal('atob', originalAtob);
     }

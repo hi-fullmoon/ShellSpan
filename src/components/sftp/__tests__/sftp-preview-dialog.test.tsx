@@ -47,7 +47,7 @@ describe('SftpPreviewDialog', () => {
     expect(screen.queryByRole('video')).not.toBeInTheDocument();
   });
 
-  it('renders text metadata and line count in one toolbar row', () => {
+  it('keeps file metadata in the header and line count in the preview toolbar', () => {
     render(
       <SftpPreviewDialog
         open
@@ -57,15 +57,17 @@ describe('SftpPreviewDialog', () => {
     );
 
     expect(screen.getByText('readme.txt')).toBeInTheDocument();
-    expect(screen.getByText('/srv/readme.txt')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'readme.txt' })).toHaveAccessibleDescription('/srv/readme.txt');
     expect(screen.getByText('2 lines')).toBeInTheDocument();
     expect(document.querySelector('pre')).toHaveTextContent(/first\s+second/);
-    const dialogHeader = document.querySelector('[data-slot="dialog-header"]');
-    expect(dialogHeader?.nextElementSibling).not.toHaveClass('border-t');
-    const toolbar = document.querySelector('[data-slot="sftp-text-toolbar"]');
-    expect(toolbar).toHaveTextContent('TXT·12 B·2 lines');
-    expect(toolbar?.querySelector('[data-slot="badge"]')).toBeNull();
-    expect(toolbar?.querySelector('[data-slot="separator"]')).toBeNull();
+    const metadata = document.querySelector('[data-slot="dialog-header"] [data-slot="sftp-preview-metadata"]');
+    const typeBadge = metadata?.querySelector('[data-variant="secondary"]');
+    expect(typeBadge).toHaveTextContent(/^TXT$/);
+    expect(typeBadge).toHaveAttribute('title', 'TXT');
+    expect(metadata).toContainElement(screen.getByText('12 B'));
+    expect(typeBadge).not.toContainElement(screen.getByText('12 B'));
+    const toolbar = document.querySelector('[data-slot="sftp-preview-surface"] [data-slot="sftp-preview-toolbar"]');
+    expect(toolbar).toHaveTextContent('2 lines');
     expect(screen.queryByText('sftp.preview.kind.text')).not.toBeInTheDocument();
   });
 
@@ -119,7 +121,7 @@ describe('SftpPreviewDialog', () => {
     expect(document.querySelector('pre')?.textContent).toBe(source);
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-slot="sftp-text-toolbar"]')).toHaveTextContent('JSON');
+    expect(document.querySelector('[data-slot="sftp-preview-metadata"]')).toHaveTextContent('JSON');
     expect(screen.getByRole('button', { name: 'sftp.preview.copyContent' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'sftp.preview.toggleWrap' }));
     expect(document.querySelector('pre')).toHaveClass('whitespace-pre-wrap');
@@ -206,8 +208,8 @@ describe('SftpPreviewDialog', () => {
     );
     expect(screen.getByText('PNG')).toBeInTheDocument();
     const metadata = document.querySelector('[data-slot="sftp-preview-metadata"]');
-    expect(metadata).toHaveTextContent('PNG·8 B');
-    expect(metadata?.querySelector('[data-slot="badge"]')).toBeNull();
+    expect(metadata).toContainElement(screen.getByText('8 B'));
+    expect(metadata?.querySelector('[data-variant="secondary"]')).toHaveTextContent(/^PNG$/);
     expect(screen.queryByText('sftp.preview.kind.image')).not.toBeInTheDocument();
   });
 
@@ -231,9 +233,8 @@ describe('SftpPreviewDialog', () => {
     expect(frame).toHaveClass('min-h-0', 'w-full', 'flex-1');
     expect(frame.parentElement).toHaveClass('min-h-0', 'flex-1', 'overflow-hidden');
     const metadata = document.querySelector('[data-slot="sftp-preview-metadata"]');
-    expect(metadata).toHaveTextContent('PDF·8 B');
-    expect(metadata).toHaveClass('text-xs', 'text-muted-foreground');
-    expect(metadata?.querySelector('[data-slot="badge"]')).toBeNull();
+    expect(metadata).toContainElement(screen.getByText('8 B'));
+    expect(metadata?.querySelector('[data-variant="secondary"]')).toHaveTextContent(/^PDF$/);
     expect(screen.queryByText('sftp.preview.kind.pdf')).not.toBeInTheDocument();
   });
 
@@ -294,17 +295,12 @@ describe('SftpPreviewDialog', () => {
       />,
     );
 
-    const binaryTitle = screen.getByText('sftp.preview.binaryTitle');
-    expect(binaryTitle).toBeInTheDocument();
-    const binaryAlert = binaryTitle.closest('[data-slot="alert"]');
-    expect(binaryAlert).toHaveClass(
-      'm-3',
-      'w-fit',
-      'max-w-[calc(100%-1.5rem)]',
-      'self-start',
-    );
-    expect(binaryAlert).not.toHaveClass('mb-0');
-    expect(document.querySelector('pre')).toHaveTextContent('00 41 42 43');
+    const table = screen.getByRole('table', { name: 'sftp.preview.binaryTitle' });
+    expect(table).toHaveAccessibleDescription('sftp.preview.hexDescription');
+    expect(screen.getAllByRole('columnheader').map(cell => cell.textContent)).toEqual([
+      'sftp.preview.hex.offset', 'sftp.preview.hex.bytes', 'sftp.preview.hex.ascii',
+    ]);
+    expect(screen.getAllByRole('cell').map(cell => cell.textContent)).toEqual(['00000000', '00 41 42 43', '.ABC']);
   });
 
   it('labels truncated text as a partial preview', () => {

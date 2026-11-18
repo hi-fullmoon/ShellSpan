@@ -10,16 +10,25 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Spinner } from '@/components/ui/empty-state';
+import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import { usePlatform } from '@/hooks/usePlatform';
 import type { SftpPreviewFileActions, SftpPreviewTarget } from '@/hooks/useSftpPaneActions';
 import type { FileOpenApplication } from '@/types';
 
-function ApplicationIcon({ icon }: { icon?: string }) {
+function ApplicationIcon({ icon, inButton = false }: { icon?: string; inButton?: boolean }) {
   const [failed, setFailed] = useState(false);
-  if (!icon || failed) return <AppWindowIcon aria-hidden="true" />;
-  return <img src={icon} alt="" className="size-4 shrink-0 object-contain" onError={() => setFailed(true)} />;
+  if (!icon || failed) return inButton ? null : <AppWindowIcon aria-hidden="true" />;
+  return (
+    <img
+      src={icon}
+      alt=""
+      data-icon={inButton ? 'inline-start' : undefined}
+      className="size-4 shrink-0 object-contain data-[icon=inline-start]:size-3.5"
+      onError={() => setFailed(true)}
+    />
+  );
 }
 
 export function SftpPreviewOpenControls({ target, actions, defaultIcon }: {
@@ -61,16 +70,14 @@ export function SftpPreviewOpenControls({ target, actions, defaultIcon }: {
       <Tooltip>
         <TooltipTrigger render={
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             className="rounded-r-none focus-visible:relative focus-visible:z-10"
             disabled={busy}
             onClick={() => void run(() => actions.open(target))}
           />
         }>
-          <span data-icon="inline-start" className="inline-flex size-3.5 shrink-0 [&>img]:size-full" aria-hidden="true">
-            {busy ? <Spinner /> : <ApplicationIcon key={defaultIcon} icon={defaultIcon} />}
-          </span>
+          {busy ? <Spinner data-icon="inline-start" aria-hidden="true" /> : <ApplicationIcon key={defaultIcon} icon={defaultIcon} inButton />}
           {t('sftp.preview.open')}
         </TooltipTrigger>
         <TooltipContent>{t(actions.isRemote ? 'sftp.preview.openLocalCopy' : 'sftp.preview.openExternally')}</TooltipContent>
@@ -80,17 +87,26 @@ export function SftpPreviewOpenControls({ target, actions, defaultIcon }: {
           disabled={busy}
           render={
             <Button
-              variant="outline"
+              variant="ghost"
               size="icon-sm"
-              className="-ml-px rounded-l-none focus-visible:relative focus-visible:z-10"
+              className="relative rounded-l-none focus-visible:z-10"
               aria-label={t('sftp.preview.openOptions')}
             />
           }
         >
+          <Separator
+            render={<span />}
+            orientation="vertical"
+            className="pointer-events-none absolute inset-y-2.5 left-0 data-vertical:border-border/65"
+            aria-hidden="true"
+          />
           <ChevronDownIcon aria-hidden="true" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="file-action-menu w-max min-w-56 max-w-72">
-          <DropdownMenuGroup>
+        <DropdownMenuContent align="end" className="file-action-menu flex w-max min-w-56 max-w-72 flex-col overflow-hidden">
+          <DropdownMenuGroup
+            data-slot="sftp-preview-open-applications"
+            className="min-h-0 max-h-[280px] overflow-x-hidden overflow-y-auto overscroll-contain"
+          >
             <DropdownMenuItem onClick={() => void run(() => actions.open(target))}>
               <ExternalLinkIcon />
               {t(actions.isRemote ? 'sftp.preview.defaultApplicationCopy' : 'sftp.preview.defaultApplication')}
@@ -113,8 +129,8 @@ export function SftpPreviewOpenControls({ target, actions, defaultIcon }: {
               </DropdownMenuItem>
             )}
           </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuGroup>
+          <DropdownMenuSeparator className="shrink-0" />
+          <DropdownMenuGroup className="shrink-0">
             <DropdownMenuItem onClick={() => void run(() => actions.reveal(target))}>
               <FolderOpenIcon />
               {t(actions.isRemote ? 'sftp.preview.revealRemote' : 'sftp.preview.revealLocal')}

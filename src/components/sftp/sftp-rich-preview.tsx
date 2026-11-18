@@ -5,17 +5,13 @@ import {
   CheckIcon,
   CopyIcon,
   FileArchiveIcon,
-  FileWarningIcon,
   FolderIcon,
   WrapTextIcon,
 } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -35,19 +31,10 @@ import {
   type TabularPreview,
 } from '@/lib/sftp/sftp-rich-preview';
 import { cn } from '@/lib/utils';
+import { SftpPreviewNotice, SftpPreviewPage, SftpPreviewScrollArea, SftpPreviewTable, SftpPreviewToolbar } from './sftp-preview-layout';
 
-export const PlainTextPreview: React.FC<{
-  content: string;
-  fileName?: string;
-  toolbarStart?: React.ReactNode;
-  toolbarEnd?: React.ReactNode;
-}> = ({ content, fileName, toolbarStart, toolbarEnd }) => {
+function TextPreviewLineCount({ content }: { content: string }) {
   const { t } = useI18n();
-  const [wrap, setWrap] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [highlighted, setHighlighted] = useState<{ content: string; fileName?: string; html: string | null }>();
-  const language = getSftpCodeLanguage(fileName);
-  const highlightedHtml = highlighted?.content === content && highlighted.fileName === fileName ? highlighted.html : null;
   const lineCount = useMemo(() => {
     if (!content) return 0;
     let count = 1;
@@ -58,11 +45,58 @@ export const PlainTextPreview: React.FC<{
     }
     return count;
   }, [content]);
+  return <span className="min-w-0 truncate">{t('sftp.preview.lineCount', { count: lineCount })}</span>;
+}
+
+function TextPreviewActions({ content, wrap, onToggleWrap }: { content: string; wrap: boolean; onToggleWrap: () => void }) {
+  const { t } = useI18n();
+  const [copy, setCopy] = useState<{ content: string }>();
+  const copied = copy?.content === content;
 
   useEffect(() => {
-    setWrap(false);
-    setCopied(false);
-  }, [content]);
+    if (!copy) return;
+    const timer = window.setTimeout(() => setCopy(undefined), 1600);
+    return () => window.clearTimeout(timer);
+  }, [copy]);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopy({ content });
+    } catch {
+      // Clipboard access can be denied by the host WebView.
+    }
+  };
+
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      <Tooltip>
+        <TooltipTrigger
+          render={<Button variant="ghost" size="icon-sm" className={cn(wrap && 'text-primary')} aria-pressed={wrap} onClick={onToggleWrap} />}
+        >
+          <WrapTextIcon />
+          <span className="sr-only">{t('sftp.preview.toggleWrap')}</span>
+        </TooltipTrigger>
+        <TooltipContent>{t('sftp.preview.toggleWrap')}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={<Button variant="ghost" size="icon-sm" onClick={() => void handleCopy()} />}
+        >
+          {copied ? <CheckIcon /> : <CopyIcon />}
+          <span className="sr-only">{t('sftp.preview.copyContent')}</span>
+        </TooltipTrigger>
+        <TooltipContent>{copied ? t('sftp.preview.copied') : t('sftp.preview.copyContent')}</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
+function TextPreviewBody({ content, fileName, wrap }: { content: string; fileName?: string; wrap: boolean }) {
+  const { t } = useI18n();
+  const [highlighted, setHighlighted] = useState<{ content: string; fileName?: string; html: string | null }>();
+  const language = getSftpCodeLanguage(fileName);
+  const highlightedHtml = highlighted?.content === content && highlighted.fileName === fileName ? highlighted.html : null;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -72,73 +106,36 @@ export const PlainTextPreview: React.FC<{
     return () => controller.abort();
   }, [content, fileName]);
 
-  const handleCopy = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(content);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      // Clipboard access can be denied by the host WebView.
-    }
-  };
-
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div
-        data-slot="sftp-text-toolbar"
-        className={cn('flex shrink-0 items-center justify-between gap-3 border-b px-3', toolbarStart || toolbarEnd ? 'min-h-11' : 'min-h-10')}
+    <SftpPreviewScrollArea className="bg-app-surface" horizontal={!wrap}>
+      <pre
+        className={cn(
+          'min-h-full px-4 pb-4 font-mono text-[13px] leading-6 text-foreground selection:bg-primary/20 @min-xl/preview:px-6',
+          wrap ? 'whitespace-pre-wrap break-words' : 'w-max min-w-full whitespace-pre',
+        )}
       >
-        <div className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-xs text-muted-foreground">
-          {toolbarStart}
-          {toolbarStart && <span aria-hidden="true">·</span>}
-          <span className="min-w-0 truncate">{t('sftp.preview.lineCount', { count: lineCount })}</span>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger
-              render={<Button variant="ghost" size="icon-sm" className={cn(wrap && 'text-primary')} aria-pressed={wrap} onClick={() => setWrap((value) => !value)} />}
-            >
-              <WrapTextIcon />
-              <span className="sr-only">{t('sftp.preview.toggleWrap')}</span>
-            </TooltipTrigger>
-            <TooltipContent>{t('sftp.preview.toggleWrap')}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => {
-                    void handleCopy();
-                  }}
-                />
-              }
-            >
-              {copied ? <CheckIcon /> : <CopyIcon />}
-              <span className="sr-only">{t('sftp.preview.copyContent')}</span>
-            </TooltipTrigger>
-            <TooltipContent>{copied ? t('sftp.preview.copied') : t('sftp.preview.copyContent')}</TooltipContent>
-          </Tooltip>
-          {toolbarEnd}
-        </div>
-      </div>
-      <ScrollArea className="min-h-0 flex-1" horizontal={!wrap} size="thin">
-        <pre
-          className={cn(
-            'min-h-full p-4 font-mono text-xs leading-5 text-foreground selection:bg-primary/20',
-            wrap ? 'whitespace-pre-wrap break-words' : 'w-max min-w-full whitespace-pre',
-          )}
-        >
-          {highlightedHtml !== null ? (
-            // The worker returns only escaped highlight.js markup, never raw file HTML.
-            <code className="sftp-source-code" data-language={language} data-highlighted="true" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
-          ) : (
-            <code className="sftp-source-code" data-language={language} data-highlighted="false">{content || t('sftp.preview.emptyFile')}</code>
-          )}
-        </pre>
-      </ScrollArea>
-    </div>
+        {highlightedHtml !== null ? (
+          // The worker returns only escaped highlight.js markup, never raw file HTML.
+          <code className="sftp-source-code" data-language={language} data-highlighted="true" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+        ) : (
+          <code className="sftp-source-code" data-language={language} data-highlighted="false">{content || t('sftp.preview.emptyFile')}</code>
+        )}
+      </pre>
+    </SftpPreviewScrollArea>
+  );
+}
+
+export const PlainTextPreview: React.FC<{ content: string; fileName?: string }> = ({ content, fileName }) => {
+  const [wrap, setWrap] = useState(false);
+  useEffect(() => setWrap(false), [content]);
+  return (
+    <>
+      <SftpPreviewToolbar>
+        <TextPreviewLineCount content={content} />
+        <TextPreviewActions content={content} wrap={wrap} onToggleWrap={() => setWrap((value) => !value)} />
+      </SftpPreviewToolbar>
+      <TextPreviewBody content={content} fileName={fileName} wrap={wrap} />
+    </>
   );
 };
 
@@ -149,17 +146,34 @@ const PreviewTabs: React.FC<{
   summary?: React.ReactNode;
 }> = ({ preview, source, sourceFileName, summary }) => {
   const { t } = useI18n();
+  const [showSource, setShowSource] = useState(false);
+  const [wrap, setWrap] = useState(false);
+  useEffect(() => setWrap(false), [source]);
   return (
-    <Tabs defaultValue="preview" className="min-h-0 flex-1 gap-0">
-      <div className="flex min-h-10 items-center gap-3 border-b px-3">
-        <TabsList variant="line" className="h-8 p-0">
+    <Tabs
+      defaultValue="preview"
+      onValueChange={(value) => {
+        setShowSource(value === 'source');
+        setWrap(false);
+      }}
+      className="min-h-0 flex-1 gap-0"
+    >
+      <SftpPreviewToolbar>
+        <TabsList className="shrink-0">
           <TabsTrigger value="preview">{t('sftp.preview.view.preview')}</TabsTrigger>
           <TabsTrigger value="source">{t('sftp.preview.view.source')}</TabsTrigger>
         </TabsList>
-        {summary && <span className="ml-auto text-xs text-muted-foreground">{summary}</span>}
-      </div>
+        {showSource ? (
+          <div className="flex min-w-0 items-center gap-2">
+            <TextPreviewLineCount content={source} />
+            <TextPreviewActions content={source} wrap={wrap} onToggleWrap={() => setWrap((value) => !value)} />
+          </div>
+        ) : summary && <span className="min-w-0 truncate">{summary}</span>}
+      </SftpPreviewToolbar>
       <TabsContent value="preview" className="min-h-0 flex flex-1 flex-col">{preview}</TabsContent>
-      <TabsContent value="source" className="min-h-0 flex flex-1 flex-col"><PlainTextPreview content={source} fileName={sourceFileName} /></TabsContent>
+      <TabsContent value="source" className="min-h-0 flex flex-1 flex-col">
+        <TextPreviewBody content={source} fileName={sourceFileName} wrap={wrap} />
+      </TabsContent>
     </Tabs>
   );
 };
@@ -167,8 +181,8 @@ const PreviewTabs: React.FC<{
 export const MarkdownPreview: React.FC<{ content: string; fileName?: string }> = ({ content, fileName }) => {
   const { t } = useI18n();
   const rendered = (
-    <ScrollArea className="min-h-0 flex-1 bg-muted/25" size="thin">
-      <article className="mx-auto flex max-w-3xl flex-col gap-4 px-8 py-7 text-sm leading-6">
+    <SftpPreviewScrollArea>
+      <SftpPreviewPage className="gap-4 text-sm leading-6 wrap-anywhere">
         <Markdown
           remarkPlugins={[remarkGfm]}
           skipHtml
@@ -176,8 +190,8 @@ export const MarkdownPreview: React.FC<{ content: string; fileName?: string }> =
             a: ({ children, href }) => <a href={href} target="_blank" rel="noreferrer" className="font-medium underline underline-offset-4">{children}</a>,
             blockquote: ({ children }) => <blockquote className="border-l-2 pl-4 text-muted-foreground">{children}</blockquote>,
             code: ({ children, className }) => <code className={cn('rounded bg-muted px-1 py-0.5 font-mono text-[0.9em]', className)}>{children}</code>,
-            h1: ({ children }) => <h1 className="text-2xl font-semibold tracking-tight">{children}</h1>,
-            h2: ({ children }) => <h2 className="mt-2 text-xl font-semibold tracking-tight">{children}</h2>,
+            h1: ({ children }) => <h1 className="text-2xl font-semibold tracking-tight @min-xl/preview:text-3xl">{children}</h1>,
+            h2: ({ children }) => <h2 className="mt-3 text-xl font-semibold tracking-tight">{children}</h2>,
             h3: ({ children }) => <h3 className="mt-1 text-base font-semibold">{children}</h3>,
             hr: () => <Separator />,
             img: ({ alt }) => <span className="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">{t('sftp.preview.markdown.image', { name: alt || 'image' })}</span>,
@@ -192,8 +206,8 @@ export const MarkdownPreview: React.FC<{ content: string; fileName?: string }> =
         >
           {content}
         </Markdown>
-      </article>
-    </ScrollArea>
+      </SftpPreviewPage>
+    </SftpPreviewScrollArea>
   );
   return <PreviewTabs preview={rendered} source={content} sourceFileName={fileName} />;
 };
@@ -201,9 +215,9 @@ export const MarkdownPreview: React.FC<{ content: string; fileName?: string }> =
 const DataTable: React.FC<{ data: TabularPreview }> = ({ data }) => {
   const { t } = useI18n();
   return (
-    <ScrollArea className="min-h-0 flex-1" horizontal size="thin">
-      <Table className="min-w-max text-xs">
-        <TableHeader className="sticky top-0 bg-background">
+    <SftpPreviewScrollArea className="bg-app-surface" horizontal>
+      <SftpPreviewTable className="min-w-max">
+        <TableHeader>
           <TableRow>
             <TableHead className="w-12 text-right text-muted-foreground">#</TableHead>
             {data.columns.map((column, index) => <TableHead key={`${column}-${index}`}>{column}</TableHead>)}
@@ -211,7 +225,7 @@ const DataTable: React.FC<{ data: TabularPreview }> = ({ data }) => {
         </TableHeader>
         <TableBody>
           {data.rows.map((row, rowIndex) => (
-            <TableRow key={rowIndex}>
+            <TableRow key={rowIndex} className="even:bg-muted/25">
               <TableCell className="text-right font-mono text-muted-foreground">{rowIndex + 1}</TableCell>
               {data.columns.map((_, columnIndex) => (
                 <TableCell key={columnIndex} className="max-w-80 truncate font-mono" title={row[columnIndex]}>
@@ -221,9 +235,9 @@ const DataTable: React.FC<{ data: TabularPreview }> = ({ data }) => {
             </TableRow>
           ))}
         </TableBody>
-      </Table>
+      </SftpPreviewTable>
       {data.omittedRows && <p className="p-3 text-xs text-muted-foreground">{t('sftp.preview.table.truncated')}</p>}
-    </ScrollArea>
+    </SftpPreviewScrollArea>
   );
 };
 
@@ -256,23 +270,22 @@ export const ArchivePreview: React.FC<{ content: string; extension: string; fall
   }, [content, extension]);
   if (!entries) return <>{fallback}</>;
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-10 items-center gap-1 border-b px-3 text-xs text-muted-foreground">
-        <FileArchiveIcon className="size-4" />
+    <>
+      <SftpPreviewToolbar>
         <span>{t('sftp.preview.archive.summary', { count: entries.length })}</span>
-      </div>
-      <ScrollArea className="min-h-0 flex-1" size="thin">
-        <Table className="text-xs">
-          <TableHeader className="sticky top-0 bg-background">
+      </SftpPreviewToolbar>
+      <SftpPreviewScrollArea className="bg-app-surface">
+        <SftpPreviewTable className="table-fixed">
+          <TableHeader>
             <TableRow>
               <TableHead>{t('sftp.preview.archive.name')}</TableHead>
-              <TableHead className="w-32">{t('sftp.preview.archive.type')}</TableHead>
-              <TableHead className="w-32 text-right">{t('sftp.preview.archive.size')}</TableHead>
+              <TableHead className="w-20 @min-xl/preview:w-32">{t('sftp.preview.archive.type')}</TableHead>
+              <TableHead className="w-20 text-right @min-xl/preview:w-32">{t('sftp.preview.archive.size')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {entries.map((entry, index) => (
-              <TableRow key={`${entry.name}-${index}`}>
+              <TableRow key={`${entry.name}-${index}`} className="even:bg-muted/25">
                 <TableCell className="max-w-xl">
                   <span className="flex min-w-0 items-center gap-1">
                     {entry.isDirectory ? <FolderIcon className="size-4 shrink-0 text-muted-foreground" /> : <FileArchiveIcon className="size-4 shrink-0 text-muted-foreground" />}
@@ -284,9 +297,9 @@ export const ArchivePreview: React.FC<{ content: string; extension: string; fall
               </TableRow>
             ))}
           </TableBody>
-        </Table>
-      </ScrollArea>
-    </div>
+        </SftpPreviewTable>
+      </SftpPreviewScrollArea>
+    </>
   );
 };
 
@@ -305,43 +318,43 @@ export const OfficeDocumentPreview: React.FC<{ content: string; extension: strin
   }, [content, extension]);
   if (!preview) {
     return (
-      <div className="flex flex-1 items-center justify-center p-8">
-        <Alert className="max-w-md">
-          <FileWarningIcon />
-          <AlertTitle>{t('sftp.preview.office.unavailableTitle')}</AlertTitle>
-          <AlertDescription>{t('sftp.preview.office.unavailableDescription')}</AlertDescription>
-        </Alert>
-      </div>
+      <SftpPreviewNotice
+        title={t('sftp.preview.office.unavailableTitle')}
+        description={t('sftp.preview.office.unavailableDescription')}
+      />
     );
   }
   if (preview.kind === 'document') {
     return (
-      <ScrollArea className="min-h-0 flex-1 bg-muted/35" size="thin">
-        <article className="mx-auto my-6 flex min-h-[34rem] max-w-3xl flex-col gap-3 rounded-lg border bg-background px-12 py-10 shadow-sm">
+      <SftpPreviewScrollArea>
+        <SftpPreviewPage className="min-h-[34rem] gap-3 wrap-anywhere">
           {preview.blocks.map((block, index) => block.kind === 'heading'
             ? <h2 key={index} className="mt-3 text-lg font-semibold tracking-tight first:mt-0">{block.text}</h2>
             : <p key={index} className="whitespace-pre-wrap text-sm leading-6">{block.text}</p>)}
-        </article>
-      </ScrollArea>
+        </SftpPreviewPage>
+      </SftpPreviewScrollArea>
     );
   }
   if (preview.kind === 'spreadsheet') {
     return (
       <Tabs defaultValue="0" className="min-h-0 flex-1 gap-0">
-        <div className="flex min-h-10 items-center border-b px-3">
+        <SftpPreviewToolbar>
           <TabsList variant="line" className="h-8 max-w-full justify-start overflow-x-auto p-0">
             {preview.sheets.map((sheet, index) => <TabsTrigger key={`${sheet.name}-${index}`} value={String(index)}>{sheet.name}</TabsTrigger>)}
           </TabsList>
-        </div>
+        </SftpPreviewToolbar>
         {preview.sheets.map((sheet, index) => <TabsContent key={`${sheet.name}-${index}`} value={String(index)} className="min-h-0 flex flex-1 flex-col"><SpreadsheetSheet sheet={sheet} /></TabsContent>)}
       </Tabs>
     );
   }
   return (
-    <ScrollArea className="min-h-0 flex-1 bg-muted/35" size="thin">
-      <div className="grid gap-5 p-6 md:grid-cols-2">
+    <SftpPreviewScrollArea>
+      <div className={cn(
+        'mx-auto grid gap-3 px-4 pb-4 @min-xl/preview:px-8 @min-xl/preview:pb-8',
+        preview.slides.length === 1 ? 'max-w-3xl' : 'max-w-6xl @min-3xl/preview:grid-cols-2',
+      )}>
         {preview.slides.map((slide) => (
-          <section key={slide.number} className="relative aspect-video overflow-hidden rounded-lg border bg-background p-7 shadow-sm">
+          <section key={slide.number} className="relative aspect-video overflow-hidden rounded-lg bg-app-surface p-4 shadow-card ring-1 ring-app-border/60 @min-xl/preview:p-6">
             <Badge variant="secondary" className="absolute bottom-2 right-2">{slide.number}</Badge>
             <div className="flex h-full flex-col justify-center gap-3 overflow-hidden">
               {slide.lines.length > 0 ? slide.lines.map((line, index) => index === 0
@@ -352,6 +365,6 @@ export const OfficeDocumentPreview: React.FC<{ content: string; extension: strin
           </section>
         ))}
       </div>
-    </ScrollArea>
+    </SftpPreviewScrollArea>
   );
 };

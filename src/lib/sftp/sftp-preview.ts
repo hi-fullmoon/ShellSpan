@@ -140,22 +140,24 @@ export function createPreviewDataUrl(content: string, mimeType: string): string 
   return `data:${mimeType};base64,${content}`;
 }
 
-export function formatHexPreview(content: string, byteLimit = 4096): string {
-  if (!content) return '';
+export function formatHexPreviewRows(content: string, byteLimit = 4096) {
   const encodedLimit = Math.ceil(byteLimit / 3) * 4;
   const decoded = atob(content.slice(0, encodedLimit));
   const length = Math.min(decoded.length, byteLimit);
-  const rows: string[] = [];
+  const rows: { offset: string; hex: string; ascii: string }[] = [];
   for (let offset = 0; offset < length; offset += 16) {
     const bytes = Array.from(
       { length: Math.min(16, length - offset) },
       (_, index) => decoded.charCodeAt(offset + index),
     );
-    const hex = bytes.map((byte) => byte.toString(16).padStart(2, '0')).join(' ');
+    const hex = bytes.map((byte, index) => {
+      const pair = byte.toString(16).padStart(2, '0');
+      return index === 8 ? ` ${pair}` : pair;
+    }).join(' ');
     const ascii = bytes
       .map((byte) => (byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : '.'))
       .join('');
-    rows.push(`${offset.toString(16).padStart(8, '0')}  ${hex.padEnd(47)}  |${ascii.padEnd(16)}|`);
+    rows.push({ offset: offset.toString(16).padStart(8, '0'), hex, ascii });
   }
-  return rows.join('\n');
+  return rows;
 }

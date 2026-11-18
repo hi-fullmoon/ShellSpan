@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdir, readFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { zipSync } from 'fflate';
 import { chromium, webkit } from 'playwright';
 import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
@@ -20,17 +21,36 @@ const files = await Promise.all(['src/components/ui/button.tsx', 'public/shellsp
 }));
 const largeSource = await readFile(join(root, 'src/locales/zh-CN.ts'), 'utf8');
 const licenseSource = await readFile(join(root, 'LICENSE'), 'utf8');
+const readmeSource = await readFile(join(root, 'README.md'), 'utf8');
+const tree = execFileSync('git', ['ls-tree', '-r', '--format=%(objectmode)%x09%(objecttype)%x09%(objectname)%x09%(path)', 'HEAD'], { cwd: root, encoding: 'utf8' });
+const richFiles = [
+  ['README.md', readmeSource, 'utf8'],
+  ['shellspan-tree.tsv', `Mode\tType\tObject\tPath\n${tree}`, 'utf8'],
+  ['shellspan-docs.zip', zipSync({ 'README.md': Buffer.from(readmeSource), 'LICENSE': Buffer.from(licenseSource) }), 'base64'],
+  ['geist-latin-wght-normal.woff2', await readFile(join(root, 'node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2')), 'base64'],
+  ['icon.icns', await readFile(join(root, 'src-tauri/icons/icon.icns')), 'base64'],
+].map(([name, data, contentEncoding]) => ({
+  path: join(root, name), name, content: Buffer.from(data).toString(contentEncoding),
+  size: Buffer.byteLength(data), isText: contentEncoding === 'utf8', contentEncoding, truncated: false,
+}));
 let desktopApplication;
+let installedApplications;
 if (process.platform === 'darwin') {
-  const textEdit = '/System/Applications/TextEdit.app/Contents';
+  const systemApplications = '/System/Applications';
+  const textEdit = join(systemApplications, 'TextEdit.app', 'Contents');
   const pngPath = join(artifacts, 'textedit-app-icon.png');
   execFileSync('/usr/bin/sips', ['-s', 'format', 'png', '-Z', '32', join(textEdit, 'Resources/AppIcon.icns'), '--out', pngPath]);
-  const readBundleField = (key) => execFileSync('/usr/bin/plutil', ['-extract', key, 'raw', '-o', '-', join(textEdit, 'Info.plist')], { encoding: 'utf8' }).trim();
+  const readBundleField = (bundle, key) => execFileSync('/usr/bin/plutil', ['-extract', key, 'raw', '-o', '-', join(bundle, 'Info.plist')], { encoding: 'utf8' }).trim();
   desktopApplication = {
-    id: readBundleField('CFBundleIdentifier'),
-    name: readBundleField('CFBundleName'),
+    id: readBundleField(textEdit, 'CFBundleIdentifier'),
+    name: readBundleField(textEdit, 'CFBundleName'),
     icon: `data:image/png;base64,${(await readFile(pngPath)).toString('base64')}`,
   };
+  // Use actual installed apps for overflow coverage on machines with differing file associations.
+  installedApplications = (await readdir(systemApplications)).filter(name => name.endsWith('.app')).slice(0, 16).map(name => ({
+    id: readBundleField(join(systemApplications, name, 'Contents'), 'CFBundleIdentifier'),
+    name,
+  }));
 }
 const server = await createServer({
   root, configFile: false, appType: 'custom', logLevel: 'error',
@@ -105,29 +125,61 @@ try {
               assert.ok(Math.abs(dialogBounds.height - height * 0.9) < 1, 'Preview uses 90% of the window height');
               assert.ok(dialogBounds.x >= 16 && dialogBounds.y >= 16, 'Preview keeps space around the window edges');
               const fileMetadata = dialog.locator('[data-slot="sftp-preview-metadata"]');
-              const metadataParts = await fileMetadata.locator('[data-slot="sftp-preview-metadata-values"] > span').allTextContents();
-              assert.equal(metadataParts.length, 3, 'All file kinds use extension, dot, and size');
-              assert.equal(metadataParts[0], image ? 'SVG' : json ? 'JSON' : 'TSX');
-              assert.equal(metadataParts[1], '·');
-              assert.equal(await fileMetadata.locator('[data-slot="badge"]').count(), 0, 'File kinds share plain metadata without badges');
-              const metadataStyles = await fileMetadata.locator('[data-slot="sftp-preview-metadata-values"] > span').evaluateAll(elements => elements.map(element => ({
-                color: getComputedStyle(element).color,
-                background: getComputedStyle(element).backgroundColor,
-                fontSize: getComputedStyle(element).fontSize,
-              })));
-              assert.equal(new Set(metadataStyles.map(style => style.color)).size, 1, 'File kinds share one muted metadata color');
-              assert.ok(metadataStyles.every(style => style.background === 'rgba(0, 0, 0, 0)' && style.fontSize === '12px'));
+              const typeBadge = fileMetadata.locator('[data-slot="badge"][data-variant="secondary"]');
+              const fileSize = fileMetadata.locator('[data-slot="sftp-preview-file-size"]');
+              assert.equal(await typeBadge.textContent(), image ? 'SVG' : json ? 'JSON' : 'TSX');
+              assert.match(await fileSize.textContent(), /^\d+(?:\.\d+)? [KMGT]?B$/);
+              await waitForBackground(typeBadge, true);
+              await waitForBackground(fileSize, false);
+              const filePath = dialog.locator('[data-slot="dialog-description"]');
+              assert.equal(await filePath.getAttribute('title'), file.path);
+              const [pathBounds, badgeBounds, sizeBounds] = await Promise.all([filePath.boundingBox(), typeBadge.boundingBox(), fileSize.boundingBox()]);
+              assert.ok(Math.abs(badgeBounds.x - pathBounds.x - pathBounds.width - 8) < 1, 'The type badge sits directly beside the path');
+              assert.ok(Math.abs(sizeBounds.x - badgeBounds.x - badgeBounds.width - 8) < 1, 'The size sits outside the type badge');
+              const pathCenter = pathBounds.y + pathBounds.height / 2;
+              assert.ok([badgeBounds, sizeBounds].every(bounds => Math.abs(bounds.y + bounds.height / 2 - pathCenter) < 1),
+                'The type and size stay on the same line as the path');
+              assert.ok(await fileMetadata.evaluate(element => element.scrollWidth <= element.clientWidth), 'The type and size fit beside a long path');
               const openButton = dialog.getByRole('button', { name: labels.open, exact: true });
               const optionsButton = dialog.getByRole('button', { name: labels.options, exact: true });
               const openBounds = await openButton.boundingBox();
               const optionsBounds = await optionsButton.boundingBox();
+              const header = dialog.locator('[data-slot="dialog-header"]');
+              const surface = dialog.locator('[data-slot="sftp-preview-surface"]');
+              const surfaceBounds = await surface.boundingBox();
+              assert.ok(await header.getByRole('button', { name: labels.open, exact: true }).isVisible());
+              assert.ok(await header.getByRole('button', { name: labels.options, exact: true }).isVisible());
+              const close = header.locator('[data-slot="dialog-close"]');
+              const closeBounds = await close.boundingBox();
+              assert.equal(closeBounds.y, openBounds.y, 'Open and close controls stay aligned');
+              assert.equal(closeBounds.height, openBounds.height);
+              assert.ok(Math.abs(closeBounds.x - optionsBounds.x - optionsBounds.width - 8) < 1,
+                'The close button is 8px from the split button');
+              assert.equal(await header.locator('[data-slot="sftp-preview-metadata"]').count(), 1);
+              assert.ok(surfaceBounds.y > openBounds.y + openBounds.height, 'The preview starts below the file controls');
+              assert.equal(surfaceBounds.width, dialogBounds.width - 2, 'The preview fills the space between the dialog edges');
               assert.equal(await openButton.textContent(), labels.open, 'The primary open action has a visible label');
               assert.equal(openBounds.height, 32);
-              assert.deepEqual(await openButton.locator('[data-icon="inline-start"]').evaluate(element => [element.clientWidth, element.clientHeight]), [14, 14]);
-              assert.equal(await openButton.locator('[data-icon="inline-start"] svg').count(), 1, 'An unavailable default application icon uses the generic icon');
+              assert.equal(await openButton.locator('img, svg').count(), 0, 'Open uses just its label without an application icon');
               assert.equal(optionsBounds.height, openBounds.height);
               assert.equal(optionsBounds.y, openBounds.y);
-              assert.ok(Math.abs(optionsBounds.x - openBounds.x - openBounds.width) <= 1, 'Both sides form one split button');
+              assert.ok(Math.abs(optionsBounds.x - openBounds.x - openBounds.width) < 1, 'Both sides form one split button');
+              await page.mouse.move(0, 0);
+              for (const button of [openButton, optionsButton]) {
+                await waitForBackground(button, false);
+                assert.equal(await button.evaluate(element => getComputedStyle(element).borderTopWidth), '0px');
+              }
+              if (!image && !json) {
+                await openButton.hover();
+                await Promise.all([waitForBackground(openButton, true), waitForBackground(optionsButton, false)]);
+                await optionsButton.hover();
+                await Promise.all([waitForBackground(openButton, false), waitForBackground(optionsButton, true)]);
+                await page.mouse.move(0, 0);
+                await waitForBackground(optionsButton, false);
+              }
+              const splitDivider = await optionsButton.locator('[data-slot="separator"]').boundingBox();
+              assert.ok(splitDivider.width > 0 && splitDivider.width <= 1 && splitDivider.height > 0 && splitDivider.height < optionsBounds.height,
+                'A short divider distinguishes the two actions');
               assert.ok(optionsBounds.x + optionsBounds.width <= dialogBounds.x + dialogBounds.width);
               if (width === 380) {
                 await optionsButton.focus();
@@ -184,7 +236,12 @@ try {
                 assert.equal(decodeURIComponent(new URL(popup.url()).pathname), `/@fs${file.path}`);
                 await popup.close();
               }
-              const actions = image ? ['zoomOut', 'reset', 'zoomIn'] : ['wrap', 'copy'];
+              const actions = image ? ['zoomOut', 'zoomIn', 'reset'] : ['wrap', 'copy'];
+              const toolbar = surface.locator('[data-slot="sftp-preview-toolbar"]');
+              assert.equal(await toolbar.count(), 1, 'Text and images share a single preview toolbar');
+              const toolbarBounds = await toolbar.boundingBox();
+              assert.equal(toolbarBounds.height, 41);
+              assert.ok(await toolbar.evaluate(element => element.scrollWidth <= element.clientWidth));
               for (const action of actions) {
                 await page.mouse.move(0, 0);
                 const button = dialog.getByRole('button', { name: labels[action], exact: true });
@@ -193,6 +250,7 @@ try {
                 const bounds = await button.boundingBox();
                 assert.equal(bounds.width, 32, `${action} uses the shared icon button width`);
                 assert.equal(bounds.height, 32, `${action} uses the shared icon button height`);
+                assert.ok(Math.abs(bounds.y + bounds.height / 2 - toolbarBounds.y - toolbarBounds.height / 2) <= 1, `${action} stays in the preview toolbar`);
                 assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width, `${action} remains visible at ${width}px`);
                 assert.equal(await button.locator('svg').count(), 1);
                 assert.ok(await button.evaluate(element => {
@@ -214,6 +272,13 @@ try {
                 }
               }
               if (image) {
+                const zoomButtons = toolbar.getByRole('button');
+                assert.deepEqual(await zoomButtons.allTextContents(), actions.map(action => labels[action]));
+                const [zoomOutBounds, zoomInBounds, resetBounds] = await Promise.all(
+                  (await zoomButtons.all()).map(button => button.boundingBox()),
+                );
+                assert.ok(zoomOutBounds.x < zoomInBounds.x && zoomInBounds.x < resetBounds.x,
+                  'Zoom out and zoom in appear together before reset');
                 const picture = dialog.getByRole('img', { name: file.name });
                 await picture.evaluate(image => image.decode());
                 const baseline = await picture.boundingBox();
@@ -224,30 +289,8 @@ try {
                 await reset.click();
                 assert.equal((await picture.boundingBox()).width, baseline.width);
               } else {
-                const toolbar = dialog.locator('[data-slot="sftp-text-toolbar"]');
-                assert.equal(await toolbar.count(), 1, 'Text previews have one toolbar');
-                const toolbarBounds = await toolbar.boundingBox();
-                assert.equal(toolbarBounds.height, 44, 'Metadata and text actions share one compact row');
-                assert.ok(await toolbar.getByRole('button', { name: labels.open, exact: true }).isVisible());
-                assert.ok(await toolbar.getByRole('button', { name: labels.options, exact: true }).isVisible());
-                for (const action of actions) {
-                  const bounds = await dialog.getByRole('button', { name: labels[action], exact: true }).boundingBox();
-                  assert.ok(Math.abs(bounds.y + bounds.height / 2 - toolbarBounds.y - toolbarBounds.height / 2) < 1, `${action} stays in the combined toolbar`);
-                }
-                const metadata = toolbar.locator('div').first();
-                assert.equal(await metadata.locator('[data-slot="badge"]').count(), 0, 'File extension uses plain text');
-                assert.equal(await metadata.getByText(json ? 'JSON' : 'TSX', { exact: true }).count(), 1);
-                assert.equal(await metadata.getByText(locale === 'zh-CN' ? '文本' : 'Text', { exact: true }).count(), 0, 'Redundant file kind is omitted');
-                assert.equal(await metadata.locator('[aria-hidden="true"]').allTextContents().then(values => values.join('')), '··', 'Dots separate extension, size, and line count');
-                const textStyle = await metadata.locator('span:not([aria-hidden])').evaluateAll(elements => elements.map(element => ({
-                  color: getComputedStyle(element).color,
-                  background: getComputedStyle(element).backgroundColor,
-                  fontSize: getComputedStyle(element).fontSize,
-                })));
-                assert.equal(new Set(textStyle.map(style => style.color)).size, 1, 'Metadata uses one muted text color');
-                assert.ok(textStyle.every(style => style.background === 'rgba(0, 0, 0, 0)' && style.fontSize === '12px'), 'Metadata has no background and uses compact text');
-                assert.ok(await toolbar.evaluate(element => element.scrollWidth <= element.clientWidth), 'Combined toolbar fits narrow windows');
-                assert.ok(await toolbar.locator('div').first().evaluate(element => element.scrollWidth <= element.clientWidth), 'Metadata stays readable in the combined toolbar');
+                const lineCount = file.content.split('\n').length;
+                assert.ok(await toolbar.getByText(locale === 'zh-CN' ? `${lineCount} 行` : `${lineCount} lines`, { exact: true }).isVisible());
                 const wrap = dialog.getByRole('button', { name: labels.wrap, exact: true });
                 const highlightedBeforeWrap = await dialog.locator('code').innerHTML();
                 const workersBeforeWrap = workerCount;
@@ -309,6 +352,101 @@ try {
         assert.equal(fallback.unknown, null, 'Unknown file types retain plain source');
         assert.equal(fallback.cancelled, null, 'Cancelled workers do not apply stale markup');
         assert.ok(fallback.large?.includes('hljs-string'), 'Large real files highlight in a worker');
+        for (const [width, height, theme] of [[380, 320, 'dark'], [1280, 800, 'light']]) {
+          await page.setViewportSize({ width, height });
+          for (const file of richFiles) {
+            await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__sftp_preview_toolbar`);
+            await page.evaluate(async ({ file, locale, theme }) => {
+              document.documentElement.dataset.theme = theme;
+              const { mountPreview } = await import('/src/components/sftp/__tests__/sftp-preview-toolbar.browser.tsx');
+              await mountPreview(file, locale);
+            }, { file, locale, theme });
+            const dialog = page.getByRole('dialog', { name: file.name, exact: true });
+            await dialog.waitFor();
+            await dialog.evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));
+            const header = dialog.locator('[data-slot="dialog-header"]');
+            const surface = dialog.locator('[data-slot="sftp-preview-surface"]');
+            const toolbar = surface.locator('[data-slot="sftp-preview-toolbar"]');
+            const viewport = surface.locator('[data-slot="scroll-area-viewport"]:visible');
+            const surfaceBounds = await surface.boundingBox();
+            const headerBounds = await header.boundingBox();
+            assert.ok(Math.abs(surfaceBounds.y - headerBounds.y - headerBounds.height) < 1, 'The preview panel starts immediately below the header');
+            assert.ok(await header.getByRole('button', { name: labels.open, exact: true }).isVisible());
+            assert.ok(await header.locator('[data-slot="sftp-preview-metadata"]').isVisible());
+            assert.ok(await dialog.evaluate(element => document.activeElement === element), 'The preview opens with focus inside the dialog');
+            assert.equal((await viewport.boundingBox()).width, surfaceBounds.width, 'The scroll layer follows the full width of the preview panel');
+            if (file.name.endsWith('.woff2')) {
+              await surface.getByText(locale === 'zh-CN' ? '字体样张' : 'Font specimen', { exact: true }).waitFor();
+              assert.equal(await toolbar.count(), 0, 'A font preview needs no toolbar');
+            }
+            if (file.name.endsWith('.md') || file.name.endsWith('.woff2')) {
+              const previewPage = await surface.locator('[data-slot="sftp-preview-page"]').boundingBox();
+              assert.ok(Math.abs((previewPage.x - surfaceBounds.x) - (surfaceBounds.x + surfaceBounds.width - previewPage.x - previewPage.width)) < 1, 'Document and font pages are centered');
+              assert.ok(previewPage.width < surfaceBounds.width);
+              assert.ok(await viewport.evaluate(element => element.scrollWidth <= element.clientWidth));
+              if (file.name.endsWith('.md')) {
+                const toolbarBounds = await toolbar.boundingBox();
+                const topGap = previewPage.y - (toolbarBounds.y + toolbarBounds.height);
+                assert.ok(Math.abs(topGap - 8) < 1, 'Markdown starts 8px below the toolbar at both window widths');
+              }
+            }
+            if (file.name.endsWith('.tsv')) {
+              const tableHeader = surface.getByRole('row').first();
+              const before = await tableHeader.boundingBox();
+              assert.ok(await viewport.evaluate(element => {
+                element.scrollTop = 500;
+                return element.scrollTop > 0;
+              }), 'Tabular data scrolls inside the preview panel');
+              assert.ok(Math.abs((await tableHeader.boundingBox()).y - before.y) < 1, 'Table headers stay visible while scrolling');
+              await viewport.evaluate(element => { element.scrollTop = 0; });
+            }
+            if (file.name.endsWith('.zip')) {
+              assert.ok(await surface.getByRole('cell', { name: 'README.md', exact: true }).isVisible());
+            }
+            if (file.name.endsWith('.icns')) {
+              const table = surface.getByRole('table', { name: locale === 'zh-CN' ? '二进制检查视图' : 'Binary inspection view' });
+              assert.deepEqual(await table.getByRole('columnheader').allTextContents(), locale === 'zh-CN'
+                ? ['偏移量', '十六进制字节', 'ASCII'] : ['Offset', 'Hex bytes', 'ASCII']);
+              const [offset, hex, ascii] = await table.getByRole('row').nth(1).getByRole('cell').allTextContents();
+              assert.equal(offset, '00000000');
+              assert.equal(hex.replaceAll(' ', ''), Buffer.from(file.content, 'base64').subarray(0, 16).toString('hex'));
+              assert.ok(ascii.startsWith('icns'));
+              const tableHeader = table.getByRole('row').first();
+              const viewportBounds = await viewport.boundingBox();
+              await viewport.evaluate(element => { element.scrollTop = 500; });
+              assert.ok(Math.abs((await tableHeader.boundingBox()).y - viewportBounds.y) < 1, 'Hex column headings stay visible while scrolling');
+              await viewport.evaluate(element => { element.scrollTop = 0; });
+              if (width === 380) {
+                assert.ok(await viewport.evaluate(element => {
+                  element.scrollLeft = element.scrollWidth;
+                  return element.scrollLeft > 0;
+                }), 'All hex columns remain reachable on narrow screens');
+                await viewport.evaluate(element => { element.scrollLeft = 0; });
+              }
+              assert.equal(await toolbar.count(), 0, 'The binary inspection notice stays with its content');
+            }
+            await page.screenshot({ path: join(artifacts, `${engine.name()}-${locale}-${theme}-${width}-${file.name}.png`) });
+            if (file.name.endsWith('.md') || file.name.endsWith('.tsv')) {
+              const sourceTab = toolbar.getByRole('tab', { name: locale === 'zh-CN' ? '源码' : 'Source', exact: true });
+              await sourceTab.focus();
+              await page.keyboard.press('Enter');
+              assert.equal(await sourceTab.getAttribute('aria-selected'), 'true');
+              assert.equal(await toolbar.count(), 1, 'Switching to source keeps a single preview toolbar');
+              const wrap = toolbar.getByRole('button', { name: labels.wrap, exact: true });
+              await wrap.focus();
+              await page.keyboard.press('Space');
+              assert.equal(await wrap.getAttribute('aria-pressed'), 'true');
+              assert.equal(await surface.locator('pre:visible').textContent(), file.content);
+              assert.deepEqual(await surface.boundingBox(), surfaceBounds, 'Source and rendered content share the same panel bounds');
+              assert.deepEqual(await header.boundingBox(), headerBounds);
+              await dialog.focus();
+              await page.mouse.move(0, 0);
+              await page.screenshot({ path: join(artifacts, `${engine.name()}-${locale}-${theme}-${width}-${file.name}-source.png`) });
+            }
+            await page.keyboard.press('Escape');
+            await dialog.waitFor({ state: 'hidden' });
+          }
+        }
         await page.setViewportSize({ width: 380, height: 600 });
         for (const file of [
           { path: join(root, 'LICENSE'), name: 'LICENSE', content: licenseSource, size: Buffer.byteLength(licenseSource), truncated: false },
@@ -325,11 +463,11 @@ try {
           const metadata = dialog.locator('[data-slot="sftp-preview-metadata"]');
           assert.equal(await dialog.locator('pre').textContent(), file.content);
           if (file.truncated) {
-            const partial = metadata.locator('[data-slot="badge"]');
+            const partial = metadata.locator('[data-slot="badge"][data-variant="outline"]');
             const badgeBounds = await partial.boundingBox();
             const metadataBounds = await metadata.boundingBox();
             assert.ok(badgeBounds.x >= metadataBounds.x && badgeBounds.x + badgeBounds.width <= metadataBounds.x + metadataBounds.width + 1, `Partial-preview status stays visible in ${engine.name()} ${locale}, badge width ${badgeBounds.width}px and metadata width ${metadataBounds.width}px`);
-            assert.ok((await metadata.locator('[data-slot="sftp-preview-metadata-values"]').getAttribute('title')).includes('TS ·'), 'Clipped metadata remains available in a tooltip');
+            assert.equal(await metadata.locator('[data-slot="badge"][data-variant="secondary"]').getAttribute('title'), 'TS', 'Clipped file types remain available on hover');
             await dialog.locator('code[data-highlighted="true"]').waitFor();
           } else {
             assert.equal(await metadata.getByText(locale === 'zh-CN' ? '文本' : 'Text', { exact: true }).count(), 1, 'Extensionless readable files have a readable type label');
@@ -350,23 +488,30 @@ try {
             }, { application: desktopApplication, file, locale, blocked });
             const dialog = page.getByRole('dialog');
             const openButton = dialog.getByRole('button', { name: labels.open, exact: true });
-            const buttonIcon = openButton.locator(blocked ? '[data-icon="inline-start"] svg' : '[data-icon="inline-start"] img');
-            await buttonIcon.waitFor();
-            if (!blocked) await buttonIcon.evaluate(image => image.decode());
-            const buttonIconGap = await buttonIcon.evaluate(icon => {
-              const button = icon.closest('button');
-              const label = Array.from(button.childNodes).find(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
-              const text = document.createRange();
-              text.selectNode(label);
-              return text.getBoundingClientRect().left - icon.getBoundingClientRect().right;
-            });
-            assert.ok(Math.abs(buttonIconGap - 4) < 1, 'The default application icon is 4px left of the Open label');
+            if (!blocked) {
+              const buttonIcon = openButton.locator('img[data-icon="inline-start"]');
+              await buttonIcon.evaluate(image => image.decode());
+              assert.deepEqual(await buttonIcon.evaluate(image => [image.clientWidth, image.clientHeight]), [14, 14]);
+              const buttonIconGap = await buttonIcon.evaluate(icon => {
+                const button = icon.closest('button');
+                const label = Array.from(button.childNodes).find(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
+                const text = document.createRange();
+                text.selectNode(label);
+                return text.getBoundingClientRect().left - icon.getBoundingClientRect().right;
+              });
+              assert.ok(Math.abs(buttonIconGap - 4) < 1, 'The default application icon is 4px left of the Open label');
+            }
             await dialog.getByRole('button', { name: labels.options, exact: true }).click();
             const menu = page.getByRole('menu');
             const appItem = menu.getByRole('menuitem', { name: desktopApplication.name, exact: true });
             const icon = appItem.locator(blocked ? 'svg' : 'img');
             await icon.waitFor();
-            if (!blocked) await icon.evaluate(image => image.decode());
+            if (blocked) {
+              await openButton.locator('img, svg').waitFor({ state: 'hidden' });
+              assert.equal(await openButton.textContent(), labels.open, 'Open keeps the label when the icon fails to load');
+            } else {
+              await icon.evaluate(image => image.decode());
+            }
             await menu.evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));
             const iconBounds = await icon.boundingBox();
             const labelBounds = await appItem.getByText(desktopApplication.name, { exact: true }).boundingBox();
@@ -374,6 +519,50 @@ try {
             assert.equal(iconBounds.height, 14);
             assert.ok(Math.abs(labelBounds.x - iconBounds.x - iconBounds.width - 4) < 1, 'The app icon is 4px left of the app name');
             await page.screenshot({ path: join(artifacts, `${engine.name()}-application-icon-${blocked ? 'fallback' : 'native'}.png`) });
+          }
+          for (const height of [800, 320]) {
+            await page.setViewportSize({ width: 760, height });
+            await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__sftp_preview_toolbar`);
+            await page.evaluate(async ({ applications, file, locale }) => {
+              const { mountPreview } = await import('/src/components/sftp/__tests__/sftp-preview-toolbar.browser.tsx');
+              await mountPreview(file, locale, true, applications);
+            }, { applications: installedApplications, file, locale });
+            const options = page.getByRole('button', { name: labels.options, exact: true });
+            await options.focus();
+            await page.keyboard.press('Enter');
+            const menu = page.getByRole('menu');
+            const list = menu.locator('[data-slot="sftp-preview-open-applications"]');
+            const lastApplication = list.getByRole('menuitem').last();
+            await list.getByRole('menuitem', { name: installedApplications.at(-1).name, exact: true }).waitFor({ state: 'attached' });
+            await menu.evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));
+
+            const menuBounds = await menu.boundingBox();
+            const listBounds = await list.boundingBox();
+            assert.ok(menuBounds.y >= 0 && menuBounds.y + menuBounds.height <= height + 1, 'The full menu fits the viewport');
+            assert.ok(listBounds.height <= 280 && (height === 800 ? listBounds.height === 280 : listBounds.height < 280));
+            assert.ok(await list.evaluate(element => element.scrollHeight > element.clientHeight), 'Only the application list needs to scroll');
+
+            const reveal = menu.getByRole('menuitem', { name: labels.revealRemote, exact: true });
+            const saveAs = menu.getByRole('menuitem', { name: labels.saveAs, exact: true });
+            const footer = () => Promise.all([reveal.boundingBox(), saveAs.boundingBox()]);
+            const initialFooter = await footer();
+            assert.ok(initialFooter.every(bounds => bounds.y >= listBounds.y + listBounds.height
+              && bounds.y + bounds.height <= menuBounds.y + menuBounds.height + 1), 'Both footer actions are fully visible');
+
+            await list.hover();
+            await page.mouse.wheel(0, 240);
+            await page.waitForFunction(() => document.querySelector('[data-slot="sftp-preview-open-applications"]').scrollTop > 0);
+            assert.deepEqual(await footer(), initialFooter, 'Wheel scrolling keeps the footer fixed');
+
+            await list.evaluate(element => { element.scrollTop = 0; });
+            await page.keyboard.press('End');
+            await page.keyboard.press('ArrowUp');
+            await page.keyboard.press('ArrowUp');
+            await page.waitForFunction(() => document.querySelector('[data-slot="sftp-preview-open-applications"]').scrollTop > 0);
+            assert.ok(await lastApplication.evaluate(item => item === document.activeElement), 'Keyboard navigation reveals the last application');
+            assert.deepEqual(await footer(), initialFooter, 'Keyboard scrolling keeps the footer fixed');
+            assert.equal(await menu.evaluate(element => element.scrollTop), 0);
+            await page.screenshot({ path: join(artifacts, `${engine.name()}-application-list-${height}.png`) });
           }
         }
         assert.deepEqual(errors, []);
