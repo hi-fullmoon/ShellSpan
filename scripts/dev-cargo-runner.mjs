@@ -82,9 +82,12 @@ async function main() {
   }
   // A frozen P3 run signs its private bundle on the evidence volume. Its
   // shared Cargo executable remains available as a read-only build input.
-  const image = await mkdtemp(join(isolatedP3?evidenceDirectory:dirname(executable), '.shellspan-dev-'));
+  const managedImage = frozenManifest ? undefined : process.env.SHELLSPAN_DEV_IMAGE_DIR;
+  assert(!managedImage || isAbsolute(managedImage), 'Development image directory must be an absolute path');
+  const image = managedImage || await mkdtemp(join(isolatedP3?evidenceDirectory:dirname(executable), '.shellspan-dev-'));
   try {
     const bundle = join(image, 'ShellSpan Dev.app');
+    if (managedImage) await rm(bundle, { recursive: true, force: true });
     const contents = join(bundle, 'Contents');
     const binary = join(contents, 'MacOS', 'ShellSpan');
     await mkdir(dirname(binary), { recursive: true });
@@ -120,6 +123,12 @@ async function main() {
     }
     console.log(`Development signing verified: ${signing.join(' ')}`);
     if (interrupted) return interrupted === 'SIGINT' ? 130 : 143;
+    if (managedImage) {
+      // Tauri kills the runner PID on reload. Give it the native app at that PID.
+      const appEnv = { ...process.env };
+      delete appEnv.SHELLSPAN_DEV_IMAGE_DIR;
+      process.execve(binary, [binary, ...appArgs], appEnv);
+    }
     const application=launch(binary,freshSshWindow?['-ApplePersistenceIgnoreState','YES',...appArgs]:appArgs);
     if(frozenManifest)writeFrozenCheckpoint(join(evidenceDirectory,`native-image-${recordId}-process.json`),{frozenManifest,runnerPid:process.pid,appPid:application.child.pid,executable:binary});
     const exitCode=await application.done;
@@ -132,7 +141,7 @@ async function main() {
     }
     return exitCode;
   } finally {
-    await rm(image, { recursive: true, force: true });
+    if (!managedImage) await rm(image, { recursive: true, force: true });
   }
 }
 
