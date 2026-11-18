@@ -570,7 +570,7 @@ async fn create_remote_terminal_session(
         },
     };
     state
-        .insert(session_id.clone(), managed)
+        .insert_ssh(session_id.clone(), managed, request.jump_host.as_ref())
         .map_err(|message| {
             error!("Failed to register SSH session session_id={session_id}: {message}");
             CreateSessionError::Other { message }

@@ -21,6 +21,7 @@ const image = 'shellspan-ssh-e2e:local';
 const targetHost = 'sftp-target';
 const entry = 'src/components/ai/__tests__/ai-sftp-location.native.tsx';
 const fileName = '.host:2026';
+const firstRouteFileName = '.first-route-only';
 const docker = (args, input) => execFileSync('docker', args, {
   encoding: 'utf8', input, timeout: 30_000, stdio: ['pipe', 'pipe', 'pipe'],
 }).trim();
@@ -58,6 +59,9 @@ async function startRoute(label, keyVolume) {
   ['/usr/sbin/sshd', '-D', '-e', '-h', '/isolated-key/host']);
   const hostname = docker(['exec', target, 'cat', '/etc/hostname']);
   docker(['exec', '--user', 'shellspan', target, 'cp', '/etc/hostname', `/home/shellspan/upload/${fileName}`]);
+  if (label === 'a') {
+    docker(['exec', '--user', 'shellspan', target, 'cp', '/etc/hostname', `/home/shellspan/upload/${firstRouteFileName}`]);
+  }
   startContainer(gateway, ['--network', network, '--publish', '127.0.0.1::22']);
   const port = Number(docker(['port', gateway, '22/tcp']).split(':').pop());
   assert(port > 0, 'Expected a loopback-only jump port');
@@ -85,6 +89,7 @@ try {
   const result = Promise.withResolvers();
   server = await createServer({
     root: repository, configFile: false, appType: 'custom', logLevel: 'error',
+    cacheDir: resolve(dataDir, 'vite-cache'),
     resolve: { alias: { '@': resolve(repository, 'src') } },
     optimizeDeps: { entries: [entry] },
     server: { host: '127.0.0.1', port: 0, hmr: false, watch: null },
@@ -94,11 +99,16 @@ try {
         vite.middlewares.use((request, response, next) => {
           if (request.url === `/${token}`) {
             response.setHeader('Content-Type', 'text/html');
-            response.end(`<!doctype html><meta charset="utf-8"><main id="root"></main><script type="module" src="/${entry}"></script>`);
+            response.end(`<!doctype html><meta charset="utf-8"><main id="root"></main><script type="module">
+              import('/${entry}').catch(error => fetch('/${token}/result', { method: 'POST', body: String(error) }));
+            </script>`);
           } else if (request.url === `/${token}/config`) {
             response.setHeader('Content-Type', 'application/json');
             response.setHeader('Cache-Control', 'no-store');
-            response.end(JSON.stringify({ password, targetHost, fileName, routes: [first, second].map(({ port, hostname }) => ({ port, hostname })) }));
+            response.end(JSON.stringify({
+              password, targetHost, fileName, firstRouteFileName, localFile: resolve(repository, 'AGENTS.md'),
+              routes: [first, second].map(({ port, hostname }) => ({ port, hostname })),
+            }));
           } else if (request.method === 'POST' && request.url === `/${token}/pause`) {
             docker(['pause', first.target]);
             paused = true;
@@ -133,7 +143,7 @@ try {
   child.on('error', result.reject);
   child.on('exit', code => result.reject(new Error(`Desktop app exited before reporting (${code})`)));
   assert.equal(await Promise.race([result.promise, delay(240_000, 'Timed out', { ref: false })]), 'PASS');
-  process.stdout.write('PASS: SFTP kept the selected remote file across tab switches and selected the correct host through each jump route.\n');
+  process.stdout.write('PASS: Local and SFTP path actions require an existing entry on the selected route. SFTP selection survives tab switches.\n');
 } catch (error) {
   process.stderr.write(`${error}\n${output}\n`);
   process.exitCode = 1;

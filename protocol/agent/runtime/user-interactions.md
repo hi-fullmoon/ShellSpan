@@ -1,4 +1,15 @@
-# User questions and manual operations
+# User interactions
+
+## Links in assistant responses
+
+Use a complete HTTP or HTTPS URL for a web link destination. The label may be a
+route such as `/todo/`. Render a route whose full URL is unknown as inline code.
+The client initially offers to copy an absolute path formatted as standalone
+inline code. It offers file actions after a metadata check confirms a file or
+directory, using the connected terminal's SFTP route for remote paths and the
+local filesystem for local paths.
+
+## User questions
 
 `ask_user_question` collects non-sensitive decisions and information. Options are
 optional; free text is supported. A selection is not missing text, an operation

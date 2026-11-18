@@ -40,56 +40,46 @@ describe('AssistantMessageContent', () => {
     vi.mocked(getPlatform).mockReturnValue('windows');
   });
 
-  it('opens an absolute local path with Ctrl + click on Windows or from the context menu', async () => {
+  it('opens an explicit file link on Windows or from the context menu', async () => {
     render(
       <AssistantMessageContent
-        blocks={[{ type: 'text', text: 'Saved at `C:\\Users\\tester\\todo.html`.' }]}
+        blocks={[{ type: 'text', text: '[Todo](file:///C:/Users/tester/todo.html)' }]}
         streaming={false}
       />,
     );
 
-    const path = screen.getByText('C:\\Users\\tester\\todo.html');
+    const path = screen.getByRole('link', { name: 'Todo' });
     expect(path).toHaveClass('ai-markdown-local-path');
     expect(path).toHaveAttribute('role', 'link');
     expect(path).toHaveAttribute('tabindex', '0');
     expect(path).not.toHaveAttribute('title');
-    expect(path).toHaveAttribute('aria-description', 'ai.path.openWithCtrl');
     fireEvent.click(path);
-    fireEvent.click(path, { metaKey: true });
-    expect(invokeOpenPath).not.toHaveBeenCalled();
-    fireEvent.click(path, { ctrlKey: true });
-    expect(invokeOpenPath).toHaveBeenCalledWith('C:\\Users\\tester\\todo.html');
+    expect(invokeOpenPath).toHaveBeenCalledWith('C:/Users/tester/todo.html');
     invokeOpenPath.mockClear();
     fireEvent.keyDown(path, { key: 'Enter' });
-    expect(invokeOpenPath).toHaveBeenCalledWith('C:\\Users\\tester\\todo.html');
+    expect(invokeOpenPath).toHaveBeenCalledWith('C:/Users/tester/todo.html');
     invokeOpenPath.mockClear();
     fireEvent.contextMenu(path, { clientX: 120, clientY: 80 });
     await screen.findByRole('menu', { name: 'ai.path.menu' });
     fireEvent.click(await screen.findByRole('menuitem', { name: 'ai.path.revealExplorer' }));
-    expect(invokeRevealPath).toHaveBeenCalledWith('C:\\Users\\tester\\todo.html');
+    expect(invokeRevealPath).toHaveBeenCalledWith('C:/Users/tester/todo.html');
 
     fireEvent.contextMenu(path, { clientX: 120, clientY: 80 });
     fireEvent.click(await screen.findByRole('menuitem', { name: 'ai.path.open' }));
-    expect(invokeOpenPath).toHaveBeenCalledWith('C:\\Users\\tester\\todo.html');
+    expect(invokeOpenPath).toHaveBeenCalledWith('C:/Users/tester/todo.html');
   });
 
-  it('uses Command + click and Finder wording on macOS', async () => {
+  it('uses Finder wording for explicit file links on macOS', async () => {
     vi.mocked(getPlatform).mockReturnValue('macos');
     render(
       <AssistantMessageContent
-        blocks={[{ type: 'text', text: 'Saved at `/Users/tester/todo.html`.' }]}
+        blocks={[{ type: 'text', text: '[Todo](file:///Users/tester/todo.html)' }]}
         streaming={false}
       />,
     );
 
-    const path = screen.getByText('/Users/tester/todo.html');
+    const path = screen.getByRole('link', { name: 'Todo' });
     expect(path).not.toHaveAttribute('title');
-    expect(path).toHaveAttribute('aria-description', 'ai.path.openWithCommand');
-    fireEvent.click(path);
-    fireEvent.click(path, { ctrlKey: true });
-    expect(invokeOpenPath).not.toHaveBeenCalled();
-    fireEvent.click(path, { metaKey: true });
-    expect(invokeOpenPath).toHaveBeenCalledWith('/Users/tester/todo.html');
     fireEvent.contextMenu(path);
     expect(await screen.findByRole('menuitem', { name: 'ai.path.revealFinder' })).toBeInTheDocument();
   });

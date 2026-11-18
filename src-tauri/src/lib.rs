@@ -545,6 +545,8 @@ pub fn run() {
             commands::pick_local_folder,
             commands::open_path,
             commands::reveal_path,
+            ai_file_actions::inspect_local_path,
+            ai_file_actions::inspect_remote_path,
             ai_file_actions::list_local_file_apps,
             ai_file_actions::open_local_file_with,
             ai_file_actions::save_local_file_as,

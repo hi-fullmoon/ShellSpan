@@ -1005,6 +1005,7 @@ pub(crate) struct SessionTargetState {
 #[derive(Default)]
 struct SessionRegistry {
     sessions: HashMap<String, ManagedSession>,
+    ssh_jump_hosts: HashMap<String, (String, u16, String)>,
     native_inflight: HashMap<String, Arc<std::sync::atomic::AtomicUsize>>,
     worker_shutdowns: HashMap<String, EventReceiver<()>>,
 }
@@ -1788,12 +1789,34 @@ impl SessionManager {
             .ok_or("TERMINAL_NATIVE_TRANSPORT_UNAVAILABLE")?;
         enqueue_session_command(managed, SessionCommand::NativeControl(frame), session_id)
     }
+    #[cfg(test)]
     pub(crate) fn insert(&self, session_id: String, managed: ManagedSession) -> Result<(), String> {
+        self.insert_ssh(session_id, managed, None)
+    }
+
+    pub(crate) fn insert_ssh(
+        &self,
+        session_id: String,
+        managed: ManagedSession,
+        jump_host: Option<&JumpHostConfig>,
+    ) -> Result<(), String> {
         let mut guard = self
             .registry
             .lock()
             .map_err(|_| "session registry poisoned".to_string())?;
         guard.worker_shutdowns.remove(&session_id);
+        if let Some(jump_host) = jump_host {
+            guard.ssh_jump_hosts.insert(
+                session_id.clone(),
+                (
+                    jump_host.host.clone(),
+                    jump_host.port,
+                    jump_host.username.clone(),
+                ),
+            );
+        } else {
+            guard.ssh_jump_hosts.remove(&session_id);
+        }
         guard.sessions.insert(session_id, managed);
         Ok(())
     }
@@ -1811,6 +1834,7 @@ impl SessionManager {
             .registry
             .lock()
             .map_err(|_| "session registry poisoned".to_string())?;
+        guard.ssh_jump_hosts.remove(&session_id);
         guard.sessions.insert(session_id.clone(), managed);
         guard.worker_shutdowns.insert(session_id, receiver);
         Ok(sender)
@@ -1896,6 +1920,7 @@ impl SessionManager {
         session_id: &str,
     ) -> Option<EventReceiver<()>> {
         let managed = guard.sessions.remove(session_id)?;
+        guard.ssh_jump_hosts.remove(session_id);
         let completion = guard.worker_shutdowns.remove(session_id);
         guard.native_inflight.remove(session_id);
         // A disconnected command channel means its worker has already exited.
@@ -1934,6 +1959,32 @@ impl SessionManager {
             identity: managed.identity.clone(),
             status: managed.status.status,
         })
+    }
+
+    pub(crate) fn matches_connected_ssh_route(
+        &self,
+        session_id: &str,
+        connection: &RemoteConnectionRequest,
+    ) -> bool {
+        let Ok(guard) = self.registry.lock() else {
+            return false;
+        };
+        let jump = guard
+            .ssh_jump_hosts
+            .get(session_id)
+            .map(|(host, port, username)| (host.as_str(), *port, username.as_str()));
+        let requested_jump = connection
+            .jump_host
+            .as_ref()
+            .map(|jump| (jump.host.as_str(), jump.port, jump.username.as_str()));
+        jump == requested_jump
+            && guard.sessions.get(session_id).is_some_and(|session| {
+                session.terminal_kind == SessionTerminalKind::Remote
+                    && session.status.status == SessionStatus::Connected
+                    && session.identity.host == connection.host
+                    && session.identity.port == connection.port
+                    && session.identity.username == connection.username
+            })
     }
 
     pub(crate) fn has_remote_account(
@@ -2054,6 +2105,7 @@ impl SessionManager {
             .lock()
             .map_err(|_| "session registry poisoned".to_string())?;
         guard.sessions.remove(session_id);
+        guard.ssh_jump_hosts.remove(session_id);
         guard.native_inflight.remove(session_id);
         guard.worker_shutdowns.remove(session_id);
         Ok(())

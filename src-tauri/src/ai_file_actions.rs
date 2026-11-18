@@ -1,9 +1,65 @@
+use crate::models::{RemoteConnectionRequest, RemoteFileKind, SessionManager};
+use crate::sftp_pool::SftpPool;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use tauri::{AppHandle, State};
 
 const CLIPBOARD_TEXT_LIMIT: u64 = 8 * 1024 * 1024;
+
+#[tauri::command]
+pub(crate) async fn inspect_local_path(path: String) -> Result<Option<RemoteFileKind>, String> {
+    tauri::async_runtime::spawn_blocking(move || local_path_kind(Path::new(&path)))
+        .await
+        .map_err(|error| format!("failed to inspect local path: {error}"))
+}
+
+fn local_path_kind(path: &Path) -> Option<RemoteFileKind> {
+    if !path.is_absolute() {
+        return None;
+    }
+    let metadata = fs::metadata(path).ok()?;
+    match (metadata.is_file(), metadata.is_dir()) {
+        (true, _) => Some(RemoteFileKind::File),
+        (_, true) => Some(RemoteFileKind::Directory),
+        _ => None,
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn inspect_remote_path(
+    app: AppHandle,
+    sessions: State<'_, SessionManager>,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    pool: State<'_, SftpPool>,
+    session_id: String,
+    mut connection: RemoteConnectionRequest,
+    path: String,
+) -> Result<Option<RemoteFileKind>, String> {
+    if !path.starts_with('/')
+        || path.starts_with("//")
+        || path.bytes().any(|byte| byte.is_ascii_control())
+    {
+        return Ok(None);
+    }
+    let sessions = sessions.inner().clone();
+    let credentials = credentials.inner().clone();
+    let pool = pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if !sessions.matches_connected_ssh_route(&session_id, &connection) {
+            return None;
+        }
+        let known_hosts = crate::known_hosts::known_hosts_path(&app).ok()?;
+        crate::commands::resolve_keychain_key_for_remote(&credentials, &mut connection).ok()?;
+        let kind = crate::remote_fs::inspect_path_kind(&connection, &path, &pool, &known_hosts)?;
+        sessions
+            .matches_connected_ssh_route(&session_id, &connection)
+            .then_some(kind)
+    })
+    .await
+    .map_err(|error| format!("failed to inspect remote path: {error}"))
+}
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -218,6 +274,19 @@ fn read_file_text(path: &str, limit: u64) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inspects_existing_absolute_files_and_directories() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
+        assert_eq!(local_path_kind(file.path()), Some(RemoteFileKind::File));
+        assert_eq!(
+            local_path_kind(directory.path()),
+            Some(RemoteFileKind::Directory)
+        );
+        assert_eq!(local_path_kind(&directory.path().join("missing")), None);
+        assert_eq!(local_path_kind(Path::new(".")), None);
+    }
 
     #[test]
     fn reads_complete_text_and_rejects_non_text_or_oversized_sources() {

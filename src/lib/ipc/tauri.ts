@@ -761,6 +761,16 @@ export async function invokeOpenUrl(url: string): Promise<void> {
   return invokeLogged('open_url', { url });
 }
 
+export type ExistingPathKind = 'file' | 'directory';
+
+export function invokeInspectRemotePath(
+  sessionId: string,
+  connection: RemoteConnectionRequest,
+  path: string,
+): Promise<ExistingPathKind | null> {
+  return invokeLogged('inspect_remote_path', { sessionId, connection, path }, { logLifecycle: false });
+}
+
 export async function invokeListRemoteDirectory(
   request: RemoteDirectoryRequest,
 ): Promise<RemoteDirectoryListing> {
@@ -1014,6 +1024,10 @@ export async function invokePickPrivateKeyFile(): Promise<string | null> {
 
 export async function invokeOpenPath(path: string): Promise<void> {
   return invokeLogged('open_path', { path });
+}
+
+export function invokeInspectLocalPath(path: string): Promise<ExistingPathKind | null> {
+  return invokeLogged('inspect_local_path', { path }, { logLifecycle: false });
 }
 
 export async function invokeRevealPath(path: string): Promise<void> {

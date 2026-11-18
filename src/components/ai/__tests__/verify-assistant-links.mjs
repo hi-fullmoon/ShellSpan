@@ -44,14 +44,14 @@ try {
     const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js');
     const { AssistantMessageContent } = await import('/src/components/ai/assistant-message-content.tsx');
     ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(AssistantMessageContent, {
-      blocks: [{ type: 'text', text: `[Open preview](${origin}/destination)` }],
+      blocks: [{ type: 'text', text: `[\`/destination\`](${origin}/destination)` }],
       streaming: false,
     }));
     document.addEventListener('click', (event) => {
       if (event.target.closest('a')) document.body.dataset.linkDefaultPrevented = String(event.defaultPrevented);
     });
   }, origin);
-  const link = page.getByRole('link', { name: 'Open preview' });
+  const link = page.getByRole('link', { name: '/destination', exact: true });
   await link.waitFor();
   await link.hover();
   assert.equal(await link.evaluate(element => getComputedStyle(element).cursor), 'default', 'Markdown links use the default cursor');
@@ -98,7 +98,8 @@ try {
   const openWith = fileMenu.getByRole('menuitem', { name: '打开方式' });
   const submenu = filePage.getByRole('menu', { name: '打开方式' });
   await fileLink.waitFor();
-  assert.equal(await filePage.getByRole('link', { name: path, exact: true }).count(), 1, 'the fenced block remains code');
+  const inlinePath = filePage.getByRole('button', { name: path, exact: true });
+  assert.equal(await inlinePath.count(), 1, 'the fenced block remains code');
   for (const width of [1000, 320]) {
     await filePage.setViewportSize({ width, height: 440 });
     await fileLink.click({ button: 'right' });
@@ -115,6 +116,14 @@ try {
     await fileMenu.getByRole('menuitem', { name: '复制路径' }).click();
     assert.equal(await filePage.evaluate(() => navigator.clipboard.readText()), path);
     await fileMenu.waitFor({ state: 'hidden' });
+
+    await inlinePath.focus();
+    await filePage.keyboard.press('Enter');
+    await fileMenu.waitFor();
+    assert.deepEqual(await fileMenu.getByRole('menuitem').allTextContents(), ['复制路径']);
+    await filePage.keyboard.press('Escape');
+    await fileMenu.waitFor({ state: 'hidden' });
+    assert(await inlinePath.evaluate(element => element === document.activeElement), 'focus returns to the inline path');
   }
   await fileLink.focus();
   await filePage.keyboard.press('Shift+F10');
@@ -136,7 +145,7 @@ try {
     const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js');
     const { AiMarkdownTargetContext, AssistantMessageContent } = await import('/src/components/ai/assistant-message-content.tsx');
     const content = React.createElement(AssistantMessageContent, {
-      blocks: [{ type: 'text', text: '当前目录为 `/root`。\n\n`/var/log/worker:2026`\n\n[服务器根目录](/)' }],
+      blocks: [{ type: 'text', text: '站点路由是 `/todo/`。\n\n`/var/log/worker:2026`\n\n[服务器根目录](/)' }],
       streaming: false,
     });
     ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(AiMarkdownTargetContext.Provider, {
@@ -144,10 +153,10 @@ try {
     }, content));
   });
   const remoteMenu = remotePage.getByRole('menu', { name: '文件操作' });
-  const remotePath = remotePage.getByRole('link', { name: '/root', exact: true });
-  for (const [locale, name, copy, reveal] of [
-    ['en-US', 'File actions', 'Copy path', 'Show in SFTP'],
-    ['zh-CN', '文件操作', '复制路径', '在 SFTP 中定位'],
+  const remotePath = remotePage.getByRole('button', { name: '/todo/', exact: true });
+  for (const [locale, name, copy] of [
+    ['en-US', 'File actions', 'Copy path'],
+    ['zh-CN', '文件操作', '复制路径'],
   ]) {
     await remotePage.evaluate(async locale => {
       const { initI18n } = await import('/src/locales/index.ts');
@@ -160,13 +169,13 @@ try {
       await remotePage.setViewportSize({ width, height: 440 });
       await remotePath.click({ button: 'right' });
       await menu.waitFor();
-      assert.deepEqual(await menu.getByRole('menuitem').allTextContents(), [copy, reveal]);
+      assert.deepEqual(await menu.getByRole('menuitem').allTextContents(), [copy]);
       const box = await menu.boundingBox();
       assert(box && box.x >= 0 && box.x + box.width <= width + 1, 'remote menu fits in the viewport');
       assert(await menu.evaluate(element => element.offsetWidth <= 160 && element.scrollWidth <= element.clientWidth),
-        'the two remote actions fit in a compact menu');
+        'the remote copy action fits in a compact menu');
       await menu.getByRole('menuitem', { name: copy }).click();
-      assert.equal(await remotePage.evaluate(() => navigator.clipboard.readText()), '/root');
+      assert.equal(await remotePage.evaluate(() => navigator.clipboard.readText()), '/todo/');
       await menu.waitFor({ state: 'hidden' });
     }
   }
@@ -177,7 +186,7 @@ try {
   await remotePage.keyboard.press('Escape');
   await remoteMenu.waitFor({ state: 'hidden' });
   assert(await remoteLink.evaluate(element => element === document.activeElement), 'focus returns to the remote path');
-  await remotePage.getByRole('link', { name: '/var/log/worker:2026', exact: true }).click({ button: 'right' });
+  await remotePage.getByRole('button', { name: '/var/log/worker:2026', exact: true }).click({ button: 'right' });
   await remoteMenu.getByRole('menuitem', { name: '复制路径' }).click();
   assert.equal(await remotePage.evaluate(() => navigator.clipboard.readText()), '/var/log/worker:2026');
   process.stdout.write('PASS: WebKit link navigation and Chromium local and remote path menus, keyboard and clipboard.\n');

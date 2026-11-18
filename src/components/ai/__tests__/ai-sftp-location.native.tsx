@@ -9,6 +9,7 @@ import {
   invokeAddProfile,
   invokeCloseSession,
   invokeCreateSession,
+  invokeInspectRemotePath,
   invokePreviewRemoteFile,
   invokeUpdateProfile,
   isTauriRuntime,
@@ -25,6 +26,8 @@ interface Fixture {
   password: string;
   targetHost: string;
   fileName: string;
+  firstRouteFileName: string;
+  localFile: string;
   routes: [{ port: number; hostname: string }, { port: number; hostname: string }];
 }
 
@@ -50,7 +53,7 @@ function activeSftpConnection(): SftpConnection | undefined {
 async function verify() {
   assert(isTauriRuntime(), 'Expected a native WebView');
   const fixture: Fixture = await fetch(`${location.pathname}/config`).then(response => response.json());
-  const { password, targetHost, fileName, routes: [first, second] } = fixture;
+  const { password, targetHost, fileName, firstRouteFileName, localFile, routes: [first, second] } = fixture;
   await initI18n('zh-CN');
   useAppStore.setState({ locale: 'zh-CN', sftpShowHiddenFiles: false, restoreWorkspace: false });
 
@@ -60,6 +63,8 @@ async function verify() {
   const home = `/home/${username}`;
   const directory = `${home}/upload`;
   const file = `${directory}/${fileName}`;
+  const firstRouteFile = `${directory}/${firstRouteFileName}`;
+  const missingLocalFile = `${localFile}.${profileId}`;
   const container = document.getElementById('root');
   assert(container, 'No WebView mount');
   const root = createRoot(container);
@@ -87,8 +92,9 @@ async function verify() {
     const { sessionId, host, port, username: login } = terminal;
     flushSync(() => root.render(<TooltipProvider>
       <div hidden><Workbench /></div>
+      <AssistantMessageContent blocks={[{ type: 'text', text: `\`${localFile}\`\n\n\`${missingLocalFile}\`` }]} streaming={false} />
       <AiMarkdownTargetContext.Provider value={{ kind: 'remote', sessionId, targetId: `terminal-${sessionId}`, profileId, host, port, username: login }}>
-        <AssistantMessageContent blocks={[{ type: 'text', text: `\`${directory}\`\n\n[主机名](${file})` }]} streaming={false} />
+        <AssistantMessageContent blocks={[{ type: 'text', text: `\`${directory}\`\n\n\`${firstRouteFile}\`\n\n[主机名](${file})` }]} streaming={false} />
       </AiMarkdownTargetContext.Provider>
       <div style={{ height: '85vh' }}><Sftp /></div>
     </TooltipProvider>));
@@ -98,6 +104,26 @@ async function verify() {
     const link = [...document.querySelectorAll<HTMLElement>('[role="link"]')].find(element => element.textContent === '主机名');
     assert(link, 'Remote file link is missing');
     link.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  };
+
+  const showInlineMenu = (path: string) => {
+    const code = [...document.querySelectorAll<HTMLElement>('code[aria-haspopup="menu"]')]
+      .find(element => element.textContent === path);
+    assert(code, `Inline path is missing: ${path}`);
+    code.focus();
+    code.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
+  };
+
+  const menuItems = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+  const waitForAction = (label: string) => until(
+    () => menuItems().find(item => item.textContent === label && !item.hasAttribute('data-disabled')),
+    `Menu action is missing: ${label}`,
+  );
+  const dismissMenu = async () => {
+    const menu = document.querySelector('[role="menu"]');
+    assert(menu, 'File menu is missing');
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await until(() => !menu.isConnected, 'File menu stayed open');
   };
 
   const verifySelection = async (expected: Fixture['routes'][number]): Promise<SftpConnection> => {
@@ -117,11 +143,18 @@ async function verify() {
   try {
     const terminalA = await connect(first.port);
     showAgentReply(terminalA);
-    const path = document.querySelector<HTMLElement>('code[role="link"]');
-    assert(path?.textContent === directory, 'Directory reference is missing');
-    path.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
-    const revealDirectory = await until(() => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
-      .find(item => item.textContent === '在 SFTP 中定位' && !item.hasAttribute('data-disabled')), 'Remote SFTP action is disabled');
+    showInlineMenu(localFile);
+    await waitForAction('打开文件');
+    await waitForAction('复制文件内容');
+    await dismissMenu();
+
+    showInlineMenu(missingLocalFile);
+    await waitForAction('复制路径');
+    assert(menuItems().length === 1, 'A missing local file offered file actions');
+    await dismissMenu();
+
+    showInlineMenu(directory);
+    const revealDirectory = await waitForAction('在 SFTP 中定位');
     revealDirectory.click();
     const tabA = await until(() => {
       const connection = activeSftpConnection();
@@ -151,8 +184,19 @@ async function verify() {
     revealFile();
     const tabB = await verifySelection(second);
     assert(tabB.id !== tabA.id, 'The new SSH route reused the old SFTP connection');
+    showInlineMenu(firstRouteFile);
+    await waitForAction('复制路径');
+    assert(await invokeInspectRemotePath(terminalB.sessionId, tabB.connection, firstRouteFile) === null,
+      'The first route file was found through the second route');
+    assert(await invokeInspectRemotePath(terminalB.sessionId, tabA.connection, firstRouteFile) === null,
+      'The second terminal accepted a path check over the first jump route');
+    assert(menuItems().length === 1, 'A missing remote file offered file actions');
+    await dismissMenu();
 
     showAgentReply(terminalA);
+    showInlineMenu(firstRouteFile);
+    await waitForAction('在 SFTP 中定位');
+    await dismissMenu();
     revealFile();
     assert((await verifySelection(first)).id === tabA.id, 'Editing the saved profile redirected the original SSH session');
   } finally {

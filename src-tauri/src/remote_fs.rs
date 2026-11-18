@@ -558,6 +558,20 @@ pub(crate) fn list_remote_directory_blocking(
     result
 }
 
+pub(crate) fn inspect_path_kind(
+    connection: &RemoteConnectionRequest,
+    path: &str,
+    pool: &SftpPool,
+    known_hosts: &Path,
+) -> Option<RemoteFileKind> {
+    let connected = connect_sftp(connection, Some(pool), Some(known_hosts)).ok()?;
+    let stat = connected.lock().ok()?.sftp.stat(Path::new(path)).ok()?;
+    match kind_from_permissions(stat.perm) {
+        kind @ (RemoteFileKind::File | RemoteFileKind::Directory) => Some(kind),
+        _ => None,
+    }
+}
+
 fn list_remote_directory_inner(
     request: RemoteDirectoryRequest,
     pool: Option<&SftpPool>,

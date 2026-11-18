@@ -1,6 +1,6 @@
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { useAppStore } from '@/stores/appStore';
-import { getSftpPaneConnectionKey, getSftpPaneSource, useSftpStore, type SftpLocationRequest, type SftpSide } from '@/stores/sftpStore';
+import { getSftpPaneConnectionKey, getSftpPaneSource, useSftpStore, type SftpConnection, type SftpLocationRequest, type SftpSide } from '@/stores/sftpStore';
 import { sshRouteKey } from '@/lib/connections/ssh-route';
 import { useTerminalStore } from '@/stores/terminalStore';
 import type { ConnectionProfile, HostConnectionAction } from '@/types';
@@ -53,6 +53,23 @@ export async function insertHostCommandSnippet(
   return await controller.writeUserInput(command) ? 'inserted' : 'no-target';
 }
 
+export function findSftpPaneForLocation(
+  connections: readonly SftpConnection[],
+  profileId: string,
+  routeKey: string,
+): { connection: SftpConnection; side: SftpSide } | undefined {
+  const sides: readonly SftpSide[] = ['remote', 'local'];
+  for (const connection of connections) {
+    const side = sides.find(candidate => (
+      (candidate === 'remote' ? connection.profileId : connection.leftProfileId) === profileId
+      && getSftpPaneSource(connection, candidate) === 'remote'
+      && !connection.restorePending?.[candidate] && !connection.connectionAttemptIds?.[candidate]
+      && routeKey === getSftpPaneConnectionKey(connection, candidate)
+    ));
+    if (side) return { connection, side };
+  }
+}
+
 export function openHostPath(
   profile: ConnectionProfile,
   path: string,
@@ -63,15 +80,9 @@ export function openHostPath(
   if (target === 'sftp') {
     const state = useSftpStore.getState();
     if (locationRequest) {
-      const sides: readonly SftpSide[] = ['remote', 'local'];
-      for (const connection of state.connections) {
-        const side = sides.find(candidate => (
-          (candidate === 'remote' ? connection.profileId : connection.leftProfileId) === profile.id
-          && getSftpPaneSource(connection, candidate) === 'remote'
-          && !connection.restorePending?.[candidate] && !connection.connectionAttemptIds?.[candidate]
-          && locationRequest.routeKey === getSftpPaneConnectionKey(connection, candidate)
-        ));
-        if (!side) continue;
+      const pane = findSftpPaneForLocation(state.connections, profile.id, locationRequest.routeKey);
+      if (pane) {
+        const { connection, side } = pane;
         state.setPaneState(connection.id, side, { locationRequest });
         state.setActiveConnection(connection.id);
         useAppStore.getState().setActiveSection('sftp');
