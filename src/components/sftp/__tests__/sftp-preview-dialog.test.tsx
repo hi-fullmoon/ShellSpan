@@ -231,6 +231,7 @@ describe('SftpPreviewDialog', () => {
 
     const frame = screen.getByTitle('manual.pdf');
     expect(frame).toHaveClass('min-h-0', 'w-full', 'flex-1');
+    expect(frame).not.toHaveClass('mt-2');
     expect(frame.parentElement).toHaveClass('min-h-0', 'flex-1', 'overflow-hidden');
     const metadata = document.querySelector('[data-slot="sftp-preview-metadata"]');
     expect(metadata).toContainElement(screen.getByText('8 B'));
@@ -364,7 +365,7 @@ describe('SftpPreviewDialog', () => {
     expect(viewport).not.toBeNull();
     Object.defineProperties(viewport, {
       clientWidth: { configurable: true, value: 600 },
-      clientHeight: { configurable: true, value: 500 },
+      clientHeight: { configurable: true, value: 432 },
     });
     Object.defineProperties(image, {
       naturalWidth: { configurable: true, value: 1000 },
@@ -373,8 +374,7 @@ describe('SftpPreviewDialog', () => {
 
     fireEvent.load(image);
 
-    expect(image.parentElement).toHaveClass('p-4');
-    expect(image.parentElement).not.toHaveClass('p-8');
-    expect(image).toHaveStyle({ width: '568px', height: '454px' });
+    expect(image.parentElement).toHaveClass('px-4', 'pt-2', 'pb-4');
+    expect(image).toHaveStyle({ width: '510px', height: '408px' });
   });
 });

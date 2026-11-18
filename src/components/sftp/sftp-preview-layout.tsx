@@ -6,16 +6,19 @@ import { Separator } from '@/components/ui/separator';
 import { Table } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 
-export const sftpPreviewContentClassName = 'mt-2 min-h-0 flex-1';
+export const sftpPreviewContentClassName = 'min-h-0 flex-1';
 
 export function SftpPreviewScrollArea({ className, size = 'thin', ...props }: ComponentProps<typeof ScrollArea>) {
   return <ScrollArea className={cn(sftpPreviewContentClassName, className)} size={size} {...props} />;
 }
 
-export function SftpPreviewToolbar({ children }: { children: ReactNode }) {
+export function SftpPreviewToolbar({ children, size = 'default' }: { children: ReactNode; size?: 'default' | 'sm' }) {
   return (
     <div data-slot="sftp-preview-toolbar" className="shrink-0 bg-app-bg">
-      <div className="flex min-h-10 min-w-0 items-center justify-between gap-3 px-4 text-xs text-muted-foreground @min-xl/preview:px-6">
+      <div className={cn(
+        'flex min-w-0 items-center justify-between gap-3 px-4 text-xs text-muted-foreground @min-xl/preview:px-6',
+        size === 'sm' ? 'min-h-9' : 'min-h-10',
+      )}>
         {children}
       </div>
       <Separator className="border-app-border/65" />
@@ -25,10 +28,10 @@ export function SftpPreviewToolbar({ children }: { children: ReactNode }) {
 
 export function SftpPreviewPage({ className, ...props }: ComponentProps<'article'>) {
   return (
-    <div className="px-4 pb-4 @min-xl/preview:px-8 @min-xl/preview:pb-8">
+    <div className="px-4 pt-2 pb-4 @min-xl/preview:px-8 @min-xl/preview:pb-8">
       <article
         data-slot="sftp-preview-page"
-        className={cn('mx-auto flex max-w-3xl min-w-0 flex-col rounded-lg bg-app-surface p-5 shadow-card ring-1 ring-app-border/60 @min-xl/preview:p-10', className)}
+        className={cn('mx-auto flex max-w-3xl min-w-0 flex-col rounded-lg bg-app-surface p-5 shadow-card ring-1 ring-app-border/60 ring-inset @min-xl/preview:p-10', className)}
         {...props}
       />
     </div>
@@ -51,7 +54,7 @@ export function SftpPreviewTable({ className, ...props }: ComponentProps<typeof 
 export function SftpPreviewNotice({ title, description }: { title: string; description: string }) {
   return (
     <SftpPreviewScrollArea>
-      <div className="flex min-h-full items-center justify-center px-4 pb-4">
+      <div className="flex min-h-full items-center justify-center px-4 pt-2 pb-4">
         <Alert className="max-w-md">
           <FileWarningIcon />
           <AlertTitle>{title}</AlertTitle>

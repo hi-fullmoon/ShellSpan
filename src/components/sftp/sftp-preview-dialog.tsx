@@ -60,12 +60,11 @@ const ImagePreview: React.FC<{ dataUrl: string; name: string }> = ({ dataUrl, na
     const sourceHeight = image.naturalHeight || image.clientHeight;
     if (sourceWidth <= 0 || sourceHeight <= 0) return;
 
-    // Reserve the canvas's 16 px side and bottom padding. The shared top gap
-    // sits outside the viewport and is already excluded from these dimensions.
+    // Reserve 16 px on each side, 8 px above, and 16 px below the fitted image.
     const viewportWidth = viewportRef.current?.clientWidth ?? 0;
     const viewportHeight = viewportRef.current?.clientHeight ?? 0;
     const availableWidth = viewportWidth > 32 ? viewportWidth - 32 : sourceWidth;
-    const availableHeight = viewportHeight > 16 ? viewportHeight - 16 : sourceHeight;
+    const availableHeight = viewportHeight > 24 ? viewportHeight - 24 : sourceHeight;
     const scale = Math.min(1, availableWidth / sourceWidth, availableHeight / sourceHeight);
     setRenderedSize({
       width: Math.floor(sourceWidth * scale),
@@ -128,7 +127,7 @@ const ImagePreview: React.FC<{ dataUrl: string; name: string }> = ({ dataUrl, na
         </div>
       </SftpPreviewToolbar>
       <SftpPreviewScrollArea viewportRef={viewportRef} horizontal>
-        <div className="grid min-h-full w-max min-w-full place-items-center px-4 pb-4">
+        <div className="grid min-h-full w-max min-w-full place-items-center px-4 pt-2 pb-4">
           <img
             ref={imageRef}
             src={dataUrl}
@@ -157,7 +156,7 @@ const MediaPreview: React.FC<{ dataUrl: string; kind: 'audio' | 'video'; name: s
   if (failed) return <MediaUnavailable />;
 
   return (
-    <div className={cn(sftpPreviewContentClassName, 'flex items-center justify-center px-4 pb-4')}>
+    <div className={cn(sftpPreviewContentClassName, 'flex items-center justify-center px-4 pt-2 pb-4')}>
       {kind === 'audio' ? (
         <audio aria-label={name} className="w-full max-w-lg" controls src={dataUrl} onError={() => setFailed(true)} />
       ) : (
@@ -175,7 +174,7 @@ const BinaryPreview: React.FC<{ content: string; isArchive: boolean }> = ({ cont
   return (
     <SftpPreviewScrollArea className="bg-app-surface" horizontal size="default">
       <div className="mx-auto max-w-3xl @min-4xl/preview:px-6">
-        <div className="sticky left-0 flex items-start gap-1 px-4 pb-3 leading-5">
+        <div className="sticky left-0 flex items-start gap-1 px-4 py-2 leading-5">
           <BinaryIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <div className="flex min-w-0 flex-col @min-xl/preview:flex-row @min-xl/preview:items-baseline @min-xl/preview:gap-2">
             <h2 id={titleId} className="text-sm font-medium">
@@ -396,7 +395,7 @@ export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({ target, co
         >
           {loading ? (
             <SftpPreviewScrollArea>
-              <div className="flex min-h-full items-center justify-center" role="status">
+              <div className="flex min-h-full items-center justify-center pt-2" role="status">
                 <EmptyState
                   title={t('sftp.preview.loading')}
                   description={t('sftp.preview.loadingDescription')}

@@ -110,7 +110,7 @@ function TextPreviewBody({ content, fileName, wrap }: { content: string; fileNam
     <SftpPreviewScrollArea className="bg-app-surface" horizontal={!wrap}>
       <pre
         className={cn(
-          'min-h-full px-4 pb-4 font-mono text-[13px] leading-6 text-foreground selection:bg-primary/20 @min-xl/preview:px-6',
+          'min-h-full px-4 pt-2 pb-4 font-mono text-[13px] leading-6 text-foreground selection:bg-primary/20 @min-xl/preview:px-6',
           wrap ? 'whitespace-pre-wrap break-words' : 'w-max min-w-full whitespace-pre',
         )}
       >
@@ -130,7 +130,7 @@ export const PlainTextPreview: React.FC<{ content: string; fileName?: string }> 
   useEffect(() => setWrap(false), [content]);
   return (
     <>
-      <SftpPreviewToolbar>
+      <SftpPreviewToolbar size="sm">
         <TextPreviewLineCount content={content} />
         <TextPreviewActions content={content} wrap={wrap} onToggleWrap={() => setWrap((value) => !value)} />
       </SftpPreviewToolbar>
@@ -350,11 +350,11 @@ export const OfficeDocumentPreview: React.FC<{ content: string; extension: strin
   return (
     <SftpPreviewScrollArea>
       <div className={cn(
-        'mx-auto grid gap-3 px-4 pb-4 @min-xl/preview:px-8 @min-xl/preview:pb-8',
+        'mx-auto grid gap-3 px-4 pt-2 pb-4 @min-xl/preview:px-8 @min-xl/preview:pb-8',
         preview.slides.length === 1 ? 'max-w-3xl' : 'max-w-6xl @min-3xl/preview:grid-cols-2',
       )}>
         {preview.slides.map((slide) => (
-          <section key={slide.number} className="relative aspect-video overflow-hidden rounded-lg bg-app-surface p-4 shadow-card ring-1 ring-app-border/60 @min-xl/preview:p-6">
+          <section key={slide.number} className="relative aspect-video overflow-hidden rounded-lg bg-app-surface p-4 shadow-card ring-1 ring-app-border/60 ring-inset @min-xl/preview:p-6">
             <Badge variant="secondary" className="absolute bottom-2 right-2">{slide.number}</Badge>
             <div className="flex h-full flex-col justify-center gap-3 overflow-hidden">
               {slide.lines.length > 0 ? slide.lines.map((line, index) => index === 0
