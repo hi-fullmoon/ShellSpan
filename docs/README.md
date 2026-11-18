@@ -11,7 +11,6 @@
 
 ## 部署与配置
 
-- [Linux SSH Agent 远端沙箱](remote-agent-sandbox.md)及[运行时协议](../protocol/agent/runtime/remote-bubblewrap.md)
 - [远端受限 sudo 执行器](remote-sudo-runner.md)
 
 ## 当前协议
@@ -53,7 +52,6 @@
 ## 后续设计与历史记录
 
 - [终端兼容与分阶段上线记录](../protocol/agent/runtime/terminal-execution-compatibility.md)
-- [本地 Agent 沙箱计划](design/agent-sandbox-implementation-plan.md)：本地 Docker 工作副本尚未交付。
 - [in-band 完成帧阶段 0 攻击记录](design/agent-direct-shell-execution-stage-0-gate.md)及[独立实验夹具](../tests/agent-direct-shell-gate/README.md)：保留被否决方案的反例，避免将终端输出当成可信完成信号。
 
 原生终端旧批次、Petdex 阶段验收流水和旧权限设计通过 `git log -- docs/design/` 查阅。历史通过结果只覆盖当时的源码、制品和环境。新测试与验收产物写到 `artifacts/tests/`，本机产物不随仓库分发。
