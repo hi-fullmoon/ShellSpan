@@ -368,7 +368,8 @@ describe('TerminalPane', () => {
     act(() => document.dispatchEvent(new Event('shellspan:find-terminal')));
     const searchInput = screen.getByPlaceholderText('terminal.search.placeholder');
     expect(searchInput).toBeInTheDocument();
-    expect(searchInput.parentElement).toHaveClass('top-2', 'right-2', 'border', 'rounded-md');
+    expect(searchInput).toHaveFocus();
+    expect(searchInput.closest('[data-terminal-search]')).toHaveClass('top-2', 'right-2');
     await userEvent.click(screen.getByRole('button', { name: 'terminal.search.close' }));
     expect(screen.queryByPlaceholderText('terminal.search.placeholder')).toBeNull();
   });

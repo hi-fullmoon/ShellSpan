@@ -98,10 +98,10 @@ const AgentTerminalLeaseBar: React.FC<{
             <Tooltip>
               <TooltipTrigger
                 render={<span />}
-                className="grid size-7 shrink-0 place-items-center rounded-md bg-app-surface-muted text-app-primary"
+                className="grid size-6 shrink-0 place-items-center rounded-md bg-app-surface-muted text-app-primary"
                 data-testid="agent-terminal-lease-identity"
               >
-                <TerminalIcon aria-hidden="true" className="size-3.5" />
+                <TerminalIcon aria-hidden="true" className="size-3" />
               </TooltipTrigger>
               <TooltipContent align="start" side="bottom">
                 {modeLabel} · {workspaceLabel} · {t('terminal.agentLease.agentIdentity', { id: lease.agentSessionId })}
@@ -280,6 +280,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         (overlayHold?.sessionId === activeSession.sessionId &&
           activeSession.status === 'connected')),
   );
+  const showPreparingInputPrompt = preparingInput && activeSession?.status === 'connected' && !activeSession.reconnecting;
+  const showInputBlockedPrompt = activeLease?.inputBlocked && !activeSession?.reconnecting && !preparingInput;
+  const showResizeIndicator = isVisible && !showConnectingOverlay && !activeSession?.reconnecting
+    && !showPreparingInputPrompt && !showInputBlockedPrompt;
 
   const handleOpenSearch = useCallback((): void => {
     setSearchOpen(true);
@@ -465,10 +469,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
             animatedDots
           />
         )}
-        {preparingInput && activeSession?.status === 'connected' && !activeSession.reconnecting && (
+        {showPreparingInputPrompt && (
           <TerminalPromptIndicator label={t('terminal.notice.preparingInput')} animatedDots />
         )}
-        {activeLease?.inputBlocked && !activeSession?.reconnecting && !preparingInput && (
+        {showInputBlockedPrompt && (
           <TerminalPromptIndicator
             label={t('terminal.agentLease.inputBlockedPrompt')}
           />
@@ -476,7 +480,9 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         <TerminalContentMenu session={activeSession} terminal={terminal} onPaste={pasteText} onSearch={handleOpenSearch}>
           <div ref={paneRef} data-terminal-measure-session={activeSession?.sessionId} className="h-full w-full p-0" />
         </TerminalContentMenu>
-        {isVisible && terminal && <TerminalResizeIndicator key={`resize:${activeSessionId}`} terminal={terminal} boundary={resizeBoundaryRef} />}
+        {showResizeIndicator && terminal && (
+          <TerminalResizeIndicator key={`resize:${activeSessionId}`} terminal={terminal} boundary={resizeBoundaryRef} />
+        )}
       </div>
       <ConfirmationDialog
         open={Boolean(pendingPaste)}

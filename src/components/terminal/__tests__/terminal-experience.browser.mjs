@@ -134,12 +134,28 @@ try {
   assert.equal(await terminalSurface.evaluate(element => getComputedStyle(element).cursor), 'text', 'Plain terminal text retains the text cursor');
 
   const search = page.getByRole('textbox', { name: '搜索...' });
+  const searchBar = page.locator('[data-terminal-search]');
+  const searchField = searchBar.locator('[data-slot=input-group]');
+  const caseToggle = page.getByRole('button', { name: '区分大小写' });
+  const regexToggle = page.getByRole('button', { name: '使用正则表达式' });
+  assert.equal(await searchField.getByRole('textbox').count(), 1);
+  assert.equal(await searchField.getByRole('button', { name: '区分大小写' }).count(), 1);
+  assert.equal(await searchField.getByRole('button', { name: '使用正则表达式' }).count(), 1);
+  await search.focus();
+  await search.press('Tab');
+  assert.ok(await caseToggle.evaluate(element => element === document.activeElement));
+  await caseToggle.press('Tab');
+  assert.ok(await regexToggle.evaluate(element => element === document.activeElement));
   await search.fill('terminal');
   const count = [...output.matchAll(/terminal/gi)].length;
   await page.waitForFunction((count) => document.querySelector('[data-terminal-search] [role=status]')?.textContent === `1/${count}`, count);
   await search.press('Enter');
   assert.equal(await page.locator('[data-terminal-search] [role=status]').textContent(), `2/${count}`);
   await search.press('Shift+Enter');
+  assert.equal(await page.locator('[data-terminal-search] [role=status]').textContent(), `1/${count}`);
+  await page.getByRole('button', { name: '下一个', exact: true }).click();
+  assert.equal(await page.locator('[data-terminal-search] [role=status]').textContent(), `2/${count}`);
+  await page.getByRole('button', { name: '上一个', exact: true }).click();
   assert.equal(await page.locator('[data-terminal-search] [role=status]').textContent(), `1/${count}`);
   await search.fill('TERMINAL');
   await page.getByRole('button', { name: '区分大小写' }).click();
@@ -176,7 +192,6 @@ try {
   }, output);
   await search.fill('terminal');
 
-  const regexToggle = page.getByRole('button', { name: '使用正则表达式' });
   assert.equal(await regexToggle.getAttribute('aria-pressed'), 'false');
   await search.fill('term(?:inal)');
   await page.getByRole('status', { name: '未找到匹配项' }).waitFor();
@@ -202,6 +217,7 @@ try {
   await page.getByRole('status', { name: '未找到匹配项' }).waitFor();
   assert.equal(await search.getAttribute('aria-invalid'), null);
   await search.fill('terminal');
+  await page.mouse.move(0, 400);
 
   for (const scheme of ['catppuccinMocha', 'solarizedDark', 'light', 'app']) {
     for (const appTheme of ['light', 'dark']) {
@@ -211,8 +227,8 @@ try {
         window.terminal.options.theme = window.runtime.resolveTerminalTheme(scheme);
       }, { scheme, appTheme });
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-      await page.locator('[data-terminal-search]').evaluate(async element => {
-        await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished));
+      await searchBar.evaluate(async element => {
+        await Promise.allSettled(element.getAnimations({ subtree: true }).map(animation => animation.finished));
       });
       const colors = await page.locator('[data-terminal-search]').evaluate((element, scheme) => {
         const theme = window.runtime.resolveTerminalTheme(scheme);
@@ -221,10 +237,10 @@ try {
         probe.style.backgroundColor = theme.background;
         document.body.appendChild(probe);
         const expected = getComputedStyle(probe);
-        const input = element.querySelector('input');
+        const inputGroup = element.querySelector('[data-slot=input-group]');
         const result = {
           text: [...element.querySelectorAll('input,button,[role=status]')].every(control => getComputedStyle(control).color === expected.color),
-          inputBackground: getComputedStyle(input).backgroundColor === expected.backgroundColor,
+          inputBackground: getComputedStyle(inputGroup).backgroundColor === expected.backgroundColor,
           actual: [...element.querySelectorAll('input,button')].map(control => ({ color: getComputedStyle(control).color, background: getComputedStyle(control).backgroundColor })),
           expected: { color: expected.color, background: expected.backgroundColor },
         };
@@ -234,45 +250,52 @@ try {
       assert.ok(colors.text && colors.inputBackground, `${scheme}/${appTheme}: ${JSON.stringify(colors)}`);
     }
   }
-  await page.evaluate(() => {
-    document.documentElement.dataset.theme = 'light';
-    window.runtime.useAppStore.setState({ terminalColorScheme: 'catppuccinMocha' });
-    window.terminal.options.theme = window.runtime.resolveTerminalTheme('catppuccinMocha');
-  });
-
-  for (const { width, height, paneWidth } of [
+  for (const { width, height, paneWidth, paneHeight = 360 } of [
     { width: 1280, height: 800, paneWidth: 900 },
     { width: 1280, height: 800, paneWidth: 260 },
     { width: 1280, height: 800, paneWidth: 240 },
     { width: 1280, height: 800, paneWidth: 130 },
+    { width: 1280, height: 800, paneWidth: 140, paneHeight: 98 },
     { width: 320, height: 420, paneWidth: 320 },
   ]) {
     await page.setViewportSize({ width, height });
-    await page.evaluate((paneWidth) => {
-      document.getElementById('pane').style.width = `${paneWidth}px`;
+    await page.evaluate(({ paneWidth, paneHeight }) => {
+      const pane = document.getElementById('pane');
+      pane.style.width = `${paneWidth}px`;
+      pane.style.height = `${paneHeight}px`;
       window.fit.fit();
-    }, paneWidth);
-    const geometry = await page.locator('[data-terminal-search]').evaluate((element) => {
+    }, { paneWidth, paneHeight });
+    const geometry = await searchBar.evaluate((element) => {
       const bounds = element.getBoundingClientRect();
       const pane = document.getElementById('pane').getBoundingClientRect();
       const controls = [...element.querySelectorAll('input,button')].map((control) => control.getBoundingClientRect().height);
-      const centers = [...element.querySelectorAll('input,button,[role=status]')].map(control => {
-        const rect = control.getBoundingClientRect();
-        return rect.top + rect.height / 2;
-      });
-      return { inside: bounds.left >= pane.left && bounds.right <= pane.right, controls, centers, height: bounds.height, overflow: element.scrollWidth > element.clientWidth };
+      const rects = [...element.querySelectorAll('input,button,[role=status]')].map(control => control.getBoundingClientRect());
+      return {
+        inside: bounds.left >= pane.left && bounds.right <= pane.right && bounds.top >= pane.top && bounds.bottom <= pane.bottom,
+        height: bounds.height,
+        controls,
+        centers: rects.map(rect => rect.top + rect.height / 2),
+        leftEdges: rects.map(rect => rect.left),
+        overflow: element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight,
+      };
     });
     assert.ok(geometry.inside && !geometry.overflow, JSON.stringify(geometry));
     assert.ok(geometry.controls.every((height) => height === geometry.controls[0]), JSON.stringify(geometry));
-    const wrapped = paneWidth < 326;
-    assert.equal(geometry.centers[2], geometry.centers[3], 'Previous and next arrows must always wrap together');
-    if (paneWidth === 130) {
-      assert.ok(geometry.height > 62, 'Very narrow panes should allow additional control rows');
-      assert.ok(geometry.centers[2] > geometry.centers[1], 'Both arrows should move below the result count together');
+    const [input, caseOption, regexOption, status, previous, next, close] = geometry.centers;
+    assert.equal(caseOption, regexOption, 'Both search options must stay together');
+    assert.ok(previous === next && next === close, 'The arrows and close button must stay together');
+    if (paneWidth === 900) {
+      assert.equal(geometry.height, 32, 'The single-line search bar should be 32px tall');
+      assert.ok(geometry.centers.every(center => Math.abs(center - input) < 1), JSON.stringify(geometry));
+      assert.ok(geometry.leftEdges.every((left, index, edges) => index === 0 || left > edges[index - 1]), JSON.stringify(geometry));
     } else {
-      assert.equal(geometry.height, wrapped ? 62 : 34, 'Narrow panes should wrap without compressing controls');
-      assert.ok(geometry.centers.slice(1).every(center => Math.abs(center - geometry.centers[1]) < 1), JSON.stringify(geometry));
-      assert.equal(geometry.centers[1] - geometry.centers[0], wrapped ? 28 : 0);
+      assert.ok(status > caseOption, 'The result count must wrap below the search field');
+      if (paneWidth <= 140) {
+        assert.ok(caseOption > input && previous > status, 'Very narrow panes must give the input and navigation room to wrap');
+      } else {
+        assert.equal(input, caseOption, 'Search options should stay beside the input when space allows');
+        assert.ok(Math.abs(status - previous) < 1, 'The result count should stay beside the navigation when space allows');
+      }
     }
     const originalQuery = await search.inputValue();
     const inputWidth = (await search.boundingBox()).width;
@@ -287,10 +310,19 @@ try {
     await search.fill('');
     assert.equal((await search.boundingBox()).width, inputWidth, 'An empty query must retain the count space');
     assert.equal((await page.locator('[data-terminal-search] [role=status]').textContent()).trim(), '0/0');
-    await page.screenshot({ path: `/tmp/shellspan-terminal-search-empty-${paneWidth}.png` });
     await search.fill(originalQuery);
     await page.waitForFunction(() => document.querySelector('[data-terminal-search] [role=status]')?.textContent.includes('/'));
-    await page.screenshot({ path: `/tmp/shellspan-terminal-search-${paneWidth}.png` });
+    if (paneHeight === 98) {
+      for (const name of ['上一个', '下一个', '关闭搜索']) {
+        await searchBar.getByRole('button', { name, exact: true }).click({ trial: true });
+      }
+    }
+    await searchBar.screenshot({ animations: 'disabled', path: `${root}artifacts/tests/terminal-search/dark-${paneWidth}.png` });
+    if (paneWidth === 900) {
+      await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+      await searchBar.screenshot({ animations: 'disabled', path: `${root}artifacts/tests/terminal-search/light-${paneWidth}.png` });
+      await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+    }
   }
 
   // Search still works when matches exceed the addon's default tracking cap.
@@ -303,9 +335,15 @@ try {
   if ([...allFiles.matchAll(/\//g)].length >= 1000) {
     await page.waitForFunction(() => document.querySelector('[data-terminal-search] [role=status]')?.textContent.includes('1000+'));
   }
-  await search.press('Escape');
+  await regexToggle.focus();
+  await regexToggle.press('Escape');
   assert.equal(await page.locator('[data-terminal-search]').count(), 0);
   assert.ok(await page.locator('.xterm-helper-textarea').evaluate((element) => element === document.activeElement));
+  await page.evaluate(() => {
+    document.documentElement.dataset.theme = 'light';
+    window.runtime.useAppStore.setState({ terminalColorScheme: 'catppuccinMocha' });
+    window.terminal.options.theme = window.runtime.resolveTerminalTheme('catppuccinMocha');
+  });
 
   await page.setViewportSize({ width: 1000, height: 600 });
   await page.evaluate(() => {
@@ -370,6 +408,53 @@ try {
     document.getElementById('pane').style.height = '360px';
     window.fit.fit();
   });
+  const reconnectResize = await page.evaluate(() => {
+    const { React, flushSync, TerminalPane, terminalRegistry, useTerminalStore, t } = window.runtime;
+    const store = useTerminalStore.getState();
+    const id = store.beginConnectionAttempt(window.identity);
+    store.setStatus(id, { sessionId: id, status: 'disconnected' });
+    const getSession = () => useTerminalStore.getState().sessions.find((session) => session.sessionId === id);
+    const controller = terminalRegistry.create(id, store.setStatus, store.setClosed, () => getSession().status, () => {});
+    const host = document.getElementById('dialog');
+    const renderPane = () => window.dialogRoot.render(React.createElement(TerminalPane, { activeSession: getSession() }));
+    const resize = (width) => flushSync(() => { host.style.width = `${width}px`; controller.fit(); });
+    const inspect = () => ({
+      cols: controller.terminal.cols,
+      hint: host.querySelector('[data-testid="terminal-resize-indicator"]')?.textContent ?? null,
+      reconnecting: [...host.querySelectorAll('[role="status"]')].some((element) =>
+        element.getAttribute('aria-label') === t('terminal.notice.reconnectingLabel')),
+    });
+    try {
+      host.style.height = '300px';
+      flushSync(renderPane);
+      resize(760);
+      const initial = inspect();
+      store.setReconnecting(id, true);
+      flushSync(renderPane);
+      const started = inspect();
+      resize(360);
+      const during = inspect();
+      store.setReconnecting(id, false);
+      flushSync(renderPane);
+      const ended = inspect();
+      resize(760);
+      return { initial, started, during, ended, next: inspect() };
+    } finally {
+      flushSync(() => window.dialogRoot.render(null));
+      controller.dispose();
+      store.removeSession(id);
+      host.style.removeProperty('width');
+      host.style.removeProperty('height');
+    }
+  });
+  const { initial, started, during, ended, next } = reconnectResize;
+  assert.ok(initial.hint, 'A pane resize displays the grid dimensions');
+  assert.deepEqual(started, { cols: initial.cols, hint: null, reconnecting: true }, 'Reconnecting dismisses visible dimensions');
+  assert.ok(during.cols < started.cols, 'The terminal grid still resizes during reconnect');
+  assert.deepEqual(during, { cols: during.cols, hint: null, reconnecting: true }, 'The reconnect prompt remains visible on a narrow pane');
+  assert.deepEqual(ended, { cols: during.cols, hint: null, reconnecting: false }, 'Ending reconnect does not restore stale dimensions');
+  assert.ok(next.hint && next.cols === initial.cols, 'The next resize displays dimensions again');
+
   await page.evaluate((text) => {
     const { React, ConfirmationDialog, TerminalPastePreview, t } = window.runtime;
     const target = `${window.identity.username}@${window.identity.host}`;
@@ -585,6 +670,11 @@ try {
       await description.waitFor();
       await lockLabel.waitFor();
       await taskButton.waitFor();
+      const identityBadge = bar.getByTestId('agent-terminal-lease-identity');
+      const badgeBounds = await identityBadge.boundingBox();
+      const iconBounds = await identityBadge.locator('svg').boundingBox();
+      assert.deepEqual([badgeBounds.width, badgeBounds.height], [24, 24], 'The status icon background must stay compact');
+      assert.deepEqual([iconBounds.width, iconBounds.height], [12, 12], 'The terminal glyph must fit the compact background');
       assert.equal(await takeover.locator('svg').count(), 0, 'The takeover button should contain text only');
       const geometry = await bar.evaluate(element => {
         const bounds = element.getBoundingClientRect();
@@ -1155,14 +1245,14 @@ try {
         path: `${root}artifacts/tests/terminal-tab-actions/overflow-hover-${theme}.png` });
       const hoverStyle = await actions.evaluate(element => {
         const reference = document.createElement('span');
-        reference.style.backgroundColor = 'var(--accent)';
+        reference.style.backgroundColor = 'var(--app-tab-active)';
         element.append(reference);
         const actual = getComputedStyle(element).backgroundColor;
         const expected = getComputedStyle(reference).backgroundColor;
         reference.remove();
         return { actual, expected };
       });
-      assert.equal(hoverStyle.actual, hoverStyle.expected, `The actions button must show a hover fill with overflow in ${theme} mode`);
+      assert.equal(hoverStyle.actual, hoverStyle.expected, `The actions button should use the tab highlight in ${theme} mode`);
       assert.deepEqual(await actions.boundingBox(), fixedButton, 'Hover must not move the actions button');
       assert.equal(await tabViewport.evaluate(element => element.scrollLeft), scrollRange,
         'Hovering the actions button must preserve the tab bar scroll position');

@@ -452,12 +452,55 @@ try {
       await bar.evaluate(element => { element.style.maxWidth = ''; });
     }
   }
+  await page.evaluate(async () => {
+    const { useTerminalStore } = await import('/tab-runtime.js');
+    const store = useTerminalStore.getState();
+    const { sessionId } = store.sessions[0];
+    store.setStatus(sessionId, { sessionId, status: 'error', message: 'Connection ended' });
+  });
+  const sourceTab = page.locator('[data-terminal-tab-bar] [role="tab"]').first();
+  const dragPreview = page.locator('[data-session-tab]:not([data-terminal-tab-bar] *)');
+  for (const { theme, width } of appearances) {
+    await page.setViewportSize({ width, height: 720 });
+    await page.evaluate((theme) => document.documentElement.setAttribute('data-theme', theme), theme);
+    await sourceTab.scrollIntoViewIfNeeded();
+    const sourceBox = await sourceTab.boundingBox();
+    assert.ok(sourceBox);
+    const x = sourceBox.x + 60;
+    const y = sourceBox.y + sourceBox.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 20, y);
+    await dragPreview.waitFor();
+    await page.mouse.move(140, 120);
+    const appearance = await dragPreview.evaluate((tab) => {
+      const style = getComputedStyle(tab);
+      return {
+        opacity: style.opacity,
+        background: style.backgroundColor,
+        canvas: getComputedStyle(document.body).backgroundColor,
+        shadow: style.boxShadow,
+      };
+    });
+    assert.equal(appearance.opacity, '1', `${theme}, ${width}px: the preview must be fully opaque`);
+    assert.notEqual(appearance.background, appearance.canvas);
+    assert.notEqual(appearance.shadow, 'none');
+    assert.equal(await dragPreview.getAttribute('aria-label'), await sourceTab.getAttribute('aria-label'));
+    const previewBox = await dragPreview.boundingBox();
+    assert.equal(previewBox.width, sourceBox.width);
+    assert.equal(previewBox.height, sourceBox.height);
+    if (process.env.TAB_SCREENSHOT_DIR) {
+      await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-drag-preview-${theme}-${width}.png` });
+    }
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
+    await dragPreview.waitFor({ state: 'hidden' });
+  }
   // A target remains marked after a connection error and while another tab is active.
   await page.evaluate(async () => {
     const { useTerminalStore, useFocusStore } = await import('/tab-runtime.js');
     const sessionId = useTerminalStore.getState().sessions[0].sessionId;
     useFocusStore.setState({ enabled: true, targetSessionId: sessionId });
-    useTerminalStore.getState().setStatus(sessionId, { status: 'error', message: 'Connection ended' });
   });
   const targetTab = page.locator('[data-terminal-tab-bar] [role="tab"]').first();
   const closeTarget = targetTab.locator('button[aria-label="close"]');

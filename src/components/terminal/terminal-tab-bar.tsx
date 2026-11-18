@@ -82,6 +82,7 @@ interface SessionTabProps {
   session: TerminalSession;
   active: boolean;
   dragging?: boolean;
+  dragPreview?: boolean;
   showDropIndicatorLeft?: boolean;
   showDropIndicatorRight?: boolean;
   onActivate: (sessionId: string) => void;
@@ -94,6 +95,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
   session,
   active,
   dragging = false,
+  dragPreview = false,
   showDropIndicatorLeft = false,
   showDropIndicatorRight = false,
   onActivate,
@@ -143,10 +145,11 @@ const SessionTab: React.FC<SessionTabProps> = ({
       }}
       className={cn(
         'session-tab group relative flex h-8 w-42 shrink-0 cursor-default items-center gap-1 rounded-t-md border-x border-transparent px-1.5 text-left text-xs outline-none transition-[background-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
-        active
+        dragPreview && 'bg-app-surface-muted text-app-text ring-1 ring-app-text/20 shadow-md',
+        !dragPreview && (active
           ? 'border-app-border/50 bg-app-surface text-app-text'
-          : 'border-transparent bg-transparent text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
-        dragging && 'opacity-80',
+          : 'border-transparent bg-transparent text-app-text-soft hover:bg-app-surface-muted hover:text-app-text'),
+        dragging && !dragPreview && 'opacity-80',
       )}
       style={session.color ? {
         backgroundColor: `color-mix(in srgb, ${session.color} ${active ? 25 : 8}%, var(${active ? '--app-bg' : '--app-surface-muted'}))`,
@@ -188,7 +191,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
               e.stopPropagation();
               onTogglePin?.(session.sessionId);
             }}
-            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text"
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-accent hover:text-app-text"
           >
             <PinIcon className="size-3" strokeWidth={1.5} />
           </button>
@@ -202,7 +205,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
               onClose(session.sessionId);
             }}
             className={cn(
-              'group/close flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
+              'group/close flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-accent hover:text-app-text',
               canCancel || agentTarget || (!dragging && active) ? 'visible' : 'invisible group-hover:visible group-focus-within:visible',
             )}
           >
@@ -703,6 +706,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
                     session={draggingSession}
                     active={activeSessionId === draggingSession.sessionId}
                     dragging
+                    dragPreview
                     onActivate={() => {}}
                     onContextMenu={() => {}}
                     onClose={() => {}}
@@ -721,7 +725,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
                 type="button"
                 variant="ghost"
                 size="icon-xs"
-                className="mx-1 shrink-0 self-center hover:bg-app-border aria-expanded:bg-app-border"
+                className="mx-1 shrink-0 self-center hover:bg-app-tab-active aria-expanded:bg-app-tab-active"
               />
             )}
             aria-label={actionsLabel}
