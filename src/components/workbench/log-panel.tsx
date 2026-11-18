@@ -226,7 +226,7 @@ const LogLine: React.FC<LogLineProps> = ({
       onClick={onSelect}
       onDoubleClick={onDoubleClick}
       className={cn(
-        'relative grid w-full cursor-default items-start gap-2 px-3 py-1.5 text-left font-mono text-xs transition-colors before:absolute before:inset-y-0 before:left-0 before:w-0.5 hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-app-primary/50',
+        'relative grid w-full cursor-default items-start gap-2 px-3 py-1.5 text-left font-mono text-xs transition-colors before:absolute before:inset-y-0 before:left-0 before:w-0.5 hover:bg-muted/55',
         LOG_COLUMNS,
         '@max-[420px]:grid-cols-[minmax(0,max-content)_minmax(3.5rem,1fr)] @max-[420px]:gap-y-1',
         selected && 'bg-muted/80',
@@ -393,9 +393,9 @@ const LogInspector: React.FC<{
           <div className="flex items-center justify-between gap-2">
             <LevelBadge level={line.level} />
             <Button
-              variant="outline"
+              variant="ghost"
               size="xs"
-              className="min-w-16"
+              className="mr-1"
               onClick={() => void handleCopy()}
               aria-live="polite"
             >
@@ -714,7 +714,7 @@ export const LogPanel: React.FC = () => {
           </div>
         </WorkbenchPageToolbar>
 
-        <WorkbenchPageToolbar className="@min-[1020px]:flex-row @min-[1020px]:items-center">
+        <WorkbenchPageToolbar className="grid grid-cols-[minmax(0,1fr)_auto] items-center @min-[1020px]:grid-cols-[auto_minmax(0,1fr)_auto]">
           <WorkbenchSearchInput
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -723,55 +723,53 @@ export const LogPanel: React.FC = () => {
             placeholder={t('workbench.logs.searchPlaceholder')}
             aria-label={t('workbench.logs.searchPlaceholder')}
           />
-          <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 @min-[1020px]:flex-1">
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
-              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('workbench.logs.date')}</span>
-                <ToggleGroup
-                  value={[dateFilter]}
-                  onValueChange={(value) => {
-                    const nextValue = value[0] as DateFilterOption | undefined;
-                    if (nextValue) setDateFilter(nextValue);
-                  }}
-                  variant="tag"
-                  size="xs"
-                  spacing={1}
-                  className="max-w-full flex-wrap"
-                  aria-label={t('workbench.logs.date')}
-                >
-                  {DATE_FILTER_OPTIONS.map((option) => (
-                    <ToggleGroupItem key={option.key} value={option.key}>{t(option.labelKey)}</ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              </div>
-              <div className="h-4 w-px bg-border @max-[760px]:hidden" />
-              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('workbench.logs.level')}</span>
-                <ToggleGroup
-                  value={[levelFilter]}
-                  onValueChange={(value) => {
-                    const nextValue = value[0] as LogLevel | 'all' | undefined;
-                    if (nextValue) setLevelFilter(nextValue);
-                  }}
-                  variant="tag"
-                  size="xs"
-                  spacing={1}
-                  className="max-w-full flex-wrap"
-                  aria-label={t('workbench.logs.level')}
-                >
-                  <ToggleGroupItem value="all">{t('workbench.logs.all')}</ToggleGroupItem>
-                  {LOG_LEVELS.map((level) => (
-                    <ToggleGroupItem key={level} value={level}>
-                      {level}<span aria-hidden="true" className="ml-1 opacity-50 group-aria-pressed/toggle:opacity-100">{levelCounts[level] ?? 0}</span>
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              </div>
+          <div className="col-span-full flex min-w-0 flex-wrap items-center gap-3 @min-[1020px]:col-span-1 @min-[1020px]:col-start-2 @min-[1020px]:row-start-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('workbench.logs.date')}</span>
+              <ToggleGroup
+                value={[dateFilter]}
+                onValueChange={(value) => {
+                  const nextValue = value[0] as DateFilterOption | undefined;
+                  if (nextValue) setDateFilter(nextValue);
+                }}
+                variant="tag"
+                size="xs"
+                spacing={1}
+                className="max-w-full flex-wrap"
+                aria-label={t('workbench.logs.date')}
+              >
+                {DATE_FILTER_OPTIONS.map((option) => (
+                  <ToggleGroupItem key={option.key} value={option.key}>{t(option.labelKey)}</ToggleGroupItem>
+                ))}
+              </ToggleGroup>
             </div>
-            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-              <span>{t('workbench.logs.resultCount', { count: filteredLines.length })}</span>
+            <div className="h-4 w-px bg-border @max-[760px]:hidden" />
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('workbench.logs.level')}</span>
+              <ToggleGroup
+                value={[levelFilter]}
+                onValueChange={(value) => {
+                  const nextValue = value[0] as LogLevel | 'all' | undefined;
+                  if (nextValue) setLevelFilter(nextValue);
+                }}
+                variant="tag"
+                size="xs"
+                spacing={1}
+                className="max-w-full flex-wrap"
+                aria-label={t('workbench.logs.level')}
+              >
+                <ToggleGroupItem value="all">{t('workbench.logs.all')}</ToggleGroupItem>
+                {LOG_LEVELS.map((level) => (
+                  <ToggleGroupItem key={level} value={level}>
+                    {level}<span aria-hidden="true" className="ml-1 opacity-50 group-aria-pressed/toggle:opacity-100">{levelCounts[level] ?? 0}</span>
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
             </div>
           </div>
+          <span className="col-start-2 row-start-1 whitespace-nowrap text-[11px] text-muted-foreground @min-[1020px]:col-start-3">
+            {t('workbench.logs.resultCount', { count: filteredLines.length })}
+          </span>
         </WorkbenchPageToolbar>
 
         {error && (

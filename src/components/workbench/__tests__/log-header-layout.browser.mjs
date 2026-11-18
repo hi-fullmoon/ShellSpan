@@ -75,21 +75,32 @@ try {
   await page.addStyleTag({ content: '[data-slot="toggle-group-item"] { transition: none !important; }' });
   const readColors = (button) => button.evaluate((element) => {
     const { backgroundColor, color } = getComputedStyle(element);
-    return { backgroundColor, color };
+    const context = document.createElement('canvas').getContext('2d');
+    context.fillStyle = backgroundColor;
+    context.fillRect(0, 0, 1, 1);
+    return { backgroundColor, color, alpha: context.getImageData(0, 0, 1, 1).data[3] };
   });
   const source = page.getByRole('button', { name: '前端日志', exact: true });
-  const filterToolbar = page.locator('[data-slot="workbench-page-toolbar"]').filter({ has: search });
+  const filterToolbar = page.locator('[data-slot="workbench-page-toolbar"]').filter({ has: page.getByRole('textbox') });
   const screenshots = `${root}artifacts/tests/log-filter-selection`;
   await mkdir(screenshots, { recursive: true });
   for (const [theme, width] of [['light', 1440], ['dark', 640]]) {
     await page.setViewportSize({ width, height: 900 });
     await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, theme);
-    const selectedColors = await readColors(source);
+    const foreground = await page.evaluate(() => getComputedStyle(document.body).color);
+    assert.equal((await readColors(source)).alpha, 255, `Source selection stays solid in ${theme} theme`);
     for (const [selected, unselected] of [[allDates, today], [warn, allLevels]]) {
       assert.equal(await selected.getAttribute('aria-pressed'), 'true');
       assert.equal(await unselected.getAttribute('aria-pressed'), 'false');
-      assert.deepEqual(await readColors(selected), selectedColors, `Selected filter colors in ${theme} theme`);
+      const selectedColors = await readColors(selected);
+      assert.equal(selectedColors.color, foreground, `Selected filter text in ${theme} theme`);
+      assert.ok(selectedColors.alpha > 0 && selectedColors.alpha < 128, `Selected filter fill in ${theme} theme`);
       assert.notEqual((await readColors(unselected)).backgroundColor, selectedColors.backgroundColor);
+      await selected.hover();
+      const hoverColors = await readColors(selected);
+      assert.equal(hoverColors.color, foreground, `Hovered filter text in ${theme} theme`);
+      assert.ok(hoverColors.alpha > selectedColors.alpha && hoverColors.alpha < 128, `Hovered filter fill in ${theme} theme`);
+      await page.mouse.move(0, 0);
     }
     assert.equal(await warn.locator('span').evaluate((element) => getComputedStyle(element).opacity), '1');
     await filterToolbar.screenshot({ path: `${screenshots}/${theme}-${width}.png` });
@@ -100,6 +111,8 @@ try {
   await page.locator('[data-index]').last().click();
   const aside = page.locator('aside');
   await aside.waitFor();
+  const copy = aside.getByRole('button', { name: '复制', exact: true });
+  await page.locator('#root').evaluate((element) => { element.style.height = '480px'; });
   for (const width of [1440, 640]) {
     await page.setViewportSize({ width, height: 900 });
     const metrics = await aside.evaluate((aside) => {
@@ -132,11 +145,27 @@ try {
     assert.equal(metrics.titleCenter, metrics.iconCenter, `Title/icon centers at ${width}px`);
     assert.equal(metrics.titleCenter, metrics.buttonCenter, `Title/close centers at ${width}px`);
     assert.equal(metrics.titleLineHeight, metrics.titleFontSize);
+    const scrollbar = aside.locator('[data-slot="scroll-area-scrollbar"][data-orientation="vertical"]');
+    await scrollbar.waitFor();
+    const copyLayout = await copy.evaluate((button) => {
+      const { borderRightWidth, columnGap } = getComputedStyle(button);
+      return { height: button.getBoundingClientRect().height, borderRightWidth, columnGap };
+    });
+    assert.deepEqual(copyLayout, { height: 24, borderRightWidth: '0px', columnGap: '4px' }, `Copy layout at ${width}px`);
+    const [copyBounds, scrollbarBounds] = await Promise.all([copy.boundingBox(), scrollbar.boundingBox()]);
+    assert.ok(scrollbarBounds.x - (copyBounds.x + copyBounds.width) >= 4, `Copy clearance from scrollbar at ${width}px`);
+    await aside.screenshot({ path: `${screenshots}/inspector-copy-${width}.png` });
     await page.screenshot({ path: `/tmp/shellspan-log-header-${width}.png` });
   }
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  const rawLog = await aside.locator('pre').last().textContent();
+  await copy.press('Enter');
+  await aside.getByRole('button', { name: '已复制', exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), rawLog);
   await page.screenshot({ path: '/tmp/shellspan-log-header-layout.png' });
   await aside.getByRole('button', { name: '关闭', exact: true }).click();
   assert.equal(await aside.count(), 0);
+  await page.locator('#root').evaluate((element) => { element.style.height = '900px'; });
 
   const header = page.locator('[data-slot="workbench-page-header"]');
   for (const [locale, title, messageLabel, refreshLabel, moreLabel, diagnosticLabel] of [
@@ -149,8 +178,32 @@ try {
       useAppStore.setState({ locale });
     }, locale);
     await header.getByRole('heading', { name: title, exact: true }).waitFor();
-    for (const width of [1024, 256]) {
+    for (const width of [1440, 1024, 752, 256]) {
       await page.setViewportSize({ width, height: 760 });
+      const context = `${locale} at ${width}px`;
+      const [toolbarBounds, searchBounds, resultBounds] = await Promise.all([
+        filterToolbar.boundingBox(),
+        filterToolbar.locator('[data-slot="input-group"]').boundingBox(),
+        filterToolbar.getByText(/^\d+ (?:条结果|results)$/).boundingBox(),
+      ]);
+      assert.ok(toolbarBounds && searchBounds && resultBounds, `${context}: visible search and result count`);
+      assert.equal(resultBounds.y + resultBounds.height / 2, searchBounds.y + searchBounds.height / 2,
+        `${context}: result count aligns with the search field`);
+      const rightInset = toolbarBounds.x + toolbarBounds.width - resultBounds.x - resultBounds.width;
+      assert.equal(rightInset, searchBounds.x - toolbarBounds.x, `${context}: result count aligns with the right inset`);
+      assert.ok(resultBounds.x >= searchBounds.x + searchBounds.width, `${context}: count and search do not overlap`);
+      for (const name of [/^(日期|Date)$/, /^(级别|Level)$/]) {
+        const bounds = await filterToolbar.getByRole('group', { name }).boundingBox();
+        assert.ok(bounds, `${context}: visible ${name} filters`);
+        if (width >= 1020) {
+          assert.ok(bounds.x >= searchBounds.x + searchBounds.width && bounds.x + bounds.width <= resultBounds.x,
+            `${context}: ${name} filters fit between search and count`);
+        } else {
+          assert.ok(bounds.y >= searchBounds.y + searchBounds.height,
+            `${context}: ${name} filters are below search`);
+        }
+      }
+
       const row = page.locator('[data-index] > button').last();
       await row.waitFor();
       const layout = await row.evaluate((element) => {
@@ -163,8 +216,7 @@ try {
           rowWidth: element.getBoundingClientRect().width,
         };
       });
-      const context = `${locale} at ${width}px`;
-      if (width === 1024) {
+      if (width > 420) {
         assert.equal(layout.messageTop, layout.timeTop, context);
         continue;
       }
