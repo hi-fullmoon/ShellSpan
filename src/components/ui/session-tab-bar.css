@@ -1,7 +1,11 @@
 @reference '../../styles/base.css';
 
+.session-tab-drag-preview {
+  @apply bg-app-surface-muted text-app-text ring-1 ring-app-text/20 shadow-md;
+}
+
 .session-tab-action {
-  @apply absolute top-1/2 right-[7px] z-10 flex size-5 -translate-y-1/2 items-center justify-center rounded text-app-text-soft transition-all hover:bg-accent hover:text-app-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-tab-accent;
+  @apply absolute top-1/2 right-[7px] z-10 flex size-5 -translate-y-1/2 items-center justify-center rounded text-app-text-soft transition-all hover:bg-accent hover:text-app-text;
 }
 
 .session-tab-slot:first-child > .session-tab {
