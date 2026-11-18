@@ -10,12 +10,14 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Spinner } from '@/components/ui/empty-state';
-import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import { usePlatform } from '@/hooks/usePlatform';
 import type { SftpPreviewFileActions, SftpPreviewTarget } from '@/hooks/useSftpPaneActions';
+import { cn } from '@/lib/utils';
 import type { FileOpenApplication } from '@/types';
+
+const openButtonHoverClassName = 'relative isolate before:pointer-events-none before:absolute before:inset-y-0.5 before:-z-10 before:transition-colors group-has-[button:hover]/open-controls:[&:not(:hover)]:before:bg-foreground/5 hover:before:bg-foreground/10 focus-visible:z-10';
 
 function ApplicationIcon({ icon, inButton = false }: { icon?: string; inButton?: boolean }) {
   const [failed, setFailed] = useState(false);
@@ -66,13 +68,13 @@ export function SftpPreviewOpenControls({ target, actions, defaultIcon }: {
   };
 
   return (
-    <div data-slot="sftp-preview-file-actions" className="flex shrink-0 items-center" aria-busy={busy}>
+    <div data-slot="sftp-preview-file-actions" className="group/open-controls flex shrink-0 items-center" aria-busy={busy}>
       <Tooltip>
         <TooltipTrigger render={
           <Button
-            variant="ghost"
+            variant="plain"
             size="sm"
-            className="rounded-r-none focus-visible:relative focus-visible:z-10"
+            className={cn(openButtonHoverClassName, 'rounded-r-none before:right-0 before:left-0.5 before:rounded-l-md')}
             disabled={busy}
             onClick={() => void run(() => actions.open(target))}
           />
@@ -87,25 +89,19 @@ export function SftpPreviewOpenControls({ target, actions, defaultIcon }: {
           disabled={busy}
           render={
             <Button
-              variant="ghost"
-              size="icon-sm"
-              className="relative rounded-l-none focus-visible:z-10"
+              variant="plain"
+              size="icon-xs"
+              className={cn(openButtonHoverClassName, 'h-8 w-5 rounded-l-none before:right-0.5 before:left-0 before:rounded-r-md')}
               aria-label={t('sftp.preview.openOptions')}
             />
           }
         >
-          <Separator
-            render={<span />}
-            orientation="vertical"
-            className="pointer-events-none absolute inset-y-2.5 left-0 data-vertical:border-border/65"
-            aria-hidden="true"
-          />
           <ChevronDownIcon aria-hidden="true" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="file-action-menu flex w-max min-w-56 max-w-72 flex-col overflow-hidden">
+        <DropdownMenuContent align="end" className="file-action-menu flex w-max min-w-56 max-w-72 flex-col overflow-hidden pr-0">
           <DropdownMenuGroup
             data-slot="sftp-preview-open-applications"
-            className="min-h-0 max-h-[280px] overflow-x-hidden overflow-y-auto overscroll-contain"
+            className="min-h-0 max-h-[280px] overflow-x-hidden overflow-y-auto overscroll-contain pr-1"
           >
             <DropdownMenuItem onClick={() => void run(() => actions.open(target))}>
               <ExternalLinkIcon />
@@ -129,17 +125,19 @@ export function SftpPreviewOpenControls({ target, actions, defaultIcon }: {
               </DropdownMenuItem>
             )}
           </DropdownMenuGroup>
-          <DropdownMenuSeparator className="shrink-0" />
-          <DropdownMenuGroup className="shrink-0">
-            <DropdownMenuItem onClick={() => void run(() => actions.reveal(target))}>
-              <FolderOpenIcon />
-              {t(actions.isRemote ? 'sftp.preview.revealRemote' : 'sftp.preview.revealLocal')}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => void run(() => actions.saveAs(target))}>
-              <SaveIcon />
-              {t('sftp.preview.saveAs')}
-            </DropdownMenuItem>
-          </DropdownMenuGroup>
+          <div className="flex shrink-0 flex-col pr-1">
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem onClick={() => void run(() => actions.reveal(target))}>
+                <FolderOpenIcon />
+                {t(actions.isRemote ? 'sftp.preview.revealRemote' : 'sftp.preview.revealLocal')}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => void run(() => actions.saveAs(target))}>
+                <SaveIcon />
+                {t('sftp.preview.saveAs')}
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          </div>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

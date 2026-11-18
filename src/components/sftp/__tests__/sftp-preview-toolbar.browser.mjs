@@ -68,17 +68,35 @@ server.middlewares.use('/__sftp_preview_toolbar', (request, response) => {
   response.end('<!doctype html><html><body><main id="root"></main></body></html>');
 });
 
-const waitForBackground = (button, filled) => button.evaluate((element, filled) => new Promise((resolve, reject) => {
+const waitForBackground = (button, filled, pseudoElement) => button.evaluate((element, { filled, pseudoElement }) => new Promise((resolve, reject) => {
   const deadline = performance.now() + 3000;
   const check = () => {
-    const color = getComputedStyle(element).backgroundColor;
+    const color = getComputedStyle(element, pseudoElement).backgroundColor;
     const transparent = color === 'rgba(0, 0, 0, 0)' || color === 'transparent';
     if (transparent !== filled) resolve();
     else if (performance.now() > deadline) reject(new Error(`Unexpected button background: ${color}, filled=${filled}`));
     else requestAnimationFrame(check);
   };
   check();
-}), filled);
+}), { filled, pseudoElement });
+
+const readHighlight = button => button.evaluate(async element => {
+  await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished));
+  const style = getComputedStyle(element, '::before');
+  const bounds = element.getBoundingClientRect();
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  context.fillStyle = style.backgroundColor;
+  context.fillRect(0, 0, 1, 1);
+  return {
+    left: bounds.left + Number.parseFloat(style.left),
+    right: bounds.right - Number.parseFloat(style.right),
+    leftCorners: [style.borderTopLeftRadius, style.borderBottomLeftRadius],
+    rightCorners: [style.borderTopRightRadius, style.borderBottomRightRadius],
+    height: style.height,
+    alpha: context.getImageData(0, 0, 1, 1).data[3],
+  };
+});
 
 try {
   await server.listen();
@@ -161,6 +179,7 @@ try {
               assert.equal(await openButton.textContent(), labels.open, 'The primary open action has a visible label');
               assert.equal(openBounds.height, 32);
               assert.equal(await openButton.locator('img, svg').count(), 0, 'Open uses just its label without an application icon');
+              assert.equal(optionsBounds.width, 20, 'The arrow segment uses the compact width');
               assert.equal(optionsBounds.height, openBounds.height);
               assert.equal(optionsBounds.y, openBounds.y);
               assert.ok(Math.abs(optionsBounds.x - openBounds.x - openBounds.width) < 1, 'Both sides form one split button');
@@ -170,16 +189,21 @@ try {
                 assert.equal(await button.evaluate(element => getComputedStyle(element).borderTopWidth), '0px');
               }
               if (!image && !json) {
-                await openButton.hover();
-                await Promise.all([waitForBackground(openButton, true), waitForBackground(optionsButton, false)]);
-                await optionsButton.hover();
-                await Promise.all([waitForBackground(openButton, false), waitForBackground(optionsButton, true)]);
+                for (const [hovered, adjacent] of [[openButton, optionsButton], [optionsButton, openButton]]) {
+                  await hovered.hover();
+                  await Promise.all([waitForBackground(hovered, true, '::before'), waitForBackground(adjacent, true, '::before')]);
+                  await waitForBackground(hovered, false);
+                  const [open, options] = await Promise.all([readHighlight(openButton), readHighlight(optionsButton)]);
+                  const [primary, secondary] = hovered === openButton ? [open, options] : [options, open];
+                  assert.ok(primary.alpha > secondary.alpha && secondary.alpha > 0, 'The hovered segment has a stronger fill than its neighbor');
+                  assert.ok(Math.abs(open.right - options.left) < 0.1, 'The hover fills meet without a gap');
+                  assert.deepEqual([open.height, options.height], ['28px', '28px']);
+                  assert.deepEqual([...open.rightCorners, ...options.leftCorners], ['0px', '0px', '0px', '0px']);
+                  assert.ok([...open.leftCorners, ...options.rightCorners].every(radius => Number.parseFloat(radius) > 0));
+                }
                 await page.mouse.move(0, 0);
-                await waitForBackground(optionsButton, false);
+                await Promise.all([waitForBackground(openButton, false, '::before'), waitForBackground(optionsButton, false, '::before')]);
               }
-              const splitDivider = await optionsButton.locator('[data-slot="separator"]').boundingBox();
-              assert.ok(splitDivider.width > 0 && splitDivider.width <= 1 && splitDivider.height > 0 && splitDivider.height < optionsBounds.height,
-                'A short divider distinguishes the two actions');
               assert.ok(optionsBounds.x + optionsBounds.width <= dialogBounds.x + dialogBounds.width);
               if (width === 380) {
                 await optionsButton.focus();
@@ -240,8 +264,12 @@ try {
               const toolbar = surface.locator('[data-slot="sftp-preview-toolbar"]');
               assert.equal(await toolbar.count(), 1, 'Text and images share a single preview toolbar');
               const toolbarBounds = await toolbar.boundingBox();
-              assert.equal(toolbarBounds.height, 41);
+              assert.equal(toolbarBounds.height, image ? 41 : 37, 'Toolbar height includes its 1px separator');
               assert.ok(await toolbar.evaluate(element => element.scrollWidth <= element.clientWidth));
+              const contentViewport = surface.locator('[data-slot="scroll-area-viewport"]');
+              const viewportBounds = await contentViewport.boundingBox();
+              const toolbarBottom = toolbarBounds.y + toolbarBounds.height;
+              assert.ok(Math.abs(viewportBounds.y - toolbarBottom) < 1, 'The preview viewport starts immediately below the toolbar');
               for (const action of actions) {
                 await page.mouse.move(0, 0);
                 const button = dialog.getByRole('button', { name: labels[action], exact: true });
@@ -282,6 +310,9 @@ try {
                 const picture = dialog.getByRole('img', { name: file.name });
                 await picture.evaluate(image => image.decode());
                 const baseline = await picture.boundingBox();
+                assert.ok(baseline.y >= viewportBounds.y - 1);
+                assert.ok(await contentViewport.evaluate(element => element.scrollHeight <= element.clientHeight && element.scrollWidth <= element.clientWidth),
+                  'The fitted image and its canvas padding stay inside the viewport');
                 const reset = dialog.getByRole('button', { name: labels.reset, exact: true });
                 assert.ok(await reset.isDisabled());
                 await dialog.getByRole('button', { name: labels.zoomIn, exact: true }).click();
@@ -289,6 +320,8 @@ try {
                 await reset.click();
                 assert.equal((await picture.boundingBox()).width, baseline.width);
               } else {
+                assert.equal(await contentViewport.locator('pre').evaluate(element => getComputedStyle(element).paddingTop), '8px',
+                  'The first code line has 8px of space inside the preview');
                 const lineCount = file.content.split('\n').length;
                 assert.ok(await toolbar.getByText(locale === 'zh-CN' ? `${lineCount} 行` : `${lineCount} lines`, { exact: true }).isVisible());
                 const wrap = dialog.getByRole('button', { name: labels.wrap, exact: true });
@@ -355,6 +388,7 @@ try {
         for (const [width, height, theme] of [[380, 320, 'dark'], [1280, 800, 'light']]) {
           await page.setViewportSize({ width, height });
           for (const file of richFiles) {
+            const binary = file.name.endsWith('.icns');
             await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__sftp_preview_toolbar`);
             await page.evaluate(async ({ file, locale, theme }) => {
               document.documentElement.dataset.theme = theme;
@@ -374,7 +408,13 @@ try {
             assert.ok(await header.getByRole('button', { name: labels.open, exact: true }).isVisible());
             assert.ok(await header.locator('[data-slot="sftp-preview-metadata"]').isVisible());
             assert.ok(await dialog.evaluate(element => document.activeElement === element), 'The preview opens with focus inside the dialog');
-            assert.equal((await viewport.boundingBox()).width, surfaceBounds.width, 'The scroll layer follows the full width of the preview panel');
+            const viewportBounds = await viewport.boundingBox();
+            assert.equal(viewportBounds.width, surfaceBounds.width, 'The scroll layer follows the full width of the preview panel');
+            const toolbarBounds = await toolbar.count() ? await toolbar.boundingBox() : null;
+            const contentTop = toolbarBounds
+              ? toolbarBounds.y + toolbarBounds.height
+              : surfaceBounds.y + await surface.evaluate(element => Number.parseFloat(getComputedStyle(element).borderTopWidth));
+            assert.ok(Math.abs(viewportBounds.y - contentTop) < 1, 'The preview viewport starts immediately below its top divider');
             if (file.name.endsWith('.woff2')) {
               await surface.getByText(locale === 'zh-CN' ? '字体样张' : 'Font specimen', { exact: true }).waitFor();
               assert.equal(await toolbar.count(), 0, 'A font preview needs no toolbar');
@@ -384,15 +424,12 @@ try {
               assert.ok(Math.abs((previewPage.x - surfaceBounds.x) - (surfaceBounds.x + surfaceBounds.width - previewPage.x - previewPage.width)) < 1, 'Document and font pages are centered');
               assert.ok(previewPage.width < surfaceBounds.width);
               assert.ok(await viewport.evaluate(element => element.scrollWidth <= element.clientWidth));
-              if (file.name.endsWith('.md')) {
-                const toolbarBounds = await toolbar.boundingBox();
-                const topGap = previewPage.y - (toolbarBounds.y + toolbarBounds.height);
-                assert.ok(Math.abs(topGap - 8) < 1, 'Markdown starts 8px below the toolbar at both window widths');
-              }
+              assert.ok(Math.abs(previewPage.y - viewportBounds.y - 8) < 1, 'Document and font cards retain an 8px inset inside the viewport');
             }
             if (file.name.endsWith('.tsv')) {
               const tableHeader = surface.getByRole('row').first();
               const before = await tableHeader.boundingBox();
+              assert.ok(Math.abs(before.y - viewportBounds.y) < 1, 'The data table header starts at the top of the viewport');
               assert.ok(await viewport.evaluate(element => {
                 element.scrollTop = 500;
                 return element.scrollTop > 0;
@@ -401,9 +438,13 @@ try {
               await viewport.evaluate(element => { element.scrollTop = 0; });
             }
             if (file.name.endsWith('.zip')) {
+              const tableHeader = await surface.getByRole('row').first().boundingBox();
+              assert.ok(Math.abs(tableHeader.y - viewportBounds.y) < 1, 'The archive header starts at the top of the viewport');
               assert.ok(await surface.getByRole('cell', { name: 'README.md', exact: true }).isVisible());
             }
-            if (file.name.endsWith('.icns')) {
+            if (binary) {
+              const heading = await surface.getByRole('heading', { level: 2 }).boundingBox();
+              assert.ok(Math.abs(heading.y - viewportBounds.y - 8) < 1, 'The binary heading starts 8px inside the scroll area');
               const table = surface.getByRole('table', { name: locale === 'zh-CN' ? '二进制检查视图' : 'Binary inspection view' });
               assert.deepEqual(await table.getByRole('columnheader').allTextContents(), locale === 'zh-CN'
                 ? ['偏移量', '十六进制字节', 'ASCII'] : ['Offset', 'Hex bytes', 'ASCII']);
@@ -412,7 +453,6 @@ try {
               assert.equal(hex.replaceAll(' ', ''), Buffer.from(file.content, 'base64').subarray(0, 16).toString('hex'));
               assert.ok(ascii.startsWith('icns'));
               const tableHeader = table.getByRole('row').first();
-              const viewportBounds = await viewport.boundingBox();
               await viewport.evaluate(element => { element.scrollTop = 500; });
               assert.ok(Math.abs((await tableHeader.boundingBox()).y - viewportBounds.y) < 1, 'Hex column headings stay visible while scrolling');
               await viewport.evaluate(element => { element.scrollTop = 0; });
@@ -427,16 +467,22 @@ try {
             }
             await page.screenshot({ path: join(artifacts, `${engine.name()}-${locale}-${theme}-${width}-${file.name}.png`) });
             if (file.name.endsWith('.md') || file.name.endsWith('.tsv')) {
-              const sourceTab = toolbar.getByRole('tab', { name: locale === 'zh-CN' ? '源码' : 'Source', exact: true });
-              await sourceTab.focus();
-              await page.keyboard.press('Enter');
-              assert.equal(await sourceTab.getAttribute('aria-selected'), 'true');
+              const sourceLabel = locale === 'zh-CN' ? '源码' : 'Source';
+              const sourceTab = toolbar.getByRole('tab', { name: sourceLabel, exact: true });
+              await sourceTab.press('Enter');
+              await toolbar.getByRole('tab', { name: sourceLabel, exact: true, selected: true }).waitFor();
               assert.equal(await toolbar.count(), 1, 'Switching to source keeps a single preview toolbar');
+              await surface.locator('[role="tabpanel"][inert]').waitFor({ state: 'hidden' });
+              const sourceViewport = surface.getByRole('tabpanel', { name: sourceLabel, exact: true }).locator('[data-slot="scroll-area-viewport"]');
+              const source = sourceViewport.locator('pre');
+              assert.ok(Math.abs((await sourceViewport.boundingBox()).y - contentTop) < 1, 'The source viewport starts immediately below the toolbar');
+              assert.equal(await source.evaluate(element => getComputedStyle(element).paddingTop), '8px',
+                'The source tab keeps 8px of space inside the preview');
               const wrap = toolbar.getByRole('button', { name: labels.wrap, exact: true });
               await wrap.focus();
               await page.keyboard.press('Space');
               assert.equal(await wrap.getAttribute('aria-pressed'), 'true');
-              assert.equal(await surface.locator('pre:visible').textContent(), file.content);
+              assert.equal(await source.textContent(), file.content);
               assert.deepEqual(await surface.boundingBox(), surfaceBounds, 'Source and rendered content share the same panel bounds');
               assert.deepEqual(await header.boundingBox(), headerBounds);
               await dialog.focus();
@@ -488,6 +534,7 @@ try {
             }, { application: desktopApplication, file, locale, blocked });
             const dialog = page.getByRole('dialog');
             const openButton = dialog.getByRole('button', { name: labels.open, exact: true });
+            const optionsButton = dialog.getByRole('button', { name: labels.options, exact: true });
             if (!blocked) {
               const buttonIcon = openButton.locator('img[data-icon="inline-start"]');
               await buttonIcon.evaluate(image => image.decode());
@@ -500,8 +547,17 @@ try {
                 return text.getBoundingClientRect().left - icon.getBoundingClientRect().right;
               });
               assert.ok(Math.abs(buttonIconGap - 4) < 1, 'The default application icon is 4px left of the Open label');
+              const header = dialog.locator('[data-slot="dialog-header"]');
+              await page.mouse.move(0, 0);
+              await header.screenshot({ path: join(artifacts, `${engine.name()}-open-idle.png`), animations: 'disabled' });
+              await openButton.hover();
+              await Promise.all([waitForBackground(openButton, true, '::before'), waitForBackground(optionsButton, true, '::before')]);
+              await header.screenshot({ path: join(artifacts, `${engine.name()}-open-hover.png`), animations: 'disabled' });
+              await optionsButton.hover();
+              await Promise.all([waitForBackground(optionsButton, true, '::before'), waitForBackground(openButton, true, '::before')]);
+              await header.screenshot({ path: join(artifacts, `${engine.name()}-open-options-hover.png`), animations: 'disabled' });
             }
-            await dialog.getByRole('button', { name: labels.options, exact: true }).click();
+            await optionsButton.click();
             const menu = page.getByRole('menu');
             const appItem = menu.getByRole('menuitem', { name: desktopApplication.name, exact: true });
             const icon = appItem.locator(blocked ? 'svg' : 'img');
@@ -538,6 +594,9 @@ try {
 
             const menuBounds = await menu.boundingBox();
             const listBounds = await list.boundingBox();
+            const borderRight = await menu.evaluate(element => Number.parseFloat(getComputedStyle(element).borderRightWidth));
+            assert.ok(Math.abs((menuBounds.x + menuBounds.width - borderRight) - (listBounds.x + listBounds.width)) < 1,
+              'The application list scrollbar reaches the popup’s inside edge');
             assert.ok(menuBounds.y >= 0 && menuBounds.y + menuBounds.height <= height + 1, 'The full menu fits the viewport');
             assert.ok(listBounds.height <= 280 && (height === 800 ? listBounds.height === 280 : listBounds.height < 280));
             assert.ok(await list.evaluate(element => element.scrollHeight > element.clientHeight), 'Only the application list needs to scroll');
