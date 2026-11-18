@@ -17,6 +17,28 @@ const entry = { path, name: 'AGENTS.md', kind: 'file', size: metadata.size, modi
 const directory = root.slice(0, -1);
 const { username } = userInfo();
 const engine = process.env.SHELLSPAN_TEST_ENGINE ?? 'chromium';
+const menuAppearance = item => item.evaluate(element => {
+  const menu = element.closest('[role="menu"]');
+  const { backgroundColor, border, borderRadius, boxShadow, padding } = getComputedStyle(menu);
+  const probe = document.createElement('span');
+  probe.style.boxShadow = 'var(--shadow-dialog)';
+  menu.append(probe);
+  // Tailwind includes transparent shadow layers before the visible dialog shadow.
+  const hasDialogShadow = boxShadow.endsWith(getComputedStyle(probe).boxShadow);
+  probe.remove();
+  const label = element.lastElementChild;
+  const icon = element.querySelector('svg');
+  return {
+    surface: { backgroundColor, border, borderRadius, hasDialogShadow, padding },
+    menuWidth: getComputedStyle(menu).width,
+    labelColor: getComputedStyle(label).color,
+    iconStroke: getComputedStyle(icon).stroke,
+    iconWidth: getComputedStyle(icon).width,
+    iconHeight: getComputedStyle(icon).height,
+    iconGap: Math.round(label.getBoundingClientRect().left - icon.getBoundingClientRect().right),
+    opacity: getComputedStyle(element).opacity,
+  };
+});
 const server = await createServer({
   root, configFile: false, appType: 'custom', logLevel: 'error',
   cacheDir: `${output}/vite-${engine}`,
@@ -43,8 +65,10 @@ try {
       for (const width of [1280, 380]) {
         await page.setViewportSize({ width, height: 900 });
         let reference;
+        let fileMenuAppearance;
+        let disabledFileItemOpacity;
         const iconKinds = ['icon', 'connection-actions', 'log-actions'];
-        for (const kind of ['account', ...iconKinds, 'terminal', 'shared', 'file', 'blank', 'bookmark']) {
+        for (const kind of ['account', ...iconKinds, 'terminal', 'shared', 'file', 'agent-path', 'blank', 'bookmark']) {
           const labels = await page.evaluate(async options => {
             const { show } = await import('/src/components/ui/__tests__/context-menu-hover.browser-entry.tsx');
             return show(options);
@@ -54,12 +78,14 @@ try {
           if (kind === 'account') await button(labels.account).click();
           if (kind === 'terminal') await page.getByRole('tab').click({ button: 'right' });
           if (kind === 'shared') await page.getByTestId('context-trigger').click({ button: 'right' });
+          if (kind === 'agent-path') await page.getByRole('link', { name: path, exact: true }).click({ button: 'right' });
           const isIcon = iconKinds.includes(kind);
           const targets = isIcon ? [button(labels[kind])] : {
             account: [menuItem(labels.appearance)],
             terminal: [menuItem(labels.template)],
             shared: [menuItem(labels.copy)],
             file: [menuItem(labels.copy), menuItem(labels.remove)],
+            'agent-path': [menuItem(labels.copyPath)],
             blank: [menuItem(labels.refresh)],
             bookmark: [button(directory)],
           }[kind];
@@ -117,6 +143,26 @@ try {
             } else {
               assert.equal(result.background, reference, `${engine}/${theme}/${locale}/${width}/${kind}: hover background`);
             }
+            if (kind === 'file' && !isDelete) {
+              fileMenuAppearance = await menuAppearance(item);
+              assert.equal(fileMenuAppearance.surface.hasDialogShadow, true, 'The SFTP file menu uses the dialog shadow');
+              assert.equal(fileMenuAppearance.iconGap, 4, 'The SFTP file menu uses a 4px icon gap');
+            }
+            if (kind === 'agent-path') {
+              assert.deepEqual(await menuAppearance(item), fileMenuAppearance, 'The AI path menu matches the SFTP file menu');
+            }
+          }
+          if (kind === 'file') {
+            disabledFileItemOpacity = (await menuAppearance(menuItem(labels.openFile))).opacity;
+          }
+          if (kind === 'agent-path') {
+            await menuItem(labels.openWith).hover();
+            const submenu = page.getByRole('menu', { name: labels.openWith });
+            const appearance = await menuAppearance(submenu.getByRole('menuitem', { name: labels.defaultApp }));
+            assert.deepEqual(appearance.surface, fileMenuAppearance.surface, 'The Open with submenu uses the same surface');
+            assert.equal(appearance.opacity, disabledFileItemOpacity, 'Disabled items use the same opacity');
+            await page.keyboard.press('Escape');
+            await submenu.waitFor({ state: 'hidden' });
           }
           if (kind === 'blank') {
             const disabled = page.getByRole('menuitem', { name: labels.paste, exact: true });

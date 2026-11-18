@@ -400,6 +400,41 @@
   display: none;
 }
 
+/* File action menus share the compact rows and surface of the file list menu. */
+.file-action-menu {
+  border: 1px solid var(--app-border);
+  box-shadow: var(--shadow-dialog);
+}
+
+.file-action-menu [role='menuitem'] {
+  @apply px-2.5 py-1.5 text-xs leading-4;
+}
+
+.file-action-menu [role='menuitem'][data-inset] {
+  @apply pl-7;
+}
+
+.file-action-menu [role='menuitem']:is(:focus, [data-highlighted], [data-popup-open]) {
+  color: var(--app-primary);
+}
+
+.file-action-menu [data-slot='menu-item-label'] {
+  color: inherit;
+}
+
+.file-action-menu [role='menuitem'] > :is(svg, img) {
+  @apply size-3.5;
+  color: var(--muted-foreground);
+}
+
+.file-action-menu [role='menuitem'][data-disabled] {
+  opacity: 0.4;
+}
+
+.file-action-menu [data-slot='dropdown-menu-separator'] {
+  @apply mx-0 my-0.5;
+}
+
 /* The account menu uses one soft surface, with inset rounded action rows. */
 .workbench-user-menu {
   background-color: color-mix(in srgb, var(--popover) 92%, transparent);

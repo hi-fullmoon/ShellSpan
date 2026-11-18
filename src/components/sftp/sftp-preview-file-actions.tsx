@@ -89,7 +89,7 @@ export function SftpPreviewOpenControls({ target, actions, defaultIcon }: {
         >
           <ChevronDownIcon aria-hidden="true" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-max min-w-48 max-w-72">
+        <DropdownMenuContent align="end" className="file-action-menu w-max min-w-56 max-w-72">
           <DropdownMenuGroup>
             <DropdownMenuItem onClick={() => void run(() => actions.open(target))}>
               <ExternalLinkIcon />

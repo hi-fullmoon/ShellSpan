@@ -133,16 +133,46 @@ try {
                 await optionsButton.focus();
                 await page.keyboard.press('Enter');
                 const menu = page.getByRole('menu');
-                await menu.getByRole('menuitem', { name: json ? labels.defaultCopy : labels.defaultApp, exact: true }).waitFor();
+                const defaultApp = menu.getByRole('menuitem', { name: json ? labels.defaultCopy : labels.defaultApp, exact: true });
+                await defaultApp.waitFor();
                 await menu.getByRole('menuitem', { name: json ? labels.revealRemote : labels.reveal, exact: true }).waitFor();
                 await menu.getByRole('menuitem', { name: labels.saveAs, exact: true }).waitFor();
                 const usesSystemPicker = await page.evaluate(() => navigator.platform.toLowerCase().includes('win'));
                 const appChoice = usesSystemPicker
                   ? (locale === 'zh-CN' ? '选择其他应用…' : 'Choose another app…')
                   : (locale === 'zh-CN' ? '无法读取应用列表' : 'Could not load apps');
-                await menu.getByRole('menuitem', { name: appChoice, exact: true }).waitFor();
+                const choice = menu.getByRole('menuitem', { name: appChoice, exact: true });
+                await choice.waitFor();
+                await menu.evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));
                 const menuBounds = await menu.boundingBox();
+                assert.ok(menuBounds.width >= 224 && menuBounds.width <= 288, 'File options use the shared menu width and can fit longer labels');
                 assert.ok(menuBounds.x >= 0 && menuBounds.x + menuBounds.width <= width);
+                assert.ok(await menu.evaluate(element => {
+                  const probe = document.createElement('span');
+                  probe.style.border = '1px solid var(--app-border)';
+                  probe.style.boxShadow = 'var(--shadow-dialog)';
+                  element.append(probe);
+                  const menuStyle = getComputedStyle(element);
+                  const expected = getComputedStyle(probe);
+                  const matches = menuStyle.border === expected.border && menuStyle.boxShadow === expected.boxShadow;
+                  probe.remove();
+                  return matches;
+                }), 'The options popup uses the shared file menu border and shadow');
+                const itemAppearance = await defaultApp.evaluate(item => {
+                  const icon = item.querySelector('svg').getBoundingClientRect();
+                  const label = item.querySelector('[data-slot="menu-item-label"]').getBoundingClientRect();
+                  return {
+                    rowHeight: item.getBoundingClientRect().height,
+                    fontSize: getComputedStyle(item).fontSize,
+                    iconSize: [icon.width, icon.height],
+                    iconGap: label.left - icon.right,
+                  };
+                });
+                assert.deepEqual(itemAppearance, { rowHeight: 28, fontSize: '12px', iconSize: [14, 14], iconGap: 4 });
+                if (!usesSystemPicker) {
+                  assert.ok(await choice.isDisabled());
+                  assert.equal(await choice.evaluate(item => getComputedStyle(item).opacity), '0.4', 'Disabled status uses the shared file menu opacity');
+                }
                 await page.screenshot({ path: join(artifacts, `${engine.name()}-${locale}-${theme}-${json ? 'remote' : 'local'}-menu.png`) });
                 await page.keyboard.press('Escape');
                 await menu.waitFor({ state: 'hidden' });
@@ -340,8 +370,8 @@ try {
             await menu.evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));
             const iconBounds = await icon.boundingBox();
             const labelBounds = await appItem.getByText(desktopApplication.name, { exact: true }).boundingBox();
-            assert.equal(iconBounds.width, 16);
-            assert.equal(iconBounds.height, 16);
+            assert.equal(iconBounds.width, 14);
+            assert.equal(iconBounds.height, 14);
             assert.ok(Math.abs(labelBounds.x - iconBounds.x - iconBounds.width - 4) < 1, 'The app icon is 4px left of the app name');
             await page.screenshot({ path: join(artifacts, `${engine.name()}-application-icon-${blocked ? 'fallback' : 'native'}.png`) });
           }

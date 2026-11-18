@@ -9,6 +9,7 @@ import { TooltipProvider } from '../tooltip';
 import { SftpFileContextMenu } from '@/components/sftp/sftp-file-context-menu';
 import { SftpBlankContextMenu } from '@/components/sftp/sftp-blank-context-menu';
 import { SftpBookmarkMenu } from '@/components/sftp/sftp-bookmark-menu';
+import { AssistantMessageContent } from '@/components/ai/assistant-message-content';
 import { TerminalContextMenu } from '@/components/terminal/terminal-context-menu';
 import { TerminalTabBar } from '@/components/terminal/terminal-tab-bar';
 import { ConnectionList } from '@/components/workbench/connection-list';
@@ -21,8 +22,9 @@ import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import type { LocalFileEntry, Locale } from '@/types';
 import '@/styles/base.css';
+import '@/components/ai/styles/styles.css';
 
-type MenuKind = 'account' | 'icon' | 'connection-actions' | 'log-actions' | 'terminal' | 'shared' | 'file' | 'blank' | 'bookmark';
+type MenuKind = 'account' | 'icon' | 'connection-actions' | 'log-actions' | 'terminal' | 'shared' | 'file' | 'agent-path' | 'blank' | 'bookmark';
 const root = createRoot(document.getElementById('root')!);
 
 function TerminalPreview() {
@@ -53,6 +55,8 @@ function Preview({ kind, entry, directory }: {
     onDuplicate={close} onToggleFavorite={close} onImport={close} onExport={close} />;
   if (kind === 'log-actions') return <LogPanel />;
   if (kind === 'terminal') return <TerminalPreview />;
+  if (kind === 'agent-path') return <AssistantMessageContent
+    blocks={[{ type: 'text', text: `\`${entry.path}\`` }]} streaming={false} />;
   if (kind === 'shared') return <ContextMenu>
     <ContextMenuTrigger data-testid="context-trigger">{entry.name}</ContextMenuTrigger>
     <ContextMenuContent>
@@ -100,6 +104,10 @@ export async function show({ kind, theme, locale, entry, directory, username }: 
     'log-actions': t('workbench.logs.actions'),
     template: t('terminal.title.template'),
     copy: t('common.copy'),
+    copyPath: t('ai.path.copy'),
+    openWith: t('ai.path.openWith'),
+    defaultApp: t('ai.path.defaultApp'),
+    openFile: t('sftp.contextMenu.open'),
     remove: t('common.delete'),
     paste: t('sftp.contextMenu.paste'),
     refresh: t('common.refresh'),

@@ -144,7 +144,7 @@ export function AiFileReferenceMenu({
   return (
     <ContextMenu open={open} onOpenChange={setOpen}>
       <ContextMenuTrigger render={<Tag {...triggerProps}>{children}</Tag>} />
-      <ContextMenuContent aria-label={t('ai.path.menu')}>
+      <ContextMenuContent className="file-action-menu w-56 min-w-0" aria-label={t('ai.path.menu')}>
         {remote ? (
           <ContextMenuGroup>
             {copyPathItem}
@@ -161,7 +161,7 @@ export function AiFileReferenceMenu({
               )}
               <ContextMenuSub>
                 <ContextMenuSubTrigger><AppWindow />{t('ai.path.openWith')}</ContextMenuSubTrigger>
-                <ContextMenuSubContent aria-label={t('ai.path.openWith')}>
+                <ContextMenuSubContent className="file-action-menu" aria-label={t('ai.path.openWith')}>
                   <ContextMenuGroup>
                     <ContextMenuItem onClick={openPath} disabled={!desktop}><AppWindow />{t('ai.path.defaultApp')}</ContextMenuItem>
                     {mac && <ContextMenuItem onClick={revealPath} disabled={!desktop}><FolderOpen />{t('ai.path.app.finder')}</ContextMenuItem>}
