@@ -3,6 +3,29 @@ use std::path::PathBuf;
 use tauri::utils::resources::ResourcePaths;
 
 #[test]
+fn development_native_resources_match_the_package_input_and_keep_frozen_validation_isolated() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let config: serde_json::Value =
+        serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+    let configured: HashMap<String, String> =
+        serde_json::from_value(config["bundle"]["resources"].clone()).unwrap();
+    let package_input = configured
+        .iter()
+        .find(|(_, target)| *target == &format!("{BUNDLE_RESOURCE_DIRECTORY}/"))
+        .map(|(source, _)| manifest_dir.join(source))
+        .expect("Native package resource mapping must exist");
+
+    assert_eq!(
+        development_resource_root(manifest_dir, false),
+        package_input
+    );
+    assert_eq!(
+        development_resource_root(manifest_dir, true),
+        manifest_dir.join("../artifacts/tests/native-input-p2/resources/native-input")
+    );
+}
+
+#[test]
 fn native_package_frontend_directory_uses_the_actual_sdk_path_variant() {
     use tauri::utils::config::FrontendDist;
     let windows_absolute: FrontendDist = serde_json::from_str(r#""D:\\owned\\frontend""#).unwrap();

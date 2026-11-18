@@ -229,14 +229,26 @@ pub(crate) fn shellspan_bash(root: &Path) -> Result<std::path::PathBuf, String> 
     Ok(shell)
 }
 
+fn development_resource_root(manifest_dir: &Path, frozen_validation: bool) -> std::path::PathBuf {
+    if frozen_validation {
+        manifest_dir.join("../artifacts/tests/native-input-p2/resources/native-input")
+    } else {
+        manifest_dir.join("target/native-input/generated")
+    }
+}
+
 pub(crate) fn resource_root(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     use tauri::Manager;
     if let Some(root) = super::editors::validation_resource_root()? {
         return Ok(root);
     }
     if cfg!(debug_assertions) {
-        Ok(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../artifacts/tests/native-input-p2/resources/native-input"))
+        // Frozen acceptance snapshots own a separate producer tree. Ordinary
+        // development uses the same verified staging directory as packaging.
+        Ok(development_resource_root(
+            Path::new(env!("CARGO_MANIFEST_DIR")),
+            std::env::var_os("SHELLSPAN_ACCEPTANCE_FROZEN_MANIFEST").is_some(),
+        ))
     } else {
         app.path()
             .resource_dir()
