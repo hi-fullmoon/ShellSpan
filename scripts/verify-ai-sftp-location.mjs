@@ -21,7 +21,9 @@ const image = 'shellspan-ssh-e2e:local';
 const targetHost = 'sftp-target';
 const entry = 'src/components/ai/__tests__/ai-sftp-location.native.tsx';
 const fileName = '.host:2026';
-const docker = (args, input) => execFileSync('docker', args, { encoding: 'utf8', input, timeout: 30_000 }).trim();
+const docker = (args, input) => execFileSync('docker', args, {
+  encoding: 'utf8', input, timeout: 30_000, stdio: ['pipe', 'pipe', 'pipe'],
+}).trim();
 const cleanups = [];
 let server;
 let child;
