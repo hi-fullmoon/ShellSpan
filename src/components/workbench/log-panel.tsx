@@ -755,7 +755,7 @@ export const LogPanel: React.FC = () => {
                   <ToggleGroupItem value="all">{t('workbench.logs.all')}</ToggleGroupItem>
                   {LOG_LEVELS.map((level) => (
                     <ToggleGroupItem key={level} value={level}>
-                      {level}<span aria-hidden="true" className="ml-1 opacity-50">{levelCounts[level] ?? 0}</span>
+                      {level}<span aria-hidden="true" className="ml-1 opacity-50 group-aria-pressed/toggle:opacity-100">{levelCounts[level] ?? 0}</span>
                     </ToggleGroupItem>
                   ))}
                 </ToggleGroup>

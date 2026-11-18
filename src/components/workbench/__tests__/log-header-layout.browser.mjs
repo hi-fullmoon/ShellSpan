@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
@@ -14,6 +14,10 @@ const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const server = await createServer({
   root, configFile: false, appType: 'custom', logLevel: 'error',
   resolve: { alias: { '@': `${root}src` } },
+  optimizeDeps: {
+    entries: ['src/components/workbench/log-panel.tsx', 'src/locales/index.ts'],
+    include: ['react-dom/client'],
+  },
   plugins: [tailwindcss(), {
     name: 'log-header-layout',
     resolveId(id) { if (id === '/layout-runtime.js') return id; },
@@ -47,12 +51,49 @@ try {
     await initI18n('zh-CN');
     createRoot(document.getElementById('root')).render(React.createElement(LogPanel));
   });
-  await page.getByPlaceholder('搜索消息、组件或错误内容…').waitFor();
+  const search = page.getByPlaceholder('搜索消息、组件或错误内容…');
+  await search.waitFor();
   await page.evaluate(async (content) => {
     const { useLogStore } = await import('/src/stores/logStore.ts');
     useLogStore.setState({ content, loading: false, error: undefined });
   }, content);
-  await page.getByRole('button', { name: '全部', exact: true }).first().click();
+  const dateGroup = page.getByRole('group', { name: '日期', exact: true });
+  const levelGroup = page.getByRole('group', { name: '级别', exact: true });
+  const allDates = dateGroup.getByRole('button', { name: '全部', exact: true });
+  const allLevels = levelGroup.getByRole('button', { name: '全部', exact: true });
+  const today = dateGroup.getByRole('button', { name: '今天', exact: true });
+  const warn = levelGroup.getByRole('button', { name: 'WARN', exact: true });
+  assert.equal(await today.getAttribute('aria-pressed'), 'true');
+  assert.equal(await allLevels.getAttribute('aria-pressed'), 'true');
+
+  await allDates.press('Space');
+  await warn.press('Space');
+  await warn.evaluate((button) => button.blur());
+  await page.addStyleTag({ content: '[data-slot="toggle-group-item"] { transition: none !important; }' });
+  const readColors = (button) => button.evaluate((element) => {
+    const { backgroundColor, color } = getComputedStyle(element);
+    return { backgroundColor, color };
+  });
+  const source = page.getByRole('button', { name: '前端日志', exact: true });
+  const filterToolbar = page.locator('[data-slot="workbench-page-toolbar"]').filter({ has: search });
+  const screenshots = `${root}artifacts/tests/log-filter-selection`;
+  await mkdir(screenshots, { recursive: true });
+  for (const [theme, width] of [['light', 1440], ['dark', 640]]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, theme);
+    const selectedColors = await readColors(source);
+    for (const [selected, unselected] of [[allDates, today], [warn, allLevels]]) {
+      assert.equal(await selected.getAttribute('aria-pressed'), 'true');
+      assert.equal(await unselected.getAttribute('aria-pressed'), 'false');
+      assert.deepEqual(await readColors(selected), selectedColors, `Selected filter colors in ${theme} theme`);
+      assert.notEqual((await readColors(unselected)).backgroundColor, selectedColors.backgroundColor);
+    }
+    assert.equal(await warn.locator('span').evaluate((element) => getComputedStyle(element).opacity), '1');
+    await filterToolbar.screenshot({ path: `${screenshots}/${theme}-${width}.png` });
+  }
+  await page.evaluate(() => { delete document.documentElement.dataset.theme; });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await allLevels.click();
   await page.locator('[data-index]').last().click();
   const aside = page.locator('aside');
   await aside.waitFor();
@@ -93,7 +134,7 @@ try {
   await page.screenshot({ path: '/tmp/shellspan-log-header-layout.png' });
   await aside.getByRole('button', { name: '关闭', exact: true }).click();
   assert.equal(await aside.count(), 0);
-  console.log('Log header alignment, background, icon spacing and close action passed at wide and narrow sizes.');
+  console.log('Log filter selection and inspector header checks passed at wide and narrow sizes.');
 } finally {
   await browser?.close();
   await server.close();

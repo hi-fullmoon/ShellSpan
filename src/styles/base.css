@@ -567,6 +567,11 @@ textarea,
   border-radius: 9999px;
 }
 
+[data-slot='sftp-preview-open-applications']::-webkit-scrollbar-thumb {
+  border-left-width: 4px;
+  border-right-width: 0;
+}
+
 ::-webkit-scrollbar-thumb:hover {
   background: var(--app-scrollbar-thumb-hover);
   background-clip: padding-box;
