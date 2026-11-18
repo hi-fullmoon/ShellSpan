@@ -85,6 +85,13 @@ try {
         return range.getBoundingClientRect().left - icon.right;
       });
       assert.ok(Math.abs(spacing - 4) < 1, `${locale}/${width}: icon/text gap must remain 4px`);
+      const copyOffset = await page.locator('.ai-web-answer').evaluate(answer => {
+        const icon = answer.closest('[data-ai-copy-region]').querySelector('.ai-tool-copy-button svg').getBoundingClientRect();
+        const style = getComputedStyle(answer);
+        const firstLineCenter = answer.getBoundingClientRect().top + parseFloat(style.paddingTop) + parseFloat(style.lineHeight) / 2;
+        return icon.top + icon.height / 2 - firstLineCenter;
+      });
+      assert.ok(Math.abs(copyOffset) <= 0.5, `${locale}/${width}: copy icon must align with the first answer line`);
       await page.screenshot({ path: join(screenshots, `${locale}-${width}.png`) });
     }
     await row.focus();

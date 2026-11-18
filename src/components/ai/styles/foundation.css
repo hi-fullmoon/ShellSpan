@@ -50,7 +50,8 @@
   --ai-content-font-size: 14px;
   --ai-font-markdown-base: 14px/24px var(--ai-font-family);
   --ai-font-markdown-code: 12px/19px var(--ai-font-family-code);
-  --ai-font-markdown-code-block: 13px/22px var(--ai-font-family-code);
+  --ai-code-line-height: 22px;
+  --ai-font-markdown-code-block: 13px/var(--ai-code-line-height) var(--ai-font-family-code);
   --ai-font-markdown-code-block-small: 12px/18px var(--ai-font-family-code);
 
   --ai-shadow-card: var(--shadow-card);

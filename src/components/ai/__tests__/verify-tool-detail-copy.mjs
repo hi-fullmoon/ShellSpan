@@ -18,7 +18,11 @@ const server = await createServer({
   cacheDir: join(tmpdir(), 'shellspan-tool-detail-copy', 'vite-cache'),
   resolve: { alias: { '@': `${root}src` } },
   esbuild: { jsx: 'automatic' },
-  optimizeDeps: { include: ['react', 'react-dom/client'] },
+  optimizeDeps: {
+    entries: ['src/components/ai/__tests__/agent-content-surfaces.browser-runtime.ts',
+      'src/components/ai/workspace/ai-tool-details.tsx'],
+    include: ['react', 'react-dom/client'],
+  },
   server: { host: '127.0.0.1', port: 0 },
   plugins: [tailwindcss(), {
     name: 'tool-detail-copy-check',
@@ -98,12 +102,16 @@ try {
           await page.setViewportSize({ width, height });
           const positions = await page.locator('.ai-tool-copy-button').evaluateAll(buttons => buttons.map(button => {
             const rect = button.getBoundingClientRect();
-            const region = button.closest('[data-ai-copy-region]').getBoundingClientRect();
-            return { right: rect.right, width: rect.width, top: rect.top - region.top };
+            const firstLine = button.closest('[data-ai-copy-region]').querySelector('.ai-terminal-header, .ai-content-code');
+            const style = getComputedStyle(firstLine);
+            const line = firstLine.getBoundingClientRect();
+            const center = firstLine.matches('.ai-terminal-header') ? line.top + line.height / 2
+              : line.top + parseFloat(style.paddingTop) + parseFloat(style.lineHeight) / 2;
+            return { right: rect.right, width: rect.width, offset: rect.top + rect.height / 2 - center };
           }));
           assert.equal(positions.length, state === 'running' ? 2 : 3);
           assert.ok(positions.every(position => Math.abs(position.right - positions[0].right) < 1));
-          assert.ok(positions.every(position => position.right <= width && position.width === 24 && position.top === 4));
+          assert.ok(positions.every(position => position.right <= width && position.width === 24 && Math.abs(position.offset) <= 0.5));
           const sections = await page.locator('.ai-detail-section').evaluateAll(elements => elements.map(element => {
             const rect = element.getBoundingClientRect();
             return { height: rect.height, bottom: rect.bottom, right: rect.right };

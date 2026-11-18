@@ -153,6 +153,7 @@ try {
             );
           }
           for (const [id, node] of [
+            ['details-terminal', tool('exec_command', { command: `cat ${data.path}` }, data.file)],
             ['details-diff', tool('apply_patch', { patch: data.patch }, { diff: data.patch })],
             ['details-code', tool('run_code', { code: data.code, language: 'javascript' }, data.codeOutput)],
             ['details-generic', tool('git', { content: data.code }, data.file)],
@@ -281,21 +282,29 @@ try {
               minHeight: roomy ? '32px' : '24px', fontSize: '12px', lineHeight: '18px',
               paddingTop: '0px', paddingBottom: '0px', paddingLeft: '14px', titleSize: '12px',
             }, `${context}: tool surface headers in details use 32px, other headers use 24px`);
-            for (const selector of ['#markdown .ai-markdown-code-copy', '#error .ai-tool-copy-button',
-              '#details-error .ai-tool-copy-button', '#code .ai-tool-copy-button', '#artifact-text .ai-detail-copy',
-              '#queue .ai-tool-copy-button', '#approval .ai-tool-copy-button']) {
-              for (const button of await page.locator(selector).all()) {
-                const geometry = await button.evaluate(element => {
-                  const rect = element.getBoundingClientRect();
-                  const region = element.offsetParent.getBoundingClientRect();
-                  const icon = element.querySelector('svg').getBoundingClientRect();
-                  return { width: rect.width, height: rect.height, icon: icon.width,
-                    top: rect.top - region.top - element.offsetParent.clientTop,
-                    right: region.right - element.offsetParent.clientLeft - rect.right };
-                });
-                assert.deepEqual(geometry, { width: 24, height: 24, icon: 12, top: 4, right: 14 },
-                  `${context}/${selector}: shared copy action geometry`);
-              }
+            const copyGeometry = await page.locator('.ai-tool-copy-button, .ai-markdown-code-copy').evaluateAll(buttons => buttons
+              .filter(button => getComputedStyle(button).position === 'absolute')
+              .map(button => {
+                const parent = button.offsetParent;
+                const target = parent.querySelector([
+                  '.ai-terminal-command', '.ai-block-line', '.ai-terminal-header',
+                  '.ai-search-result', '.ai-web-answer', '.ai-web-source > span',
+                  '[data-diff-simplified]', '.ai-diff-body', '.ai-content-code',
+                ].join(', ')) ?? parent;
+                const style = getComputedStyle(target);
+                const line = target.getBoundingClientRect();
+                const lineCenter = target.matches('.ai-terminal-header') ? line.top + line.height / 2
+                  : line.top + target.clientTop + parseFloat(style.paddingTop) + parseFloat(style.lineHeight) / 2;
+                const rect = button.getBoundingClientRect();
+                const icon = button.querySelector('svg').getBoundingClientRect();
+                return { id: button.closest('section[id]').id, offset: icon.top + icon.height / 2 - lineCenter,
+                  width: rect.width, height: rect.height, icon: icon.width,
+                  right: parent.getBoundingClientRect().left + parent.clientLeft + parent.clientWidth - rect.right };
+              }));
+            for (const { id, offset, ...geometry } of copyGeometry) {
+              assert.ok(Math.abs(offset) <= 0.5, `${context}/${id}: copy icon is offset from the first line by ${offset}px`);
+              assert.deepEqual(geometry, { width: 24, height: 24, icon: 12, right: id === 'notes' ? 4 : 14 },
+                `${context}/${id}: shared copy action geometry`);
             }
             for (const preview of await page.locator([
               '.ai-tool-scroll-area [data-slot="scroll-area-viewport"]',
@@ -331,6 +340,7 @@ try {
               const buttons = page.locator(`#${id} ${selector}`);
               const button = last ? buttons.last() : buttons.first();
               await page.mouse.move(0, 0);
+              const restingBackground = await button.evaluate(element => getComputedStyle(element).backgroundColor);
               await page.keyboard.press('Tab');
               await button.focus();
               await button.hover();
@@ -338,7 +348,7 @@ try {
               const appearance = async () => button.evaluate(async element => {
                 await Promise.all(element.getAnimations().map(animation => animation.finished.catch(() => {})));
                 const probe = document.createElement('span');
-                probe.style.backgroundColor = 'var(--ai-action-hover-solid)';
+                probe.style.backgroundColor = 'color-mix(in srgb, var(--ai-text) 12%, var(--ai-code-block))';
                 probe.style.color = 'var(--ai-text)';
                 element.append(probe);
                 const expected = getComputedStyle(probe);
@@ -349,7 +359,8 @@ try {
                 return result;
               });
               const hover = await appearance();
-              assert.equal(hover.background, hover.expectedBackground, `${id}: copy hover background must use the shared action surface`);
+              assert.equal(hover.background, hover.expectedBackground, `${id}: copy hover background must contrast with the code surface`);
+              assert.notEqual(hover.background, restingBackground, `${id}: hovering must visibly change the copy button background`);
               assert.equal(hover.color, hover.expectedColor, `${id}: copy hover icon must use the shared foreground`);
               assert.equal(hover.opacity, '1', `${id}: hovering the copy button must keep it visible`);
               if (locale === 'zh-CN') await button.screenshot({ path: join(screenshots, `${engine.name()}-${theme}-${width}-${id}-copy-hover.png`) });
@@ -521,8 +532,10 @@ try {
                 if (id.endsWith('-output')) await section.locator('.ai-code-content, .ai-io-card').evaluate(element => { element.scrollTop = 0; });
               }
             } else if (locale === 'en-US' && ((theme === 'light' && width === 720) || (theme === 'dark' && width === 380))) {
-              for (const id of ['read', 'diff', 'code', 'generic', 'markdown']) {
-                await page.locator(`#${id}`).screenshot({ path: join(screenshots, `${engine.name()}-${theme}-${width}-${id}.png`) });
+              for (const id of ['read', 'diff', 'code', 'generic', 'markdown', 'expired-command', 'expired-tool', 'cancelled-command']) {
+                const section = page.locator(`#${id}`);
+                if (Object.hasOwn(stoppedTools, id)) await section.locator('.ai-tool-content-region').hover({ position: { x: 5, y: 5 } });
+                await section.screenshot({ path: join(screenshots, `${engine.name()}-${theme}-${width}-${id}.png`) });
               }
             }
           }

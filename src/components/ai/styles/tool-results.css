@@ -50,7 +50,7 @@
 }
 
 :is(.ai-tool-copy-button, .ai-markdown-code-copy, .ai-detail-copy):is(:hover, :focus-visible) {
-  background: var(--ai-action-hover-solid);
+  background: color-mix(in srgb, var(--ai-text) 12%, var(--ai-code-block));
   color: var(--ai-text);
 }
 
@@ -86,15 +86,48 @@
 }
 
 .ai-tool-content-region > .ai-tool-copy-button {
-  top: 4px;
   right: 14px;
+}
+
+:where(.ai-tool-content-region, .ai-markdown-code-block [data-ai-copy-region], .ai-detail-code-wrap, .ai-semantic-note-body)
+  > :is(.ai-tool-copy-button, .ai-markdown-code-copy) {
+  top: var(--ai-copy-first-line-center, calc(var(--spacing) * 2 + var(--ai-code-line-height) / 2));
+  translate: 0 -50%;
+}
+
+.ai-tool-content-region:has(> :is(.ai-terminal-command-row, .ai-search-results)) {
+  --ai-copy-first-line-center: calc(var(--spacing) + var(--ai-code-line-height) / 2);
+}
+
+.ai-tool-content-region:has(> .ai-terminal-transcript) {
+  --ai-copy-first-line-center: calc(var(--ai-code-line-height) / 2);
+}
+
+.ai-tool-content-region:has(> .ai-diff-content) {
+  --ai-copy-first-line-center: calc(1px + var(--ai-code-line-height) / 2);
+}
+
+.ai-tool-content-region:has(.ai-web-content > .ai-web-answer:first-child) {
+  --ai-copy-first-line-center: calc(var(--spacing) * 3 + 10px);
+}
+
+.ai-tool-content-region:has(.ai-web-content > .ai-web-sources:first-child) {
+  --ai-copy-first-line-center: calc(var(--spacing) * 3.5 + var(--ai-code-line-height) / 2);
+}
+
+.ai-tool-content-region:has(.ai-terminal-header) {
+  --ai-copy-first-line-center: calc(var(--spacing) * 4);
+}
+
+.ai-semantic-note-body {
+  --ai-copy-first-line-center: calc(var(--spacing) * 2.5 + 8px);
 }
 
 .ai-tool-content-region:has(> .ai-tool-copy-button) > :is(pre, .ai-search-results) {
   padding-right: 48px;
 }
 
-.ai-tool-content-region:has(> .ai-tool-copy-button) .ai-content-code,
+.ai-tool-content-region:has(> .ai-tool-copy-button) :is(.ai-content-code, .ai-web-answer, .ai-web-source),
 .ai-markdown-code-block [data-ai-copy-region]:has(> .ai-markdown-code-copy) > .ai-content-code,
 .ai-detail-code-wrap:has(> .ai-detail-copy) > .ai-content-code {
   padding-right: 48px;

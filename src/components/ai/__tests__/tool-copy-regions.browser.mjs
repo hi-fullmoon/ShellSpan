@@ -29,7 +29,12 @@ assert.ok(data.patch, 'Coverage requires a real tool presentation patch');
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
   cacheDir: join(screenshots, 'vite-cache'), resolve: { alias: { '@': `${root}src` } },
-  esbuild: { jsx: 'automatic' }, optimizeDeps: { include: ['react', 'react-dom/client'] },
+  esbuild: { jsx: 'automatic' },
+  optimizeDeps: {
+    entries: ['src/components/ai/__tests__/agent-content-surfaces.browser-runtime.ts',
+      'src/components/ai/workspace/ai-tool-presentation.tsx'],
+    include: ['react', 'react-dom/client'],
+  },
   server: { host: '127.0.0.1', port: 0, hmr: false },
   plugins: [tailwindcss(), {
     name: 'tool-copy-regions',
@@ -156,11 +161,15 @@ try {
               await checkRegion(card, card.locator('pre, .ai-search-results').first(), 0);
               const copy = card.locator('.ai-tool-copy-button').first();
               const geometry = await copy.evaluate(button => {
-                const region = button.closest('[data-ai-copy-region]').getBoundingClientRect();
+                const region = button.closest('[data-ai-copy-region]');
+                const firstLine = region.querySelector('pre, .ai-search-result');
+                const style = getComputedStyle(firstLine);
+                const lineCenter = firstLine.getBoundingClientRect().top + parseFloat(style.paddingTop) + parseFloat(style.lineHeight) / 2;
                 const rect = button.getBoundingClientRect();
-                return { top: rect.top - region.top, right: region.right - rect.right, width: rect.width, height: rect.height };
+                return { offset: rect.top + rect.height / 2 - lineCenter,
+                  right: region.getBoundingClientRect().right - rect.right, width: rect.width, height: rect.height };
               });
-              assert.deepEqual(geometry, { top: 4, right: 14, width: 24, height: 24 }, `${context}: ${type} copy must sit inside its content`);
+              assert.deepEqual(geometry, { offset: 0, right: 14, width: 24, height: 24 }, `${context}: ${type} copy must align with its first line`);
               await card.screenshot({ path: join(screenshots, `${engine.name()}-${theme}-${width}-${type}.png`) });
             }
             await page.mouse.move(0, 0);

@@ -78,7 +78,7 @@ try {
                 return { top: button.top - region.top, right: region.right - button.right,
                   belowHeader: button.top >= header.bottom, width: button.width, height: button.height };
               });
-              assert.deepEqual(layout, { top: 4, right: 14, belowHeader: true, width: 24, height: 24 },
+              assert.deepEqual(layout, { top: 0, right: 14, belowHeader: true, width: 24, height: 24 },
                 `${context}: diff copy belongs to the body without covering the file header or counts`);
               await header.hover({ position: { x: 20, y: 8 } });
               assert.equal(await copy.evaluate(element => getComputedStyle(element).opacity), '0',

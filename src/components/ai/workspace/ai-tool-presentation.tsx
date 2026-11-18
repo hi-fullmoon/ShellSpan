@@ -486,7 +486,7 @@ function ReadSurface({ node, showCopyActions, showInput, scrollable }: { node: T
   return (
     <div className="ai-read-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="read">
       {showInput && <ToolSurfaceHeader title={label} copyText={showCopyActions ? inputText : undefined} copyLabel={t('ai.workspace.tool.copyInput')} />}
-      <div className="relative min-w-0" data-ai-copy-region>
+      <div className="ai-tool-content-region relative min-w-0" data-ai-copy-region>
         {showCopyActions && output && <AiToolCopyButton text={output} label={t('ai.workspace.tool.copyOutput')} className="top-1 right-3.5" />}
         <pre ref={viewportRef} className={cn(AI_CONTENT_CODE_CLASS, 'ai-read-lines pr-12 whitespace-pre', scrollable ? 'max-h-65 overflow-auto' : 'overflow-visible')} tabIndex={0}>
           {lines.map((line, index) => (
@@ -792,7 +792,7 @@ function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAc
               {!hunk.exact && <div className="px-2.5 py-1 text-xs text-muted-foreground" data-diff-simplified>
                 {t('ai.workspace.tool.diffSimplified')}
               </div>}
-              <pre className="ai-diff-body m-0 min-w-0 max-w-full whitespace-pre" aria-label={hunk.path}>
+              <pre className="ai-diff-body m-0 min-w-0 max-w-full pt-px whitespace-pre" aria-label={hunk.path}>
                 <code className="ai-diff-lines">
                   {hunk.lines.map((line, lineIndex) => (
                     <span key={lineIndex} data-diff={line.kind}>
