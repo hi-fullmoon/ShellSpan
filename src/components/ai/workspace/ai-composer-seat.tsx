@@ -493,7 +493,7 @@ export function AiComposerSeat({
         {mode === 'agent' && executionSurfaceNotice}
         <AiQuestionSeat key={currentSessionId} question={pendingQuestion} onAnswer={onAnswerQuestion} onRefresh={onRefreshQuestionAnswer} onOpenSettings={onOpenModel} />
         {mode === 'agent' && <AiApprovalSeat key={`approval:${currentSessionId ?? composerState?.sessionId ?? ''}`}
-          approval={waitingApproval && pendingApproval ? {
+          approval={!stopping && pendingApproval ? {
             ...pendingApproval, arguments: approvalArguments ?? pendingApproval.arguments,
           } : null}
           decision={approvalDecision}

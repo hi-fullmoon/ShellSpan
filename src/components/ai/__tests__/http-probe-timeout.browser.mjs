@@ -17,7 +17,11 @@ const server = await createServer({
   cacheDir: join(screenshots, 'vite-cache'),
   resolve: { alias: { '@': `${root}src` } },
   esbuild: { jsx: 'automatic' },
-  optimizeDeps: { include: ['react', 'react-dom/client'] },
+  optimizeDeps: {
+    entries: ['src/components/ai/__tests__/agent-content-surfaces.browser-runtime.ts',
+      'src/components/ai/workspace/ai-tool-presentation.tsx'],
+    include: ['react', 'react-dom/client'],
+  },
   server: { host: '127.0.0.1', port: 0 },
   plugins: [tailwindcss(), {
     name: 'http-probe-timeout-review',
@@ -49,6 +53,7 @@ try {
       await initI18n(locale);
       useAppStore.setState({ locale });
       createRoot(document.getElementById('root')).render(React.createElement(AiToolRow, {
+        onInspect() {},
         node: { kind: 'tool', name: 'probe_http', nativeName: 'probe_http', state: 'failed',
           summary: diagnostic, error: diagnostic, output: diagnostic, durationMs: null,
           input: { method: 'get', port: 80, path: '/' } },
@@ -65,6 +70,7 @@ try {
       return panel && panel.getBoundingClientRect().height >= panel.scrollHeight - 1;
     });
     assert.equal(await page.locator('.ai-detail-code').innerText(), diagnostic);
+    assert.equal(await page.locator('.ai-tool-inspect').count(), 1, 'Execution diagnostics retain their request details.');
     for (const width of [380, 720]) {
       await page.setViewportSize({ width, height: 420 });
       const fits = await page.locator('.ai-web-block').evaluate(element => {

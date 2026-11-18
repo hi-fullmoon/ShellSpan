@@ -122,13 +122,19 @@ After a structured decision, speculative calls remaining in that original batch
 are rejected without execution; a fresh model step must use the actual choice.
 This also applies when the user selects an alternative or types a custom plan.
 
-Stopping closes native tool admission for the parent and its descendants before
-joining their workers. Approval and native dispatch honor the same admission
-boundary. A user can approve or reject an exact pending tool after restarting the
-app. That decision restores the saved runtime and checks the original approval
-identity, expiry, target and current policy. Opening the conversation only reads
-its history. Approvals that require a fresh request after restart stay subject
-to that rule.
+Stopping closes native tool admission and signals native cancellation for the
+parent and its descendants before joining their workers. A stopped turn settles
+its outstanding approval even when only the journal is available. An approval
+decision keeps the model driver waiting until the remaining tool batch settles
+or reaches another interaction. A running one-shot child can receive approval
+decisions through its own conversation.
+
+After restart, approving checks the original identity, expiry, target and
+current policy before dispatch. Rejecting records the decision before attempting
+to restore the model. Unstarted calls following a rejection or expiry settled
+from the journal are closed without execution so continuation can make a fresh
+model request. Opening the conversation only reads its history. Approvals that
+require a fresh request after restart stay subject to that rule.
 
 Completion permits only the exact declared verification command, submitted alone
 to `run_terminal_command` in the foreground. The command retains normal native

@@ -1,7 +1,8 @@
 use super::*;
 use crate::agent_runtime::user_questions::{AnswerQuestionInput, UserActionResponse};
 use crate::agent_runtime::{
-    AgentAssistantContentBlock, AgentEntry, AgentRecoveryCheckpointKind, AgentStopReason,
+    AgentAssistantContentBlock, AgentEntry, AgentRecoveryCheckpointKind, AgentSessionStatus,
+    AgentStopReason,
 };
 use std::future::{poll_fn, Future};
 use std::task::Poll;
@@ -128,15 +129,121 @@ async fn stopping_blocks_new_tool_calls_while_a_child_is_draining() {
         .unwrap();
 }
 
+fn single_worker_runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap()
+}
+
+async fn hold_blocking_worker() -> std::sync::mpsc::Sender<()> {
+    let (release, blocked) = std::sync::mpsc::channel();
+    let (started, ready) = tokio::sync::oneshot::channel();
+    tokio::task::spawn_blocking(move || {
+        let _ = started.send(());
+        let _ = blocked.recv();
+    });
+    ready.await.unwrap();
+    release
+}
+
+#[test]
+fn stop_cancels_a_dispatched_write_before_the_worker_starts() {
+    single_worker_runtime().block_on(async {
+        let scenario = Scenario::new(TerminalShellKind::Bash);
+        let runtime = &scenario.runtime;
+        let entry = scenario.root(
+            "stop-with-dispatched-write",
+            AgentExecutionSurface::BoundTerminal,
+            AgentSessionPermissionMode::RequestApproval,
+        );
+        let session = &entry.session_id;
+        let child = scenario.child(session);
+        assert!(child.try_acquire_driver().unwrap());
+        scenario.start(&entry, "turn", "step");
+        let call = file_call("write_file", "write", json!({
+            "path": "stop-before-write.md",
+            "content": include_str!("../../../../../src/lib/README.md"),
+            "precondition": { "mustNotExist": true },
+        }));
+        assert_eq!(runtime.tools.process_model_calls(&entry, "turn", "step", "request", vec![call]).await.unwrap(), ToolPipelineSettlement::Waiting);
+        let release = hold_blocking_worker().await;
+        let mut approval = Box::pin(runtime.approve_tool(scenario.approval(session)));
+        assert!(poll_fn(|cx| Poll::Ready(approval.as_mut().poll(cx).is_pending())).await);
+        assert!(runtime.sessions.read_events(session, |events| events.iter().any(|event| matches!(
+            &event.payload, AgentSessionEventPayload::ToolExecution { call_id, .. } if call_id == "write"
+        ))).unwrap());
+
+        let mut stop = Box::pin(runtime.interrupt(session));
+        assert!(poll_fn(|cx| Poll::Ready(stop.as_mut().poll(cx).is_pending())).await);
+        assert!(!entry.cancellation().is_cancelled());
+        assert!(child.tool_cancellation().unwrap().is_cancelled());
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), approval).await.unwrap().unwrap();
+        assert!(!scenario.root.path().join("work/stop-before-write.md").exists());
+        assert!(runtime.sessions.read_events(session, |events| events.iter().any(|event| matches!(
+            &event.payload, AgentSessionEventPayload::ToolResult { call_id, status: AgentToolResultStatus::Cancelled, .. } if call_id == "write"
+        ))).unwrap());
+        child.release_driver();
+        tokio::time::timeout(Duration::from_secs(5), stop).await.unwrap().unwrap();
+    });
+}
+
+#[test]
+fn queue_submission_cannot_wake_the_model_while_approval_tail_is_running() {
+    single_worker_runtime().block_on(async {
+        let scenario = Scenario::new(TerminalShellKind::Bash);
+        let runtime = &scenario.runtime;
+        let entry = scenario.root(
+            "approval-tail-before-model",
+            AgentExecutionSurface::Direct,
+            AgentSessionPermissionMode::ScopedAutopilot,
+        );
+        let session = &entry.session_id;
+        let contents = include_str!("../../../../../src/lib/README.md");
+        std::fs::write(scenario.root.path().join("work/README.md"), contents).unwrap();
+        scenario.start(&entry, "turn", "step");
+        let calls = vec![
+            file_call("write_file", "write", json!({
+                "path": "review.md", "content": contents,
+                "precondition": { "mustNotExist": true },
+            })),
+            file_call("read_file", "read", json!({"path": "README.md", "encoding": "utf8"})),
+        ];
+        assert_eq!(runtime.tools.process_model_calls(&entry, "turn", "step", "request", calls).await.unwrap(), ToolPipelineSettlement::Waiting);
+
+        let release = hold_blocking_worker().await;
+        let mut decision = Box::pin(runtime.reject_tool(scenario.approval(session)));
+        assert!(poll_fn(|cx| Poll::Ready(decision.as_mut().poll(cx).is_pending())).await);
+        runtime.followup_submission(session, "queued".into(), "queued".into(), "Summarize the repository README".into(), None).unwrap();
+        assert!(!entry.is_driver_active());
+        assert_eq!(entry.phase().unwrap(), AgentLifecyclePhase::Waiting);
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), decision).await.unwrap().unwrap();
+        assert!(runtime.sessions.read_events(session, |events| events.iter().any(|event| matches!(
+            &event.payload, AgentSessionEventPayload::ToolResult { call_id, status: AgentToolResultStatus::Completed, .. } if call_id == "read"
+        ))).unwrap());
+        runtime.interrupt(session).await.unwrap();
+    });
+}
+
 #[tokio::test]
 async fn original_approval_can_be_approved_or_rejected_after_reopening_the_store() {
     let scenario = Scenario::new(TerminalShellKind::Bash);
     let state = scenario.root.path().join("state");
     let contents = include_str!("../../../../../src/lib/README.md");
-    for (root, approve, delegated) in [
-        ("approve-after-restart", true, false),
-        ("reject-after-restart", false, false),
-        ("delegation-after-restart", true, true),
+    for (root, approve, delegated, configure_model) in [
+        ("approve-after-restart", true, false, true),
+        ("reject-after-restart", false, false, true),
+        ("delegation-after-restart", true, true, true),
+        ("reject-without-original-model", false, false, false),
+        (
+            "reject-delegation-without-original-model",
+            false,
+            true,
+            false,
+        ),
     ] {
         let owner = scenario.root(
             root,
@@ -230,20 +337,30 @@ async fn original_approval_can_be_approved_or_rejected_after_reopening_the_store
         builder.native_engine = engine;
         let restored = builder.build();
         restored.configure(state.clone()).unwrap();
-        restored.configure_test_model(provider).unwrap();
+        if configure_model {
+            restored.configure_test_model(provider).unwrap();
+        }
         assert_eq!(
             restored.inspect_recovery(session).unwrap().kind,
             AgentRecoveryCheckpointKind::WaitingApproval
         );
         let mut stale = approval.clone();
         stale.approval_id = "obsolete-approval".into();
-        assert!(restored.approve_tool(stale).await.is_err());
+        assert!(restored.approve_tool(stale.clone()).await.is_err());
+        assert!(restored.reject_tool(stale).await.is_err());
         assert!(restored.agents.get(session).unwrap().is_none());
         if approve {
             restored.approve_tool(approval.clone()).await.unwrap();
         } else {
             restored.reject_tool(approval.clone()).await.unwrap();
             assert!(!original.exists());
+            if !configure_model {
+                assert!(restored.agents.get(session).unwrap().is_none());
+                assert_eq!(
+                    restored.inspect_recovery(session).unwrap().kind,
+                    AgentRecoveryCheckpointKind::ToolResultCommitted
+                );
+            }
         }
         assert!(restored.approve_tool(approval).await.is_err());
         let events = restored.sessions.all_events(session).unwrap();
@@ -277,6 +394,67 @@ async fn original_approval_can_be_approved_or_rejected_after_reopening_the_store
         )).count(), usize::from(approve));
         restored.interrupt(root).await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn stop_after_reopening_persists_cancellation_for_the_original_approval() {
+    let scenario = Scenario::new(TerminalShellKind::Bash);
+    let entry = scenario.root(
+        "stop-restored-approval",
+        AgentExecutionSurface::Direct,
+        AgentSessionPermissionMode::RequestApproval,
+    );
+    let session = &entry.session_id;
+    scenario.start(&entry, "turn", "step");
+    let call = file_call(
+        "write_file",
+        "write",
+        json!({
+            "path": "stop-restored-approval.md",
+            "content": include_str!("../../../../../src/lib/README.md"),
+            "precondition": { "mustNotExist": true },
+        }),
+    );
+    record_tool_step(&scenario.runtime, &entry, "turn", "step", "request", &call);
+    assert_eq!(
+        scenario
+            .runtime
+            .tools
+            .process_model_calls(&entry, "turn", "step", "request", vec![call])
+            .await
+            .unwrap(),
+        ToolPipelineSettlement::Waiting
+    );
+    let approval = scenario.approval(session);
+    let state = scenario.root.path().join("state");
+    let restored = AgentRuntimeBuilder::new().build();
+    restored.configure(state.clone()).unwrap();
+    assert_eq!(
+        restored.inspect_recovery(session).unwrap().kind,
+        AgentRecoveryCheckpointKind::WaitingApproval
+    );
+    assert_eq!(
+        restored.interrupt(session).await.unwrap().status,
+        AgentSessionStatus::Idle
+    );
+    assert!(restored.reject_tool(approval.clone()).await.is_err());
+    assert!(restored.approve_tool(approval.clone()).await.is_err());
+
+    let reopened = AgentSessionStore::default();
+    reopened.configure(state).unwrap();
+    let events = reopened.all_events(session).unwrap();
+    assert!(events.iter().any(|event| matches!(&event.payload,
+        AgentSessionEventPayload::ToolApproval { approval_id: Some(id), status: AgentToolApprovalStatus::Cancelled, .. }
+            if id == &approval.approval_id)));
+    assert!(events.iter().any(|event| matches!(&event.payload,
+        AgentSessionEventPayload::ToolResult { call_id, status: AgentToolResultStatus::Cancelled, .. } if call_id == "write")));
+    assert!(events.iter().all(|event| !matches!(&event.payload,
+        AgentSessionEventPayload::ToolExecution { call_id, .. } if call_id == "write")));
+    assert!(!scenario
+        .root
+        .path()
+        .join("work/stop-restored-approval.md")
+        .exists());
 }
 
 #[tokio::test]

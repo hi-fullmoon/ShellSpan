@@ -2406,22 +2406,21 @@ impl AgentRuntime {
         input: AgentToolDecisionInput,
         decision: AgentToolDecision,
     ) -> Result<AgentSessionSnapshot, String> {
-        let entry = self.attach_for_tool_decision(&input).await?;
+        let Some(entry) = self.admit_tool_decision(&input, decision).await? else {
+            return self.sessions.snapshot(&input.session_id);
+        };
         let session_id = input.session_id.clone();
         let settlement = self.tools.decide(&entry, input, decision).await?;
-        if entry.subagent.is_some() {
-            self.subagents.wake_after_approval(entry)?;
-        } else {
-            self.wake(&session_id)?;
-        }
+        self.wake_after_tool_decision(entry)?;
         settlement.acknowledge()?;
         self.sessions.snapshot(&session_id)
     }
 
-    async fn attach_for_tool_decision(
+    async fn admit_tool_decision(
         &self,
         input: &AgentToolDecisionInput,
-    ) -> Result<Arc<super::AgentEntry>, String> {
+        decision: AgentToolDecision,
+    ) -> Result<Option<Arc<super::AgentEntry>>, String> {
         let session_id = &input.session_id;
         let is_child = match self.agents.get(session_id)? {
             Some(entry) => entry.subagent.is_some(),
@@ -2446,35 +2445,63 @@ impl AgentRuntime {
             self.subagents.require_open_fleet_for_child(session_id)?;
         }
         if let Some(entry) = self.agents.get(session_id)? {
-            return Ok(entry);
+            return Ok(Some(entry));
         }
-        // Opening a historical conversation is read-only. Only a decision for
-        // the exact persisted pending call can attach its runtime.
+        // Reject or expire the exact recorded approval before resolving a model
+        // or preparing any tool. Those dependencies are needed for continuation.
+        if let Some(settlement) = self.sessions.settle_recovered_approval(input, decision)? {
+            if let Err(error) = self.continue_recovered_approval(session_id) {
+                log::warn!(
+                    "Agent approval settled but continuation is unavailable: {}",
+                    crate::redaction::redact_sensitive_text(&error)
+                );
+            }
+            settlement.acknowledge()?;
+            return Ok(None);
+        }
         let snapshot = self.sessions.snapshot(session_id)?;
         let recovery = &snapshot.recovery;
-        if snapshot.archived
-            || snapshot.ended
-            || recovery.kind != super::AgentRecoveryCheckpointKind::WaitingApproval
+        if recovery.kind != super::AgentRecoveryCheckpointKind::WaitingApproval
             || recovery.turn_id.as_deref() != Some(&input.turn_id)
             || recovery.request_id.as_deref() != Some(&input.request_id)
             || recovery.call_id.as_deref() != Some(&input.call_id)
-            || !self.sessions.read_events(session_id, |events| {
-                events.iter().rev().find(|event| {
-                    event.turn_id.as_deref() == Some(input.turn_id.as_str())
-                        && event.step_id.as_deref() == Some(input.step_id.as_str())
-                        && matches!(&event.payload, AgentSessionEventPayload::ToolApproval { call_id, .. } if call_id == &input.call_id)
-                }).is_some_and(|event| matches!(&event.payload,
-                    AgentSessionEventPayload::ToolApproval { request_id, approval_id: Some(approval_id), status: super::AgentToolApprovalStatus::Requested, .. }
-                        if request_id == &input.request_id && approval_id == &input.approval_id))
-            })?
         {
             return Err("Approval identity or state is stale".into());
         }
+        let entry = self.restore_for_tool_decision(session_id, snapshot)?;
+        // Recovery can settle a volatile or newly expired request while
+        // attaching. Let the restored turn run even if the click is now stale.
+        if entry.phase()? == AgentLifecyclePhase::Running {
+            self.wake_after_tool_decision(entry.clone())?;
+        }
+        Ok(Some(entry))
+    }
+
+    fn continue_recovered_approval(&self, session_id: &str) -> Result<(), String> {
+        let snapshot = self.sessions.snapshot(session_id)?;
+        if snapshot.recovery.kind != super::AgentRecoveryCheckpointKind::ToolResultCommitted {
+            return Ok(());
+        }
+        let entry = self.restore_for_tool_decision(session_id, snapshot)?;
+        self.tools.resume_after_tool(&entry)?;
+        self.wake_after_tool_decision(entry)
+    }
+
+    fn wake_after_tool_decision(&self, entry: Arc<super::AgentEntry>) -> Result<(), String> {
+        if entry.subagent.is_some() {
+            self.subagents.wake_after_approval(entry)
+        } else {
+            self.wake(&entry.session_id)
+        }
+    }
+
+    fn restore_for_tool_decision(
+        &self,
+        session_id: &str,
+        snapshot: AgentSessionSnapshot,
+    ) -> Result<Arc<super::AgentEntry>, String> {
         self.require_open_terminal_target(session_id)?;
         if let Some(mut owner_id) = snapshot.header.parent_session_id {
-            if child_recovery.is_none() {
-                return Err("Agent Session stopped while restoring approval".into());
-            }
             loop {
                 self.require_session_not_stopping(&owner_id)?;
                 let owner = self.sessions.snapshot(&owner_id)?;
@@ -2508,7 +2535,7 @@ impl AgentRuntime {
             .model_selection
             .ok_or("MODEL_SELECTION_REQUIRED")?;
         let provider = self.models.restore_selection(&selected)?;
-        self.start_under_admission(session_id, provider, None, true)?;
+        self.start_under_admission(session_id, provider, None, false)?;
         self.agents
             .get(session_id)?
             .ok_or_else(|| "Agent Session is not started".into())

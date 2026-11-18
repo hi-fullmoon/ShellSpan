@@ -461,6 +461,9 @@ export function AiWorkspaceRoot({
     || ['completed', 'cancelled', 'failed'].includes(status)));
   const subagentInputMode = !subagent ? 'default'
     : subagent.continuable && !subagentReadOnly ? 'supplement' : 'hidden';
+  const canResolveApproval = surfaceMode === 'agent' && view && !historicalTargetUnavailable
+    && !view.snapshot.value.ended && !view.snapshot.value.archived && !view.summary.archived
+    && (!readOnlySession || subagent?.continuable === false);
   const terminalRecovery = surfaceMode === 'agent' && !readOnlySession && !historicalTargetUnavailable
     ? terminalExecutionRecovery(view) : null;
   const sessionTarget = view?.snapshot.value.header.target;
@@ -817,7 +820,7 @@ export function AiWorkspaceRoot({
           onRetryQueueMutation={surfaceMode === 'agent' && !readOnlySession ? onRetryQueueMutation : undefined}
           queueMutable={Boolean(view && !terminalRecovery && !readOnlySession && !view.summary.archived && (!view.snapshot.value.ended || view.status === 'failed'))}
           announcement={announcement}
-          pendingApproval={surfaceMode === 'agent' && !readOnlySession ? view?.pendingApproval : undefined}
+          pendingApproval={canResolveApproval ? view.pendingApproval : undefined}
           pendingQuestion={readOnlySession ? undefined : view?.pendingQuestion}
           onAnswerQuestion={readOnlySession ? undefined : onAnswerQuestion}
           onRefreshQuestionAnswer={onRefreshQuestionAnswer}
@@ -854,12 +857,11 @@ export function AiWorkspaceRoot({
           onResumeQueueItem={surfaceMode === 'agent' && !readOnlySession ? onResumeQueueItem : undefined}
           onReorderQueueLane={surfaceMode === 'agent' && !readOnlySession ? onReorderQueueLane : undefined}
           onOpenModel={onOpenModel}
-          onApprove={surfaceMode === 'agent' && !readOnlySession ? onApprove : undefined}
-          onReject={surfaceMode === 'agent' && !readOnlySession ? onReject : undefined}
+          onApprove={canResolveApproval ? onApprove : undefined}
+          onReject={canResolveApproval ? onReject : undefined}
           onOpenApprovalDetails={() => {
-            if (readOnlySession) return;
-            const approval = view?.pendingApproval;
-            if (!view || !approval) return;
+            if (!canResolveApproval || !view.pendingApproval) return;
+            const approval = view.pendingApproval;
             const tool = findConversationTool(view.nodes, approval);
             if (tool) onOpenTool?.(tool);
           }}

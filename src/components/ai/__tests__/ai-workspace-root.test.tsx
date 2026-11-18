@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
 import { projectAgentActivity } from '@/lib/ai/agent-session-projection';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
+import { agentSessionView } from '@/lib/ai/agent-session-adapter';
 import { createAiWorkspaceNavigationState } from '@/lib/ai/panel-route';
 import { createAiComposerState, reduceAiComposer } from '@/lib/ai/composer-machine';
 import { AiAdmissionUnconfirmedError, AiPreparationTimeoutError, normalizeAiSessionError } from '@/lib/ai/session-error';
@@ -14,7 +15,7 @@ import type { AiSessionView } from '@/lib/ai/session-adapter';
 import { initI18n, t } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
-import { agentSessionEventFixture } from '@/tests/fixtures/agent-session';
+import { agentSessionEventFixture, agentSessionWaitingApprovalEventFixture } from '@/tests/fixtures/agent-session';
 import { agentSessionBaselineScenarios } from '@/tests/fixtures/agent-session-baseline';
 import { taskTokenBudgetView } from '@/tests/fixtures/task-token-budget';
 import readRecoveryCapture from '@/tests/fixtures/tool-result-read-recovery.json';
@@ -89,6 +90,31 @@ beforeEach(async () => {
 });
 
 afterEach(() => cleanup());
+
+it('lets a live one-shot child receive an approval decision with its input hidden', async () => {
+  const user = userEvent.setup();
+  const events = agentSessionWaitingApprovalEventFixture;
+  const recorded = agentSessionView({ snapshot: agentView('waiting').snapshot.value, events,
+    lastCommittedSeq: events[events.length - 1]!.seq, hasTerminalEvent: false });
+  const subagent = { descriptorId: 'diagnostic', role: 'explorer' as const, continuable: false, depth: 1 };
+  const view = { ...recorded, status: 'waiting' as const,
+    summary: { ...recorded.summary, subagent, status: 'waiting' as const } };
+  const choices: string[] = [];
+  const renderWorkspace = (historicalTargetUnavailable = false) => (
+    <AiWorkspaceRoot view={view} scope="terminal" mode="agent" readOnlySession
+      historicalTargetUnavailable={historicalTargetUnavailable} onApprove={() => choices.push('approve')}
+      onReject={() => choices.push('reject')} />
+  );
+  const { rerender } = render(renderWorkspace(true));
+  expect(screen.queryByRole('button', { name: 'Allow once' })).toBeNull();
+  rerender(renderWorkspace());
+  const approve = screen.getByRole('button', { name: 'Allow once' });
+  expect(approve).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+  expect(screen.queryByRole('textbox')).toBeNull();
+  await user.click(approve);
+  expect(choices).toEqual(['approve']);
+});
 
 it('warns and blocks pointer and keyboard submission during terminal contention, then preserves the draft for manual sending', async () => {
   const user = userEvent.setup();

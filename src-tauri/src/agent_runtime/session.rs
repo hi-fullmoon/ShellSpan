@@ -11,12 +11,14 @@ use uuid::Uuid;
 
 use crate::redaction::{redact_json_value, redact_sensitive_text};
 
+use super::tool_pipeline::AgentToolDecisionSettlement;
 use super::{
     derive_surface, derive_task, AgentAssistantContentBlock, AgentExecutionSurface, AgentInbox,
     AgentInboxLane, AgentInboxMessage, AgentInboxOperation, AgentMessageSource,
     AgentMessageSourceKind, AgentRecoveryCheckpoint, AgentSessionEvent, AgentSessionEventPayload,
     AgentSessionPermissionMode, AgentSessionStatus, AgentSessionTarget, AgentSubagentSession,
-    AgentSurfaceMessage, AgentSurfaceSnapshot, AgentTaskProjection, RecordedToolCall,
+    AgentSurfaceMessage, AgentSurfaceSnapshot, AgentTaskProjection, AgentToolApprovalStatus,
+    AgentToolDecision, AgentToolDecisionInput, AgentToolResultStatus, RecordedToolCall,
     AGENT_SESSION_EVENT_VERSION, MAX_AGENT_MESSAGE_BYTES, MAX_AGENT_STREAM_DELTA_BYTES,
 };
 
@@ -2215,6 +2217,55 @@ impl AgentSessionStore {
         self.pause_input(session_id, "cancelled", "stoppedByUser", false)
     }
 
+    pub(super) fn settle_recovered_approval(
+        &self,
+        input: &AgentToolDecisionInput,
+        decision: AgentToolDecision,
+    ) -> Result<Option<AgentToolDecisionSettlement>, String> {
+        let mut inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(&input.session_id)
+            .ok_or("Agent session was not found")?;
+        validate_mutable_session(record, "resolve approval")?;
+        let pending = recorded_pending_approvals(&record.events)
+            .into_iter()
+            .find(|pending| {
+                pending.event.turn_id.as_deref() == Some(input.turn_id.as_str())
+                    && pending.event.step_id.as_deref() == Some(input.step_id.as_str())
+                    && pending.call.call_id == input.call_id
+                    && pending.request_id == input.request_id
+                    && pending.approval_id == input.approval_id
+            })
+            .ok_or("Approval identity or state is stale")?;
+        let (approval, result, reason, settlement) =
+            if current_unix_ms() >= pending.expires_at_unix_ms {
+                (
+                    AgentToolApprovalStatus::Expired,
+                    AgentToolResultStatus::TimedOut,
+                    "Native approval expired while the app was not running",
+                    AgentToolDecisionSettlement::Expired,
+                )
+            } else if decision == AgentToolDecision::Reject {
+                (
+                    AgentToolApprovalStatus::Rejected,
+                    AgentToolResultStatus::Rejected,
+                    "Native approval was rejected",
+                    AgentToolDecisionSettlement::Resolved,
+                )
+            } else {
+                return Ok(None);
+            };
+        let mut payloads = Vec::new();
+        pending.settle(&mut payloads, approval, result, reason);
+        pending.skip_unadmitted_calls(&record.events, &mut payloads);
+        let (events, publisher) =
+            append_settlement_locked(&mut inner, &input.session_id, payloads)?;
+        drop(inner);
+        publish_events(publisher, &events);
+        Ok(Some(settlement))
+    }
+
     pub(crate) fn pause_for_input(
         &self,
         session_id: &str,
@@ -2237,6 +2288,9 @@ impl AgentSessionStore {
             .ok_or("Agent session was not found")?;
         validate_mutable_session(record, "interrupt")?;
         let mut payloads = Vec::new();
+        if !clear_recovery {
+            cancel_recorded_approvals(&record.events, &mut payloads);
+        }
         let mut turn_id = None;
         let mut step_id = None;
         for event in &record.events {
@@ -2386,6 +2440,7 @@ impl AgentSessionStore {
             return Ok(snapshot);
         }
         let mut payloads = Vec::new();
+        cancel_recorded_approvals(&record.events, &mut payloads);
         for lane in [AgentInboxLane::NextTurn, AgentInboxLane::NextStep] {
             let messages = record.inbox.discard(lane);
             if !messages.is_empty() {
@@ -3203,6 +3258,18 @@ fn append_payloads_locked(
             ..
         }
         | AgentSessionEventPayload::SessionEnded { .. } => true,
+        AgentSessionEventPayload::ToolApproval { status, .. } => matches!(
+            status,
+            AgentToolApprovalStatus::Cancelled
+                | AgentToolApprovalStatus::Expired
+                | AgentToolApprovalStatus::Rejected
+        ),
+        AgentSessionEventPayload::ToolResult { status, .. } => matches!(
+            status,
+            AgentToolResultStatus::Cancelled
+                | AgentToolResultStatus::TimedOut
+                | AgentToolResultStatus::Rejected
+        ),
         AgentSessionEventPayload::AgentStatus { status, .. } => {
             status.is_terminal() || *status == AgentSessionStatus::Idle
         }
@@ -4238,6 +4305,166 @@ fn validate_tool_execution_transition(
         return Err("tool execution dispatch has no unique authorized call".into());
     }
     Ok(())
+}
+
+type ScopedSettlement = (Option<String>, Option<String>, AgentSessionEventPayload);
+
+struct RecordedPendingApproval<'a> {
+    event: &'a AgentSessionEvent,
+    call: &'a RecordedToolCall,
+    request_id: &'a str,
+    approval_id: &'a str,
+    expires_at_unix_ms: u64,
+}
+
+impl RecordedPendingApproval<'_> {
+    fn scoped(&self, payload: AgentSessionEventPayload) -> ScopedSettlement {
+        (
+            self.event.turn_id.clone(),
+            self.event.step_id.clone(),
+            payload,
+        )
+    }
+
+    fn settle(
+        &self,
+        payloads: &mut Vec<ScopedSettlement>,
+        approval: AgentToolApprovalStatus,
+        result: AgentToolResultStatus,
+        reason: &str,
+    ) {
+        payloads.push(self.scoped(AgentSessionEventPayload::ToolApproval {
+            request_id: self.request_id.into(),
+            call_id: self.call.call_id.clone(),
+            approval_id: Some(self.approval_id.into()),
+            status: approval,
+            risk: self.call.effect,
+            reason: Some(reason.into()),
+            expires_at_unix_ms: Some(self.expires_at_unix_ms),
+            prompt: None,
+        }));
+        payloads.push(self.scoped(AgentSessionEventPayload::ToolResult {
+            call_id: self.call.call_id.clone(),
+            name: self.call.name.clone(),
+            status: result,
+            summary: reason.into(),
+            data: None,
+            duration_ms: None,
+            evidence_refs: Vec::new(),
+        }));
+    }
+
+    fn skip_unadmitted_calls(
+        &self,
+        events: &[AgentSessionEvent],
+        payloads: &mut Vec<ScopedSettlement>,
+    ) {
+        let scoped = || {
+            events.iter().filter(|event| {
+                event.turn_id == self.event.turn_id && event.step_id == self.event.step_id
+            })
+        };
+        let recorded: HashSet<_> = scoped()
+            .filter_map(|event| match &event.payload {
+                AgentSessionEventPayload::ToolCall { call } => Some(call.call_id.as_str()),
+                _ => None,
+            })
+            .collect();
+        for event in scoped() {
+            let AgentSessionEventPayload::AssistantMessage { content, .. } = &event.payload else {
+                continue;
+            };
+            let calls = super::assistant_tool_calls(content);
+            let Some(index) = calls
+                .iter()
+                .position(|call| call.call_id == self.call.call_id)
+            else {
+                continue;
+            };
+            for call in calls
+                .iter()
+                .skip(index + 1)
+                .filter(|call| !recorded.contains(call.call_id.as_str()))
+            {
+                payloads.push(self.scoped(AgentSessionEventPayload::ToolCall {
+                    call: (*call).clone(),
+                }));
+                payloads.push(self.scoped(AgentSessionEventPayload::ToolResult {
+                    call_id: call.call_id.clone(),
+                    name: call.name.clone(),
+                    status: AgentToolResultStatus::Rejected,
+                    summary: "Tool not started: approval settled after restart".into(),
+                    data: Some(serde_json::json!({ "schedulerAdmission": "notStarted", "reason": "approvalSettledAfterRestart" })),
+                    duration_ms: None,
+                    evidence_refs: Vec::new(),
+                }));
+            }
+            break;
+        }
+    }
+}
+
+fn recorded_pending_approvals(events: &[AgentSessionEvent]) -> Vec<RecordedPendingApproval<'_>> {
+    let Some(turn_id) = super::recovery::open_turn_id(events) else {
+        return Vec::new();
+    };
+    let mut calls = HashMap::new();
+    let mut pending = HashMap::new();
+    for event in events
+        .iter()
+        .filter(|event| event.turn_id.as_deref() == Some(turn_id))
+    {
+        let Some(step_id) = event.step_id.as_deref() else {
+            continue;
+        };
+        match &event.payload {
+            AgentSessionEventPayload::ToolCall { call } => {
+                calls.insert((step_id, call.call_id.as_str()), call);
+            }
+            AgentSessionEventPayload::ToolApproval {
+                request_id,
+                call_id,
+                approval_id: Some(approval_id),
+                expires_at_unix_ms,
+                status: AgentToolApprovalStatus::Requested,
+                ..
+            } => {
+                let key = (step_id, call_id.as_str());
+                if let Some(call) = calls.get(&key) {
+                    pending.insert(
+                        key,
+                        RecordedPendingApproval {
+                            event,
+                            call,
+                            request_id,
+                            approval_id,
+                            expires_at_unix_ms: expires_at_unix_ms.unwrap_or(event.time_unix_ms),
+                        },
+                    );
+                }
+            }
+            AgentSessionEventPayload::ToolApproval { call_id, .. }
+            | AgentSessionEventPayload::ToolExecution { call_id, .. }
+            | AgentSessionEventPayload::ToolResult { call_id, .. } => {
+                pending.remove(&(step_id, call_id.as_str()));
+            }
+            _ => {}
+        }
+    }
+    let mut pending: Vec<_> = pending.into_values().collect();
+    pending.sort_by_key(|approval| approval.event.seq);
+    pending
+}
+
+fn cancel_recorded_approvals(events: &[AgentSessionEvent], payloads: &mut Vec<ScopedSettlement>) {
+    for pending in recorded_pending_approvals(events) {
+        pending.settle(
+            payloads,
+            AgentToolApprovalStatus::Cancelled,
+            AgentToolResultStatus::Cancelled,
+            "Native tool call was cancelled",
+        );
+    }
 }
 
 fn validate_tool_approval_transition(

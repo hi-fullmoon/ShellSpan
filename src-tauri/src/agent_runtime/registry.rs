@@ -45,6 +45,7 @@ pub(crate) struct AgentEntry {
     pub(crate) subagent: Option<AgentSubagentSession>,
     owner: Mutex<Option<std::sync::Weak<AgentEntry>>>,
     cancellation: CancellationToken,
+    tool_cancellation: Mutex<CancellationToken>,
     admitting: AtomicBool,
     admission_gate: Mutex<()>,
     driver_active: AtomicBool,
@@ -91,6 +92,7 @@ impl AgentEntry {
             subagent,
             owner: Mutex::new(None),
             cancellation: CancellationToken::new(),
+            tool_cancellation: Mutex::new(CancellationToken::new()),
             admitting: AtomicBool::new(true),
             admission_gate: Mutex::new(()),
             driver_active: AtomicBool::new(false),
@@ -219,9 +221,17 @@ impl AgentEntry {
             .lock()
             .map_err(|_| "Agent admission lock is unavailable")?;
         self.admitting.store(false, Ordering::Release);
+        self.tool_cancellation()?.cancel();
         self.set_phase(AgentLifecyclePhase::Stopping)?;
         self.record_lifecycle("stop-admission");
         Ok(())
+    }
+
+    pub(crate) fn tool_cancellation(&self) -> Result<CancellationToken, String> {
+        self.tool_cancellation
+            .lock()
+            .map(|token| token.clone())
+            .map_err(|_| "Agent tool cancellation lock is unavailable".into())
     }
 
     pub(crate) fn with_input_admission<T>(
@@ -287,6 +297,9 @@ impl AgentEntry {
 
     pub(crate) fn cancel(&self) {
         self.cancellation.cancel();
+        if let Ok(token) = self.tool_cancellation() {
+            token.cancel();
+        }
         self.changes.send_replace(());
         self.record_lifecycle("cancel");
     }
@@ -323,6 +336,17 @@ impl AgentRegistry {
         child: &Arc<AgentEntry>,
         parent: &Arc<AgentEntry>,
     ) -> Result<(), String> {
+        // Propagate stop to native workers immediately, without interrupting
+        // the parent driver before its descendants have finished settling.
+        let token = parent.tool_cancellation()?.child_token();
+        let mut child_token = child
+            .tool_cancellation
+            .lock()
+            .map_err(|_| "Agent tool cancellation lock is unavailable")?;
+        if child_token.is_cancelled() {
+            token.cancel();
+        }
+        *child_token = token;
         *child
             .owner
             .lock()

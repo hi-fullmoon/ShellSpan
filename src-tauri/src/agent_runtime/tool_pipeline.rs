@@ -1268,6 +1268,7 @@ impl AgentToolPipeline {
                         lease.transfer();
                         return Ok(settlement);
                     }
+                    let cancellation = entry.tool_cancellation()?;
                     if entry.with_input_admission(|| {
                         self.append_auto_approved_call(&request, &preparation)?;
                         self.append_execution_dispatch(&request, &preparation)
@@ -1275,7 +1276,6 @@ impl AgentToolPipeline {
                     // spawn_blocking starts now; the pool owns its join until actual completion.
                     let native = self.native.clone();
                     let token = preparation.token.clone();
-                    let cancellation = entry.cancellation();
                     let worker = tokio::task::spawn_blocking(move || {
                         let _lease = lease;
                         native.execute(&token, true, cancellation)
@@ -2402,7 +2402,7 @@ impl AgentToolPipeline {
                     .ok_or_else(|| "Agent Session is stopping".into())
             }) as RunnerDispatchJournal
         });
-        let cancellation = entry.cancellation();
+        let cancellation = entry.tool_cancellation()?;
         tokio::task::spawn_blocking(move || {
             let _lease = lease;
             native.execute_with_runner_journal(&token, approved, cancellation, journal)
@@ -2825,7 +2825,6 @@ impl AgentToolPipeline {
         } else {
             pending.remaining_calls.clone()
         };
-        self.resume_after_tool(entry)?;
         let outcome = self
             .process_model_calls(
                 entry,
@@ -2835,6 +2834,9 @@ impl AgentToolPipeline {
                 calls,
             )
             .await;
+        if matches!(outcome, Ok(ToolPipelineSettlement::Completed)) {
+            self.resume_after_tool(entry)?;
+        }
         if let Err(error) = &outcome {
             if error.starts_with("subagentToolBudgetExceeded:") {
                 super::driver::close_open_scope(&self.sessions, entry, error)?;
@@ -2944,23 +2946,21 @@ impl AgentToolPipeline {
         entry.set_phase(AgentLifecyclePhase::Stopping)
     }
 
-    fn resume_after_tool(&self, entry: &Arc<AgentEntry>) -> Result<(), String> {
-        if !entry.is_admitting() {
-            return Ok(());
-        }
-        entry.set_phase(AgentLifecyclePhase::Running)?;
-        let snapshot = self.sessions.snapshot(&entry.session_id)?;
-        if snapshot.status == AgentSessionStatus::Waiting {
-            self.sessions.append(
-                &entry.session_id,
-                None,
-                None,
-                AgentSessionEventPayload::AgentStatus {
-                    status: AgentSessionStatus::Running,
-                    reason: Some("toolBoundaryResolved".into()),
-                },
-            )?;
-        }
+    pub(super) fn resume_after_tool(&self, entry: &Arc<AgentEntry>) -> Result<(), String> {
+        entry.with_input_admission(|| {
+            if self.sessions.snapshot(&entry.session_id)?.status == AgentSessionStatus::Waiting {
+                self.sessions.append(
+                    &entry.session_id,
+                    None,
+                    None,
+                    AgentSessionEventPayload::AgentStatus {
+                        status: AgentSessionStatus::Running,
+                        reason: Some("toolBoundaryResolved".into()),
+                    },
+                )?;
+            }
+            entry.set_phase(AgentLifecyclePhase::Running)
+        })?;
         Ok(())
     }
 
@@ -3078,15 +3078,15 @@ impl AgentToolPipeline {
             let delay = candidate.preparation.expires_at_unix_ms.saturating_sub(now);
             tokio::select! {
                 _ = tokio::time::sleep(std::time::Duration::from_millis(delay)) => {
-                    let expired = {
+                    let expired = entry.with_input_admission(|| {
                         let mut records = self.pending.lock().map_err(|_| "Native approval registry is unavailable".to_string())?;
-                        let Some(record) = records.get_mut(&key) else { continue };
-                        if record.status != PendingStatus::Requested {
-                            continue;
-                        }
-                        record.status = PendingStatus::Cancelled;
-                        record.clone()
-                    };
+                        Ok(records.get_mut(&key).filter(|record| record.status == PendingStatus::Requested).map(|record| {
+                            record.status = PendingStatus::Executing;
+                            record.clone()
+                        }))
+                    })?;
+                    let Some(expired) = expired else { return Ok(false) };
+                    let Some(expired) = expired else { continue };
                     let _owner = PendingExecutionGuard {
                         pipeline: self, key: key.clone(), token: expired.preparation.token.clone(),
                     };
@@ -3097,7 +3097,6 @@ impl AgentToolPipeline {
                         "Native approval expired",
                     )?;
                     self.native.abandon(&expired.preparation.token);
-                    self.pending.lock().map_err(|_| "Native approval registry is unavailable".to_string())?.remove(&key);
                     match self.continue_after_pending(entry, &expired).await? {
                         ToolPipelineSettlement::Completed => return Ok(true),
                         ToolPipelineSettlement::Waiting => continue,
@@ -3112,7 +3111,8 @@ impl AgentToolPipeline {
     pub(crate) fn recover_waiting(&self, entry: &Arc<AgentEntry>) -> Result<bool, String> {
         let events = self.sessions.all_events(&entry.session_id)?;
         let snapshot = self.sessions.snapshot(&entry.session_id)?;
-        if snapshot.header.subagent.is_none() && super::recovery::open_turn_id(&events).is_none() {
+        let open_turn = super::recovery::open_turn_id(&events);
+        if snapshot.header.subagent.is_none() && open_turn.is_none() {
             return Ok(false);
         }
         let mut calls = HashMap::<(String, String), RecordedToolCall>::new();
@@ -3170,6 +3170,9 @@ impl AgentToolPipeline {
                 .find(|event| event.step_id.as_deref() == Some(&step_id))
                 .and_then(|event| event.turn_id.clone())
                 .ok_or_else(|| "Recovery found an unscoped tool call".to_string())?;
+            if status == AgentToolApprovalStatus::Requested && open_turn != Some(turn_id.as_str()) {
+                continue;
+            }
             if call.name == super::skills::SKILL_TOOL {
                 continue;
             }

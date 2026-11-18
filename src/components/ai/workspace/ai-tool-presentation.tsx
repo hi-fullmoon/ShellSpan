@@ -993,8 +993,14 @@ export function AiToolRow({
   const hasOutput = node.output !== null && (node.output !== '' || variant === 'terminal');
   const hasPendingCommand = variant === 'terminal' && (node.state === 'preparing' || node.state === 'running');
   const hasSuccessPreview = node.state === 'succeeded' && (node.name === 'trash_file' || Boolean(model?.hunks.length));
-  const hasInlinePreview = node.state !== 'approval' && !failureOnly(node) && !uncertaintyOnly
-    && (hasPendingCommand || hasOutput || hasSuccessPreview);
+  const approvalStatus = node.approval?.status;
+  const approvalStopped = node.state === 'rejected' || approvalStatus === 'expired' || approvalStatus === 'cancelled';
+  const hasDetails = node.input != null || node.approval != null || node.target != null
+    || node.idempotency != null || node.effect !== 'unknown';
+  const hasInlinePreview = node.state !== 'approval' && !uncertaintyOnly
+    && (failureOnly(node)
+      ? !node.evidenceRefs?.length && (approvalStopped || !hasDetails)
+      : hasPendingCommand || hasOutput || hasSuccessPreview);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div

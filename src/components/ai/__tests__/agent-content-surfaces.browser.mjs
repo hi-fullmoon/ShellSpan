@@ -35,6 +35,10 @@ const patchLines = parsePatch(patch).flatMap(file => file.hunks.flatMap(hunk => 
 const guide = await readFile(join(root, 'AGENTS.md'), 'utf8');
 const recovery = JSON.parse(await readFile(join(root, 'src/tests/fixtures/tool-result-read-recovery.json'), 'utf8'));
 const recordedTerminal = JSON.parse(await readFile(join(root, 'src/tests/fixtures/terminal-unknown-execution.json'), 'utf8'));
+// Replay the captured result with its session identifiers stripped.
+const rejectedTerminal = JSON.parse(await readFile(new URL('./fixtures/rejected-terminal-result.json', import.meta.url), 'utf8'));
+const approvalOutcomes = JSON.parse(await readFile(new URL('./fixtures/terminal-approval-outcomes.json', import.meta.url), 'utf8'));
+const stoppedTools = { 'rejected-command': [rejectedTerminal], ...approvalOutcomes };
 const icon = await readFile(join(root, 'public/shellspan-icon.svg'));
 const sha256 = body => createHash('sha256').update(body).digest('hex');
 const assets = [
@@ -76,7 +80,7 @@ try {
           const { React, createRoot } = await import('/src/components/ai/__tests__/agent-content-surfaces.browser-runtime.ts');
           await import('/src/styles/base.css');
           await import('/src/components/ai/styles/styles.css');
-          const { AiToolExpandedContent } = await import('/src/components/ai/workspace/ai-tool-presentation.tsx');
+          const { AiToolExpandedContent, AiToolRow } = await import('/src/components/ai/workspace/ai-tool-presentation.tsx');
           const { AssistantMessageContent } = await import('/src/components/ai/assistant-message-content.tsx');
           const { AiToolDetails } = await import('/src/components/ai/workspace/ai-tool-details.tsx');
           const { AiArtifactDetails } = await import('/src/components/ai/workspace/ai-artifact-details.tsx');
@@ -98,6 +102,9 @@ try {
           const read = tool('read_file', { path: data.path }, data.file);
           const failed = projectAgentChatNodes(data.recovery.slice(0, 2))
             .flatMap(node => node.kind === 'turnProcess' ? node.children : []).find(node => node.kind === 'tool');
+          const stopped = Object.entries(data.stoppedTools).map(([id, events]) => [
+            id, projectAgentChatNodes(events).find(node => node.kind === 'tool'),
+          ]);
           const call = data.recordedTerminal.find(event => event.type === 'tool/call');
           const approval = data.recordedTerminal.find(event => event.type === 'tool/approval');
           const block = (id, content, height) => React.createElement('section', {
@@ -118,6 +125,7 @@ try {
             block('code', expanded(tool('run_code', { code: data.code, language: 'javascript' }, data.codeOutput))),
             block('generic', expanded(tool('git', { content: data.code }, data.file))),
             block('error', expanded(failed)),
+            ...stopped.map(([id, node]) => block(id, React.createElement(AiToolRow, { node, onInspect() {} }))),
             block('queue', React.createElement(AiQueueNotice, { conflict: false, error: failed.error })),
             block('markdown', React.createElement(AssistantMessageContent, {
               blocks: [{ type: 'text', text: `\u0060\u0060\u0060javascript\n${data.code}\n\u0060\u0060\u0060` }], streaming: false,
@@ -177,17 +185,24 @@ try {
             ['generic', t('ai.workspace.tool.copyInput'), JSON.stringify({ content: data.code }, null, 2)],
             ['generic', t('ai.workspace.tool.copyOutput'), data.file],
             ['error', t('ai.workspace.tool.copyOutput'), failed.error],
+            ...stopped.map(([id, node]) => [id, t('ai.workspace.tool.copyOutput'), node.summary]),
             ['queue', t('ai.workspace.tool.copyOutput'), failed.error],
             ['notes', t('common.copy'), data.guide],
             ['approval', t('ai.workspace.tool.copyCommand'), call.data.call.arguments.command],
             ['markdown', t('common.copy'), data.code],
             ['artifact-text', t('common.copy'), JSON.stringify(JSON.parse(data.file), null, 2)],
           ];
-        }, { locale, path, file, code, codeOutput, search, patch, guide, recovery, recordedTerminal, assets, captureAll, longCommand, longOutput, root, hostname: hostname() });
+        }, { locale, path, file, code, codeOutput, search, patch, guide, recovery, recordedTerminal, stoppedTools, assets, captureAll, longCommand, longOutput, root, hostname: hostname() });
         await page.locator('#artifact-text .ai-detail-code-wrap').waitFor();
         await page.locator('#artifact-image img').waitFor();
         await page.locator('#notes button[aria-expanded="false"]').click();
         await page.locator('#queue button[aria-expanded="false"]').click();
+        for (const [id, events] of Object.entries(stoppedTools)) {
+          const row = page.locator(`#${id}`);
+          await row.locator('button[aria-expanded="false"]').press('Enter');
+          assert.equal(await row.locator('pre code').textContent(), events.at(-1).data.summary);
+          assert.equal(await row.locator('.ai-tool-inspect').count(), 0, `${locale}/${id}: the approval outcome is already shown inline`);
+        }
         await page.locator('.ai-semantic-note-body').waitFor();
         if (captureAll) await page.locator('#command-expanded .ai-terminal-command').click();
         for (const [id, label, expected] of copyChecks) {

@@ -1,0 +1,53 @@
+{
+  "expired-command": [
+    {
+      "version": 5, "sessionId": "approval-outcomes", "seq": 0, "timeUnixMs": 1794921344299,
+      "type": "tool/call",
+      "data": { "call": { "callId": "command", "name": "run_terminal_command", "nativeName": "terminal_execute", "effect": "externalSideEffect" } }
+    },
+    {
+      "version": 5, "sessionId": "approval-outcomes", "seq": 1, "timeUnixMs": 1794921404302,
+      "type": "tool/approval",
+      "data": { "callId": "command", "requestId": "command-approval", "status": "expired", "risk": "externalSideEffect", "reason": "Native approval expired" }
+    },
+    {
+      "version": 5, "sessionId": "approval-outcomes", "seq": 2, "timeUnixMs": 1794921404303,
+      "type": "tool/result",
+      "data": { "callId": "command", "name": "run_terminal_command", "status": "timedOut", "summary": "Native approval expired" }
+    }
+  ],
+  "expired-tool": [
+    {
+      "version": 5, "sessionId": "approval-outcomes", "seq": 0, "timeUnixMs": 1794921406889,
+      "type": "tool/call",
+      "data": { "call": { "callId": "service", "name": "inspect_service", "nativeName": "inspect_service", "effect": "sensitiveRead" } }
+    },
+    {
+      "version": 5, "sessionId": "approval-outcomes", "seq": 1, "timeUnixMs": 1794921466891,
+      "type": "tool/approval",
+      "data": { "callId": "service", "requestId": "service-approval", "status": "expired", "risk": "sensitiveRead", "reason": "Native approval expired" }
+    },
+    {
+      "version": 5, "sessionId": "approval-outcomes", "seq": 2, "timeUnixMs": 1794921466893,
+      "type": "tool/result",
+      "data": { "callId": "service", "name": "inspect_service", "status": "timedOut", "summary": "Native approval expired" }
+    }
+  ],
+  "cancelled-command": [
+    {
+      "version": 5, "sessionId": "approval-outcomes", "seq": 0, "timeUnixMs": 1794921469958,
+      "type": "tool/call",
+      "data": { "call": { "callId": "cancelled", "name": "run_terminal_command", "nativeName": "terminal_execute", "effect": "externalSideEffect" } }
+    },
+    {
+      "version": 5, "sessionId": "approval-outcomes", "seq": 1, "timeUnixMs": 1794921519995,
+      "type": "tool/approval",
+      "data": { "callId": "cancelled", "requestId": "cancelled-approval", "status": "cancelled", "risk": "externalSideEffect", "reason": "Native tool call was cancelled" }
+    },
+    {
+      "version": 5, "sessionId": "approval-outcomes", "seq": 2, "timeUnixMs": 1794921519997,
+      "type": "tool/result",
+      "data": { "callId": "cancelled", "name": "run_terminal_command", "status": "cancelled", "summary": "Native tool call was cancelled" }
+    }
+  ]
+}

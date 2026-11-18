@@ -289,10 +289,11 @@ function flattenChatNodes(nodes: readonly AiConversationNode[]): readonly AiConv
 }
 
 function pendingApproval(nodes: readonly AiConversationNode[]): AiPendingApproval | null {
-  const readable = flattenChatNodes(nodes);
-  const node = readable.find((candidate) => (
-    candidate.kind === 'approvalMarker' && candidate.status === 'requested'
-  ));
+  const activeTurn = nodes.find(candidate => candidate.kind === 'turnProcess'
+    && !candidate.hasEndBoundary && (candidate.status === 'running' || candidate.status === 'partial'));
+  const node = activeTurn?.kind === 'turnProcess'
+    ? activeTurn.children.find(candidate => candidate.kind === 'approvalMarker' && candidate.status === 'requested')
+    : undefined;
   if (node?.kind !== 'approvalMarker' || node.turnId === null || node.stepId === null) return null;
   const tool = findConversationTool(nodes, node);
   return {
@@ -391,7 +392,8 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
       && agent.parentSessionId === state.snapshot?.header.sessionId
     )),
     inbox: projectAgentInbox(events),
-    pendingApproval: storageFault ? null : pendingApproval(nodes),
+    pendingApproval: storageFault || state.snapshot.archived || status === 'completed'
+      || status === 'failed' || status === 'cancelled' ? null : pendingApproval(nodes),
     pendingQuestion: storageFault ? null : projectQuestions(events).find((q) => q.status === 'pending') ?? null,
     status,
     statusReason: storageFault ? 'journalWriteFailed' : activity.statusReason,

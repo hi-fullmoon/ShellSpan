@@ -114,6 +114,32 @@ it('preserves the committed status reason through full and incremental view proj
   }
 });
 
+it('keeps a stopped approval in history and projects the next turn’s pending approval', () => {
+  const project = createAgentSessionViewProjector();
+  const events = [...agentSessionWaitingApprovalEventFixture];
+  const projectCurrent = () => {
+    const state = { snapshot: snapshot(), events: [...events], lastCommittedSeq: events.length - 1, hasTerminalEvent: false };
+    const current = project(state);
+    expect(current).toEqual(agentSessionView(state));
+    return current;
+  };
+  const requested = events.find(event => event.type === 'tool/approval');
+  if (requested?.type !== 'tool/approval') throw new Error('The recording must contain a pending approval');
+  expect(projectCurrent().pendingApproval?.approvalId).toBe(requested.data.approvalId);
+  events.push(sessionEvent(events.length, { type: 'turn/end', turnId: requested.turnId,
+    data: { reason: 'cancelled' } }));
+  const stopped = projectCurrent();
+  expect(stopped.pendingApproval).toBeNull();
+  expect(stopped.nodes.some(node => node.kind === 'turnProcess'
+    && node.children.some(child => child.kind === 'approvalMarker' && child.approvalId === requested.data.approvalId))).toBe(true);
+
+  const turnId = 'turn-after-stop';
+  events.push(sessionEvent(events.length, { type: 'turn/start', turnId, data: {} }));
+  events.push({ ...requested, seq: events.length, turnId, stepId: 'step-after-stop',
+    data: { ...requested.data, approvalId: 'approval-after-stop' } });
+  expect(projectCurrent().pendingApproval?.approvalId).toBe('approval-after-stop');
+});
+
 it('projects recovery updates over a stale snapshot and preserves the gate after stopping', () => {
   const project = createAgentSessionViewProjector();
   const events: AgentSessionEvent[] = [sessionEvent(0, { type: 'task/state', data: {

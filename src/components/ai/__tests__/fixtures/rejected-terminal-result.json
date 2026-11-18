@@ -1,0 +1,13 @@
+{
+  "version": 5,
+  "sessionId": "terminal-rejection",
+  "seq": 1,
+  "timeUnixMs": 1793153977550,
+  "type": "tool/result",
+  "data": {
+    "callId": "rejected-command",
+    "name": "run_terminal_command",
+    "status": "rejected",
+    "summary": "TERMINAL_VISIBLE_COMMAND_UNAVAILABLE: cooperative terminal execution is not available"
+  }
+}
