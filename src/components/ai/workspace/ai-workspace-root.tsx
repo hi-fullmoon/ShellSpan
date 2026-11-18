@@ -48,6 +48,7 @@ import { AiWorkspaceErrorNotices } from './ai-workspace-error-notices';
 import { AiFailedDraftRecoveryContext } from './ai-failed-draft-recovery';
 import { AiNoticeTransition } from './ai-notice-transition';
 import { AiNoticeAction } from './ai-notice-action';
+import { AiMarkdownTargetContext } from '@/components/ai/assistant-message-content';
 
 export interface AiWorkspaceSubmitInput {
   readonly content: string;
@@ -685,6 +686,7 @@ export function AiWorkspaceRoot({
               onRetrySync, onRetryFailedDraft: readOnlySession ? undefined : onRetryFailedDraft,
               failedDraftRetryBlockedReason,
             }}>
+            <AiMarkdownTargetContext.Provider value={sessionTarget}>
             <AiConversation
               key={conversationIdentity.generation}
               nodes={conversationNodes}
@@ -706,6 +708,7 @@ export function AiWorkspaceRoot({
               loadingOlder={loadingOlder}
               onLoadOlder={onLoadOlder}
             />
+            </AiMarkdownTargetContext.Provider>
             </AiFailedDraftRecoveryContext.Provider>
             </AiFailureRecoveryContext.Provider>
           )}

@@ -91,7 +91,7 @@ export const PlainTextPreview: React.FC<{
         <div className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-xs text-muted-foreground">
           {toolbarStart}
           {toolbarStart && <span aria-hidden="true">·</span>}
-          <span className="shrink-0">{t('sftp.preview.lineCount', { count: lineCount })}</span>
+          <span className="min-w-0 truncate">{t('sftp.preview.lineCount', { count: lineCount })}</span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <Tooltip>

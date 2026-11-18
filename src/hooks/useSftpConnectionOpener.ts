@@ -9,7 +9,7 @@ import {
 import { generateId } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
-import { useSftpStore, type SftpSide } from '@/stores/sftpStore';
+import { useSftpStore, type SftpLocationRequest, type SftpSide } from '@/stores/sftpStore';
 import { useToastStore } from '@/stores/toastStore';
 import type { ConnectionProfile } from '@/types';
 import { promptForMissingPassword, persistPromptedPassword } from '@/lib/connections/password-prompt';
@@ -20,6 +20,8 @@ import {
 } from '@/lib/connections/keychain-key-prompt';
 import { useProfileStore } from '@/stores/profileStore';
 import { usePortForwardStore } from '@/stores/portForwardStore';
+import { sshRouteKey } from '@/lib/connections/ssh-route';
+import { t } from '@/locales';
 
 const logger = createLogger('sftp');
 
@@ -45,7 +47,7 @@ export function useSftpConnectionOpener(): {
     profile: ConnectionProfile,
     targetConnectionId?: string,
     targetSide?: SftpSide,
-    initialDirectory?: string,
+    initialDirectory?: string | SftpLocationRequest,
   ) => Promise<void>;
   verifyHostKey: (host: string, port: number, onVerified: () => void) => Promise<void>;
   hostKeyDialog: SftpHostKeyDialogState;
@@ -66,7 +68,7 @@ export function useSftpConnectionOpener(): {
       profile: ConnectionProfile,
       targetConnectionId?: string,
       targetSide: SftpSide = 'remote',
-      initialDirectory?: string,
+      initialDirectory?: string | SftpLocationRequest,
     ): boolean => {
       const connection = buildRemoteConnectionRequest(profile);
       const summary = {
@@ -162,7 +164,7 @@ export function useSftpConnectionOpener(): {
       profile: ConnectionProfile,
       targetConnectionId?: string,
       targetSide: SftpSide = 'remote',
-      initialDirectory?: string,
+      initialDirectory?: string | SftpLocationRequest,
     ) => {
       const beginAttempt = (attemptProfile: ConnectionProfile): string =>
         beginConnectionAttempt({
@@ -189,6 +191,10 @@ export function useSftpConnectionOpener(): {
         }
 
         const preparedProfile = profileWithKey;
+        if (typeof initialDirectory === 'object' && initialDirectory.routeKey !== sshRouteKey(preparedProfile)) {
+          useToastStore.getState().addToast(t('ai.path.sftpRouteUnavailable'), 'error');
+          return;
+        }
         connectionAttemptId = beginAttempt(preparedProfile);
         setActiveSection('sftp');
 

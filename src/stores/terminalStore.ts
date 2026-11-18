@@ -35,6 +35,7 @@ export interface TerminalSession {
   host: string;
   port: number;
   username: string;
+  sshRouteKey?: string;
   status: SessionStatus;
   statusMessage?: string;
   closed?: ClosedEvent;
@@ -271,6 +272,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
         host: summary.host,
         port: summary.port,
         username: summary.username,
+        sshRouteKey: summary.sshRouteKey,
         status: 'connecting',
         profileId: profileId ?? pending.profileId,
         pinned: pending.pinned,
@@ -318,6 +320,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
         host: summary.host,
         port: summary.port,
         username: summary.username,
+        sshRouteKey: summary.sshRouteKey,
         status: 'connecting',
         profileId,
         pinned: options?.pinned,
@@ -408,6 +411,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
         host: summary.host,
         port: summary.port,
         username: summary.username,
+        sshRouteKey: summary.sshRouteKey,
         status: 'connecting',
         profileId,
         pinned: old.pinned,

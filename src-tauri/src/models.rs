@@ -362,6 +362,7 @@ pub(crate) struct OpenRemoteFileRequest {
     pub(crate) connection: RemoteConnectionRequest,
     pub(crate) path: String,
     pub(crate) operation_id: String,
+    pub(crate) application_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -401,6 +402,7 @@ pub(crate) struct DownloadRemotePathsRequest {
     pub(crate) connection: RemoteConnectionRequest,
     pub(crate) remote_paths: Vec<String>,
     pub(crate) destination_directory: String,
+    pub(crate) save_destination: Option<crate::file_actions::SaveFileDestination>,
     #[serde(default)]
     pub(crate) conflict_policies: Vec<UploadConflictPolicy>,
     pub(crate) operation_id: String,

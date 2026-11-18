@@ -21,6 +21,7 @@ export interface SftpFileListProps {
   side: SftpSide;
   localMode?: boolean;
   selectedPaths: ReadonlySet<string>;
+  revealRequest?: { path: string };
   filterQuery: string;
   batchMode: boolean;
   currentPath?: string;
@@ -78,6 +79,7 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
   side,
   localMode,
   selectedPaths,
+  revealRequest,
   filterQuery,
   batchMode,
   currentPath,
@@ -156,6 +158,15 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
     });
     return lookup;
   }, [sortedEntries]);
+
+  const handledReveal = useRef<SftpFileListProps['revealRequest']>(undefined);
+  useEffect(() => {
+    if (!revealRequest || revealRequest === handledReveal.current || !selectedPaths.has(revealRequest.path)) return;
+    const entry = entryLookup.get(revealRequest.path);
+    if (!entry) return;
+    handledReveal.current = revealRequest;
+    virtualizer.scrollToIndex(entry.index + (showParent ? 1 : 0), { align: 'auto' });
+  }, [entryLookup, revealRequest, selectedPaths, showParent, virtualizer]);
 
   // Selection is normally much smaller than a directory listing. Resolve and
   // order only the selected entries instead of scanning every entry on each

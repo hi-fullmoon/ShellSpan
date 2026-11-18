@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,15 +20,31 @@ const files = await Promise.all(['src/components/ui/button.tsx', 'public/shellsp
 }));
 const largeSource = await readFile(join(root, 'src/locales/zh-CN.ts'), 'utf8');
 const licenseSource = await readFile(join(root, 'LICENSE'), 'utf8');
+let desktopApplication;
+if (process.platform === 'darwin') {
+  const textEdit = '/System/Applications/TextEdit.app/Contents';
+  const pngPath = join(artifacts, 'textedit-app-icon.png');
+  execFileSync('/usr/bin/sips', ['-s', 'format', 'png', '-Z', '32', join(textEdit, 'Resources/AppIcon.icns'), '--out', pngPath]);
+  const readBundleField = (key) => execFileSync('/usr/bin/plutil', ['-extract', key, 'raw', '-o', '-', join(textEdit, 'Info.plist')], { encoding: 'utf8' }).trim();
+  desktopApplication = {
+    id: readBundleField('CFBundleIdentifier'),
+    name: readBundleField('CFBundleName'),
+    icon: `data:image/png;base64,${(await readFile(pngPath)).toString('base64')}`,
+  };
+}
 const server = await createServer({
   root, configFile: false, appType: 'custom', logLevel: 'error',
   cacheDir: join(artifacts, 'vite-cache'),
   resolve: { alias: { '@': join(root, 'src') } }, esbuild: { jsx: 'automatic' },
-  optimizeDeps: { include: ['react', 'react-dom/client'] },
+  optimizeDeps: {
+    entries: ['src/components/sftp/__tests__/sftp-preview-toolbar.browser.tsx'],
+    include: ['react', 'react-dom/client', 'react/jsx-dev-runtime'],
+  },
   plugins: [tailwindcss()], server: { host: '127.0.0.1', port: 0, hmr: false },
 });
-server.middlewares.use('/__sftp_preview_toolbar', (_request, response) => {
+server.middlewares.use('/__sftp_preview_toolbar', (request, response) => {
   response.setHeader('Content-Type', 'text/html');
+  if (request.url?.includes('?block-icons')) response.setHeader('Content-Security-Policy', "img-src 'none'");
   response.end('<!doctype html><html><body><main id="root"></main></body></html>');
 });
 
@@ -50,8 +67,8 @@ try {
     try {
       for (const locale of ['zh-CN', 'en-US']) {
         const labels = locale === 'zh-CN'
-          ? { external: '用系统应用打开', wrap: '切换自动换行', copy: '复制内容', zoomIn: '放大', zoomOut: '缩小', reset: '恢复原始比例' }
-          : { external: 'Open in system app', wrap: 'Toggle line wrapping', copy: 'Copy content', zoomIn: 'Zoom in', zoomOut: 'Zoom out', reset: 'Reset zoom' };
+          ? { open: '打开', options: '打开选项', defaultApp: '默认应用', defaultCopy: '默认应用（打开本地副本）', reveal: '打开所在文件夹', revealRemote: '在远程文件列表中定位', saveAs: '另存为…', wrap: '切换自动换行', copy: '复制内容', zoomIn: '放大', zoomOut: '缩小', reset: '恢复原始比例' }
+          : { open: 'Open', options: 'Open options', defaultApp: 'Default app', defaultCopy: 'Default app (open local copy)', reveal: 'Open containing folder', revealRemote: 'Show in remote file list', saveAs: 'Save as…', wrap: 'Toggle line wrapping', copy: 'Copy content', zoomIn: 'Zoom in', zoomOut: 'Zoom out', reset: 'Reset zoom' };
         const page = await browser.newPage();
         let workerCount = 0;
         page.on('worker', () => { workerCount += 1; });
@@ -65,11 +82,11 @@ try {
               const image = file.name.endsWith('.svg');
               const json = file.name.endsWith('.json');
               await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__sftp_preview_toolbar`);
-              await page.evaluate(async ({ file, locale, theme }) => {
+              await page.evaluate(async ({ file, locale, theme, json }) => {
                 document.documentElement.dataset.theme = theme;
                 const { mountPreview } = await import('/src/components/sftp/__tests__/sftp-preview-toolbar.browser.tsx');
-                await mountPreview(file, locale);
-              }, { file, locale, theme });
+                await mountPreview(file, locale, json);
+              }, { file, locale, theme, json });
               const dialog = page.getByRole('dialog');
               await dialog.waitFor();
               await dialog.evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));
@@ -100,7 +117,44 @@ try {
               })));
               assert.equal(new Set(metadataStyles.map(style => style.color)).size, 1, 'File kinds share one muted metadata color');
               assert.ok(metadataStyles.every(style => style.background === 'rgba(0, 0, 0, 0)' && style.fontSize === '12px'));
-              const actions = image ? ['external', 'zoomOut', 'reset', 'zoomIn'] : ['external', 'wrap', 'copy'];
+              const openButton = dialog.getByRole('button', { name: labels.open, exact: true });
+              const optionsButton = dialog.getByRole('button', { name: labels.options, exact: true });
+              const openBounds = await openButton.boundingBox();
+              const optionsBounds = await optionsButton.boundingBox();
+              assert.equal(await openButton.textContent(), labels.open, 'The primary open action has a visible label');
+              assert.equal(openBounds.height, 32);
+              assert.deepEqual(await openButton.locator('[data-icon="inline-start"]').evaluate(element => [element.clientWidth, element.clientHeight]), [14, 14]);
+              assert.equal(await openButton.locator('[data-icon="inline-start"] svg').count(), 1, 'An unavailable default application icon uses the generic icon');
+              assert.equal(optionsBounds.height, openBounds.height);
+              assert.equal(optionsBounds.y, openBounds.y);
+              assert.ok(Math.abs(optionsBounds.x - openBounds.x - openBounds.width) <= 1, 'Both sides form one split button');
+              assert.ok(optionsBounds.x + optionsBounds.width <= dialogBounds.x + dialogBounds.width);
+              if (width === 380) {
+                await optionsButton.focus();
+                await page.keyboard.press('Enter');
+                const menu = page.getByRole('menu');
+                await menu.getByRole('menuitem', { name: json ? labels.defaultCopy : labels.defaultApp, exact: true }).waitFor();
+                await menu.getByRole('menuitem', { name: json ? labels.revealRemote : labels.reveal, exact: true }).waitFor();
+                await menu.getByRole('menuitem', { name: labels.saveAs, exact: true }).waitFor();
+                const usesSystemPicker = await page.evaluate(() => navigator.platform.toLowerCase().includes('win'));
+                const appChoice = usesSystemPicker
+                  ? (locale === 'zh-CN' ? '选择其他应用…' : 'Choose another app…')
+                  : (locale === 'zh-CN' ? '无法读取应用列表' : 'Could not load apps');
+                await menu.getByRole('menuitem', { name: appChoice, exact: true }).waitFor();
+                const menuBounds = await menu.boundingBox();
+                assert.ok(menuBounds.x >= 0 && menuBounds.x + menuBounds.width <= width);
+                await page.screenshot({ path: join(artifacts, `${engine.name()}-${locale}-${theme}-${json ? 'remote' : 'local'}-menu.png`) });
+                await page.keyboard.press('Escape');
+                await menu.waitFor({ state: 'hidden' });
+                assert.ok(await dialog.isVisible(), 'Escape closes the menu before the preview');
+              }
+              if (engine.name() === 'chromium' && locale === 'zh-CN' && theme === 'light' && width === 1280 && !image && !json) {
+                const [popup] = await Promise.all([page.waitForEvent('popup'), openButton.click()]);
+                await popup.waitForLoadState();
+                assert.equal(decodeURIComponent(new URL(popup.url()).pathname), `/@fs${file.path}`);
+                await popup.close();
+              }
+              const actions = image ? ['zoomOut', 'reset', 'zoomIn'] : ['wrap', 'copy'];
               for (const action of actions) {
                 await page.mouse.move(0, 0);
                 const button = dialog.getByRole('button', { name: labels[action], exact: true });
@@ -144,6 +198,8 @@ try {
                 assert.equal(await toolbar.count(), 1, 'Text previews have one toolbar');
                 const toolbarBounds = await toolbar.boundingBox();
                 assert.equal(toolbarBounds.height, 44, 'Metadata and text actions share one compact row');
+                assert.ok(await toolbar.getByRole('button', { name: labels.open, exact: true }).isVisible());
+                assert.ok(await toolbar.getByRole('button', { name: labels.options, exact: true }).isVisible());
                 for (const action of actions) {
                   const bounds = await dialog.getByRole('button', { name: labels[action], exact: true }).boundingBox();
                   assert.ok(Math.abs(bounds.y + bounds.height / 2 - toolbarBounds.y - toolbarBounds.height / 2) < 1, `${action} stays in the combined toolbar`);
@@ -242,13 +298,53 @@ try {
             const partial = metadata.locator('[data-slot="badge"]');
             const badgeBounds = await partial.boundingBox();
             const metadataBounds = await metadata.boundingBox();
-            assert.ok(badgeBounds.x >= metadataBounds.x && badgeBounds.x + badgeBounds.width <= metadataBounds.x + metadataBounds.width + 1, 'Partial-preview status stays fully visible in narrow windows');
+            assert.ok(badgeBounds.x >= metadataBounds.x && badgeBounds.x + badgeBounds.width <= metadataBounds.x + metadataBounds.width + 1, `Partial-preview status stays visible in ${engine.name()} ${locale}, badge width ${badgeBounds.width}px and metadata width ${metadataBounds.width}px`);
             assert.ok((await metadata.locator('[data-slot="sftp-preview-metadata-values"]').getAttribute('title')).includes('TS ·'), 'Clipped metadata remains available in a tooltip');
             await dialog.locator('code[data-highlighted="true"]').waitFor();
           } else {
             assert.equal(await metadata.getByText(locale === 'zh-CN' ? '文本' : 'Text', { exact: true }).count(), 1, 'Extensionless readable files have a readable type label');
           }
           await page.screenshot({ path: join(artifacts, `${engine.name()}-${locale}-${file.truncated ? 'partial' : 'extensionless'}-380.png`) });
+        }
+        if (desktopApplication && locale === 'zh-CN') {
+          const file = {
+            path: join(root, 'LICENSE'), name: 'LICENSE', content: licenseSource,
+            size: Buffer.byteLength(licenseSource), truncated: false, isText: true, contentEncoding: 'utf8',
+          };
+          for (const blocked of [false, true]) {
+            await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__sftp_preview_toolbar${blocked ? '?block-icons' : ''}`);
+            await page.evaluate(async ({ application, file, locale, blocked }) => {
+              document.documentElement.dataset.theme = blocked ? 'dark' : 'light';
+              const { mountPreview } = await import('/src/components/sftp/__tests__/sftp-preview-toolbar.browser.tsx');
+              await mountPreview(file, locale, blocked, [application]);
+            }, { application: desktopApplication, file, locale, blocked });
+            const dialog = page.getByRole('dialog');
+            const openButton = dialog.getByRole('button', { name: labels.open, exact: true });
+            const buttonIcon = openButton.locator(blocked ? '[data-icon="inline-start"] svg' : '[data-icon="inline-start"] img');
+            await buttonIcon.waitFor();
+            if (!blocked) await buttonIcon.evaluate(image => image.decode());
+            const buttonIconGap = await buttonIcon.evaluate(icon => {
+              const button = icon.closest('button');
+              const label = Array.from(button.childNodes).find(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
+              const text = document.createRange();
+              text.selectNode(label);
+              return text.getBoundingClientRect().left - icon.getBoundingClientRect().right;
+            });
+            assert.ok(Math.abs(buttonIconGap - 4) < 1, 'The default application icon is 4px left of the Open label');
+            await dialog.getByRole('button', { name: labels.options, exact: true }).click();
+            const menu = page.getByRole('menu');
+            const appItem = menu.getByRole('menuitem', { name: desktopApplication.name, exact: true });
+            const icon = appItem.locator(blocked ? 'svg' : 'img');
+            await icon.waitFor();
+            if (!blocked) await icon.evaluate(image => image.decode());
+            await menu.evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));
+            const iconBounds = await icon.boundingBox();
+            const labelBounds = await appItem.getByText(desktopApplication.name, { exact: true }).boundingBox();
+            assert.equal(iconBounds.width, 16);
+            assert.equal(iconBounds.height, 16);
+            assert.ok(Math.abs(labelBounds.x - iconBounds.x - iconBounds.width - 4) < 1, 'The app icon is 4px left of the app name');
+            await page.screenshot({ path: join(artifacts, `${engine.name()}-application-icon-${blocked ? 'fallback' : 'native'}.png`) });
+          }
         }
         assert.deepEqual(errors, []);
         await page.close();

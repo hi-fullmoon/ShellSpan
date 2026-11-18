@@ -12,7 +12,7 @@ import { SftpBlankContextMenu, type SftpBlankContextMenuAction } from './sftp-bl
 import { SftpBookmarkMenu } from './sftp-bookmark-menu';
 import { useLocalDirectory } from '@/hooks/useLocalDirectory';
 import { useSftpConnection } from '@/hooks/useSftpConnection';
-import { getSftpPaneConnectionKey, type SftpConnection, type SftpSide } from '@/stores/sftpStore';
+import { getSftpPaneConnectionKey, getSftpPaneSource, useSftpStore, type SftpConnection, type SftpLocationRequest, type SftpSide } from '@/stores/sftpStore';
 import { type UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
 import type { FileEntry } from './utils';
 import type { SftpDndPayload } from './sftp-dnd-context';
@@ -28,7 +28,7 @@ export interface SftpPaneProps {
   actions: UseSftpPaneActionsResult;
   selectedPaths: Set<string>;
   onSelectedPathsChange: (paths: Set<string>) => void;
-  onVerifyHostKey?: () => void;
+  onVerifyHostKey?: (onVerified: () => void) => void;
   onReconnect?: () => void;
   systemDropActive?: boolean;
   systemDropHovered?: boolean;
@@ -89,9 +89,12 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     const canAcceptActiveDrag = !!activeDrag && activeDrag.side !== side;
     const path = side === 'local' ? connection.localPath : connection.remotePath;
     const entries = side === 'local' ? connection.localEntries : connection.remoteEntries;
+    const pane = side === 'local' ? connection.localPane : connection.remotePane;
+    const revealPath = pane.revealRequest && selectedPaths.has(pane.revealRequest.path) ? pane.revealRequest.path : undefined;
     const visibleEntries = useMemo(
-      () => (showHiddenFiles ? entries : entries.filter((entry) => !entry.name.startsWith('.'))),
-      [entries, showHiddenFiles],
+      () => (showHiddenFiles ? entries : entries.filter((entry) => !entry.name.startsWith('.')
+        || entry.path === revealPath)),
+      [entries, revealPath, showHiddenFiles],
     );
     const connecting = connection.connectionAttemptIds?.[side] !== undefined;
     const loading = connecting
@@ -99,13 +102,13 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     const restorePending = !connecting && !isLocal && connection.restorePending?.[side] === true;
     const error = restorePending ? t('sftp.restore.disconnected') : side === 'local' ? connection.localError : connection.remoteError;
     const isHostKeyError = !isLocal && !!error && (error.toLowerCase().includes('host key') || error.toLowerCase().includes('trust this host'));
-    const pane = side === 'local' ? connection.localPane : connection.remotePane;
     const remoteBookmarks = connection.remoteBookmarks[side];
     const selectedPathsRef = useRef(selectedPaths);
     selectedPathsRef.current = selectedPaths;
 
     const { loadLocalDirectory } = useLocalDirectory(connection, side);
     const { loadRemoteDirectory } = useSftpConnection(connection, side);
+    const { id: connectionId } = connection;
 
     const [history, setHistory] = useState<HistoryState>({
       stack: [path],
@@ -161,7 +164,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     useEffect(() => {
       setShowSearch(false);
       setSearchQuery('');
-    }, [path]);
+    }, [path, pane.revealRequest]);
 
     // Escape dismisses the search the same way the search icon does (clear +
     // collapse). It stands down while a context/bookmark menu owns the key so
@@ -195,7 +198,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     }, [side]);
 
     useEffect(() => {
-      if (connecting || restorePending) return;
+      if (connecting || restorePending || pane.locationRequest) return;
       if (isLocal) {
         loadLocalDirectory(path);
       } else {
@@ -204,13 +207,27 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     }, [connecting, isLocal, loadLocalDirectory, loadRemoteDirectory, restorePending]);
 
     const navigateTo = useCallback(
-      (target: string, pushHistory = true): void => {
+      (target: string, pushHistory = true, location?: SftpLocationRequest): void => {
+        const store = useSftpStore.getState();
+        const current = store.connections.find(({ id }) => id === connectionId);
+        const currentPane = side === 'local' ? current?.localPane : current?.remotePane;
+        if (location && currentPane?.locationRequest !== location) return;
+        if (!location && currentPane?.locationRequest) {
+          store.setPaneState(connectionId, side, { locationRequest: undefined });
+        }
+        onSelectedPathsChange(new Set());
         if (isLocal) {
           loadLocalDirectory(target);
+        } else if (location) {
+          const isCurrentSource = () => {
+            const current = useSftpStore.getState().connections.find(({ id }) => id === connectionId);
+            return current !== undefined && getSftpPaneSource(current, side) === 'remote'
+              && getSftpPaneConnectionKey(current, side) === location.routeKey;
+          };
+          loadRemoteDirectory(target, isCurrentSource, location);
         } else {
           loadRemoteDirectory(target);
         }
-        onSelectedPathsChange(new Set());
 
         if (pushHistory) {
           const current = historyRef.current;
@@ -220,8 +237,16 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
           }
         }
       },
-      [isLocal, loadLocalDirectory, loadRemoteDirectory, onSelectedPathsChange, updateHistory],
+      [connectionId, isLocal, loadLocalDirectory, loadRemoteDirectory, onSelectedPathsChange, side, updateHistory],
     );
+
+    useEffect(() => {
+      const request = pane.locationRequest;
+      if (!request || connecting || restorePending || isLocal) return;
+      navigateTo(request.path, true, request);
+    }, [connecting, isLocal, navigateTo, pane.locationRequest, restorePending]);
+
+    const retryNavigation = () => navigateTo(pane.locationRequest?.path ?? path, true, pane.locationRequest);
 
     useEffect(() => {
       const handleOpenPath = (event: Event): void => {
@@ -609,7 +634,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={restorePending && onReconnect ? onReconnect : isHostKeyError && onVerifyHostKey ? onVerifyHostKey : () => navigateTo(path)}
+                onClick={restorePending && onReconnect ? onReconnect : isHostKeyError && onVerifyHostKey ? () => onVerifyHostKey(retryNavigation) : retryNavigation}
               >
                 {restorePending ? t('sftp.restore.reconnect') : isHostKeyError ? t('sftp.hostKey.verify') : t('common.retry')}
               </Button>
@@ -657,6 +682,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
               side={side}
               localMode={isLocal}
               selectedPaths={selectedPaths}
+              revealRequest={pane.revealRequest}
               filterQuery={searchQuery}
               batchMode={pane.batchMode}
               currentPath={path}

@@ -1205,6 +1205,15 @@ fn download_remote_paths_inner<E: TransferEventEmitter>(
             message: "download conflict policy count does not match remote paths".to_string(),
         });
     }
+    if request.save_destination.is_some()
+        && (request.remote_paths.len() != 1
+            || !request.remote_paths[0].starts_with('/')
+            || !request.conflict_policies.is_empty())
+    {
+        return Err(RemoteFsError::Other {
+            message: "save as requires one absolute remote file path".into(),
+        });
+    }
 
     let mut metrics = TransferBatchMetrics::new("download", request.operation_id.clone());
 
@@ -1219,9 +1228,11 @@ fn download_remote_paths_inner<E: TransferEventEmitter>(
     let _transfer_timeout = TransferTimeoutGuard::new(&connected.session);
     metrics.start_phase(TransferPhase::Scan);
     let destination_directory = Path::new(&request.destination_directory);
-    fs::create_dir_all(destination_directory).map_err(|error| RemoteFsError::Other {
-        message: format!("failed to create destination directory: {error}"),
-    })?;
+    if request.save_destination.is_none() {
+        fs::create_dir_all(destination_directory).map_err(|error| RemoteFsError::Other {
+            message: format!("failed to create destination directory: {error}"),
+        })?;
+    }
 
     // Emit an initial event so the UI shows activity during the scan phase.
     let mut scanning_progress = DownloadProgressTracker::new(
@@ -1242,10 +1253,26 @@ fn download_remote_paths_inner<E: TransferEventEmitter>(
                 message: "download cancelled".to_string(),
             });
         }
+        let source_stat = if request.save_destination.is_some() {
+            let stat = connected
+                .sftp
+                .stat(Path::new(remote_path))
+                .map_err(|error| RemoteFsError::Other {
+                    message: format!("failed to inspect remote file: {error}"),
+                })?;
+            if kind_from_permissions(stat.perm) != RemoteFileKind::File {
+                return Err(RemoteFsError::Other {
+                    message: "save as requires a regular remote file".into(),
+                });
+            }
+            Some(stat)
+        } else {
+            None
+        };
         let manifest = build_remote_transfer_manifest(
             &connected.sftp,
             Path::new(remote_path),
-            None,
+            source_stat,
             &cancel_flag,
             0,
             RemoteManifestPurpose::Download,
@@ -1268,7 +1295,11 @@ fn download_remote_paths_inner<E: TransferEventEmitter>(
     // different parent directories) never overwrite each other's download.
     // Like the upload loop, a failing entry does not abort the rest of the
     // batch; failures are aggregated and reported at the end.
-    let mut reserved_names = local_entry_names(destination_directory);
+    let mut reserved_names = if request.save_destination.is_some() {
+        HashSet::new()
+    } else {
+        local_entry_names(destination_directory)
+    };
     metrics.set_inventory(scan_stats.total_bytes, scan_stats.total_files);
     metrics.start_phase(TransferPhase::Transfer);
     let mut transfer_buffer = new_transfer_buffer();
@@ -1282,6 +1313,16 @@ fn download_remote_paths_inner<E: TransferEventEmitter>(
         let remote_path = manifest.source_path.as_path();
         let source_path = path_to_string(remote_path);
         let download_result = (|| {
+            if let Some(destination) = &request.save_destination {
+                save_remote_file_to_path(
+                    &connected.sftp,
+                    remote_path,
+                    destination,
+                    &mut progress,
+                    &mut transfer_buffer,
+                )?;
+                return Ok(Some(destination.path.clone()));
+            }
             let file_name = remote_path
                 .file_name()
                 .ok_or_else(|| RemoteFsError::Other {
@@ -1335,12 +1376,12 @@ fn download_remote_paths_inner<E: TransferEventEmitter>(
                     destination_path.display()
                 );
             }
-            Ok::<Option<PathBuf>, RemoteFsError>(Some(destination_path))
+            Ok::<Option<String>, RemoteFsError>(Some(path_to_string(&destination_path)))
         })();
         match download_result {
             Ok(Some(destination_path)) => items.push(TransferItemResult {
                 source_path,
-                destination_path: Some(path_to_string(&destination_path)),
+                destination_path: Some(destination_path),
                 status: TransferItemStatus::Completed,
                 error: None,
             }),
@@ -1706,11 +1747,58 @@ fn download_remote_file<E: TransferEventEmitter>(
             message: format!("failed to create local file: {error}"),
         })?;
 
+    copy_remote_download_data(&mut remote_file, &mut local_file, progress, transfer_buffer)?;
+    progress
+        .finish_step()
+        .map_err(|message| RemoteFsError::Other { message })
+}
+
+fn save_remote_file_to_path<E: TransferEventEmitter>(
+    sftp: &Sftp,
+    remote_path: &Path,
+    destination: &crate::file_actions::SaveFileDestination,
+    progress: &mut DownloadProgressTracker<E>,
+    transfer_buffer: &mut [u8],
+) -> Result<(), RemoteFsError> {
+    progress
+        .set_current_path(Some(path_to_string(remote_path)))
+        .map_err(|message| RemoteFsError::Other { message })?;
+    let mut remote_file = sftp
+        .open(remote_path)
+        .map_err(|error| RemoteFsError::Other {
+            message: format!("failed to open remote file: {error}"),
+        })?;
+    let mut staging = destination
+        .create_staging_file()
+        .map_err(|message| RemoteFsError::Other { message })?;
+    copy_remote_download_data(
+        &mut remote_file,
+        staging.as_file_mut(),
+        progress,
+        transfer_buffer,
+    )?;
+    progress
+        .ensure_not_cancelled()
+        .map_err(|message| RemoteFsError::Other { message })?;
+    destination
+        .persist(staging)
+        .map_err(|message| RemoteFsError::Other { message })?;
+    progress
+        .finish_step()
+        .map_err(|message| RemoteFsError::Other { message })
+}
+
+fn copy_remote_download_data<E: TransferEventEmitter>(
+    remote_file: &mut ssh2::File,
+    local_file: &mut fs::File,
+    progress: &mut DownloadProgressTracker<E>,
+    transfer_buffer: &mut [u8],
+) -> Result<(), RemoteFsError> {
     loop {
         progress
             .ensure_not_cancelled()
             .map_err(|message| RemoteFsError::Other { message })?;
-        let read = match transfer_chunk(&mut remote_file, &mut local_file, transfer_buffer) {
+        let read = match transfer_chunk(remote_file, local_file, transfer_buffer) {
             Ok(read) => read,
             Err(TransferChunkError::Read(error)) => {
                 return Err(RemoteFsError::Other {
@@ -1732,11 +1820,7 @@ fn download_remote_file<E: TransferEventEmitter>(
     }
     local_file.flush().map_err(|error| RemoteFsError::Other {
         message: format!("failed to flush local file: {error}"),
-    })?;
-    progress
-        .finish_step()
-        .map_err(|message| RemoteFsError::Other { message })?;
-    Ok(())
+    })
 }
 
 pub(crate) fn copy_remote_to_remote_blocking<E: TransferEventEmitter>(
@@ -2694,8 +2778,16 @@ fn open_remote_file_inner(
     // external application. Failed launches remove the completed temp copy;
     // successful launches retain it for the external process.
     ensure_remote_file_read_not_cancelled(cancel_flag)?;
-    open_path_with_default_app(&local_path)?;
-    temp_file_guard.preserve();
+    let launched = if let Some(application_id) = &request.application_id {
+        crate::file_actions::open_with_application(&local_path, application_id)
+            .map_err(|message| RemoteFsError::Other { message })?
+    } else {
+        open_path_with_default_app(&local_path)?;
+        true
+    };
+    if launched {
+        temp_file_guard.preserve();
+    }
     Ok(())
 }
 

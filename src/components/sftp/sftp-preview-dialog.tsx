@@ -9,12 +9,14 @@ import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import { useLastValue } from '@/hooks/useLastValue';
+import type { SftpPreviewFileActions, SftpPreviewTarget } from '@/hooks/useSftpPaneActions';
 import { formatSize } from '@/lib/sftp/sftp-utils';
 import { createPreviewDataUrl, formatHexPreview, getFileExtension, getSftpPreviewDescriptor, type SftpPreviewDescriptor } from '@/lib/sftp/sftp-preview';
 import { cn } from '@/lib/utils';
 import type { ReadRemoteFileResponse } from '@/types';
-import { ExternalLinkIcon, FileIcon, FileWarningIcon, RotateCcwIcon, ZoomInIcon, ZoomOutIcon } from 'lucide-react';
+import { FileIcon, FileWarningIcon, RotateCcwIcon, ZoomInIcon, ZoomOutIcon } from 'lucide-react';
 import { SftpDialogBody, SftpDialogContent, SftpDialogHeader } from './sftp-dialog-layout';
+import { SftpPreviewOpenControls } from './sftp-preview-file-actions';
 import {
   ArchivePreview,
   MarkdownPreview,
@@ -24,15 +26,11 @@ import {
 } from './sftp-rich-preview';
 
 export interface SftpPreviewDialogProps {
-  target?: {
-    path: string;
-    name: string;
-    size?: number;
-  };
+  target?: SftpPreviewTarget;
   content?: ReadRemoteFileResponse;
   open: boolean;
   onClose: () => void;
-  onOpenExternally?: (path: string) => void;
+  fileActions?: SftpPreviewFileActions;
 }
 
 interface PreviewRendererProps {
@@ -293,13 +291,31 @@ const PreviewRenderer: React.FC<PreviewRendererProps> = ({ content, descriptor, 
   return <BinaryPreview content={content.content} isArchive={false} />;
 };
 
-export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({ target, content, open, onClose, onOpenExternally }) => {
+export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({ target, content, open, onClose, fileActions }) => {
   const { t } = useI18n();
   const liveTarget = useMemo(
     () => target ?? (content ? { path: content.path, name: content.name, size: content.size } : undefined),
     [content, target],
   );
   const displayTarget = useLastValue(liveTarget);
+  const lookupDefaultIcon = fileActions?.getDefaultApplicationIcon;
+  const previewPath = liveTarget?.path;
+  const previewName = liveTarget?.name;
+  const [defaultApplicationIcon, setDefaultApplicationIcon] = useState<{
+    path: string;
+    name: string;
+    lookup: SftpPreviewFileActions['getDefaultApplicationIcon'];
+    icon: string;
+  }>();
+  useEffect(() => {
+    setDefaultApplicationIcon(undefined);
+    if (!open || !previewPath || !previewName || !lookupDefaultIcon) return;
+    let current = true;
+    void lookupDefaultIcon({ path: previewPath, name: previewName }).then((icon) => {
+      if (current && icon) setDefaultApplicationIcon({ path: previewPath, name: previewName, lookup: lookupDefaultIcon, icon });
+    }, () => undefined);
+    return () => { current = false; };
+  }, [lookupDefaultIcon, open, previewName, previewPath]);
   const displayContent = useLastValue(content);
   const loading = target !== undefined && content === undefined;
   const resolvedContent = loading ? undefined : displayContent;
@@ -317,8 +333,15 @@ export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({ target, co
   const displaySize = resolvedContent?.size ?? displayTarget.size;
   const formattedSize = displaySize !== undefined ? formatSize(Number(displaySize)) : undefined;
   const inlineTextToolbar = descriptor?.kind === 'text';
+  const isPartial = resolvedContent?.truncated && resolvedContent.contentEncoding !== 'none';
   const metadata = (
-    <div data-slot="sftp-preview-metadata" className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-xs text-muted-foreground">
+    <div
+      data-slot="sftp-preview-metadata"
+      className={cn(
+        'items-center gap-2 overflow-hidden whitespace-nowrap text-xs text-muted-foreground',
+        isPartial ? 'grid min-w-min grid-cols-[minmax(0,max-content)_max-content]' : 'flex min-w-0',
+      )}
+    >
       <span
         data-slot="sftp-preview-metadata-values"
         className="min-w-0 truncate"
@@ -332,17 +355,13 @@ export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({ target, co
           </>
         )}
       </span>
-      {resolvedContent?.truncated && resolvedContent.contentEncoding !== 'none' && <Badge variant="outline">{t('sftp.preview.partial')}</Badge>}
+      {isPartial && <Badge variant="outline">{t('sftp.preview.partial')}</Badge>}
     </div>
   );
-  const externalAction = onOpenExternally && (
-    <Tooltip>
-      <TooltipTrigger render={<Button variant="ghost" size="icon-sm" onClick={() => onOpenExternally(displayTarget.path)} />}>
-        <ExternalLinkIcon />
-        <span className="sr-only">{t('sftp.preview.openExternally')}</span>
-      </TooltipTrigger>
-      <TooltipContent>{t('sftp.preview.openExternally')}</TooltipContent>
-    </Tooltip>
+  const icon = defaultApplicationIcon?.path === displayTarget.path && defaultApplicationIcon.name === displayTarget.name
+    && defaultApplicationIcon.lookup === lookupDefaultIcon ? defaultApplicationIcon.icon : undefined;
+  const fileActionControls = fileActions && (
+    <SftpPreviewOpenControls key={displayTarget.path} target={displayTarget} actions={fileActions} defaultIcon={icon} />
   );
 
   return (
@@ -370,7 +389,7 @@ export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({ target, co
             <>
               <div className="flex min-h-11 items-center gap-2 px-3">
                 {metadata}
-                <div className="ml-auto">{externalAction}</div>
+                <div className="ml-auto">{fileActionControls}</div>
               </div>
               <Separator />
             </>
@@ -392,7 +411,7 @@ export const SftpPreviewDialog: React.FC<SftpPreviewDialogProps> = ({ target, co
               content={resolvedContent!}
               descriptor={descriptor!}
               textToolbarStart={inlineTextToolbar ? metadata : undefined}
-              textToolbarEnd={inlineTextToolbar ? externalAction : undefined}
+              textToolbarEnd={inlineTextToolbar ? fileActionControls : undefined}
             />
           )}
         </SftpDialogBody>

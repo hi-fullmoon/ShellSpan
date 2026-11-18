@@ -1,6 +1,7 @@
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { useAppStore } from '@/stores/appStore';
-import { useSftpStore } from '@/stores/sftpStore';
+import { getSftpPaneConnectionKey, getSftpPaneSource, useSftpStore, type SftpLocationRequest, type SftpSide } from '@/stores/sftpStore';
+import { sshRouteKey } from '@/lib/connections/ssh-route';
 import { useTerminalStore } from '@/stores/terminalStore';
 import type { ConnectionProfile, HostConnectionAction } from '@/types';
 import { validateHostQuickAction } from '@/lib/host/host-quick-action-model';
@@ -57,10 +58,28 @@ export function openHostPath(
   path: string,
   target: 'terminal' | 'sftp',
   sftpSide: 'local' | 'remote' = 'remote',
-): void {
+  locationRequest?: SftpLocationRequest,
+): boolean {
   if (target === 'sftp') {
     const state = useSftpStore.getState();
-    const openConnection = state.connections.find((connection) => (
+    if (locationRequest) {
+      const sides: readonly SftpSide[] = ['remote', 'local'];
+      for (const connection of state.connections) {
+        const side = sides.find(candidate => (
+          (candidate === 'remote' ? connection.profileId : connection.leftProfileId) === profile.id
+          && getSftpPaneSource(connection, candidate) === 'remote'
+          && !connection.restorePending?.[candidate] && !connection.connectionAttemptIds?.[candidate]
+          && locationRequest.routeKey === getSftpPaneConnectionKey(connection, candidate)
+        ));
+        if (!side) continue;
+        state.setPaneState(connection.id, side, { locationRequest });
+        state.setActiveConnection(connection.id);
+        useAppStore.getState().setActiveSection('sftp');
+        return true;
+      }
+      if (locationRequest.routeKey !== sshRouteKey(profile)) return false;
+    }
+    const openConnection = !locationRequest && state.connections.find((connection) => (
       connection.profileId === profile.id || connection.leftProfileId === profile.id
     ));
     if (openConnection) {
@@ -70,7 +89,7 @@ export function openHostPath(
       document.dispatchEvent(new CustomEvent('shellspan:open-sftp-path', {
         detail: { connectionId: openConnection.id, side: openSide, path },
       }));
-      return;
+      return true;
     }
   }
   document.dispatchEvent(new CustomEvent('shellspan:connect-profile', {
@@ -79,8 +98,10 @@ export function openHostPath(
       target,
       initialDirectory: path,
       sftpSide: target === 'sftp' ? 'remote' : sftpSide,
+      ...(locationRequest && { locationRequest }),
     },
   }));
+  return true;
 }
 
 export function runHostConnectionAction(

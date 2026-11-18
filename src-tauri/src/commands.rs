@@ -2976,9 +2976,12 @@ pub(crate) fn reveal_path(path: String) -> Result<(), String> {
     if !path.exists() {
         return Err(format!("path does not exist: {}", path.display()));
     }
-    let canonical = path
-        .canonicalize()
-        .map_err(|error| format!("failed to canonicalize path: {error}"))?;
+    // Resolve the directory while keeping the selected entry, including symlinks.
+    let canonical = match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => parent.canonicalize().map(|parent| parent.join(name)),
+        _ => path.canonicalize(),
+    }
+    .map_err(|error| format!("failed to canonicalize path: {error}"))?;
 
     #[cfg(target_os = "macos")]
     std::process::Command::new("open")

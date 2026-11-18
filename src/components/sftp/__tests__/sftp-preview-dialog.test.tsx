@@ -47,14 +47,12 @@ describe('SftpPreviewDialog', () => {
     expect(screen.queryByRole('video')).not.toBeInTheDocument();
   });
 
-  it('renders text metadata, line count, and external-open action', () => {
-    const onOpenExternally = vi.fn();
+  it('renders text metadata and line count in one toolbar row', () => {
     render(
       <SftpPreviewDialog
         open
         content={response()}
         onClose={vi.fn()}
-        onOpenExternally={onOpenExternally}
       />,
     );
 
@@ -69,8 +67,6 @@ describe('SftpPreviewDialog', () => {
     expect(toolbar?.querySelector('[data-slot="badge"]')).toBeNull();
     expect(toolbar?.querySelector('[data-slot="separator"]')).toBeNull();
     expect(screen.queryByText('sftp.preview.kind.text')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'sftp.preview.openExternally' }));
-    expect(onOpenExternally).toHaveBeenCalledWith('/srv/readme.txt');
   });
 
   it('renders Markdown as a document with a source view', () => {

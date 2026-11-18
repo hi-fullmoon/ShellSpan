@@ -28,15 +28,19 @@ import {
   getSftpPaneConnectionKey,
   useSftpStore,
   type SftpConnection,
+  type SftpLocationRequest,
 } from '@/stores/sftpStore';
 import { useTransferStore } from '@/stores/transferStore';
 import { createLogger } from '@/lib/logger';
 import { getErrorMessage, getLocalizedErrorMessage } from '@/lib/error';
 import { promptForMissingKeychainKey } from '@/lib/connections/keychain-key-prompt';
+import { sshRouteKey } from '@/lib/connections/ssh-route';
 import { normalizePortablePath } from '@/lib/path-utils';
 import { isTransferTargetCurrent } from '@/lib/sftp/transfer-target';
 import { useAppStore } from '@/stores/appStore';
 import { useProfileStore } from '@/stores/profileStore';
+import { useToastStore } from '@/stores/toastStore';
+import { t } from '@/locales';
 import {
   getBackendDirectoryListRequestKey,
   isLatestDirectoryListRequest,
@@ -47,6 +51,7 @@ import type {
   ReadRemoteFileResponse,
   RemoteDirectoryListing,
   RemoteFileEntry,
+  SaveFileDestination,
   TransferBatchResult,
   UploadConflictPolicy,
 } from '@/types';
@@ -111,15 +116,15 @@ async function runWithConfiguredRetries(
 }
 
 export function useSftpConnection(connection: SftpConnection, side: SftpSide = 'remote'): {
-  loadRemoteDirectory: (path?: string, canApply?: () => boolean) => Promise<void>;
+  loadRemoteDirectory: (path?: string, canApply?: () => boolean, location?: SftpLocationRequest) => Promise<void>;
   createRemoteEntry: (parentPath: string, name: string, kind: 'file' | 'directory') => Promise<void>;
   renameRemotePath: (path: string, newName: string) => Promise<void>;
   copyRemotePath: (sourcePath: string, destinationDirectory: string) => Promise<void>;
   deleteRemotePaths: (paths: string[]) => Promise<void>;
   updateRemotePermissions: (path: string, permissions: number) => Promise<void>;
   uploadLocalPaths: (localPaths: string[], destinationDirectory: string, operationId?: string, conflictPolicies?: UploadConflictPolicy[]) => Promise<void>;
-  downloadRemotePaths: (remotePaths: string[], destinationDirectory: string, operationId?: string, conflictPolicies?: UploadConflictPolicy[]) => Promise<void>;
-  openRemoteFile: (path: string) => Promise<void>;
+  downloadRemotePaths: (remotePaths: string[], destinationDirectory: string, operationId?: string, conflictPolicies?: UploadConflictPolicy[], saveDestination?: SaveFileDestination) => Promise<void>;
+  openRemoteFile: (path: string, applicationId?: string) => Promise<void>;
   previewRemoteFile: (path: string) => Promise<ReadRemoteFileResponse>;
   cancelRemoteFileOpen: () => void;
   cancelRemoteFilePreview: () => void;
@@ -143,6 +148,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
   const setEntries = useSftpStore((state) => state.setEntries);
   const setLoading = useSftpStore((state) => state.setLoading);
   const setError = useSftpStore((state) => state.setError);
+  const setPaneState = useSftpStore((state) => state.setPaneState);
   const updateConnectionRequest = useSftpStore((state) => state.updateConnectionRequest);
   const addOperation = useTransferStore((state) => state.addOperation);
   const markOperationRunning = useTransferStore(
@@ -278,11 +284,16 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
   );
 
   const loadRemoteDirectory = useCallback(
-    async (path?: string, canApply: () => boolean = () => true) => {
+    async (path?: string, canApply: () => boolean = () => true, location?: SftpLocationRequest) => {
       if (!canApply()) return;
       const requestKey = `${connection.id}:${side}`;
       const requestId = nextDirectoryListRequestId(requestKey);
       const isLatest = () => isLatestDirectoryListRequest(requestKey, requestId) && canApply();
+      const isCurrentLocation = () => {
+        if (!location) return true;
+        const current = useSftpStore.getState().connections.find(({ id }) => id === connection.id);
+        return (side === 'local' ? current?.localPane : current?.remotePane)?.locationRequest === location;
+      };
       const backendRequestKey = getBackendDirectoryListRequestKey(requestKey);
       const requestedPath = path ?? '';
       const cached = getCachedDirectoryListing(directoryCacheScope, requestedPath);
@@ -300,6 +311,17 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         setEntries(connection.id, side, listing.entries);
         setCachedDirectoryListing(directoryCacheScope, requestedPath, listing);
         setCachedDirectoryListing(directoryCacheScope, listing.path, listing);
+        if (location) {
+          const entryName = location.entryName;
+          const entry = entryName === undefined ? undefined : listing.entries.find(({ name }) => name === entryName);
+          setPaneState(connection.id, side, {
+            locationRequest: undefined,
+            ...(entry && { selectedPaths: [entry.path], revealRequest: { path: entry.path } }),
+          });
+          if (entryName !== undefined && !entry) {
+            useToastStore.getState().addToast(t('sftp.location.entryMissing'), 'error');
+          }
+        }
         void resolveEntryOwners(listing, isLatest, backendRequestKey, requestId);
       };
       try {
@@ -309,10 +331,10 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
           requestKey: backendRequestKey,
           requestId,
         });
-        if (!isLatest()) return;
+        if (!isLatest() || !isCurrentLocation()) return;
         applyListing(listing);
       } catch (error) {
-        if (!isLatest()) return;
+        if (!isLatest() || !isCurrentLocation()) return;
         logger.error(`Failed to list remote directory${path ? `: ${path}` : ''}`, error);
 
         const message = getErrorMessage(error);
@@ -324,10 +346,10 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
           message.toLowerCase().startsWith('keychain key not found:')
         ) {
           const profile = useProfileStore.getState().getProfile(profileId);
-          if (profile) {
+          if (profile && (!location || sshRouteKey(profile) === location.routeKey)) {
             const recovered = await promptForMissingKeychainKey(profile);
-            if (!isLatest()) return;
-            if (recovered) {
+            if (!isLatest() || !isCurrentLocation()) return;
+            if (recovered && (!location || sshRouteKey(recovered) === location.routeKey)) {
               const newRequest = buildRemoteConnectionRequest(recovered);
               updateConnectionRequest(connection.id, side, newRequest);
               try {
@@ -337,13 +359,13 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
                   requestKey: backendRequestKey,
                   requestId,
                 });
-                if (!isLatest()) return;
+                if (!isLatest() || !isCurrentLocation()) return;
                 applyListing(retryListing);
                 return;
               } catch (retryError) {
                 // Fall through to the shared error path instead of letting the
                 // retry failure escape as an unhandled rejection.
-                if (!isLatest()) return;
+                if (!isLatest() || !isCurrentLocation()) return;
                 setError(
                   connection.id,
                   side,
@@ -355,7 +377,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
           }
         }
 
-        if (!isLatest()) return;
+        if (!isLatest() || !isCurrentLocation()) return;
         setError(
           connection.id,
           side,
@@ -367,7 +389,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         }
       }
     },
-    [connection.id, connection.leftProfileId, connection.profileId, directoryCacheScope, remoteConnection, setPath, setEntries, setLoading, setError, updateConnectionRequest, resolveEntryOwners, side],
+    [connection.id, connection.leftProfileId, connection.profileId, directoryCacheScope, remoteConnection, setPath, setEntries, setLoading, setError, setPaneState, updateConnectionRequest, resolveEntryOwners, side],
   );
 
   // Mutating operations invalidate this pane's cached listings up front so
@@ -659,7 +681,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
   );
 
   const downloadRemotePaths = useCallback(
-    async (remotePaths: string[], destinationDirectory: string, operationId = createOperationId(connection.id, 'download'), conflictPolicies: UploadConflictPolicy[] = []) => {
+    async (remotePaths: string[], destinationDirectory: string, operationId = createOperationId(connection.id, 'download'), conflictPolicies: UploadConflictPolicy[] = [], saveDestination?: SaveFileDestination) => {
       let currentRemotePaths = remotePaths;
       let currentConflictPolicies = conflictPolicies;
       let runDownload: () => Promise<void>;
@@ -669,7 +691,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
           kind: 'download',
           route: {
             source: { host: `${remoteConnection.username}@${remoteConnection.host}:${remoteConnection.port}`, path: remotePaths.join('\n') },
-            destination: { path: destinationDirectory },
+            destination: { path: saveDestination?.path ?? destinationDirectory },
           },
           ownerId: connection.id,
           connectionId: remoteConnectionKey,
@@ -693,6 +715,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
                 ...remoteConnection,
                 remotePaths: currentRemotePaths,
                 destinationDirectory,
+                saveDestination,
                 conflictPolicies: currentConflictPolicies,
                 operationId,
               });
@@ -728,8 +751,8 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
           const operation = useTransferStore.getState().operations.find(
             (item) => item.operationId === operationId,
           );
-          if (operation?.status === 'cancelling') {
-            // The download finished before the cancel request took effect.
+          if (operation?.status === 'cancelling' && !saveDestination) {
+            // Preserve the existing cancel handling for directory downloads.
             markOperationCancelled(operationId);
           } else {
             markOperationCompleted(operationId);
@@ -755,7 +778,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
   );
 
   const openRemoteFile = useCallback(
-    async (path: string) => {
+    async (path: string, applicationId?: string) => {
       const previousOperationId = openRemoteFileOperationRef.current;
       openRemoteFileOperationRef.current = undefined;
       cancelRemoteFileReadOperation(previousOperationId);
@@ -767,6 +790,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
           ...remoteConnection,
           path,
           operationId,
+          applicationId,
         });
       } catch (error) {
         if (!locallyCancelledRemoteFileReadsRef.current.has(operationId)) {

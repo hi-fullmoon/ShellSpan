@@ -223,6 +223,8 @@ export interface SessionSummary {
   host: string;
   port: number;
   username: string;
+  /** Captured from the successful SSH connection request by the IPC adapter. */
+  sshRouteKey?: string;
   /** Ephemeral broker-owned identity; omitted while terminal_broker is off. */
   terminalSessionId?: string;
   /** Generation of the currently attached PTY/ConPTY/SSH PTY transport. */
@@ -833,6 +835,18 @@ export interface CopyRemotePathRequest extends RemoteConnectionRequest {
 export interface OpenRemoteFileRequest extends RemoteConnectionRequest {
   path: string;
   operationId: string;
+  applicationId?: string;
+}
+
+export interface FileOpenApplication {
+  id: string;
+  name: string;
+  icon?: string;
+}
+
+export interface SaveFileDestination {
+  path: string;
+  replaceExisting: boolean;
 }
 
 export interface ReadRemoteFileRequest extends RemoteConnectionRequest {
@@ -859,6 +873,7 @@ export interface UpdateRemotePermissionsRequest
 export interface DownloadRemotePathsRequest extends RemoteConnectionRequest {
   remotePaths: string[];
   destinationDirectory: string;
+  saveDestination?: SaveFileDestination;
   conflictPolicies: UploadConflictPolicy[];
   operationId: string;
 }

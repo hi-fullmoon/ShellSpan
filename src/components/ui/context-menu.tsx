@@ -7,6 +7,9 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   menuPopupClassName,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
@@ -41,6 +44,9 @@ function ContextMenuContent({
 }
 
 const ContextMenuGroup = DropdownMenuGroup
+const ContextMenuSub = DropdownMenuSub
+const ContextMenuSubContent = DropdownMenuSubContent
+const compactItemClassName = "w-full px-2.5 py-1.5 text-left text-xs leading-4"
 
 function ContextMenuItem({
   className,
@@ -48,10 +54,17 @@ function ContextMenuItem({
 }: React.ComponentProps<typeof DropdownMenuItem>) {
   return (
     <DropdownMenuItem
-      className={cn("w-full px-2.5 py-1.5 text-left text-xs leading-4", className)}
+      className={cn(compactItemClassName, className)}
       {...props}
     />
   )
+}
+
+function ContextMenuSubTrigger({
+  className,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuSubTrigger>) {
+  return <DropdownMenuSubTrigger className={cn(compactItemClassName, className)} {...props} />
 }
 
 function ContextMenuSeparator({
@@ -68,4 +81,7 @@ export {
   ContextMenuGroup,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
 }

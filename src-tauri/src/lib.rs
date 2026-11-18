@@ -3,11 +3,13 @@
 mod agent_runtime;
 mod ai;
 mod ai_attachment;
+mod ai_file_actions;
 mod commands;
 mod connection;
 mod db;
 mod directory_request_registry;
 mod execution;
+mod file_actions;
 mod frontend_storage;
 mod health;
 mod identity_cache;
@@ -543,6 +545,15 @@ pub fn run() {
             commands::pick_local_folder,
             commands::open_path,
             commands::reveal_path,
+            ai_file_actions::list_local_file_apps,
+            ai_file_actions::open_local_file_with,
+            ai_file_actions::save_local_file_as,
+            ai_file_actions::read_local_file_text,
+            file_actions::list_file_open_applications,
+            file_actions::get_file_open_default_icon,
+            file_actions::open_local_file_with_application,
+            file_actions::pick_preview_save_destination,
+            file_actions::save_local_preview_file,
             commands::pick_private_key_file,
             commands::pick_profile_avatar,
             commands::open_remote_file,

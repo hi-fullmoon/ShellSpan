@@ -3,6 +3,8 @@ import type { NativePromptOriginObservation } from '@/lib/terminal/native-prompt
 import type { PetdexCategories, PetdexDiagnostic, PetdexTestResult, PetdexCheckResult } from '@/types';
 import { createLogger } from '@/lib/logger';
 import { modelDefinitionOf } from '@/lib/ai/provider-contract';
+import type { AiLocalFileReference } from '@/lib/ai/file-reference';
+import { sshRouteKey } from '@/lib/connections/ssh-route';
 import { createOperationId, findOperationId } from '@/lib/operation-id';
 import { listen, type EventCallback, type UnlistenFn } from '@tauri-apps/api/event';
 
@@ -41,6 +43,8 @@ import type {
   DeleteRemotePathRequest,
   SftpBookmarkRow,
   OpenRemoteFileRequest,
+  FileOpenApplication,
+  SaveFileDestination,
   ReadRemoteFileRequest,
   ReadRemoteFileResponse,
   UpdateRemotePermissionsRequest,
@@ -219,9 +223,12 @@ export async function invokeCreateSession(
   if(nativeInputProtocol) wireRequest.nativeInputProtocol=nativeInputProtocol;
   else delete wireRequest.nativeInputProtocol;
   const connectionStarted = onStarted ? new Channel<string>(onStarted) : undefined;
-  return invokeLogged<SessionSummary>('create_session', { request: wireRequest, ...(connectionStarted ? { connectionStarted } : {}) }).catch((error) => {
+  try {
+    const summary = await invokeLogged<SessionSummary>('create_session', { request: wireRequest, ...(connectionStarted ? { connectionStarted } : {}) });
+    return { ...summary, sshRouteKey: sshRouteKey(wireRequest) };
+  } catch (error) {
     throw error as CreateSessionError;
-  });
+  }
 }
 
 export async function invokeCreateLocalSession(
@@ -871,6 +878,26 @@ export async function invokeOpenRemoteFile(
   return invokeLogged('open_remote_file', { request });
 }
 
+export function invokeListFileOpenApplications(name: string, localPath?: string): Promise<FileOpenApplication[]> {
+  return invokeLogged('list_file_open_applications', { name, localPath });
+}
+
+export function invokeGetFileOpenDefaultIcon(name: string, localPath?: string): Promise<string | null> {
+  return invokeLogged('get_file_open_default_icon', { name, localPath });
+}
+
+export function invokeOpenLocalFileWithApplication(path: string, applicationId: string): Promise<void> {
+  return invokeLogged('open_local_file_with_application', { path, applicationId });
+}
+
+export function invokePickPreviewSaveDestination(name: string, title: string, localPath?: string): Promise<SaveFileDestination | null> {
+  return invokeLogged('pick_preview_save_destination', { name, title, localPath });
+}
+
+export function invokeSaveLocalPreviewFile(path: string, destination: SaveFileDestination): Promise<void> {
+  return invokeLogged('save_local_preview_file', { path, destination });
+}
+
 export async function invokePreviewRemoteFile(
   request: ReadRemoteFileRequest,
 ): Promise<ReadRemoteFileResponse> {
@@ -991,6 +1018,25 @@ export async function invokeOpenPath(path: string): Promise<void> {
 
 export async function invokeRevealPath(path: string): Promise<void> {
   return invokeLogged('reveal_path', { path });
+}
+
+export type LocalFileApp = 'vsCode' | 'terminal' | 'iterm' | 'xcode' | 'androidStudio' | 'systemPicker';
+
+export function invokeListLocalFileApps(): Promise<LocalFileApp[]> {
+  return isTauriRuntime() ? invokeLogged('list_local_file_apps') : Promise.resolve([]);
+}
+
+export function invokeOpenLocalFileWith(reference: AiLocalFileReference, app: LocalFileApp): Promise<void> {
+  const { path, line, column } = reference;
+  return invokeLogged('open_local_file_with', { path, line, column, app });
+}
+
+export function invokeSaveLocalFileAs(path: string, title: string): Promise<boolean> {
+  return invokeLogged('save_local_file_as', { path, title });
+}
+
+export function invokeReadLocalFileText(path: string): Promise<string> {
+  return invokeLogged('read_local_file_text', { path });
 }
 
 function toBackendKeychainKind(kind: KeychainKeyKind): string {

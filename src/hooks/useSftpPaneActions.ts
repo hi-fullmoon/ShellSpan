@@ -4,9 +4,15 @@ import {
   invokeCopyLocalPaths,
   invokeCancelRemoteCopy,
   invokeCopyRemoteToRemote,
+  invokeGetFileOpenDefaultIcon,
+  invokeListFileOpenApplications,
+  invokeOpenLocalFileWithApplication,
   invokePickLocalFiles,
   invokePickLocalFolder,
+  invokePickPreviewSaveDestination,
   invokeRenameLocalPath,
+  invokeRevealPath,
+  invokeSaveLocalPreviewFile,
   invokeTrashLocalPaths,
   invokePasteLocalPaths,
 } from '@/lib/ipc/tauri';
@@ -18,6 +24,7 @@ import { useI18n } from '@/hooks/useI18n';
 import {
   getSftpPaneConnection,
   getSftpPaneConnectionKey,
+  getSftpPaneSource,
   useSftpStore,
   type SftpConnection,
   type SftpSide,
@@ -30,7 +37,7 @@ import {
 import { createLogger } from '@/lib/logger';
 import { getLocalizedErrorMessage, getToastErrorMessage } from '@/lib/error';
 import type { FileEntry } from '@/components/sftp/utils';
-import type { ReadRemoteFileResponse, RemoteFileEntry, RemoteFileKind, UploadConflictPolicy } from '@/types';
+import type { FileOpenApplication, ReadRemoteFileResponse, RemoteFileEntry, RemoteFileKind, UploadConflictPolicy } from '@/types';
 import { useAppStore } from '@/stores/appStore';
 import { isTransferTargetCurrent } from '@/lib/sftp/transfer-target';
 
@@ -47,6 +54,15 @@ export interface PendingUploadConflict {
 
 export type SftpPreviewTarget = Pick<FileEntry, 'path' | 'name' | 'size'>;
 
+export interface SftpPreviewFileActions {
+  isRemote: boolean;
+  open: (target: SftpPreviewTarget, applicationId?: string) => Promise<void>;
+  getDefaultApplicationIcon: (target: Pick<SftpPreviewTarget, 'path' | 'name'>) => Promise<string | null>;
+  listApplications: (target: SftpPreviewTarget) => Promise<FileOpenApplication[]>;
+  reveal: (target: SftpPreviewTarget) => Promise<void>;
+  saveAs: (target: SftpPreviewTarget) => Promise<void>;
+}
+
 export interface UseSftpPaneActionsResult {
   createMode: 'file' | 'folder' | null;
   renameTarget?: FileEntry;
@@ -54,6 +70,7 @@ export interface UseSftpPaneActionsResult {
   propertiesTarget?: FileEntry;
   previewTarget?: SftpPreviewTarget;
   previewContent?: ReadRemoteFileResponse;
+  previewFileActions?: SftpPreviewFileActions;
   hasLocalClipboard: boolean;
   onOpen: (entry: FileEntry) => void;
   onOpenWithDefaultEditor: (entry?: Pick<FileEntry, 'path' | 'kind'>) => Promise<void>;
@@ -283,14 +300,16 @@ export function useSftpPaneActions(
   );
 
   const onOpenWithDefaultEditor = useCallback(
-    async (entry?: Pick<FileEntry, 'path' | 'kind'>) => {
+    async (entry?: Pick<FileEntry, 'path' | 'kind'>, applicationId?: string) => {
       const target = entry ?? selectedEntries[0];
       if (!target || target.kind === 'directory') return;
       try {
-        if (isLocal) {
+        if (isLocal && applicationId) {
+          await invokeOpenLocalFileWithApplication(target.path, applicationId);
+        } else if (isLocal) {
           await openLocalPath(target.path);
         } else {
-          await openRemoteFile(target.path);
+          await openRemoteFile(target.path, applicationId);
         }
       } catch (err) {
         logger.warn(`Failed to open ${isLocal ? 'local' : 'remote'} file: ${target.path}`, err);
@@ -332,6 +351,67 @@ export function useSftpPaneActions(
     setPreviewTarget(undefined);
     setPreviewContent(undefined);
   }, [cancelRemoteFilePreview]);
+
+  const getDefaultApplicationIcon = useCallback<SftpPreviewFileActions['getDefaultApplicationIcon']>(
+    ({ name, path }) => invokeGetFileOpenDefaultIcon(name, isLocal ? path : undefined),
+    [isLocal],
+  );
+
+  const previewFileActions: SftpPreviewFileActions = {
+    isRemote: !isLocal,
+    open: (target, applicationId) => onOpenWithDefaultEditor({ path: target.path, kind: 'file' }, applicationId),
+    getDefaultApplicationIcon,
+    listApplications: (target) => invokeListFileOpenApplications(target.name, isLocal ? target.path : undefined),
+    reveal: async (target) => {
+      try {
+        if (isLocal) {
+          await invokeRevealPath(target.path);
+          return;
+        }
+        const directory = parentPosixPath(target.path);
+        const requestId = previewRequestIdRef.current;
+        const currentConnection = () => useSftpStore.getState().connections.find((item) => item.id === connection.id);
+        const isCurrentSource = () => {
+          const current = currentConnection();
+          return current !== undefined && getSftpPaneSource(current, side) === 'remote'
+            && getSftpPaneConnectionKey(current, side) === remoteConnectionKey;
+        };
+        await loadRemoteDirectory(directory, isCurrentSource);
+        const current = currentConnection();
+        if (!current || !isCurrentSource() || requestId !== previewRequestIdRef.current) return;
+        const listing = side === 'local' ? current.localEntries : current.remoteEntries;
+        const listingError = side === 'local' ? current.localError : current.remoteError;
+        const listedPath = side === 'local' ? current.localPath : current.remotePath;
+        if (listingError) {
+          error(listingError);
+        } else if (listedPath !== directory || !listing.some((entry) => entry.path === target.path)) {
+          error(t('sftp.preview.revealMissing'));
+        } else {
+          setPaneState(connection.id, side, { selectedPaths: [target.path], revealRequest: { path: target.path } });
+          closePreview();
+        }
+      } catch (err) {
+        error(getToastErrorMessage(err));
+      }
+    },
+    saveAs: async (target) => {
+      try {
+        const requestId = previewRequestIdRef.current;
+        const destination = await invokePickPreviewSaveDestination(target.name, t('sftp.preview.saveAs'), isLocal ? target.path : undefined);
+        if (!destination || requestId !== previewRequestIdRef.current) return;
+        if (isLocal) {
+          await invokeSaveLocalPreviewFile(target.path, destination);
+          success(t('sftp.preview.fileSaved'));
+          return;
+        }
+        await runAfterPathsIdle([{ connectionId: remoteConnectionKey, paths: [target.path] }], () =>
+          downloadRemotePaths([target.path], parentPortablePath(destination.path), undefined, [], destination),
+        );
+      } catch (err) {
+        error(getToastErrorMessage(err));
+      }
+    },
+  };
 
   const onDownload = useCallback(
     async (entry?: FileEntry) => {
@@ -814,6 +894,7 @@ export function useSftpPaneActions(
     propertiesTarget,
     previewTarget,
     previewContent,
+    previewFileActions,
     hasLocalClipboard: localClipboard.length > 0,
     onOpen,
     onOpenWithDefaultEditor,

@@ -172,6 +172,7 @@ const Workbench: React.FC<WorkbenchProps> = ({
         profileId?: string;
         target?: 'terminal' | 'sftp';
         initialDirectory?: string;
+        locationRequest?: import('@/stores/sftpStore').SftpLocationRequest;
         sftpSide?: 'local' | 'remote';
       }>).detail;
       const profile = detail?.profileId
@@ -183,7 +184,7 @@ const Workbench: React.FC<WorkbenchProps> = ({
           profile,
           undefined,
           detail.sftpSide ?? 'remote',
-          detail.initialDirectory,
+          detail.locationRequest ?? detail.initialDirectory,
         );
       } else {
         void connect(profile, { initialDirectory: detail.initialDirectory });

@@ -1,12 +1,14 @@
 import React, {
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
-import Markdown, { type Components, type ExtraProps } from 'react-markdown';
+import Markdown, { defaultUrlTransform, type Components, type ExtraProps, type UrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 import { Check, Copy } from 'lucide-react';
@@ -25,11 +27,12 @@ import {
 } from '@/components/ui/context-menu';
 import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
-import { invokeOpenPath, invokeOpenUrl, invokeRevealPath, isTauriRuntime } from '@/lib/ipc/tauri';
-import { getPlatform } from '@/lib/platform';
+import { aiLocalFileReference } from '@/lib/ai/file-reference';
+import { invokeOpenUrl, isTauriRuntime } from '@/lib/ipc/tauri';
 import { createStreamingMarkdownSplitter } from '@/lib/streaming-markdown';
-import type { AgentSessionAssistantContentBlock } from '@/types/agent-session';
+import type { AgentSessionAssistantContentBlock, AgentSessionTarget } from '@/types/agent-session';
 import { cn } from '@/lib/utils';
+import { AiFileReferenceMenu } from './ai-file-reference-menu';
 import { useMessageLayoutCommit } from './message-layout-context';
 import { rehypeStreamingText, StreamingText, StreamingTextBoundaryContext, StreamingTextContext } from './streaming-text';
 
@@ -48,8 +51,17 @@ function languageFromNode(node: React.ReactNode): string {
   return /language-([^\s]+)/u.exec(child.props.className ?? '')?.[1] ?? '';
 }
 
+const MarkdownLinkContext = createContext(false);
+export const AiMarkdownTargetContext = createContext<AgentSessionTarget | undefined>(undefined);
+
 function MarkdownLink({ children, href }: { children: React.ReactNode; href?: string }) {
   const { t } = useI18n();
+  const target = useContext(AiMarkdownTargetContext);
+  const reference = href && aiLocalFileReference(href, 'link', target?.kind);
+  if (reference) {
+    if (target?.kind === 'remote' && !reference.path.startsWith('/')) return <span>{children}</span>;
+    return <AiFileReferenceMenu reference={reference} target={target}>{children}</AiFileReferenceMenu>;
+  }
   const label = textFromNode(children).trim();
   if (!href || !/^(https?:\/\/|mailto:)/iu.test(href)) {
     return <a href={href} target="_blank" rel="noreferrer">{children}</a>;
@@ -99,65 +111,13 @@ function MarkdownLink({ children, href }: { children: React.ReactNode; href?: st
 }
 
 function MarkdownInlineCode({ children, className }: { children: React.ReactNode; className?: string }) {
-  const { t } = useI18n();
-  const path = textFromNode(children).trim();
-  const isLocalPath = !className && /^(?:[A-Za-z]:[\\/]|\\\\|\/)[^\r\n]+$/u.test(path);
-  const openPath = (): void => {
-    void invokeOpenPath(path).catch(() => toast.error(t('ai.path.openFailed')));
-  };
-  const revealPath = (): void => {
-    void invokeRevealPath(path).catch(() => toast.error(t('ai.path.revealFailed')));
-  };
-  const platform = getPlatform();
-  const revealLabel = platform === 'macos'
-    ? t('ai.path.revealFinder')
-    : platform === 'windows'
-      ? t('ai.path.revealExplorer')
-      : t('ai.path.revealFileManager');
-  const openShortcut = platform === 'macos'
-    ? t('ai.path.openWithCommand')
-    : t('ai.path.openWithCtrl');
-  const code = (
-    <code
-      className={cn(!className && 'ai-markdown-inline-code', isLocalPath && 'ai-markdown-local-path', className)}
-      role={isLocalPath ? 'link' : undefined}
-      tabIndex={isLocalPath ? 0 : undefined}
-      aria-description={isLocalPath ? openShortcut : undefined}
-      onClick={isLocalPath ? (event) => {
-        if (platform === 'macos' ? event.metaKey : event.ctrlKey) openPath();
-      } : undefined}
-      onKeyDown={isLocalPath ? (event) => {
-        if (event.key === 'Enter') openPath();
-      } : undefined}
-    >
-      {children}
-    </code>
-  );
-  if (!isLocalPath) return code;
-
-  const copyPath = (): void => {
-    if (!navigator.clipboard) {
-      toast.error(t('ai.path.copyFailed'));
-      return;
-    }
-    void navigator.clipboard.writeText(path)
-      .then(() => toast.success(t('common.copied')))
-      .catch(() => toast.error(t('ai.path.copyFailed')));
-  };
-
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger render={code} />
-      <ContextMenuContent>
-        <ContextMenuGroup>
-          <ContextMenuItem onClick={openPath}>{t('ai.path.open')}</ContextMenuItem>
-          <ContextMenuItem onClick={revealPath}>{revealLabel}</ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem onClick={copyPath}>{t('ai.path.copy')}</ContextMenuItem>
-        </ContextMenuGroup>
-      </ContextMenuContent>
-    </ContextMenu>
-  );
+  const insideLink = useContext(MarkdownLinkContext);
+  const target = useContext(AiMarkdownTargetContext);
+  const text = !className && !insideLink ? textFromNode(children) : '';
+  const reference = !text.includes('\n') && aiLocalFileReference(text.trim(), 'code', target?.kind);
+  return reference && (target?.kind !== 'remote' || reference.path.startsWith('/'))
+    ? <AiFileReferenceMenu reference={reference} target={target} inlineCode>{children}</AiFileReferenceMenu>
+    : <code className={className || 'ai-markdown-inline-code'}>{children}</code>;
 }
 
 function MarkdownCodeBlock({
@@ -238,6 +198,9 @@ export const MarkdownContent = React.memo(function MarkdownContent({
   initialSource?: string;
 }): React.JSX.Element {
   const { t } = useI18n();
+  const targetKind = useContext(AiMarkdownTargetContext)?.kind;
+  const markdownUrlTransform: UrlTransform = (value, key) =>
+    key === 'href' && aiLocalFileReference(value, 'link', targetKind) ? value : defaultUrlTransform(value);
   const previousSource = useRef(initialSource);
   const fallbackImageAlt = t('ai.workspace.images.fallbackAlt');
   const revealFrom = children.startsWith(previousSource.current) ? previousSource.current.length : children.length;
@@ -246,7 +209,11 @@ export const MarkdownContent = React.memo(function MarkdownContent({
   // when the growing chunk is parsed again.
   const components = useMemo<Components>(() => ({
     span: MarkdownStreamingSpan,
-    a: ({ children: linkChildren, href }) => <MarkdownLink href={href}>{linkChildren}</MarkdownLink>,
+    a: ({ children: linkChildren, href }) => (
+      <MarkdownLinkContext.Provider value={true}>
+        <MarkdownLink href={href}>{linkChildren}</MarkdownLink>
+      </MarkdownLinkContext.Provider>
+    ),
     blockquote: ({ children: quoteChildren }) => <blockquote>{quoteChildren}</blockquote>,
     code: ({ children: codeChildren, className }) => (
       <MarkdownInlineCode className={className}>{codeChildren}</MarkdownInlineCode>
@@ -274,6 +241,7 @@ export const MarkdownContent = React.memo(function MarkdownContent({
         <Markdown
           remarkPlugins={MARKDOWN_PLUGINS}
           rehypePlugins={STREAMING_TEXT_PLUGINS}
+          urlTransform={markdownUrlTransform}
           skipHtml
           components={components}
         >

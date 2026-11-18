@@ -11,7 +11,8 @@ const { invokeOpenPath, invokeOpenUrl, invokeRevealPath } = vi.hoisted(() => ({
 
 vi.mock('@/lib/platform', () => ({ getPlatform: vi.fn(() => 'windows') }));
 
-vi.mock('@/lib/ipc/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/ipc/tauri')>(),
   invokeOpenPath,
   invokeOpenUrl,
   invokeRevealPath,
@@ -36,6 +37,7 @@ vi.mock('@/hooks/useI18n', () => ({
 describe('AssistantMessageContent', () => {
   beforeEach(() => {
     invokeOpenPath.mockClear();
+    vi.mocked(getPlatform).mockReturnValue('windows');
   });
 
   it('opens an absolute local path with Ctrl + click on Windows or from the context menu', async () => {
@@ -62,8 +64,7 @@ describe('AssistantMessageContent', () => {
     expect(invokeOpenPath).toHaveBeenCalledWith('C:\\Users\\tester\\todo.html');
     invokeOpenPath.mockClear();
     fireEvent.contextMenu(path, { clientX: 120, clientY: 80 });
-    const menu = await screen.findByRole('menu');
-    expect(menu.querySelectorAll('[role="menuitem"]')).toHaveLength(3);
+    await screen.findByRole('menu', { name: 'ai.path.menu' });
     fireEvent.click(await screen.findByRole('menuitem', { name: 'ai.path.revealExplorer' }));
     expect(invokeRevealPath).toHaveBeenCalledWith('C:\\Users\\tester\\todo.html');
 
@@ -73,7 +74,7 @@ describe('AssistantMessageContent', () => {
   });
 
   it('uses Command + click and Finder wording on macOS', async () => {
-    vi.mocked(getPlatform).mockReturnValueOnce('macos');
+    vi.mocked(getPlatform).mockReturnValue('macos');
     render(
       <AssistantMessageContent
         blocks={[{ type: 'text', text: 'Saved at `/Users/tester/todo.html`.' }]}

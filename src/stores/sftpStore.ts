@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { generateId } from '@/lib/utils';
+import { sshRouteKey } from '@/lib/connections/ssh-route';
 import type {
   ConnectionProfile,
   LocalFileEntry,
@@ -32,10 +33,18 @@ const logger = createLogger('sftpStore');
 export type SftpSide = 'local' | 'remote';
 export type SftpPaneSource = 'empty' | 'local' | 'remote';
 
+export interface SftpLocationRequest {
+  path: string;
+  entryName?: string;
+  routeKey: string;
+}
+
 export interface SftpPaneState {
   pathInput: string;
   filterQuery: string;
   selectedPaths: string[];
+  revealRequest?: { path: string };
+  locationRequest?: SftpLocationRequest;
   batchMode: boolean;
 }
 
@@ -150,7 +159,7 @@ interface SftpState {
     summary: SessionSummary,
     connection: RemoteConnectionRequest,
     profileId: string,
-    initialDirectory?: string,
+    initialDirectory?: string | SftpLocationRequest,
   ) => string | null;
   endConnectionAttempt: (attemptId: string) => void;
   addLocalConnection: () => void;
@@ -256,16 +265,7 @@ export function getSftpPaneConnectionKey(
   connection: SftpConnection,
   side: SftpSide,
 ): string {
-  const request = getSftpPaneConnection(connection, side);
-  const jump = request.jumpHost;
-  return JSON.stringify([
-    request.host,
-    request.port,
-    request.username,
-    jump?.host ?? '',
-    jump?.port ?? 0,
-    jump?.username ?? '',
-  ]);
+  return sshRouteKey(getSftpPaneConnection(connection, side));
 }
 
 // True while any tracked transfer still holds paths on this connection. The
@@ -403,6 +403,8 @@ export const useSftpStore = create<SftpState>()((set) => ({
         ? 'local'
         : 'remote';
       const wasRestored = target.restorePending?.[side] === true;
+      const locationRequest = typeof initialDirectory === 'object' ? initialDirectory : undefined;
+      const directory = typeof initialDirectory === 'string' ? initialDirectory : locationRequest?.path;
       resolvedConnectionId = target.id;
       return {
         connections: updateConnection(state, target.id, (current) => ({
@@ -423,12 +425,12 @@ export const useSftpStore = create<SftpState>()((set) => ({
               }),
           localOnly: false,
           rightLocal: side === 'remote' ? false : current.rightLocal,
-          [getPathKey(side)]: initialDirectory
+          [getPathKey(side)]: directory
             ?? (wasRestored ? current[getPathKey(side)] : ''),
           [getEntriesKey(side)]: [],
           [getLoadingKey(side)]: false,
           [getErrorKey(side)]: undefined,
-          [getPaneKey(side)]: createDefaultPaneState(),
+          [getPaneKey(side)]: { ...createDefaultPaneState(), locationRequest },
           pendingConnection: false,
           connectionAttemptIds: {
             ...current.connectionAttemptIds,

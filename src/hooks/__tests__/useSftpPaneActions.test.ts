@@ -380,7 +380,7 @@ describe('useSftpPaneActions', () => {
 
     await act(() => result.current.onOpenWithDefaultEditor({ path: '/home/previewed.txt', kind: 'file' }));
 
-    expect(connectionMocks.openRemoteFile).toHaveBeenCalledWith('/home/previewed.txt');
+    expect(connectionMocks.openRemoteFile).toHaveBeenCalledWith('/home/previewed.txt', undefined);
   });
 
   it('previews a local file through the local reader', async () => {

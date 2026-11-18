@@ -1541,6 +1541,114 @@
 
     #[test]
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn isolated_ssh_sftp_end_to_end_preview_save_as() {
+        use crate::file_actions::SaveFileDestination;
+
+        #[derive(Clone)]
+        struct CancelOnDownload(Arc<AtomicBool>);
+
+        impl TransferEventEmitter for CancelOnDownload {
+            fn emit_transfer_event<S>(&self, event: &str, payload: S) -> Result<(), String>
+            where
+                S: serde::Serialize + Clone,
+            {
+                if event == crate::DOWNLOAD_PROGRESS_EVENT {
+                    let progress =
+                        serde_json::to_value(payload).map_err(|error| error.to_string())?;
+                    if progress["downloadedBytes"].as_u64().unwrap_or_default() > 0 {
+                        self.0.store(true, AtomicOrdering::SeqCst);
+                    }
+                }
+                Ok(())
+            }
+        }
+
+        let host = std::env::var("SHELLSPAN_E2E_SSH_HOST").unwrap_or_else(|_| "127.0.0.1".into());
+        let port = std::env::var("SHELLSPAN_E2E_SSH_PORT")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(22222);
+        let username =
+            std::env::var("SHELLSPAN_E2E_SSH_USERNAME").unwrap_or_else(|_| "shellspan".into());
+        let connection = RemoteConnectionRequest {
+            host: host.clone(),
+            port,
+            username: username.clone(),
+            auth_method: crate::models::AuthMethod::Password,
+            password: Some(
+                std::env::var("SHELLSPAN_E2E_SSH_PASSWORD")
+                    .unwrap_or_else(|_| "shellspan-e2e".into()),
+            ),
+            keychain_key_id: None,
+            private_key_data: None,
+            passphrase: None,
+            jump_host: None,
+        };
+        let (_known_hosts_temp, known_hosts) =
+            crate::connection::trusted_known_hosts_fixture(&host, port);
+        let directory = tempfile::tempdir().unwrap();
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("icons/icon.png");
+        let remote_root = format!(
+            "/home/{username}/upload/shellspan-preview-{}",
+            Uuid::new_v4()
+        );
+        let remote_path = format!("{remote_root}/icon.png");
+        let upload = upload_local_paths_inner(
+            NoopTransferEventEmitter,
+            UploadLocalPathsRequest {
+                connection: connection.clone(),
+                destination_directory: remote_root,
+                local_paths: vec![path_to_string(&source)],
+                conflict_policies: Vec::new(),
+                operation_id: "preview-upload".into(),
+            },
+            Arc::new(AtomicBool::new(false)),
+            Some(&known_hosts),
+        )
+        .unwrap();
+        assert_eq!(upload.items[0].status, TransferItemStatus::Completed);
+
+        let destination = directory.path().join("saved icon.png");
+        let request = || DownloadRemotePathsRequest {
+            connection: connection.clone(),
+            remote_paths: vec![remote_path.clone()],
+            destination_directory: path_to_string(directory.path()),
+            save_destination: Some(SaveFileDestination::selected(&destination).unwrap()),
+            conflict_policies: Vec::new(),
+            operation_id: "preview-save".into(),
+        };
+
+        let existing = include_bytes!("../../../public/shellspan-icon.svg");
+        fs::write(&destination, existing).unwrap();
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let _cancelled = download_remote_paths_inner(
+            CancelOnDownload(cancel_flag.clone()),
+            request(),
+            cancel_flag.clone(),
+            Some(&known_hosts),
+        );
+        assert!(cancel_flag.load(AtomicOrdering::SeqCst));
+        assert_eq!(fs::read(&destination).unwrap(), existing);
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+
+        let result = download_remote_paths_inner(
+            NoopTransferEventEmitter,
+            request(),
+            Arc::new(AtomicBool::new(false)),
+            Some(&known_hosts),
+        )
+        .unwrap();
+        assert_eq!(result.items[0].status, TransferItemStatus::Completed);
+        assert_eq!(
+            result.items[0].destination_path.as_deref(),
+            destination.to_str()
+        );
+        assert_eq!(fs::read(&destination).unwrap(), fs::read(&source).unwrap());
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
     fn isolated_sftp_transfer_benchmark() {
         let host =
             std::env::var("SHELLSPAN_E2E_SSH_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
@@ -1665,6 +1773,7 @@
                         connection: connection.clone(),
                         remote_paths: vec![copied_path],
                         destination_directory: path_to_string(&download_directory),
+                        save_destination: None,
                         conflict_policies: Vec::new(),
                         operation_id: download_id.clone(),
                     },

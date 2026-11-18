@@ -894,12 +894,12 @@ export const SftpContent: React.FC<SftpContentProps> = ({
                   setSourceTargetSide('local');
                   setNewConnectionMenuOpen(true);
                 }}
-                onVerifyHostKey={() => {
+                onVerifyHostKey={(onVerified) => {
                   const request = getSftpPaneConnection(connection, 'local');
                   void verifyHostKey(
                     request.host,
                     request.port,
-                    () => void leftRemote.loadRemoteDirectory(connection.localPath),
+                    onVerified,
                   );
                 }}
                 onReconnect={() => reconnectRestoredPane('local')}
@@ -937,12 +937,12 @@ export const SftpContent: React.FC<SftpContentProps> = ({
                 actions={remoteActions}
                 selectedPaths={selectedRemotePaths}
                 onSelectedPathsChange={handleRemoteSelectedPathsChange}
-                onVerifyHostKey={() => {
+                onVerifyHostKey={(onVerified) => {
                   const request = getSftpPaneConnection(connection, 'remote');
                   void verifyHostKey(
                     request.host,
                     request.port,
-                    () => void rightRemote.loadRemoteDirectory(connection.remotePath),
+                    onVerified,
                   );
                 }}
                 onReconnect={() => reconnectRestoredPane('remote')}
@@ -1045,9 +1045,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
           content={localActions.previewContent}
           open={localActions.previewTarget !== undefined}
           onClose={localActions.closePreview}
-          onOpenExternally={(path) => {
-            void localActions.onOpenWithDefaultEditor({ path, kind: 'file' });
-          }}
+          fileActions={localActions.previewFileActions}
         />
 
         <SftpPreviewDialog
@@ -1055,9 +1053,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
           content={remoteActions.previewContent}
           open={remoteActions.previewTarget !== undefined}
           onClose={remoteActions.closePreview}
-          onOpenExternally={(path) => {
-            void remoteActions.onOpenWithDefaultEditor({ path, kind: 'file' });
-          }}
+          fileActions={remoteActions.previewFileActions}
         />
 
         <SftpUploadConflictDialog
