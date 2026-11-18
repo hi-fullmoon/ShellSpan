@@ -1,9 +1,19 @@
 import { spawnSync } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { resolveConfig } from 'vite';
 import { expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '../..');
 const cargoAvailable = spawnSync(process.env.CARGO || 'cargo', ['--version'], { encoding: 'utf8', timeout: 15000 }).status === 0;
+
+it('uses the same fixed loopback endpoint for Tauri and Vite development', async () => {
+  const tauri = JSON.parse(await readFile(resolve(root, 'src-tauri/tauri.conf.json'), 'utf8'));
+  const vite = await resolveConfig({ root }, 'serve');
+
+  expect(vite.server).toMatchObject({ host: '127.0.0.1', port: 1420, strictPort: true });
+  expect(tauri.build.devUrl).toBe(`http://${vite.server.host}:${vite.server.port}`);
+});
 
 it('forwards development options to the installed Tauri CLI', () => {
   const result = spawnSync(process.execPath, ['scripts/dev.mjs', '--help'], { cwd: root, encoding: 'utf8', timeout: 15000 });
