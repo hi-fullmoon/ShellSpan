@@ -7,7 +7,7 @@ import { terminalRecoveryView } from '@/tests/fixtures/terminal-execution-recove
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { agentSessionView } from '@/lib/ai/agent-session-adapter';
 import { conversationFoldRecording } from '@/tests/fixtures/conversation-fold-runtime';
-import { initI18n } from '@/locales';
+import { initI18n, t } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import type { AiSessionStatus } from '@/lib/ai/conversation-node';
 import type { AgentSessionEvent } from '@/types/agent-session';
@@ -28,10 +28,12 @@ export async function mount(host: HTMLElement, locale: Locale) {
     render(status: AiSessionStatus, statusReason?: string) {
       flushSync(() => root.render(<AiConversation nodes={nodes} status={status} statusReason={statusReason} throughSeq={events[end - 1].seq} />));
     },
-    recovery(stage: 'waiting' | 'stopping' | 'stopped' | 'reconnecting' | 'cleared' | 'history') {
-      const view = terminalRecoveryView(stage === 'stopped' || stage === 'reconnecting' || stage === 'cleared' ? 'idle' : 'waiting');
+    recovery(stage: 'waiting' | 'stopping' | 'stopped' | 'reconnecting' | 'cleared' | 'history' | 'disconnected') {
+      const recoveryCleared = stage === 'cleared' || stage === 'disconnected';
+      const view = terminalRecoveryView(stage === 'stopped' || stage === 'reconnecting' || recoveryCleared ? 'idle' : 'waiting');
       flushSync(() => root.render(<AiWorkspaceRoot scope="terminal" canStartAgent
-        view={stage === 'cleared' ? { ...view, recovery: { status: 'none' } } : view}
+        view={recoveryCleared ? { ...view, recovery: { status: 'none' } } : view}
+        agentUnavailableReason={stage === 'disconnected' ? t('agent.availability.needsTerminal') : null}
         composerState={stage === 'stopping' ? createAiComposerState({ phase: 'stopping' }) : undefined}
         terminalReconnecting={stage === 'reconnecting'} readOnlySession={stage === 'history'}
         historicalTargetUnavailable={stage === 'history'}

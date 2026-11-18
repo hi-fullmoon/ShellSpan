@@ -8,12 +8,22 @@ import { chromium, webkit } from 'playwright';
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const server = await createServer({ root, configFile: false, appType: 'custom', logLevel: 'error',
   cacheDir: `/tmp/shellspan-terminal-recovery-${process.pid}`,
+  optimizeDeps: { entries: ['src/components/ai/__tests__/ai-conversation-status.browser.tsx'] },
   plugins: [react(), tailwindcss()], resolve: { alias: { '@': `${root}src` } },
   server: { host: '127.0.0.1', port: 0, hmr: false } });
 server.middlewares.use('/__recovery', async (_request, response) => {
   response.setHeader('Content-Type', 'text/html');
   response.end(await server.transformIndexHtml('/__recovery', '<html><body></body></html>'));
 });
+
+async function assertNoticeAboveTasks(notice, taskStrip) {
+  await notice.waitFor({ state: 'visible' });
+  await taskStrip.waitFor({ state: 'visible' });
+  const noticeBox = await notice.boundingBox();
+  const taskBox = await taskStrip.boundingBox();
+  assert.ok(noticeBox.y + noticeBox.height <= taskBox.y, 'The session notice must be above Tasks');
+}
+
 try {
   await server.listen();
   for (const engine of [chromium, webkit]) {
@@ -21,7 +31,7 @@ try {
     try {
       for (const width of [360, 900]) {
         for (const locale of ['zh-CN', 'en-US']) {
-          const page = await browser.newPage({ viewport: { width, height: 720 } });
+          const page = await browser.newPage({ viewport: { width, height: 720 }, reducedMotion: 'reduce' });
           const errors = [];
           page.on('pageerror', error => errors.push(error.message));
           await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__recovery`);
@@ -35,7 +45,8 @@ try {
             window.recovery.recovery('waiting');
           }, locale);
           const notice = page.locator('[data-terminal-recovery-notice]');
-          await notice.waitFor({ state: 'visible' });
+          const taskStrip = page.locator('[data-slot="ai-task-strip"]');
+          await assertNoticeAboveTasks(notice, taskStrip);
           const stop = notice.getByRole('button', { name: locale === 'zh-CN' ? '停止任务' : 'Stop task', exact: true });
           const reconnect = notice.getByRole('button', { name: locale === 'zh-CN' ? '重新连接终端' : 'Reconnect terminal', exact: true });
           assert.ok((await notice.textContent()).includes(locale === 'zh-CN' ? '原命令可能已经执行' : 'The original command may still have run'));
@@ -72,6 +83,9 @@ try {
             await page.evaluate(stage => window.recovery.recovery(stage), stage);
             assert.equal(await notice.count(), 0);
           }
+          await page.evaluate(() => window.recovery.recovery('disconnected'));
+          const unavailable = page.getByRole('status', { name: locale === 'zh-CN' ? 'Agent 当前不可用' : 'Agent is unavailable' });
+          await assertNoticeAboveTasks(unavailable, taskStrip);
           assert.deepEqual(errors, []);
           await page.close();
         }

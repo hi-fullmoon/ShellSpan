@@ -471,7 +471,15 @@ export function AiComposerSeat({
       data-ai-mode={mode}
       className="ai-composer-seat relative mx-auto flex max-h-full min-h-0 w-full min-w-0 max-w-[calc(var(--ai-composer-card-max-width)+var(--ai-shell-clearance)+var(--ai-shell-clearance))] flex-col gap-[var(--ai-composer-stack-gap)] overflow-y-auto px-[var(--ai-shell-clearance)] py-2"
     >
+      {inputMode === 'supplement' && unavailableReason && (
+        <Alert id={availabilityHintId} variant="info" size="sm" role="status">
+          <InfoIcon aria-hidden="true" />
+          <AlertDescription>{unavailableReason}</AlertDescription>
+        </Alert>
+      )}
       <div data-slot="ai-composer-notices" className="flex shrink-0 flex-col gap-[var(--ai-composer-stack-gap)] empty:hidden">
+        {statusNotices}
+        {mode === 'agent' && executionSurfaceNotice}
         {mode === 'agent' && (
           <AiTaskStrip steps={taskSteps} active={taskPlanActive && (status === 'running' || status === 'waiting')} />
         )}
@@ -489,8 +497,6 @@ export function AiComposerSeat({
           onResume={onResumeQueueItem}
           onReorder={onReorderQueueLane}
         />}
-        {statusNotices}
-        {mode === 'agent' && executionSurfaceNotice}
         <AiQuestionSeat key={currentSessionId} question={pendingQuestion} onAnswer={onAnswerQuestion} onRefresh={onRefreshQuestionAnswer} onOpenSettings={onOpenModel} />
         {mode === 'agent' && <AiApprovalSeat key={`approval:${currentSessionId ?? composerState?.sessionId ?? ''}`}
           approval={!stopping && pendingApproval ? {
@@ -505,12 +511,6 @@ export function AiComposerSeat({
           onOpenDetails={onOpenApprovalDetails}
         />}
       </div>
-      {inputExpanded && inputMode === 'supplement' && unavailableReason && (
-        <Alert id={availabilityHintId} variant="info" size="sm" role="status">
-          <InfoIcon aria-hidden="true" />
-          <AlertDescription>{unavailableReason}</AlertDescription>
-        </Alert>
-      )}
       {inputExpanded && (
         <div id={inputRegionId} ref={completionAnchor} className="ai-composer-input-anchor relative flex min-h-24 min-w-0 shrink flex-col">
           <InputGroup ref={cardRef} className={cn(
