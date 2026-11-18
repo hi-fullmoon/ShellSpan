@@ -23,7 +23,7 @@ export function assertQuality(sha, expectedRunId) {
   const run = runs[0];
   if (!run || run.status !== 'completed' || run.conclusion !== 'success'
       || (expectedRunId !== undefined && run.id !== expectedRunId)) {
-    throw new Error(`Full Quality Gate has not passed for ${sha}; push main or run pnpm release:validate before preparing a version`);
+    throw new Error(`Full Quality Gate has not passed for ${sha}. After pushing the final code to main, run pnpm release:validate and wait for success before preparing a version.`);
   }
   const jobPages = JSON.parse(command('gh', ['api', '--paginate', '--slurp',
     `repos/${REPOSITORY}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`]));

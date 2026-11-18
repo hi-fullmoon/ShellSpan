@@ -2,15 +2,10 @@ name: Warm Rust Cache
 
 # Release builds run on tag refs, and GitHub Actions caches are scoped to the
 # ref that created them: a tag-triggered run can only restore caches from its
-# own tag or from the default branch. This workflow keeps a fresh Rust build
-# cache on main so release runs (release.yml, `save-if: false`) can restore it.
+# own tag or from the default branch. Run this workflow on main to refresh the
+# Rust build cache for release runs (release.yml, `save-if: false`).
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - src-tauri/**
   workflow_dispatch:
 
 permissions:

@@ -141,6 +141,18 @@ describe('release publication gates', () => {
     expect(() => assertDraft({ draft: false, prerelease: false })).toThrow(/immutable/);
   });
 
+  it('runs automatically only for release tags', async () => {
+    const release = parse(await readFile(path.join(root, '.github/workflows/release.yml'), 'utf8'));
+    const quality = parse(await readFile(path.join(root, '.github/workflows/quality-gate.yml'), 'utf8'));
+    const cacheWarm = parse(await readFile(path.join(root, '.github/workflows/cache-warm.yml'), 'utf8'));
+    expect(release.on).toEqual({
+      push: { tags: ['v*'] },
+      workflow_dispatch: expect.any(Object),
+    });
+    expect(quality.on).toEqual({ workflow_dispatch: null, workflow_call: expect.any(Object) });
+    expect(cacheWarm.on).toEqual({ workflow_dispatch: null });
+  });
+
   it('requires the full quality gate at the same SHA and serializes publication', async () => {
     const release = parse(await readFile(path.join(root, '.github/workflows/release.yml'), 'utf8'));
     const quality = parse(await readFile(path.join(root, '.github/workflows/quality-gate.yml'), 'utf8'));
