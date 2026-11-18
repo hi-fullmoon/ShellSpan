@@ -298,26 +298,76 @@
     }
 
     #[test]
-    fn open_temp_file_guard_removes_failed_download() {
+    fn open_temp_directory_removes_failed_download() {
         let directory = tempfile::tempdir().expect("create open temp directory");
-        let path = directory.path().join("partial.txt");
-        fs::write(&path, b"partial contents").expect("write partial open temp file");
+        let copy = OpenTempDirectory::create(directory.path()).unwrap();
+        let copy_directory = copy.path.clone();
+        fs::write(copy_directory.join("partial.txt"), b"partial contents").unwrap();
+        drop(copy);
 
-        {
-            let _guard = OpenTempFileGuard::new(path.clone());
-        }
-
-        assert!(!path.exists());
+        assert!(!copy_directory.exists());
     }
 
     #[test]
-    fn open_temp_file_name_is_bounded_and_preserves_a_safe_extension() {
-        let name = open_temp_file_name(&format!("{}.txt", "x".repeat(255)));
-        assert!(name.len() < 80);
-        assert!(name.ends_with(".txt"));
+    fn open_temp_file_name_preserves_the_original_posix_basename() {
+        assert_eq!(
+            open_temp_file_name("/srv/报表 2026.tar.gz"),
+            "报表 2026.tar.gz"
+        );
+        assert_eq!(open_temp_file_name("/srv/LICENSE"), "LICENSE");
+        assert_eq!(open_temp_file_name("/srv/.env"), ".env");
+        let long_name = format!("{}.txt", "x".repeat(251));
+        assert_eq!(open_temp_file_name(&long_name), long_name);
+        assert_eq!(open_temp_file_name("/srv/.."), "remote-file");
+        assert_eq!(open_temp_file_name("/srv/bad\0name.txt"), "remote-file");
+    }
 
-        let unsafe_extension = open_temp_file_name("report.secret/extension");
-        assert!(unsafe_extension.len() < 80);
+    #[test]
+    fn windows_open_file_name_replaces_unsupported_characters_and_device_names() {
+        assert_eq!(
+            windows_open_file_name("报表 2026.tar.gz"),
+            "报表 2026.tar.gz"
+        );
+        assert_eq!(
+            windows_open_file_name("folder\\report.txt:notes"),
+            "folder_report.txt_notes"
+        );
+        assert_eq!(windows_open_file_name("report.txt. "), "report.txt");
+        assert_eq!(windows_open_file_name("CON.txt"), "_CON.txt");
+        assert_eq!(windows_open_file_name("LPT¹ .txt"), "_LPT¹ .txt");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remote_open_cache_cleans_old_copies_and_keeps_recent_file_edits() {
+        let directory = tempfile::tempdir().unwrap();
+        let legacy = directory.path().join("legacy.txt");
+        let stale = OpenTempDirectory::create(directory.path()).unwrap();
+        let stale_path = stale.path.clone();
+        let edited = OpenTempDirectory::create(directory.path()).unwrap();
+        let edited_path = edited.path.clone();
+        let edited_file = edited_path.join("LICENSE.txt");
+        let old = SystemTime::now() - OPEN_TEMP_RETENTION - Duration::from_secs(60);
+        let license = include_bytes!("../../../LICENSE");
+        for path in [&legacy, &stale_path.join("LICENSE.txt"), &edited_file] {
+            fs::write(path, license).unwrap();
+        }
+        for path in [
+            &legacy,
+            &stale_path.join("LICENSE.txt"),
+            &stale_path,
+            &edited_path,
+        ] {
+            fs::File::open(path).unwrap().set_modified(old).unwrap();
+        }
+        stale.preserve();
+        edited.preserve();
+
+        cleanup_stale_open_temp_files(directory.path());
+
+        assert!(!legacy.exists());
+        assert!(!stale_path.exists());
+        assert_eq!(fs::read(edited_file).unwrap(), license);
     }
 
     #[test]
@@ -338,11 +388,16 @@
         let directory = tempfile::tempdir().expect("create parent temp directory");
         let open_root = directory.path().join("open-cache");
         prepare_private_open_root(&open_root).unwrap();
-        let file_path = open_root.join("private.txt");
+        let copy = OpenTempDirectory::create(&open_root).unwrap();
+        let file_path = copy.path.join("private.txt");
         drop(create_private_open_temp_file(&file_path).unwrap());
 
         assert_eq!(
             fs::metadata(&open_root).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(&copy.path).unwrap().permissions().mode() & 0o777,
             0o700
         );
         assert_eq!(
@@ -354,12 +409,14 @@
     #[test]
     fn oversized_open_copy_is_bounded_and_removes_its_partial_temp_file() {
         let directory = tempfile::tempdir().expect("create open temp directory");
-        let path = directory.path().join("oversized.txt");
+        let copy = OpenTempDirectory::create(directory.path()).unwrap();
+        let copy_directory = copy.path.clone();
+        let path = copy_directory.join("oversized.txt");
         let cancel_flag = AtomicBool::new(false);
         let mut reader = std::io::Cursor::new(b"0123456789".to_vec());
 
         let error = {
-            let _guard = OpenTempFileGuard::new(path.clone());
+            let _guard = copy;
             let mut local_file = fs::File::create(&path).expect("create partial open temp file");
             copy_remote_file_for_open_with_limit(&mut reader, &mut local_file, 5, &cancel_flag)
                 .expect_err("a growing remote file must not exceed the open limit")
@@ -371,18 +428,19 @@
         ));
         assert_eq!(reader.position(), 6, "the reader went past limit + 1");
         assert!(
-            !path.exists(),
-            "the rejected partial temp file was retained"
+            !copy_directory.exists(),
+            "the rejected partial copy directory was retained"
         );
     }
 
     #[test]
-    fn open_temp_file_guard_preserves_successful_download() {
+    fn open_temp_directory_preserves_successful_download() {
         let directory = tempfile::tempdir().expect("create open temp directory");
-        let path = directory.path().join("complete.txt");
+        let copy = OpenTempDirectory::create(directory.path()).unwrap();
+        let path = copy.path.join("complete.txt");
         fs::write(&path, b"complete contents").expect("write complete open temp file");
 
-        OpenTempFileGuard::new(path.clone()).preserve();
+        copy.preserve();
 
         assert_eq!(
             fs::read(&path).expect("read retained open temp file"),
@@ -1541,7 +1599,7 @@
 
     #[test]
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
-    fn isolated_ssh_sftp_end_to_end_preview_save_as() {
+    fn isolated_ssh_sftp_end_to_end_preview_file_actions() {
         use crate::file_actions::SaveFileDestination;
 
         #[derive(Clone)]
@@ -1645,6 +1703,40 @@
         );
         assert_eq!(fs::read(&destination).unwrap(), fs::read(&source).unwrap());
         assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+
+        let open_root = directory.path().join("open-cache");
+        let request = OpenRemoteFileRequest {
+            connection,
+            path: remote_path,
+            operation_id: "preview-open".into(),
+            application_id: None,
+        };
+        let cancel = AtomicBool::new(false);
+        let download = || {
+            download_remote_open_copy(&request, Some(&known_hosts), &open_root, &cancel).unwrap()
+        };
+        let (first_path, first_directory) = download();
+        assert_eq!(
+            first_path.file_name().and_then(|name| name.to_str()),
+            Some("icon.png")
+        );
+        assert_eq!(fs::read(&first_path).unwrap(), fs::read(&source).unwrap());
+        first_directory.preserve();
+        fs::write(&first_path, existing).unwrap();
+
+        let (second_path, second_directory) = download();
+        assert_eq!(second_path.file_name(), first_path.file_name());
+        assert_ne!(second_path.parent(), first_path.parent());
+        assert_eq!(fs::read(&second_path).unwrap(), fs::read(&source).unwrap());
+        assert_eq!(fs::read(&first_path).unwrap(), existing);
+        for path in [&first_path, &second_path] {
+            let parent = path.parent().unwrap();
+            assert_eq!(parent.parent(), Some(open_root.as_path()));
+            Uuid::parse_str(parent.file_name().unwrap().to_str().unwrap()).unwrap();
+        }
+        drop(second_directory);
+        assert!(!second_path.parent().unwrap().exists());
+        assert!(first_path.exists());
     }
 
     #[test]

@@ -61,7 +61,7 @@ const OPEN_REMOTE_FILE_CONNECTION_MODE: RemoteFileReadConnectionMode =
 const PREVIEW_REMOTE_FILE_CONNECTION_MODE: RemoteFileReadConnectionMode =
     RemoteFileReadConnectionMode::Dedicated;
 
-struct OpenTempFileGuard {
+struct OpenTempDirectory {
     path: PathBuf,
     preserve: bool,
 }
@@ -111,30 +111,75 @@ fn create_private_open_temp_file(path: &Path) -> Result<fs::File, RemoteFsError>
     })
 }
 
-fn open_temp_file_name(remote_file_name: &str) -> String {
-    let id = Uuid::new_v4();
-    let extension = Path::new(remote_file_name)
-        .extension()
-        .and_then(|value| value.to_str())
-        .filter(|value| {
-            !value.is_empty()
-                && value.len() <= 32
-                && value
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
-        });
-    match extension {
-        Some(extension) => format!("{id}.{extension}"),
-        None => id.to_string(),
+fn open_temp_file_name(remote_path: &str) -> String {
+    // SFTP paths use POSIX separators, including when ShellSpan runs on Windows.
+    let name = remote_path.rsplit('/').next().unwrap_or_default();
+    if matches!(name, "" | "." | "..") || name.contains('\0') {
+        return "remote-file".to_owned();
     }
+
+    #[cfg(windows)]
+    return windows_open_file_name(name);
+
+    #[cfg(not(windows))]
+    name.to_owned()
 }
 
-impl OpenTempFileGuard {
-    fn new(path: PathBuf) -> Self {
-        Self {
+#[cfg(any(windows, test))]
+fn windows_open_file_name(name: &str) -> String {
+    static DEVICE_NAMES: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r"(?i)^(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|(?:COM|LPT)[1-9¹²³]) *(?:\.|$)",
+        )
+        .expect("Windows device-name pattern is valid")
+    });
+
+    let name: String = name
+        .chars()
+        .map(|character| {
+            if character < '\u{20}'
+                || matches!(
+                    character,
+                    '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+                )
+            {
+                '_'
+            } else {
+                character
+            }
+        })
+        .collect();
+    let name = name.trim_end_matches([' ', '.']);
+    if name.is_empty() {
+        return "remote-file".to_owned();
+    }
+    if DEVICE_NAMES.is_match(name) {
+        return format!("_{name}");
+    }
+    name.to_owned()
+}
+
+impl OpenTempDirectory {
+    fn create(open_root: &Path) -> Result<Self, RemoteFsError> {
+        let path = open_root.join(Uuid::new_v4().to_string());
+        let mut directory = fs::DirBuilder::new();
+        directory.recursive(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            directory.mode(0o700);
+        }
+        // Register cleanup only after creating a new directory. A UUID collision
+        // must leave the existing copy untouched.
+        directory
+            .create(&path)
+            .map_err(|error| RemoteFsError::Other {
+                message: format!("failed to create remote open copy directory: {error}"),
+            })?;
+        Ok(Self {
             path,
             preserve: false,
-        }
+        })
     }
 
     fn preserve(mut self) {
@@ -142,15 +187,15 @@ impl OpenTempFileGuard {
     }
 }
 
-impl Drop for OpenTempFileGuard {
+impl Drop for OpenTempDirectory {
     fn drop(&mut self) {
         if self.preserve {
             return;
         }
-        if let Err(error) = fs::remove_file(&self.path) {
+        if let Err(error) = fs::remove_dir_all(&self.path) {
             if error.kind() != std::io::ErrorKind::NotFound {
                 warn!(
-                    "failed to remove incomplete remote open temp file path={}: {error}",
+                    "failed to remove incomplete remote open copy directory path={}: {error}",
                     self.path.display()
                 );
             }
@@ -2673,111 +2718,11 @@ pub(crate) fn open_remote_file_blocking(
     open_root: &Path,
     cancel_flag: Arc<AtomicBool>,
 ) -> Result<(), RemoteFsError> {
-    open_remote_file_inner(request, known_hosts, open_root, &cancel_flag)
-}
+    let (local_path, temp_directory) =
+        download_remote_open_copy(&request, known_hosts, open_root, &cancel_flag)?;
 
-fn open_remote_file_inner(
-    request: OpenRemoteFileRequest,
-    known_hosts: Option<&Path>,
-    open_root: &Path,
-    cancel_flag: &AtomicBool,
-) -> Result<(), RemoteFsError> {
-    ensure_remote_file_read_not_cancelled(cancel_flag)?;
-    let (local_path, temp_file_guard) = {
-        // This is deliberately a dedicated SSH/SFTP session. A File owns its
-        // SFTP handle, but a short outer lock on the pooled connection would
-        // still share ssh2's session-level mutex and could race pool
-        // invalidation/disconnect between reads.
-        let connected = match OPEN_REMOTE_FILE_CONNECTION_MODE {
-            RemoteFileReadConnectionMode::Dedicated => {
-                let result = connect_sftp_with_abort(
-                    &request.connection,
-                    None,
-                    known_hosts,
-                    Some(cancel_flag),
-                );
-                ensure_remote_file_read_not_cancelled(cancel_flag)?;
-                result?
-            }
-        };
-        let connected = connected
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let remote_path = Path::new(&request.path);
-        ensure_remote_file_read_not_cancelled(cancel_flag)?;
-        let stat_result = connected.sftp.lstat(remote_path);
-        ensure_remote_file_read_not_cancelled(cancel_flag)?;
-        let stat = stat_result.map_err(|error| RemoteFsError::Other {
-            message: format!("failed to inspect remote file: {error}"),
-        })?;
-
-        if kind_from_permissions(stat.perm) == RemoteFileKind::Directory {
-            return Err(RemoteFsError::Other {
-                message: "目录不支持使用默认编辑器打开".to_string(),
-            });
-        }
-
-        // `sftp.open` follows symlinks, so size-limit the link target rather
-        // than the link itself before pulling it into a local temp copy.
-        ensure_remote_file_read_not_cancelled(cancel_flag)?;
-        let target_stat_result = connected.sftp.stat(remote_path);
-        ensure_remote_file_read_not_cancelled(cancel_flag)?;
-        let target_size = target_stat_result
-            .map_err(|error| RemoteFsError::Other {
-                message: format!("failed to inspect remote file target: {error}"),
-            })?
-            .size
-            .unwrap_or(0);
-        if target_size > OPEN_FILE_SIZE_LIMIT {
-            return Err(RemoteFsError::Other {
-                message: format!(
-                    "file too large to open: {} bytes (limit: {} bytes)",
-                    target_size, OPEN_FILE_SIZE_LIMIT
-                ),
-            });
-        }
-
-        let file_name = remote_path
-            .file_name()
-            .map(|value| value.to_string_lossy().to_string())
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| "remote-file".to_string());
-
-        // Local copies of remotely-opened files live under ShellSpan's
-        // build-specific data directory so they survive reboots (retention
-        // cleanup bounds their lifetime).
-        prepare_private_open_root(open_root)?;
-        cleanup_stale_open_temp_files(open_root);
-
-        let local_path = open_root.join(open_temp_file_name(&file_name));
-        ensure_remote_file_read_not_cancelled(cancel_flag)?;
-        let remote_file_result = connected.sftp.open(remote_path);
-        ensure_remote_file_read_not_cancelled(cancel_flag)?;
-        let mut remote_file = remote_file_result.map_err(|error| RemoteFsError::Other {
-            message: format!("failed to open remote file: {error}"),
-        })?;
-        let mut local_file = create_private_open_temp_file(&local_path)?;
-        // Construct the guard only after create_new succeeds, so a vanishingly
-        // unlikely UUID collision never removes somebody else's existing file.
-        let temp_file_guard = OpenTempFileGuard::new(local_path.clone());
-        copy_remote_file_for_open_with_limit(
-            &mut remote_file,
-            &mut local_file,
-            OPEN_FILE_SIZE_LIMIT,
-            cancel_flag,
-        )?;
-        ensure_remote_file_read_not_cancelled(cancel_flag)?;
-        local_file.flush().map_err(|error| RemoteFsError::Other {
-            message: format!("failed to finalize temp file: {error}"),
-        })?;
-
-        (local_path, temp_file_guard)
-    };
-
-    // The dedicated SFTP file, guard, and Arc are all gone before invoking an
-    // external application. Failed launches remove the completed temp copy;
-    // successful launches retain it for the external process.
-    ensure_remote_file_read_not_cancelled(cancel_flag)?;
+    // The dedicated SFTP connection is closed before invoking the application.
+    ensure_remote_file_read_not_cancelled(&cancel_flag)?;
     let launched = if let Some(application_id) = &request.application_id {
         crate::file_actions::open_with_application(&local_path, application_id)
             .map_err(|message| RemoteFsError::Other { message })?
@@ -2786,9 +2731,94 @@ fn open_remote_file_inner(
         true
     };
     if launched {
-        temp_file_guard.preserve();
+        temp_directory.preserve();
     }
     Ok(())
+}
+
+fn download_remote_open_copy(
+    request: &OpenRemoteFileRequest,
+    known_hosts: Option<&Path>,
+    open_root: &Path,
+    cancel_flag: &AtomicBool,
+) -> Result<(PathBuf, OpenTempDirectory), RemoteFsError> {
+    ensure_remote_file_read_not_cancelled(cancel_flag)?;
+    // This is deliberately a dedicated SSH/SFTP session. A File owns its
+    // SFTP handle, but a short outer lock on the pooled connection would
+    // still share ssh2's session-level mutex and could race pool
+    // invalidation/disconnect between reads.
+    let connected = match OPEN_REMOTE_FILE_CONNECTION_MODE {
+        RemoteFileReadConnectionMode::Dedicated => {
+            let result =
+                connect_sftp_with_abort(&request.connection, None, known_hosts, Some(cancel_flag));
+            ensure_remote_file_read_not_cancelled(cancel_flag)?;
+            result?
+        }
+    };
+    let connected = connected
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let remote_path = Path::new(&request.path);
+    ensure_remote_file_read_not_cancelled(cancel_flag)?;
+    let stat_result = connected.sftp.lstat(remote_path);
+    ensure_remote_file_read_not_cancelled(cancel_flag)?;
+    let stat = stat_result.map_err(|error| RemoteFsError::Other {
+        message: format!("failed to inspect remote file: {error}"),
+    })?;
+
+    if kind_from_permissions(stat.perm) == RemoteFileKind::Directory {
+        return Err(RemoteFsError::Other {
+            message: "目录不支持使用默认编辑器打开".to_string(),
+        });
+    }
+
+    // `sftp.open` follows symlinks, so size-limit the link target rather
+    // than the link itself before pulling it into a local temp copy.
+    ensure_remote_file_read_not_cancelled(cancel_flag)?;
+    let target_stat_result = connected.sftp.stat(remote_path);
+    ensure_remote_file_read_not_cancelled(cancel_flag)?;
+    let target_size = target_stat_result
+        .map_err(|error| RemoteFsError::Other {
+            message: format!("failed to inspect remote file target: {error}"),
+        })?
+        .size
+        .unwrap_or(0);
+    if target_size > OPEN_FILE_SIZE_LIMIT {
+        return Err(RemoteFsError::Other {
+            message: format!(
+                "file too large to open: {} bytes (limit: {} bytes)",
+                target_size, OPEN_FILE_SIZE_LIMIT
+            ),
+        });
+    }
+
+    // Local copies of remotely-opened files live under ShellSpan's
+    // build-specific data directory so they survive reboots (retention
+    // cleanup bounds their lifetime).
+    prepare_private_open_root(open_root)?;
+    cleanup_stale_open_temp_files(open_root);
+
+    ensure_remote_file_read_not_cancelled(cancel_flag)?;
+    let remote_file_result = connected.sftp.open(remote_path);
+    ensure_remote_file_read_not_cancelled(cancel_flag)?;
+    let mut remote_file = remote_file_result.map_err(|error| RemoteFsError::Other {
+        message: format!("failed to open remote file: {error}"),
+    })?;
+    let temp_directory = OpenTempDirectory::create(open_root)?;
+    let local_path = temp_directory.path.join(open_temp_file_name(&request.path));
+    let mut local_file = create_private_open_temp_file(&local_path)?;
+    copy_remote_file_for_open_with_limit(
+        &mut remote_file,
+        &mut local_file,
+        OPEN_FILE_SIZE_LIMIT,
+        cancel_flag,
+    )?;
+    ensure_remote_file_read_not_cancelled(cancel_flag)?;
+    local_file.flush().map_err(|error| RemoteFsError::Other {
+        message: format!("failed to finalize temp file: {error}"),
+    })?;
+
+    Ok((local_path, temp_directory))
 }
 
 pub(crate) const PREVIEW_COMPLETE_FILE_SIZE_LIMIT: u64 = 16 * 1024 * 1024;
@@ -3143,6 +3173,20 @@ fn cleanup_stale_open_temp_files(open_root: &Path) {
         }
 
         let removal_result = if metadata.is_dir() {
+            // Editors can update a file without changing its parent directory's
+            // timestamp. Retention still follows the last edit to the copy.
+            let Ok(mut children) = fs::read_dir(&path) else {
+                continue;
+            };
+            if !children.all(|child| {
+                child
+                    .and_then(|entry| entry.metadata())
+                    .and_then(|metadata| metadata.modified())
+                    .is_ok_and(|modified| modified <= cutoff)
+            }) {
+                continue;
+            }
+            drop(children);
             fs::remove_dir_all(&path)
         } else {
             fs::remove_file(&path)
