@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -8,16 +7,31 @@ import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
-const screenshots = join(tmpdir(), 'shellspan-question-actions-hover');
+const screenshots = join(root, 'artifacts/tests/question-actions-hover');
 await mkdir(screenshots, { recursive: true });
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
+  cacheDir: join(screenshots, 'vite-cache'),
   resolve: { alias: { '@': `${root}src` } },
   esbuild: { jsx: 'automatic' },
-  optimizeDeps: { include: ['react', 'react-dom/client'] },
-  server: { host: '127.0.0.1', port: 0 },
+  optimizeDeps: { entries: ['src/components/ai/workspace/ai-question-panel.tsx'], include: ['react', 'react-dom/client'] },
+  server: { host: '127.0.0.1', port: 0, hmr: false },
   plugins: [tailwindcss(), {
     name: 'question-actions-hover',
+    resolveId(id) {
+      if (id === '/question-actions-runtime') return id;
+    },
+    load(id) {
+      if (id !== '/question-actions-runtime') return;
+      return `
+        export { default as React } from 'react';
+        export { createRoot } from 'react-dom/client';
+        export { AiQuestionPanel } from '/src/components/ai/workspace/ai-question-panel.tsx';
+        export { initI18n } from '/src/locales/index.ts';
+        import '/src/styles/base.css';
+        import '/src/components/ai/styles/styles.css';
+      `;
+    },
     configureServer(vite) {
       vite.middlewares.use((request, response, next) => {
         if (request.url !== '/') return next();
@@ -34,14 +48,9 @@ try {
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`);
   await page.evaluate(async () => {
-    const { default: React } = await import('/node_modules/.vite/deps/react.js');
-    const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js');
-    await import('/src/styles/base.css');
-    await import('/src/components/ai/styles/styles.css');
-    const { AiQuestionPanel } = await import('/src/components/ai/workspace/ai-question-panel.tsx');
-    const { initI18n } = await import('/src/locales/index.ts');
+    const { React, createRoot, AiQuestionPanel, initI18n } = await import('/question-actions-runtime');
     await initI18n('zh-CN');
-    ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(AiQuestionPanel, {
+    createRoot(document.getElementById('root')).render(React.createElement(AiQuestionPanel, {
       question: {
         identity: { sessionId: 'hover', turnId: 'turn', stepId: 'step', requestId: 'request', callId: 'call', questionRequestId: 'question' },
         questions: [{ id: 'frequency', header: '发生频率', question: '这种现象大概多久出现一次?', multi_select: false }],
@@ -55,6 +64,23 @@ try {
   assert.equal(await page.getByRole('button', { name: '关闭', exact: true }).count(), 0);
   for (const width of [320, 720]) {
     await page.setViewportSize({ width, height: 600 });
+    const answerFrame = page.locator('.ai-question-custom-input');
+    const answer = answerFrame.getByRole('textbox');
+    await answer.hover();
+    const idle = await answerFrame.evaluate(element => {
+      const style = getComputedStyle(element);
+      return { background: style.backgroundColor, border: style.borderTopColor, ring: style.boxShadow };
+    });
+    assert.equal(idle.background, 'rgba(0, 0, 0, 0)');
+    assert.notEqual(idle.border, 'rgba(0, 0, 0, 0)');
+    await answer.focus();
+    const focused = await answerFrame.evaluate(element => {
+      const style = getComputedStyle(element);
+      return { background: style.backgroundColor, ring: style.boxShadow };
+    });
+    assert.equal(focused.background, idle.background);
+    assert.notEqual(focused.ring, idle.ring);
+    await answer.blur();
     const decisions = page.locator('.ai-question-footer-actions button');
     assert.equal(await decisions.count(), 2);
     assert.equal(await decisions.filter({ hasText: '跳过此题' }).count(), 1);

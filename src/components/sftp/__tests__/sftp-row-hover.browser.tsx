@@ -1,11 +1,16 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SftpFileList } from '../sftp-file-list';
+import { SftpPane } from '../sftp-pane';
 import type { FileEntry } from '../utils';
+import { useSftpPaneActions } from '@/hooks/useSftpPaneActions';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
+import { useSftpStore } from '@/stores/sftpStore';
 import type { Locale } from '@/types';
 import '@/styles/base.css';
+
+const root = createRoot(document.getElementById('root')!);
 
 export async function mountList(entries: FileEntry[], locale: Locale, currentPath: string) {
   useAppStore.setState({ locale });
@@ -27,5 +32,20 @@ export async function mountList(entries: FileEntry[], locale: Locale, currentPat
       />
     );
   }
-  createRoot(document.getElementById('root')!).render(<List />);
+  root.render(<List />);
+}
+
+export function mountLocalPane(path: string) {
+  const store = useSftpStore.getState();
+  store.addLocalConnection();
+  const id = useSftpStore.getState().activeConnectionId!;
+  store.setPath(id, 'local', path);
+  function LocalPane() {
+    const connection = useSftpStore(state => state.connections.find(item => item.id === id)!);
+    const actions = useSftpPaneActions(connection, 'local');
+    const [selectedPaths, onSelectedPathsChange] = useState(new Set<string>());
+    return <SftpPane connection={connection} side="local" actions={actions}
+      selectedPaths={selectedPaths} onSelectedPathsChange={onSelectedPathsChange} />;
+  }
+  root.render(<LocalPane />);
 }

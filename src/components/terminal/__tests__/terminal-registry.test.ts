@@ -453,27 +453,33 @@ describe('terminalRegistry', () => {
   });
 
   it('keeps app-scheme light fallbacks in sync with the light palette in base.css', () => {
-    const lightBlock = baseCss.slice(baseCss.indexOf(':root'), baseCss.indexOf("[data-theme='dark']"));
-    const declaredToken = (token: string) => {
-      const match = new RegExp(`${token}\\s*:\\s*([^;]+);`).exec(lightBlock);
-      expect(match, `${token} should be declared in the light palette`).not.toBeNull();
-      return match![1].trim();
+    const root = document.documentElement;
+    const colors = [
+      ['cursor', '--app-primary'],
+      ['selectionBackground', '--app-terminal-selection'],
+      ['selectionInactiveBackground', '--app-terminal-selection-inactive'],
+    ] as const;
+    for (const [, token] of colors) {
+      root.style.removeProperty(token);
+    }
+    const fallback = resolveTerminalTheme('app');
+
+    const stylesheet = new CSSStyleSheet();
+    stylesheet.replaceSync(baseCss);
+    const lightRules = [...stylesheet.cssRules]
+      .filter((rule): rule is CSSStyleRule => rule instanceof CSSStyleRule && root.matches(rule.selectorText))
+      .reverse();
+    const normalizeColor = (value: string) => {
+      const probe = document.createElement('span');
+      probe.style.color = value;
+      return probe.style.color;
     };
 
-    document.documentElement.dataset.theme = 'light';
-    for (const token of [
-      '--app-primary',
-      '--app-terminal-selection',
-      '--app-terminal-selection-inactive',
-    ]) {
-      document.documentElement.style.removeProperty(token);
+    for (const [property, token] of colors) {
+      const declared = normalizeColor(lightRules.map((rule) => rule.style.getPropertyValue(token)).find(Boolean) ?? '');
+      expect(declared, `${token} should define a color in the light palette`).not.toBe('');
+      expect(normalizeColor(fallback?.[property] ?? ''), token).toBe(declared);
     }
-
-    expect(resolveTerminalTheme('app')).toMatchObject({
-      cursor: declaredToken('--app-primary'),
-      selectionBackground: declaredToken('--app-terminal-selection'),
-      selectionInactiveBackground: declaredToken('--app-terminal-selection-inactive'),
-    });
   });
 
   it('hides xterm 6 legacy viewport while leaving its real scrollable element available', () => {

@@ -20,13 +20,13 @@
 }
 
 .ai-turn-stats .ai-message-action.ai-turn-stat-trigger:hover {
-  background: var(--ai-action-hover);
+  background: var(--accent);
   color: var(--ai-text-secondary);
 }
 
 .ai-turn-stat-trigger[data-slot='button']:hover,
 .ai-turn-stat-trigger[data-slot='button'][data-popup-open] {
-  background: var(--ai-action-hover);
+  background: var(--accent);
   color: var(--ai-text-secondary);
 }
 

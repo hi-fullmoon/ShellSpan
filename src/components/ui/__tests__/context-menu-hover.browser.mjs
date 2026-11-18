@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdir, stat } from 'node:fs/promises';
+import { userInfo } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -13,10 +14,13 @@ await mkdir(output, { recursive: true });
 const path = `${root}AGENTS.md`;
 const metadata = await stat(path);
 const entry = { path, name: 'AGENTS.md', kind: 'file', size: metadata.size, modifiedAt: metadata.mtimeMs };
+const directory = root.slice(0, -1);
+const { username } = userInfo();
+const engine = process.env.SHELLSPAN_TEST_ENGINE ?? 'chromium';
 const server = await createServer({
   root, configFile: false, appType: 'custom', logLevel: 'error',
-  cacheDir: `${output}/vite`,
-  optimizeDeps: { entries: ['src/components/ui/__tests__/context-menu-hover.browser-entry.tsx'] },
+  cacheDir: `${output}/vite-${engine}`,
+  optimizeDeps: { entries: ['src/components/ui/__tests__/context-menu-hover.browser-entry.tsx'], force: true },
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': `${root}src` } },
   server: { host: '127.0.0.1', port: 0, hmr: false },
@@ -27,7 +31,6 @@ server.middlewares.use('/context-menu-hover', async (_request, response) => {
     '<html><body><div id="root"></div><script type="module" src="/src/components/ui/__tests__/context-menu-hover.browser-entry.tsx"></script></body></html>'));
 });
 let browser;
-const engine = process.env.SHELLSPAN_TEST_ENGINE ?? 'chromium';
 try {
   await server.listen();
   browser = await (engine === 'webkit' ? webkit : chromium).launch();
@@ -40,23 +43,31 @@ try {
       for (const width of [1280, 380]) {
         await page.setViewportSize({ width, height: 900 });
         let reference;
-        for (const kind of ['shared', 'file', 'blank', 'bookmark']) {
+        const iconKinds = ['icon', 'connection-actions', 'log-actions'];
+        for (const kind of ['account', ...iconKinds, 'terminal', 'shared', 'file', 'blank', 'bookmark']) {
           const labels = await page.evaluate(async options => {
             const { show } = await import('/src/components/ui/__tests__/context-menu-hover.browser-entry.tsx');
             return show(options);
-          }, { kind, theme, locale, entry, directory: root.slice(0, -1) });
-          if (kind === 'shared') {
-            await page.getByTestId('context-trigger').click({ button: 'right' });
-          }
-          const targets = kind === 'shared' ? [page.getByRole('menuitem', { name: labels.copy, exact: true })]
-            : kind === 'file' ? [page.getByRole('menuitem', { name: labels.copy, exact: true }), page.getByRole('menuitem', { name: labels.remove, exact: true })]
-              : kind === 'blank' ? [page.getByRole('menuitem', { name: labels.refresh, exact: true })]
-                : [page.getByRole('button', { name: root.slice(0, -1), exact: true })];
+          }, { kind, theme, locale, entry, directory, username });
+          const button = name => page.getByRole('button', { name, exact: true });
+          const menuItem = name => page.getByRole('menuitem', { name, exact: true });
+          if (kind === 'account') await button(labels.account).click();
+          if (kind === 'terminal') await page.getByRole('tab').click({ button: 'right' });
+          if (kind === 'shared') await page.getByTestId('context-trigger').click({ button: 'right' });
+          const isIcon = iconKinds.includes(kind);
+          const targets = isIcon ? [button(labels[kind])] : {
+            account: [menuItem(labels.appearance)],
+            terminal: [menuItem(labels.template)],
+            shared: [menuItem(labels.copy)],
+            file: [menuItem(labels.copy), menuItem(labels.remove)],
+            blank: [menuItem(labels.refresh)],
+            bookmark: [button(directory)],
+          }[kind];
           for (const item of targets) {
             const isDelete = kind === 'file' && (await item.textContent()).trim() === labels.remove;
             const expectedBackground = isDelete
               ? `color-mix(in oklab, var(--destructive) ${theme === 'dark' ? 20 : 10}%, transparent)`
-              : 'var(--accent)';
+              : 'color-mix(in srgb, var(--popover-foreground) 5%, var(--popover))';
             await item.hover();
             await page.waitForFunction(({ element, expectedBackground }) => {
               const probe = document.createElement('span');
@@ -83,8 +94,13 @@ try {
               height: element.getBoundingClientRect().height,
             }));
             reference ??= result.background;
-            assert.ok(result.text.length > 0, `${kind}: readable label`);
-            assert.ok(result.height >= 28, `${kind}: menu item height`);
+            if (isIcon) {
+              assert.equal(await item.getAttribute('aria-label'), labels[kind], 'Icon action has a readable label');
+              assert.equal(result.height, 32, 'Icon action height');
+            } else {
+              assert.ok(result.text.length > 0, `${kind}: readable label`);
+              assert.ok(result.height >= 28, `${kind}: menu item height`);
+            }
             if (isDelete) {
               assert.notEqual(result.background, reference, 'Delete uses its destructive hover background');
               const danger = await item.evaluate(element => {

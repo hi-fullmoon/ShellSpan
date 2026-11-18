@@ -329,10 +329,10 @@ export function AgentPermissionSelector({
         }}
       >
         {confirmationTarget && (
-          <Alert variant="warning" size="sm">
-            <AlertTitle>{t('agent.permission.fullAccessTarget')}</AlertTitle>
-            <AlertDescription>{confirmationTarget.label}</AlertDescription>
-          </Alert>
+          <p className="text-xs leading-4 wrap-anywhere text-muted-foreground">
+            <span className="font-medium">{t('agent.permission.fullAccessTarget')}</span>{' '}
+            <bdi>{confirmationTarget.label}</bdi>
+          </p>
         )}
       </ConfirmationDialog>
     </div>

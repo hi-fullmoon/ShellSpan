@@ -79,12 +79,71 @@ try {
   });
 
   await mkdir('artifacts/tests/workbench', { recursive: true });
+  const search = page.getByRole('textbox', { name: '搜索名称、类型、账号、主机或端口' });
+  const searchGroup = search.locator('xpath=..');
+  const refresh = page.getByRole('button', { name: '刷新', exact: true });
+  const headerActions = page.locator('[data-slot="workbench-page-header-actions"]');
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, theme);
+    const appearance = await search.evaluate(async (input) => {
+      const group = input.closest('[data-slot="input-group"]');
+      const groupStyle = getComputedStyle(group);
+      const inputStyle = getComputedStyle(input);
+      // Resolve styles before waiting for theme color transitions.
+      group.getBoundingClientRect();
+      await Promise.all([group, input].flatMap((element) => element.getAnimations().map((animation) => animation.finished)));
+      return {
+        groupBackground: groupStyle.backgroundColor,
+        inputBackground: inputStyle.backgroundColor,
+        borderStyle: groupStyle.borderTopStyle,
+        borderWidth: groupStyle.borderTopWidth,
+      };
+    });
+    assert.deepEqual(appearance, {
+      groupBackground: 'rgba(0, 0, 0, 0)',
+      inputBackground: 'rgba(0, 0, 0, 0)',
+      borderStyle: 'solid',
+      borderWidth: '1px',
+    }, `Search should be transparent with a visible border in ${theme} mode`);
+    const refreshStyle = await refresh.evaluate((button) => {
+      const style = getComputedStyle(button);
+      return {
+        background: style.backgroundColor,
+        borderStyle: style.borderTopStyle,
+        borderWidth: style.borderTopWidth,
+        height: button.getBoundingClientRect().height,
+      };
+    });
+    assert.deepEqual(refreshStyle, {
+      background: 'rgba(0, 0, 0, 0)',
+      borderStyle: 'solid',
+      borderWidth: '1px',
+      height: 32,
+    }, `Refresh should keep its outline and size without a fill in ${theme} mode`);
+    if (process.argv.includes('--search-only')) {
+      await searchGroup.screenshot({ path: `artifacts/tests/workbench/credential-search-${browserType.name()}-${theme}.png` });
+      await headerActions.screenshot({ path: `artifacts/tests/workbench/credential-actions-${browserType.name()}-${theme}.png` });
+    }
+    await search.focus();
+    await search.press('Tab');
+    assert.ok(await refresh.evaluate((button) => button.matches(':focus-visible')), 'Refresh must keep keyboard focus');
+    await refresh.hover();
+    assert.notEqual(await refresh.evaluate(async (button) => {
+      const style = getComputedStyle(button);
+      button.getBoundingClientRect();
+      await Promise.all(button.getAnimations().map((animation) => animation.finished));
+      return style.backgroundColor;
+    }), refreshStyle.background, `Refresh should show a hover background in ${theme} mode`);
+    await refresh.blur();
+    await page.mouse.move(0, 0);
+  }
+  await page.evaluate(() => { delete document.documentElement.dataset.theme; });
+
   const widths = process.argv.includes('--search-only') ? [1440, 960, 420, 360] : [1440, 960, 420];
   for (const width of widths) {
     await page.setViewportSize({ width, height: 720 });
     await page.getByRole('heading', { name: '凭据管理', exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: '新建', exact: true }).count(), 1);
-    const search = page.getByRole('textbox', { name: '搜索名称、类型、账号、主机或端口' });
     const searchLayout = await search.evaluate((input) => {
       const group = input.closest('[data-slot="input-group"]');
       const actions = group.parentElement;

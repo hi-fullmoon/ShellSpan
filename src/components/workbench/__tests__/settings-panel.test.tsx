@@ -485,7 +485,7 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('settings.general.startupUpdateCheck').closest('[data-slot="card"]')).toBe(updateCard);
     expect(screen.getByRole('heading', { name: 'settings.general.softwareUpdate' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'settings.general.appBehavior' })).toHaveAttribute('class', screen.getByRole('heading', { name: 'settings.general.softwareUpdate' }).className);
-    expect(screen.getByRole('button', { name: 'settings.general.checkUpdate' })).toHaveClass('border-input', 'bg-background');
+    expect(screen.getByRole('button', { name: 'settings.general.checkUpdate' })).toHaveClass('border-input', 'bg-transparent');
     expect(settingsCard?.querySelectorAll('[data-slot="separator"]')).toHaveLength(3);
     expect(updateCard?.querySelectorAll('[data-slot="separator"]')).toHaveLength(1);
     expect(settingsGroups).toHaveClass('flex-col', 'gap-3');

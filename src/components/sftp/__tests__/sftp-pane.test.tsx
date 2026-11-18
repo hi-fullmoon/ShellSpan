@@ -294,7 +294,9 @@ describe('SftpPane', () => {
     fireEvent.click(searchButton);
     expect(screen.getByRole('textbox', { name: 'sftp.filter' })).toHaveFocus();
     expect(searchButton.parentElement).toHaveClass('w-46');
-    expect(searchButton.parentElement?.parentElement).toHaveClass('w-46');
+    const filterFrame = searchButton.parentElement?.parentElement;
+    expect(filterFrame).toHaveClass('w-46', 'after:pointer-events-none', 'not-dark:after:inset-ring-input', 'not-dark:focus-within:after:inset-ring-ring');
+    expect(filterFrame).not.toHaveClass('bg-app-surface-muted');
     expect(screen.getByRole('button', { name: 'sftp.hideFilter' })
       .compareDocumentPosition(terminalButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });

@@ -65,10 +65,10 @@ export function AiSessionHeader({
             <h2 className="ai-session-title min-w-0 truncate text-sm font-medium leading-5 text-foreground">{title}</h2>
           </span>
           <Tooltip>
-            <TooltipTrigger render={<span tabIndex={0} className="ai-session-context truncate text-[11px] leading-[15px] text-muted-foreground" />}>
+            <TooltipTrigger render={<span tabIndex={0} className="ai-session-context w-fit max-w-full truncate text-[11px] leading-[15px] text-muted-foreground" />}>
               {context}
             </TooltipTrigger>
-            <TooltipContent role="tooltip">{context}</TooltipContent>
+            <TooltipContent role="tooltip" align="start" className="max-w-[min(20rem,var(--available-width))]">{context}</TooltipContent>
           </Tooltip>
         </span>
         <span className="sr-only">{statusLabel}</span>

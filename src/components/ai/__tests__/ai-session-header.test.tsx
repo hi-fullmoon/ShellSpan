@@ -22,7 +22,8 @@ describe('AiSessionHeader', () => {
   it('reveals the full connection context on keyboard focus', async () => {
     const user = userEvent.setup();
     const context = 'Agent · root@175.178.66.45:22 · Connected';
-    render(<AiSessionHeader title="查看for you部署位置" context={context} status="idle" />);
+    const { container } = render(<AiSessionHeader title="查看for you部署位置" context={context} status="idle" />);
+    expect(container.querySelector('.ai-session-context')).toHaveClass('w-fit', 'max-w-full', 'truncate');
     await user.tab();
     expect(await screen.findByRole('tooltip')).toHaveTextContent(context);
   });

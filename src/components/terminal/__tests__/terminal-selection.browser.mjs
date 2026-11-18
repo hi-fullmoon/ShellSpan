@@ -42,6 +42,7 @@ try {
     await page.mouse.move(screen.x + cellWidth * 10, screen.y + screen.height / 10, { steps: 10 });
     await page.mouse.up();
     assert.ok(await page.evaluate(() => window.terminal.getSelection().length > 0));
+    const selectionShades = [];
     for (const focused of [true, false]) {
       if (!focused) await page.locator('#blur').click();
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -55,10 +56,13 @@ try {
         context.fillRect(0, 0, 1, 1);
         return [...context.getImageData(0, 0, 1, 1).data];
       });
-      assert.ok(colors.slice(0, 3).every(channel => channel < 235),
-        `Selection must remain visible on white at width ${width}, focused=${focused}: ${colors}`);
+      const [red, green, blue] = colors;
+      assert.deepEqual([green, blue], [red, red], `Selection is neutral gray at width ${width}, focused=${focused}`);
+      assert.ok(red < 235, `Selection remains visible on white at width ${width}, focused=${focused}: ${colors}`);
+      selectionShades.push(red);
       await page.screenshot({ path: `/tmp/shellspan-selection-${width}-${focused ? 'focused' : 'inactive'}.png` });
     }
+    assert.ok(selectionShades[0] < selectionShades[1], `Focused selection is darker at width ${width}`);
     await page.evaluate(() => window.terminal.clearSelection());
   }
 } finally {

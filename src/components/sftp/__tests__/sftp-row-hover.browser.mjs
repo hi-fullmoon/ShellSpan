@@ -62,6 +62,28 @@ const waitForColor = async (row, alpha) => {
   }), alpha);
 };
 
+async function assertFilterBorders(page, width, locale) {
+  await page.setViewportSize({ width, height: 480 });
+  await page.getByRole('button', { name: locale === 'en-US' ? 'Show Filter' : '显示筛选' }).click();
+  const input = page.getByRole('textbox', { name: locale === 'en-US' ? 'Filter' : '筛选' });
+  const icon = page.getByRole('button', { name: locale === 'en-US' ? 'Hide Filter' : '隐藏筛选' });
+  const frame = input.locator('xpath=../..');
+  await icon.hover();
+  assert.ok(await input.evaluate(element => element === document.activeElement), 'Opening the filter focuses its input');
+  const screenshot = await loadImage(await frame.screenshot({ animations: 'disabled' }));
+  const pixels = createCanvas(screenshot.width, screenshot.height).getContext('2d');
+  pixels.drawImage(screenshot, 0, 0);
+  const edge = Math.floor(screenshot.height / 2);
+  const rgba = (x, y) => Array.from(pixels.getImageData(x, y, 1, 1).data);
+  const border = rgba(screenshot.width - 1, edge);
+  assert.notDeepEqual(border, rgba(screenshot.width - 3, edge), 'The focused frame has a visible border');
+  for (const y of [edge - 5, edge, edge + 5]) {
+    assert.deepEqual(rgba(0, y), border, 'The search button hover must leave the left border visible');
+  }
+  await input.press('Escape');
+  await page.getByRole('button', { name: locale === 'en-US' ? 'Show Filter' : '显示筛选' }).waitFor();
+}
+
 try {
   await server.listen();
   for (const engine of [chromium, webkit]) {
@@ -128,6 +150,12 @@ try {
           });
           await assertSelectedBorders(page, [selected, row], `${theme}: adjacent selected rows share one divider`);
         }
+        await page.evaluate(async (root) => {
+          document.documentElement.dataset.theme = 'light';
+          const { mountLocalPane } = await import('/src/components/sftp/__tests__/sftp-row-hover.browser.tsx');
+          mountLocalPane(root);
+        }, root);
+        for (const width of [960, 380]) await assertFilterBorders(page, width, locale);
         assert.deepEqual(errors, []);
         await page.close();
       }

@@ -89,7 +89,13 @@ try {
       name: locale === 'en-US' ? 'Allow Agent full access to this terminal?' : '允许 Agent 完全访问此终端？',
     });
     const warning = dialog.locator('[data-slot="alert-dialog-description"]');
+    const connection = dialog.getByText(
+      locale === 'en-US' ? 'Connection Menu layout (local)' : '授权连接 Menu layout (本地)',
+      { exact: true },
+    );
+    const confirm = dialog.getByRole('button', { name: locale === 'en-US' ? 'Allow full access' : '允许完全访问' });
     await warning.waitFor();
+    await connection.waitFor();
 
     for (const width of [720, 320]) {
       await page.setViewportSize({ width, height: 800 });
@@ -123,6 +129,22 @@ try {
       if (locale === 'zh-CN') {
         assert.ok(layout.firstLineGap <= layout.fontSize * 2, `${locale}/${width}: first warning line must use the available width`);
       }
+
+      const connectionLayout = await connection.evaluate(element => {
+        const style = getComputedStyle(element);
+        return {
+          lineCount: Math.round(element.clientHeight / parseFloat(style.lineHeight)),
+          overflow: element.scrollWidth > element.clientWidth,
+        };
+      });
+      const warningBounds = await warning.boundingBox();
+      const connectionBounds = await connection.boundingBox();
+      const confirmBounds = await confirm.boundingBox();
+      assert.equal(connectionLayout.lineCount, 1, `${locale}/${width}: connection should use one line`);
+      assert.equal(connectionLayout.overflow, false, `${locale}/${width}: connection must fit`);
+      assert.ok(warningBounds.y + warningBounds.height <= connectionBounds.y
+        && connectionBounds.y + connectionBounds.height <= confirmBounds.y,
+      `${locale}/${width}: connection should appear between the warning and the actions`);
     }
 
     await dialog.getByRole('button', { name: locale === 'en-US' ? 'Cancel' : '取消' }).click();

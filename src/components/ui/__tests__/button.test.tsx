@@ -74,6 +74,14 @@ describe('Button', () => {
     expect(screen.getByRole('button', { name: 'Export selected' })).toHaveClass('gap-1');
   });
 
+  it('keeps the outline and interaction feedback on transparent outline actions', () => {
+    render(<Button variant="outline">Refresh</Button>);
+
+    const button = screen.getByRole('button', { name: 'Refresh' });
+    expect(button).toHaveClass('border', 'border-input', 'bg-transparent', 'hover:bg-accent', 'focus-visible:ring-2');
+    expect(button).not.toHaveClass('bg-background');
+  });
+
   it('renders destructive outline actions without a filled background', () => {
     render(<Button variant="destructiveOutline">Delete</Button>);
 

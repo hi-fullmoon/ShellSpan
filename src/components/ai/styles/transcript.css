@@ -151,7 +151,7 @@
 }
 
 .ai-message-action:hover {
-  background: var(--ai-action-hover);
+  background: var(--accent);
   color: var(--ai-text-secondary);
 }
 

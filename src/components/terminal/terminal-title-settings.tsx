@@ -62,7 +62,7 @@ export function TerminalTitleSettings({ profileId }: { profileId?: string }) {
     </FieldGroup>
     <Field data-invalid={!valid || undefined}>
       <FieldLabel htmlFor={`${id}-template`}>{t('terminal.title.custom')}</FieldLabel>
-      <Input id={`${id}-template`} value={draft} maxLength={256} aria-invalid={!valid} aria-describedby={`${id}-help`} onChange={(event) => {
+      <Input id={`${id}-template`} className="bg-transparent" value={draft} maxLength={256} aria-invalid={!valid} aria-describedby={`${id}-help`} onChange={(event) => {
         const value = event.target.value;
         setCustom(true);
         setDraft(value);

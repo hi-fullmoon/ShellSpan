@@ -2405,7 +2405,7 @@ export default {
   'agent.permission.fullAccessDescription': '当前连接上已提供的工具无需逐次批准；子代理仍受角色工具范围限制。',
   'agent.permission.fullAccessTitle': '允许 Agent 完全访问此终端？',
   'agent.permission.fullAccessWarning': 'Agent 将以当前连接账户的权限自动执行命令、终端输入和 MCP 调用，读取、修改和删除文件，并访问网络，不再逐次请求批准。命令尚无沙箱隔离，可能影响工作目录之外的数据。关键资源拦截仍然生效；文件工具保留工作目录和符号链接限制，子代理仍受角色限制。此选择保存到本地并用于新建终端会话；你可以随时停止或切换模式。',
-  'agent.permission.fullAccessTarget': '本次授权的连接',
+  'agent.permission.fullAccessTarget': '授权连接',
   'agent.permission.fullAccessConfirm': '允许完全访问',
   'agent.permission.fullAccessActive': '已启用完全访问权限，并保存为新建终端会话的默认设置。',
   'agent.permission.composer.readOnly': '帮我批准',

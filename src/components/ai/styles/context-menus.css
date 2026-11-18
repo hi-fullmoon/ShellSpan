@@ -7,7 +7,7 @@
 
 .ai-context-meter-trigger:hover,
 .ai-context-meter-trigger[aria-expanded='true'] {
-  background: var(--ai-action-hover);
+  background: var(--accent);
 }
 
 .ai-context-meter-track,
@@ -31,7 +31,6 @@
   --ai-text-secondary: color-mix(in srgb, var(--popover-foreground) 72%, transparent);
   --ai-text-muted: var(--muted-foreground);
   --ai-border-subtle: var(--border);
-  --ai-action-hover: var(--accent);
   --ai-accent: var(--primary);
   --ai-shadow-dialog: var(--shadow-dialog);
   box-sizing: border-box;
@@ -57,7 +56,7 @@
 
 .ai-context-meter-bar {
   border-radius: 999px;
-  background: var(--ai-action-hover);
+  background: var(--muted);
 }
 
 .ai-context-meter-bar > span {

@@ -1,20 +1,37 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
+import { TerminalIcon } from 'lucide-react';
 import {
   ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuGroup, ContextMenuItem,
 } from '../context-menu';
+import { TooltipProvider } from '../tooltip';
 import { SftpFileContextMenu } from '@/components/sftp/sftp-file-context-menu';
 import { SftpBlankContextMenu } from '@/components/sftp/sftp-blank-context-menu';
 import { SftpBookmarkMenu } from '@/components/sftp/sftp-bookmark-menu';
+import { TerminalContextMenu } from '@/components/terminal/terminal-context-menu';
+import { TerminalTabBar } from '@/components/terminal/terminal-tab-bar';
+import { ConnectionList } from '@/components/workbench/connection-list';
+import { IconActionButton } from '@/components/workbench/icon-action-button';
+import { LogPanel } from '@/components/workbench/log-panel';
+import { WorkbenchSidebar } from '@/components/workbench/workbench-sidebar';
 import { initI18n, t } from '@/locales';
 import { applyTheme } from '@/lib/theme';
 import { useAppStore } from '@/stores/appStore';
+import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import type { LocalFileEntry, Locale } from '@/types';
 import '@/styles/base.css';
 
-type MenuKind = 'shared' | 'file' | 'blank' | 'bookmark';
+type MenuKind = 'account' | 'icon' | 'connection-actions' | 'log-actions' | 'terminal' | 'shared' | 'file' | 'blank' | 'bookmark';
 const root = createRoot(document.getElementById('root')!);
+
+function TerminalPreview() {
+  const [menu, setMenu] = useState<{ session: TerminalSession; x: number; y: number } | null>(null);
+  return <>
+    <TerminalTabBar forceVisible onTabContextMenu={(session, x, y) => setMenu({ session, x, y })} />
+    {menu && <TerminalContextMenu open {...menu} onClose={() => setMenu(null)} />}
+  </>;
+}
 
 function Preview({ kind, entry, directory }: {
   kind: MenuKind;
@@ -23,6 +40,19 @@ function Preview({ kind, entry, directory }: {
 }) {
   const [open, setOpen] = useState(true);
   const close = () => setOpen(false);
+  if (kind === 'account') return <WorkbenchSidebar activeTab="connections" onTabChange={close}
+    onOpenSettings={close} onCheckForUpdates={close} onOpenAbout={close} onRequestExit={close} />;
+  if (kind === 'icon') {
+    const label = t('workbench.connections.connectTerminal');
+    return <div className="bg-card p-2">
+      <IconActionButton aria-label={label} tooltip={label}><TerminalIcon /></IconActionButton>
+    </div>;
+  }
+  if (kind === 'connection-actions') return <ConnectionList profiles={[]} initialized
+    onAdd={close} onEdit={close} onDelete={close} onConnectTerminal={close} onConnectSftp={close}
+    onDuplicate={close} onToggleFavorite={close} onImport={close} onExport={close} />;
+  if (kind === 'log-actions') return <LogPanel />;
+  if (kind === 'terminal') return <TerminalPreview />;
   if (kind === 'shared') return <ContextMenu>
     <ContextMenuTrigger data-testid="context-trigger">{entry.name}</ContextMenuTrigger>
     <ContextMenuContent>
@@ -43,19 +73,32 @@ function Preview({ kind, entry, directory }: {
 }
 
 let sequence = 0;
-export async function show({ kind, theme, locale, entry, directory }: {
+export async function show({ kind, theme, locale, entry, directory, username }: {
   kind: MenuKind;
   theme: 'light' | 'dark';
   locale: Locale;
   entry: LocalFileEntry;
   directory: string;
+  username: string;
 }) {
   useAppStore.setState({ locale });
   await initI18n(locale);
   applyTheme(theme);
-  flushSync(() => root.render(<Preview key={++sequence}
-    kind={kind} entry={entry} directory={directory} />));
+  if (kind === 'terminal' && useTerminalStore.getState().sessions.length === 0) {
+    useTerminalStore.getState().addRestoredSessions([{
+      sessionId: crypto.randomUUID(), title: 'localhost', host: 'localhost', port: 22, username,
+    }]);
+  }
+  flushSync(() => root.render(<TooltipProvider>
+    <Preview key={++sequence} kind={kind} entry={entry} directory={directory} />
+  </TooltipProvider>));
   return {
+    account: t('workbench.userMenu.open'),
+    appearance: t('settings.appearance.title'),
+    icon: t('workbench.connections.connectTerminal'),
+    'connection-actions': t('workbench.connections.actions'),
+    'log-actions': t('workbench.logs.actions'),
+    template: t('terminal.title.template'),
     copy: t('common.copy'),
     remove: t('common.delete'),
     paste: t('sftp.contextMenu.paste'),

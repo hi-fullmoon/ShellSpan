@@ -1,21 +1,26 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { webkit } from 'playwright';
 import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 
 const root = path.resolve(import.meta.dirname, '../../../..');
+const entry = '/src/components/ai/__tests__/ai-session-records-width.browser-entry.tsx';
+// Pass an idle session's JSONL log to also check its real history actions.
+const sessionLog = process.argv[2];
 const server = await createServer({
-  root, configFile: false, logLevel: 'error',
+  root, configFile: false, appType: 'custom', logLevel: 'error',
+  cacheDir: path.join(root, 'artifacts/tests/session-records-width/vite-cache'),
   resolve: { alias: { '@': path.join(root, 'src') } },
-  optimizeDeps: { include: ['react', 'react-dom/client'] },
+  optimizeDeps: { entries: [entry.slice(1)], include: ['react', 'react-dom/client'] },
   plugins: [tailwindcss(), {
     name: 'records-width-test',
     configureServer(vite) {
       vite.middlewares.use((request, response, next) => {
         if (request.url !== '/width-test') return next();
         response.setHeader('Content-Type', 'text/html');
-        response.end('<html><head><script type="module" src="/src/components/ai/__tests__/ai-session-records-width.browser-entry.tsx"></script></head><body><div id="root"></div></body></html>');
+        response.end(`<html><head><script type="module" src="${entry}"></script></head><body><div id="root"></div></body></html>`);
       });
     },
   }],
@@ -29,7 +34,9 @@ try {
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/width-test`);
-  await page.locator('.ai-session-records-detail .ai-conversation-content').waitFor();
+  await page.locator('.ai-session-records-detail .ai-conversation-content').waitFor({ timeout: 10000 }).catch((error) => {
+    throw new Error(`Browser test failed to mount: ${errors.join('; ') || error.message}`, { cause: error });
+  });
   for (const width of [1024, 400]) {
     await page.setViewportSize({ width, height: 800 });
     const sizes = await page.evaluate(() => [...document.querySelectorAll('.ai-workspace-root:not([data-testid])')].map((shell) => {
@@ -64,30 +71,67 @@ try {
     assert.equal(loading.gap, 4);
     assert.ok(loading.label.includes('加载'));
   }
-  await page.evaluate(async () => {
-    const entry = await import('/src/components/ai/__tests__/ai-session-records-width.browser-entry.tsx');
-    entry.showRecordsDialog();
-  });
-  await page.getByRole('searchbox').waitFor();
+  await page.evaluate(async (entry) => (await import(entry)).showRecordsDialog(), entry);
+  const searchbox = page.getByRole('searchbox', { name: '搜索会话标题或终端', exact: true });
+  await searchbox.waitFor();
   for (const width of [1280, 400]) {
     await page.setViewportSize({ width, height: 800 });
-    const toolbar = await page.getByRole('searchbox').evaluate((input) => {
+    const toolbar = await searchbox.evaluate((input) => {
       const toolbar = input.parentElement.parentElement;
       const controls = [...toolbar.querySelectorAll('input[type="search"], button')].map((control) => control.getBoundingClientRect());
       const icon = input.parentElement.querySelector('svg').getBoundingClientRect();
       const box = input.getBoundingClientRect();
       return {
+        searchBackground: getComputedStyle(input).backgroundColor,
         heights: controls.map((control) => control.height),
         height: toolbar.getBoundingClientRect().height,
         overflow: toolbar.scrollWidth > toolbar.clientWidth,
         iconOffset: icon.y + icon.height / 2 - (box.y + box.height / 2),
       };
     });
+    assert.equal(toolbar.searchBackground, 'rgba(0, 0, 0, 0)', 'The search field must show the dialog surface');
     assert.deepEqual(toolbar.heights, [32, 32, 32, 32]);
     if (width === 1280) assert.equal(toolbar.height, 49);
     assert.equal(toolbar.overflow, false);
     assert.ok(Math.abs(toolbar.iconOffset) < 1);
     await page.screenshot({ path: `/tmp/shellspan-records-toolbar-${width}.png`, animations: 'disabled' });
+  }
+  if (sessionLog) {
+    const events = (await readFile(sessionLog, 'utf8')).trim().split('\n').map(JSON.parse);
+    for (const [locale, rename, archive] of [
+      ['en-US', 'Rename session', 'Archive'],
+      ['zh-CN', '重命名会话', '归档'],
+    ]) {
+      await page.evaluate(async ({ entry, events, locale }) => (await import(entry)).showHistory(events, locale),
+        { entry, events, locale });
+      const row = page.getByRole('treeitem');
+      const trigger = row.getByRole('button', { name: locale === 'en-US' ? /More actions for/ : /更多操作/ });
+      const menu = page.getByRole('menu');
+      for (const width of [1280, 320]) {
+        await page.setViewportSize({ width, height: 800 });
+        await row.hover();
+        await trigger.press('Enter');
+        await menu.getByRole('menuitem', { name: rename, exact: true }).waitFor();
+        await menu.getByRole('menuitem', { name: archive, exact: true }).waitFor();
+        await menu.evaluate(async (element) => {
+          await document.fonts.ready;
+          await Promise.all(element.getAnimations().map((animation) => animation.finished));
+        });
+        const bounds = await menu.boundingBox();
+        assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width, 'The history menu stays inside the viewport');
+        for (const label of await menu.locator('[data-slot="menu-item-label"]').all()) {
+          const fits = await label.evaluate((element) => {
+            const range = document.createRange();
+            range.selectNodeContents(element);
+            const text = range.getBoundingClientRect();
+            return range.getClientRects().length === 1 && text.right <= element.closest('[role="menuitem"]').getBoundingClientRect().right;
+          });
+          assert.ok(fits, `History action wraps or clips at ${width}px (${locale})`);
+        }
+        await page.keyboard.press('Escape');
+        await menu.waitFor({ state: 'hidden' });
+      }
+    }
   }
   assert.deepEqual(errors, []);
 } finally {

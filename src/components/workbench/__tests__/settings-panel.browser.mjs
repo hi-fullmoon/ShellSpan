@@ -163,6 +163,8 @@ try {
     assert.equal(overflow.groupTitleRow, 32, `group title row must be 32px at ${viewport.width}`);
     const titleInput = page.getByLabel('自定义模板', { exact: true });
     await titleInput.scrollIntoViewIfNeeded();
+    assert.equal(await titleInput.evaluate((input) => getComputedStyle(input).backgroundColor), 'rgba(0, 0, 0, 0)',
+      'The custom template input must show the card surface');
     await page.getByLabel('页签标题模板', { exact: true }).click();
     await page.getByRole('option', { name: '连接名称', exact: true }).click();
     assert.ok(await page.getByText('全局默认', { exact: true }).isVisible(), 'scope must display a readable label');

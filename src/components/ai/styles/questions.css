@@ -126,14 +126,12 @@
   );
 }
 
-.ai-question-custom-input {
+[data-theme='dark'] .ai-question-custom-input {
   border-color: transparent;
   background: transparent;
 }
 
-.ai-question-custom-input:hover,
-.ai-question-custom-input:focus-within {
-  border-color: transparent;
+[data-theme='dark'] .ai-question-custom-input:is(:hover, :focus-within) {
   background: var(--ai-action-hover);
   box-shadow: none;
 }

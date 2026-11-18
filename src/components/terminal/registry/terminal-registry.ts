@@ -210,6 +210,9 @@ function playBellSound(): void {
 
 type TerminalTheme = NonNullable<ConstructorParameters<typeof Terminal>[0]>['theme'];
 
+const LIGHT_SELECTION_BACKGROUND = 'rgba(24, 24, 24, 0.22)';
+const LIGHT_SELECTION_INACTIVE_BACKGROUND = 'rgba(24, 24, 24, 0.12)';
+
 const TERMINAL_COLOR_THEMES: Record<Exclude<TerminalColorScheme, 'app'>, TerminalTheme> = {
   oneDark: {
     background: '#282c34',
@@ -351,8 +354,8 @@ const TERMINAL_COLOR_THEMES: Record<Exclude<TerminalColorScheme, 'app'>, Termina
     background: '#ffffff',
     foreground: '#1f2328',
     cursor: '#0969da',
-    selectionBackground: 'rgba(15, 23, 42, 0.22)',
-    selectionInactiveBackground: 'rgba(15, 23, 42, 0.12)',
+    selectionBackground: LIGHT_SELECTION_BACKGROUND,
+    selectionInactiveBackground: LIGHT_SELECTION_INACTIVE_BACKGROUND,
     black: '#24292f',
     red: '#cf222e',
     green: '#116329',
@@ -376,16 +379,16 @@ function resolveBaseTerminalTheme(colorScheme: TerminalColorScheme): TerminalThe
     // Keep search markers without xterm's default full-height ruler border.
     overviewRulerBorder: '#00000000',
     background: readAppColor('--app-surface', '#ffffff', '#202122'),
-    foreground: readAppColor('--app-text', '#0f172a', '#d4d4d8'),
-    cursor: readAppColor('--app-primary', '#1e293b', '#b3b3b8'),
+    foreground: readAppColor('--app-text', '#181818', '#d4d4d8'),
+    cursor: readAppColor('--app-primary', '#282828', '#b3b3b8'),
     selectionBackground: readAppColor(
       '--app-terminal-selection',
-      'rgba(15, 23, 42, 0.22)',
+      LIGHT_SELECTION_BACKGROUND,
       'rgba(244, 244, 245, 0.22)',
     ),
     selectionInactiveBackground: readAppColor(
       '--app-terminal-selection-inactive',
-      'rgba(15, 23, 42, 0.12)',
+      LIGHT_SELECTION_INACTIVE_BACKGROUND,
       'rgba(244, 244, 245, 0.12)',
     ),
   };

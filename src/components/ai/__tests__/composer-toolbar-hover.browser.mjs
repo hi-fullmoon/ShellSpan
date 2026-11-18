@@ -11,9 +11,15 @@ const artifacts = `${root}artifacts/tests/composer-toolbar-hover`;
 await mkdir(artifacts, { recursive: true });
 const server = await createServer({
   root, configFile: false, appType: 'custom', logLevel: 'error',
+  cacheDir: `${artifacts}/vite`,
+  optimizeDeps: {
+    entries: ['src/components/ai/workspace/ai-composer-seat.tsx', 'src/components/ai/agent-permission-selector.tsx',
+      'src/components/ai/agent-execution-surface-selector.tsx', 'src/components/ui/button.tsx'],
+    include: ['react', 'react-dom/client'],
+  },
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': `${root}src` } },
-  server: { host: '127.0.0.1', port: 0 },
+  server: { host: '127.0.0.1', port: 0, hmr: false },
 });
 server.middlewares.use(async (request, response, next) => {
   if (request.url !== '/') return next();
@@ -76,7 +82,7 @@ try {
             assert.equal(await controls.count(), 5);
             const expected = await toolbar.evaluate(element => {
               const probe = document.createElement('span');
-              probe.style.background = 'var(--ai-action-hover)';
+              probe.style.background = 'var(--accent)';
               element.append(probe);
               const color = getComputedStyle(probe).backgroundColor;
               probe.remove();
@@ -110,6 +116,15 @@ try {
             await page.getByRole('menu').waitFor();
             await page.keyboard.press('Escape');
             await page.getByRole('menu').waitFor({ state: 'hidden' });
+            await toolbar.locator('.ai-context-meter-trigger').click();
+            const contextPanel = page.getByRole('dialog');
+            const track = contextPanel.locator('.ai-context-meter-bar');
+            await track.waitFor();
+            assert.equal(await background(track), theme === 'dark' ? 'rgb(40, 41, 42)' : 'rgb(233, 239, 245)',
+              'The context usage track uses the original muted background');
+            await contextPanel.screenshot({ path: `${artifacts}/${engine.name()}-${locale}-${theme}-${width}-context-panel.png` });
+            await page.keyboard.press('Escape');
+            await contextPanel.waitFor({ state: 'hidden' });
             await toolbar.locator('.ai-model-trigger').hover();
             await settle(toolbar.locator('.ai-model-trigger'));
             await page.screenshot({ path: `${artifacts}/${engine.name()}-${locale}-${theme}-${width}.png` });

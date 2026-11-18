@@ -116,7 +116,7 @@
 }
 
 .ai-session-row-menu:hover {
-  background: var(--ai-action-active);
+  background: var(--accent);
   color: var(--ai-text);
 }
 

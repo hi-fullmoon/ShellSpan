@@ -164,7 +164,7 @@
 }
 
 .ai-queue-actions button:not(:disabled):is(:hover, [aria-expanded='true']) {
-  background: var(--ai-action-hover);
+  background: var(--accent);
   color: var(--ai-text);
 }
 

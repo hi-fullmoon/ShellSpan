@@ -2407,7 +2407,7 @@ export default {
   'agent.permission.fullAccessDescription': 'Use supplied tools on this connection without per-call approval; child agents remain limited by their role’s tools.',
   'agent.permission.fullAccessTitle': 'Allow Agent full access to this terminal?',
   'agent.permission.fullAccessWarning': 'The Agent will automatically run commands, terminal input and MCP calls, read, modify and delete files, and use the network with the connected account’s permissions, without per-call approval. Commands are not sandboxed and may affect data outside the workspace. Critical-resource deny rules still apply; file tools retain workspace and symlink restrictions. Child agents remain role-limited. This choice is saved locally for new terminal sessions; you can stop or change mode at any time.',
-  'agent.permission.fullAccessTarget': 'Authorized connection',
+  'agent.permission.fullAccessTarget': 'Connection',
   'agent.permission.fullAccessConfirm': 'Allow full access',
   'agent.permission.fullAccessActive': 'Full access is enabled and saved as the default for new terminal sessions.',
   'agent.permission.composer.readOnly': 'Approve for me',

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
+import { createCanvas, loadImage } from 'canvas';
 import { chromium, webkit } from 'playwright';
 
 const screenshotDirectory = 'artifacts/tests/workbench';
@@ -9,7 +10,7 @@ for (const browserType of [chromium, webkit]) {
   const browser = await browserType.launch();
   try {
     for (const locale of ['en-US', 'zh-CN']) {
-      const page = await browser.newPage({ viewport: { width: 1440, height: 720 } });
+      const page = await browser.newPage({ colorScheme: 'light', viewport: { width: 1440, height: 720 } });
       await page.goto(process.env.SHELLSPAN_TEST_URL ?? 'http://localhost:1420');
       await page.evaluate(async (locale) => {
         const { default: React } = await import('/node_modules/.vite/deps/react.js');
@@ -63,6 +64,44 @@ for (const browserType of [chromium, webkit]) {
       }
 
       await header.screenshot({ path: `${screenshotDirectory}/connection-header-${browserType.name()}-${locale}-767.png` });
+      const moreActions = header.getByRole('button', {
+        name: locale === 'en-US' ? 'More actions' : '更多操作',
+      });
+      const readBackground = (locator) => locator.evaluate(async (element) => {
+        await new Promise(requestAnimationFrame);
+        await Promise.all(element.getAnimations().map((animation) => animation.finished));
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        context.fillStyle = getComputedStyle(element).backgroundColor;
+        context.fillRect(0, 0, 1, 1);
+        return [...context.getImageData(0, 0, 1, 1).data];
+      });
+      const pageBackground = await readBackground(page.locator('body'));
+      const secondary = await readBackground(moreActions);
+      await moreActions.hover();
+      const hover = await readBackground(moreActions);
+      for (const [label, [red, green, blue, alpha]] of Object.entries({ pageBackground, secondary, hover })) {
+        assert.deepEqual([green, blue, alpha], [red, red, 255], `${label} uses an opaque neutral gray in light mode`);
+      }
+      assert.ok(secondary[0] < hover[0] && hover[0] < pageBackground[0], 'Secondary, hover and page backgrounds remain distinct');
+      await page.mouse.move(0, 0);
+      await search.fill('SSH');
+      const countSelectionGrayPixels = async () => {
+        const image = await loadImage(await search.screenshot());
+        const context = createCanvas(image.width, image.height).getContext('2d');
+        context.drawImage(image, 0, 0);
+        const { data } = context.getImageData(0, 0, image.width, image.height);
+        let count = 0;
+        for (let pixel = 0; pixel < data.length; pixel += 4) {
+          const red = data[pixel];
+          if (red === data[pixel + 1] && red === data[pixel + 2] && red >= 170 && red <= 220) count++;
+        }
+        return count;
+      };
+      const beforeSelection = await countSelectionGrayPixels();
+      await search.selectText();
+      assert.ok(await countSelectionGrayPixels() > beforeSelection + 50, 'Selected search text paints a distinct neutral gray background');
+      await search.clear();
       await search.focus();
       await search.press('Tab');
       assert.equal(await header.getByRole('button', {
@@ -75,4 +114,4 @@ for (const browserType of [chromium, webkit]) {
   }
 }
 
-console.log('Connection header wrapping, control sizes and tab order passed in Chromium and WebKit for both locales.');
+console.log('Connection header layout, tab order and light colors passed in Chromium and WebKit for both locales.');

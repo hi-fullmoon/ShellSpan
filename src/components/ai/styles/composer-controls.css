@@ -15,7 +15,7 @@
   .ai-busy-preference-trigger,
   .ai-context-meter-trigger
 ):is(:hover, [aria-expanded='true']):not(:disabled) {
-  background: var(--ai-action-hover);
+  background: var(--accent);
 }
 
 .ai-composer-toolbar[data-compact]:not([data-compact='full']) .ai-model-trigger-name {
@@ -261,7 +261,7 @@
 }
 
 .ai-composer-stop:hover:not(:disabled) {
-  background: var(--ai-action-hover);
+  background: var(--accent);
   color: var(--ai-text);
 }
 

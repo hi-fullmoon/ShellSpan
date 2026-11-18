@@ -199,7 +199,7 @@ function SessionRow({
             </TooltipTrigger>
             <TooltipContent>{t('ai.workspace.sessions.actions', { title: summary.title })}</TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent align="end" className="w-max max-w-(--available-width)">
             <DropdownMenuGroup>
               {canRename && (
                 <DropdownMenuItem onClick={onRename}>

@@ -47,7 +47,7 @@ const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, title, children 
     onClick={onClick}
     disabled={disabled}
     title={title}
-    className="flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-xs text-app-text transition-colors hover:bg-accent hover:text-app-primary disabled:pointer-events-none disabled:opacity-40"
+    className="flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-xs text-app-text transition-colors hover:bg-accent hover:text-app-primary focus-visible:bg-accent disabled:pointer-events-none disabled:opacity-40"
   >
     <span className="leading-4">{children}</span>
   </button>

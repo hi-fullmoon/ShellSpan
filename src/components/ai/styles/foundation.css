@@ -19,7 +19,6 @@
   --ai-border-strong: color-mix(in srgb, var(--foreground) 18%, transparent);
   --ai-brand: var(--primary);
   --ai-button: var(--app-button);
-  --ai-action-active: color-mix(in srgb, var(--foreground) 10%, transparent);
   --ai-action-hover-solid: var(--muted);
   --ai-action-hover: color-mix(in srgb, var(--foreground) 6%, transparent);
   --ai-text-caption: color-mix(in srgb, var(--muted-foreground) 70%, transparent);

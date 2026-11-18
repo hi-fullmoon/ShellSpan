@@ -175,28 +175,32 @@
   --color-app-tab-accent: var(--app-tab-accent);
 }
 
+:root,
+[data-theme='dark'] {
+  --accent: color-mix(in srgb, var(--popover-foreground) 5%, var(--popover));
+}
+
 :root {
-  /* Light palette: minimal monochrome slate with a near-black primary,
-     mirroring the graphite primary of the dark theme. */
+  /* Neutral grays keep shared surfaces and their interaction states free of color tints. */
   --image-preview-backdrop: rgb(0 0 0 / 88%);
   --image-preview-controls: #f4f4f4;
   --image-preview-control-hover: #dedede;
   --image-preview-foreground: #202124;
-  --app-bg: #f6f8fb;
+  --app-bg: #f8f8f8;
   --app-surface: #ffffff;
-  --app-surface-muted: #e9eff5;
-  --app-text: #0f172a;
-  --app-text-soft: #475569;
-  --app-border: rgba(100, 116, 139, 0.28);
-  --app-primary: #1e293b;
+  --app-surface-muted: #ebebeb;
+  --app-text: #181818;
+  --app-text-soft: #545454;
+  --app-border: rgba(115, 115, 115, 0.28);
+  --app-primary: #282828;
   /* Resize rails keep the shell palette inside AI's locally themed surface. */
   --app-resize-divider: color-mix(in srgb, var(--app-border) 50%, transparent);
-  --app-resize-divider-active: #1e293b;
+  --app-resize-divider-active: var(--app-primary);
   --app-primary-text: #ffffff;
-  --app-button: #1e293b;
+  --app-button: #282828;
   --app-button-text: #ffffff;
-  --app-terminal-selection: rgba(15, 23, 42, 0.22);
-  --app-terminal-selection-inactive: rgba(15, 23, 42, 0.12);
+  --app-terminal-selection: rgba(24, 24, 24, 0.22);
+  --app-terminal-selection-inactive: rgba(24, 24, 24, 0.12);
   --app-error: #dc2626;
   --app-warning: #d97706;
   --app-success: #16a34a;
@@ -224,11 +228,11 @@
   --secondary-foreground: var(--app-text);
   --muted: var(--app-surface-muted);
   --muted-foreground: var(--app-text-soft);
-  --accent: var(--app-surface-muted);
   --accent-foreground: var(--app-text);
   --destructive: var(--app-error);
   --border: var(--app-border);
   --input: var(--app-border);
+  --input-surface: transparent;
   --ring: var(--app-primary);
   --chart-1: var(--app-primary);
   --chart-2: var(--app-text-soft);
@@ -285,11 +289,11 @@
   --secondary-foreground: var(--app-text);
   --muted: var(--app-surface-muted);
   --muted-foreground: var(--app-text-soft);
-  --accent: var(--app-surface-muted);
   --accent-foreground: var(--app-text);
   --destructive: var(--app-error);
   --border: var(--app-border);
   --input: var(--app-border);
+  --input-surface: var(--background);
   --ring: var(--app-primary);
   --chart-1: var(--app-primary);
   --chart-2: var(--app-text-soft);
@@ -339,7 +343,6 @@
   --ai-text: var(--popover-foreground);
   --ai-text-muted: var(--muted-foreground);
   --ai-action-hover: var(--accent);
-  --ai-action-active: var(--muted);
   --ai-accent: var(--primary);
   --ai-error: var(--destructive);
   --ai-success: var(--app-success);
@@ -415,7 +418,7 @@
 }
 
 .workbench-user-menu [data-slot='dropdown-menu-item']:is(:focus, [data-highlighted]) {
-  background-color: color-mix(in srgb, var(--popover-foreground) 5%, var(--popover));
+  background-color: var(--accent);
   color: var(--popover-foreground);
 }
 
@@ -445,6 +448,12 @@ body {
   color: var(--foreground);
   background-color: var(--background);
   overflow: hidden;
+}
+
+@media (forced-colors: none) {
+  :root:not([data-theme='dark']) ::selection {
+    background-color: var(--app-terminal-selection);
+  }
 }
 
 /* Disable native text selection app-wide. user-select is not inherited and
@@ -552,6 +561,7 @@ textarea,
   --color-chart-1: var(--chart-1);
   --color-ring: var(--ring);
   --color-input: var(--input);
+  --color-input-surface: var(--input-surface);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);

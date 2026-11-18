@@ -122,7 +122,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
               e.stopPropagation();
               onTogglePin?.(connection.id);
             }}
-            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text"
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-accent hover:text-app-text"
           >
             <PinIcon className="size-3" strokeWidth={1.5} />
           </button>
@@ -136,7 +136,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
               onClose(connection.id);
             }}
             className={cn(
-              'flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
+              'flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-accent hover:text-app-text',
               !dragging && active ? 'visible' : 'invisible group-hover:visible group-focus-within:visible',
             )}
           >

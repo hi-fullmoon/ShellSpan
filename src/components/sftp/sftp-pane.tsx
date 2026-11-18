@@ -485,13 +485,14 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
             </div>
           )}
           <div className="flex items-center gap-1.5">
-            {/* Search — animated expand from icon. The inner row keeps a fixed
-                width so the container clip-reveals it instead of squishing the
-                input during the width transition. */}
+            {/* The fixed-width inner row is revealed by the transition.
+                Paint the frame above it so the button hover cannot cover the border. */}
             <div
               className={cn(
-                'h-[30px] overflow-hidden rounded-md transition-[width,background-color] duration-200 ease-out',
-                showSearch ? 'w-46 bg-app-surface-muted' : 'w-7 bg-transparent',
+                'relative h-[30px] overflow-hidden rounded-md transition-[width,background-color] duration-200 ease-out',
+                showSearch
+                  ? 'w-46 dark:bg-app-surface-muted after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] not-dark:after:inset-ring-1 not-dark:after:inset-ring-input not-dark:focus-within:after:inset-ring-ring'
+                  : 'w-7 bg-transparent',
               )}
             >
               <div className="flex h-full w-46 items-center">
@@ -509,7 +510,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
                   }}
                   className={cn(
                     'size-7 shrink-0 rounded',
-                    showSearch ? 'text-app-text hover:bg-app-border/50' : 'text-app-text-soft hover:bg-app-border/50 hover:text-app-text',
+                    showSearch ? 'text-app-text' : 'text-app-text-soft hover:text-app-text',
                   )}
                   aria-label={showSearch ? t('sftp.hideFilter') : t('sftp.showFilter')}
                   title={showSearch ? t('sftp.hideFilter') : findShortcut ? `${t('sftp.showFilter')} (${getShortcutKeys(findShortcut, platform).join('+')})` : t('sftp.showFilter')}
@@ -541,7 +542,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
                 variant="ghost"
                 size="icon"
                 onClick={onOpenTerminal}
-                className="size-7 shrink-0 rounded text-app-text-soft hover:bg-app-primary/10 hover:text-app-primary"
+                className="size-7 shrink-0 rounded text-app-text-soft hover:text-app-primary"
                 aria-label={t('sftp.openTerminalHere')}
               >
                 <SquareTerminalIcon />
@@ -552,7 +553,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
                 variant="ghost"
                 size="icon"
                 onClick={handleBookmarkButtonClick}
-                className="h-[30px] w-7 shrink-0 rounded text-app-text-soft hover:bg-app-primary/10 hover:text-app-primary [&_svg]:size-3.5"
+                className="h-[30px] w-7 shrink-0 rounded text-app-text-soft hover:text-app-primary [&_svg]:size-3.5"
                 aria-label={t('sftp.contextMenu.bookmark.add')}
               >
                 <BookmarkIcon />
