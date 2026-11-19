@@ -670,32 +670,19 @@
     }
 
     #[test]
-    fn remote_copy_replace_preserves_file_over_directory_semantics() {
+    fn remote_copy_replace_authorizes_replacing_the_destination_entry() {
         assert_eq!(
-            remote_copy_destination_action(UploadConflictPolicy::Replace, RemoteFileKind::File,),
+            remote_copy_destination_action(UploadConflictPolicy::Replace),
             RemoteCopyDestinationAction::Copy {
                 allow_overwrite: true,
                 replace_any: true,
-                remove_destination_before_copy: false,
             }
         );
         assert_eq!(
-            remote_copy_destination_action(UploadConflictPolicy::Overwrite, RemoteFileKind::File,),
+            remote_copy_destination_action(UploadConflictPolicy::Overwrite),
             RemoteCopyDestinationAction::Copy {
                 allow_overwrite: true,
                 replace_any: false,
-                remove_destination_before_copy: false,
-            }
-        );
-        assert_eq!(
-            remote_copy_destination_action(
-                UploadConflictPolicy::Replace,
-                RemoteFileKind::Directory,
-            ),
-            RemoteCopyDestinationAction::Copy {
-                allow_overwrite: false,
-                replace_any: false,
-                remove_destination_before_copy: true,
             }
         );
     }
@@ -1741,6 +1728,324 @@
 
     #[test]
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn isolated_ssh_sftp_preserves_existing_entries_and_retries_failed_items() {
+        #[derive(Clone)]
+        struct CancelDuringTransfer {
+            flag: Arc<AtomicBool>,
+            event: &'static str,
+            field: &'static str,
+        }
+
+        impl TransferEventEmitter for CancelDuringTransfer {
+            fn emit_transfer_event<S: serde::Serialize + Clone>(
+                &self,
+                event: &str,
+                payload: S,
+            ) -> Result<(), String> {
+                if event == self.event
+                    && serde_json::to_value(payload).map_err(|error| error.to_string())?[self.field]
+                        .as_u64()
+                        .unwrap_or_default()
+                        > 0
+                {
+                    self.flag.store(true, AtomicOrdering::SeqCst);
+                }
+                Ok(())
+            }
+        }
+
+        let port = std::env::var("SHELLSPAN_E2E_SSH_PORT")
+            .ok()
+            .and_then(|port| port.parse().ok())
+            .unwrap_or(22222);
+        let connection = RemoteConnectionRequest {
+            host: "127.0.0.1".into(),
+            port,
+            username: "shellspan".into(),
+            auth_method: crate::models::AuthMethod::Password,
+            password: Some("shellspan-e2e".into()),
+            keychain_key_id: None,
+            private_key_data: None,
+            passphrase: None,
+            jump_host: None,
+        };
+        let alias = RemoteConnectionRequest {
+            host: "localhost".into(),
+            ..connection.clone()
+        };
+        let (_known_hosts_temp, known_hosts) =
+            crate::connection::trusted_known_hosts_fixture(&connection.host, port);
+        let (_alias_temp, alias_hosts) =
+            crate::connection::trusted_known_hosts_fixture(&alias.host, port);
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&known_hosts)
+            .unwrap()
+            .write_all(&fs::read(alias_hosts).unwrap())
+            .unwrap();
+
+        let local = tempfile::tempdir().unwrap();
+        let downloads = local.path().join("downloads");
+        let original = include_bytes!("../../../public/shellspan-icon.svg");
+        let icon = Path::new(env!("CARGO_MANIFEST_DIR")).join("icons/icon.png");
+        let incoming = fs::read(&icon).unwrap();
+        let report = local.path().join("Report.txt");
+        fs::write(&report, original).unwrap();
+        let tree = local.path().join("tree");
+        fs::create_dir(&tree).unwrap();
+        fs::copy(&icon, tree.join("icon.png")).unwrap();
+
+        let remote = format!(
+            "/home/shellspan/upload/transfer-regressions-{}",
+            Uuid::new_v4()
+        );
+        let remote_report = format!("{remote}/Report.txt");
+        let remote_tree = format!("{remote}/tree");
+        let remote_icon = format!("{remote_tree}/icon.png");
+        let remote_copy = format!("{remote}/copy");
+        let upload_request = |path: &Path, policy| UploadLocalPathsRequest {
+            connection: connection.clone(),
+            destination_directory: remote.clone(),
+            local_paths: vec![path_to_string(path)],
+            conflict_policies: vec![policy],
+            operation_id: Uuid::new_v4().to_string(),
+        };
+        for path in [&report, &tree] {
+            let upload = upload_local_paths_inner(
+                NoopTransferEventEmitter,
+                upload_request(path, UploadConflictPolicy::Fail),
+                Arc::default(),
+                Some(&known_hosts),
+            )
+            .unwrap();
+            assert_eq!(
+                upload.items[0].status,
+                TransferItemStatus::Completed,
+                "{upload:?}"
+            );
+        }
+        let connected = connect_sftp(&connection, None, Some(&known_hosts)).unwrap();
+        let connected = connected.lock().unwrap();
+        let sftp = &connected.sftp;
+        let chmod = |path: &str, mode| {
+            sftp.setstat(
+                Path::new(path),
+                FileStat {
+                    size: None,
+                    uid: None,
+                    gid: None,
+                    perm: Some(mode),
+                    atime: None,
+                    mtime: None,
+                },
+            )
+            .unwrap()
+        };
+        let read = |path: &str| {
+            let mut bytes = Vec::new();
+            sftp.open(Path::new(path))
+                .unwrap()
+                .read_to_end(&mut bytes)
+                .unwrap();
+            bytes
+        };
+
+        chmod(&remote_report, 0o600);
+        fs::write(&report, &incoming).unwrap();
+        let upload = upload_local_paths_inner(
+            NoopTransferEventEmitter,
+            upload_request(&report, UploadConflictPolicy::Overwrite),
+            Arc::default(),
+            Some(&known_hosts),
+        )
+        .unwrap();
+        assert_eq!(
+            upload.items[0].status,
+            TransferItemStatus::Completed,
+            "{upload:?}"
+        );
+        assert_eq!(
+            sftp.lstat(Path::new(&remote_report)).unwrap().perm.unwrap() & 0o777,
+            0o600
+        );
+        assert_eq!(read(&remote_report), incoming);
+
+        fs::write(tree.join("icon.png"), original).unwrap();
+        let cancel = CancelDuringTransfer {
+            flag: Arc::default(),
+            event: crate::UPLOAD_PROGRESS_EVENT,
+            field: "uploadedBytes",
+        };
+        let _ = upload_local_paths_inner(
+            cancel.clone(),
+            upload_request(&tree, UploadConflictPolicy::Replace),
+            cancel.flag.clone(),
+            Some(&known_hosts),
+        );
+        assert!(cancel.flag.load(AtomicOrdering::SeqCst));
+        assert_eq!(
+            read(&remote_icon),
+            incoming,
+            "cancelled upload must preserve the target tree"
+        );
+        let upload = upload_local_paths_inner(
+            NoopTransferEventEmitter,
+            upload_request(&tree, UploadConflictPolicy::Replace),
+            Arc::default(),
+            Some(&known_hosts),
+        )
+        .unwrap();
+        assert_eq!(
+            upload.items[0].status,
+            TransferItemStatus::Completed,
+            "{upload:?}"
+        );
+        assert_eq!(read(&remote_icon), original);
+
+        let download_request =
+            |path: &str, policy: Option<UploadConflictPolicy>| DownloadRemotePathsRequest {
+                connection: connection.clone(),
+                remote_paths: vec![path.into()],
+                destination_directory: path_to_string(&downloads),
+                save_destination: None,
+                conflict_policies: policy.into_iter().collect(),
+                operation_id: Uuid::new_v4().to_string(),
+            };
+        fs::create_dir(&downloads).unwrap();
+        let differently_cased = downloads.join("report.txt");
+        fs::write(&differently_cased, original).unwrap();
+        let existing = if downloads.join("Report.txt").exists() {
+            differently_cased
+        } else {
+            let same_name = downloads.join("Report.txt");
+            fs::write(&same_name, original).unwrap();
+            same_name
+        };
+        let download = download_remote_paths_inner(
+            NoopTransferEventEmitter,
+            download_request(&remote_report, Some(UploadConflictPolicy::Fail)),
+            Arc::default(),
+            Some(&known_hosts),
+        )
+        .unwrap();
+        assert_eq!(download.items[0].status, TransferItemStatus::Failed);
+        assert_eq!(fs::read(&existing).unwrap(), original);
+        let download = download_remote_paths_inner(
+            NoopTransferEventEmitter,
+            download_request(&remote_report, None),
+            Arc::default(),
+            Some(&known_hosts),
+        )
+        .unwrap();
+        assert_eq!(
+            download.items[0].status,
+            TransferItemStatus::Completed,
+            "{download:?}"
+        );
+        assert_eq!(
+            fs::read(download.items[0].destination_path.as_ref().unwrap()).unwrap(),
+            incoming
+        );
+        assert_eq!(fs::read(&existing).unwrap(), original);
+
+        fs::create_dir(downloads.join("tree")).unwrap();
+        fs::write(downloads.join("tree/original.svg"), original).unwrap();
+        let cancel = CancelDuringTransfer {
+            flag: Arc::default(),
+            event: crate::DOWNLOAD_PROGRESS_EVENT,
+            field: "downloadedBytes",
+        };
+        let _ = download_remote_paths_inner(
+            cancel.clone(),
+            download_request(&remote_tree, Some(UploadConflictPolicy::Replace)),
+            cancel.flag.clone(),
+            Some(&known_hosts),
+        );
+        assert!(cancel.flag.load(AtomicOrdering::SeqCst));
+        assert_eq!(
+            fs::read(downloads.join("tree/original.svg")).unwrap(),
+            original
+        );
+        assert!(!downloads.join("tree/icon.png").exists());
+
+        let link = format!("{remote}/broken-link");
+        sftp.symlink(Path::new("missing-file"), Path::new(&link))
+            .unwrap();
+        let download = download_remote_paths_inner(
+            NoopTransferEventEmitter,
+            download_request(&link, None),
+            Arc::default(),
+            Some(&known_hosts),
+        )
+        .unwrap();
+        assert_eq!(download.items[0].status, TransferItemStatus::Failed);
+        assert!(!downloads.join("broken-link").exists());
+
+        let copy_request = |paths, destination: &str, policies| CopyRemoteToRemoteRequest {
+            source_connection: connection.clone(),
+            destination_connection: alias.clone(),
+            source_paths: paths,
+            destination_directory: destination.into(),
+            conflict_policies: policies,
+            operation_id: Uuid::new_v4().to_string(),
+        };
+        let copy = |request| {
+            copy_remote_to_remote_blocking(
+                NoopTransferEventEmitter,
+                request,
+                Arc::default(),
+                None,
+                Some(&known_hosts),
+            )
+            .unwrap()
+        };
+        let current = copy(copy_request(
+            vec![remote_tree.clone()],
+            &remote,
+            vec![UploadConflictPolicy::Replace],
+        ));
+        assert_eq!(current.items[0].status, TransferItemStatus::Failed);
+        assert_eq!(
+            current.items[0].error.as_deref(),
+            Some("cannot copy a remote entry onto itself")
+        );
+        assert_eq!(read(&remote_icon), original);
+
+        chmod(&remote_icon, 0o000);
+        let partial = copy(copy_request(
+            vec![remote_report.clone(), remote_tree.clone()],
+            &remote_copy,
+            Vec::new(),
+        ));
+        assert_eq!(
+            partial.items[0].status,
+            TransferItemStatus::Completed,
+            "{partial:?}"
+        );
+        assert_eq!(partial.items[1].status, TransferItemStatus::Failed);
+        assert!(!remote_path_exists(
+            sftp,
+            Path::new(&format!("{remote_copy}/tree"))
+        ));
+        chmod(&remote_icon, 0o644);
+        let remaining = partial
+            .items
+            .into_iter()
+            .filter(|item| item.status == TransferItemStatus::Failed)
+            .map(|item| item.source_path)
+            .collect();
+        let retried = copy(copy_request(remaining, &remote_copy, Vec::new()));
+        assert_eq!(
+            retried.items[0].status,
+            TransferItemStatus::Completed,
+            "{retried:?}"
+        );
+        assert_eq!(read(&format!("{remote_copy}/tree/icon.png")), original);
+        assert_eq!(read(&format!("{remote_copy}/Report.txt")), incoming);
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
     fn isolated_sftp_transfer_benchmark() {
         let host =
             std::env::var("SHELLSPAN_E2E_SSH_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
@@ -1843,7 +2148,7 @@
                     "every benchmark upload item should complete"
                 );
 
-                copy_remote_to_remote_blocking(
+                let copy = copy_remote_to_remote_blocking(
                     emitter,
                     CopyRemoteToRemoteRequest {
                         source_connection: connection.clone(),
@@ -1858,6 +2163,7 @@
                     Some(&known_hosts),
                 )
                 .expect("benchmark remote copy should succeed");
+                assert_eq!(copy.items[0].status, TransferItemStatus::Completed);
 
                 let download = download_remote_paths_inner(
                     emitter,

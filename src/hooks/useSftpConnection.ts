@@ -17,6 +17,7 @@ import {
   invokeResolveRemoteEntryOwners,
   invokeUpdateRemotePermissions,
   invokeUploadLocalPaths,
+  parseRemoteFsError,
 } from '@/lib/ipc/tauri';
 import {
   getCachedDirectoryListing,
@@ -57,6 +58,11 @@ import type {
 } from '@/types';
 
 const logger = createLogger('sftp');
+
+function isRemoteHostKeyError(error: unknown): true | undefined {
+  const type = parseRemoteFsError(error)?.type;
+  return type === 'HostKeyUnknown' || type === 'HostKeyMismatch' ? true : undefined;
+}
 
 function createOperationId(connectionId: string, kind: string): string {
   return `${connectionId}-${kind}-${crypto.randomUUID()}`;
@@ -370,6 +376,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
                   connection.id,
                   side,
                   getLocalizedErrorMessage(retryError),
+                  isRemoteHostKeyError(retryError),
                 );
                 return;
               }
@@ -382,6 +389,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
           connection.id,
           side,
           getLocalizedErrorMessage(error),
+          isRemoteHostKeyError(error),
         );
       } finally {
         if (isLatest()) {

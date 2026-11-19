@@ -1,7 +1,6 @@
 import { useCallback, useState } from 'react';
 import {
   buildRemoteConnectionRequest,
-  invokeCheckHostKey,
   invokeTrustHost,
   invokeWarmRemoteConnection,
   parseRemoteFsError,
@@ -11,10 +10,9 @@ import { useAppStore } from '@/stores/appStore';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import { useSftpStore, type SftpLocationRequest, type SftpSide } from '@/stores/sftpStore';
 import { useToastStore } from '@/stores/toastStore';
-import type { ConnectionProfile } from '@/types';
+import type { ConnectionProfile, RemoteConnectionRequest } from '@/types';
 import { promptForMissingPassword, persistPromptedPassword } from '@/lib/connections/password-prompt';
 import { getToastErrorMessage } from '@/lib/error';
-import { createLogger } from '@/lib/logger';
 import {
   ensureKeychainKeyForProfile,
 } from '@/lib/connections/keychain-key-prompt';
@@ -22,8 +20,6 @@ import { useProfileStore } from '@/stores/profileStore';
 import { usePortForwardStore } from '@/stores/portForwardStore';
 import { sshRouteKey } from '@/lib/connections/ssh-route';
 import { t } from '@/locales';
-
-const logger = createLogger('sftp');
 
 interface SftpHostKeyDialogState {
   open: boolean;
@@ -49,7 +45,7 @@ export function useSftpConnectionOpener(): {
     targetSide?: SftpSide,
     initialDirectory?: string | SftpLocationRequest,
   ) => Promise<void>;
-  verifyHostKey: (host: string, port: number, onVerified: () => void) => Promise<void>;
+  verifyHostKey: (connection: RemoteConnectionRequest, onVerified: () => void) => Promise<void>;
   hostKeyDialog: SftpHostKeyDialogState;
   closeHostKeyDialog: () => void;
 } {
@@ -108,56 +104,54 @@ export function useSftpConnectionOpener(): {
     [hydrateSftpBookmarks, resolveConnectionAttempt, touchProfile],
   );
 
-  const verifyHostKey = useCallback(
-    async (host: string, port: number, onVerified: () => void): Promise<void> => {
+  const showHostKeyError = useCallback((
+    error: unknown,
+    connection: RemoteConnectionRequest,
+    retry: () => void | Promise<void>,
+  ) => {
+    const parsed = parseRemoteFsError(error);
+    if (parsed?.type !== 'HostKeyUnknown' && parsed?.type !== 'HostKeyMismatch') {
+      useToastStore.getState().addToast(getToastErrorMessage(error), 'error');
+      return;
+    }
+    const { host, port, fingerprint } = parsed.payload;
+    // When the failed key belongs to the jump host, that endpoint is reached directly.
+    const jump = connection.jumpHost;
+    const throughJump = jump && (host !== jump.host || port !== jump.port) ? jump : undefined;
+    setHostKeyDialog({
+      open: true,
+      host,
+      port,
+      fingerprint,
+      mismatch: parsed.type === 'HostKeyMismatch',
+      onTrust: () => {
+        const trust = throughJump
+          ? invokeTrustHost(host, port, fingerprint ?? '', throughJump)
+          : invokeTrustHost(host, port, fingerprint ?? '');
+        void trust.then(() => {
+          setHostKeyDialog(CLOSED_DIALOG);
+          return retry();
+        }).catch((trustError: unknown) => {
+          useToastStore.getState().addToast(getToastErrorMessage(trustError), 'error');
+        });
+      },
+    });
+  }, []);
+
+  const verifyHostKey = useCallback(async (
+    connection: RemoteConnectionRequest,
+    onVerified: () => void,
+  ): Promise<void> => {
+    const verify = async (): Promise<void> => {
       try {
-        const result = await invokeCheckHostKey(host, port);
-
-        if (result.status === 'match') {
-          onVerified();
-          return;
-        }
-
-        if (result.status === 'notFound' || result.status === 'mismatch') {
-          setHostKeyDialog({
-            open: true,
-            host,
-            port,
-            fingerprint: result.fingerprint,
-            mismatch: result.status === 'mismatch',
-            onTrust: () => {
-              void invokeTrustHost(host, port, result.fingerprint ?? '')
-                .then(() => {
-                  setHostKeyDialog(CLOSED_DIALOG);
-                  onVerified();
-                })
-                .catch((error: unknown) => {
-                  useToastStore
-                    .getState()
-                    .addToast(getToastErrorMessage(error), 'error');
-                });
-            },
-          });
-          return;
-        }
-
-        const detail =
-          result.message ?? `Failed to check the host key for ${host}:${port}.`;
-        logger.error('Host key check failed', detail);
-        useToastStore
-          .getState()
-          .addToast(
-            getToastErrorMessage(detail),
-            'error',
-          );
+        await invokeWarmRemoteConnection(connection);
+        onVerified();
       } catch (error) {
-        useToastStore
-          .getState()
-          .addToast(getToastErrorMessage(error), 'error');
+        showHostKeyError(error, connection, verify);
       }
-    },
-    [],
-  );
+    };
+    await verify();
+  }, [showHostKeyError]);
 
   const open = useCallback(
     async (
@@ -197,12 +191,13 @@ export function useSftpConnectionOpener(): {
         }
         connectionAttemptId = beginAttempt(preparedProfile);
         setActiveSection('sftp');
+        const connection = buildRemoteConnectionRequest(preparedProfile);
 
         const attemptSftpConnection = async (attemptId: string): Promise<void> => {
           try {
             // Let the real pooled connection perform host-key verification,
             // authentication, and SFTP initialization on the same SSH session.
-            await invokeWarmRemoteConnection(buildRemoteConnectionRequest(preparedProfile));
+            await invokeWarmRemoteConnection(connection);
             if (finishOpen(
               attemptId,
               preparedProfile,
@@ -214,45 +209,15 @@ export function useSftpConnectionOpener(): {
               void persistPromptedPassword(profileWithSavedSecrets, preparedProfile);
             }
           } catch (error) {
-            const parsed = parseRemoteFsError(error);
-            if (parsed && (
-              parsed.type === 'HostKeyUnknown'
-              || parsed.type === 'HostKeyMismatch'
-            )) {
-              setHostKeyDialog({
-                open: true,
-                host: parsed.payload.host,
-                port: parsed.payload.port,
-                fingerprint: parsed.payload.fingerprint,
-                mismatch: parsed.type === 'HostKeyMismatch',
-                onTrust: () => {
-                  void invokeTrustHost(
-                    parsed.payload.host,
-                    parsed.payload.port,
-                    parsed.payload.fingerprint ?? '',
-                  )
-                    .then(async () => {
-                      setHostKeyDialog(CLOSED_DIALOG);
-                      const retryAttemptId = beginAttempt(preparedProfile);
-                      setActiveSection('sftp');
-                      try {
-                        await attemptSftpConnection(retryAttemptId);
-                      } finally {
-                        endConnectionAttempt(retryAttemptId);
-                      }
-                    })
-                    .catch((retryError: unknown) => {
-                      useToastStore
-                        .getState()
-                        .addToast(getToastErrorMessage(retryError), 'error');
-                    });
-                },
-              });
-              return;
-            }
-            useToastStore
-              .getState()
-              .addToast(getToastErrorMessage(error), 'error');
+            showHostKeyError(error, connection, async () => {
+              const retryAttemptId = beginAttempt(preparedProfile);
+              setActiveSection('sftp');
+              try {
+                await attemptSftpConnection(retryAttemptId);
+              } finally {
+                endConnectionAttempt(retryAttemptId);
+              }
+            });
           }
         };
 
@@ -261,7 +226,7 @@ export function useSftpConnectionOpener(): {
         if (connectionAttemptId) endConnectionAttempt(connectionAttemptId);
       }
     },
-    [beginConnectionAttempt, endConnectionAttempt, finishOpen, setActiveSection],
+    [beginConnectionAttempt, endConnectionAttempt, finishOpen, setActiveSection, showHostKeyError],
   );
 
   const closeHostKeyDialog = (): void => {

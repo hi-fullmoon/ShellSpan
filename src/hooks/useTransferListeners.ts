@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { listen, type Event } from '@tauri-apps/api/event';
 import { useTransferStore } from '@/stores/transferStore';
 import type {
@@ -20,7 +20,6 @@ export function useTransferListeners(): void {
   const updateDelete = useTransferStore((state) => state.updateDelete);
   const updateRemoteCopy = useTransferStore((state) => state.updateRemoteCopy);
   const addToast = useToastStore((state) => state.addToast);
-  const notifiedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let disposed = false;
@@ -40,56 +39,30 @@ export function useTransferListeners(): void {
       unlisteners.push(unlisten);
     };
 
-    // Drop ids whose operation has ended or been removed so the set does not
-    // grow without bound; entries for completed operations are kept while the
-    // operation lives to suppress duplicate completion events.
-    const pruneNotified = (): void => {
-      const operations = useTransferStore.getState().operations;
-      notifiedRef.current.forEach((operationId) => {
-        const operation = operations.find(
-          (item) => item.operationId === operationId,
-        );
-        if (
-          !operation ||
-          operation.status === 'failed' ||
-          operation.status === 'cancelled'
-        ) {
-          notifiedRef.current.delete(operationId);
+    const unsubscribe = useTransferStore.subscribe((state, previous) => {
+      if (state.pathOccupancyRevision === previous.pathOccupancyRevision
+        || !useAppStore.getState().sftpCompletionNotification
+        || (document.visibilityState === 'visible' && document.hasFocus())) return;
+      const previouslyCompleted = new Set(previous.operations
+        .filter((operation) => operation.status === 'completed')
+        .map((operation) => operation.operationId));
+      for (const operation of state.operations) {
+        if (operation.status === 'completed' && operation.kind !== 'delete'
+          && operation.totalSteps > 0 && !previouslyCompleted.has(operation.operationId)) {
+          addToast(t('sftp.transfer.completedNotification'), 'success');
         }
-      });
-    };
-
-    const notifyCompleted = (operationId: string, totalSteps: number, completedSteps: number): void => {
-      pruneNotified();
-      if (
-        totalSteps <= 0 ||
-        completedSteps < totalSteps ||
-        notifiedRef.current.has(operationId)
-      ) return;
-      notifiedRef.current.add(operationId);
-      if (
-        useAppStore.getState().sftpCompletionNotification &&
-        (document.visibilityState !== 'visible' || !document.hasFocus())
-      ) {
-        addToast(t('sftp.transfer.completedNotification'), 'success');
       }
-    };
+    });
 
     const setup = async (): Promise<void> => {
       await Promise.all([
         register<UploadProgressEvent>(
           'upload-progress',
-          (event) => {
-            updateUpload(event.payload);
-            notifyCompleted(event.payload.operationId, event.payload.totalSteps, event.payload.completedSteps);
-          },
+          (event) => updateUpload(event.payload),
         ),
         register<DownloadProgressEvent>(
           'download-progress',
-          (event) => {
-            updateDownload(event.payload);
-            notifyCompleted(event.payload.operationId, event.payload.totalSteps, event.payload.completedSteps);
-          },
+          (event) => updateDownload(event.payload),
         ),
         register<DeleteProgressEvent>(
           'delete-progress',
@@ -99,10 +72,7 @@ export function useTransferListeners(): void {
         ),
         register<RemoteCopyProgressEvent>(
           'remote-copy-progress',
-          (event) => {
-            updateRemoteCopy(event.payload);
-            notifyCompleted(event.payload.operationId, event.payload.totalSteps, event.payload.completedSteps);
-          },
+          (event) => updateRemoteCopy(event.payload),
         ),
       ]);
     };
@@ -113,6 +83,7 @@ export function useTransferListeners(): void {
 
     return () => {
       disposed = true;
+      unsubscribe();
       unlisteners.forEach((unlisten) => unlisten());
       unlisteners.length = 0;
     };

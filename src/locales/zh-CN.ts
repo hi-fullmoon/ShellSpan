@@ -1033,6 +1033,7 @@ export default {
   'sftp.transfer.remoteCopyFailed': '远程传输失败',
   'sftp.transfer.interrupted': '应用重启导致任务中断。请确认路径后点击重试以续传。',
   'sftp.transfer.resumeProfileMissing': '保存的连接已被删除，请丢弃此恢复项。',
+  'sftp.transfer.resumeRouteChanged': '连接路由已变更或缺少原始路由，请重新发起传输。',
   'sftp.transfer.discard': '丢弃',
   'sftp.transfer.cancellingDelete': '正在撤销',
   'sftp.transfer.cancelling': '正在取消',

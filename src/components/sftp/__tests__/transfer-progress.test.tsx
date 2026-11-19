@@ -139,7 +139,7 @@ describe('TransferProgress', () => {
     expect(screen.getByText('sftp.transfer.downloadFailed')).toBeInTheDocument();
   });
 
-  it('shows remote-to-remote completion before dismissing the task', () => {
+  it('shows remote-to-remote completion after the destination is committed', () => {
     useTransferStore.setState({
       operations: [{
         ...failedUpload,
@@ -154,6 +154,8 @@ describe('TransferProgress', () => {
     });
     render(<TransferProgress />);
 
+    expect(screen.getByText('1/1')).not.toHaveClass('text-app-success');
+    act(() => useTransferStore.getState().markOperationCompleted('remote-copy-1'));
     expect(screen.getByText('1/1')).toHaveClass('text-app-success');
   });
 

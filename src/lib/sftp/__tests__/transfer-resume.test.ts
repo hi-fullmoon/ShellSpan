@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { initI18n } from '@/locales';
+import { sshRouteKey } from '@/lib/connections/ssh-route';
 
 const tauriMocks = vi.hoisted(() => ({
   loadPreferences: vi.fn(),
@@ -23,17 +24,6 @@ import {
 import { useProfileStore } from '@/stores/profileStore';
 import { useTransferStore } from '@/stores/transferStore';
 
-const candidate = {
-  schemaVersion: 1 as const,
-  operationId: 'copy-resume-1',
-  sourceProfileId: 'source-profile',
-  destinationProfileId: 'destination-profile',
-  sourcePaths: ['/var/data/archive.tar'],
-  destinationDirectory: '/backup',
-  conflictPolicies: ['overwrite' as const],
-  createdAt: '2026-08-23T00:00:00.000Z',
-};
-
 const profile = (id: string, host: string) => ({
   id,
   name: id,
@@ -46,23 +36,35 @@ const profile = (id: string, host: string) => ({
   updatedAt: 1,
 });
 
+const sourceProfile = profile('source-profile', 'source.example.test');
+const destinationProfile = profile('destination-profile', 'destination.example.test');
+const candidate = {
+  schemaVersion: 1 as const,
+  operationId: 'copy-resume-1',
+  sourceProfileId: sourceProfile.id,
+  destinationProfileId: destinationProfile.id,
+  sourceRouteKey: sshRouteKey(sourceProfile),
+  destinationRouteKey: sshRouteKey(destinationProfile),
+  sourcePaths: ['/var/data/archive.tar'],
+  destinationDirectory: '/backup',
+  conflictPolicies: ['overwrite' as const],
+  createdAt: '2026-08-23T00:00:00.000Z',
+};
+
 describe('transfer resume metadata', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     await initI18n('en-US');
     useTransferStore.setState({ operations: [] });
     useProfileStore.setState({
-      profiles: [
-        profile('source-profile', 'source.example.test'),
-        profile('destination-profile', 'destination.example.test'),
-      ],
+      profiles: [sourceProfile, destinationProfile],
       initialized: true,
     });
     tauriMocks.loadPreferences.mockResolvedValue([
       ['transferResumeCandidates', JSON.stringify([candidate])],
     ]);
     tauriMocks.savePreferences.mockResolvedValue(undefined);
-    tauriMocks.copyRemoteToRemote.mockResolvedValue(undefined);
+    tauriMocks.copyRemoteToRemote.mockResolvedValue({ items: [] });
     tauriMocks.cancelRemoteCopy.mockResolvedValue(undefined);
   });
 
@@ -109,5 +111,14 @@ describe('transfer resume metadata', () => {
       errorCategory: 'not-found',
       retry: undefined,
     });
+  });
+
+  it('blocks retries when a saved profile changes endpoints', async () => {
+    useProfileStore.setState({ profiles: [sourceProfile, { ...destinationProfile, host: 'other.example.test' }] });
+    await hydrateTransferResumeCandidates();
+
+    expect(useTransferStore.getState().operations[0]?.retry).toBeUndefined();
+    await useTransferStore.getState().retryOperation(candidate.operationId);
+    expect(tauriMocks.copyRemoteToRemote).not.toHaveBeenCalled();
   });
 });

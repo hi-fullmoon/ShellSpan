@@ -699,6 +699,7 @@ pub(crate) struct TrustHostRequest {
     pub(crate) host: String,
     pub(crate) port: u16,
     pub(crate) expected_fingerprint: String,
+    pub(crate) jump_host: Option<JumpHostConfig>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]

@@ -69,7 +69,7 @@ vi.mock('@/hooks/useTransferListeners', () => ({
 vi.mock('@/lib/ipc/tauri', () => ({
   invokeCancelRemoteCopy: vi.fn().mockResolvedValue(undefined),
   invokeCopyLocalPaths: vi.fn().mockResolvedValue(undefined),
-  invokeCopyRemoteToRemote: vi.fn().mockResolvedValue(undefined),
+  invokeCopyRemoteToRemote: vi.fn().mockResolvedValue({ items: [] }),
   invokeDisconnectSftp: vi.fn().mockResolvedValue(undefined),
   invokePickLocalFiles: vi.fn().mockResolvedValue([]),
   invokePickLocalFolder: vi.fn().mockResolvedValue([]),

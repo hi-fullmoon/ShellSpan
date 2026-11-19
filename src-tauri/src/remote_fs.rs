@@ -17,7 +17,7 @@ use crate::models::{
 };
 use crate::portable_local_path;
 use crate::posix_join;
-use crate::sftp_pool::SftpPool;
+use crate::sftp_pool::{connection_key, SftpPool};
 use base64::Engine;
 use libssh2_sys::{LIBSSH2_ERROR_EAGAIN, LIBSSH2_ERROR_FILE, LIBSSH2_FX_NO_SUCH_FILE};
 use log::{info, warn};
@@ -1200,28 +1200,41 @@ fn upload_single_local_path<E: TransferEventEmitter>(
         };
     let destination_path = remote_join(destination_directory, &destination_name);
 
-    // Replacing a directory still needs to clear the previous tree before
-    // recursively creating the new one. File uploads keep the old target in
-    // place until the staged file has been written and verified.
     if conflict_policy == UploadConflictPolicy::Replace
-        && remote_path_exists(sftp, &destination_path)
-        && fs::symlink_metadata(local_path)
-            .map(|metadata| metadata.is_dir())
-            .unwrap_or(false)
+        && fs::symlink_metadata(local_path).is_ok_and(|metadata| metadata.is_dir())
     {
-        remove_remote_entry_simple(sftp, &destination_path)?;
+        stage_remote_tree(sftp, &destination_path, |payload| {
+            let mut staging_directories = RemoteDirectoryCache::new(
+                payload
+                    .parent()
+                    .expect("remote staging payload has a parent"),
+            );
+            upload_local_entry_to_path(
+                sftp,
+                local_path,
+                payload,
+                UploadConflictPolicy::Fail,
+                &mut staging_directories,
+                progress,
+                transfer_buffer,
+            )?;
+            progress
+                .ensure_not_cancelled()
+                .map_err(|message| RemoteFsError::Other { message })?;
+            finalize_remote_copy_staging(sftp, payload, &destination_path, true, true)
+        })?;
         known_remote_directories.forget_tree(&destination_path);
+    } else {
+        upload_local_entry_to_path(
+            sftp,
+            local_path,
+            &destination_path,
+            conflict_policy,
+            known_remote_directories,
+            progress,
+            transfer_buffer,
+        )?;
     }
-
-    upload_local_entry_to_path(
-        sftp,
-        local_path,
-        &destination_path,
-        conflict_policy,
-        known_remote_directories,
-        progress,
-        transfer_buffer,
-    )?;
     existing_names.insert(destination_name);
     Ok(Some(destination_path))
 }
@@ -1350,10 +1363,8 @@ fn download_remote_paths_inner<E: TransferEventEmitter>(
         .emit()
         .map_err(|message| RemoteFsError::Other { message })?;
 
-    // Reserve names up front so two remote entries sharing a file name (from
-    // different parent directories) never overwrite each other's download.
-    // Like the upload loop, a failing entry does not abort the rest of the
-    // batch; failures are aggregated and reported at the end.
+    // The initial listing avoids obvious name conflicts. The no-clobber
+    // publish step also checks names against the destination filesystem.
     let mut reserved_names = if request.save_destination.is_some() {
         HashSet::new()
     } else {
@@ -1382,60 +1393,15 @@ fn download_remote_paths_inner<E: TransferEventEmitter>(
                 )?;
                 return Ok(Some(destination.path.clone()));
             }
-            let file_name = remote_path
-                .file_name()
-                .ok_or_else(|| RemoteFsError::Other {
-                    message: format!("invalid remote path: {}", remote_path.display()),
-                })?
-                .to_string_lossy()
-                .to_string();
-            let destination_name = match resolve_local_download_name(
-                &reserved_names,
-                &file_name,
-                request.conflict_policies.get(index).copied(),
-            )? {
-                Some(name) => name,
-                // Skip policy: leave the existing local entry untouched.
-                None => return Ok(None),
-            };
-            reserved_names.insert(destination_name.clone());
-            let destination_path = destination_directory.join(&destination_name);
-            // Replace policy: remove the existing local entry first, then
-            // download fresh. Overwrite truncates files in place instead.
-            if request.conflict_policies.get(index).copied() == Some(UploadConflictPolicy::Replace)
-                && destination_path.exists()
-            {
-                if destination_path.is_dir() {
-                    fs::remove_dir_all(&destination_path).map_err(|error| {
-                        RemoteFsError::Other {
-                            message: format!("failed to replace local directory: {error}"),
-                        }
-                    })?;
-                } else {
-                    fs::remove_file(&destination_path).map_err(|error| RemoteFsError::Other {
-                        message: format!("failed to replace local file: {error}"),
-                    })?;
-                }
-            }
-            info!(
-                "Downloading remote_path={} to destination_path={}",
-                remote_path.display(),
-                destination_path.display()
-            );
-            download_remote_entry_to_path(
+            download_remote_entry(
                 &connected.sftp,
                 &manifest,
-                &destination_path,
+                destination_directory,
+                request.conflict_policies.get(index).copied(),
+                &mut reserved_names,
                 &mut progress,
                 &mut transfer_buffer,
-            )?;
-            if !destination_path.exists() {
-                warn!(
-                    "Downloaded file does not exist at destination_path={}",
-                    destination_path.display()
-                );
-            }
-            Ok::<Option<String>, RemoteFsError>(Some(path_to_string(&destination_path)))
+            )
         })();
         match download_result {
             Ok(Some(destination_path)) => items.push(TransferItemResult {
@@ -1693,6 +1659,203 @@ fn build_remote_transfer_manifest<R: RemoteTreeReader>(
     })
 }
 
+fn local_download_name(path: &Path) -> Result<String, RemoteFsError> {
+    let name = path.file_name().ok_or_else(|| RemoteFsError::Other {
+        message: format!("invalid remote file name: {}", path.display()),
+    })?;
+    let name = name.to_string_lossy();
+    #[cfg(windows)]
+    if windows_open_file_name(&name) != name {
+        return Err(RemoteFsError::Other {
+            message: format!("invalid local download file name: {name}"),
+        });
+    }
+    Ok(name.into_owned())
+}
+
+fn download_remote_entry<E: TransferEventEmitter>(
+    sftp: &Sftp,
+    manifest: &RemoteTransferManifest,
+    destination_directory: &Path,
+    policy: Option<UploadConflictPolicy>,
+    reserved_names: &mut HashSet<String>,
+    progress: &mut DownloadProgressTracker<E>,
+    transfer_buffer: &mut [u8],
+) -> Result<Option<String>, RemoteFsError> {
+    let name = local_download_name(&manifest.source_path)?;
+    let Some(mut destination_name) = resolve_local_download_name(reserved_names, &name, policy)?
+    else {
+        return Ok(None);
+    };
+    let staging = private_local_download_directory(destination_directory, ".shellspan-download-")?;
+    let payload = staging.path().join("payload");
+    download_remote_entry_to_path(sftp, manifest, &payload, progress, transfer_buffer)?;
+    loop {
+        progress
+            .ensure_not_cancelled()
+            .map_err(|message| RemoteFsError::Other { message })?;
+        let destination = destination_directory.join(&destination_name);
+        match policy {
+            Some(UploadConflictPolicy::Replace) => replace_local_download(&payload, &destination)?,
+            Some(UploadConflictPolicy::Overwrite) => {
+                overwrite_local_download(&payload, &destination)
+                    .map_err(local_download_commit_error)?
+            }
+            _ => match rename_local_download_noclobber(&payload, &destination) {
+                Ok(()) => (),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    reserved_names.insert(destination_name);
+                    let Some(next) = resolve_local_download_name(reserved_names, &name, policy)?
+                    else {
+                        return Ok(None);
+                    };
+                    destination_name = next;
+                    continue;
+                }
+                Err(error) => return Err(local_download_commit_error(error)),
+            },
+        }
+        reserved_names.insert(destination_name);
+        return Ok(Some(path_to_string(&destination)));
+    }
+}
+
+fn local_download_commit_error(error: io::Error) -> RemoteFsError {
+    RemoteFsError::Other {
+        message: format!("failed to publish local download: {error}"),
+    }
+}
+
+fn private_local_download_directory(
+    parent: &Path,
+    prefix: &str,
+) -> Result<tempfile::TempDir, RemoteFsError> {
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(prefix);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(fs::Permissions::from_mode(0o700));
+    }
+    builder
+        .tempdir_in(parent)
+        .map_err(local_download_commit_error)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn rename_local_download_noclobber(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let source = CString::new(source.as_os_str().as_bytes())?;
+    let destination = CString::new(destination.as_os_str().as_bytes())?;
+    // SAFETY: both paths are valid NUL-terminated strings for the duration of the call.
+    let result = unsafe {
+        #[cfg(target_os = "macos")]
+        {
+            libc::renamex_np(source.as_ptr(), destination.as_ptr(), libc::RENAME_EXCL)
+        }
+        #[cfg(target_os = "linux")]
+        {
+            libc::renameat2(
+                libc::AT_FDCWD,
+                source.as_ptr(),
+                libc::AT_FDCWD,
+                destination.as_ptr(),
+                libc::RENAME_NOREPLACE,
+            )
+        }
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(windows)]
+fn rename_local_download_noclobber(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
+
+    let source: Vec<u16> = source.as_os_str().encode_wide().chain([0]).collect();
+    let destination: Vec<u16> = destination.as_os_str().encode_wide().chain([0]).collect();
+    // SAFETY: both buffers contain NUL-terminated paths and remain live during the call.
+    if unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), 0) } != 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn rename_local_download_noclobber(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::hard_link(source, destination)?;
+    fs::remove_file(source)
+}
+
+fn overwrite_local_download(source: &Path, destination: &Path) -> io::Result<()> {
+    match rename_local_download_noclobber(source, destination) {
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => (),
+        result => return result,
+    }
+    let existing = fs::symlink_metadata(destination)?;
+    if source.is_dir() && existing.is_dir() {
+        for entry in fs::read_dir(source)? {
+            let entry = entry?;
+            overwrite_local_download(&entry.path(), &destination.join(entry.file_name()))?;
+        }
+        return Ok(());
+    }
+    if source.is_dir() || !existing.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!(
+                "cannot overwrite {} with a different file type",
+                destination.display()
+            ),
+        ));
+    }
+    fs::set_permissions(source, existing.permissions())?;
+    fs::rename(source, destination)
+}
+
+fn replace_local_download(source: &Path, destination: &Path) -> Result<(), RemoteFsError> {
+    match rename_local_download_noclobber(source, destination) {
+        Ok(()) => return Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => (),
+        Err(error) => return Err(local_download_commit_error(error)),
+    }
+    let backup_dir = private_local_download_directory(
+        destination
+            .parent()
+            .expect("download destination has a parent"),
+        ".shellspan-download-backup-",
+    )?;
+    let backup = backup_dir
+        .path()
+        .join(destination.file_name().expect("download has a file name"));
+    rename_local_download_noclobber(destination, &backup).map_err(local_download_commit_error)?;
+    if let Err(error) = rename_local_download_noclobber(source, destination) {
+        if let Err(rollback) = rename_local_download_noclobber(&backup, destination) {
+            let _ = backup_dir.keep();
+            return Err(RemoteFsError::Other { message: format!(
+                "failed to publish local download: {error}; previous target preserved at {}: {rollback}",
+                backup.display(),
+            ) });
+        }
+        return Err(local_download_commit_error(error));
+    }
+    if let Err(error) = trash::delete(&backup) {
+        let _ = backup_dir.keep();
+        warn!(
+            "Download completed but failed to move backup {} to trash: {error}",
+            backup.display()
+        );
+    }
+    Ok(())
+}
+
 fn download_remote_entry_to_path<E: TransferEventEmitter>(
     sftp: &Sftp,
     manifest: &RemoteTransferManifest,
@@ -1710,7 +1873,7 @@ fn download_remote_entry_to_path<E: TransferEventEmitter>(
             progress
                 .set_current_path(Some(path_to_string(remote_path)))
                 .map_err(|message| RemoteFsError::Other { message })?;
-            fs::create_dir_all(local_path).map_err(|error| RemoteFsError::Other {
+            fs::create_dir(local_path).map_err(|error| RemoteFsError::Other {
                 message: format!("failed to create local directory: {error}"),
             })?;
             progress
@@ -1720,13 +1883,7 @@ fn download_remote_entry_to_path<E: TransferEventEmitter>(
                 progress
                     .ensure_not_cancelled()
                     .map_err(|message| RemoteFsError::Other { message })?;
-                let child_name =
-                    child
-                        .source_path
-                        .file_name()
-                        .ok_or_else(|| RemoteFsError::Other {
-                            message: "invalid child path while downloading directory".to_string(),
-                        })?;
+                let child_name = local_download_name(&child.source_path)?;
                 download_remote_entry_to_path(
                     sftp,
                     child,
@@ -1738,36 +1895,23 @@ fn download_remote_entry_to_path<E: TransferEventEmitter>(
             Ok(())
         }
         RemoteFileKind::Symlink => {
-            // Do not recursively follow symlinks to avoid infinite loops.
-            // sftp.open follows the symlink automatically for file targets.
-            match download_remote_file(sftp, remote_path, local_path, progress, transfer_buffer) {
-                Ok(()) => Ok(()),
-                Err(error) => {
-                    // Symlink might point to a directory or be broken, so it cannot
-                    // be downloaded as a file. Keep an empty placeholder so the rest
-                    // of the batch can finish, but log the real error instead of
-                    // silently pretending the download succeeded.
-                    warn!(
-                        "failed to download symlink remote_path={}, creating empty placeholder: {error:?}",
+            let stat = sftp
+                .stat(remote_path)
+                .map_err(|error| RemoteFsError::Other {
+                    message: format!(
+                        "failed to resolve download symlink {}: {error}",
                         remote_path.display()
-                    );
-                    progress
-                        .set_current_path(Some(path_to_string(remote_path)))
-                        .map_err(|message| RemoteFsError::Other { message })?;
-                    if let Some(parent) = local_path.parent() {
-                        fs::create_dir_all(parent).map_err(|e| RemoteFsError::Other {
-                            message: format!("failed to create parent directory: {e}"),
-                        })?;
-                    }
-                    fs::File::create(local_path).map_err(|e| RemoteFsError::Other {
-                        message: format!("failed to create local file for symlink: {e}"),
-                    })?;
-                    progress
-                        .finish_step()
-                        .map_err(|message| RemoteFsError::Other { message })?;
-                    Ok(())
-                }
+                    ),
+                })?;
+            if kind_from_permissions(stat.perm) != RemoteFileKind::File {
+                return Err(RemoteFsError::Other {
+                    message: format!(
+                        "download symlink does not point to a regular file: {}",
+                        remote_path.display()
+                    ),
+                });
             }
+            download_remote_file(sftp, remote_path, local_path, progress, transfer_buffer)
         }
         _ => download_remote_file(sftp, remote_path, local_path, progress, transfer_buffer),
     }
@@ -1783,23 +1927,13 @@ fn download_remote_file<E: TransferEventEmitter>(
     progress
         .set_current_path(Some(path_to_string(remote_path)))
         .map_err(|message| RemoteFsError::Other { message })?;
-    if let Some(parent) = local_path.parent() {
-        fs::create_dir_all(parent).map_err(|error| RemoteFsError::Other {
-            message: format!("failed to create local parent directory: {error}"),
-        })?;
-    }
-
-    // Downloads write the destination directly: Replace removed any existing
-    // entry up front and Overwrite truncates in place. An interrupted or
-    // cancelled download leaves a partial file behind, which is expected.
     let mut remote_file = sftp
         .open(remote_path)
         .map_err(|error| RemoteFsError::Other {
             message: format!("failed to open remote file: {error}"),
         })?;
     let mut local_file = fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .write(true)
         .open(local_path)
         .map_err(|error| RemoteFsError::Other {
@@ -1890,7 +2024,7 @@ pub(crate) fn copy_remote_to_remote_blocking<E: TransferEventEmitter>(
     // used here; the parameter is kept for a uniform *_blocking signature.
     _pool: Option<&SftpPool>,
     known_hosts: Option<&Path>,
-) -> Result<(), RemoteFsError> {
+) -> Result<TransferBatchResult, RemoteFsError> {
     if request.source_paths.is_empty() {
         return Err(RemoteFsError::Other {
             message: "no remote paths were provided".to_string(),
@@ -1906,10 +2040,8 @@ pub(crate) fn copy_remote_to_remote_blocking<E: TransferEventEmitter>(
 
     let mut metrics = TransferBatchMetrics::new("remote_copy", request.operation_id.clone());
 
-    // Pool keys differ when the same account is expressed with different
-    // credentials, so Arc::ptr_eq misses those cases and would skip the
-    // copy-into-itself validation. Compare the logical connection target
-    // (host, port, username) instead.
+    // Reuse a session only when the connection and credentials match. Separate
+    // sessions can still share a host key, including when aliases are used.
     let result =
         if is_same_connection_target(&request.source_connection, &request.destination_connection) {
             // Keep the client-streaming fallback for now. ssh2 0.9.6 exposes
@@ -1954,30 +2086,30 @@ pub(crate) fn copy_remote_to_remote_blocking<E: TransferEventEmitter>(
             let _source_transfer_timeout = TransferTimeoutGuard::new(&source.session);
             let _destination_transfer_timeout = TransferTimeoutGuard::new(&destination.session);
             metrics.start_phase(TransferPhase::Scan);
+            let same_server = matches!(
+                (source.session.host_key(), destination.session.host_key()),
+                (Some((source_key, _)), Some((destination_key, _))) if source_key == destination_key
+            );
             copy_remote_to_remote_with_sftp(
                 emitter,
                 request,
                 cancel_flag,
                 &source.sftp,
                 &destination.sftp,
-                false,
+                same_server,
                 &mut metrics,
             )
         };
-    metrics.finish(if result.is_ok() {
-        "completed"
-    } else {
-        "failed"
-    });
+    metrics.finish(result.as_ref().map_or("failed", transfer_batch_status));
     result
 }
 
 struct RemoteCopyTask {
+    index: usize,
     manifest: RemoteTransferManifest,
     destination_path: PathBuf,
     allow_overwrite: bool,
     replace_any: bool,
-    remove_destination_before_copy: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1987,33 +2119,20 @@ enum RemoteCopyDestinationAction {
     Copy {
         allow_overwrite: bool,
         replace_any: bool,
-        remove_destination_before_copy: bool,
     },
 }
 
-fn remote_copy_destination_action(
-    policy: UploadConflictPolicy,
-    source_kind: RemoteFileKind,
-) -> RemoteCopyDestinationAction {
+fn remote_copy_destination_action(policy: UploadConflictPolicy) -> RemoteCopyDestinationAction {
     match policy {
         UploadConflictPolicy::Skip => RemoteCopyDestinationAction::Skip,
         UploadConflictPolicy::Fail => RemoteCopyDestinationAction::Fail,
         UploadConflictPolicy::Overwrite => RemoteCopyDestinationAction::Copy {
             allow_overwrite: true,
             replace_any: false,
-            remove_destination_before_copy: false,
         },
-        UploadConflictPolicy::Replace if source_kind == RemoteFileKind::Directory => {
-            RemoteCopyDestinationAction::Copy {
-                allow_overwrite: false,
-                replace_any: false,
-                remove_destination_before_copy: true,
-            }
-        }
         UploadConflictPolicy::Replace => RemoteCopyDestinationAction::Copy {
             allow_overwrite: true,
             replace_any: true,
-            remove_destination_before_copy: false,
         },
     }
 }
@@ -2024,89 +2143,49 @@ fn copy_remote_to_remote_with_sftp<E: TransferEventEmitter>(
     cancel_flag: Arc<AtomicBool>,
     source: &Sftp,
     destination: &Sftp,
-    same_connection: bool,
+    same_server: bool,
     metrics: &mut TransferBatchMetrics,
-) -> Result<(), RemoteFsError> {
+) -> Result<TransferBatchResult, RemoteFsError> {
     let destination_directory = Path::new(&request.destination_directory);
+    if cancel_flag.load(AtomicOrdering::SeqCst) {
+        return Err(RemoteManifestPurpose::RemoteCopy.cancellation_error());
+    }
     ensure_remote_directory(destination, destination_directory)?;
+    let destination_directory = destination
+        .realpath(destination_directory)
+        .map_err(|error| RemoteFsError::Other {
+            message: format!("failed to resolve remote copy directory: {error}"),
+        })?;
 
     let mut tasks = Vec::new();
+    let mut items = Vec::with_capacity(request.source_paths.len());
     let mut scan_stats = RemoteCopyScanStats::default();
     for (index, source_path) in request.source_paths.iter().enumerate() {
         if cancel_flag.load(AtomicOrdering::SeqCst) {
-            return Err(RemoteFsError::Other {
-                message: "remote copy cancelled".to_string(),
-            });
-        }
-        let source_path = Path::new(source_path);
-        let name = source_path
-            .file_name()
-            .ok_or_else(|| RemoteFsError::Other {
-                message: "remote source path has no file name".to_string(),
-            })?;
-        let destination_path = remote_join(destination_directory, &name.to_string_lossy());
-        let stat = source
-            .lstat(source_path)
-            .map_err(|error| RemoteFsError::Other {
-                message: format!("failed to inspect remote source: {error}"),
-            })?;
-        let source_kind = kind_from_permissions(stat.perm);
-        if same_connection {
-            validate_same_connection_copy_destination(
-                source_path,
-                &destination_path,
-                source_kind == RemoteFileKind::Directory,
-            )?;
+            return Err(RemoteManifestPurpose::RemoteCopy.cancellation_error());
         }
         let policy = request
             .conflict_policies
             .get(index)
             .copied()
             .unwrap_or(UploadConflictPolicy::Fail);
-        let mut allow_overwrite = false;
-        let mut replace_any = false;
-        let mut remove_destination_before_copy = false;
-        if remote_path_exists(destination, &destination_path) {
-            match remote_copy_destination_action(policy, source_kind) {
-                RemoteCopyDestinationAction::Skip => continue,
-                RemoteCopyDestinationAction::Fail => {
-                    return Err(RemoteFsError::Other {
-                        message: format!(
-                            "remote destination already exists: {}",
-                            destination_path.display()
-                        ),
-                    });
-                }
-                RemoteCopyDestinationAction::Copy {
-                    allow_overwrite: planned_overwrite,
-                    replace_any: planned_replace_any,
-                    remove_destination_before_copy: planned_remove,
-                } => {
-                    // File/symlink Replace may back up an entry of any kind;
-                    // directory Replace remains a non-atomic whole-tree
-                    // delete/recreate. Overwrite keeps merge semantics.
-                    allow_overwrite = planned_overwrite;
-                    replace_any = planned_replace_any;
-                    remove_destination_before_copy = planned_remove;
-                }
-            }
-        }
-        let manifest = build_remote_transfer_manifest(
+        match plan_remote_copy(
+            index,
             source,
-            source_path,
-            Some(stat),
+            destination,
+            Path::new(source_path),
+            &destination_directory,
+            policy,
+            same_server,
             &cancel_flag,
-            0,
-            RemoteManifestPurpose::RemoteCopy,
-        )?;
-        scan_stats.combine(manifest.remote_copy_stats());
-        tasks.push(RemoteCopyTask {
-            manifest,
-            destination_path,
-            allow_overwrite,
-            replace_any,
-            remove_destination_before_copy,
-        });
+        ) {
+            Ok(Some(task)) => {
+                scan_stats.combine(task.manifest.remote_copy_stats());
+                tasks.push(task);
+            }
+            Ok(None) => items.push((index, remote_copy_item(source_path, Ok(None)))),
+            Err(error) => items.push((index, remote_copy_item(source_path, Err(error)))),
+        }
     }
 
     metrics.set_inventory(scan_stats.total_bytes, scan_stats.total_files);
@@ -2118,68 +2197,188 @@ fn copy_remote_to_remote_with_sftp<E: TransferEventEmitter>(
         .emit()
         .map_err(|message| RemoteFsError::Other { message })?;
 
-    // Each file task is staged through a temp file and renamed into place on
-    // completion (see copy_remote_file_between), so an interrupted copy never
-    // leaves a partial file under the real name.
     let mut transfer_buffer = new_transfer_buffer();
     for task in tasks {
-        if task.remove_destination_before_copy {
-            progress
-                .ensure_not_cancelled()
-                .map_err(|message| RemoteFsError::Other { message })?;
-            remove_remote_entry_simple(destination, &task.destination_path)?;
-        }
-        copy_remote_entry_between(
+        progress
+            .ensure_not_cancelled()
+            .map_err(|message| RemoteFsError::Other { message })?;
+        let result = execute_remote_copy(
             source,
             destination,
-            &task.manifest,
-            &task.destination_path,
-            task.allow_overwrite,
-            task.replace_any,
+            &task,
             &mut progress,
             &mut transfer_buffer,
-        )?;
+        )
+        .map(|()| Some(path_to_string(&task.destination_path)));
+        items.push((
+            task.index,
+            remote_copy_item(&request.source_paths[task.index], result),
+        ));
     }
 
     metrics.start_phase(TransferPhase::Finalize);
     progress
         .set_current_path(None)
         .map_err(|message| RemoteFsError::Other { message })?;
-    Ok(())
+    items.sort_by_key(|(index, _)| *index);
+    Ok(TransferBatchResult {
+        items: items.into_iter().map(|(_, item)| item).collect(),
+    })
+}
+
+fn remote_copy_item(
+    source_path: &str,
+    result: Result<Option<String>, RemoteFsError>,
+) -> TransferItemResult {
+    let (status, destination_path, error) = match result {
+        Ok(Some(path)) => (TransferItemStatus::Completed, Some(path), None),
+        Ok(None) => (TransferItemStatus::Skipped, None, None),
+        Err(RemoteFsError::Other { message }) => (TransferItemStatus::Failed, None, Some(message)),
+        Err(error) => (TransferItemStatus::Failed, None, Some(format!("{error:?}"))),
+    };
+    TransferItemResult {
+        source_path: source_path.to_owned(),
+        destination_path,
+        status,
+        error,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn plan_remote_copy(
+    index: usize,
+    source: &Sftp,
+    destination: &Sftp,
+    source_path: &Path,
+    destination_directory: &Path,
+    policy: UploadConflictPolicy,
+    same_server: bool,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<Option<RemoteCopyTask>, RemoteFsError> {
+    let name = source_path
+        .file_name()
+        .ok_or_else(|| RemoteFsError::Other {
+            message: "remote source path has no file name".to_string(),
+        })?;
+    let destination_path = remote_join(destination_directory, &name.to_string_lossy());
+    let stat = source
+        .lstat(source_path)
+        .map_err(|error| RemoteFsError::Other {
+            message: format!("failed to inspect remote source: {error}"),
+        })?;
+    let source_kind = kind_from_permissions(stat.perm);
+    if same_server {
+        validate_same_connection_copy_destination(
+            &canonical_remote_entry(source, source_path)?,
+            &destination_path,
+            source_kind == RemoteFileKind::Directory,
+        )?;
+    }
+    let (allow_overwrite, replace_any) = if remote_path_exists(destination, &destination_path) {
+        match remote_copy_destination_action(policy) {
+            RemoteCopyDestinationAction::Skip => return Ok(None),
+            RemoteCopyDestinationAction::Fail => {
+                return Err(RemoteFsError::Other {
+                    message: format!(
+                        "remote destination already exists: {}",
+                        destination_path.display()
+                    ),
+                });
+            }
+            RemoteCopyDestinationAction::Copy {
+                allow_overwrite,
+                replace_any,
+            } => (allow_overwrite, replace_any),
+        }
+    } else {
+        (false, false)
+    };
+    let manifest = build_remote_transfer_manifest(
+        source,
+        source_path,
+        Some(stat),
+        cancel_flag,
+        0,
+        RemoteManifestPurpose::RemoteCopy,
+    )?;
+    Ok(Some(RemoteCopyTask {
+        index,
+        manifest,
+        destination_path,
+        allow_overwrite,
+        replace_any,
+    }))
+}
+
+fn execute_remote_copy<E: TransferEventEmitter>(
+    source: &Sftp,
+    destination: &Sftp,
+    task: &RemoteCopyTask,
+    progress: &mut RemoteCopyProgressTracker<E>,
+    transfer_buffer: &mut [u8],
+) -> Result<(), RemoteFsError> {
+    let copy = |path: &Path,
+                allow_overwrite,
+                replace_any,
+                progress: &mut RemoteCopyProgressTracker<E>,
+                transfer_buffer: &mut [u8]| {
+        copy_remote_entry_between(
+            source,
+            destination,
+            &task.manifest,
+            path,
+            allow_overwrite,
+            replace_any,
+            progress,
+            transfer_buffer,
+        )
+    };
+    if kind_from_permissions(task.manifest.stat.perm) == RemoteFileKind::Directory
+        && (!task.allow_overwrite || task.replace_any)
+    {
+        return stage_remote_tree(destination, &task.destination_path, |payload| {
+            copy(payload, false, false, progress, transfer_buffer)?;
+            progress
+                .ensure_not_cancelled()
+                .map_err(|message| RemoteFsError::Other { message })?;
+            finalize_remote_copy_staging(
+                destination,
+                payload,
+                &task.destination_path,
+                task.allow_overwrite,
+                task.replace_any,
+            )
+        });
+    }
+    copy(
+        &task.destination_path,
+        task.allow_overwrite,
+        task.replace_any,
+        progress,
+        transfer_buffer,
+    )
+}
+
+fn canonical_remote_entry(sftp: &Sftp, path: &Path) -> Result<PathBuf, RemoteFsError> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let name = path.file_name().ok_or_else(|| RemoteFsError::Other {
+        message: format!("remote path has no file name: {}", path.display()),
+    })?;
+    sftp.realpath(parent)
+        .map(|resolved| remote_join(&resolved, &name.to_string_lossy()))
+        .map_err(|error| RemoteFsError::Other {
+            message: format!("failed to resolve remote copy source: {error}"),
+        })
 }
 
 fn is_same_connection_target(
     source: &RemoteConnectionRequest,
     destination: &RemoteConnectionRequest,
 ) -> bool {
-    source.host == destination.host
-        && source.port == destination.port
-        && source.username == destination.username
-        && ConnectionRouteKey::from(source) == ConnectionRouteKey::from(destination)
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct ConnectionRouteKey<'a> {
-    jump_host: Option<JumpRouteKey<'a>>,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct JumpRouteKey<'a> {
-    host: &'a str,
-    port: u16,
-    username: &'a str,
-}
-
-impl<'a> From<&'a RemoteConnectionRequest> for ConnectionRouteKey<'a> {
-    fn from(request: &'a RemoteConnectionRequest) -> Self {
-        Self {
-            jump_host: request.jump_host.as_ref().map(|jump| JumpRouteKey {
-                host: jump.host.as_str(),
-                port: jump.port,
-                username: jump.username.as_str(),
-            }),
-        }
-    }
+    connection_key(source) == connection_key(destination)
 }
 
 fn validate_same_connection_copy_destination(
@@ -2223,7 +2422,7 @@ fn copy_remote_entry_between<E: TransferEventEmitter>(
             // Overwrite merges into an existing destination directory; only
             // create it when it is missing.
             let destination_is_directory = destination
-                .stat(destination_path)
+                .lstat(destination_path)
                 .map(|destination_stat| {
                     kind_from_permissions(destination_stat.perm) == RemoteFileKind::Directory
                 })
@@ -2701,6 +2900,26 @@ fn upload_temp_path(destination_path: &Path) -> PathBuf {
 
 fn upload_backup_path(destination_path: &Path) -> PathBuf {
     unique_remote_hidden_path(destination_path, "upload-backup")
+}
+
+fn stage_remote_tree<T>(
+    sftp: &Sftp,
+    destination: &Path,
+    write: impl FnOnce(&Path) -> Result<T, RemoteFsError>,
+) -> Result<T, RemoteFsError> {
+    let staging = unique_remote_hidden_path(destination, "tree");
+    sftp.mkdir(&staging, 0o700)
+        .map_err(|error| RemoteFsError::Other {
+            message: format!("failed to create remote staging directory: {error}"),
+        })?;
+    let result = write(&remote_join(&staging, "payload"));
+    if let Err(error) = remove_remote_entry_simple(sftp, &staging) {
+        warn!(
+            "Failed to remove remote staging directory {}: {error:?}",
+            staging.display()
+        );
+    }
+    result
 }
 
 fn remove_remote_entry_simple(sftp: &Sftp, path: &Path) -> Result<(), RemoteFsError> {
@@ -4338,7 +4557,12 @@ fn upload_regular_file<E: TransferEventEmitter>(
     // Stage uploads through a hidden temp file and rename only after every byte
     // is written and verified. A cancelled or failed upload never leaves a
     // partial file under the real destination name.
-    let temp_path = upload_temp_path(remote_path);
+    let staging = upload_temp_path(remote_path);
+    sftp.mkdir(&staging, 0o700)
+        .map_err(|error| RemoteFsError::Other {
+            message: format!("failed to create private upload staging directory: {error}"),
+        })?;
+    let temp_path = remote_join(&staging, "payload");
     let result = upload_regular_file_to_temp(
         sftp,
         local_path,
@@ -4348,22 +4572,22 @@ fn upload_regular_file<E: TransferEventEmitter>(
         progress,
         transfer_buffer,
     );
-    if let Err(error) = result {
+    let result = result.and_then(|()| {
+        progress
+            .ensure_not_cancelled()
+            .map_err(|message| RemoteFsError::Other { message })?;
+        finalize_uploaded_temp_file(sftp, &temp_path, remote_path, conflict_policy)
+    });
+    if result.is_err() {
         let _ = sftp.unlink(&temp_path);
-        return Err(error);
     }
-
-    if let Err(message) = progress.ensure_not_cancelled() {
-        let _ = sftp.unlink(&temp_path);
-        return Err(RemoteFsError::Other { message });
+    if let Err(error) = sftp.rmdir(&staging) {
+        warn!(
+            "Failed to remove upload staging directory {}: {error}",
+            staging.display()
+        );
     }
-
-    if let Err(error) = finalize_uploaded_temp_file(sftp, &temp_path, remote_path, conflict_policy)
-    {
-        let _ = sftp.unlink(&temp_path);
-        return Err(error);
-    }
-    Ok(())
+    result
 }
 
 fn finalize_uploaded_temp_file(
@@ -4372,7 +4596,8 @@ fn finalize_uploaded_temp_file(
     remote_path: &Path,
     conflict_policy: UploadConflictPolicy,
 ) -> Result<(), RemoteFsError> {
-    let backup_path = prepare_upload_destination_backup(sftp, remote_path, conflict_policy)?;
+    let backup_path =
+        prepare_upload_destination_backup(sftp, temp_path, remote_path, conflict_policy)?;
     match sftp.rename(
         temp_path,
         remote_path,
@@ -4406,6 +4631,7 @@ fn finalize_uploaded_temp_file(
 
 fn prepare_upload_destination_backup(
     sftp: &Sftp,
+    temp_path: &Path,
     remote_path: &Path,
     conflict_policy: UploadConflictPolicy,
 ) -> Result<Option<PathBuf>, RemoteFsError> {
@@ -4436,6 +4662,30 @@ fn prepare_upload_destination_backup(
         return Err(RemoteFsError::Other {
             message: format!("remote path is a directory: {}", remote_path.display()),
         });
+    }
+
+    if let Some(mode) = stat
+        .perm
+        .filter(|_| kind_from_permissions(stat.perm) == RemoteFileKind::File)
+    {
+        // Preserve ordinary permissions on the replacement without copying set-id bits.
+        sftp.setstat(
+            temp_path,
+            FileStat {
+                size: None,
+                uid: None,
+                gid: None,
+                perm: Some(mode & 0o777),
+                atime: None,
+                mtime: None,
+            },
+        )
+        .map_err(|error| RemoteFsError::Other {
+            message: format!(
+                "failed to preserve permissions for {}: {error}",
+                remote_path.display()
+            ),
+        })?;
     }
 
     let backup_path = upload_backup_path(remote_path);

@@ -854,7 +854,7 @@ export async function invokePasteLocalPaths(
 
 export async function invokeCopyRemoteToRemote(
   request: CopyRemoteToRemoteRequest,
-): Promise<void> {
+): Promise<TransferBatchResult> {
   return invokeLogged('copy_remote_to_remote', { request });
 }
 
@@ -968,9 +968,10 @@ export async function invokeTrustHost(
   host: string,
   port: number,
   expectedFingerprint: string,
+  jumpHost?: RemoteConnectionRequest['jumpHost'],
 ): Promise<void> {
   return invokeLogged('trust_host', {
-    request: { host, port, expectedFingerprint },
+    request: { host, port, expectedFingerprint, ...(jumpHost && { jumpHost }) },
   });
 }
 

@@ -101,7 +101,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
       || (side === 'local' ? connection.localLoading : connection.remoteLoading);
     const restorePending = !connecting && !isLocal && connection.restorePending?.[side] === true;
     const error = restorePending ? t('sftp.restore.disconnected') : side === 'local' ? connection.localError : connection.remoteError;
-    const isHostKeyError = !isLocal && !!error && (error.toLowerCase().includes('host key') || error.toLowerCase().includes('trust this host'));
+    const isHostKeyError = !isLocal && pane.hostKeyError;
     const remoteBookmarks = connection.remoteBookmarks[side];
     const selectedPathsRef = useRef(selectedPaths);
     selectedPathsRef.current = selectedPaths;

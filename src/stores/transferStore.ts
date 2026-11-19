@@ -120,8 +120,7 @@ function updateOperationProgress(
 export const useTransferStore = create<TransferState>()((set) => ({
   operations: [],
   // Queue consumers subscribe to this revision so ordinary byte/step updates
-  // do not rescan every queued scope. A final counter snapshot still bumps it
-  // when the existing completion rules release path ownership.
+  // do not rescan every queued scope.
   pathOccupancyRevision: 0,
   addOperation: (operation) => {
     logger.info(`Transfer started: ${operation.kind} (${operation.operationId})`);
@@ -356,21 +355,10 @@ export const useTransferStore = create<TransferState>()((set) => ({
 }));
 
 export function isTransferComplete(operation: TransferOperation): boolean {
-  if (operation.status === 'completed') return true;
-  if (
-    operation.status === 'failed' ||
-    operation.status === 'pending' ||
-    operation.status === 'cancelling' ||
-    operation.status === 'cancelled'
-  ) {
-    return false;
-  }
-  // Delete totals grow as entries are discovered, so the counters can match
-  // momentarily mid-batch; only the explicit completion status is
-  // authoritative for deletes.
-  if (operation.kind === 'delete') return false;
-  if (operation.totalSteps === 0) return false;
-  return operation.completedSteps >= operation.totalSteps;
+  // Byte and step totals can be reached before publishing the staged entry.
+  if (operation.status !== undefined) return operation.status === 'completed';
+  return operation.kind !== 'delete' && operation.totalSteps > 0
+    && operation.completedSteps >= operation.totalSteps;
 }
 
 // Backend progress events are delivered asynchronously and can arrive after

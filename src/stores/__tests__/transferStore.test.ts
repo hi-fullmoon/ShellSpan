@@ -211,7 +211,7 @@ describe('transferStore', () => {
     expect(useTransferStore.getState().pathOccupancyRevision).toBe(revision);
   });
 
-  it('releases path occupancy when final progress completes a transfer', () => {
+  it('holds path occupancy until the staged transfer is committed', () => {
     useTransferStore.getState().addOperation({
       ...operation,
       connectionId: 'connection-1',
@@ -229,6 +229,10 @@ describe('transferStore', () => {
       completedSteps: 1,
     });
 
+    expect(hasActivePathOperation('connection-1', ['/remote/archive.zip'])).toBe(true);
+    expect(useTransferStore.getState().pathOccupancyRevision).toBe(revision);
+
+    useTransferStore.getState().markOperationCompleted(operation.operationId);
     expect(hasActivePathOperation('connection-1', ['/remote/archive.zip'])).toBe(false);
     expect(useTransferStore.getState().pathOccupancyRevision).toBe(revision + 1);
   });
@@ -463,7 +467,7 @@ describe('transferStore', () => {
     expect(resolved).toBe(true);
   });
 
-  it('waitForPathIdle preserves counter-based completion semantics', async () => {
+  it('waitForPathIdle waits for an explicit commit after the final progress update', async () => {
     useTransferStore.getState().addOperation({
       ...operation,
       connectionId: 'connection-1',
@@ -483,6 +487,8 @@ describe('transferStore', () => {
       completedSteps: 1,
     });
 
+    expect(hasActivePathOperation('connection-1', ['/remote/archive.zip'])).toBe(true);
+    useTransferStore.getState().markOperationCompleted(operation.operationId);
     await expect(waiting).resolves.toBeUndefined();
   });
 

@@ -45,6 +45,7 @@ export interface SftpPaneState {
   selectedPaths: string[];
   revealRequest?: { path: string };
   locationRequest?: SftpLocationRequest;
+  hostKeyError?: boolean;
   batchMode: boolean;
 }
 
@@ -188,7 +189,7 @@ interface SftpState {
     entries: LocalFileEntry[] | RemoteFileEntry[],
   ) => void;
   setLoading: (id: string, side: SftpSide, loading: boolean) => void;
-  setError: (id: string, side: SftpSide, error?: string) => void;
+  setError: (id: string, side: SftpSide, error?: string, hostKeyError?: boolean) => void;
   updateConnectionRequest: (
     id: string,
     side: SftpSide,
@@ -754,12 +755,17 @@ export const useSftpStore = create<SftpState>()((set) => ({
       })),
     })),
 
-  setError: (id, side, error) =>
+  setError: (id, side, error, hostKeyError) =>
     set((state) => ({
-      connections: updateConnection(state, id, (connection) => ({
-        ...connection,
-        [getErrorKey(side)]: error,
-      })),
+      connections: updateConnection(state, id, (connection) => {
+        const paneKey = getPaneKey(side);
+        const pane = connection[paneKey];
+        return {
+          ...connection,
+          [getErrorKey(side)]: error,
+          [paneKey]: pane.hostKeyError === hostKeyError ? pane : { ...pane, hostKeyError },
+        };
+      }),
     })),
 
   updateConnectionRequest: (id, side, request) =>

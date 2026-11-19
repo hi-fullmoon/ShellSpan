@@ -360,8 +360,8 @@ describe('SftpPane', () => {
 
   it('shows a host-key verification entry for an unknown remote host', () => {
     const connection = createConnection();
-    connection.remoteError =
-      'host key for 175.178.66.45:22 is not known — trust this host before connecting';
+    connection.remoteError = '首次连接到 175.178.66.45:22，请确认指纹：';
+    connection.remotePane = { ...connection.remotePane, hostKeyError: true };
     const onVerifyHostKey = vi.fn();
 
     render(

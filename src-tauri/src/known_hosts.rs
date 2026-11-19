@@ -10,7 +10,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use tauri::{AppHandle, Manager};
 
-use crate::connection::{open_session_for_host_key, validate_host};
+use crate::connection::{
+    connect_jump_tcp_stream, open_handshaken_session, open_session_for_host_key,
+    validate_connection_fields, validate_host,
+};
 use crate::models::{
     HostKeyCheckRequest, HostKeyCheckResult, HostKeyCheckStatus, TrustHostRequest,
 };
@@ -210,17 +213,27 @@ pub(crate) fn trust_host_blocking(
     app: &AppHandle,
     request: &TrustHostRequest,
 ) -> Result<(), String> {
+    trust_host_at_path(request, &get_known_hosts_path(app)?)
+}
+
+fn trust_host_at_path(request: &TrustHostRequest, known_hosts_path: &Path) -> Result<(), String> {
     let host = request.host.trim();
     let port = request.port;
 
     info!("Trusting host {host}:{port}");
     validate_host(host)?;
 
-    let _lock = KNOWN_HOSTS_WRITE_LOCK
-        .lock()
-        .map_err(|_| "known hosts write lock poisoned".to_string())?;
-
-    let session = open_session_for_host_key(host, port)?;
+    let (_jump_session, session) = if let Some(jump) = &request.jump_host {
+        validate_connection_fields(&jump.host, &jump.username)?;
+        let (jump_session, stream) =
+            connect_jump_tcp_stream(jump, host, port, Some(known_hosts_path))
+                .map_err(|error| error.message())?;
+        let session =
+            open_handshaken_session(stream, host, port).map_err(|error| error.message())?;
+        (Some(jump_session), session)
+    } else {
+        (None, open_session_for_host_key(host, port)?)
+    };
 
     let (key, key_type) = session
         .host_key()
@@ -228,8 +241,10 @@ pub(crate) fn trust_host_blocking(
     let fingerprint = compute_fingerprint(key, key_type);
     ensure_confirmed_host_fingerprint(&request.expected_fingerprint, &fingerprint)?;
 
-    let known_hosts_path = get_known_hosts_path(app)?;
-    ensure_known_hosts_dir(&known_hosts_path)?;
+    let _lock = KNOWN_HOSTS_WRITE_LOCK
+        .lock()
+        .map_err(|_| "known hosts write lock poisoned".to_string())?;
+    ensure_known_hosts_dir(known_hosts_path)?;
     let host_with_port = known_hosts_endpoint(host, port);
 
     let mut known_hosts = session
@@ -239,7 +254,7 @@ pub(crate) fn trust_host_blocking(
     if known_hosts_path.exists() {
         let count = read_known_hosts_excluding_endpoint(
             &mut known_hosts,
-            &known_hosts_path,
+            known_hosts_path,
             &host_with_port,
         )?;
         debug!("Loaded {count} known hosts from file");
@@ -260,7 +275,7 @@ pub(crate) fn trust_host_blocking(
         .map_err(|error| format!("failed to add host to known hosts: {error}"))?;
 
     known_hosts
-        .write_file(&known_hosts_path, KnownHostFileKind::OpenSSH)
+        .write_file(known_hosts_path, KnownHostFileKind::OpenSSH)
         .map_err(|error| format!("failed to write known hosts file: {error}"))?;
 
     info!("Added {host}:{port} to known hosts file");
@@ -437,6 +452,77 @@ mod tests {
             ensure_confirmed_host_fingerprint("ED25519 SHA256:confirmed", "ED25519 SHA256:changed")
                 .expect_err("a key changed after the prompt must not be persisted");
         assert!(error.contains("changed before trust confirmation"));
+    }
+
+    #[test]
+    #[ignore = "requires isolated OpenSSH target and jump containers on the same network"]
+    fn isolated_ssh_sftp_trust_confirms_the_target_through_the_jump_host() {
+        use crate::connection::{connect_sftp, trusted_known_hosts_fixture};
+        use crate::models::{AuthMethod, JumpHostConfig, RemoteConnectionRequest};
+
+        let target_port = std::env::var("SHELLSPAN_E2E_SSH_PORT")
+            .unwrap()
+            .parse()
+            .unwrap();
+        let jump_port = std::env::var("SHELLSPAN_E2E_JUMP_PORT")
+            .unwrap()
+            .parse()
+            .unwrap();
+        let target_alias = std::env::var("SHELLSPAN_E2E_TARGET_ALIAS").unwrap();
+        let loopback = "127.0.0.1";
+        let (_known_hosts_dir, known_hosts) = trusted_known_hosts_fixture(loopback, jump_port);
+        let reference = open_session_for_host_key(loopback, target_port).unwrap();
+        let (key, kind) = reference.host_key().unwrap();
+        let fingerprint = compute_fingerprint(key, kind);
+        let jump = JumpHostConfig {
+            host: loopback.into(),
+            port: jump_port,
+            username: "shellspan".into(),
+            auth_method: AuthMethod::Password,
+            password: Some("shellspan-e2e".into()),
+            keychain_key_id: None,
+            private_key_data: None,
+            passphrase: None,
+        };
+        let connection = RemoteConnectionRequest {
+            host: target_alias.clone(),
+            port: 22,
+            username: "shellspan".into(),
+            auth_method: AuthMethod::Password,
+            password: Some("shellspan-e2e".into()),
+            keychain_key_id: None,
+            private_key_data: None,
+            passphrase: None,
+            jump_host: Some(jump.clone()),
+        };
+        let error = connect_sftp(&connection, None, Some(&known_hosts))
+            .err()
+            .unwrap();
+        assert!(
+            matches!(error, crate::models::RemoteFsError::HostKeyUnknown {
+            host, port: 22, fingerprint: Some(actual),
+        } if host == target_alias && actual == fingerprint)
+        );
+
+        let mut request = TrustHostRequest {
+            host: target_alias,
+            port: 22,
+            expected_fingerprint: String::new(),
+            jump_host: Some(jump),
+        };
+        let before = std::fs::read(&known_hosts).unwrap();
+        assert!(trust_host_at_path(&request, &known_hosts).is_err());
+        assert_eq!(std::fs::read(&known_hosts).unwrap(), before);
+        request.expected_fingerprint = fingerprint;
+        trust_host_at_path(&request, &known_hosts).unwrap();
+        let connected = connect_sftp(&connection, None, Some(&known_hosts)).unwrap();
+        assert!(connected
+            .lock()
+            .unwrap()
+            .sftp
+            .realpath(Path::new("."))
+            .unwrap()
+            .is_absolute());
     }
 
     #[test]

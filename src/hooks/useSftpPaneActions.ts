@@ -3,7 +3,6 @@ import { useShallow } from 'zustand/react/shallow';
 import {
   invokeCopyLocalPaths,
   invokeCancelRemoteCopy,
-  invokeCopyRemoteToRemote,
   invokeGetFileOpenDefaultIcon,
   invokeListFileOpenApplications,
   invokeOpenLocalFileWithApplication,
@@ -40,6 +39,7 @@ import type { FileEntry } from '@/components/sftp/utils';
 import type { FileOpenApplication, ReadRemoteFileResponse, RemoteFileEntry, RemoteFileKind, UploadConflictPolicy } from '@/types';
 import { useAppStore } from '@/stores/appStore';
 import { isTransferTargetCurrent } from '@/lib/sftp/transfer-target';
+import { copyRemoteTransferBatch } from '@/lib/sftp/transfer-resume';
 
 const logger = createLogger('sftp');
 
@@ -519,7 +519,7 @@ export function useSftpPaneActions(
           const runRemoteCopy = async (): Promise<void> => {
             markOperationRunning(operationId);
             try {
-              await invokeCopyRemoteToRemote(request);
+              await copyRemoteTransferBatch(request);
               markOperationCompleted(operationId);
               void reloadAfterTransfer();
             } catch (copyError) {

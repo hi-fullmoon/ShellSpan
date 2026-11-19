@@ -44,6 +44,7 @@ vi.mock('@/lib/connections/keychain-key-prompt', () => ({
 }));
 
 import {
+  buildRemoteConnectionRequest,
   invokeCheckHostKey,
   invokeListSftpBookmarks,
   invokeRetrieveProfilePassword,
@@ -212,17 +213,17 @@ describe('useSftpConnectionOpener', () => {
     );
   });
 
-  it('keeps the standalone host-key check for an already open pane', async () => {
-    vi.mocked(invokeCheckHostKey).mockResolvedValueOnce({ status: 'match' });
+  it('checks the configured connection for an already open pane', async () => {
     const onVerified = vi.fn();
     const { result } = renderHook(() => useSftpConnectionOpener());
+    const request = buildRemoteConnectionRequest(profile);
 
     await act(async () => {
-      await result.current.verifyHostKey(profile.host, profile.port, onVerified);
+      await result.current.verifyHostKey(request, onVerified);
     });
 
-    expect(invokeCheckHostKey).toHaveBeenCalledWith(profile.host, profile.port);
-    expect(invokeWarmRemoteConnection).not.toHaveBeenCalled();
+    expect(invokeCheckHostKey).not.toHaveBeenCalled();
+    expect(invokeWarmRemoteConnection).toHaveBeenCalledWith(request);
     expect(onVerified).toHaveBeenCalledTimes(1);
   });
 

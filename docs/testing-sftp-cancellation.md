@@ -48,3 +48,15 @@ timeouts, and cleanup failures produce a nonzero exit code with the evidence
 location. If the desktop process cannot respond, inspect that record for the
 remaining temporary host/port and cleanup errors before rerunning; the runner
 does not overwrite an existing trusted host identity.
+
+The Rust integration tests also cover downloads on case-insensitive filesystems,
+preservation of replaced entries on cancellation, upload permissions, broken
+symlinks, same-server aliases, partial copy retries, and host-key confirmation
+through a jump server. With the isolated `ssh` and `jump` services from
+`tests/ssh-e2e/compose.yml` running on their configured ports, run:
+
+```bash
+SHELLSPAN_E2E_SSH_PORT=22222 SHELLSPAN_E2E_JUMP_PORT=22223 SHELLSPAN_E2E_TARGET_ALIAS=ssh \
+  cargo test --locked --manifest-path src-tauri/Cargo.toml --lib -- --ignored \
+  remote_fs::tests::isolated_ssh_sftp known_hosts::tests::isolated_ssh_sftp
+```

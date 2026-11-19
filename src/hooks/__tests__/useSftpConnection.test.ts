@@ -39,7 +39,10 @@ const tauri = vi.hoisted(() => ({
   invokeUploadLocalPaths: vi.fn().mockResolvedValue({ items: [] }),
 }));
 
-vi.mock('@/lib/ipc/tauri', () => tauri);
+vi.mock('@/lib/ipc/tauri', async (importOriginal) => ({
+  ...tauri,
+  parseRemoteFsError: (await importOriginal<typeof import('@/lib/ipc/tauri')>()).parseRemoteFsError,
+}));
 
 vi.mock('@/lib/connections/keychain-key-prompt', () => ({
   promptForMissingKeychainKey: vi.fn().mockResolvedValue(null),

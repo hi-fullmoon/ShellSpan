@@ -7,10 +7,13 @@ import {
   invokeSavePreferences,
 } from '@/lib/ipc/tauri';
 import { t } from '@/locales';
+import { sshRouteKey } from '@/lib/connections/ssh-route';
+import { createLogger } from '@/lib/logger';
 import { useProfileStore } from '@/stores/profileStore';
 import { useTransferStore } from '@/stores/transferStore';
 
 const PREFERENCE_KEY = 'transferResumeCandidates';
+const logger = createLogger('sftp-transfer-resume');
 const MAX_CANDIDATES = 50;
 const POLICIES = new Set<UploadConflictPolicy>(['overwrite', 'replace', 'skip', 'fail']);
 const CANDIDATE_KEYS = new Set([
@@ -18,6 +21,8 @@ const CANDIDATE_KEYS = new Set([
   'operationId',
   'sourceProfileId',
   'destinationProfileId',
+  'sourceRouteKey',
+  'destinationRouteKey',
   'sourcePaths',
   'destinationDirectory',
   'conflictPolicies',
@@ -29,6 +34,8 @@ export interface TransferResumeCandidate {
   operationId: string;
   sourceProfileId: string;
   destinationProfileId: string;
+  sourceRouteKey?: string;
+  destinationRouteKey?: string;
   sourcePaths: string[];
   destinationDirectory: string;
   conflictPolicies: UploadConflictPolicy[];
@@ -52,6 +59,8 @@ export function parseTransferResumeCandidates(raw: string | undefined): Transfer
         && isNonEmptyString(candidate.operationId)
         && isNonEmptyString(candidate.sourceProfileId)
         && isNonEmptyString(candidate.destinationProfileId)
+        && ((candidate.sourceRouteKey === undefined && candidate.destinationRouteKey === undefined)
+          || (isNonEmptyString(candidate.sourceRouteKey) && isNonEmptyString(candidate.destinationRouteKey)))
         && Array.isArray(candidate.sourcePaths)
         && candidate.sourcePaths.length > 0
         && candidate.sourcePaths.length <= 10_000
@@ -99,30 +108,43 @@ export function removeTransferResumeCandidate(operationId: string): Promise<void
   ));
 }
 
-function connectionKey(request: ReturnType<typeof buildRemoteConnectionRequest>): string {
-  return JSON.stringify([
-    request.host,
-    request.port,
-    request.username,
-    request.jumpHost?.host ?? '',
-    request.jumpHost?.port ?? 0,
-    request.jumpHost?.username ?? '',
-  ]);
+export async function copyRemoteTransferBatch(
+  request: CopyRemoteToRemoteRequest,
+  onPartial?: () => Promise<void>,
+): Promise<void> {
+  const { items } = await invokeCopyRemoteToRemote(request);
+  const failed = items.flatMap((item, index) => item.status === 'failed' ? [{ item, index }] : []);
+  if (failed.length === 0) return;
+
+  request.sourcePaths = failed.map(({ item }) => item.sourcePath);
+  const policies = request.conflictPolicies;
+  request.conflictPolicies = failed.map(({ index }) => policies[index] ?? 'fail');
+  await onPartial?.();
+  const details = failed.map(({ item }) => `${item.sourcePath}\n${item.error ?? t('sftp.transfer.remoteCopyFailed')}`);
+  throw new Error(details.join('\n'));
 }
 
 export async function hydrateTransferResumeCandidates(): Promise<void> {
   const candidates = await loadTransferResumeCandidates();
   for (const candidate of candidates) {
+    let pending = candidate;
     const sourceProfile = useProfileStore.getState().getProfile(candidate.sourceProfileId);
     const destinationProfile = useProfileStore.getState().getProfile(candidate.destinationProfileId);
     const missingProfile = !sourceProfile || !destinationProfile;
+    const routeMatches = sourceProfile && destinationProfile
+      && candidate.sourceRouteKey === sshRouteKey(sourceProfile)
+      && candidate.destinationRouteKey === sshRouteKey(destinationProfile);
 
-    const retry = missingProfile ? undefined : async (): Promise<void> => {
+    const retry = !routeMatches ? undefined : async (): Promise<void> => {
       const profiles = useProfileStore.getState();
       const currentSource = profiles.getProfile(candidate.sourceProfileId);
       const currentDestination = profiles.getProfile(candidate.destinationProfileId);
       if (!currentSource || !currentDestination) {
-        throw new Error('saved connection profile not found');
+        throw new Error(t('sftp.transfer.resumeProfileMissing'));
+      }
+      if (pending.sourceRouteKey !== sshRouteKey(currentSource)
+        || pending.destinationRouteKey !== sshRouteKey(currentDestination)) {
+        throw new Error(t('sftp.transfer.resumeRouteChanged'));
       }
       const [source, destination] = await Promise.all([
         profiles.ensurePassword(currentSource),
@@ -131,15 +153,20 @@ export async function hydrateTransferResumeCandidates(): Promise<void> {
       const request: CopyRemoteToRemoteRequest = {
         sourceConnection: buildRemoteConnectionRequest(source),
         destinationConnection: buildRemoteConnectionRequest(destination),
-        sourcePaths: candidate.sourcePaths,
+        sourcePaths: pending.sourcePaths,
         destinationDirectory: candidate.destinationDirectory,
-        conflictPolicies: candidate.conflictPolicies,
+        conflictPolicies: pending.conflictPolicies,
         operationId: candidate.operationId,
       };
       try {
-        await invokeCopyRemoteToRemote(request);
+        await copyRemoteTransferBatch(request, async () => {
+          pending = { ...pending, sourcePaths: request.sourcePaths, conflictPolicies: request.conflictPolicies };
+          await upsertTransferResumeCandidate(pending);
+        });
         useTransferStore.getState().markOperationCompleted(candidate.operationId);
-        await removeTransferResumeCandidate(candidate.operationId);
+        await removeTransferResumeCandidate(candidate.operationId).catch((error: unknown) =>
+          logger.warn('Failed to remove the completed transfer recovery entry', error),
+        );
       } catch (error) {
         if (useTransferStore.getState().operations.find(
           (operation) => operation.operationId === candidate.operationId,
@@ -152,11 +179,10 @@ export async function hydrateTransferResumeCandidates(): Promise<void> {
       }
     };
 
-    const sourceRequest = sourceProfile ? buildRemoteConnectionRequest(sourceProfile) : undefined;
     useTransferStore.getState().addOperation({
       operationId: candidate.operationId,
       kind: 'remote-copy',
-      connectionId: sourceRequest ? connectionKey(sourceRequest) : undefined,
+      connectionId: candidate.sourceRouteKey,
       paths: candidate.sourcePaths,
       currentPath: candidate.sourcePaths[0],
       totalBytes: 0,
@@ -166,8 +192,8 @@ export async function hydrateTransferResumeCandidates(): Promise<void> {
       status: 'failed',
       error: missingProfile
         ? t('sftp.transfer.resumeProfileMissing')
-        : t('sftp.transfer.interrupted'),
-      errorCategory: missingProfile ? 'not-found' : 'cancelled',
+        : routeMatches ? t('sftp.transfer.interrupted') : t('sftp.transfer.resumeRouteChanged'),
+      errorCategory: routeMatches ? 'cancelled' : 'not-found',
       retry,
       cancel: retry ? () => invokeCancelRemoteCopy(candidate.operationId) : undefined,
       onDiscard: () => removeTransferResumeCandidate(candidate.operationId),

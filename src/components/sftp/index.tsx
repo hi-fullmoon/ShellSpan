@@ -32,7 +32,8 @@ import { useSftpConnectionOpener } from '@/hooks/useSftpConnectionOpener';
 import { useSystemFileDrop } from '@/hooks/useSystemFileDrop';
 import { useToast } from '@/hooks/useToast';
 import { getBackendDirectoryListRequestKey, nextDirectoryListRequestId } from '@/hooks/utils';
-import { invokeCancelRemoteCopy, invokeCopyRemoteToRemote, invokeListLocalDirectory, invokeListRemoteDirectory } from '@/lib/ipc/tauri';
+import { invokeCancelRemoteCopy, invokeListLocalDirectory, invokeListRemoteDirectory } from '@/lib/ipc/tauri';
+import { sshRouteKey } from '@/lib/connections/ssh-route';
 import { getLocalizedErrorMessage } from '@/lib/error';
 import { normalizePortablePath, parentPortablePath } from '@/lib/path-utils';
 import {
@@ -41,7 +42,7 @@ import {
   runPathOperation,
   useTransferStore,
 } from '@/stores/transferStore';
-import type { ConnectionProfile, UploadConflictPolicy } from '@/types';
+import type { ConnectionProfile, RemoteConnectionRequest, UploadConflictPolicy } from '@/types';
 import { serializeSftpWorkspace } from '@/lib/sftp/sftp-workspace';
 import { isTransferTargetCurrent } from '@/lib/sftp/transfer-target';
 import {
@@ -51,6 +52,7 @@ import {
 } from '@/lib/sftp/sftp-workspace-persistence';
 import { createLogger } from '@/lib/logger';
 import {
+  copyRemoteTransferBatch,
   removeTransferResumeCandidate,
   upsertTransferResumeCandidate,
   type TransferResumeCandidate,
@@ -198,7 +200,7 @@ interface SftpContentProps {
     } | null,
   ) => void;
   openSftpConnection: (profile: ConnectionProfile, targetConnectionId?: string, targetSide?: SftpSide) => Promise<void>;
-  verifyHostKey: (host: string, port: number, onVerified: () => void) => Promise<void>;
+  verifyHostKey: (connection: RemoteConnectionRequest, onVerified: () => void) => Promise<void>;
 }
 
 interface UploadQueue {
@@ -518,6 +520,8 @@ export const SftpContent: React.FC<SftpContentProps> = ({
                   operationId,
                   sourceProfileId,
                   destinationProfileId,
+                  sourceRouteKey: sshRouteKey(request.sourceConnection),
+                  destinationRouteKey: sshRouteKey(request.destinationConnection),
                   sourcePaths: [...queue.accepted],
                   destinationDirectory: queue.destination,
                   conflictPolicies: [...queue.policies],
@@ -537,13 +541,18 @@ export const SftpContent: React.FC<SftpContentProps> = ({
           const runRemoteCopy = async (): Promise<void> => {
             markTransferRunning(operationId);
             try {
-              if (resumeCandidate) {
-                await upsertTransferResumeCandidate(resumeCandidate);
-              }
-              await invokeCopyRemoteToRemote(request);
+              const savePending = resumeCandidate && (() => upsertTransferResumeCandidate({
+                ...resumeCandidate,
+                sourcePaths: request.sourcePaths,
+                conflictPolicies: request.conflictPolicies,
+              }));
+              await savePending?.();
+              await copyRemoteTransferBatch(request, savePending);
               markTransferCompleted(operationId);
               if (resumeCandidate) {
-                await removeTransferResumeCandidate(operationId);
+                await removeTransferResumeCandidate(operationId).catch((cleanupError: unknown) =>
+                  logger.warn('Failed to remove the completed transfer recovery entry', cleanupError),
+                );
               }
               targetRemote.invalidatePaneListingCache();
               await targetRemote.loadRemoteDirectory(queue.destination, () => isTransferTargetCurrent(
@@ -896,12 +905,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
                   setNewConnectionMenuOpen(true);
                 }}
                 onVerifyHostKey={(onVerified) => {
-                  const request = getSftpPaneConnection(connection, 'local');
-                  void verifyHostKey(
-                    request.host,
-                    request.port,
-                    onVerified,
-                  );
+                  void verifyHostKey(getSftpPaneConnection(connection, 'local'), onVerified);
                 }}
                 onReconnect={() => reconnectRestoredPane('local')}
               />
@@ -939,12 +943,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
                 selectedPaths={selectedRemotePaths}
                 onSelectedPathsChange={handleRemoteSelectedPathsChange}
                 onVerifyHostKey={(onVerified) => {
-                  const request = getSftpPaneConnection(connection, 'remote');
-                  void verifyHostKey(
-                    request.host,
-                    request.port,
-                    onVerified,
-                  );
+                  void verifyHostKey(getSftpPaneConnection(connection, 'remote'), onVerified);
                 }}
                 onReconnect={() => reconnectRestoredPane('remote')}
                 systemDropActive={systemDragActive}

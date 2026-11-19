@@ -1033,6 +1033,7 @@ export default {
   'sftp.transfer.remoteCopyFailed': 'Remote transfer failed',
   'sftp.transfer.interrupted': 'Interrupted by an app restart. Review the paths, then retry to resume.',
   'sftp.transfer.resumeProfileMissing': 'A saved connection was deleted. Discard this recovery item.',
+  'sftp.transfer.resumeRouteChanged': 'The original connection route changed or is unavailable. Start a new transfer.',
   'sftp.transfer.discard': 'Discard',
   'sftp.transfer.cancellingDelete': 'Cancelling',
   'sftp.transfer.cancelling': 'Cancelling',

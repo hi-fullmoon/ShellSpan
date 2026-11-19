@@ -2617,7 +2617,7 @@ pub(crate) async fn copy_remote_to_remote(
     copies: State<'_, RemoteCopyCancellationRegistry>,
     mut request: CopyRemoteToRemoteRequest,
     pool: State<'_, SftpPool>,
-) -> Result<(), RemoteFsError> {
+) -> Result<TransferBatchResult, RemoteFsError> {
     resolve_keychain_key_for_remote(&credentials, &mut request.source_connection)
         .map_err(|message| RemoteFsError::Other { message })?;
     resolve_keychain_key_for_remote(&credentials, &mut request.destination_connection)
@@ -2649,7 +2649,7 @@ pub(crate) async fn copy_remote_to_remote(
             Some(&pool),
             Some(&known_hosts),
         );
-        activity.transition(petdex_sftp_result(&result));
+        activity.transition(petdex_sftp_batch_result(&result));
         result
     })
     .await;
@@ -3899,8 +3899,15 @@ pub(crate) fn cancel_connection_preflight(
 }
 
 #[tauri::command]
-pub(crate) async fn trust_host(app: AppHandle, request: TrustHostRequest) -> Result<(), String> {
+pub(crate) async fn trust_host(
+    app: AppHandle,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    mut request: TrustHostRequest,
+) -> Result<(), String> {
     info!("Trusting host {}:{}", request.host, request.port);
+    if let Some(jump) = &mut request.jump_host {
+        resolve_keychain_key_for_jump_host(&credentials, jump)?;
+    }
     let result = tauri::async_runtime::spawn_blocking(move || {
         crate::known_hosts::trust_host_blocking(&app, &request)
     })
