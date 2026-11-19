@@ -365,7 +365,7 @@ pub(crate) fn open_with_application(path: &Path, application_id: &str) -> Result
 
 #[cfg(target_os = "linux")]
 fn applications_for_path(path: &Path) -> Vec<gio::AppInfo> {
-    let (content_type, _) = gio::content_type_guess(Some(path), None);
+    let (content_type, _) = gio::content_type_guess(Some(path), &[]);
     gio::AppInfo::all_for_type(&content_type)
 }
 
@@ -384,9 +384,9 @@ fn default_application_icon(name: &str, local_path: Option<&Path>) -> Option<Str
                 .ok()?
                 .content_type()
         })
-        .unwrap_or_else(|| gio::content_type_guess(Some(Path::new(name)), None).0);
+        .unwrap_or_else(|| gio::content_type_guess(Some(Path::new(name)), &[]).0);
     let app = gio::AppInfo::default_for_type(&content_type, false)?;
-    Some(app.icon()?.to_string()?.to_string())
+    Some(IconExt::to_string(&app.icon()?)?.to_string())
 }
 
 #[cfg(target_os = "linux")]
@@ -407,7 +407,7 @@ fn list_applications(
             };
             let icon = application
                 .icon()
-                .and_then(|icon| icon.to_string())
+                .and_then(|icon| IconExt::to_string(&icon))
                 .map(|icon| icon.to_string());
             Some((app, icon))
         })

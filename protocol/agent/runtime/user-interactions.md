@@ -9,6 +9,14 @@ inline code. It offers file actions after a metadata check confirms a file or
 directory, using the connected terminal's SFTP route for remote paths and the
 local filesystem for local paths.
 
+## Command approval and sandbox scope
+
+The approval card derives the sandbox message from the committed native call.
+A recognized sandbox executor and policy binding on a matching Direct target
+describe the restrictions for that approval. A command without such a binding
+retains the ordinary account-permission warning. The invocation result carries
+the evidence of whether a sandboxed process actually started.
+
 ## User questions
 
 `ask_user_question` collects non-sensitive decisions and information. Options are

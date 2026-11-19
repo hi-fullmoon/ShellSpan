@@ -109,12 +109,35 @@ pub(crate) struct AgentAuthorizeCallRequestNative {
 pub(crate) struct PreparedAuthorizationNative {
     reviewed_command: Option<super::ReviewedReadCommand>,
     pub(crate) sandbox: Option<crate::remote_sandbox::Binding>,
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    desktop_sandbox: Option<mac_sandbox_acceptance::Binding>,
+    #[cfg(all(test, target_os = "linux"))]
+    local_sandbox: Option<local_sandbox_acceptance::Binding>,
     pub(crate) context: NativeExecutionContext,
     pub(crate) call: AgentToolCallNative,
     pub(crate) effect: AgentObservedEffectNative,
     ttl_ms: u64,
     pub(crate) requires_native_confirmation: bool,
     pub(crate) native_prompt: String,
+}
+
+#[cfg(all(
+    feature = "native-input-acceptance",
+    debug_assertions,
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+impl PreparedAuthorizationNative {
+    pub(crate) fn desktop_sandbox_digest(&self) -> Option<&str> {
+        self.desktop_sandbox
+            .as_ref()
+            .map(|binding| binding.digest.as_str())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -148,6 +171,8 @@ pub(crate) struct NativeToolEngine {
     file_operations: FileOperationRegistryNative,
     checkpoint_root: Arc<Mutex<Option<PathBuf>>>,
     pub(crate) sudo_prompts: Arc<super::SudoPrompts>,
+    #[cfg(all(test, target_os = "linux"))]
+    local_sandbox: Option<local_sandbox_acceptance::Launcher>,
 }
 
 impl Default for NativeToolEngine {
@@ -264,6 +289,8 @@ impl NativeToolEngine {
             file_operations: FileOperationRegistryNative::default(),
             checkpoint_root: Arc::new(Mutex::new(None)),
             sudo_prompts: Arc::default(),
+            #[cfg(all(test, target_os = "linux"))]
+            local_sandbox: None,
         }
     }
 }
@@ -791,6 +818,21 @@ impl NativeToolEngine {
             capability_id: "pending-native-capability".into(),
         };
         let sandbox = call_sandbox_binding(&context, &call, database, known_hosts_path)?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let desktop_sandbox = {
+            let binding = mac_sandbox_acceptance::resolve(&context, &call)?;
+            if binding.is_some() {
+                database.require_agent_sandbox_enabled()?;
+            }
+            binding
+        };
+        #[cfg(all(test, target_os = "linux"))]
+        let local_sandbox = self.local_sandbox_binding(&call, database)?;
         if call.tool_name == "exec_command" && call.arguments["elevated"] == json!(true) {
             let arguments: ExecCommandArgumentsNative =
                 serde_json::from_value(call.arguments.clone()).map_err(|e| e.to_string())?;
@@ -830,26 +872,66 @@ impl NativeToolEngine {
         } else {
             preview_call()?
         };
-        let review = super::review_call(context.request.permission_mode, &call, &effect, &scope);
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let managed_workspace = desktop_sandbox
+            .as_ref()
+            .map(|binding| binding.workspace.as_path());
+        #[cfg(not(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        )))]
+        let managed_workspace = None;
+        let review = super::review_call(
+            context.request.permission_mode,
+            &call,
+            &effect,
+            &scope,
+            managed_workspace,
+        );
         effect
             .summary
             .push_str(&format!(" Approval review: {}.", review.reason));
+        let native_prompt = format!(
+            "{}\nApproval review: {}{}",
+            native_prompt(&context, &call, &effect, &scope, &preview, ttl_ms),
+            review.reason,
+            sandbox
+                .as_ref()
+                .and_then(|b| b.state.policy.as_ref())
+                .map(|p| format!(
+                    "\nRemote Bubblewrap sandbox: {} ({:?}). Network is disabled.",
+                    p.workspace, p.mode
+                ))
+                .unwrap_or_default()
+        );
+        #[cfg(all(test, target_os = "linux"))]
+        let native_prompt = match &local_sandbox {
+            Some(binding) => format!(
+                "{native_prompt}\nLocal nono acceptance sandbox: {}. Internet sockets are blocked.",
+                binding.workspace.display()
+            ),
+            None => native_prompt,
+        };
         Ok(PreparedAuthorizationNative {
             reviewed_command: review.command,
-            native_prompt: format!(
-                "{}\nApproval review: {}{}",
-                native_prompt(&context, &call, &effect, &scope, &preview, ttl_ms),
-                review.reason,
-                sandbox
-                    .as_ref()
-                    .and_then(|b| b.state.policy.as_ref())
-                    .map(|p| format!(
-                        "\nRemote Bubblewrap sandbox: {} ({:?}). Network is disabled.",
-                        p.workspace, p.mode
-                    ))
-                    .unwrap_or_default()
-            ),
+            native_prompt,
             sandbox,
+            #[cfg(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            desktop_sandbox,
+            #[cfg(all(test, target_os = "linux"))]
+            local_sandbox,
             context,
             call,
             effect,
@@ -866,6 +948,23 @@ impl NativeToolEngine {
         if prepared.requires_native_confirmation && !approved {
             return Err("Native capability approval was denied".into());
         }
+        let sandbox_digest = prepared
+            .sandbox
+            .as_ref()
+            .map(|binding| binding.digest.as_str());
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let sandbox_digest = prepared.desktop_sandbox_digest().or(sandbox_digest);
+        #[cfg(all(test, target_os = "linux"))]
+        let sandbox_digest = prepared
+            .local_sandbox
+            .as_ref()
+            .map(|binding| binding.digest.as_str())
+            .or(sandbox_digest);
         let IssuedCapabilityNative {
             capability_id,
             expires_at_unix_ms: _,
@@ -877,7 +976,7 @@ impl NativeToolEngine {
                     request_id: prepared.context.request.request_id.clone(),
                     user_session_id: prepared.context.request.user_session_id.clone(),
                     call_id: prepared.call.call_id.clone(),
-                    call_digest: bound_call_digest(&prepared.call, prepared.sandbox.as_ref())?,
+                    call_digest: bound_call_digest(&prepared.call, sandbox_digest)?,
                     allowed_tools: vec![prepared.call.tool_name.clone()],
                     allowed_effects: vec![prepared.effect.kind],
                     target_ids: vec![prepared.call.target.target_id().to_string()],
@@ -1096,6 +1195,31 @@ impl NativeToolEngine {
             .executable(&call.tool_name)
             .map_err(registry_error_message)?;
         let sandbox = call_sandbox_binding(context, &call, database, known_hosts_path)?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let desktop_sandbox = mac_sandbox_acceptance::resolve(context, &call)?;
+        #[cfg(all(test, target_os = "linux"))]
+        let local_sandbox = self.local_sandbox_binding(&call, database)?;
+        let sandbox_digest = sandbox.as_ref().map(|binding| binding.digest.as_str());
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let sandbox_digest = desktop_sandbox
+            .as_ref()
+            .map(|binding| binding.digest.as_str())
+            .or(sandbox_digest);
+        #[cfg(all(test, target_os = "linux"))]
+        let sandbox_digest = local_sandbox
+            .as_ref()
+            .map(|binding| binding.digest.as_str())
+            .or(sandbox_digest);
         self.revalidate_target(context, &call.target, sessions, database)?;
         if !(call.tool_name == "exec_command" && call.arguments["elevated"] == json!(true)) {
             ensure_unmanaged_call(database, context, &call)?;
@@ -1124,7 +1248,7 @@ impl NativeToolEngine {
                     call_id: &call.call_id,
                     target_id: call.target.target_id(),
                 },
-                &bound_call_digest(&call, sandbox.as_ref())?,
+                &bound_call_digest(&call, sandbox_digest)?,
                 current_unix_ms(),
             )
             .map_err(|error| format!("Native capability verification failed: {error:?}"))?;
@@ -1183,6 +1307,15 @@ impl NativeToolEngine {
                 cancellation,
                 runner_journal,
                 sandbox.as_ref(),
+                #[cfg(all(
+                    feature = "native-input-acceptance",
+                    debug_assertions,
+                    target_os = "macos",
+                    target_arch = "aarch64"
+                ))]
+                desktop_sandbox.as_ref(),
+                #[cfg(all(test, target_os = "linux"))]
+                local_sandbox.as_ref(),
             ),
             "terminal_execute" => self.execute_terminal_command(
                 context,
@@ -1781,6 +1914,16 @@ impl NativeToolEngine {
         cancellation: &CancellationToken,
         runner_journal: Option<crate::agent_runtime::RunnerDispatchJournal>,
         sandbox: Option<&crate::remote_sandbox::Binding>,
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        desktop_sandbox: Option<&mac_sandbox_acceptance::Binding>,
+        #[cfg(all(test, target_os = "linux"))] local_sandbox: Option<
+            &local_sandbox_acceptance::Binding,
+        >,
     ) -> Result<AgentToolResultNative, String> {
         let arguments: ExecCommandArgumentsNative = serde_json::from_value(call.arguments.clone())
             .map_err(|error| format!("Invalid exec_command arguments: {error}"))?;
@@ -1986,7 +2129,89 @@ impl NativeToolEngine {
         }
         self.processes.ensure_capacity()?;
         validate_frozen_cwd(&call.target, arguments.cwd.as_deref())?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let mut desktop_launch = None;
         let process = match &call.target {
+            #[cfg(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            AgentToolTargetNative::Local { target_id, .. } if desktop_sandbox.is_some() => {
+                let binding = desktop_sandbox.expect("desktop sandbox binding");
+                binding.wait_for_gate_case(&arguments.command, cancellation)?;
+                let launch = database.with_local_sandbox_dispatch(|| {
+                    if cancellation.is_cancelled() {
+                        return Err("Local sandbox launch cancelled".into());
+                    }
+                    binding.revalidate()?;
+                    let mut lease = super::mac_sandbox_workspace::Lease::acquire(&binding.directory)
+                        .map_err(|error| error.to_string())?;
+                    let admitted = (|| {
+                        binding.hold_crash_cut(&arguments.command, "before", cancellation)?;
+                        runner_journal.ok_or("Missing acceptance dispatch journal")?()?;
+                        super::process::spawn_mac_sandbox_acceptance_process(
+                            &context.request, target_id, &arguments.command, reviewed_command,
+                            &binding.workspace, &binding.launcher, timeout, &mut lease,
+                        )
+                    })();
+                    match admitted {
+                        Ok((process, receipt)) => Ok((process, receipt, lease)),
+                        Err(error) => {
+                            if let Err(cleanup) = lease.release() {
+                                log::warn!("Managed sandbox recovery retained directory protection: {cleanup}");
+                            }
+                            Err(error)
+                        }
+                    }
+                });
+                match launch {
+                    Ok((process, receipt, lease)) => {
+                        desktop_launch = Some((receipt, lease));
+                        process
+                    }
+                    Err(error) => {
+                        let mut result = completed_result(
+                            &context.request,
+                            call,
+                            effect,
+                            &error,
+                            json!({"sandbox":mac_sandbox_acceptance::EXECUTOR,"started":false}),
+                            false,
+                        );
+                        result.status = AgentToolResultStatusNative::Failed;
+                        return Ok(result);
+                    }
+                }
+            }
+            #[cfg(all(test, target_os = "linux"))]
+            AgentToolTargetNative::Local { target_id, .. } if local_sandbox.is_some() => {
+                let binding = local_sandbox.expect("local sandbox binding");
+                if reviewed_command.is_some() {
+                    return Err("Local sandbox acceptance requires manual authorization".into());
+                }
+                database.with_local_sandbox_dispatch(|| {
+                    if cancellation.is_cancelled() {
+                        return Err("Local sandbox launch was cancelled".into());
+                    }
+                    binding.revalidate()?;
+                    super::process::spawn_sandbox_acceptance_process(
+                        &context.request,
+                        target_id,
+                        &arguments.command,
+                        &binding.workspace,
+                        &binding.launcher.executable,
+                        &binding.launcher.node,
+                        timeout,
+                    )
+                })?
+            }
             AgentToolTargetNative::Local { target_id, .. } if reviewed_command.is_some() => {
                 super::spawn_reviewed_local_process_native(
                     context.request.task_id.clone(),
@@ -2030,6 +2255,58 @@ impl NativeToolEngine {
                 .remove_terminal(&snapshot.process_handle, snapshot.state)?;
         }
         let mut result = exec_process_result(&context.request, call, effect, snapshot, background);
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        if let Some((receipt, mut lease)) = desktop_launch {
+            use std::os::unix::fs::FileExt;
+            let mut evidence = [0];
+            let data = result.data.as_mut().expect("Direct result data");
+            data["sandbox"] = json!(mac_sandbox_acceptance::EXECUTOR);
+            match (receipt.read_at(&mut evidence, 0).ok(), evidence[0]) {
+                (Some(1), b'S') => data["started"] = json!(true),
+                (Some(1), b'F') => {
+                    result.status = AgentToolResultStatusNative::Failed;
+                    result.summary = "LOCAL_SANDBOX_START_FAILED: launcher rejected the command before it started".into();
+                    data["started"] = json!(false);
+                    data["launcherExitCode"] = data["exitCode"].take();
+                }
+                _ => {
+                    result.status = AgentToolResultStatusNative::Uncertain;
+                    result.summary =
+                        "LOCAL_SANDBOX_START_UNCONFIRMED: no trusted launch evidence".into();
+                    data["started"] = Value::Null;
+                }
+            }
+            let cleanup = (|| {
+                lease.record_ended().map_err(|error| error.to_string())?;
+                desktop_sandbox
+                    .expect("desktop sandbox binding")
+                    .hold_crash_cut(
+                        call.arguments["command"].as_str().unwrap_or_default(),
+                        "after",
+                        cancellation,
+                    )?;
+                if !lease.release().map_err(|error| error.to_string())? {
+                    return Err("Previous sandbox process group is still active".to_string());
+                }
+                Ok(())
+            })();
+            if let Err(error) = cleanup {
+                result.status = AgentToolResultStatusNative::Uncertain;
+                result.summary =
+                    format!("Managed sandbox directory retained its protection: {error}");
+                data["terminationConfirmed"] = json!(false);
+            }
+        }
+        #[cfg(all(test, target_os = "linux"))]
+        if local_sandbox.is_some() {
+            result.data.as_mut().expect("Direct process result data")["sandbox"] =
+                json!("nonoLinuxSeccompAcceptance");
+        }
         if reviewed_command.is_some() {
             if let Some(Value::Object(data)) = result.data.as_mut() {
                 data.insert("approvalReview".into(), json!("boundedLocalRead"));
@@ -3053,7 +3330,7 @@ fn call_digest(call: &AgentToolCallNative) -> Result<String, String> {
 
 fn bound_call_digest(
     call: &AgentToolCallNative,
-    sandbox: Option<&crate::remote_sandbox::Binding>,
+    sandbox_digest: Option<&str>,
 ) -> Result<String, String> {
     let bytes = serde_json::to_vec(&(
         call.request_id.as_str(),
@@ -3061,7 +3338,7 @@ fn bound_call_digest(
         call.tool_name.as_str(),
         &call.arguments,
         &call.target,
-        sandbox.map(|b| &b.digest),
+        sandbox_digest,
     ))
     .map_err(|error| format!("Failed to digest native call: {error}"))?;
     Ok(Sha256::digest(bytes)
@@ -3069,6 +3346,37 @@ fn bound_call_digest(
         .map(|byte| format!("{byte:02x}"))
         .collect())
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "__tests__/local_sandbox_acceptance.rs"]
+mod local_sandbox_acceptance;
+
+#[cfg(all(
+    feature = "native-input-acceptance",
+    debug_assertions,
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+#[path = "mac_sandbox_acceptance.rs"]
+mod mac_sandbox_acceptance;
+
+#[cfg(all(
+    feature = "native-input-acceptance",
+    debug_assertions,
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+pub(crate) use mac_sandbox_acceptance::EXECUTOR as MAC_SANDBOX_ACCEPTANCE_EXECUTOR;
+#[cfg(all(
+    feature = "native-input-acceptance",
+    debug_assertions,
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+pub(crate) use mac_sandbox_acceptance::{
+    active as mac_sandbox_trial_active, automated as mac_sandbox_automated,
+    preview_active as mac_sandbox_preview_active,
+};
 
 fn call_sandbox_binding(
     context: &NativeExecutionContext,
@@ -3416,6 +3724,8 @@ mod tests {
             file_operations: FileOperationRegistryNative::default(),
             checkpoint_root: Arc::new(Mutex::new(None)),
             sudo_prompts: Arc::default(),
+            #[cfg(target_os = "linux")]
+            local_sandbox: None,
         }
     }
 
@@ -4041,6 +4351,15 @@ mod tests {
                 None,
                 &CancellationToken::new(),
                 None,
+                None,
+                #[cfg(all(
+                    feature = "native-input-acceptance",
+                    debug_assertions,
+                    target_os = "macos",
+                    target_arch = "aarch64"
+                ))]
+                None,
+                #[cfg(target_os = "linux")]
                 None,
             )
             .unwrap();

@@ -906,6 +906,26 @@ impl Database {
         self.save_preferences(&[(AGENT_SANDBOX_ENABLED_KEY.into(), enabled.to_string())])
     }
 
+    #[cfg(any(
+        all(test, target_os = "linux"),
+        all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        )
+    ))]
+    pub(crate) fn with_local_sandbox_dispatch<T>(
+        &self,
+        send: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        let conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
+        if !Self::read_agent_sandbox_enabled(&conn)? {
+            return Err(AGENT_SANDBOX_DISABLED.into());
+        }
+        send()
+    }
+
     pub(crate) fn load_preferences(&self) -> Result<Vec<(String, String)>, String> {
         let conn = self
             .conn

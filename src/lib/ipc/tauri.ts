@@ -373,7 +373,10 @@ export function invokePrepareTerminalAcceptanceRawCommand(agentSessionId: string
 
 export type TerminalAcceptanceSourceKind = 'effect' | 'running' | 'manual-running' | 'syntax-error' | 'unsupported-input' | 'parent-shell' | 'complex-source'
   | 'exact-byte-boundary' | 'oversized-byte-boundary' | 'long-input' | 'paced-input' | 'transport-read'
-  | 'job-launch' | 'job-wait' | 'job-stop' | 'file-write' | 'file-read' | 'file-run';
+  | 'job-launch' | 'job-wait' | 'job-stop' | 'file-write' | 'file-read' | 'file-run'
+  | 'sandbox-gate' | 'sandbox-init' | 'sandbox-exit' | 'sandbox-exit-125' | 'sandbox-cancel' | 'sandbox-timeout' | 'sandbox-restart'
+  | 'sandbox-before' | 'sandbox-after' | 'sandbox-reviewed-read' | 'sandbox-reviewed-list'
+  | 'sandbox-operator-write' | 'sandbox-operator-outside-read';
 
 export interface TerminalAcceptanceSubmission {
   readonly invocationOrigin: string;

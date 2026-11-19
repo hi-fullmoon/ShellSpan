@@ -285,6 +285,33 @@ fn apply_connection_sandbox(
     app: &AppHandle,
     request: &mut CreateAgentSessionRequest,
 ) -> Result<(), String> {
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    if super::native::mac_sandbox_preview_active() {
+        if let Some(target) = request
+            .target
+            .as_mut()
+            .filter(|target| target.kind == "local" && target.target_id != "workbench-ai")
+        {
+            let workspace = crate::commands::terminal_acceptance_directory()?.join("home");
+            let workspace = workspace
+                .to_str()
+                .ok_or("Expected a UTF-8 managed workspace")?;
+            if target.cwd.as_deref().is_some_and(|cwd| cwd != workspace)
+                || target
+                    .local_root
+                    .as_deref()
+                    .is_some_and(|root| root != workspace)
+            {
+                return Err("MAC_SANDBOX_PREVIEW_MANAGED_ROOT_REQUIRED: select the managed preview workspace".into());
+            }
+            target.cwd = Some(workspace.into());
+        }
+    }
     let Some(target) = request.target.as_mut().filter(|t| t.kind == "remote") else {
         return Ok(());
     };

@@ -1,0 +1,137 @@
+//! Scoped to installed arm64 debug acceptance bundles.
+use super::*;
+use std::fs;
+use std::os::unix::fs::MetadataExt;
+
+pub(crate) const EXECUTOR: &str = "nonoMacAcceptance";
+
+pub(crate) fn active() -> bool {
+    automated() || preview_active()
+}
+
+pub(crate) fn automated() -> bool {
+    std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO").as_deref()
+        == Ok("local-sandbox-direct")
+}
+
+pub(crate) fn preview_active() -> bool {
+    std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO").as_deref()
+        == Ok("local-sandbox-preview")
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct Binding {
+    pub(super) directory: PathBuf,
+    pub(super) workspace: PathBuf,
+    pub(super) launcher: PathBuf,
+    pub(super) digest: String,
+}
+
+fn identity(path: &Path, directory: bool) -> Result<(u64, u64), String> {
+    let stat = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+    if (directory && !stat.is_dir()) || (!directory && !stat.is_file()) {
+        return Err("Expected an owned acceptance directory or executable".into());
+    }
+    Ok((stat.dev(), stat.ino()))
+}
+
+impl Binding {
+    fn current_digest(&self) -> Result<String, String> {
+        let bytes = serde_json::to_vec(&(
+            EXECUTOR,
+            &self.workspace,
+            identity(&self.workspace, true)?,
+            &self.launcher,
+            identity(&self.launcher, false)?,
+        ))
+        .map_err(|error| error.to_string())?;
+        Ok(hex::encode(Sha256::digest(bytes)))
+    }
+
+    pub(super) fn revalidate(&self) -> Result<(), String> {
+        if self.current_digest()? != self.digest {
+            return Err("Acceptance workspace or launcher changed before dispatch".into());
+        }
+        Ok(())
+    }
+
+    pub(super) fn wait_for_gate_case(
+        &self,
+        command: &str,
+        cancel: &CancellationToken,
+    ) -> Result<(), String> {
+        if !automated() || !command.starts_with("printf gate > gate-") {
+            return Ok(());
+        }
+        let signals = self.directory.join("signals");
+        fs::write(signals.join("approval-ready"), b"ready").map_err(|error| error.to_string())?;
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !signals.join("release").is_file() {
+            if cancel.is_cancelled() || Instant::now() >= deadline {
+                return Err("Acceptance dispatch barrier cancelled or timed out".into());
+            }
+            std::thread::sleep(Duration::from_millis(15));
+        }
+        Ok(())
+    }
+
+    pub(super) fn hold_crash_cut(
+        &self,
+        command: &str,
+        stage: &str,
+        cancel: &CancellationToken,
+    ) -> Result<(), String> {
+        if !automated() || !command.starts_with(&format!("printf {stage} ")) {
+            return Ok(());
+        }
+        let signal = self
+            .directory
+            .join("signals")
+            .join(format!("crash-{stage}"));
+        fs::write(signal, b"ready").map_err(|error| error.to_string())?;
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !cancel.is_cancelled() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(15));
+        }
+        Err("Acceptance crash cut ended without an application crash".into())
+    }
+}
+
+pub(super) fn resolve(
+    context: &NativeExecutionContext,
+    call: &AgentToolCallNative,
+) -> Result<Option<Binding>, String> {
+    if !active()
+        || call.tool_name != "exec_command"
+        || (automated()
+            && !context
+                .request
+                .user_session_id
+                .starts_with("phase3-submission-"))
+        || (preview_active() && !matches!(call.target, AgentToolTargetNative::Local { .. }))
+    {
+        return Ok(None);
+    }
+    let directory = crate::commands::terminal_acceptance_directory()?;
+    let workspace = directory.join("home");
+    let AgentToolTargetNative::Local { cwd: Some(cwd), .. } = &call.target else {
+        return Err("Acceptance requires an isolated local Direct target".into());
+    };
+    if Path::new(cwd) != workspace {
+        return Err("Acceptance requires an isolated local Direct target".into());
+    }
+    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    let contents = exe
+        .parent()
+        .and_then(Path::parent)
+        .ok_or("Acceptance bundle required")?;
+    let launcher = contents.join("Resources/acceptance/nono-probe");
+    let mut binding = Binding {
+        directory,
+        workspace,
+        launcher,
+        digest: String::new(),
+    };
+    binding.digest = binding.current_digest()?;
+    Ok(Some(binding))
+}

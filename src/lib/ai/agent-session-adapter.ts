@@ -296,6 +296,16 @@ function pendingApproval(nodes: readonly AiConversationNode[]): AiPendingApprova
     : undefined;
   if (node?.kind !== 'approvalMarker' || node.turnId === null || node.stepId === null) return null;
   const tool = findConversationTool(nodes, node);
+  const args = tool?.nativeName === 'exec_command' && tool.input && typeof tool.input === 'object'
+    && !Array.isArray(tool.input) ? tool.input as Record<string, unknown> : null;
+  const boundDirect = args?.channel === 'direct' && args.elevated !== true
+    && typeof args.connectionPolicyBinding === 'string' && /^[a-f0-9]{64}$/u.test(args.connectionPolicyBinding);
+  let commandSandbox: AiPendingApproval['commandSandbox'];
+  if (boundDirect && args.sandboxExecutor === 'nonoMacAcceptance' && tool?.target?.kind === 'local') {
+    commandSandbox = 'macos';
+  } else if (boundDirect && args.sandboxExecutor === 'bubblewrapV1' && tool?.target?.kind === 'remote') {
+    commandSandbox = 'remote';
+  }
   return {
     sessionId: node.sessionId,
     turnId: node.turnId,
@@ -310,6 +320,7 @@ function pendingApproval(nodes: readonly AiConversationNode[]): AiPendingApprova
     toolName: tool?.name ?? node.callId,
     target: tool?.target ?? null,
     arguments: tool?.input ?? null,
+    ...(commandSandbox && { commandSandbox }),
     effect: tool?.effect ?? node.risk,
     evidenceRefs: tool?.evidenceRefs ?? [],
   };

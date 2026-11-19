@@ -1009,14 +1009,22 @@ fn create_local_session_blocking(
     if shell_kind == TerminalShellKind::Bash {
         configure_local_bash_locale(&mut command);
     }
-    if let Some(home) = std::env::var_os("SHELLSPAN_LOCAL_HOME") {
-        let home = std::path::PathBuf::from(home);
-        if !home.is_absolute() || !home.is_dir() {
-            return Err("local shell HOME must be an existing absolute directory".into());
-        }
-        command.env("HOME", &home);
-        command.cwd(&home);
-    }
+    let home = std::env::var_os("SHELLSPAN_LOCAL_HOME");
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    let home = if home.is_some()
+        && crate::agent_runtime::mac_sandbox_preview_active()
+        && !app.state::<Database>().agent_sandbox_enabled()?
+    {
+        None
+    } else {
+        home
+    };
+    configure_local_terminal_home(&mut command, home.as_deref())?;
     #[cfg(any(unix, windows))]
     if let Some(native) = prepared_native.as_ref() {
         native.configure(&mut command)?;
@@ -4279,6 +4287,21 @@ fn configure_local_terminal_environment(command: &mut CommandBuilder) {
     command.env("COLORTERM", "truecolor");
     command.env("TERM_PROGRAM", "ShellSpan");
     command.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+}
+
+fn configure_local_terminal_home(
+    command: &mut CommandBuilder,
+    home: Option<&std::ffi::OsStr>,
+) -> Result<(), String> {
+    if let Some(home) = home {
+        let path = std::path::Path::new(home);
+        if !path.is_absolute() || !path.is_dir() {
+            return Err("local shell HOME must be an existing absolute directory".into());
+        }
+        command.env("HOME", home);
+        command.cwd(path);
+    }
+    Ok(())
 }
 
 #[cfg(unix)]

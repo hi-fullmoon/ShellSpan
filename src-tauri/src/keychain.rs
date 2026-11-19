@@ -149,6 +149,8 @@ struct NativeKeychainBackend;
 struct VaultCredentialBackend {
     inner: Arc<dyn CredentialBackend>,
     operation_lock: Arc<Mutex<()>>,
+    service: &'static str,
+    account: String,
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -201,27 +203,28 @@ impl VaultCredentialBackend {
         Self {
             inner,
             operation_lock,
+            service: CREDENTIAL_VAULT_SERVICE,
+            account: CREDENTIAL_VAULT_ACCOUNT.into(),
         }
     }
 
-    fn validate_logical_specifier(service: &str, key: &str) -> Result<(), String> {
+    fn validate_logical_specifier(&self, service: &str, key: &str) -> Result<(), String> {
         if service.is_empty() {
             return Err("credential service cannot be empty".to_string());
         }
         if key.is_empty() {
             return Err("credential key cannot be empty".to_string());
         }
-        if service == CREDENTIAL_VAULT_SERVICE && key == CREDENTIAL_VAULT_ACCOUNT {
+        if (service == CREDENTIAL_VAULT_SERVICE && key == CREDENTIAL_VAULT_ACCOUNT)
+            || (service == self.service && key == self.account)
+        {
             return Err("credential identifier is reserved for the ShellSpan vault".to_string());
         }
         Ok(())
     }
 
     fn load_vault(&self) -> Result<CredentialVault, String> {
-        let Some(payload) = self
-            .inner
-            .get_credential(CREDENTIAL_VAULT_SERVICE, CREDENTIAL_VAULT_ACCOUNT)?
-        else {
+        let Some(payload) = self.inner.get_credential(self.service, &self.account)? else {
             return Ok(CredentialVault::default());
         };
         let vault: CredentialVault = serde_json::from_str(&payload)
@@ -239,7 +242,7 @@ impl VaultCredentialBackend {
         let payload = serde_json::to_string(vault)
             .map_err(|e| format!("credential vault serialization failed: {e}"))?;
         self.inner
-            .set_credential(CREDENTIAL_VAULT_SERVICE, CREDENTIAL_VAULT_ACCOUNT, &payload)
+            .set_credential(self.service, &self.account, &payload)
     }
 
     fn lock_operations(&self) -> Result<std::sync::MutexGuard<'_, ()>, String> {
@@ -252,7 +255,7 @@ impl VaultCredentialBackend {
 #[cfg(any(target_os = "macos", test))]
 impl CredentialBackend for VaultCredentialBackend {
     fn set_credential(&self, service: &str, key: &str, value: &str) -> Result<(), String> {
-        Self::validate_logical_specifier(service, key)?;
+        self.validate_logical_specifier(service, key)?;
         let _guard = self.lock_operations()?;
         let mut vault = self.load_vault()?;
         vault.insert(service, key, value);
@@ -260,14 +263,14 @@ impl CredentialBackend for VaultCredentialBackend {
     }
 
     fn get_credential(&self, service: &str, key: &str) -> Result<Option<String>, String> {
-        Self::validate_logical_specifier(service, key)?;
+        self.validate_logical_specifier(service, key)?;
         let _guard = self.lock_operations()?;
         let vault = self.load_vault()?;
         Ok(vault.get(service, key).map(str::to_string))
     }
 
     fn delete_credential(&self, service: &str, key: &str) -> Result<(), String> {
-        Self::validate_logical_specifier(service, key)?;
+        self.validate_logical_specifier(service, key)?;
         let _guard = self.lock_operations()?;
         let mut vault = self.load_vault()?;
         vault.remove(service, key);
@@ -415,6 +418,23 @@ impl CredentialManager {
         let backend: Arc<dyn CredentialBackend> = Arc::new(NativeKeychainBackend);
 
         Self { backend }
+    }
+
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    pub(crate) fn for_sandbox_preview(profile: uuid::Uuid) -> Self {
+        Self {
+            backend: Arc::new(VaultCredentialBackend {
+                inner: Arc::new(NativeKeychainBackend),
+                operation_lock: shared_native_vault_lock(),
+                service: "com.shellspan.validation.agent-sandbox-preview.credential-vault",
+                account: profile.to_string(),
+            }),
+        }
     }
 
     #[cfg(test)]
