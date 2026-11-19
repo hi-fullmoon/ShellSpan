@@ -131,7 +131,10 @@ try {
           const commandPadding = await command.evaluate(element => parseFloat(getComputedStyle(element).paddingRight));
           assert.ok(commandBox.x + commandBox.width - commandPadding <= copyBox.x,
             'The copy button must stay inside the space reserved to the right of the command text.');
-          assert.ok(copyBox.x + copyBox.width <= regionBox.x + regionBox.width, 'The copy button must fit inside the command block.');
+          const rightBorder = await region.evaluate(element => parseFloat(getComputedStyle(element).borderRightWidth));
+          const rightInset = regionBox.x + regionBox.width - rightBorder - copyBox.x - copyBox.width;
+          assert.ok(Math.abs(rightInset - 14) <= 0.5,
+            `The copy button must use the shared 14px inset inside the command border, got ${rightInset}px.`);
           const copyOpacity = () => copy.evaluate(element => getComputedStyle(element).opacity);
           assert.equal(await copyOpacity(), '0', 'The copy button must be hidden at rest.');
           await command.hover();

@@ -69,7 +69,8 @@
   }
 }
 
-.ai-tool-content-region > .ai-tool-copy-button {
+.ai-tool-content-region > .ai-tool-copy-button,
+[data-ai-copy-anchor] > .ai-tool-copy-button {
   right: 14px;
 }
 

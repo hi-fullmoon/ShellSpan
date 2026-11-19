@@ -325,7 +325,7 @@ export function AiQuestionPanel({
                           type="button"
                           variant="ghost"
                           size="icon-xs"
-                          className="ai-tool-copy-button absolute -top-[0.5ex] right-1 -translate-y-1/2 [font:var(--ai-font-markdown-code-block)]"
+                          className="ai-tool-copy-button absolute -top-[0.5ex] -translate-y-1/2 [font:var(--ai-font-markdown-code-block)]"
                           aria-label={copyCommandLabel}
                           onClick={() => {
                             void writeClipboardText(userAction.verification_command).then(
