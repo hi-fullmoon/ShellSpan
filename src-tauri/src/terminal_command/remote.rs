@@ -18,6 +18,10 @@ const NATIVE_SFTP_TRANSFER_WINDOW: usize = 1024 * 1024;
 #[path = "remote_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "ssh_bash_startup_tests.rs"]
+mod bash_startup_tests;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RemoteBashTarget {
     Arm64,

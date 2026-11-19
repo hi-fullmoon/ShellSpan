@@ -7,7 +7,7 @@ pub(crate) fn bootstrap_source(module: &Path, socket: &Path) -> Result<String, S
             .map_err(|_| "TERMINAL_NATIVE_PATH_INVALID")
     };
     let job_helpers = crate::terminal_jobs::POSIX_HELPERS;
-    let tty_recovery = crate::terminal_integration::POSIX_TTY_RECOVERY;
+    let tty_recovery = crate::terminal_integration::posix_tty_recovery();
     // Called by the explicit GNU post-profile startup entry. Bash itself has
     // already loaded system/user configuration with the real HOME/login flags.
     Ok(format!(
@@ -89,4 +89,12 @@ fi
         quote(socket)?,
         control_path = quote(socket)?
     ))
+}
+
+#[test]
+fn bash_bootstrap_embeds_tty_recovery_as_posix_source() {
+    let source = bootstrap_source(Path::new("/tmp/adapter.so"), Path::new("/tmp/control")).unwrap();
+    assert!(source.contains("__shellspan_saved_prompt_tty=\n"));
+    assert!(source.contains("\n__shellspan_recover_prompt_tty() {\n"));
+    assert!(!source.contains('\r'));
 }

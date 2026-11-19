@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fs::{self, File};
 #[cfg(unix)]
 use std::io::Write;
@@ -18,7 +19,16 @@ use uuid::Uuid;
 
 const MAX_CONTROL_FIELD_BYTES: usize = 32_768;
 const MAX_CONTROL_BUFFER_BYTES: usize = MAX_CONTROL_FIELD_BYTES * 4;
-pub(crate) const POSIX_TTY_RECOVERY: &str = include_str!("terminal-tty-recovery.sh");
+pub(crate) fn posix_tty_recovery() -> Cow<'static, str> {
+    // include_str! preserves Windows checkout bytes, while POSIX shells
+    // interpret a carriage return in source as part of a token.
+    let source = include_str!("terminal-tty-recovery.sh");
+    if source.contains("\r\n") {
+        Cow::Owned(source.replace("\r\n", "\n"))
+    } else {
+        Cow::Borrowed(source)
+    }
+}
 
 pub(crate) fn recovery_token(root: &Path) -> &str {
     root.file_name()
@@ -880,7 +890,7 @@ fi
         ""
     };
     let job_helpers = crate::terminal_jobs::POSIX_HELPERS;
-    let tty_recovery = POSIX_TTY_RECOVERY;
+    let tty_recovery = posix_tty_recovery();
     format!(
         r#"readonly __shellspan_parser_executable=$BASH
 readonly __shellspan_stty_executable=$(builtin type -P stty)
@@ -1421,7 +1431,7 @@ add-zle-hook-widget line-init __shellspan_line_init
 "#
     };
     let job_helpers = crate::terminal_jobs::POSIX_HELPERS;
-    let tty_recovery = POSIX_TTY_RECOVERY;
+    let tty_recovery = posix_tty_recovery();
     format!(
         r#"typeset -gr __shellspan_parser_executable={parser_executable}
 typeset -gr __shellspan_stty_executable=$(builtin whence -p stty)

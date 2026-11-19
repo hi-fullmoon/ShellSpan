@@ -422,7 +422,7 @@ pub(crate) fn zle_bootstrap(
     };
     let json = serde_json::to_string(profile).map_err(|_| "TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
     let quoted = shlex::try_quote(&json).map_err(|_| "TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
-    let tty_recovery = crate::terminal_integration::POSIX_TTY_RECOVERY;
+    let tty_recovery = crate::terminal_integration::posix_tty_recovery();
     Ok(format!(
         r#"[[ ! -o allexport ]] || return
 typeset -ga __shellspan_nip_module_path=("${{module_path[@]}}")

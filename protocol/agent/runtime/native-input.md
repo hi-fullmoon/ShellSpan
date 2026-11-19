@@ -102,7 +102,8 @@ SSH 制品经真实 SFTP 上传、远端读取校验与独立 relay 通道加载
 Linux x86_64 SSH 仅对登录 Shell 为 Bash、glibc 为 2.28 或更新的 2.x 版本启用
 `gnu-bash-5.3-readline-8.3.6-linux-x86_64-glibc-2.28-native`。启动前校验随包
 Bash、模块和 relay，上传后从该会话的私有目录回读校验，并在不读取登录配置的
-检查中加载模块确认 ABI。实际登录仍按 Bash 自身语义读取配置。准备失败时使用
+检查中加载模块确认 ABI。客户端将内置 TTY 恢复脚本以 LF 换行嵌入启动脚本，避免 Windows
+检出的 CRLF 影响远端 Bash 解析。实际登录仍按 Bash 自身语义读取配置。准备失败时使用
 账户原来的 SSH Shell。低于 glibc 2.28 时，终端 Agent 对新请求使用 Direct，提示检测到的版本和最低版本，已有执行不重放。ARM64 SSH 继续要求实际登录 Shell 摘要匹配。
 
 SSH 平台探测和 relay 启动使用每次连接独立的标记区分协议和非交互 Shell 的启动输出。
