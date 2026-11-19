@@ -144,8 +144,11 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
             if (generation === opening.current) setClipboard(text);
           }).catch(() => {});
         }} />
-      <ContextMenuContent aria-label={t('terminal.menu.label')} finalFocus={() =>
-        restoreFocus.current && valid() ? terminal?.textarea : false}>
+      <ContextMenuContent
+        aria-label={t('terminal.menu.label')}
+        className="[&_[role=menuitem]:focus-visible]:outline-hidden!"
+        finalFocus={() => restoreFocus.current && valid() ? terminal?.textarea : false}
+      >
         <ContextMenuGroup>
           <ContextMenuItem disabled={!snapshot.selection} onClick={() => {
             const text = useAppStore.getState().terminalTrimTrailingWhitespace ? snapshot.selection.replace(/[ \t]+(?=\r?$)/gm, '') : snapshot.selection;

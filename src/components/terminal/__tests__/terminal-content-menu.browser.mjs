@@ -78,14 +78,19 @@ try {
       }, { output, username: userInfo().username, shell: userInfo().shell });
       const screen = page.locator('.xterm-screen');
       const menu = page.getByRole('menu', { name: '终端菜单' });
-      for (const width of [1200, 400]) {
+      const itemHighlight = item => item.evaluate(element => {
+        const { outlineStyle, backgroundColor } = getComputedStyle(element);
+        return { outlineStyle, backgroundColor };
+      });
+      for (const [width, theme] of [[1200, 'light'], [400, 'dark']]) {
         await page.setViewportSize({ width, height: 700 });
-        await page.evaluate(async () => {
+        await page.evaluate(async theme => {
+          document.documentElement.dataset.theme = theme;
           window.runtime.terminalRegistry.get(window.session.sessionId).fit();
           await new Promise(requestAnimationFrame);
           await new Promise(requestAnimationFrame);
           window.terminal.select(0, window.terminal.buffer.active.baseY, 12);
-        });
+        }, theme);
         const selected = await page.evaluate(() => window.terminal.getSelection());
         await screen.click({ button: 'right', position: { x: 15, y: 20 } });
         await menu.waitFor();
@@ -96,11 +101,32 @@ try {
         const bounds = await menu.boundingBox();
         assert.ok(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= width && bounds.y + bounds.height <= 700, JSON.stringify(bounds));
         await menu.evaluate(async element => { await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished)); });
+
+        const selectAll = menu.getByRole('menuitem', { name: '全选', exact: true });
+        const idle = await itemHighlight(selectAll);
+        await selectAll.hover();
+        const focusedSelectAll = selectAll.and(page.locator(':focus'));
+        await focusedSelectAll.waitFor();
+        const hovered = await itemHighlight(focusedSelectAll);
+        assert.notEqual(hovered.backgroundColor, idle.backgroundColor, 'Hover highlights the menu item');
+        assert.equal(hovered.outlineStyle, 'none', 'Hovering a focused menu item does not draw an outline');
+
+        await page.keyboard.press('ArrowDown');
+        const keyboardItem = menu.locator('[role="menuitem"]:focus-visible');
+        await keyboardItem.waitFor();
+        assert.notEqual(await keyboardItem.textContent(), '全选', 'ArrowDown advances to another item');
+        assert.deepEqual(await itemHighlight(keyboardItem), hovered, 'Arrow keys use the same background highlight');
+        await page.mouse.move(0, 0);
+        await selectAll.hover();
+        await focusedSelectAll.waitFor();
+        assert.deepEqual(await itemHighlight(focusedSelectAll), hovered, 'Returning from keyboard to pointer keeps the highlight');
+
         await page.screenshot({ path: `/tmp/shellspan-terminal-menu-${name}-${width}.png` });
         await page.keyboard.press('Escape');
         await menu.waitFor({ state: 'hidden' });
         assert.ok(await page.locator('.xterm-helper-textarea').evaluate(element => element === document.activeElement));
       }
+      await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
       const blockedPaste = await page.evaluate(text => {
         const data = new DataTransfer();
         data.setData('text/plain', text);
