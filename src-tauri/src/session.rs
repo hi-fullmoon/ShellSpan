@@ -2075,42 +2075,6 @@ fn write_all_nonblocking(
     Ok(())
 }
 
-fn resize_pty_nonblocking(
-    session: &Session,
-    channel: &mut Channel,
-    cols: u32,
-    rows: u32,
-) -> Result<(), String> {
-    let wait_timeout = Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS);
-    loop {
-        match channel.request_pty_size(cols, rows, None, None) {
-            Ok(()) => return Ok(()),
-            Err(error) => {
-                let io_error: std::io::Error = error.into();
-                if is_retryable_channel_error_kind(io_error.kind()) {
-                    if io_error.kind() == ErrorKind::Interrupted {
-                        continue;
-                    }
-                    wait_for_session_socket(session, wait_timeout)?;
-                    continue;
-                }
-                warn!(
-                    "SSH resize failed cols={} rows={} kind={:?} block_directions={:?} error={}",
-                    cols,
-                    rows,
-                    io_error.kind(),
-                    session.block_directions(),
-                    io_error
-                );
-                return Err(format_transport_error(
-                    "failed to resize PTY",
-                    &io_error.to_string(),
-                ));
-            }
-        }
-    }
-}
-
 #[cfg(unix)]
 fn session_poll_events(directions: BlockDirections) -> i16 {
     match directions {

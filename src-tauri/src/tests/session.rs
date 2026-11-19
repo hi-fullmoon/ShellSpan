@@ -1732,8 +1732,26 @@
         assert_eq!(exact.cwd.as_deref(), Some("/var/tmp"));
         assert!(String::from_utf8_lossy(&terminal.display).contains("remote-终端"));
 
-        resize_pty_nonblocking(&terminal.session, &mut terminal.shell_channel, 132, 41)
-            .expect("propagate SSH PTY resize through the production helper");
+        let mut writes = VecDeque::from([SshWrite::Resize {
+            cols: 132,
+            rows: 41,
+        }]);
+        let resize_deadline = Instant::now() + Duration::from_secs(5);
+        while !writes.is_empty() {
+            assert!(Instant::now() < resize_deadline, "SSH PTY resize timed out");
+            match advance_ssh_write_queue(&mut writes, &mut terminal.shell_channel, None, None) {
+                Ok(_) => {}
+                Err(error) if error.kind() == ErrorKind::Interrupted => {}
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                    wait_for_session_socket(
+                        &terminal.session,
+                        Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS),
+                    )
+                    .expect("wait for SSH transport during PTY resize");
+                }
+                Err(error) => panic!("SSH PTY resize failed: {error}"),
+            }
+        }
         broker
             .resize("fixture-user-ssh-1", TerminalGeometry::new(132, 41))
             .unwrap();

@@ -11,11 +11,11 @@ use super::{
     drive_agent, recover_open_scope, AgentArtifactStore, AgentCompactionManager, AgentDriverConfig,
     AgentDriverSettlement, AgentHookBus, AgentInboxLane, AgentInboxMessage, AgentLifecyclePhase,
     AgentMessageSource, AgentRegistry, AgentSessionEvent, AgentSessionEventPage,
-    AgentSessionEventPayload, AgentSessionEventsRequest, AgentSessionListPage,
-    AgentSessionListRequest, AgentSessionSnapshot, AgentSessionStore, AgentToolDecision,
-    AgentToolDecisionInput, AgentToolPipeline, CreateAgentSessionRequest, ModelRegistry,
-    NativeToolAdapter, NativeToolEngine, NativeToolRuntime, NativeToolRuntimeSlot,
-    OrchestrationToolRuntime, OrchestrationToolRuntimeSlot, SubAgentManager,
+    AgentSessionEventsRequest, AgentSessionListPage, AgentSessionListRequest, AgentSessionSnapshot,
+    AgentSessionStore, AgentToolDecision, AgentToolDecisionInput, AgentToolPipeline,
+    CreateAgentSessionRequest, ModelRegistry, NativeToolAdapter, NativeToolEngine,
+    NativeToolRuntime, NativeToolRuntimeSlot, OrchestrationToolRuntime,
+    OrchestrationToolRuntimeSlot, SubAgentManager,
 };
 
 #[cfg(all(
@@ -30,7 +30,7 @@ mod mac_submission_acceptance;
 #[cfg(test)]
 use super::{
     assistant_content_text, AgentAfterToolHook, AgentBeforeToolHook, AgentPreStepHook,
-    AgentRequestReason, AgentToolFailedHook, ModelAdapterFactory,
+    AgentRequestReason, AgentSessionEventPayload, AgentToolFailedHook, ModelAdapterFactory,
 };
 
 struct TerminalAdmissionGuard {
