@@ -69,7 +69,7 @@ import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
 import { documentMessageSummary } from '@/lib/ai/document-message';
 import { chatReferenceFile } from '@/lib/ai/chat-reference';
 import { routeProviderConfigs, useLlmRoutesStore } from '@/stores/llmRoutesStore';
-import { isTauriRuntime } from '@/lib/ipc/tauri';
+import { invokeGetProfileSandbox, isLocalAgentSandboxPreview, isTauriRuntime } from '@/lib/ipc/tauri';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { readTerminalCurrentDirectory } from '@/lib/terminal/terminal-current-directory';
 import { remoteGlibcMismatch, terminalConnectionPresentationState, type RealTerminalPresentationState, type RemoteGlibcMismatch } from '@/lib/terminal/terminal-surface-semantics';
@@ -111,6 +111,7 @@ export interface AiSessionController {
   readonly selectedProvider?: AiProviderConfig;
   readonly selectedPermission?: AgentPermissionMode;
   readonly selectedExecutionSurface: AgentExecutionSurface;
+  readonly sandboxDirectOnly: boolean;
   readonly glibcMismatch: RemoteGlibcMismatch | null;
   readonly settingsBusy: boolean;
   readonly selectModel: (provider: AiProviderConfig) => Promise<void>;
@@ -278,6 +279,32 @@ export function useAiSessionController({
   const focusRestored = useRef(false);
   const activeTerminal = useTerminalStore((state) => state.sessions.find(item => item.sessionId === (focusMode ? focusTargetId : state.activeSessionId)));
   const activeTerminalId = useTerminalStore((state) => focusMode ? focusTargetId : state.activeSessionId);
+  const sandboxProfileId = scope === 'terminal' && isTauriRuntime() ? activeTerminal?.profileId : undefined;
+  const [sandboxProfile, setSandboxProfile] = useState<{ id: string; configured: boolean | null }>();
+  useEffect(() => {
+    if (!sandboxProfileId) return;
+    let generation = 0;
+    const refresh = (): void => {
+      const request = ++generation;
+      setSandboxProfile(undefined);
+      void invokeGetProfileSandbox(sandboxProfileId).then((profile) => {
+        if (generation === request) setSandboxProfile({ id: sandboxProfileId, configured: Boolean(profile.policy) });
+      }, () => {
+        if (generation === request) setSandboxProfile({ id: sandboxProfileId, configured: null });
+      });
+    };
+    const onChange = (event: Event) => {
+      if ((event as CustomEvent<string>).detail === sandboxProfileId) refresh();
+    };
+    refresh();
+    window.addEventListener('shellspan:connection-sandbox-changed', onChange);
+    return () => {
+      generation++;
+      window.removeEventListener('shellspan:connection-sandbox-changed', onChange);
+    };
+  }, [sandboxProfileId]);
+  const sandboxChecking = Boolean(sandboxProfileId) && sandboxProfile?.id !== sandboxProfileId;
+  const sandboxConfigured = sandboxProfile?.id === sandboxProfileId && sandboxProfile?.configured === true;
   const browserProviders = useAiSettingsStore((state) => state.providers);
   const routeSnapshot = useLlmRoutesStore((state) => state.snapshot);
   const routeModels = useLlmRoutesStore((state) => state.modelsByRoute);
@@ -483,7 +510,21 @@ export function useAiSessionController({
     || Boolean(openedSessionId && !view)
     || (!view && Boolean(terminalOccupancy) && automaticRestore.current.eligible
       && completedRestore !== automaticRestore.current));
+  const currentAgentTarget = view?.snapshot.value.header.target;
+  const sameSandboxTarget = currentAgentTarget?.sessionId === activeTerminalId;
+  const sandboxRequired = sameSandboxTarget && currentAgentTarget?.remoteSandboxRequired === true;
+  const sandboxDirectOnly = sandboxConfigured || sandboxRequired;
+  const sandboxSessionChanged = sameSandboxTarget && sandboxProfile?.id === sandboxProfileId
+    && typeof sandboxProfile?.configured === 'boolean' && currentAgentTarget?.remoteSandboxRequired !== undefined
+    && currentAgentTarget.remoteSandboxRequired !== sandboxConfigured;
+  const sandboxNeedsDirect = !focusMode && sandboxConfigured && sameSandboxTarget
+    && view?.snapshot.value.header.executionSurface === 'boundTerminal';
   const visibleExecutionRequired = focusMode && Boolean(view && view.snapshot.value.header.executionSurface !== 'boundTerminal');
+  const sandboxUnavailableReason =
+    sandboxChecking ? t('connection.sandbox.loading')
+    : focusMode && sandboxDirectOnly ? t('focus.sandboxRequiresDirect')
+    : sandboxSessionChanged ? t('ai.error.sandboxSessionPolicyChanged')
+    : sandboxNeedsDirect ? t('ai.error.sandboxDirectRequired') : null;
   const canStartAgent = !terminalSessionRestoring && !visibleExecutionRequired && (scope === 'workbench'
     || activeTerminal?.status === 'connected');
   const realTerminalState: RealTerminalPresentationState = activeTerminal?.status === 'connected' && activeTerminal.integrationState === 'ready'
@@ -493,14 +534,15 @@ export function useAiSessionController({
       : terminalConnectionPresentationState(activeTerminal?.status);
   const glibcMismatch = scope === 'terminal' && activeTerminal?.status === 'connected'
     ? remoteGlibcMismatch(activeTerminal.integrationReason) : null;
-  const terminalCreationSurface = focusMode ? 'boundTerminal' : glibcMismatch ? 'direct' : newExecutionSurface;
+  const terminalCreationSurface = focusMode ? 'boundTerminal'
+    : sandboxConfigured || glibcMismatch ? 'direct' : newExecutionSurface;
   const needsDirectFallback = !focusMode && glibcMismatch !== null
     && view?.snapshot.value.header.executionSurface === 'boundTerminal'
     && view.snapshot.value.header.target?.sessionId === activeTerminal?.sessionId
     && !view.snapshot.value.header.subagent;
   const focusCommandsUnavailable = focusMode && activeTerminal?.status === 'connected'
     && realTerminalState === 'unavailable' && !view?.snapshot.value.header.subagent;
-  const canSubmitAgent = canStartAgent && !focusCommandsUnavailable && !needsDirectFallback
+  const canSubmitAgent = canStartAgent && !sandboxUnavailableReason && !focusCommandsUnavailable && !needsDirectFallback
     && view?.storageFaultAtSeq === undefined;
   const terminalUnavailableReason = scope === 'terminal' && !canStartAgent && !focusMode
     && activeTerminal?.status !== 'connecting'
@@ -698,6 +740,9 @@ export function useAiSessionController({
     if (!target || input.request.permissionMode !== 'operator'
       || (target.kind !== 'local' && target.kind !== 'remote')
       || (target.kind === 'remote' && !target.profileId)) return input;
+    // The preview backend supplies its managed root. A pre-existing terminal
+    // may still report the ordinary shell directory.
+    if (target.kind === 'local' && await isLocalAgentSandboxPreview().catch(() => false)) return input;
     const root = await resolveProjectRoot();
     if (!root) {
       // The directory enables structured file tools; full-access shell execution
@@ -1274,7 +1319,8 @@ export function useAiSessionController({
     && !directTerminalReconnect && !canVerifyCurrentTerminal
     && visibleView?.snapshot.kind === 'agent'
     && Boolean(provider)
-    && (focusMode ? canSwitchFocusTarget(visibleView, activeTerminal) : canContinueHistoricalConversation(visibleView.snapshot.value, activeTerminal));
+    && (focusMode ? !sandboxDirectOnly && !sandboxChecking && canSwitchFocusTarget(visibleView, activeTerminal)
+      : canContinueHistoricalConversation(visibleView.snapshot.value, activeTerminal));
   const reconnectAgentTerminal = useCallback((): void => {
     const current = viewRef.current;
     if (!adapter.reconnectTerminal || !current || !activeTerminal || terminalReconnectPending.current
@@ -1339,14 +1385,14 @@ export function useAiSessionController({
   const terminalConflict = !terminalSessionRestoring && !isSubagent && scope === 'terminal' && selectedExecutionSurface === 'boundTerminal'
     && Boolean(terminalOccupancy && terminalOccupancy.agentSessionId !== (visibleView?.summary.id ?? composer.sessionId));
   const agentUnavailableReason = terminalSessionRestoring ? null
-    : terminalConflict ? t('terminal.occupancy.submitBlocked') : visibleExecutionRequired ? t('focus.visibleRequired') : oneShotSubagent
+    : sandboxUnavailableReason ?? (terminalConflict ? t('terminal.occupancy.submitBlocked') : visibleExecutionRequired ? t('focus.visibleRequired') : oneShotSubagent
     ? t('ai.workspace.subagents.oneShotReadOnly')
     : subagentBudgetExhausted ? t('ai.error.childRecoveryBudgetExhausted')
     : canVerifyCurrentTerminal ? t(terminalReconnectBusy ? 'ai.workspace.reconnectChecking' : 'ai.workspace.reconnectAvailable')
     : canContinueHistoricalView ? terminalUnavailableReason
       : sessionProviderResolution.error
       ?? (historicalTargetUnavailable && !canContinueReconnectedView
-        ? t('ai.workspace.sessions.previousTerminalReadOnly') : terminalUnavailableReason);
+        ? t('ai.workspace.sessions.previousTerminalReadOnly') : terminalUnavailableReason));
   const pendingNodes = useMemo(() => (
     view ? [] : withOptimisticConversationNodes([], retainedOptimistic, workspaceScopeKey, null)
   ), [retainedOptimistic, view, workspaceScopeKey]);
@@ -1957,6 +2003,7 @@ export function useAiSessionController({
         : preferredAgentPermission
       : permissionModeForUi(visibleView.snapshot.value.header.permissionMode),
     selectedExecutionSurface,
+    sandboxDirectOnly,
     glibcMismatch,
     settingsBusy,
     selectModel: (provider) => changeSettings(async (sessionId) => {
@@ -1974,6 +2021,7 @@ export function useAiSessionController({
       }
     }),
     selectExecutionSurface: (surface) => {
+      if (surface === 'boundTerminal' && sandboxDirectOnly) return;
       if (canContinueHistoricalView) {
         claimWorkspace();
         setNewExecutionSurface(surface);
@@ -2037,7 +2085,7 @@ export function useAiSessionController({
     setDraft: (value) => { claimWorkspace(); dispatch({ type: 'draft.changed', value }); },
     setBusyPreference: (value) => dispatch({ type: 'preference.changed', value }),
     submit: (gesture, accelerated = false) => {
-      if (terminalSessionRestoring || focusCommandsUnavailable || needsDirectFallback
+      if (terminalSessionRestoring || sandboxUnavailableReason || focusCommandsUnavailable || needsDirectFallback
         || viewRef.current?.storageFaultAtSeq !== undefined) return;
       const child = viewRef.current?.snapshot.value.header.subagent;
       if (child && readOnlySession) return;
@@ -2149,7 +2197,7 @@ export function useAiSessionController({
     retryFailedDraft: (failedDraftId) => {
       const failed = composerRef.current.failedDrafts.find(item => item.id === failedDraftId);
       if (!failed?.error.retryable) return;
-      if (focusCommandsUnavailable) {
+      if (sandboxUnavailableReason || focusCommandsUnavailable) {
         if (failed.error.deliveryUnknown) void retrySync();
         return;
       }
@@ -2173,7 +2221,7 @@ export function useAiSessionController({
       });
     },
     failedDraftRetryBlockedReason: subagentBudgetExhausted ? t('ai.error.childRecoveryBudgetExhausted')
-      : focusCommandsUnavailable ? t('focus.terminalCommandsUnavailable') : null,
+      : sandboxUnavailableReason ?? (focusCommandsUnavailable ? t('focus.terminalCommandsUnavailable') : null),
     dismissError: () => dispatch({ type: 'error.dismissed' }),
     retryingModel: retryingModelSession === view?.summary.id,
     retryModel: (turnId) => {

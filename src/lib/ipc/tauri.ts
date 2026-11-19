@@ -1284,6 +1284,12 @@ export function isTauriRuntime(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
+export async function isLocalAgentSandboxPreview(): Promise<boolean> {
+  if (!isTauriRuntime()) return false;
+  const { getIdentifier } = await import('@tauri-apps/api/app');
+  return (await getIdentifier()) === 'com.shellspan.validation.agent-sandbox-preview-keychain';
+}
+
 export async function invokeRequestAppRestart(): Promise<void> {
   return invokeLogged('request_app_restart');
 }
@@ -1303,8 +1309,9 @@ export function invokeGetProfileSandbox(profileId: string): Promise<import('@/ty
   return invokeLogged('get_profile_sandbox', { profileId });
 }
 
-export function invokeSaveProfileSandbox(profileId: string, binding: string, policy: import('@/types').SandboxPolicy | null): Promise<void> {
-  return invokeLogged('save_profile_sandbox', { profileId, binding, policy });
+export async function invokeSaveProfileSandbox(profileId: string, binding: string, policy: import('@/types').SandboxPolicy | null): Promise<void> {
+  await invokeLogged('save_profile_sandbox', { profileId, binding, policy });
+  window.dispatchEvent(new CustomEvent('shellspan:connection-sandbox-changed', { detail: profileId }));
 }
 
 export function invokeTestProfileSandbox(profileId: string, binding: string, policy: import('@/types').SandboxPolicy, operationId: string): Promise<import('@/types').SandboxTestResult> {

@@ -35,21 +35,21 @@ export function showRecordsDialog() {
 
 export async function showHistory(events: AgentSessionEvent[], locale: Locale) {
   const created = events.find((event) => event.type === 'session/created');
-  if (!created || projectAgentActivity(events).status !== 'idle') {
+  if (events.length > 0 && (!created || projectAgentActivity(events).status !== 'idle')) {
     throw new Error('The history layout check needs an idle Agent session log');
   }
   const renamed = events.filter((event) => event.type === 'session/renamed').pop();
-  const context = created.data.target?.targetId ?? created.sessionId;
+  const context = created?.data.target?.targetId ?? created?.sessionId ?? '';
   useAppStore.setState({ locale });
   await initI18n(locale);
   root.render(
     <main className="ai-panel-shell">
       <AiSessionHeader title={t('ai.newConversation')} context={context} status="idle" historyOpen historyContent={(
         <AiSessionBrowser
-          compact sessions={[{
+          compact sessions={created ? [{
             id: created.sessionId, kind: 'agent', title: renamed?.data.title ?? created.data.goal,
             updatedAt: new Date(events[events.length - 1].timeUnixMs).toISOString(), status: 'idle', scopeKey: context, archived: false,
-          }]}
+          }] : []}
           loading={false} error={null} archivingId={null}
           onBack={() => {}} onNew={() => {}} onOpen={() => {}} onArchive={() => {}}
         />

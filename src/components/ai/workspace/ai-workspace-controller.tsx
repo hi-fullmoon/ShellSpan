@@ -12,7 +12,7 @@ import { useAppStore } from '@/stores/appStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useReconnectSession } from '@/hooks/useReconnectSession';
-import { isTauriRuntime } from '@/lib/ipc/tauri';
+import { isLocalAgentSandboxPreview, isTauriRuntime } from '@/lib/ipc/tauri';
 import { AgentPermissionSelector } from '../agent-permission-selector';
 import { AgentExecutionSurfaceSelector } from '../agent-execution-surface-selector';
 import { AgentTerminalBusyNotice } from '../agent-terminal-busy-notice';
@@ -43,8 +43,8 @@ export function AiWorkspaceController({
   useEffect(() => {
     if (scope !== 'terminal' || !isTauriRuntime()) return;
     let disposed = false;
-    void import('@tauri-apps/api/app').then(({ getIdentifier }) => getIdentifier()).then((identifier) => {
-      if (!disposed) setIsSandboxPreview(identifier === 'com.shellspan.validation.agent-sandbox-preview-keychain');
+    void isLocalAgentSandboxPreview().then((preview) => {
+      if (!disposed) setIsSandboxPreview(preview);
     }).catch(() => undefined);
     return () => { disposed = true; };
   }, [scope]);
@@ -192,6 +192,7 @@ export function AiWorkspaceController({
               realTerminalState={realTerminalState}
               nativeStartupTimedOut={activeTerminalStatus === 'connected' && nativeStartupTimedOut}
               glibcMismatch={controller.glibcMismatch}
+              sandboxDirectOnly={controller.sandboxDirectOnly}
               disabled={executionSurfaceLocked}
               onSurfaceChange={controller.selectExecutionSurface}
             />

@@ -96,19 +96,42 @@ try {
     assert.ok(Math.abs(toolbar.iconOffset) < 1);
     await page.screenshot({ path: `/tmp/shellspan-records-toolbar-${width}.png`, animations: 'disabled' });
   }
-  if (sessionLog) {
-    const events = (await readFile(sessionLog, 'utf8')).trim().split('\n').map(JSON.parse);
-    for (const [locale, rename, archive] of [
-      ['en-US', 'Rename session', 'Archive'],
-      ['zh-CN', '重命名会话', '归档'],
+  {
+    const events = sessionLog ? (await readFile(sessionLog, 'utf8')).trim().split('\n').map(JSON.parse) : [];
+    for (const [locale, searchLabel, rename, archive] of [
+      ['en-US', 'Search sessions', 'Rename session', 'Archive'],
+      ['zh-CN', '搜索会话', '重命名会话', '归档'],
     ]) {
       await page.evaluate(async ({ entry, events, locale }) => (await import(entry)).showHistory(events, locale),
         { entry, events, locale });
       const row = page.getByRole('treeitem');
       const trigger = row.getByRole('button', { name: locale === 'en-US' ? /More actions for/ : /更多操作/ });
       const menu = page.getByRole('menu');
+      const history = page.locator('.ai-session-history-popover');
+      const search = history.getByRole('searchbox', { name: searchLabel, exact: true });
       for (const width of [1280, 320]) {
         await page.setViewportSize({ width, height: 800 });
+        await search.press('x');
+        assert.equal(await search.inputValue(), 'x');
+        const focusedSearch = await search.evaluate((input) => {
+          const group = getComputedStyle(input.closest('[data-slot="input-group"]'));
+          return {
+            focused: input.matches(':focus-visible'),
+            inputOutline: getComputedStyle(input).outlineStyle,
+            groupOutline: group.outlineStyle,
+            divider: group.borderBottomStyle,
+          };
+        });
+        assert.deepEqual(focusedSearch, { focused: true, inputOutline: 'none', groupOutline: 'none', divider: 'solid' });
+        if (!sessionLog) {
+          const noResults = locale === 'en-US' ? /^No matching results/ : /^没有匹配的搜索结果/;
+          await history.getByText(noResults).waitFor();
+        }
+        await search.fill('');
+        if (!sessionLog) {
+          await history.screenshot({ path: path.join(root, `artifacts/tests/session-records-width/history-search-${locale}-${width}.png`), animations: 'disabled' });
+          continue;
+        }
         await row.hover();
         await trigger.press('Enter');
         await menu.getByRole('menuitem', { name: rename, exact: true }).waitFor();
