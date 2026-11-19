@@ -258,7 +258,9 @@ export function projectAgentInbox(events: readonly AgentSessionEvent[]): readonl
       if (previous) items.set(previous.id, { ...previous, paused: false });
     } else if (event.type === 'agent/inbox/item_updated') {
       const previous = items.get(event.data.itemId);
-      if (previous) items.set(event.data.itemId, { ...previous, content: event.data.content });
+      if (previous) items.set(event.data.itemId, {
+        ...previous, content: event.data.content, images: event.data.images ?? previous.images,
+      });
     } else if (event.type === 'agent/inbox/item_removed') {
       items.delete(event.data.itemId);
     } else if (event.type === 'agent/inbox/item_steered') {
@@ -915,15 +917,10 @@ export function createAgentSessionAdapter(
     },
     evict,
     async mutateInbox(input: AiInboxMutationInput): Promise<void> {
-      const { type, sessionId, expectedRevision, clientOperationId } = input;
-      const mutation = type === 'update'
-        ? { type, itemId: input.itemId, content: input.content }
-        : type === 'remove' || type === 'steer' || type === 'resume'
-          ? { type, itemId: input.itemId }
-          : { type, lane: input.lane, orderedItemIds: input.orderedItemIds };
+      const { sessionId, expectedRevision, clientOperationId, ...mutation } = input;
       await waitForCommittedOperation(sessionId, clientOperationId, async (current, signal) => {
         let revision = expectedRevision;
-        if (type === 'resume') {
+        if (mutation.type === 'resume') {
           const view = await resumeEndedSession(sessionId, current, signal);
           const selection = view.snapshot.value.header.modelSelection;
           if (!selection) throw new Error('Select a model before resuming queued input');

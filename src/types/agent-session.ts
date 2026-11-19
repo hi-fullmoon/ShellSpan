@@ -432,6 +432,8 @@ export type AgentSessionEvent =
       lane: AgentSessionInboxLane;
       content: string;
       contentFingerprint?: string;
+      images?: readonly import('./agent-image').AgentImageRef[];
+      imageEditFingerprint?: string;
       previousRevision: number;
       clientOperationId: string;
     }>
@@ -856,6 +858,7 @@ export interface AgentSessionMessageInput {
 export type AgentInboxMutation =
   | Readonly<{ type: 'resume'; itemId: string }>
   | Readonly<{ type: 'update'; itemId: string; content: string }>
+  | Readonly<{ type: 'updateWithImages'; itemId: string; content: string; images: import('./agent-image').AgentInboxImageEdit }>
   | Readonly<{ type: 'remove'; itemId: string }>
   | Readonly<{ type: 'steer'; itemId: string }>
   | Readonly<{

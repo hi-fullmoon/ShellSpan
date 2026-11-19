@@ -12,3 +12,8 @@ export interface AgentImageUpload {
   readonly data: string;
   readonly name: string;
 }
+
+export interface AgentInboxImageEdit {
+  readonly kept: readonly AgentImageRef[];
+  readonly added: readonly AgentImageUpload[];
+}

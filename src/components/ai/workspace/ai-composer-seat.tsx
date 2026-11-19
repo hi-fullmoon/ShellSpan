@@ -37,7 +37,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
 import { formatFileMention } from '@/lib/ai/file-reference-grammar';
-import { invokeListLocalDirectory, invokePickLocalFiles, invokePreviewLocalFile, isTauriRuntime } from '@/lib/ipc/tauri';
+import { invokeListLocalDirectory, invokePickLocalFiles, isTauriRuntime } from '@/lib/ipc/tauri';
+import { isLocalImagePath, readLocalImageFile } from '@/lib/ai/prepare-image-files';
+import { imageErrorKey } from '@/lib/ai/image-error';
 import { useToast } from '@/hooks/useToast';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
 import type { AiSessionStatus } from '@/lib/ai/conversation-node';
@@ -48,6 +50,7 @@ import { AiApprovalSeat } from './ai-approval-panel';
 import { AiQuestionSeat } from './ai-question-panel';
 import { AiContextMeter } from './ai-context-meter';
 import { AiQueueDock } from './ai-queue-dock';
+import { AiQueueEditComposer } from './ai-queue-edit-composer';
 import { useDocumentImport } from './use-document-import';
 import { DOCUMENT_ACCEPT, IMAGE_ACCEPT, documentErrorKey, isDocumentName } from '@/lib/ai/document-import';
 import { decodeDocumentMessage, encodeDocumentMessage } from '@/lib/ai/document-message';
@@ -55,7 +58,7 @@ import { AiDocumentAttachments } from './ai-document-attachments';
 import { AiDraftAttachmentRail, UnifiedAttachmentContext } from './ai-image-draft-rail';
 import { AiTaskStrip } from './ai-task-strip';
 import { AiComposerAddMenu, type ComposerHistoryProps } from './ai-composer-add-menu';
-import type { AiQueueMutationState } from './use-ai-session-controller';
+import type { AiQueueMutationState, AiSessionController } from './use-ai-session-controller';
 
 export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly inputMode?: 'default' | 'supplement' | 'hidden';
@@ -83,7 +86,7 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly taskPlanActive?: boolean;
   readonly queueMutable?: boolean;
   readonly queueMutation?: AiQueueMutationState | null;
-  readonly onRetryQueueMutation?: () => void;
+  readonly onRetryQueueMutation?: AiSessionController['retryQueueMutation'];
   readonly announcement?: string | null;
   readonly pendingApproval?: AiPendingApproval | null;
   readonly pendingQuestion?: import('@/types/agent-question').AgentQuestionView | null;
@@ -109,7 +112,8 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly onSubmitGesture?: (gesture: 'keyboard' | 'primary', accelerated: boolean) => void;
   readonly onStop?: () => void;
   readonly onBusyPreferenceChange?: (value: 'queue' | 'steer') => void;
-  readonly onUpdateQueueItem?: (item: AiInboxItem, content: string) => void;
+  readonly onUpdateQueueItem?: AiSessionController['updateQueueItem'];
+  readonly onDiscardQueueEdit?: AiSessionController['discardQueueEdit'];
   readonly onRemoveQueueItem?: (item: AiInboxItem) => void;
   readonly onSteerQueueItem?: (item: AiInboxItem) => void;
   readonly onResumeQueueItem?: (item: AiInboxItem) => void;
@@ -170,6 +174,7 @@ export function AiComposerSeat({
   onStop,
   onBusyPreferenceChange,
   onUpdateQueueItem,
+  onDiscardQueueEdit,
   onRemoveQueueItem,
   onSteerQueueItem,
   onResumeQueueItem,
@@ -198,6 +203,13 @@ export function AiComposerSeat({
   const rawDraftRef = useRef(rawDraft);
   rawDraftRef.current = rawDraft;
   const attachmentOwner = JSON.stringify([mode, attachmentScopeKey, composerState?.sessionId, skillsScopeKey]);
+  const queueSessionId = currentSessionId ?? composerState?.sessionId;
+  const queueOwner = JSON.stringify([attachmentOwner, queueSessionId]);
+  const [queueEdit, setQueueEdit] = useState<{ owner: string; item: AiInboxItem } | null>(null);
+  const editingItem = queueEdit?.owner === queueOwner && inputExpanded && onUpdateQueueItem ? queueEdit.item : undefined;
+  useEffect(() => {
+    setQueueEdit(edit => edit && edit.owner !== queueOwner ? null : edit);
+  }, [queueOwner]);
   const attachmentOwnerRef = useRef(attachmentOwner);
   attachmentOwnerRef.current = attachmentOwner;
   const message = useMemo(() => decodeDocumentMessage(rawDraft), [rawDraft]);
@@ -292,23 +304,22 @@ export function AiComposerSeat({
     return items;
   }, [composerState?.pendingSubmissions, inbox]);
 
+  const mutableQueue = !stopping && queueMutable && !['completed', 'cancelled'].includes(status);
+  const editedItem = editingItem && mutableQueue && status !== 'failed'
+    ? queueItems.find(item => item.id === editingItem.id && item.state === 'queued')
+    : undefined;
+  const queueIntent = queueMutation?.intent;
+  const editingFailedUpdate = queueMutation?.status === 'failed' && editingItem
+    && (queueIntent?.type === 'update' || queueIntent?.type === 'updateWithImages') && queueIntent.itemId === editingItem.id;
   const attachmentsEnabled = inputExpanded && !terminal && !unavailable && !submitting && !imageLocked && !documents.busy;
   const addPaths = async (paths: readonly string[], kind?: 'file' | 'directory'): Promise<void> => {
     if (!attachmentsEnabled || !paths.length || attachmentOwnerRef.current !== attachmentOwner) return;
     try {
       const imagePaths = kind !== 'directory' && onPasteImages
-        ? paths.filter(path => /\.(png|jpe?g|webp|gif)$/iu.test(path)) : [];
+        ? paths.filter(isLocalImagePath) : [];
       const referencePaths = paths.filter(path => !imagePaths.includes(path));
       if (imagePaths.length) {
-        const files = await Promise.all(imagePaths.map(async path => {
-          const preview = await invokePreviewLocalFile(path);
-          if (preview.truncated || preview.contentEncoding !== 'base64') throw new Error(t('ai.workspace.images.error.invalid'));
-          const binary = atob(preview.content);
-          const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
-          const extension = path.split('.').pop()?.toLowerCase();
-          const mediaType = extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : extension === 'gif' ? 'image/gif' : 'image/jpeg';
-          return new File([bytes], preview.name, { type: mediaType });
-        }));
+        const files = await Promise.all(imagePaths.map(readLocalImageFile));
         if (attachmentOwnerRef.current !== attachmentOwner) return;
         await onPasteImages?.(files);
       }
@@ -332,7 +343,10 @@ export function AiComposerSeat({
       const currentText = decodeDocumentMessage(rawDraftRef.current).text;
       updateDraft(`${currentText}${currentText && !/\s$/u.test(currentText) ? ' ' : ''}${mentions.join(' ')} `);
       completion.editor.current?.focus();
-    } catch (error) { toast.error(String(error)); }
+    } catch (error) {
+      const message = String(error);
+      toast.error(message.includes('IMAGE_') ? t(imageErrorKey(message)) : message);
+    }
   };
   const addDroppedPaths = async (paths: readonly string[]) => {
     if (attachmentOwnerRef.current !== attachmentOwner) return;
@@ -376,7 +390,7 @@ export function AiComposerSeat({
   const uploadLocalFile = () => {
     if (isTauriRuntime()) void invokePickLocalFiles().then(paths => {
       if (attachmentOwnerRef.current !== attachmentOwner) return;
-      if (paths.some(path => !isDocumentName(path) && !/\.(png|jpe?g|webp|gif)$/iu.test(path))) {
+      if (paths.some(path => !isDocumentName(path) && !isLocalImagePath(path))) {
         toast.error(t('ai.workspace.documents.error.format')); return;
       }
       return addDroppedPaths(paths);
@@ -394,7 +408,7 @@ export function AiComposerSeat({
   const skillCompletion = useSkillCompletion({ text: draft, update: updateDraft, query: mode === 'agent' ? onListSkills : undefined, scopeKey: skillsScopeKey, editor: completion.editor, disabled: Boolean(terminal || waitingApproval || waitingQuestion || unavailable || imageLocked || submitting) });
   const wasStopping = useRef(false);
   useEffect(() => {
-    if (!running || stopping || terminal || !onStop) return;
+    if (!running || stopping || terminal || !onStop || editingItem) return;
     let previous: { target: EventTarget | null; time: number } | null = null;
     const reset = () => { previous = null; };
     const keyDown = (event: KeyboardEvent) => {
@@ -428,7 +442,7 @@ export function AiComposerSeat({
       document.removeEventListener('compositionstart', reset);
       window.removeEventListener('blur', reset);
     };
-  }, [running, stopping, terminal, onStop, attachmentOwner]);
+  }, [running, stopping, terminal, onStop, attachmentOwner, editingItem]);
   const blockedSubmitReason = submitting ? 'ai.workspace.announce.submitting'
     : mode === 'ask' && running ? 'ai.workspace.announce.askRunning' : null;
   const announcedBlock = useRef<string | null>(null);
@@ -484,19 +498,6 @@ export function AiComposerSeat({
           <AiTaskStrip steps={taskSteps} active={taskPlanActive && (status === 'running' || status === 'waiting')} />
         )}
         {completion.dialog}
-        {mode === 'agent' && <AiQueueDock
-          items={queueItems}
-          mutation={queueMutation}
-          onRetry={onRetryQueueMutation}
-          running={status === 'running'}
-          mutable={!stopping && queueMutable && !['completed', 'cancelled'].includes(status)}
-          resumeOnly={status === 'failed'}
-          onUpdate={onUpdateQueueItem}
-          onRemove={onRemoveQueueItem}
-          onSteer={onSteerQueueItem}
-          onResume={onResumeQueueItem}
-          onReorder={onReorderQueueLane}
-        />}
         <AiQuestionSeat key={currentSessionId} question={pendingQuestion} onAnswer={onAnswerQuestion} onRefresh={onRefreshQuestionAnswer} onOpenSettings={onOpenModel} />
         {mode === 'agent' && <AiApprovalSeat key={`approval:${currentSessionId ?? composerState?.sessionId ?? ''}`}
           approval={!stopping && pendingApproval ? {
@@ -510,14 +511,48 @@ export function AiComposerSeat({
           onReject={onReject}
           onOpenDetails={onOpenApprovalDetails}
         />}
+        {mode === 'agent' && <AiQueueDock key={queueOwner}
+          items={queueItems}
+          sessionId={queueSessionId}
+          editingId={editingItem?.id}
+          mutation={queueMutation}
+          onRetry={editingFailedUpdate ? undefined : onRetryQueueMutation}
+          running={status === 'running'}
+          mutable={mutableQueue}
+          resumeOnly={status === 'failed'}
+          onEdit={inputExpanded && onUpdateQueueItem ? item => {
+            completion.dismiss();
+            skillCompletion.dismiss();
+            setQueueEdit({ owner: queueOwner, item });
+          } : undefined}
+          onRemove={onRemoveQueueItem}
+          onSteer={onSteerQueueItem}
+          onResume={onResumeQueueItem}
+          onReorder={onReorderQueueLane}
+        />}
       </div>
+      {editingItem && onUpdateQueueItem && (
+        <div className="ai-composer-input-anchor flex min-h-0 min-w-0 shrink-0 flex-col">
+          <AiQueueEditComposer key={queueOwner} item={editingItem} current={editedItem}
+            sessionId={queueSessionId} mutation={queueMutation} onUpdate={onUpdateQueueItem} onRetry={onRetryQueueMutation}
+            allowImageAdd={Boolean(onPasteImages)}
+            onClose={saved => {
+              if (!saved) onDiscardQueueEdit?.(editingItem.id);
+              setQueueEdit(null);
+              if (!editedItem) requestAnimationFrame(() => {
+                if (document.activeElement === document.body) completion.editor.current?.focus();
+              });
+            }} />
+        </div>
+      )}
       {inputExpanded && (
-        <div id={inputRegionId} ref={completionAnchor} className="ai-composer-input-anchor relative flex min-h-24 min-w-0 shrink flex-col">
+        <div id={inputRegionId} ref={completionAnchor} hidden={Boolean(editingItem)}
+          className={cn('ai-composer-input-anchor relative flex min-h-24 min-w-0 shrink flex-col', editingItem && 'hidden')}>
           <InputGroup ref={cardRef} className={cn(
             'h-auto min-h-0 flex-col items-stretch gap-0 overflow-hidden [&>.ai-composer-editor-wrap]:min-h-0 [&>.ai-composer-editor-wrap]:grid-rows-[minmax(0,1fr)]',
             dragActive && 'ring-2 ring-primary',
             !imageControls && (phase === 'hero' ? 'pt-1.5' : 'pt-2.5'),
-          )} data-composer-card="" onClick={event => {
+          )} data-composer-card={editingItem ? undefined : ''} onClick={event => {
             if (event.target === event.currentTarget) completion.editor.current?.focus();
           }} onDragOver={event => {
             if (!isTauriRuntime() && event.dataTransfer.types.includes('Files')) { event.preventDefault(); setDragActive(attachmentsEnabled); }

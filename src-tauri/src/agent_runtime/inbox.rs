@@ -57,8 +57,9 @@ impl AgentInbox {
                     item_id,
                     lane,
                     content,
+                    images,
                     ..
-                } => inbox.update(*lane, item_id, content.clone())?,
+                } => inbox.update(*lane, item_id, content.clone(), images.as_deref())?,
                 AgentSessionEventPayload::InboxItemRemoved { item_id, lane, .. } => {
                     inbox.remove(*lane, item_id)?
                 }
@@ -188,12 +189,22 @@ impl AgentInbox {
         lane: AgentInboxLane,
         item_id: &str,
         content: String,
+        images: Option<&[super::images::ImageRef]>,
     ) -> Result<(), String> {
         let message = self
             .queue_mut(lane)
             .iter_mut()
             .find(|message| message.message_id == item_id)
             .ok_or_else(|| "Agent inbox item is not queued in the requested lane".to_string())?;
+        if content.trim().is_empty() && images.unwrap_or(&message.images).is_empty() {
+            return Err("Agent inbox item requires text or images".into());
+        }
+        if let Some(images) = images {
+            if message.source.kind != super::AgentMessageSourceKind::User {
+                return Err("IMAGE_SOURCE_NOT_USER".into());
+            }
+            message.images = images.to_vec();
+        }
         message.content = content;
         Ok(())
     }

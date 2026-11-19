@@ -39,6 +39,63 @@ struct TerminalAdmissionGuard {
     committed: bool,
 }
 
+fn validate_image_queue_budget(
+    provider: &AiProviderConfig,
+    max_request_images: usize,
+    snapshot: &AgentSessionSnapshot,
+    content: &str,
+    images: &[super::images::ImageRef],
+    terminal_context: Option<&super::AgentTerminalContextSnapshot>,
+    replacing: Option<&str>,
+) -> Result<(), String> {
+    let mut request = super::ModelRequest::from_surface(
+        "image-admission".into(),
+        &snapshot.surface,
+        String::new(),
+        Vec::new(),
+    );
+    for pending in snapshot
+        .inbox
+        .next_turn
+        .iter()
+        .chain(&snapshot.inbox.next_step)
+    {
+        if !pending.images.is_empty() && Some(pending.message_id.as_str()) != replacing {
+            request.messages.push(super::ModelMessage::UserImages {
+                content: pending.content.clone(),
+                images: pending.images.clone(),
+                data_urls: Vec::new(),
+            });
+        }
+    }
+    if let Some(context) = terminal_context {
+        request.messages.push(super::ModelMessage::User {
+            content: context.model_content(),
+        });
+    }
+    request.messages.push(super::ModelMessage::UserImages {
+        content: content.into(),
+        images: images.to_vec(),
+        data_urls: Vec::new(),
+    });
+    let count: usize = request
+        .messages
+        .iter()
+        .map(|message| match message {
+            super::ModelMessage::UserImages { images, .. } => images.len(),
+            _ => 0,
+        })
+        .sum();
+    if count > max_request_images {
+        return Err("IMAGE_REQUEST_BUDGET: start a new session for more images".into());
+    }
+    let budget = super::estimate_model_surface_budget(provider, &request)?;
+    if budget.estimated_input_tokens > budget.usable_input_tokens {
+        return Err("IMAGE_TOKEN_BUDGET".into());
+    }
+    Ok(())
+}
+
 struct AgentStopGuard {
     sessions: Arc<Mutex<HashSet<String>>>,
     session_id: String,
@@ -369,7 +426,8 @@ impl AgentRuntime {
         if entry.cancellation().is_cancelled() || token.is_cancelled() {
             return Err("IMAGE_CANCELLED".into());
         }
-        let route = super::images::vision_route(&entry.model()?.provider)?;
+        let model = entry.model()?;
+        let route = super::images::vision_route(&model.provider)?;
         let store = self.models.images.clone();
         let uploads = input.images;
         let import_token = token.clone();
@@ -422,51 +480,15 @@ impl AgentRuntime {
             }
         }
         let snapshot = self.sessions.snapshot(&input.session_id)?;
-        let mut request = super::ModelRequest::from_surface(
-            "image-admission".into(),
-            &snapshot.surface,
-            String::new(),
-            Vec::new(),
-        );
-        for pending in snapshot
-            .inbox
-            .next_turn
-            .iter()
-            .chain(snapshot.inbox.next_step.iter())
-        {
-            if !pending.images.is_empty() {
-                request.messages.push(super::ModelMessage::UserImages {
-                    content: pending.content.clone(),
-                    images: pending.images.clone(),
-                    data_urls: Vec::new(),
-                });
-            }
-        }
-        if let Some(context) = &terminal_context {
-            request.messages.push(super::ModelMessage::User {
-                content: context.model_content(),
-            });
-        }
-        request.messages.push(super::ModelMessage::UserImages {
-            content: input.content.clone(),
-            images: images.clone(),
-            data_urls: Vec::new(),
-        });
-        let count: usize = request
-            .messages
-            .iter()
-            .map(|m| match m {
-                super::ModelMessage::UserImages { images, .. } => images.len(),
-                _ => 0,
-            })
-            .sum();
-        if count > route.max_request_images {
-            return Err("IMAGE_REQUEST_BUDGET: start a new session for more images".into());
-        }
-        let budget = super::estimate_model_surface_budget(&entry.model()?.provider, &request)?;
-        if budget.estimated_input_tokens > budget.usable_input_tokens {
-            return Err("IMAGE_TOKEN_BUDGET".into());
-        }
+        validate_image_queue_budget(
+            &entry.model()?.provider,
+            route.max_request_images,
+            &snapshot,
+            &input.content,
+            &images,
+            terminal_context.as_ref(),
+            None,
+        )?;
         if token.is_cancelled() || entry.cancellation().is_cancelled() {
             return Err("IMAGE_CANCELLED".into());
         }
@@ -547,20 +569,20 @@ impl AgentRuntime {
             .sessions
             .all_events(&input.session_id)?
             .into_iter()
-            .find_map(|e| {
-                if let super::AgentSessionEventPayload::InboxSpliced {
+            .find_map(|e| match e.payload {
+                super::AgentSessionEventPayload::InboxSpliced {
                     operation: super::AgentInboxOperation::Enqueued,
                     messages,
                     ..
-                } = e.payload
-                {
-                    messages
-                        .into_iter()
-                        .flat_map(|m| m.images)
-                        .find(|r| r.sha256 == input.sha256)
-                } else {
-                    None
-                }
+                } => messages
+                    .into_iter()
+                    .flat_map(|m| m.images)
+                    .find(|r| r.sha256 == input.sha256),
+                super::AgentSessionEventPayload::InboxItemUpdated {
+                    images: Some(images),
+                    ..
+                } => images.into_iter().find(|r| r.sha256 == input.sha256),
+                _ => None,
             })
             .ok_or("IMAGE_REFERENCE_NOT_IN_SESSION")?;
         Ok(format!(
@@ -2044,7 +2066,43 @@ impl AgentRuntime {
         // instances can still acknowledge an earlier successful operation.
         let resume = matches!(input.mutation, super::AgentInboxMutation::Resume { .. });
         let session_id = input.session_id.clone();
-        let snapshot = self.sessions.mutate_inbox_with_driver(input, active)?;
+        let snapshot = self.sessions.mutate_inbox_preparing_images(
+            input,
+            active,
+            |snapshot, current, content, edit| {
+                let mut images = edit.kept.clone();
+                if edit.added.is_empty() {
+                    return Ok(images);
+                }
+                let provider = match self.agents.get(&session_id)? {
+                    Some(entry) => entry.model()?.provider.clone(),
+                    None => self.models.restore_selection(
+                        snapshot
+                            .header
+                            .model_selection
+                            .as_ref()
+                            .ok_or("MODEL_SELECTION_REQUIRED")?,
+                    )?,
+                };
+                let route = super::images::vision_route(&provider)?;
+                let _permit = self.models.images.import_permit()?;
+                images.extend(
+                    self.models
+                        .images
+                        .import(&edit.added, &tokio_util::sync::CancellationToken::new())?,
+                );
+                validate_image_queue_budget(
+                    &provider,
+                    route.max_request_images,
+                    snapshot,
+                    content,
+                    &images,
+                    current.terminal_context.as_ref(),
+                    Some(&current.message_id),
+                )?;
+                Ok(images)
+            },
+        )?;
         if resume {
             self.wake(&session_id)?;
         }

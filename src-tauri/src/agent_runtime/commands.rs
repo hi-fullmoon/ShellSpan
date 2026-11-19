@@ -627,13 +627,16 @@ pub(crate) async fn agent_runtime_steer(
 }
 
 #[tauri::command]
-pub(crate) fn agent_runtime_mutate_inbox(
+pub(crate) async fn agent_runtime_mutate_inbox(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,
     input: AgentInboxMutationInput,
 ) -> Result<AgentSessionSnapshot, String> {
     configure_runtime(&app, &runtime)?;
-    runtime.mutate_inbox(input)
+    let runtime = runtime.inner().clone();
+    tokio::task::spawn_blocking(move || runtime.mutate_inbox(input))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

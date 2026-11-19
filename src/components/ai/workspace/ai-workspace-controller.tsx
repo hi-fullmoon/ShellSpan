@@ -244,6 +244,7 @@ export function AiWorkspaceController({
       onArchiveSession={controller.archiveSession}
       onDeleteSession={controller.deleteSession}
       onUpdateQueueItem={controller.updateQueueItem}
+      onDiscardQueueEdit={controller.discardQueueEdit}
       onRemoveQueueItem={controller.removeQueueItem}
       onSteerQueueItem={controller.steerQueueItem}
       onResumeQueueItem={controller.resumeQueueItem}

@@ -82,8 +82,10 @@ import {
 import { getRecentTerminalOutputSnapshot, truncateAiContext } from '@/lib/terminal/terminal-output-buffer';
 import type { AppSection } from '@/types';
 import type { AgentPermissionMode } from '@/types/agent-approval';
+import type { AgentInboxImageEdit } from '@/types/agent-image';
 import type {
   AgentExecutionSurface,
+  AgentInboxMutation,
   AgentSessionPermissionMode,
   AgentSessionTarget,
   AgentTerminalContextSnapshot,
@@ -177,12 +179,13 @@ export interface AiSessionController {
   readonly readSessionReference: (summary: AiSessionSummary, signal: AbortSignal) => Promise<File>;
   readonly archiveSession: (summary: AiSessionSummary) => void;
   readonly deleteSession: (summary: AiSessionSummary) => void;
-  readonly updateQueueItem: (item: AiInboxItem, content: string) => void;
+  readonly updateQueueItem: (item: AiInboxItem, content: string, images?: AgentInboxImageEdit) => Promise<boolean>;
   readonly removeQueueItem: (item: AiInboxItem) => void;
   readonly steerQueueItem: (item: AiInboxItem) => void;
   readonly resumeQueueItem: (item: AiInboxItem) => void;
   readonly reorderQueueLane: (lane: AiInboxItem['lane'], orderedItemIds: readonly string[]) => void;
-  readonly retryQueueMutation: () => void;
+  readonly retryQueueMutation: () => Promise<boolean>;
+  readonly discardQueueEdit: (itemId: string) => void;
   readonly renameSession: (summary: AiSessionSummary, title: string) => void;
   readonly back: () => void;
   readonly openToolDetails: (node: AiConversationNodeOf<'tool'>) => void;
@@ -196,15 +199,8 @@ export interface AiSessionController {
   readonly loadArtifact: AiSessionAdapter['loadArtifact'];
 }
 
-type AiQueueMutationIntent =
-  | Readonly<{ type: 'resume'; itemId: string }>
-  | Readonly<{ type: 'update'; itemId: string; content: string }>
-  | Readonly<{ type: 'remove'; itemId: string }>
-  | Readonly<{ type: 'steer'; itemId: string }>
-  | Readonly<{ type: 'reorder'; lane: AiInboxItem['lane']; orderedItemIds: readonly string[] }>;
-
 export interface AiQueueMutationState {
-  readonly intent: AiQueueMutationIntent;
+  readonly intent: AgentInboxMutation;
   readonly status: 'pending' | 'retrying' | 'failed';
   readonly error: string | null;
   readonly conflict: boolean;
@@ -1627,21 +1623,21 @@ export function useAiSessionController({
     });
   }, [adapter, forgetSessionVisits, newSession, refreshSessions, t]);
 
-  const executeQueueMutation = useCallback((intent: AiQueueMutationIntent, retry = false): void => {
+  const executeQueueMutation = useCallback(async (intent: AgentInboxMutation, retry = false): Promise<boolean> => {
     // React state alone cannot guard two clicks within the same render.
-    if (queueOperationRef.current?.pending) return;
+    if (queueOperationRef.current?.pending) return false;
     if (!retry) queueOperationRef.current = null;
     const current = viewRef.current;
     const previous = retry ? queueOperationRef.current?.input : undefined;
     if (current?.summary.kind !== 'agent' || current.revision == null) {
       setQueueMutation({ intent, status: 'failed', error: t('ai.workspace.queue.errorUnavailable'), conflict: false });
-      return;
+      return false;
     }
-    if (previous && previous.sessionId !== current.summary.id) return;
+    if (previous && previous.sessionId !== current.summary.id) return false;
     if (previous && current.committedOperationIds?.includes(previous.clientOperationId)) {
       queueOperationRef.current = null;
       setQueueMutation(null);
-      return;
+      return true;
     }
     // A retry must reach the durable receipt lookup even if the item has since
     // been consumed. New requests can be rejected immediately from the view.
@@ -1652,7 +1648,7 @@ export function useAiSessionController({
     const resumingFailure = intent.type === 'resume' && current.status === 'failed';
     if (!previous && (current.summary.archived || (!resumingFailure && (current.snapshot.value.ended || terminal)) || !steerable)) {
       setQueueMutation({ intent, status: 'failed', error: t('ai.workspace.queue.errorNotActionable'), conflict: false });
-      return;
+      return false;
     }
     const input: AiInboxMutationInput = {
       ...intent,
@@ -1667,11 +1663,12 @@ export function useAiSessionController({
     setQueueMutation(failure => retry && failure?.status === 'failed'
       ? { ...failure, status: 'retrying' }
       : { intent, status: 'pending', error: null, conflict: false });
-    void adapter.mutateInbox(input).then(
+    return adapter.mutateInbox(input).then(
       () => {
-        if (!isCurrent()) return;
+        if (!isCurrent()) return false;
         queueOperationRef.current = null;
         setQueueMutation(null);
+        return true;
       },
       async (error: unknown) => {
         const normalized = normalizeAiSessionError(error);
@@ -1686,14 +1683,15 @@ export function useAiSessionController({
             // Keep the recognizable conflict; retry remains available.
           }
         }
-        if (!isCurrent()) return;
+        if (!isCurrent()) return false;
         if (viewRef.current?.committedOperationIds?.includes(input.clientOperationId)) {
           queueOperationRef.current = null;
           setQueueMutation(null);
-          return;
+          return true;
         }
         operation.pending = false;
         setQueueMutation({ intent, status: 'failed', error: normalized.message, conflict: normalized.kind === 'conflict' });
+        return false;
       },
     );
   }, [adapter, operationId, t]);
@@ -2213,17 +2211,24 @@ export function useAiSessionController({
     },
     archiveSession,
     deleteSession,
-    updateQueueItem: (item, content) => executeQueueMutation({
-      type: 'update', itemId: item.id, content,
-    }),
-    removeQueueItem: (item) => executeQueueMutation({ type: 'remove', itemId: item.id }),
-    steerQueueItem: (item) => executeQueueMutation({ type: 'steer', itemId: item.id }),
-    resumeQueueItem: (item) => executeQueueMutation({ type: 'resume', itemId: item.id }),
-    reorderQueueLane: (lane, orderedItemIds) => executeQueueMutation({
-      type: 'reorder', lane, orderedItemIds,
-    }),
-    retryQueueMutation: () => {
-      if (queueMutation?.status === 'failed') executeQueueMutation(queueMutation.intent, true);
+    updateQueueItem: (item, content, images) => executeQueueMutation(images
+      ? { type: 'updateWithImages', itemId: item.id, content, images }
+      : { type: 'update', itemId: item.id, content }),
+    removeQueueItem: (item) => { void executeQueueMutation({ type: 'remove', itemId: item.id }); },
+    steerQueueItem: (item) => { void executeQueueMutation({ type: 'steer', itemId: item.id }); },
+    resumeQueueItem: (item) => { void executeQueueMutation({ type: 'resume', itemId: item.id }); },
+    reorderQueueLane: (lane, orderedItemIds) => {
+      void executeQueueMutation({ type: 'reorder', lane, orderedItemIds });
+    },
+    retryQueueMutation: async () => {
+      return queueMutation?.status === 'failed' && executeQueueMutation(queueMutation.intent, true);
+    },
+    discardQueueEdit: (itemId) => {
+      const intent = queueMutation?.intent;
+      if (queueMutation?.status !== 'failed' || (intent?.type !== 'update' && intent?.type !== 'updateWithImages')
+        || intent.itemId !== itemId || queueOperationRef.current?.pending) return;
+      queueOperationRef.current = null;
+      setQueueMutation(null);
     },
     renameSession,
     back,

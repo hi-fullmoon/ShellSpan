@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { AiQueueDock } from '@/components/ai/workspace/ai-queue-dock';
+import { AiComposerSeat } from '@/components/ai/workspace/ai-composer-seat';
 import type { AiInboxItem } from '@/lib/ai/session-adapter';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
@@ -16,10 +16,13 @@ function Queue() {
   const [items, setItems] = useState<AiInboxItem[]>(['hello', '年后'].map(content => ({
     id: content, content, lane: 'nextStep', state: 'queued', source: 'user',
   })));
-  return <AiQueueDock items={items}
-    onUpdate={(item, content) => setItems(current => current.map(candidate => candidate.id === item.id ? { ...candidate, content } : candidate))}
-    onRemove={item => setItems(current => current.filter(candidate => candidate.id !== item.id))}
-    onReorder={(_lane, ids) => {
+  return <AiComposerSeat phase="active" status="waiting" inbox={items}
+    onUpdateQueueItem={async (item, content) => {
+      setItems(current => current.map(candidate => candidate.id === item.id ? { ...candidate, content } : candidate));
+      return true;
+    }}
+    onRemoveQueueItem={item => setItems(current => current.filter(candidate => candidate.id !== item.id))}
+    onReorderQueueLane={(_lane, ids) => {
     setItems(current => ids.map(id => {
       const item = current.find(candidate => candidate.id === id);
       if (!item) throw new Error(`Unknown queue item: ${id}`);

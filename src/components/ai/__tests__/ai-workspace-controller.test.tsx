@@ -2182,7 +2182,7 @@ describe('Queue mutation controller', () => {
     expect(result.current.queueMutation?.conflict).toBe(true);
     expect(agent.refresh).toHaveBeenCalledWith(view.summary.id);
     const failure = result.current.queueMutation;
-    act(() => result.current.retryQueueMutation());
+    act(() => { void result.current.retryQueueMutation(); });
     expect(result.current.queueMutation).toEqual({ ...failure, status: 'retrying' });
     await waitFor(() => expect(result.current.queueMutation).toBeNull());
     expect(mutateInbox).toHaveBeenLastCalledWith({ sessionId: view.summary.id, type: 'steer', itemId: 'queued', expectedRevision: 9, clientOperationId: 'steer-retry' });
@@ -2200,7 +2200,7 @@ describe('Queue mutation controller', () => {
     act(() => result.current.steerQueueItem(view.inbox[0]));
     await waitFor(() => expect(result.current.queueMutation?.status).toBe('failed'));
     act(() => publish?.({ ...view, revision: 12, inbox: [], status: 'idle' }));
-    act(() => result.current.retryQueueMutation());
+    act(() => { void result.current.retryQueueMutation(); });
     await waitFor(() => expect(result.current.queueMutation).toBeNull());
     expect(mutateInbox).toHaveBeenLastCalledWith(expect.objectContaining({ clientOperationId: 'same', expectedRevision: 12 }));
     let reject: ((error: Error) => void) | undefined;

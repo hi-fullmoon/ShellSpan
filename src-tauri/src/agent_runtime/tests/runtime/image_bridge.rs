@@ -1,5 +1,235 @@
 use super::*;
+use crate::agent_runtime::images::{
+    ImagePreviewRequest, ImageSubmission, ImageUpload, InboxImageEdit,
+};
+use crate::agent_runtime::{AgentInboxMutation, AgentInboxMutationInput};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+fn queue_image(name: &str, bytes: &[u8]) -> ImageUpload {
+    ImageUpload {
+        name: name.into(),
+        media_type: "image/png".into(),
+        data: base64::engine::general_purpose::STANDARD.encode(bytes),
+    }
+}
+
+async fn queue_image_edit_session(
+    runtime: &AgentRuntime,
+    session_id: &str,
+    root: &std::path::Path,
+) {
+    skill_tests::create_skill_session(runtime, session_id, root);
+    runtime
+        .start(session_id, image_tests::vision_provider(), None)
+        .unwrap();
+    for (id, images) in [
+        (
+            "first",
+            vec![
+                queue_image("32x32.png", include_bytes!("../../../../icons/32x32.png")),
+                queue_image("64x64.png", include_bytes!("../../../../icons/64x64.png")),
+            ],
+        ),
+        (
+            "second",
+            vec![queue_image(
+                "128x128.png",
+                include_bytes!("../../../../icons/128x128.png"),
+            )],
+        ),
+    ] {
+        runtime
+            .submit_images_with_admission(
+                ImageSubmission {
+                    session_id: session_id.into(),
+                    client_operation_id: id.into(),
+                    content: if id == "first" {
+                        ""
+                    } else {
+                        "Another queued message"
+                    }
+                    .into(),
+                    lane: AgentInboxLane::NextTurn,
+                    images,
+                    terminal_context: None,
+                },
+                true,
+                None,
+            )
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn inbox_image_edit_preserves_order_and_only_commits_valid_attachments() {
+    let storage = tempfile::tempdir().unwrap();
+    let runtime = AgentRuntime::default();
+    runtime.configure(storage.path().to_path_buf()).unwrap();
+    let id = "queue-images";
+    queue_image_edit_session(&runtime, id, storage.path()).await;
+    let initial = runtime.session(id).unwrap();
+    let first = &initial.inbox.next_turn[0];
+    let second = &initial.inbox.next_turn[1];
+    let update = |operation: &str, content: &str, images: InboxImageEdit| AgentInboxMutationInput {
+        session_id: id.into(),
+        expected_revision: initial.event_count,
+        client_operation_id: operation.into(),
+        mutation: AgentInboxMutation::UpdateWithImages {
+            item_id: first.message_id.clone(),
+            content: content.into(),
+            images,
+        },
+    };
+    assert!(runtime
+        .mutate_inbox(update(
+            "foreign",
+            "",
+            InboxImageEdit {
+                kept: second.images.clone(),
+                added: vec![],
+            }
+        ))
+        .unwrap_err()
+        .contains("IMAGE_REFERENCE_NOT_IN_SESSION"));
+    assert!(runtime
+        .mutate_inbox(update(
+            "empty",
+            "",
+            InboxImageEdit {
+                kept: vec![],
+                added: vec![],
+            }
+        ))
+        .is_err());
+    assert_eq!(
+        runtime.session(id).unwrap().event_count,
+        initial.event_count
+    );
+
+    let new_image = queue_image("256x256.png", include_bytes!("../../../../icons/icon.png"));
+    let edit = update(
+        "edit-with-images",
+        "",
+        InboxImageEdit {
+            kept: vec![first.images[1].clone()],
+            added: vec![new_image.clone()],
+        },
+    );
+    let saved = runtime.mutate_inbox(edit.clone()).unwrap();
+    let updated = &saved.inbox.next_turn[0];
+    assert_eq!(updated.message_id, first.message_id);
+    assert_eq!(updated.client_submission_id, first.client_submission_id);
+    assert_eq!(updated.source, first.source);
+    assert_eq!(updated.images[0], first.images[1]);
+    assert_eq!(updated.images[1].name, new_image.name);
+    assert_eq!(saved.inbox.next_turn[1], *second);
+    assert_eq!(saved.inbox.paused_ids, initial.inbox.paused_ids);
+    let preview = ImagePreviewRequest {
+        session_id: id.into(),
+        sha256: updated.images[1].sha256.clone(),
+    };
+    assert!(runtime
+        .image_preview(preview)
+        .unwrap()
+        .starts_with("data:image/png;base64,"));
+    assert_eq!(
+        runtime.mutate_inbox(edit.clone()).unwrap().event_count,
+        saved.event_count
+    );
+    assert!(runtime
+        .mutate_inbox(update(
+            "edit-with-images",
+            "",
+            InboxImageEdit {
+                kept: vec![first.images[0].clone()],
+                added: vec![new_image],
+            }
+        ))
+        .unwrap_err()
+        .contains("different payload"));
+
+    let text_only = runtime
+        .mutate_inbox(AgentInboxMutationInput {
+            expected_revision: saved.event_count,
+            ..update(
+                "remove-all-images",
+                "Text only",
+                InboxImageEdit {
+                    kept: vec![],
+                    added: vec![],
+                },
+            )
+        })
+        .unwrap();
+    assert!(text_only.inbox.next_turn[0].images.is_empty());
+    assert_eq!(text_only.inbox.next_turn[0].content, "Text only");
+    drop(runtime);
+    let restored = AgentRuntime::default();
+    restored.configure(storage.path().to_path_buf()).unwrap();
+    assert_eq!(
+        restored.session(id).unwrap().inbox.next_turn,
+        text_only.inbox.next_turn
+    );
+    assert_eq!(
+        restored.mutate_inbox(edit).unwrap().event_count,
+        text_only.event_count
+    );
+}
+
+#[tokio::test]
+#[ignore = "run via queue-edit-recovery.browser.mjs"]
+async fn queue_image_edit_browser_bridge() {
+    let ready = std::env::var_os("SHELLSPAN_QUEUE_EDIT_BRIDGE").expect("browser runner");
+    let storage = tempfile::tempdir().unwrap();
+    let runtime = AgentRuntime::default();
+    runtime.configure(storage.path().to_path_buf()).unwrap();
+    let drafts = crate::frontend_storage::FrontendStorage::open(storage.path()).unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    std::fs::write(ready, format!("http://{}", listener.local_addr().unwrap())).unwrap();
+    loop {
+        let (mut socket, _) =
+            tokio::time::timeout(std::time::Duration::from_secs(180), listener.accept())
+                .await
+                .unwrap()
+                .unwrap();
+        let request = read_request(&mut socket).await;
+        let input = &request["args"]["input"];
+        let session = input["sessionId"].as_str().unwrap_or_default();
+        let command = request["command"].as_str().unwrap();
+        let result: Result<serde_json::Value, String> = async {
+            Ok(match command {
+                "open_fixture" => {
+                    queue_image_edit_session(&runtime, session, storage.path()).await;
+                    json!(null)
+                }
+                "agent_runtime_prepare_images" => json!(runtime.prepare_images(
+                    serde_json::from_value(request["args"]["images"].clone()).unwrap(),
+                ).await?),
+                "agent_runtime_image_preview" => json!(runtime.image_preview(serde_json::from_value(input.clone()).unwrap())?),
+                "agent_runtime_mutate_inbox" => json!(runtime.mutate_inbox(serde_json::from_value(input.clone()).unwrap())?),
+                "read_image_drafts" => json!(drafts.read(serde_json::from_value(input.clone()).unwrap())?),
+                "commit_image_drafts" => json!(drafts.commit(serde_json::from_value(input.clone()).unwrap())?),
+                "read_fixture" => json!({ "snapshot": runtime.session(session)?, "events": all_events(&runtime, session) }),
+                "finish" => json!(null),
+                _ => return Err(format!("unexpected command: {command}")),
+            })
+        }.await;
+        respond(
+            &mut socket,
+            "application/json",
+            match result {
+                Ok(value) => json!({ "value": value }),
+                Err(error) => json!({ "error": error }),
+            }
+            .to_string(),
+        )
+        .await;
+        if command == "finish" {
+            break;
+        }
+    }
+}
 
 async fn read_request(socket: &mut tokio::net::TcpStream) -> serde_json::Value {
     let mut bytes = Vec::new();

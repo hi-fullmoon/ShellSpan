@@ -2247,6 +2247,8 @@ fn inbox_legacy_update_receipts_keep_exact_content_matching_without_a_fingerprin
                 lane: AgentInboxLane::NextTurn,
                 content: "legacy update".into(),
                 content_fingerprint: None,
+                images: None,
+                image_edit_fingerprint: None,
                 previous_revision: revision,
                 client_operation_id: "legacy-update".into(),
             },

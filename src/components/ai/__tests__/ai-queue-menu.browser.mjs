@@ -12,10 +12,11 @@ const screenshots = join(tmpdir(), 'shellspan-queue-menu');
 await mkdir(screenshots, { recursive: true });
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
+  cacheDir: join(screenshots, 'vite-cache'),
   resolve: { alias: { '@': `${root}src` } },
   esbuild: { jsx: 'automatic' },
-  optimizeDeps: { include: ['react', 'react-dom/client'] },
-  server: { host: '127.0.0.1', port: 0 },
+  optimizeDeps: { entries: ['src/components/ai/__tests__/ai-queue-menu.browser.tsx'], include: ['react', 'react-dom/client'] },
+  server: { host: '127.0.0.1', port: 0, hmr: false },
   plugins: [tailwindcss(), {
     name: 'queue-menu-check',
     configureServer(vite) {
@@ -151,11 +152,11 @@ try {
       await down.waitFor();
       await down.focus();
       await page.keyboard.press('Enter');
-      await page.waitForFunction(() => document.querySelector('.ai-queue-row-content > span').textContent === '年后');
+      await page.waitForFunction(() => document.querySelector('.ai-queue-row-content > div:first-child').textContent === '年后');
       await triggers.nth(1).click();
       assert.equal(await down.getAttribute('aria-disabled'), 'true');
       await up.click();
-      await page.waitForFunction(() => document.querySelector('.ai-queue-row-content > span').textContent === 'hello');
+      await page.waitForFunction(() => document.querySelector('.ai-queue-row-content > div:first-child').textContent === 'hello');
       const edit = page.getByRole('button', { name: chinese ? '编辑排队输入' : 'Edit queued input', exact: true }).first();
       const rowBefore = await page.locator('.ai-queue-row').first().boundingBox();
       await edit.click();
@@ -164,35 +165,33 @@ try {
       await input.waitFor();
       assert.equal(await input.evaluate(element => document.activeElement === element), true);
       const editGeometry = await editor.evaluate(element => {
-        const inputRect = element.querySelector('input').getBoundingClientRect();
-        const rowRect = element.closest('.ai-queue-row').getBoundingClientRect();
+        const queueRect = document.querySelector('.ai-queue-dock').getBoundingClientRect();
+        const box = element.getBoundingClientRect();
         return {
-          topGap: inputRect.top - rowRect.top,
-          bottomGap: rowRect.bottom - inputRect.bottom,
-          height: inputRect.height,
+          topGap: box.top - queueRect.bottom,
           buttons: [...element.querySelectorAll('button')].map(button => {
             const rect = button.getBoundingClientRect();
-            return { height: rect.height, top: rect.top - inputRect.top };
+            return { height: rect.height, top: rect.top };
           }),
           overflow: element.scrollWidth > element.clientWidth,
         };
       });
-      assert.ok(editGeometry.topGap >= 4 && editGeometry.bottomGap >= 4, 'Editor focus ring must have room above and below');
-      assert.equal(editGeometry.overflow, false, 'Inline editor must fit a narrow queue');
-      assert.ok(editGeometry.buttons.every(button => button.height === editGeometry.height && button.top === 0), 'Editor input and actions must align at equal heights');
-      assert.deepEqual(await page.locator('.ai-queue-row').first().boundingBox(), rowBefore, 'Editing must preserve queue row geometry');
+      assert.ok(editGeometry.topGap >= 4, 'The editor must have room below the queue');
+      assert.equal(editGeometry.overflow, false, 'The editor must fit a narrow composer');
+      assert.deepEqual(editGeometry.buttons[0], editGeometry.buttons[1], 'Save and cancel must align at equal heights');
+      assert.equal((await page.locator('.ai-queue-row').first().boundingBox()).height, rowBefore.height, 'Editing must preserve queue row height');
       await page.mouse.move(0, 0);
       await page.screenshot({ path: join(screenshots, `${locale}-${width}-editing.png`) });
-      for (const key of ['Enter', 'Escape']) {
+      for (const key of ['Control+Enter', 'Escape']) {
         if (key === 'Escape') await edit.click();
         await page.mouse.move(0, 0);
         await input.fill('Updated queued input');
         await input.press(key);
-        assert.equal(await edit.evaluate(element => document.activeElement === element), true);
+        await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label')?.includes('queued input') || document.activeElement?.getAttribute('aria-label') === '编辑排队输入');
         // Wait beyond the tooltip delay to catch an unintended focus-triggered popup.
         await page.waitForTimeout(700);
         assert.equal(await page.getByRole('tooltip').count(), 0, `${key} must restore focus without opening a tooltip`);
-        assert.equal(await page.locator('.ai-queue-row-content > span').first().textContent(), 'Updated queued input');
+        assert.equal(await page.locator('.ai-queue-row-content > div:first-child').first().textContent(), 'Updated queued input');
         await page.screenshot({ path: join(screenshots, `${locale}-${width}-after-${key}.png`) });
         await page.keyboard.press('Tab');
         await page.keyboard.press('Shift+Tab');

@@ -1,15 +1,13 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
 import {
   ArrowDownUpIcon,
   ArrowDownIcon,
   ArrowUpIcon,
-  CheckIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   ListEndIcon,
   PencilIcon,
   Trash2Icon,
-  XIcon,
 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -22,28 +20,27 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
-import { useToast } from '@/hooks/useToast';
 import type { AiInboxItem } from '@/lib/ai/session-adapter';
-import { decodeDocumentMessage, documentMessageSummary, encodeDocumentMessage } from '@/lib/ai/document-message';
-import { DOCUMENT_LIMITS, documentErrorKey } from '@/lib/ai/document-import';
+import { documentMessageSummary } from '@/lib/ai/document-message';
 import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
 import { AiQueueNotice } from './ai-queue-notice';
+import { AiCommittedImages } from './ai-image-attachments';
 import type { AiQueueMutationState } from './use-ai-session-controller';
 
 export interface AiQueueDockProps {
   readonly items: readonly AiInboxItem[];
+  readonly sessionId?: string | null;
+  readonly editingId?: string;
   readonly running?: boolean;
   readonly mutable?: boolean;
   readonly resumeOnly?: boolean;
   readonly mutation?: AiQueueMutationState | null;
   readonly onRetry?: () => void;
-  readonly onUpdate?: (item: AiInboxItem, content: string) => void;
+  readonly onEdit?: (item: AiInboxItem) => void;
   readonly onRemove?: (item: AiInboxItem) => void;
   readonly onSteer?: (item: AiInboxItem) => void;
   readonly onResume?: (item: AiInboxItem) => void;
@@ -94,73 +91,43 @@ function IconAction({
   );
 }
 
-/** Runtime-projected Inbox rows with transient edit controls only. */
+/** Runtime-projected Inbox rows. Editing takes place in the composer. */
 export function AiQueueDock({
   items,
+  sessionId,
+  editingId,
   running = false,
   mutable = true,
   resumeOnly = false,
   mutation = null,
   onRetry,
-  onUpdate,
+  onEdit,
   onRemove,
   onSteer,
   onResume,
   onReorder,
 }: AiQueueDockProps): React.ReactNode {
   const { t } = useI18n();
-  const toast = useToast();
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState('');
   const [collapsed, setCollapsed] = useState(false);
   const editButtons = useRef(new Map<string, HTMLButtonElement>());
   const restoreEditFocus = useRef<string | null>(null);
-  const editInput = useRef<HTMLInputElement>(null);
-  const submittedEdit = useRef<{ id: string; content: string; draft: string } | null>(null);
   const retrying = mutation?.status === 'retrying';
   const pending = mutation?.status === 'pending' || retrying;
 
-  const finishEditing = (): void => {
-    restoreEditFocus.current = editingId;
-    setEditingId(null);
-    submittedEdit.current = null;
-  };
-
   useLayoutEffect(() => {
-    const submitted = submittedEdit.current;
-    if (!submitted || pending || mutation?.status === 'failed') return;
-    if (items.some(item => item.id === submitted.id && item.content === submitted.content)) {
-      submittedEdit.current = null;
-      // A retry acknowledges the saved version, even if the user has since
-      // edited its text. Only close the editor for that exact draft version.
-      if (editingId === submitted.id && editValue === submitted.draft) {
-        restoreEditFocus.current = submitted.id;
-        setEditingId(null);
-      } else if (editingId === submitted.id && document.activeElement === document.body) {
-        editInput.current?.focus({ preventScroll: true });
-      }
+    if (editingId) {
+      restoreEditFocus.current = editingId;
+      return;
     }
-  }, [editingId, editValue, items, mutation, pending]);
-
-  useLayoutEffect(() => {
     const id = restoreEditFocus.current;
-    if (id === null || editingId !== null || pending) return;
-    // The editor disappears on save/cancel. Restore its trigger after a pending
-    // save settles, unless the user has already focused another control.
+    if (id === null || pending) return;
     const button = editButtons.current.get(id);
-    if (button && !button.disabled && document.activeElement === document.body) button.focus();
+    if (button && !button.disabled && document.activeElement === document.body) button.focus({ preventScroll: true });
     restoreEditFocus.current = null;
-  }, [editingId, items, pending]);
-
-  useEffect(() => {
-    if (editingId && (!mutable || !items.some((item) => item.id === editingId && item.state === 'queued'))) {
-      setEditingId(null);
-      setEditValue('');
-    }
-  }, [editingId, items, mutable]);
+  }, [editingId, pending]);
 
   if (items.length === 0 && !mutation) return null;
-  const expanded = items.length === 1 || !collapsed || editingId !== null;
+  const expanded = items.length === 1 || !collapsed || Boolean(editingId);
 
   const move = (item: AiInboxItem, offset: -1 | 1): void => {
     const laneItems = items.filter((candidate) => (
@@ -191,7 +158,7 @@ export function AiQueueDock({
           variant="plain"
           className="ai-queue-header flex h-9 w-full min-w-0 items-center gap-1 px-3 py-1 [&>:last-child]:ml-auto"
           aria-expanded={expanded}
-          disabled={editingId !== null}
+          disabled={Boolean(editingId)}
           onClick={() => setCollapsed((value) => !value)}
         >
           <ListEndIcon aria-hidden="true" />
@@ -202,25 +169,6 @@ export function AiQueueDock({
       )}
       {expanded && <ul className="ai-queue-list m-0 max-h-[min(108px,16dvh)] list-none overflow-y-auto p-0">
         {items.map((item) => {
-          const documentMessage = decodeDocumentMessage(item.content);
-          const canSave = Boolean(editValue.trim() || documentMessage.documents.length);
-          const save = (): void => {
-            if (!canSave) return;
-            let content: string;
-            try {
-              content = encodeDocumentMessage(editValue.trim(), documentMessage.documents, true, documentMessage.skills);
-            } catch (error) {
-              toast.error(t(documentErrorKey(error)));
-              return;
-            }
-            submittedEdit.current = { id: item.id, content, draft: editValue };
-            if (mutation?.status === 'failed' && mutation.intent.type === 'update'
-              && mutation.intent.itemId === item.id && mutation.intent.content === content && onRetry) {
-              onRetry();
-            } else {
-              onUpdate?.(item, content);
-            }
-          };
           const laneItems = items.filter((candidate) => (
             candidate.lane === item.lane && candidate.state === 'queued'
           ));
@@ -228,56 +176,20 @@ export function AiQueueDock({
           const editable = mutable && !resumeOnly && item.state === 'queued' && item.source === 'user';
           const steering = pending && mutation.intent.type === 'steer' && mutation.intent.itemId === item.id;
           const editing = editingId === item.id;
+          const imageCount = item.images?.length ?? 0;
+          const summary = documentMessageSummary(item.content);
           return (
-            <li key={item.id} className="ai-queue-row flex h-9 w-full min-w-0 items-center gap-1 box-border py-1 pr-[5px] pl-3" data-state={item.state}>
+            <li key={item.id} className="ai-queue-row flex h-9 w-full min-w-0 items-center gap-1 box-border py-1 pr-[5px] pl-3"
+              data-state={item.state} data-editing={editing || undefined}>
               {items.length === 1 && <ListEndIcon aria-hidden="true" />}
-              {editing ? (
-                <form
-                  className="ai-queue-editor flex w-full min-w-0 items-center gap-1"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    save();
-                  }}
-                >
-                  <FieldGroup className="min-w-0 flex-1 gap-0">
-                    <Field data-invalid={!canSave}>
-                      <FieldLabel htmlFor={`queue-edit-${item.id}`} className="sr-only">
-                        {t('ai.workspace.queue.editLabel')}
-                      </FieldLabel>
-                      <Input
-                        ref={editInput}
-                        id={`queue-edit-${item.id}`}
-                        className="h-6 px-2 py-0"
-                        value={editValue}
-                        aria-invalid={!canSave}
-                        maxLength={documentMessage.documents.length ? DOCUMENT_LIMITS.maxDraftCharacters - documentMessage.documents.reduce((sum, document) => sum + document.text.length, 0) : undefined}
-                        disabled={pending}
-                        autoFocus
-                        onChange={(event) => setEditValue(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Escape') {
-                            event.preventDefault();
-                            finishEditing();
-                          }
-                        }}
-                      />
-                    </Field>
-                  </FieldGroup>
-                  <IconAction
-                    label={t('common.save')}
-                    disabled={pending || !canSave}
-                    onClick={save}
-                  >
-                    <CheckIcon data-icon="inline-start" />
-                  </IconAction>
-                  <IconAction label={t('common.cancel')} disabled={pending} onClick={finishEditing}>
-                    <XIcon data-icon="inline-start" />
-                  </IconAction>
-                </form>
-              ) : (
                 <div className="ai-queue-row-content flex w-full min-w-0 items-center gap-2.5">
-                  <span className="min-w-0 flex-1 truncate">{documentMessageSummary(item.content)
-                    || ((item.hasImages || item.images?.length) ? t('ai.workspace.images.attachments') : '')}</span>
+                  <div className="flex min-w-0 flex-1 items-center gap-1">
+                    {sessionId && imageCount > 0 && <AiCommittedImages sessionId={sessionId} images={item.images?.slice(0, 2)} compact />}
+                    {summary && <span className="min-w-0 truncate">{summary}</span>}
+                    {imageCount > 0
+                      ? <span className="shrink-0 text-muted-foreground">{t(imageCount === 1 ? 'ai.workspace.queue.image' : 'ai.workspace.queue.images', { count: imageCount })}</span>
+                      : !summary && item.hasImages ? <span className="truncate">{t('ai.workspace.images.attachments')}</span> : null}
+                  </div>
                   {item.paused && <Badge variant="secondary">{t('ai.workspace.queue.paused')}</Badge>}
                   {item.confirming && <Badge variant="secondary">{t('ai.workspace.messageConfirming')}</Badge>}
                   {item.waitingForAdmission && <Badge variant="secondary">{t('ai.workspace.queue.waitingAdmission')}</Badge>}
@@ -292,12 +204,13 @@ export function AiQueueDock({
                     {t(`ai.workspace.queue.state.${item.state}` as LocaleKey)}
                   </span>
                   {!editable && mutable && item.paused && onResume && <IconAction label={t('ai.workspace.queue.resume')} disabled={pending} onClick={() => onResume(item)}><ArrowUpIcon data-icon="inline-start" /></IconAction>}
-                  {editable && (
+                  {editing && <Badge variant="secondary">{t('ai.workspace.queue.editing')}</Badge>}
+                  {editable && !editing && (
                     <div className="ai-queue-actions flex shrink-0 items-center gap-1">
                       {laneItems.length > 1 && onReorder && <DropdownMenu>
                         <DropdownMenuTrigger render={(
                           <Button type="button" variant="ghost" size="icon-xs" className="shrink-0"
-                            disabled={pending} aria-label={t('ai.workspace.queue.reorder')} />
+                            disabled={pending || Boolean(editingId)} aria-label={t('ai.workspace.queue.reorder')} />
                         )}>
                           <ArrowDownUpIcon data-icon="inline-start" />
                         </DropdownMenuTrigger>
@@ -325,29 +238,24 @@ export function AiQueueDock({
                           if (button) editButtons.current.set(item.id, button);
                           else editButtons.current.delete(item.id);
                         }}
-                        disabled={pending || onUpdate === undefined}
-                        onClick={() => {
-                          setEditingId(item.id);
-                          setEditValue(mutation?.status === 'failed' && mutation.intent.type === 'update'
-                            && mutation.intent.itemId === item.id
-                            ? decodeDocumentMessage(mutation.intent.content).text : documentMessage.text);
-                        }}
+                        disabled={pending || Boolean(editingId) || onEdit === undefined}
+                        onClick={() => onEdit?.(item)}
                       >
                         <PencilIcon data-icon="inline-start" />
                       </IconAction>
                       <IconAction
                         label={t('ai.workspace.queue.remove')}
-                        disabled={pending || onRemove === undefined}
+                        disabled={pending || Boolean(editingId) || onRemove === undefined}
                         onClick={() => onRemove?.(item)}
                       >
                         <Trash2Icon data-icon="inline-start" />
                       </IconAction>
-                      {item.paused && onResume && <IconAction label={t('ai.workspace.queue.resume')} disabled={pending} onClick={() => onResume(item)}><ArrowUpIcon data-icon="inline-start" /></IconAction>}
+                      {item.paused && onResume && <IconAction label={t('ai.workspace.queue.resume')} disabled={pending || Boolean(editingId)} onClick={() => onResume(item)}><ArrowUpIcon data-icon="inline-start" /></IconAction>}
                       {running && !item.paused && item.lane === 'nextTurn' && onSteer && (
                         <IconAction
                           label={t('ai.workspace.queue.steer')}
                           tooltip={t('ai.workspace.queue.steerTooltip')}
-                          disabled={pending}
+                          disabled={pending || Boolean(editingId)}
                           onClick={() => onSteer(item)}
                         >
                           {steering
@@ -358,7 +266,6 @@ export function AiQueueDock({
                     </div>
                   )}
                 </div>
-              )}
             </li>
           );
         })}

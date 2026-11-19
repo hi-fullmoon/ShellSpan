@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
 import { AiImageDraftRail } from '../workspace/ai-image-draft-rail';
 import { AiDocumentAttachments } from '../workspace/ai-document-attachments';
-import { AiQueueDock } from '../workspace/ai-queue-dock';
 import { aiConversationNodeRenderers } from '../workspace/ai-conversation-node-seat';
 import { decodeDocumentMessage, encodeDocumentMessage } from '@/lib/ai/document-message';
 import { DOCUMENT_LIMITS } from '@/lib/ai/document-import';
@@ -190,10 +189,11 @@ describe('document attachment surfaces', () => {
     const user = userEvent.setup();
     let saved = '';
     const item: AiInboxItem = { id: 'queued', lane: 'nextTurn', source: 'user', state: 'queued', content: encodeDocumentMessage('Explain this project', documents) };
-    render(<AiQueueDock items={[item]} onUpdate={(_item, content) => { saved = content; }} />);
+    render(<AiComposerSeat phase="active" status="waiting" inbox={[item]}
+      onUpdateQueueItem={async (_item, content) => { saved = content; return true; }} />);
     expect(screen.getByText('Explain this project')).toBeVisible();
     await user.click(screen.getByRole('button', { name: /Edit/ }));
-    const input = screen.getByRole('textbox');
+    const input = screen.getByRole('textbox', { name: 'Queued input text' });
     await user.clear(input);
     await user.type(input, 'Summarize it');
     await user.click(screen.getByRole('button', { name: 'Save' }));

@@ -155,8 +155,16 @@
   color: var(--ai-error);
 }
 
-.ai-queue-row-content > span:first-child {
+.ai-queue-row-content > div:first-child {
   color: var(--ai-text-dimmed);
+}
+
+.ai-queue-row[data-editing] {
+  background: var(--ai-action-hover);
+}
+
+.ai-queue-editor .ai-image-thumbnail-remove {
+  opacity: 1;
 }
 
 .ai-queue-actions {

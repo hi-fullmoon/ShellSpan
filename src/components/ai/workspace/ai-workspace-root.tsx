@@ -275,7 +275,7 @@ export interface AiWorkspaceRootProps {
   readonly onRefreshQuestionAnswer?: (input: import('@/types/agent-question').AnswerQuestionInput) => Promise<void>;
   readonly loadingOlder?: boolean;
   readonly queueMutation?: AiQueueMutationState | null;
-  readonly onRetryQueueMutation?: () => void;
+  readonly onRetryQueueMutation?: import('./use-ai-session-controller').AiSessionController['retryQueueMutation'];
   readonly renamingSessionId?: string | null;
   readonly renameError?: string | null;
   readonly canStartAgent?: boolean;
@@ -313,7 +313,8 @@ export interface AiWorkspaceRootProps {
   readonly onOpenSession?: (summary: AiSessionSummary) => void;
   readonly onArchiveSession?: (summary: AiSessionSummary) => void;
   readonly onDeleteSession?: (summary: AiSessionSummary) => void;
-  readonly onUpdateQueueItem?: (item: AiInboxItem, content: string) => void;
+  readonly onUpdateQueueItem?: import('./use-ai-session-controller').AiSessionController['updateQueueItem'];
+  readonly onDiscardQueueEdit?: (itemId: string) => void;
   readonly onRemoveQueueItem?: (item: AiInboxItem) => void;
   readonly onSteerQueueItem?: (item: AiInboxItem) => void;
   readonly onResumeQueueItem?: (item: AiInboxItem) => void;
@@ -412,6 +413,7 @@ export function AiWorkspaceRoot({
   onArchiveSession,
   onDeleteSession,
   onUpdateQueueItem,
+  onDiscardQueueEdit,
   onRemoveQueueItem,
   onSteerQueueItem,
   onResumeQueueItem,
@@ -868,6 +870,7 @@ export function AiWorkspaceRoot({
           onBusyPreferenceChange={surfaceMode === 'agent' && !readOnlySession
             && !view?.snapshot.value.header.subagent ? onBusyPreferenceChange : undefined}
           onUpdateQueueItem={surfaceMode === 'agent' && !readOnlySession ? onUpdateQueueItem : undefined}
+          onDiscardQueueEdit={onDiscardQueueEdit}
           onRemoveQueueItem={surfaceMode === 'agent' && !readOnlySession ? onRemoveQueueItem : undefined}
           onSteerQueueItem={surfaceMode === 'agent' && !readOnlySession ? onSteerQueueItem : undefined}
           onResumeQueueItem={surfaceMode === 'agent' && !readOnlySession ? onResumeQueueItem : undefined}

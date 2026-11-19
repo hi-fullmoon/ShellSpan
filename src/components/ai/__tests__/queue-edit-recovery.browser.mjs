@@ -1,154 +1,172 @@
 import assert from 'node:assert/strict';
-import { readFile, mkdir } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
+import { mkdir, mkdtemp, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from 'playwright';
 import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 
-// Replay a real queue edit. No runtime command, model, or service replacement is used.
-// Supply an existing journal containing agent/inbox/item_updated.
-const journal = process.env.SHELLSPAN_AGENT_SESSION_FILE;
-assert.ok(journal, 'Set SHELLSPAN_AGENT_SESSION_FILE to a recorded Agent session journal');
-const events = (await readFile(journal, 'utf8')).trim().split('\n').map(JSON.parse);
-const index = events.findIndex(event => event.type === 'agent/inbox/item_updated');
-assert.ok(index > 0, 'A recorded queue edit is required');
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
-const output = join(tmpdir(), 'shellspan-queue-edit-recovery');
-await mkdir(output, { recursive: true });
-const server = await createServer({
-  configFile: false, root, appType: 'custom', logLevel: 'error',
-  cacheDir: join(output, 'vite-cache'),
-  resolve: { alias: { '@': `${root}src` } }, esbuild: { jsx: 'automatic' },
-  optimizeDeps: {
-    entries: [
-      'src/components/ai/__tests__/agent-content-surfaces.browser-runtime.ts',
-      'src/components/ai/workspace/ai-queue-dock.tsx',
-      'src/lib/ai/agent-session-adapter.ts',
-      'src/locales/index.ts',
-    ],
-    include: ['react', 'react-dom', 'react-dom/client'],
-  },
-  server: { host: '127.0.0.1', port: 0, hmr: false }, plugins: [tailwindcss()],
+const artifacts = join(root, 'artifacts/tests');
+await mkdir(artifacts, { recursive: true });
+const output = await mkdtemp(join(artifacts, 'queue-image-edit-'));
+const readyFile = join(output, 'runtime-url');
+const fixture = '/src/components/ai/__tests__/queue-edit-recovery.browser.tsx';
+const native = spawn('cargo', [
+  'test', '--manifest-path', 'src-tauri/Cargo.toml', '--lib', 'queue_image_edit_browser_bridge', '--', '--ignored',
+], {
+  cwd: root, env: { ...process.env, SHELLSPAN_QUEUE_EDIT_BRIDGE: readyFile }, stdio: 'inherit',
 });
-server.middlewares.use('/__queue_review', (_request, response) => {
-  response.setHeader('Content-Type', 'text/html');
-  response.end('<!doctype html><html><body style="margin:0"><main id="root" class="ai-panel-shell" style="padding:12px"></main></body></html>');
+const exited = new Promise((resolve, reject) => {
+  native.on('error', reject);
+  native.on('exit', resolve);
 });
+
+let server;
+let runtime;
+async function rpc(command, input) {
+  const response = await fetch(runtime, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ command, args: { input } }),
+  });
+  const payload = await response.json();
+  if (payload.error) throw new Error(payload.error);
+  return payload.value;
+}
+
 try {
+  for (let attempt = 0; attempt < 1200 && !runtime; attempt++) {
+    assert.equal(native.exitCode, null, 'Runtime bridge exited before listening');
+    try { runtime = await readFile(readyFile, 'utf8'); }
+    catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      await delay(250);
+    }
+  }
+  assert.ok(runtime, 'Runtime bridge did not become ready');
+  server = await createServer({
+    configFile: false, root, appType: 'custom', logLevel: 'error',
+    cacheDir: join(output, 'vite-cache'),
+    resolve: { alias: { '@': join(root, 'src') } },
+    esbuild: { jsx: 'automatic' },
+    optimizeDeps: { entries: [fixture.slice(1)], include: ['react', 'react-dom', 'react-dom/client'] },
+    server: { host: '127.0.0.1', port: 0, hmr: false, proxy: { '/__queue_rpc': runtime } },
+    plugins: [tailwindcss()],
+  });
+  server.middlewares.use((request, response, next) => {
+    if (!request.url?.startsWith('/?session=')) return next();
+    response.setHeader('Content-Type', 'text/html');
+    response.end(`<!doctype html><html><body class="m-0"><main id="root" class="ai-panel-shell @container/ai-workspace flex h-dvh flex-col justify-end" data-ai-scope="workbench"></main><script type="module" src="${fixture}"></script></body></html>`);
+  });
   await server.listen();
+  const url = `http://127.0.0.1:${server.httpServer.address().port}`;
   for (const engine of [chromium, webkit]) {
-    const browser = await engine.launch(engine === chromium ? { channel: 'chromium' } : {});
+    const browser = await engine.launch();
     try {
-      for (const locale of ['zh-CN', 'en-US']) for (const width of [360, 900]) for (const keepNewerDraft of [true, false]) {
-        const page = await browser.newPage({ viewport: { width, height: 600 } });
+      for (const [width, locale] of [[360, 'zh-CN'], [900, 'en-US']]) {
+        const sessionId = `edit-${engine.name()}-${width}`;
+        await rpc('open_fixture', { sessionId });
+        const page = await browser.newPage({ viewport: { width, height: 700 } });
         const errors = [];
         page.on('pageerror', error => errors.push(error.message));
-        await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__queue_review`);
-        await page.evaluate(async ({ events, index, locale }) => {
-          const { React, createRoot } = await import('/src/components/ai/__tests__/agent-content-surfaces.browser-runtime.ts');
-          const { AiQueueDock } = await import('/src/components/ai/workspace/ai-queue-dock.tsx');
-          const { projectAgentInbox } = await import('/src/lib/ai/agent-session-adapter.ts');
-          const { decodeDocumentMessage } = await import('/src/lib/ai/document-message.ts');
-          const { initI18n } = await import('/src/locales/index.ts');
-          const { useAppStore } = await import('/src/stores/appStore.ts');
-          await import('/src/styles/base.css');
-          await import('/src/components/ai/styles/styles.css');
-          await initI18n(locale);
-          useAppStore.setState({ locale });
-          const event = events[index];
-          const before = projectAgentInbox(events.slice(0, index)).filter(item => item.state === 'queued');
-          const after = projectAgentInbox(events.slice(0, index + 1)).filter(item => item.state === 'queued');
-          const item = before.find(item => item.id === event.data.itemId);
-          if (!item || item.source !== 'user') throw new Error('Recorded edit must target a queued user message');
-          const root = createRoot(document.getElementById('root'));
-          const intent = { type: 'update', itemId: item.id, content: event.data.content };
-          window.queueReview = {
-            itemId: item.id, text: decodeDocumentMessage(event.data.content).text,
-            requests: [], retries: 0,
-            render(stage) {
-              root.render(React.createElement(AiQueueDock, {
-                items: stage === 'committed' ? after.filter(candidate => candidate.id === item.id) : [item],
-                mutation: stage === 'initial' || stage === 'committed' ? null
-                  : { intent, status: stage, error: null, conflict: false },
-                // Observe UI intent only. Outcomes below are explicit recorded-state replay.
-                onUpdate: (item, content) => window.queueReview.requests.push({ id: item.id, content }),
-                onRetry: () => { window.queueReview.retries++; },
-              }));
-            },
-          };
-          window.queueReview.render('initial');
-        }, { events, index, locale });
-        const chinese = locale === 'zh-CN';
-        const dock = page.locator('[data-slot="ai-queue-dock"]');
-        const edit = page.getByRole('button', { name: chinese ? '编辑排队输入' : 'Edit queued input' });
-        await edit.first().waitFor();
-        const dockBeforeEdit = await dock.boundingBox();
-        const message = await dock.locator('.ai-queue-row-content > span').first().boundingBox();
-        const messageCenter = message.y + message.height / 2;
-        assert.equal(messageCenter, dockBeforeEdit.y + dockBeforeEdit.height / 2,
-          'The single queued message must be vertically centered in the dock');
-        const editButton = await edit.boundingBox();
-        assert.equal(messageCenter, editButton.y + editButton.height / 2,
-          'The queued message must align with the row actions');
-        if (!keepNewerDraft) await dock.screenshot({ path: join(output, `${engine.name()}-${locale}-${width}-queued.png`) });
+        await page.goto(`${url}/?session=${sessionId}&locale=${locale}`);
+        const zh = locale === 'zh-CN';
+        const edit = page.getByRole('button', { name: zh ? '编辑排队输入' : 'Edit queued input', exact: true }).first();
+        const draft = page.getByTestId('ai-workspace-composer');
+        await edit.waitFor();
+        const queue = page.locator('[data-slot="ai-queue-dock"]');
+        const row = queue.locator('li').first();
+        await row.locator('img').first().evaluate(image => image.decode());
+        await draft.fill('Keep this new message');
+        await page.locator('input[type=file][accept*="image/png"]').setInputFiles(join(root, 'src-tauri/icons/128x128@2x.png'));
+        const draftImage = page.getByRole('img', { name: '128x128@2x.png' });
+        try {
+          await draftImage.waitFor({ timeout: 8000 });
+        } catch (error) {
+          const toasts = await page.evaluate(async () => {
+            const { useToastStore } = await import('/src/stores/toastStore.ts');
+            return useToastStore.getState().toasts.map(toast => toast.message);
+          });
+          throw new Error(`Draft image was not attached. Browser errors: ${errors.join(', ')}. Toasts: ${toasts.join(', ')}`, { cause: error });
+        }
+        const original = await rpc('read_fixture', { sessionId });
         await edit.click();
-        const input = page.getByRole('textbox');
-        await input.waitFor();
-        const { topGap, bottomGap } = await input.evaluate(element => {
-          const input = element.getBoundingClientRect();
-          const dock = element.closest('[data-slot="ai-queue-dock"]').getBoundingClientRect();
-          return { topGap: input.top - dock.top, bottomGap: dock.bottom - input.bottom };
+
+        const editor = page.locator('[data-queue-edit-composer]');
+        const text = editor.getByRole('textbox');
+        const save = editor.getByRole('button', { name: zh ? '保存' : 'Save', exact: true });
+        const preview = name => editor.getByRole('button', { name: `${zh ? '预览图片' : 'Preview image'} ${name}`, exact: true });
+        const remove = name => editor.getByRole('button', { name: `${zh ? '删除图片' : 'Remove image'} ${name}`, exact: true });
+        await text.waitFor();
+        assert.equal(await text.inputValue(), '');
+        assert.equal(await text.evaluate(element => element === document.activeElement), true);
+        assert.equal(await draft.isVisible(), false);
+        assert.ok(await row.getAttribute('data-editing'));
+        assert.ok(await save.isEnabled(), 'An image-only message can be saved without a caption');
+        await preview('32x32.png').click();
+        const dialog = page.getByRole('dialog');
+        await dialog.locator('img').evaluate(image => image.decode());
+        await dialog.getByRole('button', { name: zh ? '关闭' : 'Close', exact: true }).click();
+        await dialog.waitFor({ state: 'hidden' });
+
+        await remove('32x32.png').click();
+        await remove('64x64.png').click();
+        assert.ok(await save.isDisabled(), 'Removing all images from a blank message disables save');
+        await text.press('Escape');
+        await draftImage.waitFor();
+        assert.equal(await draft.textContent(), 'Keep this new message');
+        assert.equal(await edit.evaluate(element => element === document.activeElement), true);
+        assert.deepEqual((await rpc('read_fixture', { sessionId })).snapshot.inbox, original.snapshot.inbox);
+
+        await edit.click();
+        await remove('32x32.png').click();
+        await text.fill('Updated queue caption');
+        await editor.locator('input[type=file]').setInputFiles(join(root, 'src-tauri/icons/icon.png'));
+        await preview('icon.png').waitFor();
+        await page.waitForFunction(() => document.querySelector('[data-queue-edit-composer]')?.getAttribute('aria-busy') === null);
+        const dimensions = await page.evaluate(() => {
+          const queue = document.querySelector('[data-slot="ai-queue-dock"]').getBoundingClientRect();
+          const editor = document.querySelector('[data-queue-edit-composer]').getBoundingClientRect();
+          return { queue: queue.bottom, top: editor.top, bottom: editor.bottom, height: innerHeight,
+            overflow: document.documentElement.scrollWidth > innerWidth };
         });
-        assert.equal(topGap, bottomGap, 'The single queued item input must be vertically centered in the dock');
-        assert.equal((await dock.boundingBox()).height, dockBeforeEdit.height, 'Editing must preserve the dock height');
-        if (!keepNewerDraft) await dock.screenshot({ path: join(output, `${engine.name()}-${locale}-${width}-editing.png`) });
-        const text = await page.evaluate(() => window.queueReview.text);
-        await input.fill(text);
-        await input.press('Enter');
-        assert.equal(await page.evaluate(() => window.queueReview.requests.length), 1);
-        await page.evaluate(() => window.queueReview.render('pending'));
-        await page.waitForFunction(() => document.querySelector('input')?.disabled === true);
-        assert.equal(await input.isDisabled(), true);
-        await page.evaluate(() => window.queueReview.render('failed'));
-        await page.getByRole('alert').waitFor();
-        assert.equal(await input.inputValue(), text, 'Failed edit must retain its exact text');
-        await page.getByRole('button', { name: chinese ? '重试' : 'Retry', exact: true }).click();
-        assert.equal(await page.evaluate(() => window.queueReview.retries), 1);
-        assert.equal(await page.evaluate(() => window.queueReview.requests.length), 1, 'Retry must use the original intent');
-        await input.press('Escape');
+        assert.ok(dimensions.queue < dimensions.top && dimensions.bottom <= dimensions.height && !dimensions.overflow);
+        await page.screenshot({ path: join(output, `${engine.name()}-${width}-editing.png`) });
+        await rpc('agent_runtime_mutate_inbox', {
+          sessionId, clientOperationId: 'concurrent-revision', expectedRevision: original.snapshot.eventCount,
+          mutation: { type: 'reorder', lane: 'nextTurn', orderedItemIds: ['first', 'second'] },
+        });
+        await save.click();
+        await page.getByRole('alert').getByText(zh ? '队列已在别处发生变化' : 'Queue changed elsewhere').waitFor();
+        assert.equal(await text.inputValue(), 'Updated queue caption');
+        assert.ok(await preview('64x64.png').isVisible());
+        assert.ok(await preview('icon.png').isVisible());
+        await save.click();
+        await editor.waitFor({ state: 'detached' });
+        await draftImage.waitFor();
+        assert.equal(await draft.textContent(), 'Keep this new message');
+        const saved = await rpc('read_fixture', { sessionId });
+        assert.deepEqual(saved.snapshot.inbox.nextTurn.map(item => item.messageId), ['first', 'second']);
+        assert.equal(saved.snapshot.inbox.nextTurn[0].content, 'Updated queue caption');
+        assert.deepEqual(saved.snapshot.inbox.nextTurn[0].images.map(image => image.name), ['64x64.png', 'icon.png']);
+        assert.equal(saved.events.filter(event => event.type === 'agent/inbox/item_updated').length, 1);
         await edit.click();
-        assert.equal(await input.inputValue(), text, 'Reopening a failed edit must restore the retained intent');
-        await input.press('Enter');
-        assert.equal(await page.evaluate(() => window.queueReview.retries), 2);
-        assert.equal(await page.evaluate(() => window.queueReview.requests.length), 1, 'Saving unchanged failed text must retry the same intent');
-        const newerDraft = `${text} — review follow-up`;
-        if (keepNewerDraft) {
-          await input.fill(newerDraft);
-          await page.getByRole('button', { name: chinese ? '重试' : 'Retry', exact: true }).click();
-          assert.equal(await page.evaluate(() => window.queueReview.requests.length), 1, 'Retry must not submit the newer unsaved draft');
-        }
-        assert.equal(await dock.evaluate(element => element.scrollWidth > element.clientWidth), false);
-        await page.screenshot({ path: join(output, `${engine.name()}-${locale}-${width}-${keepNewerDraft}.png`) });
-        await page.evaluate(() => window.queueReview.render('pending'));
-        await page.waitForFunction(() => document.querySelector('input')?.disabled === true);
-        await page.evaluate(() => window.queueReview.render('committed'));
-        if (keepNewerDraft) {
-          await page.waitForFunction(() => !document.querySelector('[role="alert"]'));
-          assert.equal(await input.count(), 1, 'Acknowledging an older save must preserve the newer editor');
-          assert.equal(await input.inputValue(), newerDraft);
-          assert.equal(await input.isEnabled(), true);
-          assert.equal(await input.evaluate(element => element === document.activeElement), true, 'A retained draft must keep keyboard focus after the retry action disappears');
-          await input.press('Enter');
-          assert.equal(await page.evaluate(() => window.queueReview.requests.length), 2, 'The newer draft remains available for an explicit save');
-        } else {
-          await input.waitFor({ state: 'detached' });
-        }
+        await preview('icon.png').click();
+        await dialog.locator('img').evaluate(image => image.decode());
         assert.deepEqual(errors, []);
         await page.close();
       }
-    } finally { await browser.close(); }
+    } finally {
+      await browser.close();
+    }
   }
-  console.log('Recorded queue edit recovery passed in Chromium/WebKit, both locales, at 360/900px.');
-} finally { await server.close(); }
+  await rpc('finish');
+  assert.equal(await exited, 0);
+  console.log(`Queue edit passed in Chromium and WebKit. Screenshots: ${output}`);
+} finally {
+  await server?.close();
+  if (runtime && native.exitCode === null) await rpc('finish').catch(() => undefined);
+  if (native.exitCode === null) native.kill();
+}

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiQueueDock } from '@/components/ai/workspace/ai-queue-dock';
+import { AiComposerSeat } from '@/components/ai/workspace/ai-composer-seat';
 import { AiSessionBrowser } from '@/components/ai/workspace/ai-session-browser';
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
 import { createAiWorkspaceNavigationState } from '@/lib/ai/panel-route';
@@ -69,22 +70,22 @@ describe('Queue Dock', () => {
     const remove = vi.fn();
     const reorder = vi.fn();
     const { rerender } = render(
-      <AiQueueDock
-        items={queue}
-        onUpdate={update}
-        onRemove={remove}
-        onReorder={reorder}
+      <AiComposerSeat phase="active" status="waiting"
+        inbox={queue}
+        onUpdateQueueItem={async (item, content) => { update(item, content); return true; }}
+        onRemoveQueueItem={remove}
+        onReorderQueueLane={reorder}
       />,
     );
 
     await user.click(screen.getAllByRole('button', { name: 'Edit queued input' })[0]);
     const input = screen.getByRole('textbox', { name: 'Queued input text' });
     await user.clear(input);
-    await user.type(input, 'Updated task{Enter}');
+    await user.type(input, 'Updated task{Control>}{Enter}{/Control}');
     expect(update).toHaveBeenCalledWith(queue[0], 'Updated task');
-    expect(input).toHaveValue('Updated task');
-    rerender(<AiQueueDock items={[{ ...queue[0], content: 'Updated task' }, queue[1]]}
-      onUpdate={update} onRemove={remove} onReorder={reorder} />);
+    expect(input).not.toBeInTheDocument();
+    rerender(<AiComposerSeat phase="active" status="waiting" inbox={[{ ...queue[0], content: 'Updated task' }, queue[1]]}
+      onRemoveQueueItem={remove} onReorderQueueLane={reorder} />);
 
     await user.click(screen.getAllByRole('button', { name: 'Reorder queued input' })[0]);
     await user.click(await screen.findByRole('menuitem', { name: 'Move down' }));
@@ -97,31 +98,30 @@ describe('Queue Dock', () => {
   it('returns keyboard focus to the edit action on cancel and after a pending save settles', async () => {
     const user = userEvent.setup();
     const update = vi.fn();
-    const { rerender } = render(<AiQueueDock items={[queue[0]]} onUpdate={update} />);
+    let committed!: (value: boolean) => void;
+    const receipt = new Promise<boolean>(resolve => { committed = resolve; });
+    render(<AiComposerSeat phase="active" status="waiting" inbox={[queue[0]]}
+      defaultDraft="Keep my draft" onUpdateQueueItem={(item, content) => { update(item, content); return receipt; }} />);
     await user.click(screen.getByRole('button', { name: 'Edit queued input' }));
-    await user.type(screen.getByRole('textbox'), ' discarded{Escape}');
+    await user.type(screen.getByRole('textbox', { name: 'Queued input text' }), ' discarded{Escape}');
     expect(update).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Edit queued input' })).toHaveFocus();
+    expect(screen.getByTestId('ai-workspace-composer')).toHaveTextContent('Keep my draft');
 
     await user.keyboard('{Enter}');
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.getByRole('button', { name: 'Edit queued input' })).toHaveFocus();
 
-    const save = (item: AiInboxItem, content: string): void => {
-      update(item, content);
-      rerender(<AiQueueDock items={[queue[0]]} onUpdate={save} mutation={{
-        intent: { type: 'update', itemId: item.id, content }, status: 'pending', error: null, conflict: false,
-      }} />);
-    };
-    rerender(<AiQueueDock items={[queue[0]]} onUpdate={save} />);
     await user.keyboard('{Enter}');
-    await user.clear(screen.getByRole('textbox'));
-    await user.type(screen.getByRole('textbox'), 'Saved text{Enter}');
-    expect(screen.getByRole('textbox')).toHaveValue('Saved text');
+    const input = screen.getByRole('textbox', { name: 'Queued input text' });
+    await user.clear(input);
+    await user.type(input, 'Saved text{Control>}{Enter}{/Control}');
+    expect(input).toHaveValue('Saved text');
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
-    rerender(<AiQueueDock items={[{ ...queue[0], content: 'Saved text' }]} onUpdate={save} />);
-    expect(screen.getByRole('button', { name: 'Edit queued input' })).toHaveFocus();
+    committed(true);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit queued input' })).toHaveFocus());
     expect(update).toHaveBeenCalledExactlyOnceWith(queue[0], 'Saved text');
+    expect(screen.getByTestId('ai-workspace-composer')).toHaveTextContent('Keep my draft');
   });
 
   it('shows pending and conflict feedback without retry buttons or changing projected rows locally', async () => {

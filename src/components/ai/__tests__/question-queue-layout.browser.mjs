@@ -12,10 +12,14 @@ const screenshots = join(tmpdir(), 'shellspan-question-queue-layout');
 await mkdir(screenshots, { recursive: true });
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
+  cacheDir: join(screenshots, 'vite-cache'),
   resolve: { alias: { '@': `${root}src` } },
   esbuild: { jsx: 'automatic' },
-  optimizeDeps: { include: ['react', 'react-dom/client'] },
-  server: { host: '127.0.0.1', port: 0 },
+  optimizeDeps: { entries: [
+    'src/components/ai/__tests__/agent-content-surfaces.browser-runtime.ts',
+    'src/components/ai/workspace/ai-composer-seat.tsx',
+  ], include: ['react', 'react-dom/client'] },
+  server: { host: '127.0.0.1', port: 0, hmr: false },
   plugins: [tailwindcss(), {
     name: 'question-queue-layout',
     configureServer(vite) {
@@ -36,8 +40,7 @@ try {
       const page = await browser.newPage({ viewport: { width, height } });
       await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`);
       await page.evaluate(async (language) => {
-        const { default: React } = await import('/node_modules/.vite/deps/react.js');
-        const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js');
+        const { React, createRoot } = await import('/src/components/ai/__tests__/agent-content-surfaces.browser-runtime.ts');
         await import('/src/styles/base.css');
         await import('/src/components/ai/styles/styles.css');
         const { AiComposerSeat } = await import('/src/components/ai/workspace/ai-composer-seat.tsx');
@@ -47,7 +50,7 @@ try {
         await initI18n(language);
         // Reproduce the question and queued inputs from the user's screenshot,
         // rendering production components without replacing their dependencies.
-        ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(AiComposerSeat, {
+        createRoot(document.getElementById('root')).render(React.createElement(AiComposerSeat, {
           phase: 'active', status: 'waiting', modelLabel: 'MiniMax-M3',
           inbox: ['你好', 'hello'].map(content => ({ id: content, content, lane: 'nextTurn', state: 'queued', source: 'user' })),
           pendingQuestion: {
@@ -71,12 +74,12 @@ try {
       const q = await question.boundingBox();
       const k = await queue.boundingBox();
       const c = await composer.boundingBox();
-      assert.ok(k.y >= 0 && k.y + k.height + 6 <= q.y, 'Queue must sit above the question with a visible gap');
-      assert.ok(q.y + q.height + 6 <= c.y, 'Question must sit above the composer with a visible gap');
+      assert.ok(q.y >= 0 && q.y + q.height + 6 <= k.y, 'Question must sit above the queue with a visible gap');
+      assert.ok(k.y + k.height + 6 <= c.y, 'Queue must sit above the composer with a visible gap');
       assert.equal(q.x, k.x);
-      assert.equal(k.x, c.x);
       assert.equal(q.width, k.width);
-      assert.equal(k.width, c.width);
+      assert.ok(k.x >= c.x && k.x + k.width <= c.x + c.width, 'Queue must fit within the input area');
+      assert.ok(Math.abs(k.x + k.width / 2 - c.x - c.width / 2) <= 1, 'Queue and input must share a center line');
       assert.ok(c.y + c.height <= height, 'Composer must remain in view');
       assert.ok(q.height <= Math.min(440, height * 0.4) + 1, 'Question must leave room for the conversation and input');
       const content = question.locator('.ai-question-panel-content');

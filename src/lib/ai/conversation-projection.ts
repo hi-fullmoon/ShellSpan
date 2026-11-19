@@ -730,6 +730,7 @@ function createChatProjection() {
             ...previous,
             lastSeq: event.seq,
             content: event.data.content,
+            images: event.data.images ?? previous.images,
           });
         }
         break;

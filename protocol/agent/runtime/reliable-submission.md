@@ -28,6 +28,16 @@ or restart. Different original content conflicts even if it produces identical
 redacted text. The original secret is never retained. Legacy receipts without a
 digest continue to require exact equality with their persisted content.
 
+An unclaimed user input can be edited in place. The `updateWithImages` Inbox
+mutation takes the ordered subset of original references to keep and any new
+image uploads. The runtime validates the retained references against that item,
+normalizes new uploads, and checks the queue revision again before writing one
+`agent/inbox/item_updated` event. An absent `images` field on the event keeps
+the previous attachments. A present list replaces them, including an empty
+list when all images were removed. The original item ID, queue position,
+provenance, and terminal context stay with the message. The receipt records an
+`imageEditFingerprint` for matching retries. It contains no uploaded bytes.
+
 Model-surface reconciliation replaces an uncertain or synthetic tool result by
 its complete Turn/Step/call/name identity, including after later steps, turns or
 assistant messages. Audit events remain append-only. A new assistant call only

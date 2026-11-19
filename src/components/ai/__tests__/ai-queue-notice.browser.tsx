@@ -20,7 +20,7 @@ export function showQueueNotice(status: 'failed' | 'retrying' | null) {
     queueMutation={status && {
       intent: { type: 'remove', itemId: '1278' }, status, conflict: true,
       error: 'Agent Runtime revision conflict: expected revision 1278, current revision 1279',
-    }} onRetryQueueMutation={() => showQueueNotice('retrying')} />));
+    }} onRetryQueueMutation={async () => { showQueueNotice('retrying'); return false; }} />));
 }
 
 showQueueNotice('failed');

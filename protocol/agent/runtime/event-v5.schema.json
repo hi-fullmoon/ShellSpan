@@ -1128,6 +1128,37 @@
     {
       "if": {
         "properties": {
+          "type": { "const": "agent/inbox/item_updated" }
+        }
+      },
+      "then": {
+        "required": ["data"],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["itemId", "lane", "content", "previousRevision", "clientOperationId"],
+            "dependentRequired": {
+              "images": ["imageEditFingerprint"],
+              "imageEditFingerprint": ["images"]
+            },
+            "properties": {
+              "itemId": { "type": "string", "minLength": 1 },
+              "lane": { "enum": ["nextTurn", "nextStep"] },
+              "content": { "type": "string" },
+              "contentFingerprint": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+              "images": { "type": "array", "items": { "$ref": "#/$defs/imageRef" } },
+              "imageEditFingerprint": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+              "previousRevision": { "type": "integer", "minimum": 0 },
+              "clientOperationId": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
           "type": {
             "const": "agent/inbox/item_resumed"
           }

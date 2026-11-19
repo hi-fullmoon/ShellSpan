@@ -88,12 +88,36 @@ impl ImageRef {
         Ok(())
     }
 }
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ImageUpload {
     pub media_type: String,
     pub data: String,
     pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct InboxImageEdit {
+    pub(crate) kept: Vec<ImageRef>,
+    pub(crate) added: Vec<ImageUpload>,
+}
+
+impl InboxImageEdit {
+    pub(crate) fn fingerprint(&self) -> Result<String, String> {
+        if self.kept.len().saturating_add(self.added.len()) > VISION.max_images {
+            return Err("IMAGE_COUNT_LIMIT".into());
+        }
+        if !self.added.is_empty() {
+            validate_upload_envelope(&self.added)?;
+        }
+        for reference in &self.kept {
+            reference.validate()?;
+        }
+        Ok(digest(
+            &serde_json::to_vec(self).map_err(|e| e.to_string())?,
+        ))
+    }
 }
 pub(crate) fn validate_upload_envelope(uploads: &[ImageUpload]) -> Result<(), String> {
     if uploads.is_empty() || uploads.len() > VISION.max_images {

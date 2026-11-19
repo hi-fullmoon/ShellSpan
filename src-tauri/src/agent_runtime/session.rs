@@ -114,6 +114,11 @@ pub(crate) enum AgentInboxMutation {
         item_id: String,
         content: String,
     },
+    UpdateWithImages {
+        item_id: String,
+        content: String,
+        images: super::images::InboxImageEdit,
+    },
     Remove {
         item_id: String,
     },
@@ -1899,90 +1904,98 @@ impl AgentSessionStore {
         self.mutate_inbox_with_driver(input, true)
     }
 
+    #[cfg(test)]
     pub(crate) fn mutate_inbox_with_driver(
         &self,
         input: AgentInboxMutationInput,
         has_active_driver: bool,
+    ) -> Result<AgentSessionSnapshot, String> {
+        self.mutate_inbox_preparing_images(input, has_active_driver, |_, _, _, _| {
+            Err("image edits require Runtime admission".into())
+        })
+    }
+
+    pub(super) fn mutate_inbox_preparing_images(
+        &self,
+        input: AgentInboxMutationInput,
+        has_active_driver: bool,
+        prepare_images: impl FnOnce(
+            &AgentSessionSnapshot,
+            &AgentInboxMessage,
+            &str,
+            &super::images::InboxImageEdit,
+        ) -> Result<Vec<super::images::ImageRef>, String>,
     ) -> Result<AgentSessionSnapshot, String> {
         validate_identifier(&input.session_id, "sessionId")?;
         validate_identifier(&input.client_operation_id, "clientOperationId")?;
         if input.expected_revision > MAX_JS_SAFE_INTEGER {
             return Err("Agent inbox expected revision exceeds the wire boundary".into());
         }
+        let image_edit_fingerprint = match &input.mutation {
+            AgentInboxMutation::UpdateWithImages { images, .. } => Some(images.fingerprint()?),
+            _ => None,
+        };
         let mut inner = self.lock_configured()?;
+        let (record, committed) = inbox_mutation_target(
+            &inner,
+            &input,
+            image_edit_fingerprint.as_deref(),
+            has_active_driver,
+        )?;
+        if committed {
+            return record.snapshot();
+        }
+        let prepared = if let AgentInboxMutation::UpdateWithImages {
+            item_id,
+            content,
+            images,
+        } = &input.mutation
+        {
+            validate_identifier(item_id, "itemId")?;
+            validate_text(
+                content,
+                "inbox content",
+                !images.kept.is_empty() || !images.added.is_empty(),
+                MAX_AGENT_MESSAGE_BYTES,
+            )?;
+            let (_, current) = require_queued_item(record, item_id)?;
+            if current.source.kind != AgentMessageSourceKind::User
+                || record.header.subagent.is_some()
+            {
+                return Err("IMAGE_SOURCE_NOT_USER".into());
+            }
+            let mut originals = current.images.iter();
+            if !images
+                .kept
+                .iter()
+                .all(|kept| originals.any(|image| image == kept))
+            {
+                return Err("IMAGE_REFERENCE_NOT_IN_SESSION: queue attachments changed".into());
+            }
+            let snapshot = record.snapshot()?;
+            let current = current.clone();
+            // Image decoding and disk writes run off the Session lock. Recheck the
+            // revision and receipt before committing the replacement atomically.
+            drop(inner);
+            let prepared = prepare_images(&snapshot, &current, content, images)?;
+            inner = self.lock_configured()?;
+            let (record, committed) = inbox_mutation_target(
+                &inner,
+                &input,
+                image_edit_fingerprint.as_deref(),
+                has_active_driver,
+            )?;
+            if committed {
+                return record.snapshot();
+            }
+            Some(prepared)
+        } else {
+            None
+        };
         let record = inner
             .sessions
             .get(&input.session_id)
-            .ok_or_else(|| "Agent inbox mutation target Session was not found".to_string())?;
-        // A durable receipt wins over stale revision, claimed state or termination.
-        // Retrying a committed operation must acknowledge it without consuming twice.
-        if let Some(previous) = record.events.iter().find(|event| {
-            inbox_operation_id(&event.payload) == Some(input.client_operation_id.as_str())
-        }) {
-            let previous_mutation = match &previous.payload {
-                AgentSessionEventPayload::InboxItemResumed { item_id, .. } => {
-                    Some(AgentInboxMutation::Resume {
-                        item_id: item_id.clone(),
-                    })
-                }
-                AgentSessionEventPayload::InboxItemSteered { item_id, .. } => {
-                    Some(AgentInboxMutation::Steer {
-                        item_id: item_id.clone(),
-                    })
-                }
-                AgentSessionEventPayload::InboxItemUpdated {
-                    item_id, content, ..
-                } => Some(AgentInboxMutation::Update {
-                    item_id: item_id.clone(),
-                    content: content.clone(),
-                }),
-                AgentSessionEventPayload::InboxItemRemoved { item_id, .. } => {
-                    Some(AgentInboxMutation::Remove {
-                        item_id: item_id.clone(),
-                    })
-                }
-                AgentSessionEventPayload::InboxReordered {
-                    lane,
-                    ordered_item_ids,
-                    ..
-                } => Some(AgentInboxMutation::Reorder {
-                    lane: *lane,
-                    ordered_item_ids: ordered_item_ids.clone(),
-                }),
-                _ => None,
-            };
-            let same_payload = match (&previous.payload, &input.mutation) {
-                (
-                    AgentSessionEventPayload::InboxItemUpdated {
-                        item_id,
-                        content_fingerprint: Some(fingerprint),
-                        ..
-                    },
-                    AgentInboxMutation::Update {
-                        item_id: incoming_item,
-                        content,
-                    },
-                ) => {
-                    item_id == incoming_item
-                        && *fingerprint == crate::llm::runtime::digest(content.as_bytes())
-                }
-                _ => previous_mutation.as_ref() == Some(&input.mutation),
-            };
-            if same_payload {
-                return record.snapshot();
-            }
-            return Err(
-                "client operation id was already committed with a different payload".into(),
-            );
-        }
-        validate_mutable_session(record, "inbox mutation")?;
-        if matches!(input.mutation, AgentInboxMutation::Steer { .. }) && !has_active_driver {
-            return Err(
-                "Agent inbox steer requires an active running driver; resume the Session first"
-                    .into(),
-            );
-        }
-        validate_expected_revision(record, input.expected_revision)?;
+            .expect("validated mutation target");
         let payload = match input.mutation {
             AgentInboxMutation::Resume { item_id } => {
                 validate_identifier(&item_id, "itemId")?;
@@ -2005,14 +2018,25 @@ impl AgentSessionStore {
                     client_operation_id: input.client_operation_id,
                 }
             }
-            AgentInboxMutation::Update { item_id, content } => {
+            AgentInboxMutation::Update { item_id, content }
+            | AgentInboxMutation::UpdateWithImages {
+                item_id, content, ..
+            } => {
                 validate_identifier(&item_id, "itemId")?;
-                validate_text(&content, "inbox content", false, MAX_AGENT_MESSAGE_BYTES)?;
-                let (lane, _) = require_queued_item(record, &item_id)?;
+                let (lane, current) = require_queued_item(record, &item_id)?;
+                let images = prepared.as_deref().unwrap_or(&current.images);
+                validate_text(
+                    &content,
+                    "inbox content",
+                    !images.is_empty(),
+                    MAX_AGENT_MESSAGE_BYTES,
+                )?;
                 AgentSessionEventPayload::InboxItemUpdated {
                     item_id,
                     lane,
                     content_fingerprint: inbox_content_fingerprint(&content),
+                    images: prepared,
+                    image_edit_fingerprint,
                     content,
                     previous_revision: input.expected_revision,
                     client_operation_id: input.client_operation_id,
@@ -3620,6 +3644,85 @@ fn find_submission<'a>(
     })
 }
 
+fn inbox_mutation_target<'a>(
+    inner: &'a AgentSessionStoreInner,
+    input: &AgentInboxMutationInput,
+    image_fingerprint: Option<&str>,
+    has_active_driver: bool,
+) -> Result<(&'a AgentSessionRecord, bool), String> {
+    use AgentInboxMutation as Mutation;
+    use AgentSessionEventPayload as Event;
+
+    let record = inner
+        .sessions
+        .get(&input.session_id)
+        .ok_or_else(|| "Agent inbox mutation target Session was not found".to_string())?;
+    // Durable receipts take precedence over stale revisions and consumed items.
+    if let Some(previous) = record.events.iter().find(|event| {
+        inbox_operation_id(&event.payload) == Some(input.client_operation_id.as_str())
+    }) {
+        let matches = match (&previous.payload, &input.mutation) {
+            (Event::InboxItemResumed { item_id, .. }, Mutation::Resume { item_id: incoming })
+            | (Event::InboxItemSteered { item_id, .. }, Mutation::Steer { item_id: incoming })
+            | (Event::InboxItemRemoved { item_id, .. }, Mutation::Remove { item_id: incoming }) => {
+                item_id == incoming
+            }
+            (
+                Event::InboxItemUpdated {
+                    item_id,
+                    content,
+                    content_fingerprint,
+                    image_edit_fingerprint,
+                    ..
+                },
+                Mutation::Update {
+                    item_id: incoming,
+                    content: raw,
+                }
+                | Mutation::UpdateWithImages {
+                    item_id: incoming,
+                    content: raw,
+                    ..
+                },
+            ) => {
+                item_id == incoming
+                    && image_edit_fingerprint.as_deref() == image_fingerprint
+                    && match content_fingerprint {
+                        Some(fingerprint) => {
+                            *fingerprint == crate::llm::runtime::digest(raw.as_bytes())
+                        }
+                        None => content == raw,
+                    }
+            }
+            (
+                Event::InboxReordered {
+                    lane,
+                    ordered_item_ids,
+                    ..
+                },
+                Mutation::Reorder {
+                    lane: incoming_lane,
+                    ordered_item_ids: incoming,
+                },
+            ) => lane == incoming_lane && ordered_item_ids == incoming,
+            _ => false,
+        };
+        return if matches {
+            Ok((record, true))
+        } else {
+            Err("client operation id was already committed with a different payload".into())
+        };
+    }
+    validate_mutable_session(record, "inbox mutation")?;
+    if matches!(input.mutation, Mutation::Steer { .. }) && !has_active_driver {
+        return Err(
+            "Agent inbox steer requires an active running driver; resume the Session first".into(),
+        );
+    }
+    validate_expected_revision(record, input.expected_revision)?;
+    Ok((record, false))
+}
+
 fn require_queued_item<'a>(
     record: &'a AgentSessionRecord,
     item_id: &str,
@@ -4700,8 +4803,11 @@ fn apply_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) -> Re
             item_id,
             lane,
             content,
+            images,
             ..
-        } => record.inbox.update(*lane, item_id, content.clone())?,
+        } => record
+            .inbox
+            .update(*lane, item_id, content.clone(), images.as_deref())?,
         AgentSessionEventPayload::InboxItemRemoved { item_id, lane, .. } => {
             record.inbox.remove(*lane, item_id)?
         }
@@ -4852,6 +4958,8 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             item_id,
             content,
             content_fingerprint,
+            images,
+            image_edit_fingerprint,
             previous_revision,
             client_operation_id,
             ..
@@ -4859,9 +4967,22 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             require_scope(event, false, false)?;
             validate_mutation_event_identity(event, *previous_revision, client_operation_id)?;
             validate_identifier(item_id, "itemId")?;
-            validate_text(content, "inbox content", false, MAX_AGENT_MESSAGE_BYTES)?;
+            validate_text(content, "inbox content", true, MAX_AGENT_MESSAGE_BYTES)?;
             if let Some(fingerprint) = content_fingerprint {
                 validate_content_fingerprint(fingerprint)?;
+            }
+            if let Some(images) = images {
+                if images.len() > super::images::VISION.max_images {
+                    return Err("IMAGE_COUNT_LIMIT".into());
+                }
+                for image in images {
+                    image.validate()?;
+                }
+            }
+            match (images, image_edit_fingerprint) {
+                (Some(_), Some(fingerprint)) => validate_content_fingerprint(fingerprint)?,
+                (None, None) => (),
+                _ => return Err("incomplete Inbox image edit receipt".into()),
             }
         }
         Payload::InboxItemSteered {

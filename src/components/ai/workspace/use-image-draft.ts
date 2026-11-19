@@ -3,9 +3,9 @@ import { useToast } from '@/hooks/useToast';
 import { t } from '@/locales';
 import { detachImageDraft, readImageDraft, restoreCancelledImageDraft, writeImageDraft, type ImageDraft } from '@/lib/ai/image-drafts';
 import { imageErrorKey } from '@/lib/ai/image-error';
+import { prepareImageFiles } from '@/lib/ai/prepare-image-files';
 import { IMAGE_LIMITS } from '@/lib/ai/vision-contract';
-import { invokeCancelAgentImageSubmission, invokePrepareAgentImages } from '@/lib/ipc/tauri';
-import type { AgentImageUpload } from '@/types/agent-image';
+import { invokeCancelAgentImageSubmission } from '@/lib/ipc/tauri';
 
 async function bindImageOperation(
   bind: () => Promise<NonNullable<ImageDraft['operation']>>, signal: AbortSignal,
@@ -81,20 +81,9 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
         toast.error(t('ai.workspace.images.error.count', { max: IMAGE_LIMITS.maxImages }));
         return;
       }
-      if (files.some(file => file.size > IMAGE_LIMITS.maxSourceBytes)
-        || files.reduce((sum, file) => sum + file.size, 0) > IMAGE_LIMITS.maxBatchBytes) throw new Error('IMAGE_SOURCE_LIMIT');
       setPendingFiles(files);
-      const uploads: AgentImageUpload[] = [];
-      for (const file of files) {
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        if (!isCurrent(generation)) return;
-        let binary = '';
-        for (let i = 0; i < bytes.length; i += 32768) binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
-        // No extension inference. Empty browser MIME is rejected by native admission too.
-        uploads.push({ mediaType: file.type, name: file.name, data: btoa(binary) });
-      }
-      const normalized = await invokePrepareAgentImages(uploads);
-      if (!isCurrent(generation)) return;
+      const normalized = await prepareImageFiles(files, () => isCurrent(generation));
+      if (!normalized || !isCurrent(generation)) return;
       await persist({ ...previous, revision: previous.revision + 1, text: textRef.current, images: [...previous.images, ...normalized] }, generation);
     } catch (e) { if (isCurrent(generation)) reportError(String(e)); }
     finally { if (isCurrent(generation)) { running.current = false; setBusy(false); setPendingFiles([]); } }
