@@ -196,7 +196,10 @@ describe('LogPanel', () => {
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith('second complete log line');
     });
-    expect(mockAddToast).toHaveBeenCalledWith('workbench.logs.copied');
+    const feedback = await screen.findByRole('status');
+    expect(feedback).toHaveTextContent('common.copied');
+    expect(feedback.closest('button')).toContainElement(screen.getByText('second complete log line'));
+    expect(mockAddToast).not.toHaveBeenCalled();
   });
 
   it('filters log entries by the search query', () => {

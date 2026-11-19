@@ -14,6 +14,15 @@ vi.mock('@/hooks/useI18n', () => ({
 const initialState = useSftpStore.getState();
 
 describe('SftpBlankContextMenu', () => {
+  it('confirms directory copying inside the menu without closing', async () => {
+    const { onAction, onClose } = renderMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'sftp.contextMenu.copyCurrentDirectoryPath' }));
+    const copied = await screen.findByRole('menuitem', { name: 'common.copied' });
+    expect(copied.querySelector('.lucide-check')).toBeInTheDocument();
+    expect(onAction).toHaveBeenCalledExactlyOnceWith('copyCurrentDirectoryPath');
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     useSftpStore.setState(initialState, true);
   });

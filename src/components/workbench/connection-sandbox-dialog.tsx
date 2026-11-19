@@ -9,7 +9,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useI18n } from '@/hooks/useI18n';
-import { writeClipboardText } from '@/lib/clipboard';
+import { CopyButton } from '@/components/ui/copy-button';
 import { invokeCancelConnectionPreflight, invokeGetProfileSandbox, invokeSaveProfileSandbox, invokeTestProfileSandbox, invokeTrustHost } from '@/lib/ipc/tauri';
 import { createOperationId } from '@/lib/operation-id';
 import type { ProfileSandbox, SandboxMode, SandboxTestResult } from '@/types';
@@ -153,12 +153,8 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
                 {report.installCommand ? <>
                   <p>{t('connection.sandbox.installHint')}</p>
                   <code className="break-all">{report.installCommand}</code>
-                  <Button variant="outline" size="sm" className="self-start" onClick={() => {
-                    void writeClipboardText(report.installCommand!).then(
-                      () => toast.success(t('connection.sandbox.copied')),
-                      () => toast.error(t('connection.sandbox.copyFailed')),
-                    );
-                  }}>{t('connection.sandbox.copyInstall')}</Button>
+                  <CopyButton key={report.installCommand} text={report.installCommand} variant="outline" size="sm" className="self-start"
+                    label={t('connection.sandbox.copyInstall')} errorLabel={t('connection.sandbox.copyFailed')} />
                 </> : <p>{t('connection.sandbox.unknownDistro')}</p>}
               </AlertDescription>}
             </Alert>

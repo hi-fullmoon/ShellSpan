@@ -1,20 +1,19 @@
 import assert from 'node:assert/strict';
 import { realpathSync } from 'node:fs';
 import { readFile, mkdir } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from 'playwright';
 import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 
-// Render the ledger exported by the real Session store regression test.
+// Render a selected pending user operation from the supplied JSONL ledger.
 // No model provider, IPC replacement or answer-submission callback is installed.
-assert.ok(process.argv[2], 'Pass a production-store JSONL ledger with a selected pending user operation.');
+assert.ok(process.argv[2], 'Pass a JSONL ledger with a selected pending user operation.');
 const events = (await readFile(process.argv[2], 'utf8')).trim().split('\n').map(line => JSON.parse(line));
 assert.ok(events.some(event => event.type === 'question/answered'), 'A committed selection is required.');
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
-const output = join(tmpdir(), 'shellspan-user-action-review');
+const output = join(root, 'artifacts/tests/user-action-review');
 await mkdir(output, { recursive: true });
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error', cacheDir: join(output, 'vite-cache'),
@@ -29,7 +28,7 @@ const server = await createServer({
     ],
     include: ['react', 'react-dom', 'react-dom/client'],
   },
-  server: { host: '127.0.0.1', port: 0, hmr: false, fs: { allow: [root, realpathSync(join(root, 'node_modules'))] } },
+  server: { host: '127.0.0.1', port: 0, hmr: false, watch: { ignored: ['**/src-tauri/target/**', '**/artifacts/**'] }, fs: { allow: [root, realpathSync(join(root, 'node_modules'))] } },
 });
 server.middlewares.use('/__user-action', (_request, response) => {
   response.setHeader('Content-Type', 'text/html');
@@ -38,8 +37,10 @@ server.middlewares.use('/__user-action', (_request, response) => {
 let checks = 0;
 try {
   await server.listen();
-  for (const [engineName, engine] of [['chromium', chromium], ['webkit', webkit]]) {
-    const browser = await engine.launch(engine === chromium ? { channel: 'chromium' } : {});
+  const channel = process.env.SHELLSPAN_BROWSER_CHANNEL;
+  const engines = channel ? [['chromium', chromium]] : [['chromium', chromium], ['webkit', webkit]];
+  for (const [engineName, engine] of engines) {
+    const browser = await engine.launch(engine === chromium ? { channel: channel || 'chromium' } : {});
     try {
       for (const locale of ['en-US', 'zh-CN']) {
         for (const width of [200, 320, 420, 720]) {
@@ -52,7 +53,7 @@ try {
           page.on('response', response => {
             if (response.status() >= 400) errors.push(`${response.status()} ${response.url()}`);
           });
-          await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__user-action`);
+          await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__user-action`, { timeout: 15_000 });
           const verificationCommand = await page.evaluate(async ({ events, locale }) => {
             const { React, createRoot } = await import('/src/components/ai/__tests__/agent-content-surfaces.browser-runtime.ts');
             await import('/src/styles/base.css');
@@ -97,9 +98,24 @@ try {
             assert.ok(button.left >= dimensions.panel.left && button.right <= dimensions.panel.right, JSON.stringify(dimensions));
             assert.ok(button.bottom <= dimensions.panel.bottom, JSON.stringify(dimensions));
           }
+          const copiedLabel = locale === 'zh-CN' ? '已复制' : 'Copied';
+          const instructionsCopy = page.getByRole('button', { name: locale === 'zh-CN' ? '复制操作说明' : 'Copy instructions' });
+          assert.equal(await instructionsCopy.evaluate(element => getComputedStyle(element).opacity), '1');
+          await instructionsCopy.click();
+          await page.locator('.ai-question-panel-actions').getByRole('button', { name: copiedLabel, exact: true }).waitFor();
+          assert.equal(await page.locator('[data-sonner-toast]').count(), 0, 'Copy success must stay on the button.');
+          await page.screenshot({ path: join(output, `${engineName}-${locale}-${width}-instructions.png`) });
+          if (engine === chromium) {
+            const instructions = await page.evaluate(async events => {
+              const { projectQuestions } = await import('/src/lib/ai/question-projection.ts');
+              const { pendingUserAction } = await import('/src/types/agent-question.ts');
+              return pendingUserAction(projectQuestions(events).find(q => pendingUserAction(q))).instructions;
+            }, events);
+            assert.equal((await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n'), instructions.replace(/\r\n/g, '\n'));
+          }
           const copyLabel = locale === 'zh-CN' ? '复制命令' : 'Copy command';
-          const region = page.locator('.ai-question-panel-content [data-ai-copy-region]');
-          const copy = region.getByRole('button', { name: copyLabel });
+          const region = page.locator('.ai-question-panel-content [data-ai-copy-region]').filter({ has: page.locator('[data-ai-copy-anchor]') });
+          const copy = region.locator('button');
           const command = region.locator('pre');
           await copy.scrollIntoViewIfNeeded();
           const [regionBox, commandBox, copyBox] = await Promise.all([region.boundingBox(), command.boundingBox(), copy.boundingBox()]);
@@ -148,15 +164,28 @@ try {
             await page.locator('[data-slot="tooltip-content"]').filter({ hasText: copyLabel }).waitFor({ timeout: 5_000 });
             await copy.click();
           } else {
-            await page.locator('.ai-question-panel-actions').getByRole('button').focus();
-            await page.keyboard.press('Tab');
+            await page.locator('.ai-question-panel-actions').getByRole('button').last().focus();
+            for (let tab = 0; tab < 8 && !await copy.evaluate(button => button === document.activeElement); tab++) {
+              await page.keyboard.press('Tab');
+            }
             assert.equal(await copy.evaluate(button => button === document.activeElement), true);
             assert.equal(await copyOpacity(), '1', 'Keyboard focus must reveal the copy button.');
             await page.keyboard.press('Enter');
           }
-          await page.getByText(locale === 'zh-CN' ? '已复制' : 'Copied', { exact: true }).waitFor();
+          await region.getByRole('button', { name: copiedLabel, exact: true }).waitFor();
+          assert.equal(await copy.locator('.lucide-check').count(), 1);
+          assert.equal(await page.locator('[data-sonner-toast]').count(), 0);
           if (engine === chromium) {
-            assert.equal(await page.evaluate(() => navigator.clipboard.readText()), verificationCommand);
+            assert.equal((await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n'), verificationCommand.replace(/\r\n/g, '\n'));
+          }
+          const markdownRegion = page.locator('.ai-markdown-code-block [data-ai-copy-region]').first();
+          if (await markdownRegion.count()) {
+            const source = await markdownRegion.locator('code').textContent();
+            await markdownRegion.hover();
+            await markdownRegion.locator('button').click();
+            await markdownRegion.getByRole('button', { name: copiedLabel, exact: true }).waitFor();
+            if (engine === chromium) assert.equal((await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n'), source.replace(/\n$/, ''));
+            assert.equal(await page.locator('[data-sonner-toast]').count(), 0);
           }
           assert.deepEqual(errors, []);
           checks++;

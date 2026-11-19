@@ -618,7 +618,7 @@ describe('TerminalContextMenu', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('copy info writes username@host:port to the clipboard and closes', () => {
+  it('copy info writes username@host:port and shows feedback without closing', async () => {
     const session = makeSession('s1', 'A', 'p1');
 
     const onClose = vi.fn();
@@ -637,7 +637,9 @@ describe('TerminalContextMenu', () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
       'username@host:22',
     );
-    expect(onClose).toHaveBeenCalledTimes(1);
+    const copied = await screen.findByRole('menuitem', { name: 'common.copied' });
+    expect(copied.querySelector('.lucide-check')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('rename opens the prompt dialog with the session title as default', () => {

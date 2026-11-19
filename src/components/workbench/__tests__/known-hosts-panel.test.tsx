@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within, waitFor } from '@testing-library/react';
+import { useToastStore } from '@/stores/toastStore';
 import { describe, expect, it, vi } from 'vitest';
 import { KnownHostsPanel } from '../known-hosts-panel';
 
@@ -31,6 +32,19 @@ vi.mock('@/stores/knownHostsStore', () => ({
 }));
 
 describe('KnownHostsPanel', () => {
+  it('confirms fingerprint copying on the button without a success toast', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    useToastStore.setState({ toasts: [] });
+    render(<KnownHostsPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'workbench.knownHosts.copyFingerprint' }));
+    const copied = await screen.findByRole('button', { name: 'common.copied' });
+    expect(copied.querySelector('.lucide-check')).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledExactlyOnceWith('SHA256:fingerprint');
+    expect(useToastStore.getState().toasts).toHaveLength(0);
+    await waitFor(() => expect(copied).toHaveAccessibleName('workbench.knownHosts.copyFingerprint'), { timeout: 2_000 });
+  });
+
   it('provides labeled search and refresh actions in the header', () => {
     render(<KnownHostsPanel />);
 

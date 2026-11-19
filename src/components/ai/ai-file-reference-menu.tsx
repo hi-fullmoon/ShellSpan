@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useMemo, useState, type ComponentProps, type ReactNode } from 'react';
-import { AppWindow, Code, Copy, FileText, FolderOpen, Save, SquareTerminal } from 'lucide-react';
+import { AppWindow, Code, FileText, FolderOpen, Save, SquareTerminal } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   ContextMenu,
@@ -15,7 +15,7 @@ import {
 import { useI18n } from '@/hooks/useI18n';
 import type { AiLocalFileReference } from '@/lib/ai/file-reference';
 import { terminalLoginScopeKey } from '@/lib/ai/terminal-login-scope';
-import { writeClipboardText } from '@/lib/clipboard';
+import { CopyMenuItem } from '@/components/ui/copy-menu-item';
 import { sshRouteKey } from '@/lib/connections/ssh-route';
 import { findSftpPaneForLocation, openHostPath } from '@/lib/host/host-quick-actions';
 import {
@@ -155,10 +155,6 @@ export function AiFileReferenceMenu({
     return () => { current = false; };
   }, [directActivation, inspection, open]);
 
-  const copy = async (value: string) => {
-    await writeClipboardText(value);
-    toast.success(t('common.copied'));
-  };
   const saveAs = () => run(async () => {
     if (await invokeSaveLocalFileAs(path, t('ai.path.saveAs'))) toast.success(t('ai.path.saved'));
   }, 'ai.path.saveFailed');
@@ -194,7 +190,7 @@ export function AiFileReferenceMenu({
     },
   };
   const copyPathItem = (
-    <ContextMenuItem onClick={() => run(() => copy(path), 'ai.path.copyFailed')}><Copy />{t('ai.path.copy')}</ContextMenuItem>
+    <CopyMenuItem text={path} label={t('ai.path.copy')} errorLabel={t('ai.path.copyFailed')} />
   );
   const remoteAction = remote && (!inlineCode || confirmedKind) && (
     <ContextMenuItem onClick={revealRemotePath} disabled={!desktop || !remoteProfile || !routeKey}>
@@ -239,12 +235,13 @@ export function AiFileReferenceMenu({
         {(!inlineCode || localActions) && <ContextMenuGroup>
           {localActions && fileActions && <ContextMenuItem onClick={saveAs} disabled={!desktop}><Save />{t('ai.path.saveAs')}</ContextMenuItem>}
           {!inlineCode && copyPathItem}
-          {localActions && fileActions && <ContextMenuItem
-            onClick={() => run(async () => copy(await invokeReadLocalFileText(path)), 'ai.path.copyContentsFailed')}
+          {localActions && fileActions && <CopyMenuItem
+            text={() => invokeReadLocalFileText(path)}
+            label={t('ai.path.copyContents')}
+            errorLabel={t('ai.path.copyContentsFailed')}
+            icon={FileText}
             disabled={!desktop}
-          >
-            <FileText />{t('ai.path.copyContents')}
-          </ContextMenuItem>}
+          />}
           {localActions && <ContextMenuItem onClick={revealPath} disabled={!desktop}><FolderOpen />{t(revealLabel)}</ContextMenuItem>}
           {!inlineCode && remoteAction}
         </ContextMenuGroup>}

@@ -1,6 +1,5 @@
 import React, {
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -32,6 +31,8 @@ import { invokeOpenUrl, isTauriRuntime } from '@/lib/ipc/tauri';
 import { createStreamingMarkdownSplitter } from '@/lib/streaming-markdown';
 import type { AgentSessionAssistantContentBlock, AgentSessionTarget } from '@/types/agent-session';
 import { cn } from '@/lib/utils';
+import { CopyMenuItem } from '@/components/ui/copy-menu-item';
+import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { AiFileReferenceMenu } from './ai-file-reference-menu';
 import { useMessageLayoutCommit } from './message-layout-context';
 import { rehypeStreamingText, StreamingText, StreamingTextBoundaryContext, StreamingTextContext } from './streaming-text';
@@ -75,16 +76,6 @@ function MarkdownLink({ children, href }: { children: React.ReactNode; href?: st
     }
   };
 
-  const copy = (value: string): void => {
-    if (!navigator.clipboard) {
-      toast.error(t('ai.link.copyFailed'));
-      return;
-    }
-    void navigator.clipboard.writeText(value)
-      .then(() => toast.success(t('common.copied')))
-      .catch(() => toast.error(t('ai.link.copyFailed')));
-  };
-
   return (
     <ContextMenu>
       <ContextMenuTrigger
@@ -100,9 +91,9 @@ function MarkdownLink({ children, href }: { children: React.ReactNode; href?: st
         <ContextMenuGroup>
           <ContextMenuItem onClick={openLink}>{t('ai.link.open')}</ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => copy(href)}>{t('ai.link.copyAddress')}</ContextMenuItem>
+          <CopyMenuItem text={href} label={t('ai.link.copyAddress')} errorLabel={t('ai.link.copyFailed')} />
           {label && label !== href && (
-            <ContextMenuItem onClick={() => copy(label)}>{t('ai.link.copyText')}</ContextMenuItem>
+            <CopyMenuItem text={label} label={t('ai.link.copyText')} errorLabel={t('ai.link.copyFailed')} />
           )}
         </ContextMenuGroup>
       </ContextMenuContent>
@@ -133,21 +124,8 @@ function MarkdownCodeBlock({
 }) {
   const code = textFromNode(children).replace(/\n$/, '');
   const language = languageFromNode(children);
-  const [copied, setCopied] = useState(false);
-  const resetTimerRef = useRef<number | null>(null);
+  const { copied, copy } = useCopyFeedback();
   const viewportRef = useRef<HTMLPreElement>(null);
-
-  useEffect(() => () => {
-    if (resetTimerRef.current !== null) window.clearTimeout(resetTimerRef.current);
-  }, []);
-
-  const copy = useCallback(() => {
-    if (copied || !navigator.clipboard) return;
-    void navigator.clipboard.writeText(code).then(() => {
-      setCopied(true);
-      resetTimerRef.current = window.setTimeout(() => setCopied(false), 1_000);
-    }).catch(() => undefined);
-  }, [code, copied]);
 
   return (
     <div className="ai-code-block ai-markdown-code-block relative my-3 min-w-0 max-w-full overflow-hidden" data-language={language || undefined}>
@@ -163,7 +141,7 @@ function MarkdownCodeBlock({
             className="ai-markdown-code-copy ai-content-copy absolute top-1 right-3.5 z-10"
             aria-label={copied ? copiedLabel : copyLabel}
             title={copied ? undefined : copyLabel}
-            onClick={copy}
+            onClick={() => { void copy(code); }}
           >
             {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
           </Button>

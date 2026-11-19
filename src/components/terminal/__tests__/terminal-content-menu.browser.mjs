@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { userInfo } from 'node:os';
 import { createServer } from 'vite';
@@ -7,6 +9,8 @@ import tailwindcss from '@tailwindcss/vite';
 import { chromium, webkit } from 'playwright';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
+const screenshots = join(root, 'artifacts/tests/terminal-copy-feedback');
+await mkdir(screenshots, { recursive: true });
 const output = readFileSync(new URL('../terminal-pane.tsx', import.meta.url), 'utf8');
 const server = await createServer({
   root, configFile: false, appType: 'custom', logLevel: 'error',
@@ -46,8 +50,10 @@ const server = await createServer({
 
 try {
   await server.listen();
-  for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) {
-    const browser = await engine.launch();
+  const channel = process.env.SHELLSPAN_BROWSER_CHANNEL;
+  const engines = channel ? [['chromium', chromium]] : [['chromium', chromium], ['webkit', webkit]];
+  for (const [name, engine] of engines) {
+    const browser = await engine.launch(engine === chromium && channel ? { channel } : {});
     try {
       const page = await browser.newPage();
       page.setDefaultTimeout(10000);
@@ -133,10 +139,25 @@ try {
           });
           assert.deepEqual(frame, { outlineStyle: 'none', boxShadow: menuShadow }, 'Hovering a separator leaves the menu frame unchanged');
         }
-        await page.screenshot({ path: `/tmp/shellspan-terminal-menu-${name}-${width}.png` });
+        await page.screenshot({ path: join(screenshots, `${name}-${width}.png`) });
         await page.keyboard.press('ArrowDown');
         await keyboardItem.waitFor();
         assert.deepEqual(await itemHighlight(keyboardItem), hovered, 'ArrowDown resumes item highlighting from a separator');
+        await page.keyboard.press('Escape');
+        await menu.waitFor({ state: 'hidden' });
+        assert.ok(await page.locator('.xterm-helper-textarea').evaluate(element => element === document.activeElement));
+        await screen.click({ button: 'right', position: { x: 15, y: 20 } });
+        const copy = menu.getByRole('menuitem', { name: '复制', exact: true });
+        await copy.focus();
+        await page.keyboard.press('Enter');
+        const copied = menu.getByRole('menuitem', { name: '已复制', exact: true });
+        await copied.waitFor();
+        assert.equal(await copied.locator('.lucide-check').count(), 1);
+        assert.equal(await copied.evaluate(element => element === document.activeElement), true);
+        assert.equal(await page.evaluate(() => window.terminal.getSelection()), selected);
+        if (name === 'chromium') assert.equal((await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n'), selected.replace(/\r\n/g, '\n'));
+        assert.equal(await page.locator('[data-sonner-toast]').count(), 0);
+        await page.screenshot({ path: join(screenshots, `${name}-${width}-copied.png`) });
         await page.keyboard.press('Escape');
         await menu.waitFor({ state: 'hidden' });
         assert.ok(await page.locator('.xterm-helper-textarea').evaluate(element => element === document.activeElement));
@@ -247,6 +268,8 @@ try {
       if (name === 'chromium') {
         await menu.getByRole('menuitem').first().click();
         assert.equal(await page.evaluate(() => navigator.clipboard.readText()), path);
+        await menu.getByRole('menuitem', { name: '已复制', exact: true }).waitFor();
+        await page.keyboard.press('Escape');
       } else {
         await page.waitForFunction(() => document.activeElement?.closest('[role="menu"]'));
         await page.keyboard.press('Escape');
@@ -280,7 +303,7 @@ try {
         document.dispatchEvent(new Event('shellspan:find-terminal'));
       }, { path, name });
       const search = page.locator('[data-terminal-search] input');
-      const file = path.split('/').at(-1);
+      const file = path.split(/[\\/]/).at(-1);
       await search.fill(file);
       await page.waitForFunction(file => window.terminal.getSelection() === file, file);
       if (name === 'chromium') {
@@ -320,7 +343,7 @@ try {
       await browser.close();
     }
   }
-  process.stdout.write('Terminal content menu regressions passed with real xterm in Chromium and WebKit.\n');
+  process.stdout.write('Terminal content menu regressions passed with real xterm in the selected browsers.\n');
 } finally {
   await server.close();
 }

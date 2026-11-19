@@ -34,6 +34,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { MessageLayoutContext } from './message-layout-context';
 import { useTurnScrollTransition } from './workspace/use-turn-scroll-transition';
+import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 
 interface MessageScrollerProps {
   children: React.ReactNode;
@@ -779,21 +780,7 @@ export const MessageActions: React.FC<{
   reveal?: 'hover' | 'always';
 }> = ({ text, align, timestamp, className, actionClassName, children, reveal = 'hover' }) => {
   const { t } = useI18n();
-  const [copied, setCopied] = useState(false);
-  const resetTimerRef = useRef<number | null>(null);
-
-  useEffect(() => () => {
-    if (resetTimerRef.current !== null) window.clearTimeout(resetTimerRef.current);
-  }, []);
-
-  const copy = useCallback(() => {
-    if (copied || !navigator.clipboard) return;
-    void navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      if (resetTimerRef.current !== null) window.clearTimeout(resetTimerRef.current);
-      resetTimerRef.current = window.setTimeout(() => setCopied(false), 1_000);
-    }).catch(() => undefined);
-  }, [copied, text]);
+  const { copied, copy } = useCopyFeedback();
 
   const time = timestamp === undefined
     ? null
@@ -820,7 +807,7 @@ export const MessageActions: React.FC<{
               size="icon-sm"
               className={cn('ai-message-action grid size-7 place-items-center p-0', actionClassName)}
               aria-label={copied ? t('common.copied') : t('common.copy')}
-              onClick={copy}
+              onClick={() => { void copy(text); }}
             />
           )}
         >

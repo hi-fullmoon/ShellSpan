@@ -1,3 +1,4 @@
+import { writeClipboardText } from '@/lib/clipboard';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import {
@@ -79,13 +80,13 @@ export interface UseSftpPaneActionsResult {
   onBatchDownload: () => Promise<void>;
   uploadWithPolicies: (localPaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[], operationId?: string) => Promise<void>;
   copyWithPolicies: (sourcePaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[], operationId?: string) => Promise<void>;
-  onCopy: (entry?: FileEntry) => void;
+  onCopy: (entry?: FileEntry) => boolean;
   onPaste: () => Promise<void>;
   onRename: (entry?: FileEntry) => void;
   onDelete: (entries?: FileEntry[]) => Promise<void>;
-  onCopyName: (entry?: FileEntry) => Promise<void>;
-  onCopyPath: (entry?: FileEntry) => Promise<void>;
-  onCopyContainingDirectory: (entry?: FileEntry) => Promise<void>;
+  onCopyName: (entry?: FileEntry) => Promise<boolean>;
+  onCopyPath: (entry?: FileEntry) => Promise<boolean>;
+  onCopyContainingDirectory: (entry?: FileEntry) => Promise<boolean>;
   onNewFile: () => void;
   onNewFolder: () => void;
   onUploadFiles: () => Promise<void>;
@@ -95,7 +96,7 @@ export interface UseSftpPaneActionsResult {
   onToggleBookmark: (path?: string) => void;
   onRefresh: () => Promise<void>;
   onToggleBatchMode: () => void;
-  onCopyCurrentDirectoryPath: () => Promise<void>;
+  onCopyCurrentDirectoryPath: () => Promise<boolean>;
   setCreateMode: (mode: 'file' | 'folder' | null) => void;
   setRenameTarget: (entry?: FileEntry) => void;
   setPermissionsTarget: (entry?: RemoteFileEntry) => void;
@@ -115,33 +116,6 @@ function remoteDestinationPath(directory: string, sourcePath: string): string {
   const name = normalizedSource.split('/').filter(Boolean).pop() ?? sourcePath;
   const base = directory === '/' ? '' : directory.replace(/\/+$/, '');
   return `${base}/${name}`;
-}
-
-function writeClipboardText(value: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    return navigator.clipboard.writeText(value);
-  }
-  return new Promise((resolve, reject) => {
-    const textarea = document.createElement('textarea');
-    textarea.value = value;
-    textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
-    textarea.style.pointerEvents = 'none';
-    document.body.append(textarea);
-    textarea.select();
-    let succeeded = false;
-    try {
-      succeeded = document.execCommand('copy');
-    } catch {
-      succeeded = false;
-    }
-    textarea.remove();
-    if (succeeded) {
-      resolve();
-    } else {
-      reject(new Error('Copy to clipboard failed'));
-    }
-  });
 }
 
 export function useSftpPaneActions(
@@ -458,13 +432,12 @@ export function useSftpPaneActions(
     (entry?: FileEntry) => {
       if (isLocal) {
         const targets = entry ? [entry] : selectedEntries;
-        if (!targets.length) return;
+        if (!targets.length) return false;
         setLocalClipboard(targets);
-        success(`Copied ${targets.length} item(s)`);
-        return;
+        return true;
       }
       const target = entry ?? selectedEntries[0];
-      if (!target) return;
+      if (!target) return false;
       setRemoteClipboard(connection.id, {
         sourcePath: target.path,
         sourceName: target.name,
@@ -473,9 +446,9 @@ export function useSftpPaneActions(
         sourceConnection: remoteConnection,
         sourceConnectionKey: remoteConnectionKey,
       });
-      success(`Copied ${target.name}`);
+      return true;
     },
-    [connection.id, isLocal, remoteConnection, remoteConnectionKey, selectedEntries, setRemoteClipboard, side, success],
+    [connection.id, isLocal, remoteConnection, remoteConnectionKey, selectedEntries, setRemoteClipboard, side],
   );
 
   const onPaste = useCallback(async () => {
@@ -569,59 +542,63 @@ export function useSftpPaneActions(
   const onCopyName = useCallback(
     async (entry?: FileEntry) => {
       const target = entry ?? selectedEntries[0];
-      if (!target) return;
+      if (!target) return false;
       try {
         await writeClipboardText(target.name);
-        success('Copied name');
+        return true;
       } catch (err) {
         logger.warn('Failed to copy name', err);
         error(t('sftp.feedback.copyNameFailed'));
+        return false;
       }
     },
-    [selectedEntries, error, success, t],
+    [selectedEntries, error, t],
   );
 
   const onCopyPath = useCallback(
     async (entry?: FileEntry) => {
       const target = entry ?? selectedEntries[0];
-      if (!target) return;
+      if (!target) return false;
       try {
         await writeClipboardText(target.path);
-        success('Copied path');
+        return true;
       } catch (err) {
         logger.warn('Failed to copy path', err);
         error(t('sftp.feedback.copyPathFailed'));
+        return false;
       }
     },
-    [selectedEntries, error, success, t],
+    [selectedEntries, error, t],
   );
 
   const onCopyContainingDirectory = useCallback(
     async (entry?: FileEntry) => {
       const target = entry ?? selectedEntries[0];
-      if (!target) return;
+      if (!target) return false;
       const dir = target.kind === 'directory' ? target.path : parentDirectoryPath(target.path, isLocal);
       try {
         await writeClipboardText(dir);
-        success('Copied directory path');
+        return true;
       } catch (err) {
         logger.warn('Failed to copy directory path', err);
         error(t('sftp.feedback.copyDirectoryFailed'));
+        return false;
       }
     },
-    [selectedEntries, error, isLocal, success, t],
+    [selectedEntries, error, isLocal, t],
   );
 
   const onCopyCurrentDirectoryPath = useCallback(async () => {
-    if (!path) return;
+    if (!path) return false;
     try {
       await writeClipboardText(path);
-      success('Copied current directory path');
+      return true;
     } catch (err) {
       logger.warn('Failed to copy current directory path', err);
       error(t('sftp.feedback.copyCurrentDirectoryFailed'));
+      return false;
     }
-  }, [path, error, success, t]);
+  }, [path, error, t]);
 
   const onNewFile = useCallback(() => {
     if (isLocal) return;

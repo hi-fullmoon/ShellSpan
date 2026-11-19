@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils';
 import type { TerminalSession } from '@/stores/terminalStore';
 import type { TerminalSplitDirection } from './terminal-split';
 import { TerminalCloseDetails } from './terminal-close-details';
-import { copyTerminalText } from './terminal-clipboard';
+import { CopyButton } from '@/components/ui/copy-button';
 import { useAppStore } from '@/stores/appStore';
 import { useFocusStore } from '@/stores/focusStore';
 
@@ -151,11 +151,6 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
     onClose();
   };
 
-  const handleCopyInfo = (): void => {
-    void copyTerminalText(`${target.username}@${target.host}:${target.port}`);
-    onClose();
-  };
-
   const handleOpenSftp = (): void => {
     if (target.profileId) {
       document.dispatchEvent(new CustomEvent('shellspan:connect-profile', {
@@ -290,9 +285,9 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         >
           {t('common.duplicate')}
         </MenuItem>
-        <MenuItem onClick={handleCopyInfo}>
-          {t('terminal.tab.copyInfo')}
-        </MenuItem>
+        <CopyButton key={target.sessionId} role="menuitem" tabIndex={-1} size="sm"
+          className="h-auto w-full justify-start px-2.5 py-1.5 text-left text-xs focus:bg-accent focus:text-app-primary focus-visible:outline-hidden!"
+          text={`${target.username}@${target.host}:${target.port}`} label={t('terminal.tab.copyInfo')} errorLabel={t('terminal.feedback.copyFailed')} />
         <MenuItem onClick={handleOpenSftp} disabled={!target.profileId}>
           {t('terminal.tab.openSftp')}
         </MenuItem>

@@ -4,11 +4,9 @@ import {
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  CopyIcon,
   MessageCircleQuestionIcon,
   PenLineIcon,
 } from 'lucide-react';
-import { toast } from 'sonner';
 import {
   Card,
   CardAction,
@@ -30,7 +28,6 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   InputGroup,
   InputGroupAddon,
@@ -43,9 +40,10 @@ import {
 } from '@/components/ui/collapsible';
 import { useI18n } from '@/hooks/useI18n';
 import { AiContentTitle } from './ai-content-title';
+import { MarkdownContent } from '../assistant-message-content';
+import { AiToolCopyButton } from './ai-tool-presentation';
 import { AiSubmissionButtonLabel, submissionFeedbackMs } from './ai-submission-button-label';
 import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
-import { writeClipboardText } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 import { questionIssue, questionIssueMessageKey, questionSubmissionIssue, type QuestionSubmissionIssue } from '@/lib/ai/question-submission';
 import {
@@ -290,6 +288,12 @@ export function AiQuestionPanel({
           <AiContentTitle key={currentQuestion.id}>{userAction ? t('ai.workspace.question.actionWaiting') : currentQuestion.question}</AiContentTitle>
         </CardTitle>
         <CardAction className="ai-question-panel-actions flex items-center gap-0.5">
+          {userAction && <AiToolCopyButton
+            text={userAction.instructions}
+            label={t('ai.workspace.question.actionCopyInstructions')}
+            errorLabel={t('ai.workspace.question.actionCopyInstructionsFailed')}
+            placement="inline"
+          />}
           <Button
             type="button"
             variant="ghost"
@@ -310,7 +314,9 @@ export function AiQuestionPanel({
         <>
           <CardContent ref={content} className="ai-question-panel-content max-h-65 min-h-0 overflow-x-hidden overflow-y-auto px-4 pt-px pb-1.5 @max-[421px]/ai-workspace:px-2.5 @max-[421px]/ai-workspace:pt-0">
             {userAction ? <FieldGroup className="gap-2" aria-live="polite">
-              <FieldDescription className="whitespace-pre-wrap [overflow-wrap:anywhere]">{userAction.instructions}</FieldDescription>
+              <MarkdownContent copiedLabel={t('common.copied')} copyLabel={t('ai.workspace.tool.copyCommand')} showCodeBlockActions>
+                {userAction.instructions}
+              </MarkdownContent>
               <Field>
                 <FieldDescription>{t('ai.workspace.question.actionVerification')}</FieldDescription>
                 <div className="ai-code-block flex min-w-0 items-baseline" data-ai-copy-region>
@@ -319,26 +325,12 @@ export function AiQuestionPanel({
                   </pre>
                   {/* A zero-size box shares the first text baseline without taking space from the command. */}
                   <span className="relative size-0 shrink-0" data-ai-copy-anchor>
-                    <Tooltip>
-                      <TooltipTrigger render={
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-xs"
-                          className="ai-tool-copy-button absolute -top-[0.5ex] -translate-y-1/2 [font:var(--ai-font-markdown-code-block)]"
-                          aria-label={copyCommandLabel}
-                          onClick={() => {
-                            void writeClipboardText(userAction.verification_command).then(
-                              () => toast.success(t('common.copied')),
-                              () => toast.error(t('ai.workspace.question.actionCopyFailed')),
-                            );
-                          }}
-                        />
-                      }>
-                        <CopyIcon aria-hidden="true" />
-                      </TooltipTrigger>
-                      <TooltipContent>{copyCommandLabel}</TooltipContent>
-                    </Tooltip>
+                    <AiToolCopyButton
+                      text={userAction.verification_command}
+                      label={copyCommandLabel}
+                      errorLabel={t('ai.workspace.question.actionCopyFailed')}
+                      className="-top-[0.5ex] -translate-y-1/2 [font:var(--ai-font-markdown-code-block)]"
+                    />
                   </span>
                 </div>
               </Field>

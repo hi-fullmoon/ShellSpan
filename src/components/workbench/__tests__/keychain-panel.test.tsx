@@ -125,6 +125,18 @@ describe('KeychainPanel', () => {
     expect(screen.getByLabelText('common.privateKey')).toHaveAttribute('autocomplete', 'off');
   });
 
+  it('confirms public key copying inside its button', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    render(<KeychainPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'common.create' }));
+    fireEvent.change(screen.getByLabelText('common.publicKey'), { target: { value: 'ssh-ed25519 PUBLIC_TEST_KEY example' } });
+    fireEvent.click(screen.getByRole('button', { name: 'workbench.keychain.copyPublicKey' }));
+    const copied = await screen.findByRole('button', { name: 'common.copied' });
+    expect(copied.querySelector('.lucide-check')).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledExactlyOnceWith('ssh-ed25519 PUBLIC_TEST_KEY example');
+  });
+
   it('focuses the first invalid field when saving an empty key', async () => {
     render(<KeychainPanel />);
 

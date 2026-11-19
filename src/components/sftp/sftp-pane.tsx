@@ -363,7 +363,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     }, [blankContextMenu, bookmarkMenu, fileContextMenu, handleExitBatchMode, pane.batchMode]);
 
     const handleFileContextMenuAction = useCallback(
-      (action: SftpFileContextMenuAction, targets?: FileEntry[]): void => {
+      (action: SftpFileContextMenuAction, targets?: FileEntry[]): void | boolean | Promise<boolean> => {
         switch (action) {
           case 'open': {
             const target = selectedEntries[0];
@@ -386,22 +386,18 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
             actions.onRename(singleSelection);
             break;
           case 'copy':
-            actions.onCopy(singleSelection);
-            break;
+            return actions.onCopy(singleSelection);
           case 'delete':
             // The confirmation dialog snapshots its targets while open; prefer
             // that snapshot over the live selection, which may have changed.
             void actions.onDelete(targets?.length ? targets : selectedEntries);
             break;
           case 'copyName':
-            void actions.onCopyName(singleSelection);
-            break;
+            return actions.onCopyName(singleSelection);
           case 'copyPath':
-            void actions.onCopyPath(singleSelection);
-            break;
+            return actions.onCopyPath(singleSelection);
           case 'copyContainingDirectory':
-            void actions.onCopyContainingDirectory(singleSelection);
-            break;
+            return actions.onCopyContainingDirectory(singleSelection);
           case 'newFile':
             actions.onNewFile();
             break;
@@ -432,7 +428,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     );
 
     const handleBlankContextMenuAction = useCallback(
-      (action: SftpBlankContextMenuAction): void => {
+      (action: SftpBlankContextMenuAction): void | Promise<boolean> => {
         switch (action) {
           case 'newFile':
             actions.onNewFile();
@@ -450,8 +446,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
             void actions.onPaste();
             break;
           case 'copyCurrentDirectoryPath':
-            void actions.onCopyCurrentDirectoryPath();
-            break;
+            return actions.onCopyCurrentDirectoryPath();
           case 'batchMode':
             actions.onToggleBatchMode();
             break;

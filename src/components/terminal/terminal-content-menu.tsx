@@ -17,7 +17,7 @@ import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useFocusStore } from '@/stores/focusStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
-import { copyTerminalText } from './terminal-clipboard';
+import { CopyMenuItem } from '@/components/ui/copy-menu-item';
 import { findHttpLinksInBuffer, terminalRegistry } from './registry/terminal-registry';
 import { terminalInputReadiness } from './terminal-input-readiness';
 import { agentTerminalLeaseState } from './agent-terminal-lease-state';
@@ -122,7 +122,6 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
   const shortcuts = useAppStore(state => state.shortcuts);
   const mac = getPlatform() === 'macos';
   const hint = (value: string): React.ReactNode => <span className="ml-auto pl-4 text-muted-foreground">{value}</span>;
-  const copy = (text: string): void => { void copyTerminalText(text); };
   const run = (action: () => void): void => { if (valid()) action(); };
   const transfer = (analyze: boolean): void => run(() => {
     if (!snapshot.selection || !sessionId) return;
@@ -161,10 +160,10 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
         finalFocus={() => restoreFocus.current && valid() ? terminal?.textarea : false}
       >
         <ContextMenuGroup>
-          <ContextMenuItem disabled={!snapshot.selection} onClick={() => {
-            const text = useAppStore.getState().terminalTrimTrailingWhitespace ? snapshot.selection.replace(/[ \t]+(?=\r?$)/gm, '') : snapshot.selection;
-            copy(text);
-          }}>{t('common.copy')}{hint(mac ? '⌘+C' : 'Ctrl+Shift+C')}</ContextMenuItem>
+          <CopyMenuItem disabled={!snapshot.selection}
+            text={() => useAppStore.getState().terminalTrimTrailingWhitespace ? snapshot.selection.replace(/[ \t]+(?=\r?$)/gm, '') : snapshot.selection}
+            label={t('common.copy')} errorLabel={t('terminal.feedback.copyFailed')}
+          >{hint(mac ? '⌘+C' : 'Ctrl+Shift+C')}</CopyMenuItem>
           <ContextMenuItem disabled={!canPaste || clipboard === ''} onClick={() => run(() => {
             if (clipboard !== null) onPaste(clipboard);
             else {
@@ -179,7 +178,7 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
         {(snapshot.url || snapshot.path) && <><ContextMenuSeparator /><ContextMenuGroup>
           {snapshot.url && <>
             <ContextMenuItem onClick={() => { void invokeOpenUrl(snapshot.url!).catch(() => showError(t('ai.link.openFailed'))); }}>{t('ai.link.open')}</ContextMenuItem>
-            <ContextMenuItem onClick={() => copy(snapshot.url!)}>{t('ai.link.copyAddress')}</ContextMenuItem>
+            <CopyMenuItem text={snapshot.url} label={t('ai.link.copyAddress')} errorLabel={t('terminal.feedback.copyFailed')} />
           </>}
           {snapshot.path && <>
             <ContextMenuItem onClick={() => run(() => {
@@ -191,7 +190,7 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
                 if (profile) openHostPath(profile, parentDirectoryPath(snapshot.path!), 'sftp');
               }
             })} disabled={!(session?.host === 'local' && session.port === 0) && !session?.profileId}>{t('terminal.menu.revealPath')}</ContextMenuItem>
-            <ContextMenuItem onClick={() => copy(snapshot.path!)}>{t('ai.path.copy')}</ContextMenuItem>
+            <CopyMenuItem text={snapshot.path} label={t('ai.path.copy')} errorLabel={t('terminal.feedback.copyFailed')} />
           </>}
         </ContextMenuGroup></>}
         <ContextMenuSeparator />

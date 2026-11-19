@@ -12,7 +12,6 @@ import {
   CheckIcon,
   ChevronRightIcon,
   CircleAlertIcon,
-  CopyIcon,
   EllipsisIcon,
   FileSearchIcon,
   FileTextIcon,
@@ -22,6 +21,8 @@ import {
   XIcon,
 } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
+import { useCopyFeedback } from '@/hooks/useCopyFeedback';
+import { CopyButton } from '@/components/ui/copy-button';
 import { useAppStore } from '@/stores/appStore';
 import { useLogStore } from '@/stores/logStore';
 import { createLogParser, type ParsedLogLine } from '@/lib/logs/parser';
@@ -203,7 +204,6 @@ interface LogLineProps {
   query: string;
   selected: boolean;
   onSelect: () => void;
-  onDoubleClick: () => void;
 }
 
 const LogLine: React.FC<LogLineProps> = ({
@@ -212,8 +212,9 @@ const LogLine: React.FC<LogLineProps> = ({
   query,
   selected,
   onSelect,
-  onDoubleClick,
 }) => {
+  const { t } = useI18n();
+  const { copied, copy } = useCopyFeedback(t('workbench.logs.copyFailed'));
   const timestamp = line.date && line.time
     ? `${line.date} ${line.time}`
     : `#${originalIndex + 1}`;
@@ -224,7 +225,7 @@ const LogLine: React.FC<LogLineProps> = ({
     <button
       type="button"
       onClick={onSelect}
-      onDoubleClick={onDoubleClick}
+      onDoubleClick={() => { void copy(line.raw); }}
       className={cn(
         'relative grid w-full cursor-default items-start gap-2 px-3 py-1.5 text-left font-mono text-xs transition-colors before:absolute before:inset-y-0 before:left-0 before:w-0.5',
         LOG_COLUMNS,
@@ -245,9 +246,12 @@ const LogLine: React.FC<LogLineProps> = ({
         <TooltipContent>{line.target ?? `#${originalIndex + 1}`}</TooltipContent>
       </Tooltip>
       <span
-        className="min-w-0 truncate whitespace-nowrap leading-5 text-foreground @max-[420px]:col-span-full"
+        className="flex min-w-0 items-center gap-1 truncate whitespace-nowrap leading-5 text-foreground @max-[420px]:col-span-full"
       >
-        {renderHighlightedText(message, query)}
+        <span className="min-w-0 flex-1 truncate">{renderHighlightedText(message, query)}</span>
+        {copied && <span role="status" className="flex shrink-0 items-center gap-1 text-muted-foreground">
+          <CheckIcon className="size-3" />{t('common.copied')}
+        </span>}
       </span>
     </button>
   );
@@ -337,12 +341,9 @@ const LogInspector: React.FC<{
   entry: IndexedLogLine;
   source: LogSource;
   onClose: () => void;
-  onCopy: () => Promise<boolean>;
-}> = ({ entry, source, onClose, onCopy }) => {
+}> = ({ entry, source, onClose }) => {
   const { t } = useI18n();
   const { line, originalIndex } = entry;
-  const [copied, setCopied] = useState(false);
-  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const timestamp = line.date && line.time ? `${line.date} ${line.time}` : '—';
   const fields = [
     [t('workbench.logs.inspector.timestamp'), timestamp],
@@ -353,22 +354,6 @@ const LogInspector: React.FC<{
     [t('workbench.logs.inspector.target'), line.target ?? '—'],
     [t('workbench.logs.inspector.line'), String(originalIndex + 1)],
   ];
-
-  useEffect(() => {
-    setCopied(false);
-    if (copyResetTimerRef.current) clearTimeout(copyResetTimerRef.current);
-  }, [originalIndex]);
-
-  useEffect(() => () => {
-    if (copyResetTimerRef.current) clearTimeout(copyResetTimerRef.current);
-  }, []);
-
-  const handleCopy = async (): Promise<void> => {
-    if (!await onCopy()) return;
-    setCopied(true);
-    if (copyResetTimerRef.current) clearTimeout(copyResetTimerRef.current);
-    copyResetTimerRef.current = setTimeout(() => setCopied(false), 2000);
-  };
 
   return (
     <aside className="flex min-h-0 w-72 shrink-0 flex-col border-l border-app-border/50 bg-card @max-[760px]:absolute @max-[760px]:inset-y-0 @max-[760px]:right-0 @max-[760px]:z-20 @max-[760px]:w-[min(22rem,92%)] @max-[760px]:shadow-xl">
@@ -392,20 +377,17 @@ const LogInspector: React.FC<{
         <div className="flex flex-col gap-3 p-3">
           <div className="flex items-center justify-between gap-2">
             <LevelBadge level={line.level} />
-            <Button
+            <CopyButton
+              key={line.raw}
+              text={line.raw}
+              label={t('workbench.logs.inspector.copy')}
+              copiedLabel={t('workbench.logs.inspector.copied')}
+              errorLabel={t('workbench.logs.copyFailed')}
               variant="ghost"
               size="xs"
               className="mr-1"
-              onClick={() => void handleCopy()}
               aria-live="polite"
-            >
-              {copied
-                ? <CheckIcon data-icon="inline-start" />
-                : <CopyIcon data-icon="inline-start" />}
-              {t(copied
-                ? 'workbench.logs.inspector.copied'
-                : 'workbench.logs.inspector.copy')}
-            </Button>
+            />
           </div>
           <dl className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-[11px]">
             {fields.map(([fieldLabel, value]) => (
@@ -529,24 +511,6 @@ export const LogPanel: React.FC = () => {
   useEffect(() => {
     void loadFiles();
   }, [loadFiles]);
-
-  const copyLogContent = useCallback(async (
-    contentToCopy: string,
-    showSuccess = true,
-  ): Promise<boolean> => {
-    if (!navigator.clipboard?.writeText) {
-      showError(t('workbench.logs.copyFailed'));
-      return false;
-    }
-    try {
-      await navigator.clipboard.writeText(contentToCopy);
-      if (showSuccess) success(t('workbench.logs.copied'));
-      return true;
-    } catch {
-      showError(t('workbench.logs.copyFailed'));
-      return false;
-    }
-  }, [success, showError, t]);
 
   useEffect(() => {
     if (!activeFileName || activeSection !== 'workbench') return;
@@ -819,7 +783,6 @@ export const LogPanel: React.FC = () => {
                             query={normalizedQuery}
                             selected={entry.originalIndex === selectedOriginalIndex}
                             onSelect={() => setSelectedOriginalIndex(entry.originalIndex)}
-                            onDoubleClick={() => void copyLogContent(entry.line.raw)}
                           />
                         </div>
                       );
@@ -851,7 +814,6 @@ export const LogPanel: React.FC = () => {
               entry={selectedEntry}
               source={activeSource}
               onClose={() => setSelectedOriginalIndex(undefined)}
-              onCopy={() => copyLogContent(selectedEntry.line.raw, false)}
             />
           )}
 

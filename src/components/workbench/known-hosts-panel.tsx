@@ -6,7 +6,7 @@ import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state'
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover';
-import { writeClipboardText } from '@/lib/clipboard';
+import { CopyButton } from '@/components/ui/copy-button';
 import type { KnownHostEntry } from '@/types';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -15,7 +15,6 @@ import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   CircleAlertIcon,
-  CopyIcon,
   InfoIcon,
   FingerprintIcon,
   PlusIcon,
@@ -43,7 +42,7 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
   onCreateConnection,
 }) => {
   const { t } = useI18n();
-  const { error: showError, success: showSuccess } = useToast();
+  const { error: showError } = useToast();
   const { hosts, loading, error, loadHosts, removeHost } = useKnownHostsStore();
   const [removing, setRemoving] = React.useState<{
     host: string;
@@ -70,14 +69,6 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
   };
 
   const normalizedQuery = query.trim().toLowerCase();
-  const handleCopy = async (fingerprint: string): Promise<void> => {
-    try {
-      await writeClipboardText(fingerprint);
-      showSuccess(t('workbench.knownHosts.copied'));
-    } catch {
-      showError(t('workbench.knownHosts.copyFailed'));
-    }
-  };
   const filteredHosts = hosts.filter((host) => {
     if (!normalizedQuery) return true;
     return [host.host, host.keyType, host.fingerprint, String(host.port)]
@@ -231,15 +222,14 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
                           {fingerprint}
                         </div>
                       </div>
-                      <IconActionButton
+                      <CopyButton
+                        text={fingerprint}
+                        label={t('workbench.knownHosts.copyFingerprint', { keyType: key.keyType })}
+                        errorLabel={t('workbench.knownHosts.copyFailed')}
+                        iconOnly
                         size="icon-xs"
                         className="absolute right-1 top-1 size-6! text-muted-foreground opacity-0 group-hover/fingerprint:opacity-100 focus-visible:opacity-100"
-                        onClick={() => void handleCopy(fingerprint)}
-                        aria-label={t('workbench.knownHosts.copyFingerprint', { keyType: key.keyType })}
-                        tooltip={t('workbench.knownHosts.copyFingerprint', { keyType: key.keyType })}
-                      >
-                        <CopyIcon />
-                      </IconActionButton>
+                      />
                     </div>
                   );
                 })}

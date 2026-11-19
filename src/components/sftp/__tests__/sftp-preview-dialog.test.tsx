@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { strToU8, zipSync } from 'fflate';
 import { readFileSync } from 'node:fs';
@@ -31,6 +31,19 @@ const toBase64 = (bytes: Uint8Array): string => {
 };
 
 describe('SftpPreviewDialog', () => {
+  it('confirms text copying inside the toolbar and resets for another file', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const { rerender } = render(<SftpPreviewDialog open content={response()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'sftp.preview.copyContent' }));
+    const copied = await screen.findByRole('button', { name: 'common.copied' });
+    expect(copied.querySelector('.lucide-check')).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledExactlyOnceWith('first\nsecond');
+    rerender(<SftpPreviewDialog open content={response({ content: 'another file' })} onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'sftp.preview.copyContent' })).toBeVisible());
+    expect(screen.queryByRole('button', { name: 'common.copied' })).not.toBeInTheDocument();
+  });
+
   it('opens immediately with a loading state before remote content arrives', () => {
     render(
       <SftpPreviewDialog

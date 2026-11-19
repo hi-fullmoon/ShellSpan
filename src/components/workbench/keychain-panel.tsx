@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { CopyIcon, EyeIcon, EyeOffIcon, FileKey, InfoIcon, KeyRound, Lock, PencilIcon, PlusIcon, RefreshCwIcon, SearchXIcon, Trash2Icon, UploadCloud } from 'lucide-react';
+import { EyeIcon, EyeOffIcon, FileKey, InfoIcon, KeyRound, Lock, PencilIcon, PlusIcon, RefreshCwIcon, SearchXIcon, Trash2Icon, UploadCloud } from 'lucide-react';
+import { CopyButton } from '@/components/ui/copy-button';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
@@ -236,15 +237,6 @@ export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionPr
     }
   };
 
-  const copyPublicKey = async (publicKey: string): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(publicKey);
-      showSuccess(t('keychain.form.copySuccess'));
-    } catch {
-      showError(t('keychain.form.copyFailed'));
-    }
-  };
-
   return (
     <TooltipProvider>
       <WorkbenchPage>
@@ -430,9 +422,8 @@ export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionPr
                 placeholder={t(editing && !replacing ? 'workbench.keychain.publicKeyUnavailable' : 'keychain.form.publicKeyOptionalPlaceholder')}
                 rows={4}
               />
-              {form.publicKey && <Button size="sm" variant="outline" onClick={() => void copyPublicKey(form.publicKey)}>
-                <CopyIcon data-icon="inline-start" />{t('workbench.keychain.copyPublicKey')}
-              </Button>}
+              {form.publicKey && <CopyButton key={form.publicKey} size="sm" variant="outline" text={form.publicKey}
+                label={t('workbench.keychain.copyPublicKey')} errorLabel={t('keychain.form.copyFailed')} />}
             </FormRow>
             {(!editing || replacing) && <FileDropZone
               onFileContent={(content) => {

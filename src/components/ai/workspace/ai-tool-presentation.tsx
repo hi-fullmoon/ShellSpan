@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react';
+import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { diffLines, parsePatch } from 'diff';
 import hljs from 'highlight.js/lib/common';
 import {
@@ -297,14 +298,16 @@ function TerminalOutputText({ text }: { text: string }) {
   );
 }
 
-export function AiToolCopyButton({ text, label, className, showCopiedTooltip = true }: {
+export function AiToolCopyButton({ text, label, className, showCopiedTooltip = true, placement = 'overlay', errorLabel }: {
   readonly text: string;
   readonly label?: string;
   readonly className?: string;
   readonly showCopiedTooltip?: boolean;
+  readonly placement?: 'overlay' | 'inline';
+  readonly errorLabel?: string;
 }) {
   const { t } = useI18n();
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyFeedback(errorLabel);
   return (
     <Tooltip>
       <TooltipTrigger
@@ -312,16 +315,10 @@ export function AiToolCopyButton({ text, label, className, showCopiedTooltip = t
           <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
-            className={cn('ai-tool-copy-button absolute top-2 right-1 z-10', className)}
+            size={placement === 'inline' ? 'icon-sm' : 'icon-xs'}
+            className={cn(placement === 'inline' ? 'static shrink-0' : 'ai-tool-copy-button absolute top-2 right-1 z-10', className)}
             aria-label={copied ? t('common.copied') : (label ?? t('common.copy'))}
-            onClick={() => {
-              if (!navigator.clipboard || copied) return;
-              void navigator.clipboard.writeText(text).then(() => {
-                setCopied(true);
-                window.setTimeout(() => setCopied(false), 1_000);
-              }).catch(() => undefined);
-            }}
+            onClick={() => { void copy(text); }}
           />
         )}
       >

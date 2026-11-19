@@ -115,6 +115,25 @@ function responseFor(path: string): ReadRemoteFileResponse {
 }
 
 describe('useSftpPaneActions', () => {
+  it.each([
+    ['onCopyName', 'test.txt'],
+    ['onCopyPath', '/home/test.txt'],
+    ['onCopyContainingDirectory', '/home'],
+    ['onCopyCurrentDirectoryPath', '/home'],
+  ] as const)('copies through %s without a success toast', async (action, expected) => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const connection = addConnection();
+    const { result } = renderHook(() => useSftpPaneActions(connection, 'remote'));
+    let succeeded = false;
+    await act(async () => {
+      succeeded = await result.current[action]({ path: '/home/test.txt', name: 'test.txt', kind: 'file' });
+    });
+    expect(succeeded).toBe(true);
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(expected);
+    expect(toastMocks.success).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(invokePickLocalFiles).mockResolvedValue([]);

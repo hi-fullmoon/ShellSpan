@@ -2,14 +2,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
-  CheckIcon,
-  CopyIcon,
   FileArchiveIcon,
   FolderIcon,
   WrapTextIcon,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { CopyButton } from '@/components/ui/copy-button';
 import { Separator } from '@/components/ui/separator';
 import {
   TableBody,
@@ -50,23 +49,6 @@ function TextPreviewLineCount({ content }: { content: string }) {
 
 function TextPreviewActions({ content, wrap, onToggleWrap }: { content: string; wrap: boolean; onToggleWrap: () => void }) {
   const { t } = useI18n();
-  const [copy, setCopy] = useState<{ content: string }>();
-  const copied = copy?.content === content;
-
-  useEffect(() => {
-    if (!copy) return;
-    const timer = window.setTimeout(() => setCopy(undefined), 1600);
-    return () => window.clearTimeout(timer);
-  }, [copy]);
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(content);
-      setCopy({ content });
-    } catch {
-      // Clipboard access can be denied by the host WebView.
-    }
-  };
 
   return (
     <div className="flex shrink-0 items-center gap-1">
@@ -79,15 +61,7 @@ function TextPreviewActions({ content, wrap, onToggleWrap }: { content: string; 
         </TooltipTrigger>
         <TooltipContent>{t('sftp.preview.toggleWrap')}</TooltipContent>
       </Tooltip>
-      <Tooltip>
-        <TooltipTrigger
-          render={<Button variant="ghost" size="icon-sm" onClick={() => void handleCopy()} />}
-        >
-          {copied ? <CheckIcon /> : <CopyIcon />}
-          <span className="sr-only">{t('sftp.preview.copyContent')}</span>
-        </TooltipTrigger>
-        <TooltipContent>{copied ? t('sftp.preview.copied') : t('sftp.preview.copyContent')}</TooltipContent>
-      </Tooltip>
+      <CopyButton key={content} text={content} label={t('sftp.preview.copyContent')} iconOnly size="icon-sm" />
     </div>
   );
 }

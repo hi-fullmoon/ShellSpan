@@ -1,12 +1,15 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { toast } from 'sonner';
 import { AiQuestionHistory, AiQuestionPanel } from '../workspace/ai-question-panel';
 import { createQuestionProjection } from '@/lib/ai/question-projection';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
 import type { AgentQuestionView, AnswerQuestionInput } from '@/types/agent-question';
+
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const action = { instructions: 'Finish the access configuration outside the Agent.', verification_command: 'test -r /etc/hosts' };
 const question: AgentQuestionView = {
@@ -18,6 +21,7 @@ const question: AgentQuestionView = {
 };
 
 beforeEach(async () => {
+  vi.clearAllMocks();
   useAgentQuestionStore.setState({ drafts: {} });
   useAppStore.setState({ locale: 'en-US' });
   await initI18n('en-US');
@@ -25,6 +29,55 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('user operation within the existing question card', () => {
+  it.each(['en-US', 'zh-CN'] as const)('copies instructions and commands with local feedback in %s', async locale => {
+    await initI18n(locale);
+    useAppStore.setState({ locale });
+    const user = userEvent.setup();
+    const command = "$out='C:\\Users\\example\\home-sizes.csv'; Get-ChildItem | Export-Csv $out";
+    const instructions = `Run this command:\n\n\`\`\`powershell\n${command}\n\`\`\`\n\nThen continue verification.`;
+    const { container } = render(<AiQuestionPanel question={{ ...question, questions: [{
+      id: 'manual', question: 'Run the command', multi_select: false,
+      user_action: { ...action, instructions },
+    }], answers: [] }} />);
+    const copyInstructions = screen.getByRole('button', { name: locale === 'en-US' ? 'Copy instructions' : '复制操作说明' });
+    expect(copyInstructions.closest('[data-slot="card-action"]')).toBeInTheDocument();
+    const copiedLabel = locale === 'en-US' ? 'Copied' : '已复制';
+    await user.click(copyInstructions);
+    expect(await navigator.clipboard.readText()).toBe(instructions);
+    expect(copyInstructions).toHaveAccessibleName(copiedLabel);
+    expect(copyInstructions.querySelector('.lucide-check')).toBeInTheDocument();
+    await user.click(copyInstructions);
+    expect(toast.success).not.toHaveBeenCalled();
+    await waitFor(() => expect(copyInstructions).toHaveAccessibleName(locale === 'en-US' ? 'Copy instructions' : '复制操作说明'), { timeout: 2_000 });
+
+    const commands = container.querySelectorAll('pre');
+    expect(commands).toHaveLength(2);
+    for (const [index, expected] of [command, action.verification_command].entries()) {
+      const copy = commands[index].closest('[data-ai-copy-region]')!.querySelector('button')!;
+      await user.click(copy);
+      expect(await navigator.clipboard.readText()).toBe(expected);
+      expect(copy).toHaveAccessibleName(copiedLabel);
+      expect(copy.querySelector('.lucide-check')).toBeInTheDocument();
+    }
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('reports clipboard failure once without showing success and allows retry', async () => {
+    const user = userEvent.setup();
+    const write = vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValueOnce(new Error('locked'));
+    render(<AiQuestionPanel question={question} />);
+    const copy = screen.getByRole('button', { name: 'Copy instructions' });
+    await user.click(copy);
+    expect(toast.error).toHaveBeenCalledExactlyOnceWith('Could not copy the instructions');
+    expect(copy).toHaveAccessibleName('Copy instructions');
+    await user.click(copy);
+    expect(copy).toHaveAccessibleName('Copied');
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(toast.success).not.toHaveBeenCalled();
+    write.mockRestore();
+  });
+
   it.each(['en-US', 'zh-CN'] as const)('waits for explicit completion without a text field in %s', async locale => {
     await initI18n(locale);
     useAppStore.setState({ locale });

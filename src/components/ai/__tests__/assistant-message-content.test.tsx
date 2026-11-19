@@ -1,12 +1,14 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { toast } from 'sonner';
 import { getPlatform } from '@/lib/platform';
 import { AssistantMessageContent } from '../assistant-message-content';
 
-const { invokeOpenPath, invokeOpenUrl, invokeRevealPath } = vi.hoisted(() => ({
+const { invokeOpenPath, invokeOpenUrl, invokeRevealPath, invokeReadLocalFileText } = vi.hoisted(() => ({
   invokeOpenPath: vi.fn().mockResolvedValue(undefined),
   invokeOpenUrl: vi.fn().mockResolvedValue(undefined),
   invokeRevealPath: vi.fn().mockResolvedValue(undefined),
+  invokeReadLocalFileText: vi.fn().mockResolvedValue('Complete file contents\n第二行'),
 }));
 
 vi.mock('@/lib/platform', () => ({ getPlatform: vi.fn(() => 'windows') }));
@@ -16,6 +18,7 @@ vi.mock('@/lib/ipc/tauri', async (importOriginal) => ({
   invokeOpenPath,
   invokeOpenUrl,
   invokeRevealPath,
+  invokeReadLocalFileText,
   isTauriRuntime: () => true,
 }));
 
@@ -36,6 +39,7 @@ vi.mock('@/hooks/useI18n', () => ({
 
 describe('AssistantMessageContent', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     invokeOpenPath.mockClear();
     vi.mocked(getPlatform).mockReturnValue('windows');
   });
@@ -123,6 +127,10 @@ describe('AssistantMessageContent', () => {
     fireEvent.contextMenu(link, { clientX: 120, clientY: 80 });
     fireEvent.click(await screen.findByRole('menuitem', { name: 'ai.link.copyAddress' }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('http://localhost:8000'));
+    const copied = await screen.findByRole('menuitem', { name: 'common.copied' });
+    expect(copied.querySelector('.lucide-check')).toBeInTheDocument();
+    expect(screen.getByRole('menu')).toBeVisible();
+    expect(toast.success).not.toHaveBeenCalled();
     expect(screen.queryByRole('menuitem', { name: 'ai.link.copyText' })).not.toBeInTheDocument();
   });
 
@@ -142,6 +150,26 @@ describe('AssistantMessageContent', () => {
     fireEvent.contextMenu(screen.getByRole('link', { name: 'Preview' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'ai.link.copyText' }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('Preview'));
+    expect(await screen.findByRole('menuitem', { name: 'common.copied' })).toBeVisible();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['ai.path.copy', 'C:/Users/tester/todo.html'],
+    ['ai.path.copyContents', 'Complete file contents\n第二行'],
+  ])('shows feedback inside the %s menu item', async (label, expected) => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    render(<AssistantMessageContent blocks={[{ type: 'text', text: '[Todo](file:///C:/Users/tester/todo.html)' }]} streaming={false} />);
+    fireEvent.contextMenu(screen.getByRole('link', { name: 'Todo' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: label }));
+    const copied = await screen.findByRole('menuitem', { name: 'common.copied' });
+    expect(copied.querySelector('.lucide-check')).toBeInTheDocument();
+    expect(screen.getByRole('menu')).toBeVisible();
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(expected);
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+    await waitFor(() => expect(copied).toHaveAccessibleName(label), { timeout: 2_000 });
   });
 
   it('renders an empty structured stream without parsing text for reasoning', () => {
