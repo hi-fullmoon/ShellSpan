@@ -76,6 +76,22 @@ pub(crate) struct AgentSessionHeader {
     pub(crate) created_at_unix_ms: u64,
 }
 
+impl AgentSessionHeader {
+    pub(super) fn delegated_target(&self, target_id: &str) -> Option<&AgentSessionTarget> {
+        if self
+            .capability_scope
+            .as_ref()
+            .is_some_and(|scope| !scope.target_ids.iter().any(|id| id == target_id))
+        {
+            return None;
+        }
+        self.target
+            .iter()
+            .chain(self.subagent.iter().flat_map(|child| &child.target_scope))
+            .find(|target| target.target_id == target_id)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct CreateAgentSessionRequest {
@@ -805,6 +821,7 @@ impl AgentSessionStore {
             child_session_id,
             parent_session_id: descriptor_parent,
             parent_task_id,
+            target_scope,
             ..
         } = &descriptor
         else {
@@ -824,6 +841,16 @@ impl AgentSessionStore {
         }
         if parent.header.task_id != *parent_task_id {
             return Err("subagent descriptor parentTaskId drifted".into());
+        }
+        if !request
+            .subagent
+            .as_ref()
+            .is_some_and(|metadata| metadata.target_scope == *target_scope)
+            || target_scope
+                .iter()
+                .any(|target| parent.header.delegated_target(&target.target_id) != Some(target))
+        {
+            return Err("subagent target scope drifted from the parent Session".into());
         }
         if inner.sessions.contains_key(&request.session_id) {
             return Err("Agent session already exists".into());
@@ -1107,18 +1134,6 @@ impl AgentSessionStore {
             .collect::<Vec<_>>();
         children.sort();
         Ok(children)
-    }
-
-    pub(crate) fn target_by_id(&self, target_id: &str) -> Result<AgentSessionTarget, String> {
-        validate_identifier(target_id, "targetId")?;
-        let inner = self.lock_configured()?;
-        inner
-            .sessions
-            .values()
-            .filter_map(|record| record.header.target.as_ref())
-            .find(|target| target.target_id == target_id)
-            .cloned()
-            .ok_or_else(|| "delegated target is not frozen in any Agent Session".to_string())
     }
 
     pub(crate) fn append(
@@ -1776,9 +1791,30 @@ impl AgentSessionStore {
         &self,
         session_id: &str,
         lane: AgentInboxLane,
+        message: AgentInboxMessage,
+        paused: bool,
+        target_turn_id: Option<&str>,
+    ) -> Result<AgentSessionSnapshot, String> {
+        self.enqueue_submission_checked(
+            session_id,
+            lane,
+            message,
+            paused,
+            target_turn_id,
+            None::<fn(&AgentSessionSnapshot, &AgentInboxMessage) -> Result<(), String>>,
+        )
+    }
+
+    pub(super) fn enqueue_submission_checked(
+        &self,
+        session_id: &str,
+        lane: AgentInboxLane,
         mut message: AgentInboxMessage,
         paused: bool,
         target_turn_id: Option<&str>,
+        validate: Option<
+            impl FnOnce(&AgentSessionSnapshot, &AgentInboxMessage) -> Result<(), String>,
+        >,
     ) -> Result<AgentSessionSnapshot, String> {
         if let Some(turn_id) = target_turn_id {
             validate_identifier(turn_id, "targetTurnId")?;
@@ -1841,6 +1877,9 @@ impl AgentSessionStore {
         }
         if record.storage_fault_at_seq.is_some() {
             return Err(JOURNAL_WRITE_FAILED.into());
+        }
+        if let Some(validate) = validate {
+            validate(&record.snapshot()?, &message)?;
         }
         if let Some(fingerprint) = inbox_content_fingerprint(&message.content) {
             message

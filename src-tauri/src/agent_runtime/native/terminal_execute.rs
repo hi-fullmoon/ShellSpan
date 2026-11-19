@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use crate::agent_runtime::validate_visible_command_input;
 use crate::models::{SessionManager, SessionStatus};
+use crate::remote_sandbox::VisibleTerminalDispatch;
 use crate::terminal_broker::{
     TerminalCommandOperation, TerminalCommandRequestedSettlement, TerminalCommandSnapshot,
     TerminalCommandState, TerminalSessionBroker,
@@ -102,6 +103,7 @@ impl TerminalExecuteRegistry {
         deadline: Option<Instant>,
         reduced: bool,
         job_input: Option<(&str, &str)>,
+        dispatch_policy: Option<&VisibleTerminalDispatch<'_>>,
         revalidate: &mut impl FnMut(TerminalExecuteValidationStage) -> Result<(), String>,
     ) -> Result<(), String> {
         let limit = deadline
@@ -125,6 +127,23 @@ impl TerminalExecuteRegistry {
                 }
                 Ok(())
             };
+        let submit = |coordinator: &crate::terminal_broker::NativeInputCoordinator,
+                      revalidate: &mut dyn FnMut(
+            TerminalExecuteValidationStage,
+        ) -> Result<(), String>| {
+            let mut send = || {
+                coordinator.submit(
+                    || check(revalidate),
+                    |key| sessions.write_session_bytes(session, key.to_vec()),
+                )
+            };
+            // Refuse a stale policy before the broker marks submission attempted.
+            // Policy saves and the executable enqueue share the database lock.
+            match dispatch_policy {
+                Some(policy) => policy.write(send),
+                None => send(),
+            }
+        };
         check(revalidate)?;
         self.leases.publish_command_phase(
             session,
@@ -197,10 +216,7 @@ impl TerminalExecuteRegistry {
                     test_incomplete_proof = false;
                     let arm = current
                         .arm_commit(|bytes| sessions.write_native_control(session, bytes, false));
-                    let submit = current.submit(
-                        || check(revalidate),
-                        |key| sessions.write_session_bytes(session, key.to_vec()),
-                    );
+                    let submit = submit(&current, revalidate);
                     crate::terminal_command::acceptance_trace::record(
                         "incomplete-proof-attempt-returned",
                         serde_json::json!({
@@ -316,13 +332,12 @@ impl TerminalExecuteRegistry {
                 serde_json::json!({"identity":identity}),
             )?;
         }
-        coordinator
-            .lock()
-            .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?
-            .submit(
-                || check(revalidate),
-                |key| sessions.write_session_bytes(session, key.to_vec()),
-            )?;
+        {
+            let current = coordinator
+                .lock()
+                .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?;
+            submit(&current, revalidate)?;
+        }
         #[cfg(all(
             feature = "native-input-acceptance",
             debug_assertions,
@@ -334,10 +349,7 @@ impl TerminalExecuteRegistry {
                 .lock()
                 .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?;
             let identity = current.identity()?;
-            let repeated = current.submit(
-                || check(revalidate),
-                |key| sessions.write_session_bytes(session, key.to_vec()),
-            );
+            let repeated = submit(&current, revalidate);
             crate::terminal_command::acceptance_trace::record(
                 "duplicate-submit-returned",
                 serde_json::json!({"identity":identity,"admitted":repeated.is_ok(),"error":repeated.err()}),
@@ -647,6 +659,7 @@ impl TerminalExecuteRegistry {
             deadline,
             None,
             false,
+            None,
             &mut revalidate,
         )
         .map_err(|error| error.message)
@@ -666,6 +679,7 @@ impl TerminalExecuteRegistry {
         deadline: Option<Instant>,
         authorization: Option<crate::terminal_command::state::IntentAuthorization>,
         handoff_to_user: bool,
+        dispatch_policy: Option<&VisibleTerminalDispatch<'_>>,
         revalidate: impl FnMut(TerminalExecuteValidationStage) -> Result<(), String>,
     ) -> Result<Arc<TerminalCommandOperation>, TerminalSubmissionError> {
         let mut submission_attempted = false;
@@ -681,6 +695,7 @@ impl TerminalExecuteRegistry {
             deadline,
             authorization,
             handoff_to_user,
+            dispatch_policy,
             revalidate,
             &mut submission_attempted,
         )
@@ -704,6 +719,7 @@ impl TerminalExecuteRegistry {
         deadline: Option<Instant>,
         authorization: Option<crate::terminal_command::state::IntentAuthorization>,
         handoff_to_user: bool,
+        dispatch_policy: Option<&VisibleTerminalDispatch<'_>>,
         mut revalidate: impl FnMut(TerminalExecuteValidationStage) -> Result<(), String>,
         submission_attempted: &mut bool,
     ) -> Result<Arc<TerminalCommandOperation>, String> {
@@ -912,7 +928,10 @@ impl TerminalExecuteRegistry {
             );
             return Err("TERMINAL_EXECUTE_NOT_CONNECTED".into());
         }
-        if let Err(error) = revalidate(TerminalExecuteValidationStage::CommandCreation) {
+        let command_creation = dispatch_policy
+            .map_or(Ok(()), |policy| policy.write(|| Ok(())))
+            .and_then(|()| revalidate(TerminalExecuteValidationStage::CommandCreation));
+        if let Err(error) = command_creation {
             let _ = self.leases.release(
                 session_id,
                 agent_session_id,
@@ -947,6 +966,7 @@ impl TerminalExecuteRegistry {
             deadline,
             self.leases.reduced_motion(session_id, operation_id)?,
             job_submission.map(|line| (command, line)),
+            dispatch_policy,
             &mut revalidate,
         );
         *submission_attempted = operation.submission_may_have_occurred()?;

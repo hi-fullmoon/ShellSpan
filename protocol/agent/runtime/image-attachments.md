@@ -2,6 +2,11 @@
 
 Image admission validates the shared `src/lib/ai/vision-contract.json` limits before decoding. PNG, JPEG, WebP and single-frame GIF inputs are normalized in the existing blocking import task; cancellation, batch atomicity and content-addressed storage remain unchanged.
 
+Before committing a new image submission or a queue edit that adds images, the
+runtime checks the model's image count and normalized byte limits against the
+retained conversation and queued messages. A replacement counts the updated
+attachments once. Request preparation uses the same image limits.
+
 Embedded RGB and grayscale ICC profiles are parsed and converted to sRGB with `moxcms` before resizing or stripping metadata. This includes sRGB, Display P3 and Adobe RGB profiles. Conversion preserves alpha, processes 16-bit samples before reducing them to 8 bits, and checks cancellation between scanlines. Profile parsing is bounded; invalid profiles and profiles inconsistent with the decoded pixel layout fail with `IMAGE_COLOR_PROFILE_UNSUPPORTED`.
 
 For PNG, a streaming parser checks every chunk through IEND without decompressing the pixels again. Invalid, duplicate or misplaced colour declarations are rejected, including ancillary-chunk errors that the high-level decoder would otherwise ignore. These checks apply even when an ICC or sRGB declaration is present. Valid ICC or sRGB declarations take precedence over legacy gamma/chromaticity chunks. Standard sRGB gamma and chromaticity chunks are also accepted without ICC. Unprofiled RGB/grayscale images default to sRGB. Unsupported cICP declarations, non-sRGB gamma/chromaticity without ICC, and CMYK/YCCK JPEG inputs remain rejected rather than silently changing their colours.

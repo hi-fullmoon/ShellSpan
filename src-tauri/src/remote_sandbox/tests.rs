@@ -165,6 +165,63 @@ fn agent_sandbox_is_opt_in_and_rechecks_before_ssh_dispatch() {
 }
 
 #[test]
+fn visible_ssh_dispatch_checks_saved_and_unsaved_targets_after_policy_change() {
+    let temp = tempfile::tempdir().unwrap();
+    let database = Database::open(&temp.path().join("db")).unwrap();
+    let profile = profile(2222);
+    database.insert_profile(&profile).unwrap();
+    let target = AgentToolTargetNative::Remote {
+        target_id: "remote".into(),
+        session_id: "terminal".into(),
+        profile_id: Some(profile.id.clone()),
+        host: profile.host.clone(),
+        port: profile.port,
+        username: profile.username.clone(),
+        root_path: None,
+        local_root: None,
+    };
+    let mut unsaved = target.clone();
+    if let AgentToolTargetNative::Remote { profile_id, .. } = &mut unsaved {
+        *profile_id = None;
+    }
+    let known_hosts = temp.path().join("known_hosts");
+    let binding = binding_for_target(&target, &database, &known_hosts)
+        .unwrap()
+        .unwrap();
+    assert!(binding_for_target(&unsaved, &database, &known_hosts)
+        .unwrap()
+        .is_none());
+    let saved_dispatch = VisibleTerminalDispatch {
+        target: &target,
+        binding: Some(&binding),
+        database: &database,
+        known_hosts: &known_hosts,
+    };
+    let unsaved_dispatch = VisibleTerminalDispatch {
+        target: &unsaved,
+        binding: None,
+        database: &database,
+        known_hosts: &known_hosts,
+    };
+    assert!(saved_dispatch.write(|| Ok(())).is_ok());
+    assert!(unsaved_dispatch.write(|| Ok(())).is_ok());
+
+    set_policy(&database, &profile, Mode::ReadOnly);
+    assert_eq!(
+        saved_dispatch
+            .write::<()>(|| panic!("stale SSH input was admitted"))
+            .unwrap_err(),
+        "SANDBOX_POLICY_CHANGED"
+    );
+    assert_eq!(
+        unsaved_dispatch
+            .write::<()>(|| panic!("unbound SSH input was admitted"))
+            .unwrap_err(),
+        "SANDBOX_PROFILE_REQUIRED"
+    );
+}
+
+#[test]
 fn removed_policy_requires_a_new_session_even_after_reopening_database() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("db");

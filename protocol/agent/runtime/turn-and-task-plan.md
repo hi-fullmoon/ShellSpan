@@ -31,6 +31,11 @@ Each child model request with an effective step limit includes its current per-t
 
 Child requests also report cumulative provider-reported total tokens, admitted tool calls, turns and elapsed time. Child token usage and tool calls are unlimited by default, including all Fleet roles. The optional `budget.maxTokens` enables a cumulative token limit only when explicitly supplied; omit it unless a token budget is requested. The optional `budget.maxToolCalls` enables a cumulative tool-call limit (1–4096) only when explicitly supplied by the parent. Omitting either field, including when omitting the entire budget, leaves that counter unlimited. `fleet_plan` accepts the same optional `budget`, persists it with the Fleet plan, and applies it separately to each child; no Fleet role adds an implicit tool-call limit. Existing saved numeric budgets remain enforced across reload and continuation. At 80% of an explicitly supplied token or tool-call limit, or the elapsed-time limit, the request advises immediate evidence-based handoff rather than further exploration. Unlimited counters do not trigger budget warnings, failures or continuation rejection. This is model guidance, not a guarantee of a final report or a reservation of additional tokens or tool calls. Missing provider usage remains unknown; total tokens include repeated inputs and are distinct from the model context-window limit. Manual cancellation, per-request model-stream deadlines, no-progress detection and the other child budgets remain unchanged.
 
+Child and Fleet delegation resolve target IDs against the parent's bound target
+and any frozen targets in its own delegation scope. The store checks the full
+target metadata again when it commits the child, including project directories
+and the SSH sandbox requirement.
+
 Each Fleet has one active scheduler. A role's child identity is committed before
 the child starts. Aborting a Fleet prevents further dispatch and cancels its
 registered active children. If a scheduler stops before recording a target's

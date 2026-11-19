@@ -3737,21 +3737,55 @@ async fn partial_text_reasoning_and_tool_call_streams_recover_in_the_same_step()
         runtime.start(&session_id, provider(), None).unwrap();
         runtime.await_idle(&session_id).await.unwrap();
         assert_eq!(adapter.request_count(), 2);
-        let requests = adapter.requests.lock().unwrap();
-        assert_ne!(requests[0].request_id, requests[1].request_id);
-        assert_eq!(requests[0].messages, requests[1].messages);
-        drop(requests);
+        let (failed_request, retried_request) = {
+            let requests = adapter.requests.lock().unwrap();
+            assert_ne!(requests[0].request_id, requests[1].request_id);
+            assert_eq!(requests[0].messages, requests[1].messages);
+            (
+                requests[0].request_id.clone(),
+                requests[1].request_id.clone(),
+            )
+        };
         let events = all_events(&runtime, &session_id);
+        let mut failed_text = String::new();
+        let mut failed_reasoning = String::new();
+        let mut failed_tool_indices = Vec::new();
+        let mut recovered_text = String::new();
+        for event in &events {
+            if let AgentSessionEventPayload::AssistantChunk {
+                request_id,
+                text_delta,
+                reasoning_delta,
+                tool_call_delta,
+                ..
+            } = &event.payload
+            {
+                if request_id == &failed_request {
+                    failed_text.push_str(text_delta.as_deref().unwrap_or_default());
+                    failed_reasoning.push_str(reasoning_delta.as_deref().unwrap_or_default());
+                    failed_tool_indices.extend(tool_call_delta.iter().map(|delta| delta.index));
+                } else {
+                    assert_eq!(request_id, &retried_request);
+                    assert!(reasoning_delta.is_none() && tool_call_delta.is_none());
+                    recovered_text.push_str(text_delta.as_deref().unwrap_or_default());
+                }
+            }
+        }
+        let expected = match label {
+            "text" => ("partial once", "", &[][..]),
+            "reasoning" => ("", "failed reasoning", &[][..]),
+            "tool" => ("", "", &[0][..]),
+            _ => unreachable!(),
+        };
         assert_eq!(
-            events
-                .iter()
-                .filter(|event| matches!(
-                    event.payload,
-                    AgentSessionEventPayload::AssistantChunk { .. }
-                ))
-                .count(),
-            2
+            (
+                failed_text.as_str(),
+                failed_reasoning.as_str(),
+                failed_tool_indices.as_slice()
+            ),
+            expected
         );
+        assert_eq!(recovered_text, "recovered answer");
         assert!(events.iter().any(|event| matches!(
             &event.payload,
             AgentSessionEventPayload::AssistantMessage {
@@ -3760,16 +3794,19 @@ async fn partial_text_reasoning_and_tool_call_streams_recover_in_the_same_step()
                 ..
             }
         )));
-        assert!(events
-            .iter()
-            .any(|event| matches!(event.payload, AgentSessionEventPayload::RequestRetry { .. })));
         assert!(events.iter().any(|event| matches!(
-            event.payload,
+            &event.payload,
+            AgentSessionEventPayload::RequestRetry { request_id, previous_request_id: Some(previous), attempt: 2, .. }
+                if request_id == &retried_request && previous == &failed_request
+        )));
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
             AgentSessionEventPayload::RequestFailure {
+                request_id,
                 attempt: 1,
                 interrupted: true,
                 ..
-            }
+            } if request_id == &failed_request
         )));
         assert_eq!(
             events

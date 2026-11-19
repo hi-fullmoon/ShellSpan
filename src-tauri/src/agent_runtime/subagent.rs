@@ -500,7 +500,6 @@ impl SubAgentManager {
                 AgentSubagentRole::Operator,
                 std::slice::from_ref(&target.target_id),
             )?;
-            self.sessions.target_by_id(&target.target_id)?;
         }
         let remaining = targets.len().saturating_sub(canary_size as usize);
         let total_waves = 1_u32.saturating_add(
@@ -1018,7 +1017,13 @@ impl SubAgentManager {
         let capability_scope = delegated_scope(&parent, role, &target_ids)?;
         let target_scope = target_ids
             .iter()
-            .map(|target_id| self.sessions.target_by_id(target_id))
+            .map(|target_id| {
+                parent
+                    .header
+                    .delegated_target(target_id)
+                    .cloned()
+                    .ok_or("delegated target is not frozen in the parent Session")
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let inheritance = match inheritance_mode {
             "blank" => AgentSubagentInheritance::Blank,
@@ -1932,8 +1937,8 @@ impl OrchestrationToolRuntime for SubAgentManager {
                 child_header.target = arguments
                     .target_ids
                     .first()
-                    .map(|id| self.sessions.target_by_id(id))
-                    .transpose()?;
+                    .and_then(|id| parent.header.delegated_target(id))
+                    .cloned();
                 validate_required_tools(&child_header, &scope, &arguments.required_tools)?;
                 let child_session_id = self
                     .spawn_child(
@@ -2116,7 +2121,7 @@ fn delegated_scope(
     if requested.len() != requested_targets.len()
         || requested_targets
             .iter()
-            .any(|target| !parent_scope.target_ids.contains(target))
+            .any(|target| parent.header.delegated_target(target).is_none())
     {
         return Err("subagent requested targets exceed the parent capability".into());
     }

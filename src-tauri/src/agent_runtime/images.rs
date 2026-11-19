@@ -55,6 +55,26 @@ pub(crate) fn vision_route(
         .ok_or_else(|| "IMAGE_MODEL_UNSUPPORTED: image input is not enabled for this model".into())
 }
 
+pub(super) fn request_image_refs(request: &ModelRequest) -> impl Iterator<Item = &ImageRef> {
+    request.messages.iter().flat_map(|message| match message {
+        ModelMessage::UserImages { images, .. } => images.as_slice(),
+        _ => &[],
+    })
+}
+
+pub(super) fn validate_request_image_budget<'a>(
+    route: &crate::llm::catalog::VisionBudget,
+    images: impl Iterator<Item = &'a ImageRef>,
+) -> Result<(), String> {
+    let (count, bytes) = images.fold((0, 0), |(count, bytes), image| {
+        (count + 1, bytes + image.bytes)
+    });
+    if count > route.max_request_images || bytes > route.max_request_image_bytes {
+        return Err("IMAGE_REQUEST_BUDGET: image count or bytes exceed the model limit".into());
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ImageRef {
@@ -544,25 +564,12 @@ impl ImageStore {
         request: &mut ModelRequest,
         token: &CancellationToken,
     ) -> Result<(), String> {
-        let refs = request
-            .messages
-            .iter()
-            .flat_map(|m| match m {
-                ModelMessage::UserImages { images, .. } => images.as_slice(),
-                _ => &[],
-            })
-            .collect::<Vec<_>>();
+        let refs = request_image_refs(request).collect::<Vec<_>>();
         if refs.is_empty() {
             return Ok(());
         }
         let route = vision_route(provider)?;
-        if refs.len() > route.max_request_images
-            || refs.iter().map(|r| r.bytes).sum::<u64>() > route.max_request_image_bytes
-        {
-            return Err(
-                "IMAGE_REQUEST_BUDGET: too many retained images; start a new session".into(),
-            );
-        }
+        validate_request_image_budget(&route, refs.iter().copied())?;
         let mut resolved = BTreeMap::new();
         for reference in refs {
             cancelled(token)?;

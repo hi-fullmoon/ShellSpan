@@ -62,6 +62,82 @@ async fn queue_image_edit_session(
 }
 
 #[tokio::test]
+async fn image_request_byte_limit_rejects_submissions_and_edits_before_inbox_commit() {
+    let storage = tempfile::tempdir().unwrap();
+    let runtime = AgentRuntime::default();
+    runtime.configure(storage.path().to_path_buf()).unwrap();
+    let session_id = "image-byte-budget";
+    skill_tests::create_skill_session(&runtime, session_id, storage.path());
+    let image = queue_image("64x64.png", include_bytes!("../../../../icons/64x64.png"));
+    let refs = runtime
+        .models
+        .images
+        .import(
+            std::slice::from_ref(&image),
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .unwrap();
+    let mut provider = image_tests::vision_provider();
+    let mut definition = crate::llm::catalog::preset_models(&provider.profile, provider.kind)
+        .unwrap()
+        .remove(&provider.model)
+        .unwrap();
+    definition.vision.as_mut().unwrap().max_request_image_bytes = 2 * refs[0].bytes;
+    provider.model_definition = Some(definition);
+    runtime.start(session_id, provider, None).unwrap();
+    runtime.await_idle(session_id).await.unwrap();
+
+    let submission = |id: &str| ImageSubmission {
+        session_id: session_id.into(),
+        client_operation_id: id.into(),
+        content: "Check image".into(),
+        lane: AgentInboxLane::NextTurn,
+        images: vec![image.clone()],
+        terminal_context: None,
+    };
+    runtime
+        .submit_images_with_admission(submission("first"), true, None)
+        .await
+        .unwrap();
+    let before = runtime
+        .submit_images_with_admission(submission("second"), true, None)
+        .await
+        .unwrap();
+    assert!(runtime
+        .submit_images_with_admission(submission("third"), true, None)
+        .await
+        .unwrap_err()
+        .starts_with("IMAGE_REQUEST_BUDGET"));
+
+    let edit = |id: &str, kept| AgentInboxMutationInput {
+        session_id: session_id.into(),
+        expected_revision: before.event_count,
+        client_operation_id: id.into(),
+        mutation: AgentInboxMutation::UpdateWithImages {
+            item_id: "first".into(),
+            content: "Check the updated image".into(),
+            images: InboxImageEdit {
+                kept,
+                added: vec![image.clone()],
+            },
+        },
+    };
+    assert!(runtime
+        .mutate_inbox(edit("add-image", refs.clone()))
+        .unwrap_err()
+        .starts_with("IMAGE_REQUEST_BUDGET"));
+    assert_eq!(runtime.session(session_id).unwrap(), before);
+
+    let replaced = runtime.mutate_inbox(edit("replace-image", vec![])).unwrap();
+    assert_eq!(replaced.inbox.next_turn[0].images, refs);
+    assert_eq!(
+        replaced.inbox.next_turn[0].content,
+        "Check the updated image"
+    );
+    assert_eq!(replaced.inbox.next_turn[1], before.inbox.next_turn[1]);
+}
+
+#[tokio::test]
 async fn inbox_image_edit_preserves_order_and_only_commits_valid_attachments() {
     let storage = tempfile::tempdir().unwrap();
     let runtime = AgentRuntime::default();

@@ -230,7 +230,7 @@ capability checks still apply.
 
 The experimental Agent sandbox requires the user to enable it in AI Settings. It is off by default. An SSH profile keeps its saved policy when the setting is off, and Agent operations that require the sandbox are rejected before dispatch, including calls authorized before the setting was turned off. Local Direct and ordinary SSH profiles keep their existing execution behavior.
 
-A newly created SSH Agent Session records the connection's sandbox requirement. If that requirement changes, existing sessions pause before a new tool call. Start a new session to use the updated configuration, or restore the previous requirement. Older sessions on an SSH profile with a removed sandbox policy also require a new session. The final SSH dispatch rechecks the approved connection policy for both Direct execution paths. SSH profiles with Bubblewrap support Direct execution only. The Agent rejects requests to use them with an ordinary visible terminal.
+A newly created SSH Agent Session records the connection's sandbox requirement. If that requirement changes, existing sessions pause before a new tool call. Start a new session to use the updated configuration, or restore the previous requirement. Older sessions on an SSH profile with a removed sandbox policy also require a new session. Direct execution rechecks the approved policy at dispatch. In a visible SSH terminal, saving the connection policy and enqueuing the executable input share the same admission lock. A policy saved while the Agent waits for the terminal can reject the submission before the shell executes it. SSH profiles with Bubblewrap support Direct execution only.
 
 ### Automatic review in “Approve for me”
 

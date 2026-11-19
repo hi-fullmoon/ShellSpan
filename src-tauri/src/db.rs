@@ -397,11 +397,34 @@ impl Database {
         username: &str,
     ) -> Result<bool, String> {
         let conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
+        Self::read_endpoint_has_sandbox(&conn, host, port, username)
+    }
+
+    fn read_endpoint_has_sandbox(
+        conn: &Connection,
+        host: &str,
+        port: u16,
+        username: &str,
+    ) -> Result<bool, String> {
         conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM profiles p JOIN profile_sandbox s ON s.profile_id=p.id
              WHERE lower(p.host)=lower(?1) AND p.port=?2 AND p.username=?3 AND s.policy_json <> 'null')",
             params![host, port, username], |row| row.get(0),
         ).map_err(|e| e.to_string())
+    }
+
+    pub(crate) fn with_unsandboxed_endpoint_dispatch<T>(
+        &self,
+        host: &str,
+        port: u16,
+        username: &str,
+        send: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        let conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
+        if Self::read_endpoint_has_sandbox(&conn, host, port, username)? {
+            return Err("SANDBOX_PROFILE_REQUIRED".into());
+        }
+        send()
     }
 
     pub(crate) fn with_sandbox_dispatch<T>(

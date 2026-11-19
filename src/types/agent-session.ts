@@ -796,14 +796,12 @@ export interface CreateAgentSessionRequest {
   readonly sessionId: string;
   readonly taskId: string;
   readonly goal: string;
-  readonly parentSessionId?: string;
   readonly continuedFromSessionId?: string;
   readonly target?: AgentSessionTarget;
   readonly permissionMode?: AgentSessionPermissionMode;
   readonly executionSurface: AgentExecutionSurface;
   readonly successCriteria?: readonly string[];
   readonly capabilityScope?: AgentCapabilityScope;
-  readonly subagent?: AgentSubagentSession;
 }
 
 export interface AgentSessionListRequest {

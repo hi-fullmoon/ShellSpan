@@ -151,6 +151,48 @@ impl Binding {
     }
 }
 
+pub(crate) struct VisibleTerminalDispatch<'a> {
+    pub(crate) target: &'a AgentToolTargetNative,
+    pub(crate) binding: Option<&'a Binding>,
+    pub(crate) database: &'a Database,
+    pub(crate) known_hosts: &'a Path,
+}
+
+impl VisibleTerminalDispatch<'_> {
+    pub(crate) fn write<T>(&self, send: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+        match (self.target, self.binding) {
+            (
+                AgentToolTargetNative::Remote {
+                    profile_id: Some(id),
+                    ..
+                },
+                Some(binding),
+            ) if id == &binding.profile_id => {
+                if binding.state.policy.is_some() {
+                    return Err(DIRECT_REQUIRED.into());
+                }
+                binding.write(self.database, self.known_hosts, send)?
+            }
+            (
+                AgentToolTargetNative::Remote {
+                    profile_id: None,
+                    host,
+                    port,
+                    username,
+                    ..
+                },
+                None,
+            ) => self
+                .database
+                .with_unsandboxed_endpoint_dispatch(host, *port, username, send),
+            _ => Err(
+                "SANDBOX_CONNECTION_CHANGED: the visible SSH target has no matching policy binding"
+                    .into(),
+            ),
+        }
+    }
+}
+
 fn approval_digest(profile: &ProfileSandbox, known_hosts: &Path) -> Result<String, String> {
     let mut digest = Sha256::new();
     digest.update(POLICY_VERSION.to_be_bytes());

@@ -41,7 +41,7 @@ struct TerminalAdmissionGuard {
 
 fn validate_image_queue_budget(
     provider: &AiProviderConfig,
-    max_request_images: usize,
+    route: &crate::llm::catalog::VisionBudget,
     snapshot: &AgentSessionSnapshot,
     content: &str,
     images: &[super::images::ImageRef],
@@ -78,17 +78,10 @@ fn validate_image_queue_budget(
         images: images.to_vec(),
         data_urls: Vec::new(),
     });
-    let count: usize = request
-        .messages
-        .iter()
-        .map(|message| match message {
-            super::ModelMessage::UserImages { images, .. } => images.len(),
-            _ => 0,
-        })
-        .sum();
-    if count > max_request_images {
-        return Err("IMAGE_REQUEST_BUDGET: start a new session for more images".into());
-    }
+    super::images::validate_request_image_budget(
+        route,
+        super::images::request_image_refs(&request),
+    )?;
     let budget = super::estimate_model_surface_budget(provider, &request)?;
     if budget.estimated_input_tokens > budget.usable_input_tokens {
         return Err("IMAGE_TOKEN_BUDGET".into());
@@ -426,8 +419,7 @@ impl AgentRuntime {
         if entry.cancellation().is_cancelled() || token.is_cancelled() {
             return Err("IMAGE_CANCELLED".into());
         }
-        let model = entry.model()?;
-        let route = super::images::vision_route(&model.provider)?;
+        super::images::vision_route(&entry.model()?.provider)?;
         let store = self.models.images.clone();
         let uploads = input.images;
         let import_token = token.clone();
@@ -479,19 +471,11 @@ impl AgentRuntime {
                 }
             }
         }
-        let snapshot = self.sessions.snapshot(&input.session_id)?;
-        validate_image_queue_budget(
-            &entry.model()?.provider,
-            route.max_request_images,
-            &snapshot,
-            &input.content,
-            &images,
-            terminal_context.as_ref(),
-            None,
-        )?;
         if token.is_cancelled() || entry.cancellation().is_cancelled() {
             return Err("IMAGE_CANCELLED".into());
         }
+        let provider = entry.model()?.provider;
+        let route = super::images::vision_route(&provider)?;
         let mut source = AgentMessageSource::user();
         source
             .metadata
@@ -505,7 +489,7 @@ impl AgentRuntime {
             &input.client_operation_id,
             paused,
         )?;
-        let snapshot = self.sessions.enqueue_submission(
+        let snapshot = self.sessions.enqueue_submission_checked(
             &input.session_id,
             input.lane,
             AgentInboxMessage {
@@ -518,6 +502,19 @@ impl AgentRuntime {
             },
             paused,
             target_turn_id,
+            Some(
+                |snapshot: &AgentSessionSnapshot, message: &AgentInboxMessage| {
+                    validate_image_queue_budget(
+                        &provider,
+                        &route,
+                        snapshot,
+                        &message.content,
+                        &message.images,
+                        message.terminal_context.as_ref(),
+                        None,
+                    )
+                },
+            ),
         )?;
         if let Some(guard) = reservation.as_mut() {
             guard.committed = !snapshot.ended && !paused;
@@ -2093,7 +2090,7 @@ impl AgentRuntime {
                 );
                 validate_image_queue_budget(
                     &provider,
-                    route.max_request_images,
+                    &route,
                     snapshot,
                     content,
                     &images,

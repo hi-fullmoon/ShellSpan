@@ -1460,6 +1460,26 @@ fn child_session_and_parent_descriptor_are_committed_together() {
         })
         .unwrap();
     let before = store.snapshot("session-1").unwrap();
+    let (mut request, mut descriptor) = child_request();
+    let mut other_target = request.target.clone().unwrap();
+    other_target.cwd = Some(
+        root.path()
+            .join("another-workspace")
+            .to_string_lossy()
+            .into_owned(),
+    );
+    request.target = Some(other_target.clone());
+    request.subagent.as_mut().unwrap().target_scope = vec![other_target.clone()];
+    if let AgentSessionEventPayload::SubagentDescriptor { target_scope, .. } = &mut descriptor {
+        *target_scope = vec![other_target];
+    }
+    assert!(store
+        .create_child_with_descriptor("session-1", request, descriptor)
+        .unwrap_err()
+        .contains("target scope drifted"));
+    assert_eq!(store.snapshot("session-1").unwrap(), before);
+    assert!(store.snapshot("child-1").is_err());
+
     let path = log_path(&root);
     let saved = path.with_extension("saved");
     fs::rename(&path, &saved).unwrap();

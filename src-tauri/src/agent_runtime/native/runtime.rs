@@ -29,6 +29,7 @@ use crate::models::{
     AuthMethod, JumpHostConfig, ProfileAuthMethod, RemoteConnectionRequest, SessionManager,
     SessionStatus, SessionTerminalKind,
 };
+use crate::remote_sandbox::VisibleTerminalDispatch;
 use crate::terminal_broker::{
     TerminalBrokerAttachment, TerminalBrokerSnapshot, TerminalGenerationCloseReason,
     TerminalGeometry, TerminalIntegrationState, TerminalLeaseOwner, TerminalRawOutputFrame,
@@ -1273,6 +1274,16 @@ impl NativeToolEngine {
             .consume(&call.capability_id, current_unix_ms())
             .map_err(|error| format!("Native capability consumption failed: {error:?}"))?;
 
+        let terminal_dispatch = context.request.targets.iter().find_map(|target| {
+            matches!(target, AgentToolTargetNative::Remote { .. }).then_some(
+                VisibleTerminalDispatch {
+                    target,
+                    binding: sandbox.as_ref(),
+                    database,
+                    known_hosts: known_hosts_path,
+                },
+            )
+        });
         match call.tool_name.as_str() {
             "inspect_host" | "inspect_service" | "query_logs" | "diagnose_endpoint" => {
                 let remote = match &call.target {
@@ -1324,6 +1335,7 @@ impl NativeToolEngine {
                 sessions,
                 tool.descriptor.default_timeout_ms,
                 cancellation,
+                terminal_dispatch.as_ref(),
             ),
             "probe_http" => {
                 let remote_connection = match &call.target {
@@ -1375,8 +1387,22 @@ impl NativeToolEngine {
                 cancellation,
             ),
             "write_stdin" => self.write_process(context, &call, &effect),
-            "wait_process" => self.wait_process(context, &call, &effect, sessions, cancellation),
-            "kill_process" => self.kill_process(context, &call, &effect, sessions, cancellation),
+            "wait_process" => self.wait_process(
+                context,
+                &call,
+                &effect,
+                sessions,
+                cancellation,
+                terminal_dispatch.as_ref(),
+            ),
+            "kill_process" => self.kill_process(
+                context,
+                &call,
+                &effect,
+                sessions,
+                cancellation,
+                terminal_dispatch.as_ref(),
+            ),
             "read_file" | "list_directory" | "search_text" | "write_file" | "edit_file"
             | "apply_patch" | "transfer_file" | "trash_file" => self.execute_file_tool(
                 context,
@@ -2368,6 +2394,7 @@ impl NativeToolEngine {
         Ok(result)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn execute_terminal_command(
         &self,
         context: &NativeExecutionContext,
@@ -2376,6 +2403,7 @@ impl NativeToolEngine {
         sessions: &SessionManager,
         default_timeout_ms: u64,
         cancellation: &CancellationToken,
+        dispatch_policy: Option<&VisibleTerminalDispatch<'_>>,
     ) -> Result<AgentToolResultNative, String> {
         let arguments: TerminalExecuteArgumentsNative =
             serde_json::from_value(call.arguments.clone())
@@ -2439,6 +2467,7 @@ impl NativeToolEngine {
                 frozen_target: call.target.clone(),
             }),
             arguments.handoff_to_user,
+            dispatch_policy,
             |stage| {
                 if cancellation.is_cancelled() {
                     return Err(if arguments.background {
@@ -2935,6 +2964,7 @@ impl NativeToolEngine {
         effect: &AgentObservedEffectNative,
         sessions: &SessionManager,
         cancellation: &CancellationToken,
+        dispatch_policy: Option<&VisibleTerminalDispatch<'_>>,
     ) -> Result<AgentToolResultNative, String> {
         let arguments: WaitProcessArgumentsNative = serde_json::from_value(call.arguments.clone())
             .map_err(|error| format!("Invalid wait_process arguments: {error}"))?;
@@ -2948,6 +2978,7 @@ impl NativeToolEngine {
                 false,
                 arguments.timeout_ms.unwrap_or(30_000),
                 cancellation,
+                dispatch_policy,
             );
         }
         let snapshot = self.processes.get(handle)?.wait(Duration::from_millis(
@@ -2987,6 +3018,7 @@ impl NativeToolEngine {
         effect: &AgentObservedEffectNative,
         sessions: &SessionManager,
         cancellation: &CancellationToken,
+        dispatch_policy: Option<&VisibleTerminalDispatch<'_>>,
     ) -> Result<AgentToolResultNative, String> {
         let arguments: KillProcessArgumentsNative = serde_json::from_value(call.arguments.clone())
             .map_err(|error| format!("Invalid kill_process arguments: {error}"))?;
@@ -3005,6 +3037,7 @@ impl NativeToolEngine {
                 true,
                 arguments.timeout_ms.unwrap_or(10_000),
                 cancellation,
+                dispatch_policy,
             );
         }
         let snapshot = self.processes.get(handle)?.kill(
@@ -3022,6 +3055,7 @@ impl NativeToolEngine {
         ))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn manage_shell_job(
         &self,
         context: &NativeExecutionContext,
@@ -3031,6 +3065,7 @@ impl NativeToolEngine {
         stop: bool,
         timeout_ms: u64,
         cancellation: &CancellationToken,
+        dispatch_policy: Option<&VisibleTerminalDispatch<'_>>,
     ) -> Result<AgentToolResultNative, String> {
         let AgentToolTargetNative::Process {
             process_handle: handle,
@@ -3135,6 +3170,7 @@ impl NativeToolEngine {
                     frozen_target: call.target.clone(),
                 }),
                 false,
+                dispatch_policy,
                 |stage| {
                     if cancellation.is_cancelled() {
                         return Err("TERMINAL_JOB_WAIT_CANCELLED".into());
@@ -4553,6 +4589,7 @@ mod tests {
             &sessions,
             1_000,
             &CancellationToken::new(),
+            None,
         );
         let mut second_call = call.clone();
         second_call.call_id = "operation-2".into();
@@ -4563,6 +4600,7 @@ mod tests {
             &sessions,
             1_000,
             &CancellationToken::new(),
+            None,
         );
         assert!(
             first_result.is_ok() && second_result.is_ok(),

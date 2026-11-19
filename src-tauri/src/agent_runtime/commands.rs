@@ -265,6 +265,9 @@ pub(crate) fn agent_runtime_create_session(
     runtime: State<'_, AgentRuntime>,
     mut request: CreateAgentSessionRequest,
 ) -> Result<AgentSessionSnapshot, String> {
+    if request.parent_session_id.is_some() || request.subagent.is_some() {
+        return Err("Create child Agent Sessions through the delegation command".into());
+    }
     configure_runtime(&app, &runtime)?;
     apply_connection_sandbox(&app, &mut request)?;
     runtime.create_session(request)

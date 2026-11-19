@@ -25,6 +25,69 @@ fn setup_with_budget(
     setup_with_services(budget, "http://127.0.0.1:11434".into(), false)
 }
 
+#[test]
+fn children_inherit_their_own_parent_workspace_on_a_shared_terminal() {
+    let (storage, manager, _) = setup();
+    let parent_id = "lifecycle-parent";
+    let parent = manager.sessions.snapshot(parent_id).unwrap();
+    let target = parent.header.target.unwrap();
+    let other_workspace = tempfile::tempdir_in(storage.path()).unwrap();
+    let other_target = super::super::AgentSessionTarget {
+        cwd: Some(other_workspace.path().to_string_lossy().into_owned()),
+        ..target.clone()
+    };
+    let other_id = "lifecycle-other-parent";
+    manager
+        .sessions
+        .create(CreateAgentSessionRequest {
+            session_id: other_id.into(),
+            task_id: "lifecycle-other-task".into(),
+            goal: "Inspect the second workspace".into(),
+            parent_session_id: None,
+            continued_from_session_id: None,
+            target: Some(other_target.clone()),
+            permission_mode: parent.header.permission_mode,
+            execution_surface: parent.header.execution_surface,
+            success_criteria: Vec::new(),
+            capability_scope: None,
+            subagent: None,
+        })
+        .unwrap();
+    let model = manager
+        .agents
+        .get(parent_id)
+        .unwrap()
+        .unwrap()
+        .model()
+        .unwrap();
+    manager
+        .agents
+        .attach(
+            manager.sessions.clone(),
+            other_id.into(),
+            model.provider,
+            model.adapter,
+        )
+        .unwrap();
+
+    for (owner, expected) in [(parent_id, target), (other_id, other_target)] {
+        let child_id = manager
+            .create_child(
+                owner,
+                "Read the inherited workspace".into(),
+                AgentSubagentRole::Explorer,
+                "blank",
+                vec![expected.target_id.clone()],
+                default_subagent_budget(),
+                false,
+            )
+            .unwrap();
+        let child = manager.sessions.snapshot(&child_id).unwrap();
+        assert_eq!(child.header.target.as_ref(), Some(&expected));
+        assert_eq!(child.header.subagent.unwrap().target_scope, vec![expected]);
+    }
+}
+
 fn setup_with_services(
     budget: AgentSubagentBudget,
     base_url: String,
