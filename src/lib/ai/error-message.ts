@@ -47,6 +47,10 @@ export function aiErrorMessage(message: string, t: (key: LocaleKey, values?: Rec
   if (code === 'AGENT_SANDBOX_DISABLED') return t('ai.error.sandboxDisabled');
   if (code === 'SANDBOX_DIRECT_REQUIRED') return t('ai.error.sandboxDirectRequired');
   if (code === 'MAC_SANDBOX_PREVIEW_DIRECT_ONLY') return t('ai.error.localSandboxDirectRequired');
+  if (code === 'WINDOWS_SANDBOX_DIRECT_REQUIRED') return t('ai.error.windowsSandboxDirectRequired');
+  if (code === 'WINDOWS_SANDBOX_MANAGED_ROOT_REQUIRED') return t('ai.error.windowsSandboxManagedRoot');
+  if (code === 'WINDOWS_SANDBOX_START_FAILED') return t('ai.error.windowsSandboxStartFailed');
+  if (code === 'WINDOWS_SANDBOX_UNAVAILABLE') return t('ai.error.windowsSandboxUnavailable');
   if (code === 'LOCAL_SANDBOX_LAUNCHER_CHANGED') return t('ai.error.localSandboxLauncherChanged');
   if (code === 'SANDBOX_SESSION_POLICY_CHANGED') return t('ai.error.sandboxSessionPolicyChanged');
   if (code === 'AUTO_REVIEW_CHANGED') return t('ai.error.autoReviewChanged');

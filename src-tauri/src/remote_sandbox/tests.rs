@@ -432,6 +432,7 @@ fn linux_ssh_bubblewrap_acceptance() {
         root_path: Some(WORKSPACE.into()),
         local_root: Some(temp.path().to_str().unwrap().into()),
         remote_sandbox_required: Some(true),
+        windows_sandbox_required: None,
     };
     let data_root = temp.path().join("runtime");
     std::fs::create_dir(&data_root).unwrap();

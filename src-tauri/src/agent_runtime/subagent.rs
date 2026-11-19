@@ -2632,6 +2632,7 @@ mod retry_policy_tests {
                     root_path: None,
                     local_root: None,
                     remote_sandbox_required: None,
+                    windows_sandbox_required: None,
                 }),
                 permission_mode: Some(super::super::AgentSessionPermissionMode::Operator),
                 execution_surface: super::super::AgentExecutionSurface::Direct,
@@ -2848,6 +2849,7 @@ mod retry_policy_tests {
                 root_path: None,
                 local_root: None,
                 remote_sandbox_required: None,
+                windows_sandbox_required: None,
             };
             let scope = AgentCapabilityScope {
                 tool_names: vec!["list_directory".into()],

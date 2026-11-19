@@ -2011,12 +2011,27 @@ pub(crate) fn terminal_acceptance_directory() -> Result<std::path::PathBuf, Stri
 
 #[tauri::command]
 pub(crate) async fn run_terminal_acceptance_command(
+    app: AppHandle,
     agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
     agent_session_id: String,
     call_id: String,
     source_kind: String,
     tool_argument: Option<String>,
 ) -> Result<serde_json::Value, String> {
+    let _ = &app;
+    #[cfg(all(windows, debug_assertions, feature = "native-input-acceptance"))]
+    {
+        let evidence = windows_sandbox_acceptance_directory(&app)?;
+        return agent_runtime
+            .windows_sandbox_acceptance_command(
+                &evidence,
+                &agent_session_id,
+                &call_id,
+                &source_kind,
+                tool_argument.as_deref(),
+            )
+            .await;
+    }
     #[cfg(all(
         feature = "native-input-acceptance",
         debug_assertions,
@@ -2038,11 +2053,14 @@ pub(crate) async fn run_terminal_acceptance_command(
             )
             .await
     }
-    #[cfg(not(all(
-        feature = "native-input-acceptance",
-        debug_assertions,
-        target_os = "macos",
-        target_arch = "aarch64"
+    #[cfg(not(any(
+        all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ),
+        all(windows, debug_assertions, feature = "native-input-acceptance")
     )))]
     {
         let _ = (
@@ -2058,10 +2076,19 @@ pub(crate) async fn run_terminal_acceptance_command(
 
 #[tauri::command]
 pub(crate) async fn decide_terminal_acceptance_command(
+    app: AppHandle,
     agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
     input: crate::agent_runtime::AgentToolDecisionInput,
     approve: bool,
 ) -> Result<serde_json::Value, String> {
+    let _ = &app;
+    #[cfg(all(windows, debug_assertions, feature = "native-input-acceptance"))]
+    {
+        windows_sandbox_acceptance_directory(&app)?;
+        return agent_runtime
+            .windows_sandbox_acceptance_decide(input, approve)
+            .await;
+    }
     #[cfg(all(
         feature = "native-input-acceptance",
         debug_assertions,
@@ -2077,16 +2104,34 @@ pub(crate) async fn decide_terminal_acceptance_command(
             .terminal_acceptance_decide_command(&directory.join("home"), input, approve)
             .await
     }
-    #[cfg(not(all(
-        feature = "native-input-acceptance",
-        debug_assertions,
-        target_os = "macos",
-        target_arch = "aarch64"
+    #[cfg(not(any(
+        all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ),
+        all(windows, debug_assertions, feature = "native-input-acceptance")
     )))]
     {
         let _ = (agent_runtime, input, approve);
         Err("TERMINAL_ACCEPTANCE_DISABLED".into())
     }
+}
+
+#[cfg(all(windows, debug_assertions, feature = "native-input-acceptance"))]
+fn windows_sandbox_acceptance_directory(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let evidence = std::env::var_os("SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR")
+        .map(std::path::PathBuf::from)
+        .ok_or("TERMINAL_ACCEPTANCE_DISABLED")?;
+    if app.config().identifier != "com.shellspan.validation.windows-sandbox"
+        || std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION").as_deref() != Ok("1")
+        || !evidence.is_absolute()
+        || std::env::var_os("SHELLSPAN_DATA_DIR") != Some(evidence.join("data").into_os_string())
+    {
+        return Err("TERMINAL_ACCEPTANCE_DISABLED".into());
+    }
+    Ok(evidence)
 }
 
 #[tauri::command]

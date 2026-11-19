@@ -409,8 +409,7 @@ impl AgentRegistry {
     #[cfg(all(
         feature = "native-input-acceptance",
         debug_assertions,
-        target_os = "macos",
-        target_arch = "aarch64"
+        any(windows, all(target_os = "macos", target_arch = "aarch64"))
     ))]
     pub(crate) fn attach_without_model(
         &self,

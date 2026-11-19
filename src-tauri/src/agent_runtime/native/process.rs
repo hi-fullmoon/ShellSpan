@@ -666,6 +666,91 @@ fn spawn_local_child_native(
     )
 }
 
+#[cfg(windows)]
+pub(super) fn run_windows_sandbox_process(
+    registry: &ProcessRegistryNative,
+    request: &crate::agent_runtime::AgentRequestNative,
+    target_id: &str,
+    mut child: super::windows_sandbox::Suspended,
+    timeout: Duration,
+    cancellation: tokio_util::sync::CancellationToken,
+    start: impl FnOnce(&super::windows_sandbox::Suspended) -> Result<(), String>,
+) -> Result<Arc<ManagedProcessNative>, String> {
+    let (control_tx, control_rx) = mpsc::channel();
+    let process = ManagedProcessNative::new(
+        request.task_id.clone(),
+        request.request_id.clone(),
+        target_id.into(),
+        AgentExecutionChannelNative::Direct,
+        Vec::new(),
+        control_tx,
+    );
+    registry.insert(Arc::clone(&process))?;
+    if let Err(error) = start(&child) {
+        // The suspended process never ran. Dropping the job terminates it.
+        process.finish(
+            ProcessLifecycleNative::Failed,
+            None,
+            false,
+            Some(error.clone()),
+        );
+        registry.remove_terminal(&process.process_handle, ProcessLifecycleNative::Failed)?;
+        return Err(error);
+    }
+    let worker = Arc::clone(&process);
+    let (stdout, stderr) = child.take_output();
+    thread::spawn(move || {
+        let (output_tx, output_rx) = mpsc::sync_channel(32);
+        spawn_reader(stdout, output_tx.clone(), true);
+        spawn_reader(stderr, output_tx, false);
+        let deadline = Instant::now() + timeout;
+        let outcome = (|| -> std::io::Result<_> {
+            loop {
+                let mut cancelled = cancellation.is_cancelled();
+                while let Ok(control) = control_rx.try_recv() {
+                    match control {
+                        ProcessControlNative::Kill { .. } => cancelled = true,
+                        ProcessControlNative::Write { response, .. } => {
+                            let _ = response.send(Err("Sandbox foreground stdin is closed".into()));
+                        }
+                    }
+                }
+                for output in output_rx.try_iter().take(32) {
+                    worker.push_output(output);
+                }
+                let exit_code = child.exit_code()?;
+                let state = if cancelled {
+                    ProcessLifecycleNative::Cancelled
+                } else if let Some(code) = exit_code {
+                    if child.empty()? {
+                        return Ok((ProcessLifecycleNative::Exited, Some(code)));
+                    }
+                    ProcessLifecycleNative::Exited
+                } else if Instant::now() >= deadline {
+                    ProcessLifecycleNative::TimedOut
+                } else {
+                    thread::sleep(PROCESS_POLL_INTERVAL);
+                    continue;
+                };
+                child.terminate()?;
+                child.wait_empty()?;
+                return Ok((state, exit_code));
+            }
+        })();
+        drain_process_output(&worker, &output_rx);
+        match outcome {
+            Ok((state, code)) => worker.finish(state, code, true, None),
+            Err(error) => worker.finish(
+                ProcessLifecycleNative::Failed,
+                None,
+                false,
+                Some(error.to_string()),
+            ),
+        }
+    });
+    Ok(process)
+}
+
 fn spawn_local_child_command(child: &mut Command) -> Result<Child, String> {
     child.stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(unix)]

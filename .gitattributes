@@ -1,6 +1,9 @@
 # git-cliff --prepend 按字节匹配文件头,CRLF 会导致识别失败、头部重复
 CHANGELOG.md text eol=lf
 
+# The Linux SSH subsystem is copied into Docker from Windows worktrees.
+scripts/remote-sandbox/shellspan-bwrap-v1 text eol=lf
+
 # Streaming selection tests consume this document by character offset.
 AGENTS.md text eol=lf
 # Standalone Ajv output is compared byte-for-byte with generated LF source.

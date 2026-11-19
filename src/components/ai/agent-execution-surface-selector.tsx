@@ -70,7 +70,7 @@ export interface AgentExecutionSurfaceSelectorProps {
   readonly realTerminalState?: RealTerminalPresentationState;
   readonly nativeStartupTimedOut?: boolean;
   readonly glibcMismatch?: RemoteGlibcMismatch | null;
-  readonly sandboxDirectOnly?: 'local' | 'remote';
+  readonly sandboxDirectOnly?: 'local' | 'windows' | 'remote';
   /** Reserved for a future authoritative runtime routing result. */
   readonly runtimeFallback?: TerminalSurfaceRuntimeFallbackSignal;
   readonly onSurfaceChange?: (surface: AgentExecutionSurface) => void;
@@ -101,7 +101,8 @@ export function AgentExecutionSurfaceSelector({
   const realTerminalCopy = REAL_TERMINAL_STATE_COPY[presentation.realTerminalState];
   const visibleAvailable = !sandboxDirectOnly && presentation.realTerminalState === 'ready';
   const realTerminalDescription = sandboxDirectOnly
-    ? t(sandboxDirectOnly === 'local' ? 'ai.error.localSandboxDirectRequired' : 'ai.error.sandboxDirectRequired')
+    ? t(sandboxDirectOnly === 'windows' ? 'ai.error.windowsSandboxDirectRequired'
+      : sandboxDirectOnly === 'local' ? 'ai.error.localSandboxDirectRequired' : 'ai.error.sandboxDirectRequired')
     : presentation.realTerminalState !== 'unavailable'
     ? t(realTerminalCopy.description)
     : glibcMismatch

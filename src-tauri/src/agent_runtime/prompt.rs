@@ -701,6 +701,7 @@ mod tests {
                 root_path: Some("/workspace".into()),
                 local_root: Some("/workspace".into()),
                 remote_sandbox_required: None,
+                windows_sandbox_required: None,
             }),
             permission_mode: Some(AgentSessionPermissionMode::ScopedAutopilot),
             execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,

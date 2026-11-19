@@ -22,6 +22,7 @@ import type { AgentExecutionSurface } from '@/types/agent-session';
 
 const logger = createLogger('aiSettingsStore');
 const AGENT_SANDBOX_ENABLED_KEY = 'ai.agentSandboxEnabled';
+const WINDOWS_AGENT_SANDBOX_KEY = 'ai.windowsAgentSandboxEnabled';
 
 export interface AiProviderPresetDefinition {
   preset: AiProviderPreset;
@@ -122,6 +123,7 @@ interface AiSettingsState extends AiPreferences {
   initialized: boolean;
   agentSandboxEnabled: boolean;
   agentSandboxSaving: boolean;
+  windowsAgentSandboxEnabled: boolean;
   persistenceStatus: 'idle' | 'pending' | 'saving' | 'saved' | 'error';
   hydrateFromDb: () => Promise<void>;
   addProvider: (
@@ -135,6 +137,7 @@ interface AiSettingsState extends AiPreferences {
   setAgentPermissionMode: (mode: AgentPermissionMode) => void;
   setAgentExecutionSurface: (surface: AgentExecutionSurface) => void;
   setAgentSandboxEnabled: (enabled: boolean) => Promise<void>;
+  setWindowsAgentSandboxEnabled: (enabled: boolean) => Promise<void>;
   getProviderConfig: (id?: string) => AiProviderConfig;
 }
 
@@ -258,6 +261,7 @@ export const useAiSettingsStore = create<AiSettingsState>()(
     initialized: false,
     agentSandboxEnabled: false,
     agentSandboxSaving: false,
+    windowsAgentSandboxEnabled: false,
     persistenceStatus: 'idle',
     hydrateFromDb: async () => {
       try {
@@ -268,6 +272,7 @@ export const useAiSettingsStore = create<AiSettingsState>()(
         set({
           ...preferences,
           agentSandboxEnabled: entries.some(([key, value]) => key === AGENT_SANDBOX_ENABLED_KEY && value === 'true'),
+          windowsAgentSandboxEnabled: entries.some(([key, value]) => key === WINDOWS_AGENT_SANDBOX_KEY && value === 'true'),
         });
         set({ initialized: true });
       } catch (error) {
@@ -325,6 +330,16 @@ export const useAiSettingsStore = create<AiSettingsState>()(
       try {
         await invokeSavePreferences([[AGENT_SANDBOX_ENABLED_KEY, String(agentSandboxEnabled)]]);
         set({ agentSandboxEnabled });
+      } finally {
+        set({ agentSandboxSaving: false });
+      }
+    },
+    setWindowsAgentSandboxEnabled: async (windowsAgentSandboxEnabled) => {
+      if (get().agentSandboxSaving) return;
+      set({ agentSandboxSaving: true });
+      try {
+        await invokeSavePreferences([[WINDOWS_AGENT_SANDBOX_KEY, String(windowsAgentSandboxEnabled)]]);
+        set({ windowsAgentSandboxEnabled });
       } finally {
         set({ agentSandboxSaving: false });
       }

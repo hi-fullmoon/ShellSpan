@@ -226,6 +226,8 @@ pub(crate) struct AgentSessionTarget {
     pub(crate) local_root: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) remote_sandbox_required: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) windows_sandbox_required: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

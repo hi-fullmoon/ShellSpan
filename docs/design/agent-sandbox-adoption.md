@@ -82,6 +82,12 @@ Windows 在原生系统上选择可验证的后端后，复用同一套桌面验
 
 在加锁后尚未启动、命令运行中、进程组退出后尚未解锁三个时点强制结束应用，再用同一个测试包重启。实测未启动的用例未派发或写入；运行中的用例在重启后仍受保护，进程组退出才解锁；已经退出的用例解除遗留保护，缺少结果的会话继续标记为待恢复。额外重启一次后，九条会话记录再次校验通过，所有崩溃用例均未重跑。结果保存在 `artifacts/tests/agent-sandbox/desktop-mac-*/`。这次验证覆盖受管临时工作区和应用进程崩溃，任意现有工作区的原地接入和 Windows 原生实现仍待验证。
 
+### Windows 本地 Direct
+
+Windows 通过无附加能力的 AppContainer 执行前台 Direct 命令。可在「设置 → AI 助手 → 终端 Agent」打开总开关及「新建本地会话使用 Windows 沙箱」。每个新会话使用独立的受管工作区。Windows PowerShell 命令及其子进程均受同一 AppContainer 与 Job Object 约束。系统资源访问遵循 Windows 的 AppContainer ACL。结构化文件、HTTP 和 MCP 工具暂不进入此执行面。
+
+应用在恢复挂起的进程前保存派发记录并再次确认总开关。退出或崩溃时，系统关闭 Job Object 并清理该次运行的进程树。重启后，已派发但未结算的调用保留待恢复状态。Windows 选择、执行限制和结果字段见 [Agent 协议](../../protocol/agent/runtime/terminal-protocol-rfc.md#windows-appcontainer-for-direct-agent-commands)。
+
 ## 阶段三：验证 OpenSandbox 的远端可见终端
 
 1. 在专用测试环境部署固定版本的 OpenSandbox 与执行镜像，验证工作区以受控方式进入沙箱，并验证文件可见范围、网络出站规则和沙箱资源回收。记录部署所用执行运行时及其隔离能力。现有 Bubblewrap SSH 连接使用原有子系统及文件接口；OpenSandbox 使用明确配置的服务目标与自己的沙箱身份。[OpenSandbox 部署与执行](https://github.com/opensandbox-group/OpenSandbox) · [执行后端选型](https://github.com/opensandbox-group/OpenSandbox/blob/main/docs/guides/secure-container.md)

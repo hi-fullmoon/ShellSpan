@@ -1342,3 +1342,11 @@ not fabricated control receipts, and runs after a clean dependency installation
 without old ignored capture directories. Limited P0 completion permits continuing
 P1; it is not completion of the refactor. Full frontend tests retain three
 unrelated AI assertion failures reproduced with the unpatched-package baseline.
+
+## Windows AppContainer for Direct Agent commands
+
+Windows clients can explicitly request `windowsSandboxRequired: true` on a new local Agent target. The runtime requires the experimental sandbox preference and the Direct surface. It creates a separate workspace and persists the requirement and workspace with that session. Ordinary local sessions keep their existing execution behavior. The workspace cannot be rebound, and the session cannot switch to the visible terminal.
+
+This mode exposes foreground `run_terminal_command`, `ask_user_question` and `read_tool_result`. Commands start Windows PowerShell without a caller profile, with closed stdin, bounded captured streams, and no AppContainer network capabilities. AppContainer ACLs permit writes to the managed workspace, its temporary directory and platform-provided container storage. System and explicitly AppContainer-accessible resources follow Windows ACLs. The runner holds the managed directory identity during execution and binds its policy version, directory identity and the approved call to the capability. It checks the preference again before releasing the suspended process.
+
+The runtime commits dispatch before resuming the process. `sandbox: "windowsAppContainer"` identifies the executor and `started` records whether Windows admitted the process. A real nonzero exit is kept separately from pre-start refusal. The command and its descendants enter a kill-on-close Windows Job Object at process creation. Cancellation and timeout wait for the job to empty. If a crash leaves a dispatch without a settlement, recovery preserves it as in flight and requires explicit resolution.

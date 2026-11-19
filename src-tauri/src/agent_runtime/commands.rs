@@ -320,6 +320,64 @@ fn apply_connection_sandbox(
         return Ok(());
     };
     target.remote_sandbox_required = None;
+    if target.windows_sandbox_required == Some(true) {
+        if target.kind != "local"
+            || target.target_id == "workbench-ai"
+            || request.execution_surface != super::AgentExecutionSurface::Direct
+        {
+            return Err(
+                "WINDOWS_SANDBOX_DIRECT_REQUIRED: select a local Direct Agent session".into(),
+            );
+        }
+        #[cfg(windows)]
+        {
+            let database = app.state::<crate::db::Database>();
+            database.require_agent_sandbox_enabled()?;
+            let home = app.path().home_dir().map_err(|error| error.to_string())?;
+            let workspace = super::native::windows_sandbox::create_workspace(
+                &crate::shellspan_data_dir(&home),
+                &request.session_id,
+            )?;
+            target.cwd = Some(workspace.clone());
+            target.local_root = Some(workspace);
+            use super::AgentSessionEffect::*;
+            let allowed = |name: &str| {
+                matches!(
+                    name,
+                    "run_terminal_command" | "ask_user_question" | "read_tool_result"
+                )
+            };
+            if let Some(scope) = request.capability_scope.as_mut() {
+                if scope.tool_names.iter().any(|name| !allowed(name)) {
+                    return Err("WINDOWS_SANDBOX_DIRECT_REQUIRED".into());
+                }
+            } else {
+                request.capability_scope = Some(super::AgentCapabilityScope {
+                    tool_names: [
+                        "run_terminal_command",
+                        "ask_user_question",
+                        "read_tool_result",
+                    ]
+                    .map(str::to_owned)
+                    .to_vec(),
+                    effects: vec![
+                        None,
+                        ReadOnly,
+                        SensitiveRead,
+                        StateChange,
+                        Destructive,
+                        ExternalSideEffect,
+                        Unknown,
+                    ],
+                    target_ids: vec![target.target_id.clone()],
+                });
+            }
+        }
+        #[cfg(not(windows))]
+        return Err(
+            "WINDOWS_SANDBOX_UNAVAILABLE: the session requires Windows AppContainer".into(),
+        );
+    }
     if target.kind != "remote" {
         return Ok(());
     }

@@ -5788,6 +5788,11 @@ fn validate_session_target(target: &AgentSessionTarget) -> Result<(), String> {
     if target.remote_sandbox_required.is_some() && target.kind != "remote" {
         return Err("Agent sandbox requirement is only valid for a remote target".into());
     }
+    if target.windows_sandbox_required == Some(true)
+        && (target.kind != "local" || target.cwd.is_none() || target.cwd != target.local_root)
+    {
+        return Err("Windows sandbox target requires a managed local workspace".into());
+    }
     if target.remote_sandbox_required == Some(true) && target.profile_id.is_none() {
         return Err("Agent sandbox requirement needs a saved SSH profile".into());
     }

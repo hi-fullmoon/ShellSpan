@@ -13,6 +13,7 @@ import { Field } from '@/components/ui/field';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/hooks/useI18n';
+import { usePlatform } from '@/hooks/usePlatform';
 import { useToast } from '@/hooks/useToast';
 import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
@@ -88,10 +89,14 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const contextLines = useAiSettingsStore((state) => state.contextLines);
   const setContextLines = useAiSettingsStore((state) => state.setContextLines);
   const sandboxControlId = React.useId();
+  const windowsSandboxControlId = React.useId();
+  const platform = usePlatform();
   const preferencesReady = useAiSettingsStore((state) => state.initialized);
   const agentSandboxEnabled = useAiSettingsStore((state) => state.agentSandboxEnabled);
   const agentSandboxSaving = useAiSettingsStore((state) => state.agentSandboxSaving);
   const setAgentSandboxEnabled = useAiSettingsStore((state) => state.setAgentSandboxEnabled);
+  const windowsAgentSandboxEnabled = useAiSettingsStore((state) => state.windowsAgentSandboxEnabled);
+  const setWindowsAgentSandboxEnabled = useAiSettingsStore((state) => state.setWindowsAgentSandboxEnabled);
   const [selectedProviderId, setSelectedProviderId] = useState(defaultProviderId);
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -323,6 +328,23 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
               }}
             />
           </SettingRow>
+          {platform === 'windows' && <SettingRow
+              controlId={windowsSandboxControlId}
+              label={t('settings.ai.agent.windowsSandbox')}
+              description={t('settings.ai.agent.windowsSandboxDescription')}
+              descriptionId={`${windowsSandboxControlId}-description`}
+            >
+              <Switch
+                id={windowsSandboxControlId}
+                aria-label={t('settings.ai.agent.windowsSandbox')}
+                aria-describedby={`${windowsSandboxControlId}-description`}
+                checked={windowsAgentSandboxEnabled}
+                disabled={!preferencesReady || agentSandboxSaving || !agentSandboxEnabled}
+                onCheckedChange={(enabled) => {
+                  void setWindowsAgentSandboxEnabled(enabled).catch(() => showError(t('settings.ai.agent.sandboxSaveFailed')));
+                }}
+              />
+          </SettingRow>}
         </SettingsGroup>
       )}
 

@@ -959,6 +959,7 @@ impl Database {
     }
 
     #[cfg(any(
+        windows,
         all(test, target_os = "linux"),
         all(
             feature = "native-input-acceptance",

@@ -64,6 +64,7 @@ import { generateId } from '@/lib/utils';
 import { t } from '@/locales';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
+import { usePlatform } from '@/hooks/usePlatform';
 import { useAiDraftStore } from '@/stores/aiDraftStore';
 import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
 import { documentMessageSummary } from '@/lib/ai/document-message';
@@ -111,7 +112,7 @@ export interface AiSessionController {
   readonly selectedProvider?: AiProviderConfig;
   readonly selectedPermission?: AgentPermissionMode;
   readonly selectedExecutionSurface: AgentExecutionSurface;
-  readonly sandboxDirectOnly: 'local' | 'remote' | undefined;
+  readonly sandboxDirectOnly: 'local' | 'windows' | 'remote' | undefined;
   readonly glibcMismatch: RemoteGlibcMismatch | null;
   readonly settingsBusy: boolean;
   readonly selectModel: (provider: AiProviderConfig) => Promise<void>;
@@ -290,6 +291,10 @@ export function useAiSessionController({
     return () => { disposed = true; };
   }, [isSandboxPreview, localTarget]);
   const localSandboxPreview = localTarget && isSandboxPreview === true;
+  const platform = usePlatform();
+  const agentSandboxEnabled = useAiSettingsStore((state) => state.agentSandboxEnabled);
+  const windowsSandboxEnabled = useAiSettingsStore((state) => state.windowsAgentSandboxEnabled);
+  const newWindowsSandbox = localTarget && platform === 'windows' && agentSandboxEnabled && windowsSandboxEnabled;
   const activeTerminalId = useTerminalStore((state) => focusMode ? focusTargetId : state.activeSessionId);
   const sandboxProfileId = scope === 'terminal' && isTauriRuntime() ? activeTerminal?.profileId : undefined;
   const [sandboxProfile, setSandboxProfile] = useState<{ id: string; configured: boolean | null }>();
@@ -525,8 +530,10 @@ export function useAiSessionController({
   const currentAgentTarget = view?.snapshot.value.header.target;
   const sameSandboxTarget = currentAgentTarget?.sessionId === activeTerminalId;
   const sandboxRequired = sameSandboxTarget && currentAgentTarget?.remoteSandboxRequired === true;
+  const windowsSandboxRequired = sameSandboxTarget && currentAgentTarget?.windowsSandboxRequired === true;
+  const windowsSandbox = windowsSandboxRequired || (!view && newWindowsSandbox);
   const sandboxDirectOnly = localSandboxPreview ? 'local'
-    : sandboxConfigured || sandboxRequired ? 'remote' : undefined;
+    : windowsSandbox ? 'windows' : sandboxConfigured || sandboxRequired ? 'remote' : undefined;
   const sandboxSessionChanged = sameSandboxTarget && sandboxProfile?.id === sandboxProfileId
     && typeof sandboxProfile?.configured === 'boolean' && currentAgentTarget?.remoteSandboxRequired !== undefined
     && currentAgentTarget.remoteSandboxRequired !== sandboxConfigured;
@@ -535,8 +542,10 @@ export function useAiSessionController({
   const visibleExecutionRequired = focusMode && Boolean(view && view.snapshot.value.header.executionSurface !== 'boundTerminal');
   const sandboxUnavailableReason =
     sandboxChecking || (localTarget && isSandboxPreview === null) ? t('connection.sandbox.loading')
+    : windowsSandboxRequired && !agentSandboxEnabled ? t('ai.error.sandboxDisabled')
     : focusMode && sandboxDirectOnly
-      ? t(localSandboxPreview ? 'focus.localSandboxRequiresDirect' : 'focus.sandboxRequiresDirect')
+      ? t(windowsSandbox ? 'ai.error.windowsSandboxDirectRequired'
+        : localSandboxPreview ? 'focus.localSandboxRequiresDirect' : 'focus.sandboxRequiresDirect')
     : sandboxSessionChanged ? t('ai.error.sandboxSessionPolicyChanged')
     : sandboxNeedsDirect ? t(localSandboxPreview ? 'ai.error.localSandboxDirectRequired' : 'ai.error.sandboxDirectRequired') : null;
   const canStartAgent = !terminalSessionRestoring && !visibleExecutionRequired && (scope === 'workbench'
@@ -549,7 +558,7 @@ export function useAiSessionController({
   const glibcMismatch = scope === 'terminal' && activeTerminal?.status === 'connected'
     ? remoteGlibcMismatch(activeTerminal.integrationReason) : null;
   const terminalCreationSurface = focusMode ? 'boundTerminal'
-    : localSandboxPreview || sandboxConfigured || glibcMismatch ? 'direct' : newExecutionSurface;
+    : localSandboxPreview || newWindowsSandbox || sandboxConfigured || glibcMismatch ? 'direct' : newExecutionSurface;
   const needsDirectFallback = !focusMode && glibcMismatch !== null
     && view?.snapshot.value.header.executionSurface === 'boundTerminal'
     && view.snapshot.value.header.target?.sessionId === activeTerminal?.sessionId
@@ -718,7 +727,10 @@ export function useAiSessionController({
         sessionId,
         taskId: `task-${sessionId}`,
         goal: intent.goal,
-        target: runtimeTarget(activeTerminal, workspaceRoot),
+        target: {
+          ...runtimeTarget(activeTerminal, workspaceRoot),
+          ...(newWindowsSandbox && { windowsSandboxRequired: true }),
+        },
         permissionMode: permissionMode(
           useAgentPermissionStore.getState().getMode(activeTerminal.sessionId),
         ),
@@ -726,7 +738,7 @@ export function useAiSessionController({
         successCriteria: intent.successCriteria,
       },
     };
-  }, [activeTerminal, focusMode, operationId, scope, t, terminalCreationSurface]);
+  }, [activeTerminal, focusMode, newWindowsSandbox, operationId, scope, t, terminalCreationSurface]);
 
   const projectKey = `${workspaceScopeKey}:${openedSessionId ?? 'new'}:${skillNavigation}:${focusMode ? activeTerminal?.sessionId ?? '' : ''}`;
   const projectEpoch = useRef({ key: projectKey });
@@ -756,7 +768,7 @@ export function useAiSessionController({
       || (target.kind === 'remote' && !target.profileId)) return input;
     // The preview backend supplies its managed root. A pre-existing terminal
     // may still report the ordinary shell directory.
-    if (target.kind === 'local' && localSandboxPreview) return input;
+    if (target.kind === 'local' && (localSandboxPreview || target.windowsSandboxRequired)) return input;
     const root = await resolveProjectRoot();
     if (!root) {
       // The directory enables structured file tools; full-access shell execution

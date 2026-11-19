@@ -67,6 +67,8 @@ fn resolve_runtime_storage_path(path: &Path) -> PathBuf {
 
 #[derive(Debug, Clone)]
 pub(crate) struct NativeExecutionContext {
+    #[cfg(windows)]
+    pub(crate) windows_sandbox_required: bool,
     pub(crate) request: AgentRequestNative,
     pub(crate) turn_id: String,
     pub(crate) step_id: String,
@@ -108,6 +110,8 @@ pub(crate) struct AgentAuthorizeCallRequestNative {
 
 #[derive(Debug, Clone)]
 pub(crate) struct PreparedAuthorizationNative {
+    #[cfg(windows)]
+    pub(crate) windows_sandbox_digest: Option<String>,
     reviewed_command: Option<super::ReviewedReadCommand>,
     pub(crate) sandbox: Option<crate::remote_sandbox::Binding>,
     #[cfg(all(
@@ -819,6 +823,10 @@ impl NativeToolEngine {
             capability_id: "pending-native-capability".into(),
         };
         let sandbox = call_sandbox_binding(&context, &call, database, known_hosts_path)?;
+        #[cfg(windows)]
+        let windows_sandbox_digest = self
+            .windows_sandbox_binding(&context, &call, database)?
+            .map(|binding| binding.digest);
         #[cfg(all(
             feature = "native-input-acceptance",
             debug_assertions,
@@ -921,6 +929,8 @@ impl NativeToolEngine {
             None => native_prompt,
         };
         Ok(PreparedAuthorizationNative {
+            #[cfg(windows)]
+            windows_sandbox_digest,
             reviewed_command: review.command,
             native_prompt,
             sandbox,
@@ -953,6 +963,11 @@ impl NativeToolEngine {
             .sandbox
             .as_ref()
             .map(|binding| binding.digest.as_str());
+        #[cfg(windows)]
+        let sandbox_digest = prepared
+            .windows_sandbox_digest
+            .as_deref()
+            .or(sandbox_digest);
         #[cfg(all(
             feature = "native-input-acceptance",
             debug_assertions,
@@ -1196,6 +1211,8 @@ impl NativeToolEngine {
             .executable(&call.tool_name)
             .map_err(registry_error_message)?;
         let sandbox = call_sandbox_binding(context, &call, database, known_hosts_path)?;
+        #[cfg(windows)]
+        let windows_sandbox = self.windows_sandbox_binding(context, &call, database)?;
         #[cfg(all(
             feature = "native-input-acceptance",
             debug_assertions,
@@ -1206,6 +1223,11 @@ impl NativeToolEngine {
         #[cfg(all(test, target_os = "linux"))]
         let local_sandbox = self.local_sandbox_binding(&call, database)?;
         let sandbox_digest = sandbox.as_ref().map(|binding| binding.digest.as_str());
+        #[cfg(windows)]
+        let sandbox_digest = windows_sandbox
+            .as_ref()
+            .map(|binding| binding.digest.as_str())
+            .or(sandbox_digest);
         #[cfg(all(
             feature = "native-input-acceptance",
             debug_assertions,
@@ -1318,6 +1340,8 @@ impl NativeToolEngine {
                 cancellation,
                 runner_journal,
                 sandbox.as_ref(),
+                #[cfg(windows)]
+                windows_sandbox,
                 #[cfg(all(
                     feature = "native-input-acceptance",
                     debug_assertions,
@@ -1940,6 +1964,7 @@ impl NativeToolEngine {
         cancellation: &CancellationToken,
         runner_journal: Option<crate::agent_runtime::RunnerDispatchJournal>,
         sandbox: Option<&crate::remote_sandbox::Binding>,
+        #[cfg(windows)] windows_sandbox: Option<super::windows_sandbox::Workspace>,
         #[cfg(all(
             feature = "native-input-acceptance",
             debug_assertions,
@@ -2163,6 +2188,73 @@ impl NativeToolEngine {
         ))]
         let mut desktop_launch = None;
         let process = match &call.target {
+            #[cfg(windows)]
+            AgentToolTargetNative::Local { target_id, .. } if windows_sandbox.is_some() => {
+                let launch = database.with_local_sandbox_dispatch(|| {
+                    if cancellation.is_cancelled() {
+                        return Err("Local sandbox launch cancelled".into());
+                    }
+                    let journal =
+                        runner_journal.ok_or("Missing Windows sandbox dispatch journal")?;
+                    let workspace = windows_sandbox.expect("Windows sandbox binding");
+                    let child = super::windows_sandbox::prepare(workspace, &arguments.command)
+                        .map_err(|error| format!("WINDOWS_SANDBOX_START_FAILED: {error}"))?;
+                    super::process::run_windows_sandbox_process(
+                        &self.processes,
+                        &context.request,
+                        target_id,
+                        child,
+                        timeout,
+                        cancellation.clone(),
+                        |child| {
+                            journal(&mut || {
+                                if cancellation.is_cancelled() {
+                                    return Err("Local sandbox launch cancelled".into());
+                                }
+                                child.start().map_err(|error| {
+                                    format!("WINDOWS_SANDBOX_START_FAILED: {error}")
+                                })
+                            })
+                        },
+                    )
+                });
+                match launch {
+                    Ok(process) => {
+                        let snapshot =
+                            process.wait(timeout.saturating_add(Duration::from_secs(4)))?;
+                        self.processes
+                            .remove_terminal(&snapshot.process_handle, snapshot.state)?;
+                        let termination_confirmed = snapshot.termination_confirmed;
+                        let mut result =
+                            exec_process_result(&context.request, call, effect, snapshot, false);
+                        let data = result.data.as_mut().expect("Direct process result data");
+                        data["sandbox"] = json!(super::windows_sandbox::EXECUTOR);
+                        data["started"] = json!(true);
+                        if !termination_confirmed {
+                            result.status = AgentToolResultStatusNative::Uncertain;
+                            result.summary =
+                                "Sandbox process termination could not be confirmed.".into();
+                        }
+                        return Ok(result);
+                    }
+                    Err(error) => {
+                        let mut result = completed_result(
+                            &context.request,
+                            call,
+                            effect,
+                            &error,
+                            json!({"sandbox": super::windows_sandbox::EXECUTOR, "started": false}),
+                            false,
+                        );
+                        result.status = if cancellation.is_cancelled() {
+                            AgentToolResultStatusNative::Cancelled
+                        } else {
+                            AgentToolResultStatusNative::Failed
+                        };
+                        return Ok(result);
+                    }
+                }
+            }
             #[cfg(all(
                 feature = "native-input-acceptance",
                 debug_assertions,
@@ -2392,6 +2484,29 @@ impl NativeToolEngine {
             }
         }
         Ok(result)
+    }
+
+    #[cfg(windows)]
+    fn windows_sandbox_binding(
+        &self,
+        context: &NativeExecutionContext,
+        call: &AgentToolCallNative,
+        database: &Database,
+    ) -> Result<Option<super::windows_sandbox::Workspace>, String> {
+        if !context.windows_sandbox_required {
+            return Ok(None);
+        }
+        database.require_agent_sandbox_enabled()?;
+        let AgentToolTargetNative::Local { cwd: Some(cwd), .. } = &call.target else {
+            return Err("WINDOWS_SANDBOX_DIRECT_REQUIRED".into());
+        };
+        if call.tool_name != "exec_command"
+            || call.arguments["background"] == true
+            || call.arguments["elevated"] == true
+        {
+            return Err("WINDOWS_SANDBOX_DIRECT_REQUIRED".into());
+        }
+        super::windows_sandbox::Workspace::open(&self.checkpoint_root()?, Path::new(cwd)).map(Some)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -3976,6 +4091,8 @@ mod tests {
             cwd: None,
         };
         let context = NativeExecutionContext {
+            #[cfg(windows)]
+            windows_sandbox_required: false,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                 request_id: "cancel-request".into(),
@@ -4088,6 +4205,8 @@ mod tests {
         };
         let mut prepared = PreparedMcpAuthorizationNative {
             context: NativeExecutionContext {
+                #[cfg(windows)]
+                windows_sandbox_required: false,
                 request: AgentRequestNative {
                     contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                     request_id: "request".into(), user_session_id: "session".into(), task_id: "task".into(),
@@ -4157,6 +4276,8 @@ mod tests {
             cwd: Some(crate::portable_local_path(&workspace)),
         };
         let context = NativeExecutionContext {
+            #[cfg(windows)]
+            windows_sandbox_required: false,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                 request_id: "request".into(),
@@ -4258,6 +4379,8 @@ mod tests {
     #[test]
     fn execution_context_is_call_scoped_and_rejects_missing_step_identity() {
         let context = NativeExecutionContext {
+            #[cfg(windows)]
+            windows_sandbox_required: false,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                 request_id: "request-a".into(),
@@ -4402,6 +4525,8 @@ mod tests {
             cwd: Some(workspace.to_str().unwrap().into()),
         };
         let context = NativeExecutionContext {
+            #[cfg(windows)]
+            windows_sandbox_required: false,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                 request_id: "request-full-access".into(),
@@ -4540,6 +4665,8 @@ mod tests {
             local_root: None,
         };
         let context = NativeExecutionContext {
+            #[cfg(windows)]
+            windows_sandbox_required: false,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                 request_id: "request-remote-source".into(),
@@ -4869,6 +4996,8 @@ mod tests {
             local_root: None,
         };
         let context = NativeExecutionContext {
+            #[cfg(windows)]
+            windows_sandbox_required: false,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                 request_id: "request-remote-revalidate".into(),

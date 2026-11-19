@@ -305,6 +305,9 @@ function pendingApproval(nodes: readonly AiConversationNode[]): AiPendingApprova
   let commandSandbox: AiPendingApproval['commandSandbox'];
   if (boundDirect && args.sandboxExecutor === 'nonoMacAcceptance' && tool?.target?.kind === 'local') {
     commandSandbox = 'macos';
+  } else if (boundDirect && args.sandboxExecutor === 'windowsAppContainer'
+    && tool?.target?.kind === 'local' && tool.target.windowsSandboxRequired) {
+    commandSandbox = 'windows';
   } else if (boundDirect && args.sandboxExecutor === 'bubblewrapV1' && tool?.target?.kind === 'remote') {
     commandSandbox = 'remote';
   }

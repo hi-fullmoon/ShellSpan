@@ -2,6 +2,14 @@
 
 从仓库根目录运行。验证顺序为普通 Direct、原始 `nono`、加固后的 `nono` 和 Anthropic `srt` CLI。四者运行相同的 `/bin/sh -lc` 命令，各自使用新建的测试工作区、外部探针目录和临时目录。脚本以独立进程组模拟 Direct 的启动与停止方式，结果适用于此验证入口。ShellSpan 的生产程序、会话和配置均无需参与。
 
+## Windows x64 桌面验收
+
+使用仓库工具链执行 Windows x64 Debug NSIS 构建，并启用 `native-input-acceptance`。验收配置使用产品名 `ShellSpan Windows Sandbox Retest`、可执行文件名 `ShellSpanWindowsSandboxRetest`、标识 `com.shellspan.validation.windows-sandbox`。应为验收包设置独立的 Tauri 数据目录和 WebView2 数据目录，并关闭 updater artifacts。先通过 `pnpm build` 和 `SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests` 下的 `node scripts/native-input/prepare-resources.mjs --acceptance` 准备前端及原生资源。仅在此验收配置中将 `build.beforeBuildCommand` 留空，然后以 `pnpm exec tauri build --debug --features native-input-acceptance --bundles nsis --no-sign --ci --config <验收配置>` 构建。
+
+创建一个空验收目录 `artifacts/tests/agent-sandbox/windows-<本次运行>`，运行 `node scripts/agent-sandbox/verify-windows-desktop.mjs <该目录>`。脚本核验已安装 EXE 与编译产物，检查实际设置界面，通过正常审批派发固定的无模型命令，并在验收后卸载该副本。报告保存在 `desktop-report.json`。
+
+真实远端回归使用 `node scripts/remote-sandbox/verify-remote-sandbox.mjs`。Windows 的 libssh2 编译使用内置 OpenSSL，Linux 子系统脚本按 LF 检出。Docker 测试使用 OpenSSH 默认算法验证 Bubblewrap 缺失、可用和无法启动三个场景。
+
 ## macOS
 
 需要 Rust 1.95、Node.js 22.12 或以上版本，以及 PATH 中的 `rg`。沙箱启动器的编译缓存统一位于 `src-tauri/target/agent-sandbox-probe/`，独立验证、桌面验收和手动内测包共用该目录。

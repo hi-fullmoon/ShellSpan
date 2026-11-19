@@ -228,6 +228,7 @@ export function AiApprovalPanel({
   const elevated = command !== null && argumentRecord?.elevated === true;
   const commandImpactKey = elevated ? 'ai.workspace.approval.sudoImpact'
     : approval.commandSandbox === 'macos' ? 'ai.workspace.approval.macSandboxImpact'
+      : approval.commandSandbox === 'windows' ? 'ai.workspace.approval.windowsSandboxImpact'
       : approval.commandSandbox === 'remote' ? 'ai.workspace.approval.remoteSandboxImpact'
         : 'ai.workspace.approval.unsandboxedImpact';
   const target = approval.target;

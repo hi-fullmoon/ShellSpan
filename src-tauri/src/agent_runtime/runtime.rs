@@ -27,6 +27,10 @@ use super::{
 #[path = "mac_submission_acceptance.rs"]
 mod mac_submission_acceptance;
 
+#[cfg(all(windows, debug_assertions, feature = "native-input-acceptance"))]
+#[path = "windows_sandbox_acceptance.rs"]
+mod windows_sandbox_acceptance;
+
 #[cfg(test)]
 use super::{
     assistant_content_text, AgentAfterToolHook, AgentBeforeToolHook, AgentPreStepHook,
@@ -1584,6 +1588,9 @@ impl AgentRuntime {
             }
         }
         if let Some(target) = &snapshot.header.target {
+            if target.windows_sandbox_required == Some(true) {
+                return Err("WINDOWS_SANDBOX_MANAGED_ROOT_REQUIRED".into());
+            }
             if self.native_engine.has_terminal_lease(&target.session_id)? {
                 return Err("Busy: wait for the terminal lease to be released".into());
             }
@@ -1632,6 +1639,11 @@ impl AgentRuntime {
                 }
             }
             if let Some(target) = &snapshot.header.target {
+                if target.windows_sandbox_required == Some(true)
+                    && surface != super::AgentExecutionSurface::Direct
+                {
+                    return Err("WINDOWS_SANDBOX_DIRECT_REQUIRED".into());
+                }
                 if self.native_engine.has_terminal_lease(&target.session_id)? {
                     return Err(
                         "EXECUTION_SURFACE_BUSY: wait for the terminal lease to be released".into(),

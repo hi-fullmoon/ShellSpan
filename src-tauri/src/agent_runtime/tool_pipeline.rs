@@ -139,6 +139,10 @@ fn is_restricted_sudo(preparation: &NativeToolPreparation) -> bool {
 }
 
 fn requires_runner_dispatch_journal(preparation: &NativeToolPreparation) -> bool {
+    #[cfg(windows)]
+    if preparation.call.arguments["sandboxExecutor"] == super::native::windows_sandbox::EXECUTOR {
+        return true;
+    }
     #[cfg(all(
         feature = "native-input-acceptance",
         debug_assertions,
@@ -2485,15 +2489,10 @@ impl AgentToolPipeline {
                 artifacts: Vec::new(),
             };
         }
-        #[cfg(all(
-            feature = "native-input-acceptance",
-            debug_assertions,
-            target_os = "macos",
-            target_arch = "aarch64"
-        ))]
-        let cancelled_sandbox_approval = if preparation.call.arguments["sandboxExecutor"]
-            == super::native::MAC_SANDBOX_ACCEPTANCE_EXECUTOR
-        {
+        let cancelled_sandbox_approval = if matches!(
+            preparation.call.arguments["sandboxExecutor"].as_str(),
+            Some("nonoMacAcceptance" | "windowsAppContainer")
+        ) {
             let events = self.sessions.all_events(&request.session_id)?;
             let mut approval = None;
             let mut dispatched = false;
@@ -2522,7 +2521,7 @@ impl AgentToolPipeline {
             approval.filter(|_| !dispatched).map(|approval_id| {
                 result.status = AgentToolResultStatus::Cancelled;
                 result.data = Some(serde_json::json!({
-                    "sandbox": super::native::MAC_SANDBOX_ACCEPTANCE_EXECUTOR,
+                    "sandbox": preparation.call.arguments["sandboxExecutor"],
                     "started": false,
                 }));
                 AgentScopedPayload {
@@ -2623,12 +2622,6 @@ impl AgentToolPipeline {
                 },
             }))
             .collect::<Vec<_>>();
-        #[cfg(all(
-            feature = "native-input-acceptance",
-            debug_assertions,
-            target_os = "macos",
-            target_arch = "aarch64"
-        ))]
         payloads.extend(cancelled_sandbox_approval);
         payloads.push(AgentScopedPayload {
             turn_id: Some(request.turn_id.clone()),

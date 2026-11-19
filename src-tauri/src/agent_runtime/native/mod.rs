@@ -25,6 +25,8 @@ mod sudo;
 mod terminal_execute;
 mod terminal_interactive;
 mod terminal_lease;
+#[cfg(windows)]
+pub(crate) mod windows_sandbox;
 
 pub(crate) use ansi::*;
 pub(crate) use auto_review::*;

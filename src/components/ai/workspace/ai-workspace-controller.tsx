@@ -171,7 +171,7 @@ export function AiWorkspaceController({
               variant="composer"
               disabled={runtimeSettingsLocked}
               mode={controller.selectedPermission}
-              localDirectSandboxEnabled={controller.sandboxDirectOnly === 'local' && sandboxEnabled && controller.selectedExecutionSurface === 'direct'}
+              localDirectSandboxEnabled={(controller.sandboxDirectOnly === 'local' || controller.sandboxDirectOnly === 'windows') && sandboxEnabled && controller.selectedExecutionSurface === 'direct'}
               onModeChange={controller.view && !configuringContinuation ? controller.selectPermission : undefined}
             />
         )

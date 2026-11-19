@@ -248,6 +248,25 @@ impl NativeToolRuntime for NativeToolAdapter {
         self.configure(runtime)?;
         let known_hosts_path = &self.services.known_hosts_path;
         let mut owner_target = target_native(&request.target)?;
+        let windows_sandbox = request.target.windows_sandbox_required == Some(true);
+        if windows_sandbox {
+            if !cfg!(windows) {
+                return Err("WINDOWS_SANDBOX_UNAVAILABLE".into());
+            }
+            if request.execution_surface != super::AgentExecutionSurface::Direct
+                || request.model_call.name != "run_terminal_command"
+                || request.model_call.arguments["background"] == true
+                || request.model_call.arguments["handoffToUser"] == true
+                || request
+                    .model_call
+                    .arguments
+                    .get("sudoOperationId")
+                    .is_some()
+                || request.model_call.arguments.get("fileScope").is_some()
+            {
+                return Err("WINDOWS_SANDBOX_DIRECT_REQUIRED".into());
+            }
+        }
         #[cfg(all(
             feature = "native-input-acceptance",
             debug_assertions,
@@ -313,6 +332,7 @@ impl NativeToolRuntime for NativeToolAdapter {
         let tracks_execution = request.model_call.name == "run_terminal_command"
             || is_model_process_tool(&request.model_call.name);
         let mut scratch = if !sandbox_enabled
+            && !windows_sandbox
             && (scratch_scope
                 || (tracks_execution
                     && (request.target.kind == "local" || request.target.profile_id.is_some())))
@@ -433,6 +453,8 @@ impl NativeToolRuntime for NativeToolAdapter {
             );
             let prepared = runtime.prepare_mcp_authorization(
                 NativeExecutionContext {
+                    #[cfg(windows)]
+                    windows_sandbox_required: false,
                     request: frozen_request,
                     turn_id: request.turn_id.clone(),
                     step_id: request.step_id.clone(),
@@ -558,6 +580,8 @@ impl NativeToolRuntime for NativeToolAdapter {
         );
         let prepared = runtime.prepare_authorization(
             NativeExecutionContext {
+                #[cfg(windows)]
+                windows_sandbox_required: windows_sandbox,
                 request: frozen_request,
                 turn_id: request.turn_id.clone(),
                 step_id: request.step_id.clone(),
@@ -606,6 +630,11 @@ impl NativeToolRuntime for NativeToolAdapter {
             if binding.state.policy.is_some() {
                 call.arguments["sandboxExecutor"] = json!("bubblewrapV1");
             }
+        }
+        #[cfg(windows)]
+        if let Some(digest) = &prepared.windows_sandbox_digest {
+            call.arguments["sandboxExecutor"] = json!(super::native::windows_sandbox::EXECUTOR);
+            call.arguments["connectionPolicyBinding"] = json!(digest);
         }
         #[cfg(all(
             feature = "native-input-acceptance",

@@ -631,6 +631,7 @@ fn focus_target_switch_preserves_history_and_freezes_new_authority() {
         cwd: None,
         local_root: None,
         remote_sandbox_required: None,
+        windows_sandbox_required: None,
         root_path: None,
         label: None,
     };
@@ -1287,6 +1288,7 @@ fn target() -> AgentSessionTarget {
         root_path: None,
         local_root: Some("/tmp".into()),
         remote_sandbox_required: None,
+        windows_sandbox_required: None,
     }
 }
 
