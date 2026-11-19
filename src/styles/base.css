@@ -689,6 +689,13 @@ textarea,
   outline-offset: 0;
 }
 
+@media (forced-colors: none) {
+  .sftp-split-pane > [data-slot='split-pane-divider']:focus-visible {
+    outline: none;
+    background-color: var(--ring);
+  }
+}
+
 /* Filled controls can share the outline color with their background. */
 :where([data-slot='button'][data-variant='default'], [data-slot='checkbox'], [data-slot='switch']):focus-visible {
   outline-offset: 1px;
