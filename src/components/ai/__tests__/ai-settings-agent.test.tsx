@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiSettingsSection } from '../ai-settings-section';
@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => ({
   cancel: vi.fn(),
   list: vi.fn(),
   toast: vi.fn(),
-  platform: vi.fn(),
 }));
 
 vi.mock('@/lib/ipc/tauri', async (importOriginal) => ({
@@ -28,10 +27,6 @@ vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
 }));
 
-vi.mock('@/hooks/usePlatform', () => ({
-  usePlatform: mocks.platform,
-}));
-
 const initialSettings = useAiSettingsStore.getState();
 const activeSession = {
   ended: false,
@@ -42,23 +37,20 @@ const activeSession = {
 describe('Agent Session settings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.platform.mockReturnValue('macos');
     mocks.list.mockResolvedValue({ sessions: [activeSession] });
     mocks.cancel.mockResolvedValue({ ...activeSession, ended: true });
     mocks.archive.mockResolvedValue({ ...activeSession, ended: true, archived: true });
     useAiSettingsStore.setState(initialSettings, true);
   });
 
-  it('offers the Windows sandbox for new sessions only when the master switch is on', () => {
-    mocks.platform.mockReturnValue('windows');
+  it('uses one Agent sandbox switch for local and SSH sandboxing', () => {
     const save = vi.fn().mockResolvedValue(undefined);
-    useAiSettingsStore.setState({ initialized: true, setWindowsAgentSandboxEnabled: save });
+    useAiSettingsStore.setState({ initialized: true, setAgentSandboxEnabled: save });
     render(<AiSettingsSection />);
-    const toggle = screen.getByRole('switch', { name: 'settings.ai.agent.windowsSandbox' });
-    expect(toggle).toHaveAttribute('aria-disabled', 'true');
-    expect(toggle).toHaveAccessibleDescription('settings.ai.agent.windowsSandboxDescription');
-    act(() => useAiSettingsStore.setState({ agentSandboxEnabled: true }));
-    expect(toggle).not.toHaveAttribute('aria-disabled', 'true');
+    const toggle = screen.getByRole('switch', { name: 'settings.ai.agent.sandbox' });
+    expect(screen.getAllByRole('switch')).toEqual([toggle]);
+    expect(toggle).toHaveAccessibleDescription('settings.ai.agent.sandboxDescription');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
     fireEvent.click(toggle);
     expect(save).toHaveBeenCalledWith(true);
   });

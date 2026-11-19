@@ -112,7 +112,7 @@ export interface AiSessionController {
   readonly selectedProvider?: AiProviderConfig;
   readonly selectedPermission?: AgentPermissionMode;
   readonly selectedExecutionSurface: AgentExecutionSurface;
-  readonly sandboxDirectOnly: 'local' | 'windows' | 'remote' | undefined;
+  readonly sandboxDirectOnly: 'local' | 'remote' | undefined;
   readonly glibcMismatch: RemoteGlibcMismatch | null;
   readonly settingsBusy: boolean;
   readonly selectModel: (provider: AiProviderConfig) => Promise<void>;
@@ -293,8 +293,8 @@ export function useAiSessionController({
   const localSandboxPreview = localTarget && isSandboxPreview === true;
   const platform = usePlatform();
   const agentSandboxEnabled = useAiSettingsStore((state) => state.agentSandboxEnabled);
-  const windowsSandboxEnabled = useAiSettingsStore((state) => state.windowsAgentSandboxEnabled);
-  const newWindowsSandbox = localTarget && platform === 'windows' && agentSandboxEnabled && windowsSandboxEnabled;
+  const newWindowsSandbox = localTarget && platform === 'windows' && isTauriRuntime() && agentSandboxEnabled;
+  const newLocalSandbox = localSandboxPreview || newWindowsSandbox;
   const activeTerminalId = useTerminalStore((state) => focusMode ? focusTargetId : state.activeSessionId);
   const sandboxProfileId = scope === 'terminal' && isTauriRuntime() ? activeTerminal?.profileId : undefined;
   const [sandboxProfile, setSandboxProfile] = useState<{ id: string; configured: boolean | null }>();
@@ -530,24 +530,23 @@ export function useAiSessionController({
   const currentAgentTarget = view?.snapshot.value.header.target;
   const sameSandboxTarget = currentAgentTarget?.sessionId === activeTerminalId;
   const sandboxRequired = sameSandboxTarget && currentAgentTarget?.remoteSandboxRequired === true;
-  const windowsSandboxRequired = sameSandboxTarget && currentAgentTarget?.windowsSandboxRequired === true;
-  const windowsSandbox = windowsSandboxRequired || (!view && newWindowsSandbox);
-  const sandboxDirectOnly = localSandboxPreview ? 'local'
-    : windowsSandbox ? 'windows' : sandboxConfigured || sandboxRequired ? 'remote' : undefined;
+  const localSandbox = localSandboxPreview
+    || (sameSandboxTarget && currentAgentTarget?.windowsSandboxRequired === true)
+    || (!view && newLocalSandbox);
+  const sandboxDirectOnly = localSandbox ? 'local' : sandboxConfigured || sandboxRequired ? 'remote' : undefined;
   const sandboxSessionChanged = sameSandboxTarget && sandboxProfile?.id === sandboxProfileId
     && typeof sandboxProfile?.configured === 'boolean' && currentAgentTarget?.remoteSandboxRequired !== undefined
     && currentAgentTarget.remoteSandboxRequired !== sandboxConfigured;
-  const sandboxNeedsDirect = !focusMode && (sandboxConfigured || localSandboxPreview) && sameSandboxTarget
+  const sandboxNeedsDirect = !focusMode && (sandboxConfigured || localSandbox) && sameSandboxTarget
     && view?.snapshot.value.header.executionSurface === 'boundTerminal';
   const visibleExecutionRequired = focusMode && Boolean(view && view.snapshot.value.header.executionSurface !== 'boundTerminal');
   const sandboxUnavailableReason =
     sandboxChecking || (localTarget && isSandboxPreview === null) ? t('connection.sandbox.loading')
-    : windowsSandboxRequired && !agentSandboxEnabled ? t('ai.error.sandboxDisabled')
+    : localSandbox && !agentSandboxEnabled ? t('ai.error.sandboxDisabled')
     : focusMode && sandboxDirectOnly
-      ? t(windowsSandbox ? 'ai.error.windowsSandboxDirectRequired'
-        : localSandboxPreview ? 'focus.localSandboxRequiresDirect' : 'focus.sandboxRequiresDirect')
+      ? t(localSandbox ? 'focus.localSandboxRequiresDirect' : 'focus.sandboxRequiresDirect')
     : sandboxSessionChanged ? t('ai.error.sandboxSessionPolicyChanged')
-    : sandboxNeedsDirect ? t(localSandboxPreview ? 'ai.error.localSandboxDirectRequired' : 'ai.error.sandboxDirectRequired') : null;
+    : sandboxNeedsDirect ? t(localSandbox ? 'ai.error.localSandboxDirectRequired' : 'ai.error.sandboxDirectRequired') : null;
   const canStartAgent = !terminalSessionRestoring && !visibleExecutionRequired && (scope === 'workbench'
     || activeTerminal?.status === 'connected');
   const realTerminalState: RealTerminalPresentationState = activeTerminal?.status === 'connected' && activeTerminal.integrationState === 'ready'
@@ -558,7 +557,7 @@ export function useAiSessionController({
   const glibcMismatch = scope === 'terminal' && activeTerminal?.status === 'connected'
     ? remoteGlibcMismatch(activeTerminal.integrationReason) : null;
   const terminalCreationSurface = focusMode ? 'boundTerminal'
-    : localSandboxPreview || newWindowsSandbox || sandboxConfigured || glibcMismatch ? 'direct' : newExecutionSurface;
+    : newLocalSandbox || sandboxConfigured || glibcMismatch ? 'direct' : newExecutionSurface;
   const needsDirectFallback = !focusMode && glibcMismatch !== null
     && view?.snapshot.value.header.executionSurface === 'boundTerminal'
     && view.snapshot.value.header.target?.sessionId === activeTerminal?.sessionId
@@ -728,7 +727,7 @@ export function useAiSessionController({
         taskId: `task-${sessionId}`,
         goal: intent.goal,
         target: {
-          ...runtimeTarget(activeTerminal, workspaceRoot),
+          ...runtimeTarget(activeTerminal, newLocalSandbox ? undefined : workspaceRoot),
           ...(newWindowsSandbox && { windowsSandboxRequired: true }),
         },
         permissionMode: permissionMode(
@@ -738,7 +737,7 @@ export function useAiSessionController({
         successCriteria: intent.successCriteria,
       },
     };
-  }, [activeTerminal, focusMode, newWindowsSandbox, operationId, scope, t, terminalCreationSurface]);
+  }, [activeTerminal, focusMode, newLocalSandbox, newWindowsSandbox, operationId, scope, t, terminalCreationSurface]);
 
   const projectKey = `${workspaceScopeKey}:${openedSessionId ?? 'new'}:${skillNavigation}:${focusMode ? activeTerminal?.sessionId ?? '' : ''}`;
   const projectEpoch = useRef({ key: projectKey });
@@ -766,9 +765,9 @@ export function useAiSessionController({
     if (!target || input.request.permissionMode !== 'operator'
       || (target.kind !== 'local' && target.kind !== 'remote')
       || (target.kind === 'remote' && !target.profileId)) return input;
-    // The preview backend supplies its managed root. A pre-existing terminal
+    // The sandbox backend supplies its managed root. A pre-existing terminal
     // may still report the ordinary shell directory.
-    if (target.kind === 'local' && (localSandboxPreview || target.windowsSandboxRequired)) return input;
+    if (target.kind === 'local' && newLocalSandbox) return input;
     const root = await resolveProjectRoot();
     if (!root) {
       // The directory enables structured file tools; full-access shell execution
@@ -784,7 +783,7 @@ export function useAiSessionController({
           : { ...target, rootPath: root },
       },
     };
-  }, [createInput, localSandboxPreview, resolveProjectRoot]);
+  }, [createInput, newLocalSandbox, resolveProjectRoot]);
   const ensureProjectSession = useCallback(async (root?: string): Promise<string> => {
     if (focusMode && viewRef.current && viewRef.current.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId) {
       throw new Error(t('focus.continueFirst'));

@@ -303,11 +303,10 @@ function pendingApproval(nodes: readonly AiConversationNode[]): AiPendingApprova
   const boundDirect = args?.channel === 'direct' && args.elevated !== true
     && typeof args.connectionPolicyBinding === 'string' && /^[a-f0-9]{64}$/u.test(args.connectionPolicyBinding);
   let commandSandbox: AiPendingApproval['commandSandbox'];
-  if (boundDirect && args.sandboxExecutor === 'nonoMacAcceptance' && tool?.target?.kind === 'local') {
-    commandSandbox = 'macos';
-  } else if (boundDirect && args.sandboxExecutor === 'windowsAppContainer'
-    && tool?.target?.kind === 'local' && tool.target.windowsSandboxRequired) {
-    commandSandbox = 'windows';
+  if (boundDirect && tool?.target?.kind === 'local'
+    && (args.sandboxExecutor === 'nonoMacAcceptance'
+      || (args.sandboxExecutor === 'windowsAppContainer' && tool.target.windowsSandboxRequired === true))) {
+    commandSandbox = 'local';
   } else if (boundDirect && args.sandboxExecutor === 'bubblewrapV1' && tool?.target?.kind === 'remote') {
     commandSandbox = 'remote';
   }

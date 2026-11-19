@@ -320,6 +320,13 @@ fn apply_connection_sandbox(
         return Ok(());
     };
     target.remote_sandbox_required = None;
+    #[cfg(windows)]
+    if target.kind == "local" && target.target_id != "workbench-ai" {
+        let db = app.state::<crate::db::Database>();
+        if db.agent_sandbox_enabled()? {
+            target.windows_sandbox_required = Some(true);
+        }
+    }
     if target.windows_sandbox_required == Some(true) {
         if target.kind != "local"
             || target.target_id == "workbench-ai"

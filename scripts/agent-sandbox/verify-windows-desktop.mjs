@@ -117,15 +117,18 @@ const preference = async (page, key) => (await invoke(page, 'load_preferences'))
 const save = (page, value) => invoke(page, 'save_preferences', { entries: [['ai.agentSandboxEnabled', String(value)]] });
 const pidAlive = pid => { try { process.kill(pid, 0); return true; } catch (error) { if (error.code === 'ESRCH') return false; throw error; } };
 
+function createLocalAgent(page, terminalId, sessionId = `windows-sandbox-acceptance-${randomUUID()}`) {
+  return invoke(page, 'agent_runtime_create_session', { request: {
+    sessionId, taskId: sessionId, goal: 'Verify Windows sandbox on test fixtures', executionSurface: 'direct',
+    permissionMode: 'requestApproval',
+    target: { kind: 'local', targetId: `terminal-${terminalId}`, sessionId: terminalId },
+  } });
+}
+
 async function prepare(page, terminalId, sourceKind, toolArgument = null) {
   const sessionId = `windows-sandbox-acceptance-${randomUUID()}`;
   const callId = randomUUID();
-  const created = await invoke(page, 'agent_runtime_create_session', { request: {
-    sessionId, taskId: sessionId, goal: 'Verify Windows sandbox on test fixtures', executionSurface: 'direct',
-    permissionMode: 'requestApproval',
-    target: { kind: 'local', targetId: `terminal-${terminalId}`, sessionId: terminalId,
-      windowsSandboxRequired: true },
-  } });
+  const created = await createLocalAgent(page, terminalId, sessionId);
   const workspace = created.header.target.cwd;
   assert.equal(created.header.target.windowsSandboxRequired, true);
   assert.equal(workspace, created.header.target.localRoot);
@@ -178,24 +181,34 @@ try {
     return proof;
   });
   let page = await launch('initial');
-  await check('Sandbox settings default off and native switch persists', async () => {
-    await page.keyboard.press('Control+,');
-    await page.getByRole('tab', { name: /^AI (助手|Assistant)$/i }).click();
-    const global = page.getByRole('switch', { name: /^(Agent 沙箱|Agent sandbox)/i });
-    const windows = page.getByRole('switch', { name: /Windows 沙箱|Windows sandbox/ });
-    assert.equal(await global.getAttribute('aria-checked'), 'false');
-    assert.equal(await windows.getAttribute('aria-checked'), 'false');
-    assert(await windows.isDisabled());
-    await global.click();
-    await windows.click();
-    await waitFor(async () => (await preference(page, 'ai.windowsAgentSandboxEnabled')) === 'true', 'Windows sandbox preference');
-    await page.screenshot({ path: join(directory, 'windows-sandbox-settings.png') });
-    await page.keyboard.press('Escape');
-    return { global: await preference(page, 'ai.agentSandboxEnabled'), windows: 'true' };
-  });
   const terminal = await invoke(page, 'create_local_session', { cols: 120, rows: 30 });
   const terminalId = terminal.sessionId;
   assert(terminalId);
+  await check('One sandbox switch controls the selection of new local Agent sessions', async () => {
+    // A preference from the previous Windows build must not supply a second opt-in.
+    await invoke(page, 'save_preferences', { entries: [['ai.windowsAgentSandboxEnabled', 'false']] });
+    const ordinary = await createLocalAgent(page, terminalId);
+    assert.notEqual(ordinary.header.target.windowsSandboxRequired, true);
+    await page.keyboard.press('Control+,');
+    await page.getByRole('tab', { name: /^AI (助手|Assistant)$/i }).click();
+    const global = page.getByRole('switch', { name: /^(Agent 沙箱|Agent sandbox)/i });
+    assert.equal(await page.getByRole('switch').count(), 1);
+    assert.equal(await global.getAttribute('aria-checked'), 'false');
+    const descriptionId = await global.getAttribute('aria-describedby');
+    assert(descriptionId);
+    assert.match(await page.locator(`[id="${descriptionId}"]`).innerText(), /受管沙箱|managed sandbox/);
+    await global.click();
+    await waitFor(async () => (await global.getAttribute('aria-checked')) === 'true', 'Agent sandbox switch');
+    assert.equal(await preference(page, 'ai.agentSandboxEnabled'), 'true');
+    const managed = await createLocalAgent(page, terminalId);
+    assert.equal(managed.header.target.windowsSandboxRequired, true);
+    assert.equal(managed.header.executionSurface, 'direct');
+    const retained = await snapshot(page, ordinary.header.sessionId);
+    assert.notEqual(retained.header.target.windowsSandboxRequired, true);
+    await page.screenshot({ path: join(directory, 'windows-sandbox-settings.png') });
+    await page.keyboard.press('Escape');
+    return { preference: 'true', ordinaryRetained: true, newSessionUsesManagedDirect: true };
+  });
   await writeFile(join(directory, 'outside.txt'), 'outside', { flag: 'wx' });
   let connections = 0;
   tcp = createServer(socket => { connections++; socket.end(); });
@@ -217,6 +230,9 @@ try {
   await check('Approved call cannot dispatch after disabling the sandbox', async () => {
     const record = await prepare(page, terminalId, 'sandbox-write');
     await save(page, false);
+    const ordinary = await createLocalAgent(page, terminalId);
+    assert.notEqual(ordinary.header.target.windowsSandboxRequired, true);
+    assert.equal((await snapshot(page, record.sessionId)).header.target.windowsSandboxRequired, true);
     await record.approve();
     const observed = await result(page, record);
     assert.match(observed.summary, /AGENT_SANDBOX_DISABLED/);
@@ -270,7 +286,7 @@ try {
         assert.equal(persisted.recovery.kind, 'executionInFlight', JSON.stringify(persisted.recovery));
         assert.deepEqual((await result(page, { ...record, sessionId: boundaries.sessionId,
           callId: boundaries.callId })).data, boundaries.data);
-        assert.equal(await preference(page, 'ai.windowsAgentSandboxEnabled'), 'true');
+        assert.equal(await preference(page, 'ai.agentSandboxEnabled'), 'true');
         assert.equal(pids.some(pidAlive), false);
         assert.deepEqual(await Promise.all(['leader.txt', 'child.txt'].map(async name =>
           Number(await readFile(join(record.workspace, name), 'utf8')))), pids);

@@ -78,7 +78,7 @@ async function verifySandboxApproval(
   history: readonly AgentSessionEvent[],
 ) {
   const approval = agentSessionView({ snapshot, events: history, hasTerminalEvent: false }).pendingApproval;
-  assert(approval?.commandSandbox === 'macos', 'Committed native approval did not project its sandbox');
+  assert(approval?.commandSandbox === 'local', 'Committed native approval did not project its sandbox');
   const section = document.createElement('section');
   section.className = 'ai-panel-shell @container/ai-workspace';
   document.body.append(section);
@@ -93,7 +93,7 @@ async function verifySandboxApproval(
         onReject={() => { throw new Error('The test only observes the pending approval'); }} />);
       const note = await until(async () => {
         const current = section.querySelector<HTMLElement>('[role=note]');
-        return current?.textContent?.includes(t('ai.workspace.approval.macSandboxImpact')) ? current : undefined;
+        return current?.textContent?.includes(t('ai.workspace.approval.localSandboxImpact')) ? current : undefined;
       }, `Sandbox approval copy at ${width}px in ${locale}`);
       assert(!note.textContent?.includes(t('ai.workspace.approval.unsandboxedImpact')),
         'Sandboxed command received the unsandboxed warning');

@@ -26,6 +26,7 @@ import * as visionContract from '@/lib/ai/vision-contract';
 import { terminalLoginScopeKey } from '@/lib/ai/terminal-login-scope';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { agentSessionBaselineScenarios } from '@/tests/fixtures/agent-session-baseline';
+import * as tauri from '@/lib/ipc/tauri';
 
 const provider = {
   id: 'provider-test',
@@ -424,6 +425,7 @@ beforeEach(async () => {
     contextLines: 200,
     agentPermissionMode: 'autoApproveReadOnly',
     agentExecutionSurface: 'direct',
+    agentSandboxEnabled: false,
   });
   useTerminalStore.setState({ sessions: [], activeSessionId: null });
   useLlmRoutesStore.setState({ snapshot: undefined, status: 'idle', error: undefined, modelsByRoute: {} });
@@ -647,6 +649,33 @@ it('uses the RouteStore global selection regardless of browser fixture state', (
 
   expect(result.current.providerLabel).toBe('RouteStore default');
   expect(result.current.modelLabel).toBe('route-model');
+});
+
+it.each([
+  ['Win32', false],
+  ['MacIntel', true],
+] as const)('selects the same local Direct sandbox on %s from the shared preference', async (platform, preview) => {
+  const platformSpy = vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
+  const previewSpy = vi.spyOn(tauri, 'isLocalAgentSandboxPreview').mockResolvedValue(preview);
+  try {
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    connectedLocalTerminal();
+    setNativeRoute('route-default', 'route-model', 7);
+    useAiSettingsStore.setState({ agentSandboxEnabled: true, agentExecutionSurface: 'boundTerminal' });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: adapter() }));
+
+    await waitFor(() => {
+      expect(result.current.sandboxDirectOnly).toBe('local');
+      expect(result.current.selectedExecutionSurface).toBe('direct');
+      expect(result.current.canSubmitAgent).toBe(true);
+    });
+    act(() => useAiSettingsStore.setState({ agentSandboxEnabled: false }));
+    expect(result.current.sandboxDirectOnly).toBe(preview ? 'local' : undefined);
+    expect(result.current.canSubmitAgent).toBe(!preview);
+  } finally {
+    platformSpy.mockRestore();
+    previewSpy.mockRestore();
+  }
 });
 
 it('shows an invalid frozen route revision without crashing or falling back', async () => {

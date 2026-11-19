@@ -4,12 +4,13 @@
 
 ## 配置与执行约定
 
-沿用「设置 → AI → 终端 Agent → Agent 沙箱（实验性）」及其持久化配置 `ai.agentSandboxEnabled`，默认关闭。开启总开关后，再由用户明确选择使用沙箱的本地会话或远端连接。执行前由 Rust 解析有效策略，审批继续按当前权限模式判断。总开关、选定后端、工作区、策略版本或目标身份与审批时不一致时，拒绝尚未发送的调用，并要求重新授权。
+沿用「设置 → AI → 终端 Agent → Agent 沙箱（实验性）」及其持久化配置 `ai.agentSandboxEnabled`，默认关闭。开启后，在支持本地沙箱的环境中新建本地 Agent 会话时，自动选择受管工作区和 Direct。远端沙箱由连接配置决定。执行前由 Rust 解析有效策略，审批继续按当前权限模式判断。总开关、选定后端、工作区、策略版本或目标身份与审批时不一致时，拒绝尚未发送的调用，并要求重新授权。
 
 | 目标 | 关闭总开关 | 开启总开关 |
 | --- | --- | --- |
-| 本地 Direct 普通会话 | 现有 Direct 路径 | 现有 Direct 路径 |
-| 明确选择本地 Direct 沙箱的会话 | 拦截需要沙箱的调用 | 仅通过已验证的本地后端执行 |
+| 已有普通本地 Agent 会话 | 保留已选执行方式 | 保留已选执行方式 |
+| 在支持本地沙箱的环境中新建本地 Agent 会话 | 常规包可创建普通会话，专用内测包拦截本地 Agent 命令 | 自动选择受管工作区和 Direct |
+| 已有本地沙箱会话 | 拦截新的沙箱派发 | 仅通过已绑定的本地沙箱执行 |
 | 普通本地或 SSH 可见终端 | 现有终端路径 | 现有终端路径。会话要求沙箱时，在申请终端输入权前拒绝向普通 PTY 提交 |
 | 已配置 Bubblewrap 的 SSH 连接 | 保留配置并拦截需要沙箱的调用 | 使用现有 SSH 子系统及沙箱 SFTP |
 | 已配置 OpenSandbox 的会话 | 拦截创建及新的 Agent 操作，并保留已有会话的停止、清理能力 | 在沙箱内创建和使用专用 PTY |
@@ -84,7 +85,7 @@ Windows 在原生系统上选择可验证的后端后，复用同一套桌面验
 
 ### Windows 本地 Direct
 
-Windows 通过无附加能力的 AppContainer 执行前台 Direct 命令。可在「设置 → AI 助手 → 终端 Agent」打开总开关及「新建本地会话使用 Windows 沙箱」。每个新会话使用独立的受管工作区。Windows PowerShell 命令及其子进程均受同一 AppContainer 与 Job Object 约束。系统资源访问遵循 Windows 的 AppContainer ACL。结构化文件、HTTP 和 MCP 工具暂不进入此执行面。
+Windows 通过无附加能力的 AppContainer 执行前台 Direct 命令。在「设置 → AI 助手 → 终端 Agent」开启「Agent 沙箱」后，新建本地 Agent 会话自动使用独立的受管工作区和 Direct 执行。关闭开关会拦截已有沙箱会话的派发。Windows PowerShell 命令及其子进程均受同一 AppContainer 与 Job Object 约束。系统资源访问遵循 Windows 的 AppContainer ACL。结构化文件、HTTP 和 MCP 工具暂不进入此执行面。
 
 应用在恢复挂起的进程前保存派发记录并再次确认总开关。退出或崩溃时，系统关闭 Job Object 并清理该次运行的进程树。重启后，已派发但未结算的调用保留待恢复状态。Windows 选择、执行限制和结果字段见 [Agent 协议](../../protocol/agent/runtime/terminal-protocol-rfc.md#windows-appcontainer-for-direct-agent-commands)。
 

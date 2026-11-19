@@ -76,7 +76,7 @@ export interface AiPendingApproval {
   readonly toolName: string;
   readonly target: import('@/types/agent-session').AgentSessionTarget | null;
   readonly arguments: unknown;
-  readonly commandSandbox?: 'macos' | 'windows' | 'remote';
+  readonly commandSandbox?: 'local' | 'remote';
   readonly effect: import('@/types/agent-session').AgentSessionEffect;
   readonly evidenceRefs: readonly string[];
 }
