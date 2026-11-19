@@ -269,11 +269,18 @@ try {
       const bounds = element.getBoundingClientRect();
       const pane = document.getElementById('pane').getBoundingClientRect();
       const controls = [...element.querySelectorAll('input,button')].map((control) => control.getBoundingClientRect().height);
+      const buttons = [...element.querySelectorAll('button')].map((button) => {
+        const { width, height } = button.getBoundingClientRect();
+        return { width, height };
+      });
       const rects = [...element.querySelectorAll('input,button,[role=status]')].map(control => control.getBoundingClientRect());
       return {
         inside: bounds.left >= pane.left && bounds.right <= pane.right && bounds.top >= pane.top && bounds.bottom <= pane.bottom,
         height: bounds.height,
         controls,
+        buttons,
+        fieldRadius: parseFloat(getComputedStyle(element.querySelector('[data-slot=input-group]')).borderTopLeftRadius),
+        barRadius: parseFloat(getComputedStyle(element).borderTopLeftRadius),
         centers: rects.map(rect => rect.top + rect.height / 2),
         leftEdges: rects.map(rect => rect.left),
         overflow: element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight,
@@ -281,6 +288,8 @@ try {
     });
     assert.ok(geometry.inside && !geometry.overflow, JSON.stringify(geometry));
     assert.ok(geometry.controls.every((height) => height === geometry.controls[0]), JSON.stringify(geometry));
+    assert.ok(geometry.buttons.every(({ width, height }) => width === height), `Search buttons must be square: ${JSON.stringify(geometry.buttons)}`);
+    assert.ok(geometry.fieldRadius > 0 && geometry.fieldRadius < geometry.barRadius, 'The search field should have tighter corners than the search bar');
     const [input, caseOption, regexOption, status, previous, next, close] = geometry.centers;
     assert.equal(caseOption, regexOption, 'Both search options must stay together');
     assert.ok(previous === next && next === close, 'The arrows and close button must stay together');
@@ -321,6 +330,17 @@ try {
     if (paneWidth === 900) {
       await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
       await searchBar.screenshot({ animations: 'disabled', path: `${root}artifacts/tests/terminal-search/light-${paneWidth}.png` });
+    }
+    if (paneWidth === 900 || paneWidth === 260) {
+      const closeButton = searchBar.getByRole('button', { name: '关闭搜索', exact: true });
+      const idleFill = await closeButton.evaluate(button => getComputedStyle(button).backgroundColor);
+      await closeButton.hover();
+      const theme = paneWidth === 900 ? 'light' : 'dark';
+      await searchBar.screenshot({ animations: 'disabled', path: `${root}artifacts/tests/terminal-search/${theme}-${paneWidth}-hover.png` });
+      assert.notEqual(await closeButton.evaluate(button => getComputedStyle(button).backgroundColor), idleFill);
+      await page.mouse.move(0, 400);
+    }
+    if (paneWidth === 900) {
       await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
     }
   }

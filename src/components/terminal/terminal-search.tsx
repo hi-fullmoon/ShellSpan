@@ -103,7 +103,7 @@ export function TerminalSearch({ addon, onClose, active = true }: {
     <div
       data-terminal-search
       style={surfaceStyle}
-      className="absolute right-2 top-2 z-20 flex max-h-[calc(100%-0.5rem)] min-h-8 w-[26rem] max-w-[calc(100%-1rem)] flex-wrap items-center gap-x-1 gap-y-0.5 overflow-y-auto rounded-lg border px-1 py-0.5 shadow-md [&_button]:h-5.5"
+      className="absolute right-2 top-2 z-20 flex max-h-[calc(100%-0.5rem)] min-h-8 w-[26rem] max-w-[calc(100%-1rem)] flex-wrap items-center gap-x-1 gap-y-0.5 overflow-y-auto rounded-lg border px-1 py-0.5 shadow-md [&_button]:size-5.5"
       onKeyDown={(event) => {
         if (event.key !== 'Escape') return;
         event.preventDefault();
@@ -111,7 +111,7 @@ export function TerminalSearch({ addon, onClose, active = true }: {
         onClose();
       }}
     >
-      <InputGroup style={{ backgroundColor: 'var(--background)' }} className="h-auto flex-[1_1_10rem] flex-wrap">
+      <InputGroup style={{ backgroundColor: 'var(--background)' }} className="h-auto flex-[1_1_10rem] flex-wrap rounded-md">
         <InputGroupInput
           ref={inputRef}
           value={query}
