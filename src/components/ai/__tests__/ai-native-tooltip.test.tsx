@@ -32,6 +32,16 @@ describe('AI panel native tooltip removal', () => {
     expect(trigger).not.toHaveAttribute('title');
   });
 
+  it('delays the disabled execution tooltip on hover', async () => {
+    const user = userEvent.setup();
+    render(<AgentExecutionSurfaceSelector disabled surface="boundTerminal" realTerminalState="ready" />);
+    const wrapper = screen.getByRole('button', { name: 'Command execution: Visible command' }).parentElement!;
+
+    await user.hover(wrapper);
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Visible command');
+  });
+
   it('shows the execution mode on keyboard focus and closes its tooltip when opening the menu', async () => {
     const user = userEvent.setup();
     render(<AgentExecutionSurfaceSelector surface="direct" />);

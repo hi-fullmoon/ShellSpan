@@ -60,7 +60,8 @@ try {
         const permissionControl = () => h(AgentPermissionSelector, {
           sessionId: 'alignment-session', mode: 'fullAccess', variant: 'composer',
         });
-        const executionSurfaceControl = (fallback) => h(AgentExecutionSurfaceSelector, {
+        const executionSurfaceControl = (fallback, disabled = false) => h(AgentExecutionSurfaceSelector, {
+          disabled,
           surface: fallback ? 'direct' : 'boundTerminal',
           realTerminalState: fallback ? 'unavailable' : 'ready',
           nativeStartupTimedOut: fallback === 'timeout',
@@ -78,7 +79,7 @@ try {
           ),
           h(AiComposerSeat, {
             phase: 'active', status, modelLabel: 'MiniMax-M3 · Default',
-            permissionControl: permissionControl(), executionSurfaceControl: executionSurfaceControl(fallback),
+            permissionControl: permissionControl(), executionSurfaceControl: executionSurfaceControl(fallback, status === 'running'),
           })),
         );
         window.setComposerStatus = render;
@@ -207,6 +208,24 @@ try {
       assert.ok(preservedSurface, 'Execution text must remain visible after queue text collapses');
 
       const visibleCommandLabel = locale === 'zh-CN' ? '可视命令' : 'Visible command';
+      const disabledSurface = composer.locator('[data-execution-surface="boundTerminal"]');
+      const tooltip = page.getByRole('tooltip').filter({ hasText: visibleCommandLabel });
+      assert.equal(await disabledSurface.isDisabled(), true);
+      for (const width of [360, 664]) {
+        await page.setViewportSize({ width, height: 300 });
+        await disabledSurface.locator('..').hover();
+        await assert.rejects(tooltip.waitFor({ state: 'visible', timeout: 250 }), { name: 'TimeoutError' });
+        await page.mouse.move(0, 0);
+        await assert.rejects(tooltip.waitFor({ state: 'visible', timeout: 650 }), { name: 'TimeoutError' });
+
+        const started = performance.now();
+        await disabledSurface.locator('..').hover();
+        await tooltip.waitFor({ state: 'visible', timeout: 2500 });
+        assert.ok(performance.now() - started >= 500, 'The disabled execution tooltip honors the hover delay');
+        await page.mouse.move(0, 0);
+        await tooltip.waitFor({ state: 'hidden' });
+      }
+
       const directLabel = locale === 'zh-CN' ? '直接执行' : 'Direct';
       const timeoutCopy = locale === 'zh-CN'
         ? '终端集成初始化超时，已使用普通 SSH。请改用直接执行。'
