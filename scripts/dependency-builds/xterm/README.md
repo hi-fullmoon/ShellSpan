@@ -6,7 +6,7 @@
 
 ## 来源与构建
 
-`build.json` 固定 NPM 包所记录的 Git commit `f447274f430fd22513f6adbf9862d19524471c04`、官方 GitHub archive SHA-256、上游 package-lock 摘要、两个已审阅源补丁摘要。源补丁仍位于 `scripts/native-input-p0/`，与已通过可行性验证的实现逐字节相同。
+`build.json` 固定 NPM 包所记录的 Git commit `f447274f430fd22513f6adbf9862d19524471c04`、官方 GitHub archive SHA-256、上游 package-lock 摘要、两个已审阅源补丁摘要。源补丁仍位于 `scripts/native-input/prototype/`，与已通过可行性验证的实现逐字节相同。
 
 官方源码按其 TypeScript project build、webpack.config.js 和 bin/esbuild.mjs 构建，没有自定义 JS 字符串替换。构建根位于系统临时目录，避免父项目的 xterm typings 污染上游 TypeScript。Node 为项目要求的 24，TypeScript 5.5.3、webpack 5.94.0、esbuild 0.25.2 来自固定上游锁。构建不运行上游 Mock 单测，也不把编译测试源码计为功能验收。
 
@@ -17,7 +17,7 @@
 pnpm check:xterm:rebuild
 
 # 审阅源补丁后重新构建，并通过官方 pnpm patch / patch-commit 登记
-node scripts/rebuild-xterm-patch.mjs --record
+node scripts/dependency-builds/xterm/rebuild.mjs --record
 pnpm install --frozen-lockfile
 ```
 
@@ -30,11 +30,11 @@ pnpm install --frozen-lockfile
 node src/lib/terminal/__tests__/native-input-display.browser.mjs
 
 # macOS arm64：构建固定 GNU Bash 5.3 / Readline 8.3.6、重新采集并验证
-node scripts/verify-terminal-p0-formal.mjs
+node scripts/native-input/verify.mjs display
 
 # 只采集/验证相关复制，或只验证同流模式
-node scripts/verify-terminal-p0-formal.mjs --copy-only
-node scripts/verify-terminal-p0-formal.mjs --inband-only
+node scripts/native-input/verify.mjs display --copy-only
+node scripts/native-input/verify.mjs display --inband-only
 ```
 
 完整入口缺少输入时生成真实 capture，不 skip；也支持显式 `--captures`（ownership）、`--copy-captures`、`--compat-captures`、`--geometry-captures`、`--commit-capture` 回放。它通过 `pnpm patch --ignore-existing` 提取原包生成对照；候选始终直接加载正式 node_modules 运行包，不再次套实验补丁。结果记录正式 pnpm patch hash、实际 JS/source 摘要及所有 capture 路径。没有硬编码旧时间戳作为必需输入。
@@ -42,7 +42,7 @@ node scripts/verify-terminal-p0-formal.mjs --inband-only
 控制器的就近 fixture 是从真实 PTY 逐字节截取的显示包，包含原始流 SHA、offset、长度与 module 来源，不是生命周期回执。可用新采集重新生成：
 
 ```bash
-node scripts/export-native-display-fixture.mjs --captures <successful-ownership-capture>
+node scripts/native-input/export-fixture.mjs display <successful-ownership-capture>
 ```
 
 `src/lib/terminal/native-input-display.ts` 只接受显式 native 模式和调用者提供的 binding；当前 legacy/raw registry 没有接入。线上标识、协商和生产恢复留给 P1/P2，见 `protocol/native-input-display.md`。P0 的协议原型键不是正式线上标识。

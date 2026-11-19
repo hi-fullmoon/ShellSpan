@@ -2,8 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, copyFile, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, it } from 'vitest';
-import { nativeInputReleaseDirectory } from '../native-input-p2/resource-paths.mjs';
-import {copyNativeRebuildSources} from '../native-input-p2/rebuild-sources.mjs';
+import { nativeInputReleaseDirectory } from '../native-input/integration/resource-paths.mjs';
+import {copyNativeRebuildSources} from '../native-input/integration/rebuild-sources.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 
@@ -12,15 +12,15 @@ it('packs an unsupported target twice and rejects a missing catalogue for an adm
   await mkdir(artifacts, { recursive: true });
   const directory = await mkdtemp(path.join(artifacts, 'run-'));
   try {
-    for (const name of ['scripts/prepare-native-input-resources.mjs', 'scripts/native-input-p2/frozen-validation.mjs',
-      'scripts/native-input-p2/resource-paths.mjs','scripts/native-input-p2/rebuild-sources.mjs', 'scripts/native-input-p2/bash-profiles.mjs', 'protocol/agent/runtime/native-editor-admission.json']) {
+    for (const name of ['scripts/native-input/prepare-resources.mjs', 'scripts/native-input/integration/frozen-validation.mjs',
+      'scripts/native-input/integration/resource-paths.mjs','scripts/native-input/integration/rebuild-sources.mjs', 'scripts/native-input/integration/bash-profiles.mjs', 'protocol/agent/runtime/native-editor-admission.json']) {
       await mkdir(path.dirname(path.join(directory, name)), { recursive: true });
       await copyFile(path.join(root, name), path.join(directory, name));
     }
     const legacy = path.join(directory, 'src-tauri/resources/native-input/generated');
     await mkdir(legacy, { recursive: true });
     await writeFile(path.join(legacy, 'retained.txt'), 'owned prior fixture');
-    const execute = (target) => spawnSync(process.execPath, ['scripts/prepare-native-input-resources.mjs',
+    const execute = (target) => spawnSync(process.execPath, ['scripts/native-input/prepare-resources.mjs',
       '--no-build', '--target', target], { cwd: directory, windowsHide: true, encoding: 'utf8', timeout: 10_000 });
     const first = execute('unsupported');
     expect(first.status, first.stderr).toBe(0);

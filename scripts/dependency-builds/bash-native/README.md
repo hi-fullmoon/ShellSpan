@@ -1,6 +1,6 @@
 # Native GNU dependency targets
 
-`python3 -B scripts/native-input-p2/build.py` builds the release profile under
+`python3 -B scripts/native-input/integration/build.py` builds the release profile under
 `src-tauri/target/native-input/`. On macOS ARM64 it builds ShellSpan Bash
 (Bash 5.3.20 / Readline 8.3.6). Set
 `SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests` when preparing inputs for local
@@ -14,7 +14,7 @@ before applying the ShellSpan integration patches. The catalogue keeps the
 Bash 5.3 profile ID and records the macOS patch level separately.
 
 The P2 producer builds the Linux x86_64 5.3 profile on glibc 2.28 using the
-pinned AlmaLinux 8 image in `scripts/native-input-p2/Dockerfile.amd64`.
+pinned AlmaLinux 8 image in `scripts/native-input/integration/Dockerfile.amd64`.
 It isolates dependencies in `linux-x86_64-glibc-2.28/` under the build root
 and rejects glibc symbol requirements above 2.28 in Bash, the adapter and the
 relay. It publishes `catalogue-linux-x86_64-glibc-2.28.json` and the three

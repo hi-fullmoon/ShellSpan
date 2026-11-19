@@ -22,5 +22,5 @@
     "lib/xterm.mjs": "a3b07697b370801483c7cdad174defb286ea4d180a5b3c9f62cb565b8c5e6fab",
     "lib/xterm.mjs.map": "2ab59910b56f7bb484689797138d5de3ec79a89ca3da4cc012010dd2929aabc9"
   },
-  "generatedBy": "node scripts/rebuild-xterm-patch.mjs --record"
+  "generatedBy": "node scripts/dependency-builds/xterm/rebuild.mjs --record"
 }

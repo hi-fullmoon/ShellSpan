@@ -20,11 +20,11 @@ import { initI18n, t } from '@/locales';
 import { applyTheme } from '@/lib/theme';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
-import type { LocalFileEntry, Locale } from '@/types';
+import type { ConnectionProfile, LocalFileEntry, Locale } from '@/types';
 import '@/styles/base.css';
 import '@/components/ai/styles/styles.css';
 
-type MenuKind = 'account' | 'icon' | 'connection-actions' | 'log-actions' | 'terminal' | 'shared' | 'file' | 'agent-path' | 'blank' | 'bookmark';
+type MenuKind = 'account' | 'icon' | 'connection-actions' | 'connection-card' | 'log-actions' | 'terminal' | 'shared' | 'file' | 'agent-path' | 'blank' | 'bookmark';
 const root = createRoot(document.getElementById('root')!);
 
 function TerminalPreview() {
@@ -35,11 +35,12 @@ function TerminalPreview() {
   </>;
 }
 
-function Preview({ kind, entry, fileUrl, directory }: {
+function Preview({ kind, entry, fileUrl, directory, profile }: {
   kind: MenuKind;
   entry: LocalFileEntry;
   fileUrl: string;
   directory: string;
+  profile: ConnectionProfile;
 }) {
   const [open, setOpen] = useState(true);
   const close = () => setOpen(false);
@@ -51,7 +52,8 @@ function Preview({ kind, entry, fileUrl, directory }: {
       <IconActionButton aria-label={label} tooltip={label}><TerminalIcon /></IconActionButton>
     </div>;
   }
-  if (kind === 'connection-actions') return <ConnectionList profiles={[]} initialized
+  if (kind === 'connection-actions' || kind === 'connection-card') return <ConnectionList
+    profiles={kind === 'connection-card' ? [profile] : []} initialized
     onAdd={close} onEdit={close} onDelete={close} onConnectTerminal={close} onConnectSftp={close}
     onDuplicate={close} onToggleFavorite={close} onImport={close} onExport={close} />;
   if (kind === 'log-actions') return <LogPanel />;
@@ -78,7 +80,7 @@ function Preview({ kind, entry, fileUrl, directory }: {
 }
 
 let sequence = 0;
-export async function show({ kind, theme, locale, entry, fileUrl, directory, username }: {
+export async function show({ kind, theme, locale, entry, fileUrl, directory, username, profile }: {
   kind: MenuKind;
   theme: 'light' | 'dark';
   locale: Locale;
@@ -86,6 +88,7 @@ export async function show({ kind, theme, locale, entry, fileUrl, directory, use
   fileUrl: string;
   directory: string;
   username: string;
+  profile: ConnectionProfile;
 }) {
   useAppStore.setState({ locale });
   await initI18n(locale);
@@ -96,13 +99,14 @@ export async function show({ kind, theme, locale, entry, fileUrl, directory, use
     }]);
   }
   flushSync(() => root.render(<TooltipProvider>
-    <Preview key={++sequence} kind={kind} entry={entry} fileUrl={fileUrl} directory={directory} />
+    <Preview key={++sequence} kind={kind} entry={entry} fileUrl={fileUrl} directory={directory} profile={profile} />
   </TooltipProvider>));
   return {
     account: t('workbench.userMenu.open'),
     appearance: t('settings.appearance.title'),
     icon: t('workbench.connections.connectTerminal'),
     'connection-actions': t('workbench.connections.actions'),
+    'connection-card': t('workbench.connections.moreActions', { name: profile.name }),
     'log-actions': t('workbench.logs.actions'),
     template: t('terminal.title.template'),
     copy: t('common.copy'),

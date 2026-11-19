@@ -2,7 +2,7 @@ import {describe,it,expect} from 'vitest';
 import {mkdir,readFile,readdir} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
-import {injectOccupiedScratch,scratchFaultOriginal} from '../native-input-p3/scratch-fault.mjs';
+import {injectOccupiedScratch,scratchFaultOriginal} from '../native-input/acceptance/scratch-fault.mjs';
 
 async function ownedCase(){
  const evidence=resolve(import.meta.dirname,'../../artifacts/tests/native-input-p2','fault-unit-'+randomUUID());

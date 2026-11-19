@@ -4,7 +4,7 @@ import {resolve} from 'node:path';
 import {request} from 'node:http';
 import {createServer} from 'vite';
 import {expect,it} from 'vitest';
-import {attachMacLateLifecycle} from '../native-input-p3/mac-late-lifecycle.mjs';
+import {attachMacLateLifecycle} from '../native-input/acceptance/mac-late-lifecycle.mjs';
 
 it('releases the actual owned file once and never invents an old-program effect',async()=>{
  const directory=resolve(import.meta.dirname,'../../artifacts/tests/native-input-p3/late-channel',randomUUID());

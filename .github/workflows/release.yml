@@ -55,7 +55,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/release-preflight.mjs
+        run: node scripts/release/release-preflight.mjs
 
   quality:
     name: Release Quality Gate
@@ -138,16 +138,16 @@ jobs:
           DOCKER_PLATFORM: linux/${{ matrix.arch }}
           BASH_ARCH: ${{ matrix.arch }}
         run: |
-          dockerfile=scripts/native-input-p2/Dockerfile
+          dockerfile=scripts/native-input/integration/Dockerfile
           if [[ "$BASH_ARCH" == amd64 ]]; then dockerfile="$dockerfile.amd64"; fi
-          docker build --platform "$DOCKER_PLATFORM" -t shellspan-native-input-p2:local -f "$dockerfile" scripts/native-input-p2
-          docker run --rm --platform "$DOCKER_PLATFORM" --user "$(id -u):$(id -g)" -e CARGO_HOME=/tmp/cargo -e SHELLSPAN_NATIVE_BUILD_ROOT=src-tauri/target/native-input -v "$PWD:/work" shellspan-native-input-p2:local python3 -B scripts/native-input-p2/build.py
+          docker build --platform "$DOCKER_PLATFORM" -t shellspan-native-input-p2:local -f "$dockerfile" scripts/native-input/integration
+          docker run --rm --platform "$DOCKER_PLATFORM" --user "$(id -u):$(id -g)" -e CARGO_HOME=/tmp/cargo -e SHELLSPAN_NATIVE_BUILD_ROOT=src-tauri/target/native-input -v "$PWD:/work" shellspan-native-input-p2:local python3 -B scripts/native-input/integration/build.py
       - name: Build pinned Linux ARM64 Zsh resources
         if: matrix.arch == 'arm64'
         shell: bash
         run: |
-          docker build -t shellspan-native-input-p3:local -f scripts/native-input-p3/Dockerfile scripts/native-input-p3
-          docker run --rm --user "$(id -u):$(id -g)" -e CARGO_HOME=/tmp/cargo -e SHELLSPAN_NATIVE_BUILD_ROOT=src-tauri/target/native-input -v "$PWD:/work" shellspan-native-input-p3:local sh scripts/native-input-p3/linux-build.sh
+          docker build -t shellspan-native-input-p3:local -f scripts/native-input/acceptance/Dockerfile scripts/native-input/acceptance
+          docker run --rm --user "$(id -u):$(id -g)" -e CARGO_HOME=/tmp/cargo -e SHELLSPAN_NATIVE_BUILD_ROOT=src-tauri/target/native-input -v "$PWD:/work" shellspan-native-input-p3:local sh scripts/native-input/acceptance/linux-build.sh
       - name: Upload source-verified native resources
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -180,7 +180,7 @@ jobs:
       - name: Build pinned Zsh, ZLE and adapter
         env:
           SHELLSPAN_NATIVE_BUILD_ROOT: src-tauri/target/native-input
-        run: bash scripts/native-input-p3/build-macos-editor.sh
+        run: bash scripts/native-input/acceptance/build-macos-editor.sh
 
       - name: Upload macOS editor resources and source archive
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -287,7 +287,7 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          python3 -B scripts/native-input-p2/build.py
+          python3 -B scripts/native-input/integration/build.py
           pnpm native:prepare --no-build --target "$RUST_TARGET" --require-ssh
           # 用 tag 推导出的版本号覆盖配置，使测试构建（如 2.0.30-test.1）的包版本与 tag 一致
           # signingIdentity 覆盖为 adhoc：配置文件里的 "ShellSpan Dev" 是开发者本机钥匙串里的
@@ -455,10 +455,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y minisign
 
       - name: Test signature verification against real signed bytes
-        run: node --test scripts/release-signatures.integration.mjs
+        run: node --test scripts/release/release-signatures.integration.mjs
 
       - name: Verify assets, publish draft, and promote Latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
-        run: node scripts/publish-release.mjs
+        run: node scripts/release/publish-release.mjs

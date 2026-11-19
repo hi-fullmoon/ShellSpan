@@ -99,7 +99,7 @@ Windows 新 ConPTY 的初始光标位置相对于新的可见屏幕。重绑到�
 
 正式xterm构建同时保留显式reflow模式中EL0清除的软换行关系；默认模式继续使用原EL0
 行为。源码补丁、UMD/ESM与固定构建输入由 `scripts/dependency-builds/xterm/` 共同记录，
-通过 `scripts/rebuild-xterm-patch.mjs` 重建，不单独手改安装包。该通用显示规则不产生执行权限。
+通过 `scripts/dependency-builds/xterm/rebuild.mjs` 重建，不单独手改安装包。该通用显示规则不产生执行权限。
 
 通用 UTF8 byte 输入解码必须跨真实片段保留 continuation byte，包括低六位为零的 0x80，
 不能把它当成不存在的残留项而丢失 U+200D 等字符。维护补丁与固定重建同时覆盖此规则；
@@ -128,8 +128,10 @@ insert/delete/trim 事件解析其行并限制在可用滚动范围。不能继�
 
 `node src/lib/terminal/__tests__/native-input-display.browser.mjs` 直接使用仓库内由真实 PTY 导出的冻结包片段；缺失或摘要不符会失败，不依赖旧机器上的忽略目录。
 
-`node scripts/verify-terminal-input-p1.mjs` 从源码重建正式 NIP producer，重新捕获真实 PTY，并在 Chromium/WebKit × DOM/WebGL 校验正式键、碎片、输出排空、EOF 半包、重绑、旧控制器重复释放及零可执行输入。显示断言不伪造原生控制回执。
+`node scripts/native-input/verify.mjs protocol` 从源码重建正式 NIP producer，重新捕获真实 PTY，并在 Chromium/WebKit × DOM/WebGL 校验正式键、碎片、输出排空、EOF 半包、重绑、旧控制器重复释放及零可执行输入。显示断言不伪造原生控制回执。
 
-`node scripts/verify-terminal-p0-formal.mjs` 从固定 GNU 源码构建原型并重新采集真实 PTY，再用正式安装包验证复制、同流模式、边界、几何和提交。也可显式传入每项真实 capture 路径回放，结果记录这些输入路径与当前源码/运行包摘要。重采集后可运行 `node scripts/export-native-display-fixture.mjs --captures <successful ownership capture>` 重新生成就近 fixture；它只导出显示字节，不伪造私有回执。
+`node scripts/native-input/verify.mjs display` 从固定 GNU 源码构建原型并重新采集真实 PTY，再用正式安装包验证复制、同流模式、边界、几何和提交。也可显式传入每项真实 capture 路径回放，结果记录这些输入路径与当前源码/运行包摘要。重采集后可运行 `node scripts/native-input/export-fixture.mjs display <successful ownership capture>` 重新生成显示样本。导出样本保留真实 PTY 显示字节和摘要。
+
+`node scripts/native-input/export-fixture.mjs selection <ZLE capture directory>` 导出选择回归样本。`node scripts/native-input/export-fixture.mjs viewport <viewport report.json>` 导出视口回归样本。三个子命令都可以在末尾传入输出路径，默认写入 `src/lib/terminal/__tests__/fixtures/`。
 
 历史冻结范围和结果保留在Git历史，不外推当前源码、Linux/SSH新扩展、Windows、其他架构或用户插件。当前待验范围见[统一验收清单](../docs/design/agent-terminal-input-acceptance-checklist.md)，历史通过结果不能启用未验收的生产配置。

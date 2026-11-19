@@ -1,7 +1,7 @@
 import { createServer, request } from 'node:http';
 import { once } from 'node:events';
 import { expect, it } from 'vitest';
-import { closeNativeValidationServer } from '../native-input-p3/close-validation-server.mjs';
+import { closeNativeValidationServer } from '../native-input/acceptance/close-validation-server.mjs';
 
 it('closes a real unfinished HTTP request after the completed result without retaining a listener', async () => {
   let received;

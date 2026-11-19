@@ -5,6 +5,7 @@
 - [项目介绍与本地开发](../README.zh-CN.md)
 - [贡献指南](../CONTRIBUTING.md)
 - [仓库工作约定](../AGENTS.md)
+- [项目脚本](../scripts/README.md)
 - [领域模块组织](../src/lib/README.md)
 - [发布流程](releasing.md)
 - [版本记录](../CHANGELOG.md)与[各版本发布说明](../release-notes/)

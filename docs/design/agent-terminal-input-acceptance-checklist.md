@@ -139,13 +139,13 @@ Shell、编辑器、Core、模块及 relay 均按实际版本和 SHA-256 绑定�
 
 | 范围 | 入口及限制 |
 | --- | --- |
-| 源码/目录与发现 | [冻结清单](../../scripts/native-input-p2/frozen-validation.mjs)、[快照](../../scripts/native-input-p3/snapshot.mjs)、[目录回归](../../scripts/__tests__/artifact-layout.test.mjs)；只读索引不得改写 |
-| GNU 本地与 SSH | [P2](../../scripts/verify-terminal-input-p2.mjs)、[矩阵](../../scripts/native-input-p2/matrix.mjs)；`--list-cases` 只列清单，`--local-only` 只选本地，`--include-legacy` 扩展至三个 Bash 版本 |
-| ZLE | [Core 构建](../../scripts/native-input-p3/build-scoped-core.mjs)、[编辑器构建](../../scripts/native-input-p3/build.mjs)、[App](../../scripts/native-input-p3/app.mjs)；Core/Main/模块须同批绑定 |
-| 双 Shell SSH 无模型子案 | [实际 App 入口](../../scripts/native-input-p3/ssh-recovery.mjs)；`--list-cases` 可离线运行，实机逐案指定 `--case` 和独立夹具。Bash 5.3 加 `--bash`；ZLE 使用固定 Main/Core。见 [交接清单](agent-terminal-input-zle-ssh-recovery.md)。 |
-| Windows | [资源构建](../../scripts/native-input-p3/build-windows.mjs)、[组件](../../src-tauri/native-input-editors/examples/windows_acceptance.rs)、[App 入口](../../scripts/verify-ai-session-stream.mjs)；debug 与 release 制品分开核验 |
-| 资源准入 | [资源核验](../../scripts/native-input-p3/verify-resource-admission.mjs)；错误资源负例与拟验收有效资源分别隔离，不打开生产 profile |
-| 包批次与留存 | [包执行器](../../scripts/native-input-p3/windows-package-batch.mjs)、[输入核验](../../scripts/native-input-p3/acceptance-inputs.mjs)、[证据契约](../../scripts/native-input-p3/acceptance-evidence.mjs)；普通/模型/封存/卸载分别记录，子集不关闭父项 |
+| 源码/目录与发现 | [冻结清单](../../scripts/native-input/integration/frozen-validation.mjs)、[快照](../../scripts/native-input/acceptance/snapshot.mjs)、[目录回归](../../scripts/__tests__/artifact-layout.test.mjs)；只读索引不得改写 |
+| GNU 本地与 SSH | `node scripts/native-input/verify.mjs integration`。 [矩阵](../../scripts/native-input/integration/matrix.mjs)支持 `--list-cases` 列清单、`--local-only` 选择本地和 `--include-legacy` 扩展至三个 Bash 版本 |
+| ZLE | [Core 构建](../../scripts/native-input/acceptance/build-scoped-core.mjs)、[编辑器构建](../../scripts/native-input/acceptance/build.mjs)、[App](../../scripts/native-input/acceptance/app.mjs)；Core/Main/模块须同批绑定 |
+| 双 Shell SSH 无模型子案 | [实际 App 入口](../../scripts/native-input/acceptance/ssh-recovery.mjs)；`--list-cases` 可离线运行，实机逐案指定 `--case` 和独立夹具。Bash 5.3 加 `--bash`；ZLE 使用固定 Main/Core。见 [交接清单](agent-terminal-input-zle-ssh-recovery.md)。 |
+| Windows | [资源构建](../../scripts/native-input/acceptance/build-windows.mjs)、[组件](../../src-tauri/native-input-editors/examples/windows_acceptance.rs)、[App 入口](../../scripts/verification/agent/verify-ai-session-stream.mjs)；debug 与 release 制品分开核验 |
+| 资源准入 | [资源核验](../../scripts/native-input/acceptance/verify-resource-admission.mjs)；错误资源负例与拟验收有效资源分别隔离，不打开生产 profile |
+| 包批次与留存 | [包执行器](../../scripts/native-input/acceptance/windows-package-batch.mjs)、[输入核验](../../scripts/native-input/acceptance/acceptance-inputs.mjs)、[证据契约](../../scripts/native-input/acceptance/acceptance-evidence.mjs)；普通/模型/封存/卸载分别记录，子集不关闭父项 |
 | 浏览器与选择 | [binding](../../src/lib/terminal/__tests__/native-input-display-binding.browser.mjs)、[显示](../../src/lib/terminal/__tests__/native-input-display.browser.mjs)、[选择](../../src/lib/terminal/__tests__/native-selection-reflow.browser.mjs)；历史样本仅证明其范围 |
 | 临时脚本 | [运行回归](../../src-tauri/src/agent_runtime/tests/runtime/scratch_execution.rs)、[归属回归](../../src-tauri/src/agent_runtime/tests/scratch.rs)；Direct、原生和 SFTP 分开 |
 

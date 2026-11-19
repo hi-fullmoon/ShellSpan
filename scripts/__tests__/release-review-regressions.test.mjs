@@ -3,8 +3,8 @@ import { mkdtemp, mkdir, readFile, writeFile, copyFile, rm, access } from 'node:
 import { execSync } from 'node:child_process';
 import path from 'node:path';
 import semver from 'semver';
-import { command, readVersions, checkNotes, updateChangelog, VERSION_FILES, REPOSITORY } from '../release-notes.mjs';
-import { editTomlVersion, writePreparedVersion } from '../bump-version.mjs';
+import { command, readVersions, checkNotes, updateChangelog, VERSION_FILES, REPOSITORY } from '../release/release-notes.mjs';
+import { editTomlVersion, writePreparedVersion } from '../release/bump-version.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const directories = [];
@@ -246,8 +246,8 @@ describe('release preparation recovery', () => {
   it('blocks the actual pnpm version command before any manifest changes', async () => {
     const directory = await copyManifests();
     const before = await originalFiles(directory);
-    await mkdir(path.join(directory, 'scripts'));
-    await copyFile(path.join(root, 'scripts/reject-package-version.mjs'), path.join(directory, 'scripts/reject-package-version.mjs'));
+    await mkdir(path.join(directory, 'scripts/release'), { recursive: true });
+    await copyFile(path.join(root, 'scripts/release/reject-package-version.mjs'), path.join(directory, 'scripts/release/reject-package-version.mjs'));
     const pkg = JSON.parse(await readFile(path.join(directory, 'package.json'), 'utf8'));
     expect(pkg.scripts).not.toHaveProperty('version');
     await writeFile(path.join(directory,'pnpm-workspace.yaml'),'packages: []\n');

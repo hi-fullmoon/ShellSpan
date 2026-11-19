@@ -1,6 +1,6 @@
 import {readFileSync} from 'node:fs';
 import {expect,it} from 'vitest';
-import {nativeExportRva,nativeExports,renameNativeExport} from '../native-input-p3/windows-native-export.mjs';
+import {nativeExportRva,nativeExports,renameNativeExport} from '../native-input/acceptance/windows-native-export.mjs';
 
 it.runIf(process.platform==='win32'&&process.arch==='x64')('resolves a real Node x64 native export and rejects an absent symbol',()=>{
   const bytes=readFileSync(process.execPath);expect(nativeExportRva(bytes,'napi_get_version')).toBeGreaterThan(0);

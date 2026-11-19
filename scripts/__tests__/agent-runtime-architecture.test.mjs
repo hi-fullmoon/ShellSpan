@@ -41,7 +41,7 @@ describe('single Agent Runtime architecture', () => {
     delete environment.SHELLSPAN_ALLOW_FOREGROUND_TESTS;
     delete environment.SHELLSPAN_DATA_DIR;
     const result = spawnSync(process.execPath, [
-      path.join(repositoryRoot, 'scripts/verify-ai-session-stream.mjs'),
+      path.join(repositoryRoot, 'scripts/verification/agent/verify-ai-session-stream.mjs'),
       '--data-scope', 'com.shellspan.validation.storage-check', '--no-model',
     ], { cwd: repositoryRoot, env: environment, encoding: 'utf8', timeout: 10_000 });
     expect(result.status).not.toBe(0);

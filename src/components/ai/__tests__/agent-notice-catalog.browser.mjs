@@ -10,7 +10,9 @@ import { chromium, webkit } from 'playwright';
 import { createCanvas, loadImage } from 'canvas';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
-const output = resolve(process.argv[2] ?? '/tmp/shellspan-agent-notices');
+const args = process.argv.slice(2);
+const budgetOnly = args.includes('--budget-only');
+const output = resolve(args.find(arg => arg !== '--budget-only') ?? '/tmp/shellspan-agent-notices');
 const engine = process.env.SHELLSPAN_TEST_ENGINE === 'chromium' ? chromium : webkit;
 const entry = '/src/components/ai/__tests__/agent-notice-catalog.browser-entry.tsx';
 await mkdir(join(output, 'samples'), { recursive: true });
@@ -43,7 +45,7 @@ async function recordedNotices() {
   }
   return [...selected.values()];
 }
-const events = await recordedNotices();
+const events = budgetOnly ? [] : await recordedNotices();
 const server = await createServer({ root, configFile: false, appType: 'custom', logLevel: 'error',
   cacheDir: `/tmp/shellspan-notice-catalog-${process.pid}`,
   optimizeDeps: { entries: [entry.slice(1)] },
@@ -79,7 +81,11 @@ try {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/`);
-    const cases = await page.evaluate(async entry => (await import(entry)).loadRecordedNotices(), entry);
+    const cases = await page.evaluate(async ({ entry, budgetOnly }) => {
+      const catalog = await import(entry);
+      return budgetOnly ? catalog.cases.filter(sample => sample.id === 'budget') : catalog.loadRecordedNotices();
+    }, { entry, budgetOnly });
+    if (budgetOnly) assert.equal(cases.length, 1, 'The catalog must include the recorded budget scenario');
     for (const theme of ['light', 'dark']) {
       for (const locale of ['zh-CN', 'en-US']) {
         for (const sample of cases) {
@@ -89,6 +95,13 @@ try {
             if (sample.id === 'file-reference') await page.locator('[data-composer-editor]').fill('@');
             const element = page.locator(sample.selector).first();
             await element.waitFor({ state: 'visible', timeout: 10_000 });
+            if (sample.id === 'budget') {
+              const description = `${engine.name()} / ${theme} / ${locale} / ${width}px`;
+              assert.equal(await element.getByRole('button').count(), 0, `${description}: budget notice has no actions`);
+              assert.equal(await page.getByRole('button', { name: /继续任务|Continue task|retry|重试/i }).count(), 0);
+              assert.equal(await page.getByRole('textbox').isEnabled(), true, `${description}: composer remains available`);
+              assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${description}: workspace fits`);
+            }
             // Measure the spinner at the same starting frame used for still screenshots.
             if (sample.id === 'approval-loading') await element.evaluate(element => {
               for (const animation of element.getAnimations({ subtree: true })) {
@@ -201,10 +214,16 @@ try {
                 style: 'html, body, .ai-workspace-root { background-color: transparent !important; }',
               }) });
             report.push({ ...sample, theme, locale, width, ...measurements, image: `samples/${name}` });
+            if (sample.id === 'budget') {
+              await page.evaluate(async ({ entry, locale, theme }) => (await import(entry)).show('budget', locale, theme, true), { entry, locale, theme });
+              await element.waitFor({ state: 'detached' });
+              assert.equal(await page.locator('.ai-turn-error').count(), 1, 'Keep the original budget error in conversation history');
+            }
           }
         }
         for (const [group, title] of groups) {
           const samples = report.filter(sample => sample.group === group && sample.theme === theme && sample.locale === locale);
+          if (samples.length === 0) continue;
           const ids = [...new Set(samples.map(sample => sample.id))];
           const images = await Promise.all(samples.map(async sample => ({ ...sample, bitmap: await loadImage(join(output, sample.image)) })));
           const padding = 32;

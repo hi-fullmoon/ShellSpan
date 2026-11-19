@@ -214,13 +214,13 @@ impl Scenario {
                     Some(crate::models::LocalTerminalProfile::ShellSpanBash),
                     Some("/bin/bash".into()),
                     || Ok(resources.clone()),
-                ).expect("set SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests and run scripts/native-input-p2/build.py --versions 5.3");
+                ).expect("set SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests and run scripts/native-input/integration/build.py --versions 5.3");
                 std::path::PathBuf::from(shell)
             }
             #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
             {
                 let profile = crate::terminal_command::artifacts::read_catalogue(&resources, "linux-aarch64-glibc-2.36")
-                    .expect("set SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests and run scripts/native-input-p2/build.py --versions 5.3")
+                    .expect("set SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests and run scripts/native-input/integration/build.py --versions 5.3")
                     .into_iter()
                     .find(|profile| profile.bash_version == "5.3")
                     .expect("verified GNU Bash 5.3 test profile");

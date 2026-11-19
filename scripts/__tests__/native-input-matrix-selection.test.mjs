@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '../..');
-const runner = resolve(root, 'scripts/native-input-p2/matrix.mjs');
+const runner = resolve(root, 'scripts/native-input/integration/matrix.mjs');
 const directory = resolve(root, 'artifacts/tests/native-input-p2/app-matrix');
 const entries = () => existsSync(directory) ? readdirSync(directory).sort() : [];
 const environment = { ...process.env };

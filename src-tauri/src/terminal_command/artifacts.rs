@@ -72,12 +72,12 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<NativeArti
             include_str!("protocol.rs"),
         ),
         (
-            "scripts/native-input-p2/build.py",
-            include_str!("../../../scripts/native-input-p2/build.py"),
+            "scripts/native-input/integration/build.py",
+            include_str!("../../../scripts/native-input/integration/build.py"),
         ),
         (
-            "scripts/native-input-p2/Dockerfile",
-            include_str!("../../../scripts/native-input-p2/Dockerfile"),
+            "scripts/native-input/integration/Dockerfile",
+            include_str!("../../../scripts/native-input/integration/Dockerfile"),
         ),
         (
             "scripts/dependency-builds/bash-native/build.py",
@@ -146,12 +146,12 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<NativeArti
             ),
         ),
         (
-            "scripts/native-input-p0/build.py",
-            include_str!("../../../scripts/native-input-p0/build.py"),
+            "scripts/native-input/prototype/build.py",
+            include_str!("../../../scripts/native-input/prototype/build.py"),
         ),
         (
-            "scripts/native-input-p0/readline-sources.json",
-            include_str!("../../../scripts/native-input-p0/readline-sources.json"),
+            "scripts/native-input/prototype/readline-sources.json",
+            include_str!("../../../scripts/native-input/prototype/readline-sources.json"),
         ),
     ];
     if required_sources
@@ -161,8 +161,8 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<NativeArti
         return Err("TERMINAL_NATIVE_STALE_ARTIFACTS".into());
     }
     if target == super::protocol::LINUX_X86_64_BASH_TARGET {
-        let recipe = "scripts/native-input-p2/Dockerfile.amd64";
-        let contents = include_str!("../../../scripts/native-input-p2/Dockerfile.amd64");
+        let recipe = "scripts/native-input/integration/Dockerfile.amd64";
+        let contents = include_str!("../../../scripts/native-input/integration/Dockerfile.amd64");
         if catalogue.sources.get(recipe) != Some(&super::protocol::sha(contents)) {
             return Err("TERMINAL_NATIVE_STALE_ARTIFACTS".into());
         }

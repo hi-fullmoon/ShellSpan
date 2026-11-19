@@ -1,6 +1,6 @@
 import {it,expect} from 'vitest';
 import fs from 'node:fs/promises';import p from 'node:path';import {randomUUID,createHash} from 'node:crypto';
-import {windowsPackageFileWitness} from '../native-input-p3/windows-package-witness.mjs';
+import {windowsPackageFileWitness} from '../native-input/acceptance/windows-package-witness.mjs';
 it('reads only the owned actual scratch files and separates missing resources from unreadable data',async()=>{
  const base=p.resolve(import.meta.dirname,'../../artifacts/tests/package-witness');await fs.mkdir(base,{recursive:true});const root=await fs.mkdtemp(p.join(base,'case-')),data=p.join(root,'data'),home=p.join(root,'home'),token=randomUUID();
  try{

@@ -1,6 +1,6 @@
 import {expect,it} from 'vitest';
 import http from 'node:http';import fs from 'node:fs';import p from 'node:path';import {randomUUID} from 'node:crypto';import {DatabaseSync} from 'node:sqlite';
-import {createNativeBoundaryFixture,installNativeBoundaryFixtureRoute,nativeBoundaryFixtureModel} from '../native-input-p3/native-no-inference-boundary.mjs';
+import {createNativeBoundaryFixture,installNativeBoundaryFixtureRoute,nativeBoundaryFixtureModel} from '../native-input/acceptance/native-no-inference-boundary.mjs';
 const token='11111111-1111-4111-8111-111111111111';
 async function serverTest(check){const fixture=createNativeBoundaryFixture(token,8192),server=http.createServer((request,response)=>{if(!request.url.startsWith(fixture.basePath)){response.writeHead(404).end();return;}request.url=request.url.slice(fixture.basePath.length);fixture.middleware(request,response);});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const endpoint='http://127.0.0.1:'+server.address().port+fixture.basePath+'/api/chat';try{await check(fixture,endpoint);}finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}}
 const body=()=>({model:nativeBoundaryFixtureModel,stream:true,messages:[{role:'user',content:'Verify boundary-'+token+'.txt'}],tools:[{type:'function',function:{name:'run_terminal_command'}}]});

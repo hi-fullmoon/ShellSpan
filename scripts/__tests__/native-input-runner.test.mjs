@@ -3,11 +3,11 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { selectWindowsProfiles, windowsValidationPaths, windowsShortSnapshotLocation } from '../native-input-p3/windows-profiles.mjs';
-import { verifyNativeWindowReview } from '../native-input-p3/window-review.mjs';
+import { selectWindowsProfiles, windowsValidationPaths, windowsShortSnapshotLocation } from '../native-input/acceptance/windows-profiles.mjs';
+import { verifyNativeWindowReview } from '../native-input/acceptance/window-review.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
-const runner = path.join(root, 'scripts/verify-terminal-native-input.mjs');
+const runner = path.join(root, 'scripts/native-input/verify.mjs');
 
 describe('native input runner argument validation', () => {
   it.each([
@@ -16,7 +16,7 @@ describe('native input runner argument validation', () => {
     ['--native-input-p3-ai-credential','provision','--data-initialize','--no-model','--data-scope','com.shellspan.validation.native-input-p3','--native-jobs'],
     ['--native-input-p3-ai-credential','verify-absence','--data-initialize','--no-model','--data-scope','com.shellspan.validation.native-input-p3','--native-input-p3-credential-lifecycle'],
   ])('rejects mixed or unowned AI credential validation before touching credentials: %j',(...args)=>{
-    const evidence=path.join(root,'artifacts/tests/native-ai-credential-scope-test'),result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home'),SHELLSPAN_E07_ORIGINAL_ROUTE_DB:path.join(evidence,'original.db'),SHELLSPAN_ACCEPTANCE_RUN_ID:'43b17b64-3422-4739-9d93-fbc415b9f3ab'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-ai-credential requires isolated Windows no-model API initialization');
+    const evidence=path.join(root,'artifacts/tests/native-ai-credential-scope-test'),result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home'),SHELLSPAN_E07_ORIGINAL_ROUTE_DB:path.join(evidence,'original.db'),SHELLSPAN_ACCEPTANCE_RUN_ID:'43b17b64-3422-4739-9d93-fbc415b9f3ab'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-ai-credential requires isolated Windows no-model API initialization');
   });
   it.each([
     ['--native-input-p3-credential-lifecycle'],
@@ -24,55 +24,55 @@ describe('native input runner argument validation', () => {
     ['--native-input-p3-credential-lifecycle','--data-initialize','--no-model','--data-scope','com.shellspan.validation.native-input-p3','--native-jobs'],
     ['--native-input-p3-credential-lifecycle','--data-initialize','--no-model','--data-scope','com.shellspan.validation.native-input-p3','--native-input-p2-credential','cleanup'],
   ])('rejects mixed or unisolated API-only credential validation before accessing credentials: %j',(...args)=>{
-    const evidence=path.join(root,'artifacts/tests/native-credential-lifecycle-scope-test'),result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home')},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-credential-lifecycle requires one isolated Windows API-only initialization');
+    const evidence=path.join(root,'artifacts/tests/native-credential-lifecycle-scope-test'),result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home')},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-credential-lifecycle requires one isolated Windows API-only initialization');
   });
   it.each([
     ['--native-input-p3-history-lifecycle','history-default','--no-model'],
     ['--native-input-p3-history-lifecycle','history-unset'],
     ['--native-input-p3-history-lifecycle','history-custom','--native-jobs','--native-jobs-powershell','powerShell7','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3','--native-jobs-direct'],
   ])('rejects unsafe history lifecycle options before App/profile access: %j',(...args)=>{
-    const evidence=path.join(root,'artifacts/tests/native-history-lifecycle-scope-test'),result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home'),SHELLSPAN_LOCAL_SHELL:'D:/Programs/PowerShell/7/pwsh.exe'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain(process.platform!=='win32'&&args.includes('--native-jobs-powershell')?'--native-jobs-powershell requires native Windows':'--native-input-p3-history-lifecycle requires one isolated real-model Windows history option case');
+    const evidence=path.join(root,'artifacts/tests/native-history-lifecycle-scope-test'),result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home'),SHELLSPAN_LOCAL_SHELL:'D:/Programs/PowerShell/7/pwsh.exe'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain(process.platform!=='win32'&&args.includes('--native-jobs-powershell')?'--native-jobs-powershell requires native Windows':'--native-input-p3-history-lifecycle requires one isolated real-model Windows history option case');
   });
   it('rejects combined startup and lifecycle history modes before reading profiles',()=>{
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),'--native-input-p3-history-lifecycle','history-custom','--native-input-p3-history-startup','history-custom'],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('Choose one isolated Windows history startup or lifecycle case');
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),'--native-input-p3-history-lifecycle','history-custom','--native-input-p3-history-startup','history-custom'],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('Choose one isolated Windows history startup or lifecycle case');
   });
   it.each([
     ['--native-input-p3-history-startup','history-default','--no-model'],
     ['--native-input-p3-history-startup','history-unset'],
     ['--native-input-p3-history-startup','history-custom','--native-jobs','--native-jobs-powershell','powerShell7','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3','--native-jobs-direct'],
   ])('rejects unsafe history startup options before App/profile access: %j',(...args)=>{
-    const evidence=path.join(root,'artifacts/tests/native-history-scope-test'),result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home'),SHELLSPAN_LOCAL_SHELL:'D:/Programs/PowerShell/7/pwsh.exe'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain(process.platform!=='win32'&&args.includes('--native-jobs-powershell')?'--native-jobs-powershell requires native Windows':'--native-input-p3-history-startup requires one isolated real-model Windows history option case');
+    const evidence=path.join(root,'artifacts/tests/native-history-scope-test'),result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home'),SHELLSPAN_LOCAL_SHELL:'D:/Programs/PowerShell/7/pwsh.exe'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain(process.platform!=='win32'&&args.includes('--native-jobs-powershell')?'--native-jobs-powershell requires native Windows':'--native-input-p3-history-startup requires one isolated real-model Windows history option case');
   });
   it.each([
     ['--native-input-p3-job-retired','wait','--no-model'],
     ['--native-input-p3-job-retired','invalid'],
     ['--native-input-p3-job-retired','kill','--native-jobs','--native-jobs-powershell','powerShell7','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3','--native-jobs-direct'],
   ])('rejects unsafe retired binding checks before any App or keyboard action: %j',(...args)=>{
-    const evidence=path.join(root,'artifacts/tests/native-job-retired-scope-test'),result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home'),SHELLSPAN_LOCAL_SHELL:'D:/Programs/PowerShell/7/pwsh.exe'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain(process.platform!=='win32'&&args.includes('--native-jobs-powershell')?'--native-jobs-powershell requires native Windows':'--native-input-p3-job-retired requires one isolated real-model Windows retired wait/kill case');
+    const evidence=path.join(root,'artifacts/tests/native-job-retired-scope-test'),result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home'),SHELLSPAN_LOCAL_SHELL:'D:/Programs/PowerShell/7/pwsh.exe'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain(process.platform!=='win32'&&args.includes('--native-jobs-powershell')?'--native-jobs-powershell requires native Windows':'--native-input-p3-job-retired requires one isolated real-model Windows retired wait/kill case');
   });
   it.each([
     ['--native-input-p3-job-ownership','wait','--no-model'],
     ['--native-input-p3-job-ownership','invalid'],
     ['--native-input-p3-job-ownership','kill','--native-jobs','--native-jobs-powershell','powerShell7','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3','--native-jobs-direct'],
   ])('rejects unsafe job ownership entry before any App or keyboard action: %j',(...args)=>{
-    const evidence=path.join(root,'artifacts/tests/native-job-ownership-scope-test'),result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home'),SHELLSPAN_LOCAL_SHELL:'D:/Programs/PowerShell/7/pwsh.exe'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain(process.platform!=='win32'&&args.includes('--native-jobs-powershell')?'--native-jobs-powershell requires native Windows':'--native-input-p3-job-ownership requires one isolated real-model Windows foreign wait/kill case');
+    const evidence=path.join(root,'artifacts/tests/native-job-ownership-scope-test'),result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home'),SHELLSPAN_LOCAL_SHELL:'D:/Programs/PowerShell/7/pwsh.exe'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain(process.platform!=='win32'&&args.includes('--native-jobs-powershell')?'--native-jobs-powershell requires native Windows':'--native-input-p3-job-ownership requires one isolated real-model Windows foreign wait/kill case');
   });
   it.each([
     ['--native-input-p3-job-completion','0','--no-model'],
     ['--native-input-p3-job-completion','5'],
     ['--native-input-p3-job-completion','7','--native-jobs','--native-jobs-powershell','powerShell7','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3','--native-jobs-direct'],
   ])('rejects unsafe natural job completion before any App or keyboard action: %j',(...args)=>{
-    const evidence=path.join(root,'artifacts/tests/native-job-completion-scope-test'),result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home'),SHELLSPAN_LOCAL_SHELL:'D:/Programs/PowerShell/7/pwsh.exe'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain(process.platform!=='win32'&&args.includes('--native-jobs-powershell')?'--native-jobs-powershell requires native Windows':'--native-input-p3-job-completion requires one isolated real-model Windows natural exit0/7 case');
+    const evidence=path.join(root,'artifacts/tests/native-job-completion-scope-test'),result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home'),SHELLSPAN_LOCAL_SHELL:'D:/Programs/PowerShell/7/pwsh.exe'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain(process.platform!=='win32'&&args.includes('--native-jobs-powershell')?'--native-jobs-powershell requires native Windows':'--native-input-p3-job-completion requires one isolated real-model Windows natural exit0/7 case');
   });
   it.each([
     ['--native-input-p3-job-lifecycle','--no-model'],
     ['--native-input-p3-job-lifecycle','--native-jobs','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3'],
     ['--native-input-p3-job-lifecycle','--native-jobs','--native-jobs-powershell','powerShell7','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3','--native-jobs-direct'],
   ])('refuses unsafe lifecycle combinations before any App or keyboard action: %j',(...args)=>{
-    const evidence=path.join(root,'artifacts/tests/native-job-scope-test'),result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home'),SHELLSPAN_LOCAL_SHELL:'D:/Programs/PowerShell/7/pwsh.exe'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain(process.platform!=='win32'&&args.includes('--native-jobs-powershell')?'--native-jobs-powershell requires native Windows':'--native-input-p3-job-lifecycle requires an isolated real-model native Windows lifecycle case');
+    const evidence=path.join(root,'artifacts/tests/native-job-scope-test'),result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home'),SHELLSPAN_LOCAL_SHELL:'D:/Programs/PowerShell/7/pwsh.exe'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain(process.platform!=='win32'&&args.includes('--native-jobs-powershell')?'--native-jobs-powershell requires native Windows':'--native-input-p3-job-lifecycle requires an isolated real-model native Windows lifecycle case');
   });
   it('requires the isolated late receipt entry before testing an unconfirmed accept',()=>{
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),'--native-input-p3-before-accept'],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-before-accept requires the isolated late receipt entry');
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),'--native-input-p3-before-accept'],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-before-accept requires the isolated late receipt entry');
   });
   it.each([
     ['--native-input-p3-late-receipt','--no-model'],
@@ -81,7 +81,7 @@ describe('native input runner argument validation', () => {
     ['--native-input-p3-late-receipt','--native-input-p3','zsh','--data-scope','com.shellspan.validation.native-input-p3'],
     ['--native-input-p3-late-receipt','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3','--native-input-p3-windows-lifetime','control-eof'],
   ])('requires an exclusive isolated real-model late receipt entry: %j',(...args)=>{
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-late-receipt requires one isolated real-model Windows late receipt case');
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-late-receipt requires one isolated real-model Windows late receipt case');
   });
   it.each([
     ['--native-input-p3-active-eof','--no-model'],
@@ -89,23 +89,23 @@ describe('native input runner argument validation', () => {
     ['--native-input-p3-active-eof','--native-input-p3','zsh','--data-scope','com.shellspan.validation.native-input-p3'],
     ['--native-input-p3-windows-lifetime','control-eof-draft','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3','--no-model','--native-input-p3-active-eof'],
   ])('requires an isolated approved real-model active EOF entry: %j',(...args)=>{
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-active-eof requires one isolated real-model Windows EOF case');
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-active-eof requires one isolated real-model Windows EOF case');
   });
   it.each([
     ['--native-input-p3-navigation-manual','--no-model'],
     ['--native-input-p3-navigation-manual','--native-input-p3','powerShell7','--data-scope','com.shellspan'],
     ['--native-input-p3-navigation-manual','--native-input-p3','zsh','--data-scope','com.shellspan.validation.native-input-p3'],
   ])('requires an isolated approved real-model manual-navigation entry: %j',(...args)=>{
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-navigation-manual requires one isolated real-model Windows manual case');
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-navigation-manual requires one isolated real-model Windows manual case');
   });
   it.each([
     ['--native-input-p3-delegation-takeover'],
     ['--native-input-p3-delegation-takeover','--native-input-p3-approval-delegation','--native-input-p3-delegation-close'],
   ])('requires an exclusive approved delegation entry for takeover: %j',(...args)=>{
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-delegation-takeover requires exclusive approval-delegation');
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-delegation-takeover requires exclusive approval-delegation');
   });
   it('requires the approval-preserving entry for delegated running close',()=>{
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),'--native-input-p3-delegation-close'],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-delegation-close requires approval-delegation');
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),'--native-input-p3-delegation-close'],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-delegation-close requires approval-delegation');
   });
   it.each([
     ['--native-input-p3-approval-delegation','--no-model'],
@@ -114,21 +114,21 @@ describe('native input runner argument validation', () => {
     ['--native-input-p3-approval-delegation','--native-input-p3','zsh','--data-scope','com.shellspan.validation.native-input-p3'],
     ['--native-input-p3-approval-delegation','--native-input-p3','powerShell7','--data-scope','com.shellspan'],
   ])('rejects unsafe approved delegation before App start: %j',(...args)=>{
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-approval-delegation requires one isolated real-model Windows delegation case');
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-approval-delegation requires one isolated real-model Windows delegation case');
   });
   it('requires the approval-preserving entry for simultaneous admission',()=>{
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),'--native-input-p3-contention-race'],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-contention-race requires approval-contention');
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),'--native-input-p3-contention-race'],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-contention-race requires approval-contention');
   });
   it.each([
     ['--native-input-p3-approval-contention','--no-model'],
     ['--native-input-p3-approval-contention','--native-input-p3','zsh','--data-scope','com.shellspan.validation.native-input-p3'],
     ['--native-input-p3-approval-contention','--native-input-p3','powerShell7','--data-scope','com.shellspan'],
   ])('refuses unsafe approval-contention entry before App start: %j',(...args)=>{
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-approval-contention requires one isolated real-model Windows approval case');
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-approval-contention requires one isolated real-model Windows approval case');
   });
   it('rejects an otherwise valid EOF case without explicit isolated data/home paths',()=>{
     const env={...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'};for(const name of ['SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR','SHELLSPAN_DATA_DIR','SHELLSPAN_LOCAL_HOME'])delete env[name];
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),'--native-input-p3-windows-lifetime','control-eof','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3','--no-model'],{cwd:root,env,encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-windows-lifetime requires an isolated Windows no-model lifetime case');
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),'--native-input-p3-windows-lifetime','control-eof','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3','--no-model'],{cwd:root,env,encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-windows-lifetime requires an isolated Windows no-model lifetime case');
   });
   it.each([
     ['--native-input-p3-windows-lifetime','invalid'],
@@ -139,21 +139,21 @@ describe('native input runner argument validation', () => {
     ['--native-input-p3-windows-lifetime','close','--native-input-p3','powerShell7','--data-scope','com.shellspan','--no-model'],
     ['--native-input-p3-windows-lifetime','close','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3','--no-model','--native-input-p3-file-chain'],
   ])('rejects unsafe bootstrap lifetime selection before App start: %j',(...args)=>{
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
     expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-windows-lifetime requires an isolated Windows no-model lifetime case');
   });
   it.each([
     ['--native-input-p3-windows-draft-action','takeover'],
     ['--native-input-p3-windows-draft-cancel','--native-input-p3-windows-draft-action','unknown'],
   ])('rejects unsupported or unpaired draft-action selection: %j',(...args)=>{
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
     expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-windows-draft-action requires one supported draft action');
   });
   it.each([
     ['--native-input-p3-windows-draft-stage','fullInput'],
     ['--native-input-p3-windows-draft-cancel','--native-input-p3-windows-draft-stage','armed'],
   ])('rejects unsupported or unpaired draft-stage selection: %j',(...args)=>{
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
     expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-windows-draft-stage requires draft cancellation and an exact supported stage');
   });
   it.each([
@@ -162,7 +162,7 @@ describe('native input runner argument validation', () => {
     ['--native-input-p3-windows-draft-cancel','--native-input-p3','powerShell7','--data-scope','com.shellspan'],
     ['--native-input-p3-windows-draft-cancel','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3','--native-input-p3-file-chain'],
   ])('rejects unsafe partial-input cancellation arguments before starting an App: %j',(...args)=>{
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
     expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-windows-draft-cancel requires one isolated real-model Windows partial-input case');
   });
   it.each([
@@ -172,7 +172,7 @@ describe('native input runner argument validation', () => {
     ['--native-input-p3-windows-stop','takeover','--native-input-p3','powerShell7','--data-scope','com.shellspan'],
     ['--native-input-p3-windows-stop','cancel','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3','--native-input-p3-file-chain'],
   ])('rejects unsafe Windows stop arguments before starting an App: %j',(...args)=>{
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
     expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-windows-stop requires one isolated real-model Windows running-stop case');
   });
   it.each([
@@ -183,7 +183,7 @@ describe('native input runner argument validation', () => {
     ['--native-input-p3-byte-boundary','8193','--native-input-p3','powerShell7','--data-scope','com.shellspan'],
     ['--native-input-p3-byte-boundary','8192','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3','--native-input-p3-file-chain'],
   ])('rejects unsafe byte-boundary arguments before starting an App: %j',(...args)=>{
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
     expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-byte-boundary requires one isolated real-model Windows byte-boundary case');
   });
   it.each([
@@ -193,7 +193,7 @@ describe('native input runner argument validation', () => {
     ['--native-input-p3-file-restart','prepare','--native-input-p3','powerShell7','--data-scope','com.shellspan'],
     ['--native-input-p3-file-restart','verify','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3','--native-input-p3-file-chain'],
   ])('rejects unsafe scratch-restart arguments before starting an App: %j',(...args)=>{
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
     expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-file-restart requires one isolated real-model native scratch restart phase');
   });
   it.each([
@@ -203,7 +203,7 @@ describe('native input runner argument validation', () => {
     ['--native-input-p3-file-fault','existing-file','--native-input-p3','powerShell7','--data-scope','com.shellspan'],
     ['--native-input-p3-file-fault','existing-file','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3','--native-input-p3-file-chain'],
   ])('rejects unsafe scratch-fault arguments before starting an App: %j',(...args)=>{
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
     expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-file-fault requires one isolated real-model native scratch refusal case');
   });
   it.each([
@@ -211,7 +211,7 @@ describe('native input runner argument validation', () => {
     ['--native-input-p3-file-chain','--native-input-p3','zsh','--data-scope','com.shellspan.validation.native-input-p3'],
     ['--native-input-p3-file-chain','--native-input-p3','powerShell7','--data-scope','com.shellspan'],
   ])('rejects unsafe native file-chain arguments before starting an App: %j',(...args)=>{
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
     expect(result.status).toBe(1);expect(result.stderr).toContain('--native-input-p3-file-chain requires one isolated real-model native file chain');
   });
   it.each([
@@ -223,21 +223,21 @@ describe('native input runner argument validation', () => {
         ['--native-input-p3-storage-admission',mode,'--native-input-p3','powerShell7','--data-scope','com.shellspan'],
       ]),
   ])('rejects unsafe storage admission modes before native execution: %j', (...args) => {
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{
       cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000,
     });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('--native-input-p3-storage-admission requires one isolated real-model native case with an exact supported host, editor and owned data');
   });
   it('rejects a storage refusal expectation outside read-only recovery mode', () => {
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),'--journal-recovery-error','TERMINAL_SUBMISSION_JOURNAL_UNAVAILABLE'],{
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),'--journal-recovery-error','TERMINAL_SUBMISSION_JOURNAL_UNAVAILABLE'],{
       cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000,
     });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('--journal-recovery-error requires read-only recovery');
   });
   it('rejects empty recovery expectations outside a normal recovery query', () => {
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),'--journal-recovery-empty'],{
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),'--journal-recovery-empty'],{
       cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000,
     });
     expect(result.status).toBe(1);expect(result.stderr).toContain('--journal-recovery-empty requires a normal read-only recovery query');
@@ -246,7 +246,7 @@ describe('native input runner argument validation', () => {
     ['--journal-recovery-agent','agent-test'],
     ['--journal-recovery-agent','agent-test','--data-initialize','--no-model','--data-scope','com.shellspan.validation.native-input-p3','--native-input-p2-credential','provision'],
   ])('rejects unsafe journal-only startup before any App or credential operation: %j', (...args) => {
-    const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{
+    const result=spawnSync(process.execPath,[path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{
       cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000,
     });
     expect(result.status).toBe(1);
@@ -259,7 +259,7 @@ describe('native input runner argument validation', () => {
     expect(capture).not.toContain('getCurrentWindow().setFocus()');
     expect(capture).not.toContain('getCurrentWindow().show()');
     expect(capture).toContain('/__native-window-evidence/');
-    const runnerSource = readFileSync(path.join(root, 'scripts/verify-ai-session-stream.mjs'), 'utf8');
+    const runnerSource = readFileSync(path.join(root, 'scripts/verification/agent/verify-ai-session-stream.mjs'), 'utf8');
     expect(runnerSource).toContain('alwaysOnTop: !frozenNativeRun');
   });
   it('requires a passing visual review of the exact captured image', () => {
@@ -333,7 +333,7 @@ describe('native input runner argument validation', () => {
     ['--model-preflight'],
     ['--model-preflight', '--data-scope', 'com.shellspan.validation.native-input-p3', '--native-jobs'],
   ])('rejects an unsafe model preflight before starting an App: %j', (...args) => {
-    const result = spawnSync(process.execPath, [path.join(root, 'scripts/verify-ai-session-stream.mjs'), ...args], {
+    const result = spawnSync(process.execPath, [path.join(root, 'scripts/verification/agent/verify-ai-session-stream.mjs'), ...args], {
       cwd: root,
       // Every case is rejected during argument validation, before any GUI work.
       env: { ...process.env, SHELLSPAN_ALLOW_FOREGROUND_TESTS: '1' },
@@ -345,9 +345,18 @@ describe('native input runner argument validation', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('--model-preflight is one independent bounded real-model connection test');
   });
+  it('lists all shared verification lanes without starting a native check', () => {
+    const result = spawnSync(process.execPath, [runner, '--help'], { cwd: root, encoding: 'utf8', timeout: 5_000 });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/prototype[\s\S]+display[\s\S]+protocol[\s\S]+integration/);
+  });
   it.each([
-    { arguments: ['--browser-only', '--native-only'], error: 'Choose either --browser-only or --native-only' },
-    { arguments: ['--browser-only', '--native-only', '--research-profile'], error: "Unknown option '--research-profile'" },
+    { arguments: ['prototype', '--browser-only', '--native-only'], error: 'Choose either --browser-only or --native-only' },
+    { arguments: ['prototype', '--browser-only', '--native-only', '--research-profile'], error: "Unknown option '--research-profile'" },
+    { arguments: ['display', '--copy-only', '--inband-only'], error: 'Choose one scope' },
+    { arguments: ['protocol', '--research-profile'], error: "Unknown option '--research-profile'" },
+    { arguments: ['integration', '--research-profile'], error: "Unknown option '--research-profile'" },
+    { arguments: ['research'], error: 'Unknown native input verification lane: research' },
   ])('rejects $arguments before starting a native check', ({ arguments: args, error }) => {
     const result = spawnSync(process.execPath, [runner, ...args], {
       cwd: root,

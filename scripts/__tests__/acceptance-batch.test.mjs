@@ -5,16 +5,16 @@ import {randomUUID} from 'node:crypto';
 import {createHash} from 'node:crypto';
 import {writeFileSync,statSync,utimesSync} from 'node:fs';
 import {setTimeout as delay} from 'node:timers/promises';
-import {digest,inventory,reuseDecision,verifyRetainedArtifacts,hashFile,dependencyInventory,stageToolchains,fingerprints,buildInputRoots} from '../native-input-p3/acceptance-inputs.mjs';
-import {withLease,boundedQueue,runInstalledCases,backgroundQueue,watchBatchCancellation} from '../native-input-p3/acceptance-queue.mjs';
-import {summarize,evidenceMatches,sealCase,retainSealedCase,referenceEvidence,modelEvidenceMetrics} from '../native-input-p3/acceptance-evidence.mjs';
-import {packageCases,checklistObligations} from '../native-input-p3/acceptance-plan.mjs';
-import {allocateCase,packageLoader,packageCargoLocation,reservePackageCargo,retainUninstallResidue,requireVisiblePackageViewport} from '../native-input-p3/package-launch.mjs';
-import {scopePackageStyles,assertPackageModuleInput} from '../native-input-p3/package-frontend.mjs';
-import {selectSnapshotResources,verifySnapshotResourceCopy} from '../native-input-p3/acceptance-snapshot-resources.mjs';
-import {legacyTiming,compareTimings} from '../native-input-p3/acceptance-timings.mjs';
-import {productionDependencyInputs,assertReusableBuild,assertArtifactSourceContext} from '../native-input-p3/acceptance-package-reuse.mjs';
-import {foreignNativeValidations} from '../native-input-p3/acceptance-gui-readiness.mjs';
+import {digest,inventory,reuseDecision,verifyRetainedArtifacts,hashFile,dependencyInventory,stageToolchains,fingerprints,buildInputRoots} from '../native-input/acceptance/acceptance-inputs.mjs';
+import {withLease,boundedQueue,runInstalledCases,backgroundQueue,watchBatchCancellation} from '../native-input/acceptance/acceptance-queue.mjs';
+import {summarize,evidenceMatches,sealCase,retainSealedCase,referenceEvidence,modelEvidenceMetrics} from '../native-input/acceptance/acceptance-evidence.mjs';
+import {packageCases,checklistObligations} from '../native-input/acceptance/acceptance-plan.mjs';
+import {allocateCase,packageLoader,packageCargoLocation,reservePackageCargo,retainUninstallResidue,requireVisiblePackageViewport} from '../native-input/acceptance/package-launch.mjs';
+import {scopePackageStyles,assertPackageModuleInput} from '../native-input/acceptance/package-frontend.mjs';
+import {selectSnapshotResources,verifySnapshotResourceCopy} from '../native-input/acceptance/acceptance-snapshot-resources.mjs';
+import {legacyTiming,compareTimings} from '../native-input/acceptance/acceptance-timings.mjs';
+import {productionDependencyInputs,assertReusableBuild,assertArtifactSourceContext} from '../native-input/acceptance/acceptance-package-reuse.mjs';
+import {foreignNativeValidations} from '../native-input/acceptance/acceptance-gui-readiness.mjs';
 
 const base=resolve(import.meta.dirname,'../../artifacts/tests/acceptance-batch-regression');
 const roots=[];
@@ -132,12 +132,12 @@ it('keeps controller-only source freezes out of artifact admission',()=>{
 
 it('recognizes foreign native acceptance across frozen roots without blocking unrelated desktop apps or static checks',()=>{
   const owner=resolve(import.meta.dirname,'../..'),path=owner.replaceAll('\\','/');
-  const records=[{pid:10,name:'node.exe',commandLine:`node ${path}/scripts/native-input-p3/windows-package-batch.mjs`},
-    {pid:11,name:'node.exe',commandLine:`node ${path}/artifacts/tests/p3/other/s/scripts/verify-ai-session-stream.mjs --no-model`},
+  const records=[{pid:10,name:'node.exe',commandLine:`node ${path}/scripts/native-input/acceptance/windows-package-batch.mjs`},
+    {pid:11,name:'node.exe',commandLine:`node ${path}/artifacts/tests/p3/other/s/scripts/verification/agent/verify-ai-session-stream.mjs --no-model`},
     {pid:12,name:'ShellSpan.exe',executablePath:`${path}/artifacts/tests/p3/other/s/image/ShellSpan.exe`},
     {pid:13,name:'ShellSpan.exe',executablePath:`${path}/src-tauri/target/debug/ShellSpan.exe`},
-    {pid:14,name:'node.exe',commandLine:`node ${path}/scripts/native-input-p3/windows-package-batch.mjs --list-only`},
-    {pid:15,name:'node.exe',commandLine:`node ${path}-unrelated/scripts/verify-ai-session-stream.mjs`}];
+    {pid:14,name:'node.exe',commandLine:`node ${path}/scripts/native-input/acceptance/windows-package-batch.mjs --list-only`},
+    {pid:15,name:'node.exe',commandLine:`node ${path}-unrelated/scripts/verification/agent/verify-ai-session-stream.mjs`}];
   expect(foreignNativeValidations(records,owner,10).map(item=>item.pid)).toEqual([11,12]);
 });
 

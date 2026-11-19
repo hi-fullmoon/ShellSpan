@@ -4,7 +4,7 @@ import path from 'node:path';
 import { Script } from 'node:vm';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
-import { captureValidationSources } from '../native-input-p2/frozen-validation.mjs';
+import { captureValidationSources } from '../native-input/integration/frozen-validation.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 
@@ -45,7 +45,7 @@ describe('native validation identity contracts', () => {
     for (const { file, source } of sources) {
       expect(source, file).not.toMatch(/\bshellspan(?:\.validation)?\.artifacts\//);
     }
-    const runner = scriptNodes(sources.find(({ file }) => file === 'scripts/verify-ai-session-stream.mjs'));
+    const runner = scriptNodes(sources.find(({ file }) => file === 'scripts/verification/agent/verify-ai-session-stream.mjs'));
     const patterns = runner.nodes.filter(node => node.kind === ts.SyntaxKind.RegularExpressionLiteral
       && node.getText(runner.syntax).includes('shellspan')
       && node.getText(runner.syntax).includes('validation'));
@@ -63,27 +63,27 @@ describe('native validation identity contracts', () => {
     for (const identifier of identifiers) expect(acceptsIdentifier.test(identifier), identifier).toBe(true);
 
     for (const file of [
-      'scripts/native-input-p3/windows-desktop-worker.ps1',
-      'scripts/native-input-p3/windows-credential-worker.ps1',
+      'scripts/native-input/acceptance/windows-desktop-worker.ps1',
+      'scripts/native-input/acceptance/windows-credential-worker.ps1',
     ]) {
       expect(sources.find(source => source.file === file).source)
         .toContain("'com.shellspan.validation.native-input-p3'");
     }
-    expect(sources.find(({ file }) => file === 'scripts/native-input-p3/linux-run.py').source)
+    expect(sources.find(({ file }) => file === 'scripts/native-input/acceptance/linux-run.py').source)
       .toContain('com.shellspan.native-input-p3.fixture');
-    expect(sources.find(({ file }) => file === 'scripts/native-input-p3/scoped-linux-baseline.py').source)
+    expect(sources.find(({ file }) => file === 'scripts/native-input/acceptance/scoped-linux-baseline.py').source)
       .toContain('父Shell');
   });
 
   it('keeps fixed and dynamic Docker labels consistent with ownership checks and cleanup', async () => {
     const sources = await validationSources();
-    const peer = scriptNodes(sources.find(({ file }) => file === 'scripts/native-input-p3/linux-peer.mjs'));
+    const peer = scriptNodes(sources.find(({ file }) => file === 'scripts/native-input/acceptance/linux-peer.mjs'));
     const dynamic = peer.nodes.filter(node => ts.isTemplateExpression(node) && node.head.text.startsWith('shellspan.'));
     expect(dynamic).toHaveLength(1);
     const keys = ['p2', 'p3'].map(namespace => dockerLabelKey(dynamic[0], peer.syntax, namespace));
     expect(keys).toEqual(['shellspan.native-input-p2', 'shellspan.native-input-p3']);
 
-    for (const file of ['scripts/native-input-p2/ssh.mjs', 'scripts/native-input-p3/linux-fixture.mjs']) {
+    for (const file of ['scripts/native-input/integration/ssh.mjs', 'scripts/native-input/acceptance/linux-fixture.mjs']) {
       const producer = scriptNodes(sources.find(source => source.file === file));
       const fixed = producer.nodes.filter(node => ts.isTemplateExpression(node) && node.head.text.startsWith('shellspan.'));
       expect(fixed.length, file).toBeGreaterThan(0);
@@ -95,11 +95,11 @@ describe('native validation identity contracts', () => {
       .filter(value => value.startsWith('{{index .Config.Labels ') && value.includes('native-input-'));
     expect(consumers.length).toBeGreaterThan(0);
     for (const format of consumers) expect(keys.some(key => format.includes(JSON.stringify(key))), format).toBe(true);
-    for (const file of ['scripts/native-input-p3/linux-run.py', 'scripts/native-input-p3/scoped-linux-baseline.py']) {
+    for (const file of ['scripts/native-input/acceptance/linux-run.py', 'scripts/native-input/acceptance/scoped-linux-baseline.py']) {
       expect(sources.find(source => source.file === file).source, file)
         .toContain('{{index .Config.Labels ' + JSON.stringify(keys[1]) + '}}');
     }
-    const cleanup = await readFile(path.join(root, 'scripts/native-input-p3/scoped-fixture-stop.mjs'), 'utf8');
+    const cleanup = await readFile(path.join(root, 'scripts/native-input/acceptance/scoped-fixture-stop.mjs'), 'utf8');
     expect(cleanup).toContain(JSON.stringify(keys[1]));
   });
 });

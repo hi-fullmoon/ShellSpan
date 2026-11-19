@@ -5,7 +5,7 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { chromium, webkit } from 'playwright';
-import { displayModuleJavaScript, installedRuntimeManifest } from '../../../../scripts/native-input-p0/formal-runtime.mjs';
+import { displayModuleJavaScript, installedRuntimeManifest } from '../../../../scripts/native-input/prototype/formal-runtime.mjs';
 
 const installed = await installedRuntimeManifest();
 const output = path.resolve('artifacts/tests/native-input-p0/p1-evidence/display-binding');

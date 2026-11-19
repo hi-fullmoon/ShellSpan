@@ -1,7 +1,7 @@
 import {expect,it} from 'vitest';
-import {verifyNsisInstalledImage} from '../native-input-p3/windows-package-image.mjs';
-import {packageFrontendDirectory,validationPackageMarker,packageResourceMapping,assertPackageResourcePaths,windowsPackageHost,windowsPackageScenario} from '../native-input-p3/package-config.mjs';
-import {windowsShortSnapshotLocation} from '../native-input-p3/windows-profiles.mjs';
+import {verifyNsisInstalledImage} from '../native-input/acceptance/windows-package-image.mjs';
+import {packageFrontendDirectory,validationPackageMarker,packageResourceMapping,assertPackageResourcePaths,windowsPackageHost,windowsPackageScenario} from '../native-input/acceptance/package-config.mjs';
+import {windowsShortSnapshotLocation} from '../native-input/acceptance/windows-profiles.mjs';
 import path from 'node:path';
 
 it('requires an explicit validation context for model and manual display package scenarios',()=>{

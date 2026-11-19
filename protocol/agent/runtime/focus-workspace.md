@@ -55,7 +55,7 @@ menu. It does not add model-facing application-control tools.
 
 ## Validation
 
-Run `node scripts/verify-ai-session-stream.mjs --focus` on a native desktop.
+Run `node scripts/verification/agent/verify-ai-session-stream.mjs --focus` on a native desktop.
 The regression uses real local PTYs and production terminal primitives, checks
 view-versus-target selection, keyboard context-menu actions, exact-session
 and draft restoration after remount, target badges, collapse/controller retention,

@@ -1601,8 +1601,10 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
         assert_eq!(
             baseline["userGateSha256"].as_str().unwrap(),
             nip::sha(
-                &fs::read_to_string(owner.join("scripts/native-input-p3/zle-handoff-gate.zsh"))
-                    .unwrap()
+                &fs::read_to_string(
+                    owner.join("scripts/native-input/acceptance/zle-handoff-gate.zsh")
+                )
+                .unwrap()
             )
         );
         let folder = path.parent().unwrap();
@@ -1671,7 +1673,7 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
         "builtin print -r -- P3_EXISTING_1",
         "builtin print -r -- P3_EXISTING_2",
     ];
-    let observer = owner.join("scripts/native-input-p3/zle-history-observer.zsh");
+    let observer = owner.join("scripts/native-input/acceptance/zle-history-observer.zsh");
     if let Some(mode) = &history_mode {
         assert!(matches!(
             mode.as_str(),
@@ -1722,7 +1724,7 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
             "source {}\n",
             shlex::try_quote(
                 owner
-                    .join("scripts/native-input-p3/zle-handoff-gate.zsh")
+                    .join("scripts/native-input/acceptance/zle-handoff-gate.zsh")
                     .to_str()
                     .unwrap()
             )

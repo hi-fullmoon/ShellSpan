@@ -89,7 +89,7 @@ describe('AI tool presentation', () => {
     await initI18n(locale);
     const path = `${process.cwd()}/package.json`;
     const file = readFileSync(path, 'utf8');
-    const codePath = 'scripts/check-ai-panel-styles.mjs';
+    const codePath = 'scripts/checks/check-ai-panel-styles.mjs';
     const code = readFileSync(codePath, 'utf8');
     const execution = spawnSync(process.execPath, [codePath], { encoding: 'utf8' });
     expect(execution.status).toBe(0);

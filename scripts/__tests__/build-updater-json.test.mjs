@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildUpdaterManifest } from '../build-updater-json.mjs';
+import { buildUpdaterManifest } from '../release/build-updater-json.mjs';
 
 const tempDirs = [];
 

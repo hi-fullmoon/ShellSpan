@@ -1,4 +1,4 @@
-import configuration from '../../../../scripts/native-input-p3/mac-system-selection-configuration.json';
+import configuration from '../../../../scripts/native-input/acceptance/mac-system-selection-configuration.json';
 import {macHumanPlan} from './mac-human-plan';
 import {macDisplayOutputCommand} from './native-display-manual-posix';
 

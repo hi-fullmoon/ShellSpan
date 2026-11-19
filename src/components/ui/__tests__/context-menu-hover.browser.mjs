@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdir, stat } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import { userInfo } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { chromium, webkit } from 'playwright';
+import { parse } from 'yaml';
 
 // node src/components/ui/__tests__/context-menu-hover.browser.mjs
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -17,7 +18,48 @@ const entry = { path, name: 'AGENTS.md', kind: 'file', size: metadata.size, modi
 const fileUrl = pathToFileURL(path).href;
 const directory = root.slice(0, -1);
 const { username } = userInfo();
+// Render the connection card with the SSH/SFTP acceptance endpoint. The browser never connects to it.
+const qualityGate = parse(await readFile(`${root}.github/workflows/quality-gate.yml`, 'utf8'));
+const { env: sshFixture } = qualityGate.jobs['ssh-e2e'].steps.find(step => step.env?.SHELLSPAN_E2E_SSH_HOST);
+const profile = {
+  id: 'ssh-e2e', name: 'SSH/SFTP E2E', authMethod: 'password',
+  host: sshFixture.SHELLSPAN_E2E_SSH_HOST, port: Number(sshFixture.SHELLSPAN_E2E_SSH_PORT),
+  username: sshFixture.SHELLSPAN_E2E_SSH_USERNAME, createdAt: metadata.mtimeMs, updatedAt: metadata.mtimeMs,
+};
 const engine = process.env.SHELLSPAN_TEST_ENGINE ?? 'chromium';
+
+async function verifyMenuAlignment(menu, kind) {
+  await menu.evaluate(async element => {
+    await document.fonts.ready;
+    await Promise.all(element.getAnimations().map(animation => animation.finished));
+  });
+  const rows = await menu.getByRole('menuitem').evaluateAll((items, account) => items.map(item => {
+    const label = account ? item.querySelector('[data-slot="menu-item-label"]') : item.lastElementChild;
+    if (account && !label) return null;
+    const icon = item.querySelector('svg').getBoundingClientRect();
+    const text = label.getBoundingClientRect();
+    return {
+      name: label.textContent,
+      left: icon.left, width: icon.width, height: icon.height,
+      gap: text.left - icon.right,
+      textOffset: text.top + text.height / 2 - icon.top - icon.height / 2,
+    };
+  }).filter(Boolean), kind === 'account');
+  assert.ok(rows.length > 0, `${kind}: menu must have icon and label rows`);
+  if (kind === 'connection-card') assert.equal(rows.length, 8, 'Check every connection card action');
+  for (const row of rows) {
+    const description = `${kind}: ${row.name}`;
+    assert.equal(row.gap, 4, `${description}: icon and label gap`);
+    if (kind === 'connection-card') {
+      assert.equal(row.left, rows[0].left, `${description}: align icons to a common left edge`);
+      assert.deepEqual([row.width, row.height], [14, 14], `${description}: icon size`);
+    }
+    if (kind !== 'account') {
+      assert.ok(Math.abs(row.textOffset) <= 1, `${description}: label and icon centers differ by ${row.textOffset}px`);
+    }
+  }
+}
+
 const menuAppearance = item => item.evaluate(element => {
   const menu = element.closest('[role="menu"]');
   const { backgroundColor, border, borderRadius, boxShadow, padding } = getComputedStyle(menu);
@@ -69,17 +111,24 @@ try {
         let fileMenuAppearance;
         let disabledFileItemOpacity;
         const iconKinds = ['icon', 'connection-actions', 'log-actions'];
-        for (const kind of ['account', ...iconKinds, 'terminal', 'shared', 'file', 'agent-path', 'blank', 'bookmark']) {
+        for (const kind of ['account', ...iconKinds, 'connection-card', 'terminal', 'shared', 'file', 'agent-path', 'blank', 'bookmark']) {
           const labels = await page.evaluate(async options => {
             const { show } = await import('/src/components/ui/__tests__/context-menu-hover.browser-entry.tsx');
             return show(options);
-          }, { kind, theme, locale, entry, fileUrl, directory, username });
+          }, { kind, theme, locale, entry, fileUrl, directory, username, profile });
           const button = name => page.getByRole('button', { name, exact: true });
           const menuItem = name => page.getByRole('menuitem', { name, exact: true });
           if (kind === 'account') await button(labels.account).click();
+          if (kind === 'connection-card') {
+            await button(labels[kind]).click();
+            await verifyMenuAlignment(page.getByRole('menu'), kind);
+            await page.screenshot({ path: `${output}/${engine}-${theme}-${locale}-${width}-${kind}.png` });
+            continue;
+          }
           if (kind === 'terminal') await page.getByRole('tab').click({ button: 'right' });
           if (kind === 'shared') await page.getByTestId('context-trigger').click({ button: 'right' });
           if (kind === 'agent-path') await page.getByRole('link', { name: entry.name, exact: true }).click({ button: 'right' });
+          if (['account', 'file', 'blank'].includes(kind)) await verifyMenuAlignment(page.getByRole('menu'), kind);
           const isIcon = iconKinds.includes(kind);
           const targets = isIcon ? [button(labels[kind])] : {
             account: [menuItem(labels.appearance)],

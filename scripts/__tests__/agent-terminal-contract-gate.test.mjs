@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { selectedRustTests, checkRustTestResult, terminalContractFilters } from '../verify-agent-terminal-contracts.mjs';
+import { selectedRustTests, checkRustTestResult, terminalContractFilters } from '../verification/agent/verify-agent-terminal-contracts.mjs';
 
 describe('native Rust contract gate', () => {
   it('rejects the successful zero-match output produced by a retired module filter', () => {

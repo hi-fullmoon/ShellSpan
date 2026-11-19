@@ -46,7 +46,7 @@ describe('Terminal remote SSH runner contracts', () => {
 
   it('runs real isolated SSH PTYs, unsupported-shell evidence, and Direct regression', async () => {
     const [runner, session, sessionTests, compose, dockerfile] = await Promise.all([
-      readFile(path.join(repositoryRoot, 'scripts/verify-terminal-remote-ssh.mjs'), 'utf8'),
+      readFile(path.join(repositoryRoot, 'scripts/verification/terminal/verify-terminal-remote-ssh.mjs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/session.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/tests/session.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'tests/ssh-e2e/compose.yml'), 'utf8'),

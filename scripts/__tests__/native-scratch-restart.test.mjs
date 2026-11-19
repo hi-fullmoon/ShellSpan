@@ -2,7 +2,7 @@ import {describe,it,expect} from 'vitest';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
-import {saveScratchRestart,readScratchRestart,scratchRestartWitness} from '../native-input-p3/scratch-restart.mjs';
+import {saveScratchRestart,readScratchRestart,scratchRestartWitness} from '../native-input/acceptance/scratch-restart.mjs';
 
 // These are disk-boundary helper fixtures, never App/model acceptance evidence.
 async function ownedCase(){

@@ -31,8 +31,8 @@ def main():
 
     # Reuse the already reviewed GNU archive/Readline verification. This is a
     # source dependency build, never a timestamped previous capture or module.
-    run(['python3', '-B', 'scripts/native-input-p0/build.py', '--upstream', '--versions', args.versions])
-    helper_path = ROOT / 'scripts/native-input-p0/build.py'
+    run(['python3', '-B', 'scripts/native-input/prototype/build.py', '--upstream', '--versions', args.versions])
+    helper_path = ROOT / 'scripts/native-input/prototype/build.py'
     spec = importlib.util.spec_from_file_location('gnu_dependency_inputs', helper_path)
     helper = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(helper)
@@ -55,7 +55,7 @@ def main():
         if not archive.is_absolute() or not archive.is_file():
             raise RuntimeError('The Linux x86_64 Bash build requires the libtinfo static archive (libncurses-dev)')
         static_tinfo = archive.resolve()
-    stamp = hashlib.sha256((''.join(sha(patch) for patch in [*patches.values(), *display_patches.values(), paste_patch, darwin_patch, bind_x_patch, unload_patch, combining_patch, native_history_patch, *setpgid_patches.values(), setpgid_header, *resize_patches.values()]) + sha(Path(__file__)) + sha(helper_path) + sha(ROOT / 'scripts/native-input-p0/readline-sources.json')).encode()).hexdigest()[:20]
+    stamp = hashlib.sha256((''.join(sha(patch) for patch in [*patches.values(), *display_patches.values(), paste_patch, darwin_patch, bind_x_patch, unload_patch, combining_patch, native_history_patch, *setpgid_patches.values(), setpgid_header, *resize_patches.values()]) + sha(Path(__file__)) + sha(helper_path) + sha(ROOT / 'scripts/native-input/prototype/readline-sources.json')).encode()).hexdigest()[:20]
     if static_tinfo:
         stamp += '-' + sha(static_tinfo)[:12]
     bash_patch_lock = Path(__file__).with_name('bash-5.3-patches.json')
@@ -91,7 +91,7 @@ def main():
             raise RuntimeError('Stale Readline native display patch')
 
     def build_readline83():
-        pin = json.loads((ROOT / 'scripts/native-input-p0/readline-sources.json').read_text())
+        pin = json.loads((ROOT / 'scripts/native-input/prototype/readline-sources.json').read_text())
         upstream = BUILD_ROOT / 'native-input-p0/upstream'
         archive = upstream / 'readline-8.3.tar.gz'
         if sha(archive) != pin['archive']:

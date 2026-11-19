@@ -8,7 +8,7 @@
     "platform": "macOS arm64",
     "bash": "5.3",
     "readline": "8.3.6",
-    "regenerate": "node scripts/export-native-display-fixture.mjs --captures <successful ownership-window capture directory>"
+    "regenerate": "node scripts/native-input/export-fixture.mjs display <ownership-window capture directory>"
   },
   "packets": {
     "enter": {

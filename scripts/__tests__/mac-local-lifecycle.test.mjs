@@ -3,8 +3,8 @@ import {randomUUID} from 'node:crypto';
 import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {expect,it} from 'vitest';
-import {isMacLocalLifecycle,macLifecycleEvidenceClockEnabled,macLifecycleVisualCheckpoints,macLifecycleSnapshotCheckpoints} from '../native-input-p3/mac-local-lifecycle.mjs';
-import {attachMacDailyCheckpoints} from '../native-input-p3/mac-daily.mjs';
+import {isMacLocalLifecycle,macLifecycleEvidenceClockEnabled,macLifecycleVisualCheckpoints,macLifecycleSnapshotCheckpoints} from '../native-input/acceptance/mac-local-lifecycle.mjs';
+import {attachMacDailyCheckpoints} from '../native-input/acceptance/mac-daily.mjs';
 
 const directory=resolve(import.meta.dirname,'../../artifacts/tests/native-input-p3/local-lifecycle-selection',randomUUID());
 const paths={evidence:directory,data:resolve(directory,'data'),home:resolve(directory,'home')};
@@ -15,7 +15,7 @@ const bash={'native-input-p2-lifecycle':true,'native-input-p2':true,'no-model':t
 it('rejects the late mode alone before any foreground or native operation',()=>{
  const root=resolve(import.meta.dirname,'../..');
  for(const foreground of ['0','1']) {
-  const result=spawnSync(process.execPath,['scripts/verify-ai-session-stream.mjs','--native-input-p2-lifecycle-late'],
+  const result=spawnSync(process.execPath,['scripts/verification/agent/verify-ai-session-stream.mjs','--native-input-p2-lifecycle-late'],
    {cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:foreground},encoding:'utf8',timeout:5000});
   expect(result.error).toBeUndefined();expect(result.status).toBe(1);
   expect(result.stderr).toContain(foreground==='0'?'Native App acceptance is disabled by default':'Late local lifecycle requires the exact owned no-model Mac lifecycle mode');
@@ -25,7 +25,7 @@ it('rejects the late mode alone before any foreground or native operation',()=>{
 it('rejects dispose alone before any native operation',()=>{
  const root=resolve(import.meta.dirname,'../..');
  for(const foreground of ['0','1']){
-  const result=spawnSync(process.execPath,['scripts/verify-ai-session-stream.mjs','--native-input-p2-lifecycle-dispose'],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:foreground},encoding:'utf8',timeout:5000});
+  const result=spawnSync(process.execPath,['scripts/verification/agent/verify-ai-session-stream.mjs','--native-input-p2-lifecycle-dispose'],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:foreground},encoding:'utf8',timeout:5000});
   expect(result.error).toBeUndefined();expect(result.status).toBe(1);
   expect(result.stderr).toContain(foreground==='0'?'Native App acceptance is disabled by default':'Dispose local lifecycle requires the exact owned no-model Mac lifecycle mode without late mode');
  }

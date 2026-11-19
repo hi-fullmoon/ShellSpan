@@ -3,8 +3,8 @@ import {mkdir,mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {resolve,dirname} from 'node:path';
 import {build} from 'vite';
 import tailwindcss from '@tailwindcss/vite';
-import {packageInputGuard,guardPackageWatchInputs,packageCssInputGuard} from '../native-input-p3/package-frontend.mjs';
-import {inside} from '../native-input-p3/acceptance-inputs.mjs';
+import {packageInputGuard,guardPackageWatchInputs,packageCssInputGuard} from '../native-input/acceptance/package-frontend.mjs';
+import {inside} from '../native-input/acceptance/acceptance-inputs.mjs';
 
 const base=resolve(import.meta.dirname,'../../artifacts/tests/package-frontend-guard'),roots=[];
 async function fixture(files){

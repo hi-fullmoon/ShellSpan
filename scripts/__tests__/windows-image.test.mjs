@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { windowsValidationPaths } from '../native-input-p3/windows-profiles.mjs';
+import { windowsValidationPaths } from '../native-input/acceptance/windows-profiles.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const artifacts = path.join(root, 'artifacts/tests/windows-image');
@@ -21,7 +21,7 @@ describe.runIf(process.platform === 'win32')('owned Windows image inspection', (
     const ownedEnded=new Promise(resolve=>owned.once('close',resolve)),siblingEnded=new Promise(resolve=>sibling.once('close',resolve));
     try{
       await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Owned fixture did not start')),5000);owned.once('error',error=>{clearTimeout(timer);reject(error);});owned.stdout.once('data',()=>{clearTimeout(timer);resolve();});});
-      const args=['-NoLogo','-NoProfile','-NonInteractive','-File',path.join(root,'scripts/native-input-p3/windows-image.ps1'),'-Action','Stop','-ApplicationPid',String(owned.pid),'-RunnerPid',String(process.pid),'-Executable',process.execPath];
+      const args=['-NoLogo','-NoProfile','-NonInteractive','-File',path.join(root,'scripts/native-input/acceptance/windows-image.ps1'),'-Action','Stop','-ApplicationPid',String(owned.pid),'-RunnerPid',String(process.pid),'-Executable',process.execPath];
       const stopped=JSON.parse((await execute('powershell.exe',args,{cwd:root,windowsHide:true,encoding:'utf8',timeout:20000})).stdout);
       expect(stopped.treeKillUsed).toBe(false);expect(stopped.termination).toBe('verified-process-handles');await ownedEnded;
       expect(sibling.exitCode).toBeNull();expect(()=>process.kill(sibling.pid,0)).not.toThrow();
@@ -34,8 +34,8 @@ describe.runIf(process.platform === 'win32')('owned Windows image inspection', (
     await mkdir(artifacts,{recursive:true});const directory=await mkdtemp(path.join(artifacts,'shell-owner-'));
     try{
       const record=path.join(directory,'app.json');await writeFile(record,JSON.stringify({executable:process.execPath,applicationPid:process.pid}));
-      await expect(execute('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-File',path.join(root,'scripts/native-input-p3/windows-native-shell.ps1'),
-        '-AppRecord',record,'-AppHelper',path.join(root,'scripts/native-input-p3/windows-image.ps1'),'-OwnedRoot',directory,'-Shell',process.execPath,
+      await expect(execute('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-File',path.join(root,'scripts/native-input/acceptance/windows-native-shell.ps1'),
+        '-AppRecord',record,'-AppHelper',path.join(root,'scripts/native-input/acceptance/windows-image.ps1'),'-OwnedRoot',directory,'-Shell',process.execPath,
         '-ExpectedShellSha256','0'.repeat(64),'-ExpectedModuleSha256','1'.repeat(64)],{cwd:directory,windowsHide:true,encoding:'utf8',timeout:20000,
         env:{...process.env,PSModulePath:directory,PSModuleAnalysisCachePath:path.join(directory,'module.cache')}})).rejects.toThrow('App image is outside the owned acceptance directory');
     }finally{const relative=path.relative(artifacts,directory);if(!relative||relative.startsWith('..')||path.isAbsolute(relative))throw new Error('Unsafe Shell ownership fixture cleanup');await rm(directory,{recursive:true,force:true});}
@@ -45,7 +45,7 @@ describe.runIf(process.platform === 'win32')('owned Windows image inspection', (
     const image=path.join(directory,'image.exe'),symbols=directory,source=path.join(directory,'source.rs');
     try{
       await Promise.all([writeFile(image,'owned invalid image'),writeFile(path.join(symbols,'image.pdb'),'owned symbols'),writeFile(source,'owned source')]);
-      const args=['-NoLogo','-NoProfile','-NonInteractive','-File',path.join(root,'scripts/native-input-p3/windows-debug-symbols.ps1'),
+      const args=['-NoLogo','-NoProfile','-NonInteractive','-File',path.join(root,'scripts/native-input/acceptance/windows-debug-symbols.ps1'),
         '-Image',image,'-Symbols',symbols,'-Source',source,'-Line','1','-ExpectedImageSha256','0'.repeat(64),'-ExpectedPdbSha256','1'.repeat(64),'-ExpectedSourceSha256','2'.repeat(64)];
       await expect(execute('powershell.exe',args,{cwd:directory,windowsHide:true,encoding:'utf8',timeout:20000,
         env:{...process.env,PSModulePath:directory,PSModuleAnalysisCachePath:path.join(directory,'module.cache')}})).rejects.toThrow('Frozen symbol input identity changed');
@@ -57,7 +57,7 @@ describe.runIf(process.platform === 'win32')('owned Windows image inspection', (
   it('requires the exact inspected creation time and digest before crashing an owned process', async () => {
     const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{cwd:root,windowsHide:true,stdio:'ignore'});
     const ended=new Promise(resolve=>child.once('close',resolve));
-    const args=['-NoLogo','-NoProfile','-NonInteractive','-File',path.join(root,'scripts/native-input-p3/windows-image.ps1'),
+    const args=['-NoLogo','-NoProfile','-NonInteractive','-File',path.join(root,'scripts/native-input/acceptance/windows-image.ps1'),
       '-Action','Inspect','-ApplicationPid',String(child.pid),'-RunnerPid',String(process.pid),'-Executable',process.execPath];
     const options={cwd:root,windowsHide:true,encoding:'utf8',timeout:20_000};
     try{
@@ -112,7 +112,7 @@ describe.runIf(process.platform === 'win32')('owned Windows image inspection', (
     });
     const ended = new Promise(resolve => child.once('close', resolve));
     const args = ['-NoLogo', '-NoProfile', '-NonInteractive', '-File',
-      path.join(root, 'scripts/native-input-p3/windows-image.ps1'), '-Action', 'Inspect',
+      path.join(root, 'scripts/native-input/acceptance/windows-image.ps1'), '-Action', 'Inspect',
       '-ApplicationPid', String(child.pid), '-RunnerPid', String(process.pid), '-Executable', process.execPath];
     try {
       const options = { cwd: root, env: environment, windowsHide: true, encoding: 'utf8', timeout: 20_000 };

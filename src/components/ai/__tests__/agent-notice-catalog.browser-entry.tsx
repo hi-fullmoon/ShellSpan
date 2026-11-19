@@ -95,7 +95,8 @@ export const cases: NoticeCase[] = [
     ['budget', '任务预算检查点已保存'],
     ['waitingApproval', '等待审批记录同步'],
     ['waitingQuestion', '等待问题记录同步'],
-  ].map(([id, label]) => ({ id, label, group: 'availability' as const, source: workspaceSource, selector: workspaceSelector })),
+  ].map(([id, label]) => ({ id, label, group: 'availability' as const, source: workspaceSource,
+    selector: id === 'budget' ? '[data-token-budget-notice]' : workspaceSelector })),
   { id: 'focus', label: 'Focus · 未选择终端', group: 'availability', source: 'src/components/focus/focus-no-target.tsx', selector: '[data-slot="focus-start-notice"]' },
   { id: 'supplement', label: '子 Agent · 补充输入不可用', group: 'availability', source: 'src/components/ai/workspace/ai-composer-seat.tsx', selector: '[role="status"][data-slot="alert"]' },
   { id: 'skills-stale', label: '技能列表 · 使用缓存', group: 'availability', source: 'src/components/ai/workspace/use-skill-completion.tsx', selector: '[role="note"]' },
@@ -161,7 +162,7 @@ export async function loadRecordedNotices() {
   return cases;
 }
 
-function renderCase(id: string): ReactNode {
+function renderCase(id: string, continued: boolean): ReactNode {
   const record = () => { document.body.dataset.catalogAction = id; };
   const workspace = (props: Partial<ComponentProps<typeof AiWorkspaceRoot>>) => <AiWorkspaceRoot scope="terminal" mode="agent" view={null} {...props} />;
   if (id === 'focus') return <FocusNoTarget />;
@@ -198,7 +199,8 @@ function renderCase(id: string): ReactNode {
   if (id === 'processing' || id === 'thinking') return <AiConversation nodes={[]} status="running" runningIndicator={id === 'thinking' ? 'ask' : 'agent'} throughSeq={null} />;
   if (id === 'process') return <AiConversationNodeList nodes={recorded.filter(node => node.kind === 'turnProcess').slice(0, 1)} />;
   if (trace[id]) return <AiConversationNodeList nodes={[trace[id]]} />;
-  if (id === 'budget') return workspace({ view: budget });
+  if (id === 'budget') return workspace({ scope: 'workbench', mode: 'ask', canStartAgent: true,
+    view: continued ? taskTokenBudgetView(true) : budget });
   if (id === 'waitingApproval' || id === 'waitingQuestion') return workspace({ composerState: createAiComposerState({ phase: id }) });
   if (id.startsWith('history')) return workspace({ historicalContinuationAvailable: id !== 'history-error', historicalContinuationBusy: id === 'history-busy',
     historicalContinuationError: id === 'history-error' ? error!.message : null });
@@ -208,13 +210,13 @@ function renderCase(id: string): ReactNode {
     onOpenModel: id === 'model' ? record : undefined, onReconnectTerminal: id === 'terminal' ? record : undefined });
 }
 
-export async function show(id: string, locale: Locale, theme: 'light' | 'dark') {
+export async function show(id: string, locale: Locale, theme: 'light' | 'dark', continued = false) {
   useAppStore.setState({ locale });
   await initI18n(locale);
   applyTheme(theme);
   delete document.body.dataset.catalogAction;
-  flushSync(() => root.render(null));
+  if (!continued) flushSync(() => root.render(null));
   flushSync(() => root.render(<main key={id} className="ai-panel-shell @container/ai-workspace flex min-h-0 min-w-0 flex-col p-4"
-    style={{ height: '100dvh' }} data-ai-scope="terminal">{renderCase(id)}</main>));
+    style={{ height: '100dvh' }} data-ai-scope={id === 'budget' ? 'workbench' : 'terminal'}>{renderCase(id, continued)}</main>));
   await document.fonts.ready;
 }

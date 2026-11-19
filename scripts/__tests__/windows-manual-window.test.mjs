@@ -1,5 +1,5 @@
 import {expect,it} from 'vitest';
-import {manualWindowMilliseconds,manualWindowTransition} from '../native-input-p3/windows-manual-window.mjs';
+import {manualWindowMilliseconds,manualWindowTransition} from '../native-input/acceptance/windows-manual-window.mjs';
 const start={started:true,evidence:{kind:'manual-native-display-start',trusted:true}};
 it('starts the bounded operator period only after readiness and one trusted start',()=>{
  expect(manualWindowMilliseconds).toBe(600000);

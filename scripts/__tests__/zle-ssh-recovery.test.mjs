@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { resolve } from 'node:path';
-import { parseSshRecoveryArgs, readOwnedZleFixture, requireSshRecoveryRunner } from '../native-input-p3/ssh-recovery-cases.mjs';
-import { macSubmissionControlMode } from '../native-input-p3/mac-submission.mjs';
+import { parseSshRecoveryArgs, readOwnedZleFixture, requireSshRecoveryRunner } from '../native-input/acceptance/ssh-recovery-cases.mjs';
+import { macSubmissionControlMode } from '../native-input/acceptance/mac-submission.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 

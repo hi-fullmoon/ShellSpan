@@ -532,7 +532,7 @@ fn production_bash_profiles(
 }
 
 #[test]
-#[ignore = "set SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests and run python3 scripts/native-input-p2/build.py"]
+#[ignore = "set SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests and run python3 scripts/native-input/integration/build.py"]
 fn native_production_private_widget_restores_real_stream_after_signal_and_control_eof() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -874,7 +874,7 @@ fn native_production_private_widget_restores_real_stream_after_signal_and_contro
 }
 // The type is private to the Broker module; this alias exposes no new writer.
 #[test]
-#[ignore = "set SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests and run python3 scripts/native-input-p2/build.py"]
+#[ignore = "set SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests and run python3 scripts/native-input/integration/build.py"]
 fn native_production_geometry_unicode_and_real_resize() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -1368,7 +1368,7 @@ fn native_linux_geometry_inputs() {
 }
 
 #[test]
-#[ignore = "set SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests and run python3 scripts/native-input-p2/build.py"]
+#[ignore = "set SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests and run python3 scripts/native-input/integration/build.py"]
 fn native_production_capture_preserves_real_output_and_bounds_osc_across_all_splits() {
     use crate::terminal_command::capture::CaptureFence;
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1553,7 +1553,7 @@ impl Drop for NativeShell {
 }
 
 #[test]
-#[ignore = "requires the pinned NIP native producer; run node scripts/verify-terminal-input-p1.mjs"]
+#[ignore = "requires the pinned NIP native producer; run node scripts/native-input/verify.mjs protocol"]
 fn native_protocol_real_bash_commit_and_duplicate_fence() {
     let mut shell = NativeShell::start("commit");
     assert_eq!(
@@ -1634,7 +1634,7 @@ fn native_protocol_real_bash_commit_and_duplicate_fence() {
 }
 
 #[test]
-#[ignore = "requires the pinned NIP native producer; run node scripts/verify-terminal-input-p1.mjs"]
+#[ignore = "requires the pinned NIP native producer; run node scripts/native-input/verify.mjs protocol"]
 fn native_protocol_real_queries_do_not_exhaust_cancellation() {
     let mut shell = NativeShell::start("queries-cancel");
     let source = "printf forbidden >> \"$HOME/effect\"; : 'owned draft 中文'";
@@ -1749,7 +1749,7 @@ fn native_protocol_crash_child() {
 }
 
 #[test]
-#[ignore = "requires the rebuilt native producer; run node scripts/verify-terminal-input-p1.mjs"]
+#[ignore = "requires the rebuilt native producer; run node scripts/native-input/verify.mjs protocol"]
 fn native_protocol_real_process_crash_recovery_never_reinputs_or_reaccepts() {
     use std::os::unix::process::ExitStatusExt;
     let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

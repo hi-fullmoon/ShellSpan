@@ -236,7 +236,7 @@ An unresolved editor decision leaves the editor open. A child without the
 question tool reports the decision to its parent. Existing answers and task
 authorization do not require another question, and answers do not bypass native
 approval or recovery checks.
-The optional native macOS gate `node scripts/verify-terminal-broker-macos.mjs --editors-only` requires real
+The optional native macOS gate `node scripts/verification/terminal/verify-terminal-broker-macos.mjs --editors-only` requires real
 `vim` and `nvim` executables on PATH and fails if either is missing. It explicitly
 runs four otherwise ignored PTY regressions (Bash/zsh × Vim/Neovim), each with
 clean and modified-buffer exits, using a temporary copy of `src/lib/README.md`.
@@ -411,7 +411,7 @@ The already-started command stayed uncertain and its first side effect occurred
 once. Evidence uses actual remote file reads, generation/input counters and
 redacted terminal transcripts, with no model-provider requests.
 
-`node scripts/verify-terminal-remote-ssh.mjs` includes the isolated recovery cases.
+`node scripts/verification/terminal/verify-terminal-remote-ssh.mjs` includes the isolated recovery cases.
 `saved_profile_ssh_input_timeout_disconnect_and_reconnect_do_not_replay` is an
 explicitly ignored release-mode acceptance test: select an existing profile
 with `SHELLSPAN_SSH_ACCEPTANCE_PROFILE_ID`. It reads profile metadata without

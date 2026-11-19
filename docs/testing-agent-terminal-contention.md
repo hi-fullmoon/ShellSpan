@@ -1,6 +1,6 @@
 # Native Agent terminal contention and close
 
-Run `node scripts/verify-ai-session-stream.mjs --terminal-contention` on a desktop
+Run `node scripts/verification/agent/verify-ai-session-stream.mjs --terminal-contention` on a desktop
 with a configured model route. This uses two real Agents and a local PTY to check
 submission blocking, warning feedback, draft retention, release, manual retry,
 simultaneous admission, confirmed takeover, and closing a running Agent terminal.

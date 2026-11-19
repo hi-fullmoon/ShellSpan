@@ -29,7 +29,7 @@ macOS 的 `pnpm tauri:dev` 会在 Cargo 编译完成后使用 `Apple Development
 
 ## 凭据管理界面回归
 
-运行 `node scripts/verify-credential-refresh.mjs`。需要桌面会话、Rust/Tauri 编译环境和已解锁的系统钥匙串。
+运行 `node scripts/verification/app/verify-credential-refresh.mjs`。需要桌面会话、Rust/Tauri 编译环境和已解锁的系统钥匙串。
 
 脚本启动独立的本地 Vite 服务及 Tauri 开发窗口，使用真实 IPC、开发数据库（`~/.shellspan-dev`）和开发钥匙串。测试使用连接表单提交所调用的 `addProfile` 创建唯一临时连接；随机密码仅在内存和系统钥匙串中保存，不连接 SSH 服务器。现有连接不会被修改。
 

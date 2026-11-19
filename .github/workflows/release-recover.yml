@@ -55,4 +55,4 @@ jobs:
           EXPECTED_TAG_OBJECT: ${{ inputs.expected_tag_object }}
           TARGET_SHA: ${{ inputs.target_sha }}
           RECOVERY_REASON: ${{ inputs.reason }}
-        run: node scripts/recover-release.mjs
+        run: node scripts/release/recover-release.mjs

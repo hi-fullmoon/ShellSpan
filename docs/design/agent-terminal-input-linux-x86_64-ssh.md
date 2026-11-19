@@ -2,7 +2,7 @@
 
 Linux x86_64 支持登录 Shell 为 Bash 且 glibc 为 2.28 或更新的 2.x 版本的账户。随包 Bash 固定为 5.3 / Readline 8.3.6，以 AlmaLinux 8 的 glibc 2.28 为构建基线，并静态链接 `libtinfo`。构建时核查 Bash、适配模块和 relay 的 ELF 符号版本。SSH 所用的 SFTP 和可执行的私有临时目录须可用。musl、低于 2.28 的 glibc 和 Linux x86_64 Zsh 不在支持范围内。
 
-`scripts/native-input-p2/build.py` 写入 `catalogue-linux-x86_64-glibc-2.28.json` 与同名 profile 下的 `bash`、`adapter.so`、`native-input-relay`。构建缓存与 ARM64 分开，最终资源目录共用。发布流程在独立的 Linux amd64 和 ARM64 runner 上构建，macOS 包收录两者，Windows 包收录 amd64 SSH 资源。`native:prepare` 复核源码和文件摘要，Tauri 沿用 `native-input/generated/` 资源映射。
+`scripts/native-input/integration/build.py` 写入 `catalogue-linux-x86_64-glibc-2.28.json` 与同名 profile 下的 `bash`、`adapter.so`、`native-input-relay`。构建缓存与 ARM64 分开，最终资源目录共用。发布流程在独立的 Linux amd64 和 ARM64 runner 上构建，macOS 包收录两者，Windows 包收录 amd64 SSH 资源。`native:prepare` 复核源码和文件摘要，Tauri 沿用 `native-input/generated/` 资源映射。
 
 Bash 的 SSH 加载流程根据远端平台选择清单。x86_64 将已校验的 Bash、adapter 和 relay 上传到本次连接的 `/tmp/.ss-nip-*` 目录，回读校验后再登录启动。服务器的 `/bin/bash`、`/etc/passwd` 和启动文件无需修改。普通断开时会尝试清理该目录；突然断网时，旧连接无法继续通过 SFTP 清理，重连创建新的目录和控制连接。
 
@@ -10,7 +10,7 @@ Bash 的 SSH 加载流程根据远端平台选择清单。x86_64 将已校验的
 
 ## 构建与包体对比
 
-在 macOS ARM64 上运行。Docker 需能运行 `linux/amd64` 和 `linux/arm64` 容器；macOS Zsh 继续使用仓库固定的 macOS 27.0 SDK 和 Xcode（见 `scripts/native-input-p3/build-macos-editor.sh`）。若 amd64 模拟构建不可用，在原生 amd64 runner 上用发布工作流中同一条 Docker 构建命令生产资源，再导入验收资源目录进行 `--no-build --require-ssh` 检查。
+在 macOS ARM64 上运行。Docker 需能运行 `linux/amd64` 和 `linux/arm64` 容器；macOS Zsh 继续使用仓库固定的 macOS 27.0 SDK 和 Xcode（见 `scripts/native-input/acceptance/build-macos-editor.sh`）。若 amd64 模拟构建不可用，在原生 amd64 runner 上用发布工作流中同一条 Docker 构建命令生产资源，再导入验收资源目录进行 `--no-build --require-ssh` 检查。
 
 ```sh
 pnpm install --frozen-lockfile

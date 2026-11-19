@@ -5,9 +5,9 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { parse } from 'yaml';
 import { parse as parseToml } from 'smol-toml';
-import { editTomlVersion, generateCandidates } from '../bump-version.mjs';
-import { command, validateNotes, updateChangelog, changelogSection, assertBaseline, validVersion, readVersions, REVIEW_MARKER } from '../release-notes.mjs';
-import { assertDraft, findReleaseByTag } from '../publish-release.mjs';
+import { editTomlVersion, generateCandidates } from '../release/bump-version.mjs';
+import { command, validateNotes, updateChangelog, changelogSection, assertBaseline, validVersion, readVersions, REVIEW_MARKER } from '../release/release-notes.mjs';
+import { assertDraft, findReleaseByTag } from '../release/publish-release.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const directories = [];
@@ -177,7 +177,7 @@ describe('release publication gates', () => {
     }
     expect(release.on.workflow_dispatch.inputs).not.toHaveProperty('release_notes');
     const scripts = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).scripts;
-    expect(scripts.changelog).toBe('node scripts/release-notes.mjs sync');
+    expect(scripts.changelog).toBe('node scripts/release/release-notes.mjs sync');
   });
 
   it('builds the frontend once in either entry point and runs platform tests with the current run artifact', async () => {

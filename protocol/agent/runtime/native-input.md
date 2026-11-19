@@ -15,7 +15,7 @@ stdout、OSC、前端 ready 和显示完成都不是控制报文。
 | 正式资源暂存及包内路径 | `src-tauri/target/native-input/generated/`、`native-input/generated/` |
 | 原生显示与只读装饰 | `src/lib/terminal/native-input-display.ts`、`NATIVE_INPUT_DISPLAY`、terminal registry、`terminal-command-decorations.ts` |
 | Bash 内置命令及只读列接口 | `ss_native_input` 及同前缀私有操作、`rl_native_prompt_columns` |
-| 静态边界检查 | `scripts/check-terminal-command-boundary.mjs` |
+| 静态边界检查 | `scripts/checks/check-terminal-command-boundary.mjs` |
 
 当前实现不提供旧命名别名、协议翻译或旧客户端兼容入口；第三方版本、标准路径、标准 API 名称及原始采样保留真实内容。
 原始源码、光标、输入推进和回显属于 Shell 编辑器及同一 PTY 数据流，前端不维护替代编辑器或改写公开选择、搜索方法。
@@ -491,7 +491,7 @@ macOS 私有 Zsh Core 的普通编辑刷新另按固定 `native-macos-refresh.pa
 必须同时对应，失效资源须实际重建。独立真实 PTY 和浏览器诊断只支持缺陷定位与回归，
 正式验收仍需要新签名 App 的缩放、取消、选择、Unicode 和生命周期直接证据。
 
-`node scripts/verify-terminal-input-p1.mjs` 从固定源码重建模块，运行 reducer/Broker/执行器/lease、
+`node scripts/native-input/verify.mjs protocol` 从固定源码重建模块，运行 reducer/Broker/执行器/lease、
 真实 PTY/私有 socket、原生 SIGKILL 恢复、实际捕获的 schema 校验、浏览器排空/重绑，
 以及能力缺失、未验证编辑模式拒绝和前端回归，不再调用已删除测试或旧实验报文用例。
 输出在 Git 忽略的 `artifacts/tests/native-input-p0/p1-validation` 与 `p1-evidence`，无时间戳依赖。

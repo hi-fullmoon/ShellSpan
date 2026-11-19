@@ -3,8 +3,8 @@ import p from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {createServer,preview} from 'vite';
 import {expect,it} from 'vitest';
-import {attachNativeWindowEvidence} from '../native-input-p3/window-evidence-route.mjs';
-import {closeNativeValidationServer} from '../native-input-p3/close-validation-server.mjs';
+import {attachNativeWindowEvidence} from '../native-input/acceptance/window-evidence-route.mjs';
+import {closeNativeValidationServer} from '../native-input/acceptance/close-validation-server.mjs';
 import {nativePackageEndpoint} from '../../src/components/terminal/__tests__/native-package-endpoint';
 
 async function fixture(mode,selection,capture,client='relative'){

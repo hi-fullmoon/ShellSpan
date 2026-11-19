@@ -6,7 +6,7 @@ import {
   includedRustFiles,
   rustIncludeSourceIsFormatted,
   unformattedIncludedRustFiles,
-} from '../check-rust-includes.mjs';
+} from '../checks/check-rust-includes.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 describe('quality gate wiring', () => {

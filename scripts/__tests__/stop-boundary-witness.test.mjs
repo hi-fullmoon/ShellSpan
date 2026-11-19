@@ -1,4 +1,4 @@
-import {describe,it,expect} from 'vitest';import {createServer} from 'node:http';import {mkdir,mkdtemp,writeFile,readFile} from 'node:fs/promises';import {resolve,join} from 'node:path';import {createStopBoundaryWitness} from '../native-input-p3/stop-boundary-witness.mjs';
+import {describe,it,expect} from 'vitest';import {createServer} from 'node:http';import {mkdir,mkdtemp,writeFile,readFile} from 'node:fs/promises';import {resolve,join} from 'node:path';import {createStopBoundaryWitness} from '../native-input/acceptance/stop-boundary-witness.mjs';
 describe('stop boundary witness support (not native proof)',()=>{
  it.each(['armed','beforeAccept','afterAccept'])('requires a stopped-case record and resumes the same owned %s gate once',async(stage)=>{
   const owned=resolve('artifacts/tests/stop-boundary-witness');await mkdir(owned,{recursive:true});const evidence=await mkdtemp(join(owned,'case-')),home=join(evidence,'home');await mkdir(home);const token='12345678-1234-1234-1234-123456789abc';

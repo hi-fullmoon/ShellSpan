@@ -21,20 +21,20 @@ it('uses the same fixed loopback endpoint for Tauri and Vite development', async
 });
 
 it('forwards development options to the installed Tauri CLI', () => {
-  const result = spawnSync(process.execPath, ['scripts/dev.mjs', '--help'], { cwd: root, encoding: 'utf8', timeout: 15000 });
+  const result = spawnSync(process.execPath, ['scripts/dev/dev.mjs', '--help'], { cwd: root, encoding: 'utf8', timeout: 15000 });
   expect(result.status, result.stderr).toBe(0);
   expect(result.stdout).toContain('--no-watch');
   expect(result.stdout).toContain('--runner');
 });
 
 it.runIf(cargoAvailable)('preserves real Cargo subcommands other than run', () => {
-  const result = spawnSync(process.execPath, ['scripts/dev-cargo-runner.mjs', '--version'], { cwd: root, encoding: 'utf8', timeout: 15000 });
+  const result = spawnSync(process.execPath, ['scripts/dev/dev-cargo-runner.mjs', '--version'], { cwd: root, encoding: 'utf8', timeout: 15000 });
   expect(result.status, result.stderr).toBe(0);
   expect(result.stdout).toMatch(/^cargo \d/);
 });
 
 it('reports an unavailable Cargo executable without starting the app', () => {
-  const result = spawnSync(process.execPath, ['scripts/dev-cargo-runner.mjs', 'run'], {
+  const result = spawnSync(process.execPath, ['scripts/dev/dev-cargo-runner.mjs', 'run'], {
     cwd: root, encoding: 'utf8', timeout: 15000,
     env: { ...process.env, CARGO: resolve(import.meta.dirname, 'missing-cargo-executable') },
   });
@@ -45,7 +45,7 @@ it('reports an unavailable Cargo executable without starting the app', () => {
 
 it.runIf(testNativeSigning)(
   'never launches an unsigned development app when the requested identity is missing', () => {
-    const result = spawnSync(process.execPath, ['scripts/dev.mjs', '--no-watch', '--no-dev-server-wait', '--config',
+    const result = spawnSync(process.execPath, ['scripts/dev/dev.mjs', '--no-watch', '--no-dev-server-wait', '--config',
       JSON.stringify({ build: { beforeDevCommand: '' } }), '--', '--', '--check-keychain-access'], {
       cwd: root, encoding: 'utf8', timeout: 120000,
       env: { ...process.env, SHELLSPAN_DEV_SIGNING_IDENTITY: `missing-shellspan-identity-${crypto.randomUUID()}` },
@@ -73,7 +73,7 @@ it.runIf(testNativeSigning)('replaces the native desktop app on reload and shuts
   };
   await mkdir(watch);
   await writeFile(changedFile, 'before reload\n');
-  const launcher = spawn(process.execPath, ['scripts/dev.mjs', '--config', JSON.stringify(config),
+  const launcher = spawn(process.execPath, ['scripts/dev/dev.mjs', '--config', JSON.stringify(config),
     '--additional-watch-folders', watch], {
     cwd: root,
     env: { ...process.env, SHELLSPAN_DATA_DIR: join(temporary, 'data') },

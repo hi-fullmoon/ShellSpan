@@ -6,10 +6,10 @@ import {randomUUID,createHash} from 'node:crypto';
 import {createServer} from 'vite';
 import {chromium,webkit} from 'playwright';
 import ts from 'typescript';
-import {attachFocusTraceChannel} from '../../../../scripts/native-input-p3/focus-trace-channel.mjs';
+import {attachFocusTraceChannel} from '../../../../scripts/native-input/acceptance/focus-trace-channel.mjs';
 const directory=resolve('artifacts/tests/native-input-p3/focus-trace-checks',randomUUID());await mkdir(directory,{recursive:true,mode:0o700});
 const source=await readFile(new URL('./native-focus-trace.ts',import.meta.url),'utf8');
-const channelSource=await readFile('scripts/native-input-p3/focus-trace-channel.mjs');
+const channelSource=await readFile('scripts/native-input/acceptance/focus-trace-channel.mjs');
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const module=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const tokens={chromium:randomUUID(),webkit:randomUUID()},results=[];
@@ -92,5 +92,5 @@ try{for(const[name,launcher]of[['chromium',chromium],['webkit',webkit]]){
    actualMutationObserved:true,safeRoleFacts:true,publicMethodsUnmodified:true,oneShotPrivateFile:true,limitFailsExplicitly:true});
   await page.close();
  }finally{await browser.close();}
-}}finally{await server.close();assert.equal(await readFile(new URL('./native-focus-trace.ts',import.meta.url),'utf8'),source);assert.equal(sha(await readFile('scripts/native-input-p3/focus-trace-channel.mjs')),sha(channelSource));await writeFile(resolve(directory,'result.json'),JSON.stringify({scope:'Actual headless DOM/xterm and HTTP/file observer checks only; no Tauri window/model/native acceptance',sourceSha256:sha(source),channelSha256:sha(channelSource),results},null,2));}
+}}finally{await server.close();assert.equal(await readFile(new URL('./native-focus-trace.ts',import.meta.url),'utf8'),source);assert.equal(sha(await readFile('scripts/native-input/acceptance/focus-trace-channel.mjs')),sha(channelSource));await writeFile(resolve(directory,'result.json'),JSON.stringify({scope:'Actual headless DOM/xterm and HTTP/file observer checks only; no Tauri window/model/native acceptance',sourceSha256:sha(source),channelSha256:sha(channelSource),results},null,2));}
 assert.equal(results.length,2);process.stdout.write(JSON.stringify({directory,engines:results.length})+'\n');

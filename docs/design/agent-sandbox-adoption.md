@@ -31,7 +31,7 @@
 
 ### 第一阶段实测 · 2026-11-18
 
-已使用 [验证脚本](../../scripts/agent-sandbox-phase1/README.md)运行普通 Direct 基线、`nono` 0.82.0 Rust 启动器和 `srt` 0.0.83。macOS 使用 Apple Silicon 宿主机。Linux 使用 Docker Desktop 的 arm64 Linux 内核，`nono` 探测到 Landlock ABI 8、实际使用 ABI 6，`srt` 使用 Bubblewrap 0.8.0。
+已使用 [验证脚本](../../scripts/agent-sandbox/README.md)运行普通 Direct 基线、`nono` 0.82.0 Rust 启动器和 `srt` 0.0.83。macOS 使用 Apple Silicon 宿主机。Linux 使用 Docker Desktop 的 arm64 Linux 内核，`nono` 探测到 Landlock ABI 8、实际使用 ABI 6，`srt` 使用 Bubblewrap 0.8.0。
 
 | 环境 | 普通 Direct | 原始 `nono` | 加固后的 `nono` | `srt` |
 | --- | --- | --- | --- | --- |
@@ -44,7 +44,7 @@ macOS 的验证程序锁定自己创建的两级父目录。运行中的工作�
 
 Linux 的候选启动器对同一份 `block_network()` 策略显式启用 `SeccompOpts::network_baseline()`。TCP 和 UDP 回环一同被阻止，文件操作和进程生命周期用例通过。结果来自 arm64 测试容器，可作为执行链和网络策略的对照证据。[nono 0.82.0 源码](https://docs.rs/crate/nono/0.82.0/source/src/sandbox/linux.rs)
 
-复测中短命令首次总耗时及后五次中位数为 macOS 原始 `nono` 18/15 毫秒、加固组 19/14 毫秒。Linux 两组均为 3/2 毫秒。数据来自调试构建，计时从启动命令到退出，macOS 的父目录加锁与恢复位于计时范围外。原始报告位于 `artifacts/tests/agent-sandbox-phase1/`。
+复测中短命令首次总耗时及后五次中位数为 macOS 原始 `nono` 18/15 毫秒、加固组 19/14 毫秒。Linux 两组均为 3/2 毫秒。数据来自调试构建，计时从启动命令到退出，macOS 的父目录加锁与恢复位于计时范围外。原始报告位于 `artifacts/tests/agent-sandbox/`。
 
 ## 阶段二：把本地 Direct 接到 Agent 正常入口
 
@@ -66,13 +66,13 @@ Windows 在原生系统上选择可验证的后端后，复用同一套桌面验
 
 ### 测试接入实测 · 2026-11-18
 
-- Linux arm64 在 Docker Desktop 容器内通过 ShellSpan 的原生授权、能力凭据和 `exec_command` 执行加固后的 `nono`，明确选用测试专用启动器。实测通过默认关闭、批准后关闭、授权的工作区被替换、启动器不可执行时拒绝派发、工作区写入边界、UDP 回环、标准流和退出码、取消与超时。取消和超时均确认测试子进程停止，普通原生进程回归 8 项通过。[验收入口](../../scripts/agent-sandbox-phase1/README.md#第二阶段的测试接入)
+- Linux arm64 在 Docker Desktop 容器内通过 ShellSpan 的原生授权、能力凭据和 `exec_command` 执行加固后的 `nono`，明确选用测试专用启动器。实测通过默认关闭、批准后关闭、授权的工作区被替换、启动器不可执行时拒绝派发、工作区写入边界、UDP 回环、标准流和退出码、取消与超时。取消和超时均确认测试子进程停止，普通原生进程回归 8 项通过。[验收入口](../../scripts/agent-sandbox/README.md#第二阶段的测试接入)
 - macOS 的两个独立受管工作区并行实验通过。一条命令被 `SIGKILL` 后仅解除该命令的目录保护，另一条工作区继续拒绝替换，后续写入原工作区并正常清理。
-- Linux 结果验证了原生工具和进程管理层。原始记录位于 `artifacts/tests/agent-sandbox-phase1/`。
+- Linux 结果验证了原生工具和进程管理层。原始记录位于 `artifacts/tests/agent-sandbox/`。
 
 ### macOS arm64 专用桌面测试包实测
 
-[桌面验收入口](../../scripts/agent-sandbox-phase1/README.md#macos-桌面验收包)完成 7 个真实调用。批准后关闭总开关时，会话依序保存审批请求、批准和撤销，命令没有派发或写入。启动器校验失败时，独立启动凭据记录 `started=false` 和启动器退出码 `125`。命令自身的退出码 `42` 和 `125` 均随 `started=true` 保存。两种 `125` 结果可区分，即使命令输出形似启动器诊断的文本。
+[桌面验收入口](../../scripts/agent-sandbox/README.md#macos-桌面验收包)完成 7 个真实调用。批准后关闭总开关时，会话依序保存审批请求、批准和撤销，命令没有派发或写入。启动器校验失败时，独立启动凭据记录 `started=false` 和启动器退出码 `125`。命令自身的退出码 `42` 和 `125` 均随 `started=true` 保存。两种 `125` 结果可区分，即使命令输出形似启动器诊断的文本。
 
 主动取消和超时均确认测试子进程已停止。强制结束应用并重启后，六条终态结果与原记录一致，尚未结算的调用进入 `executionInFlight` 恢复状态，实际命令只启动一次。
 
@@ -80,7 +80,7 @@ Windows 在原生系统上选择可验证的后端后，复用同一套桌面验
 
 专用测试包由应用管理目录保护和恢复。应用写入目录身份和准备状态后加锁，启动器等待应用持久保存进程组后才执行命令。恢复只读取真实进程组存活情况。仍然运行或无法确认时，目录保持受保护。
 
-在加锁后尚未启动、命令运行中、进程组退出后尚未解锁三个时点强制结束应用，再用同一个测试包重启。实测未启动的用例未派发或写入；运行中的用例在重启后仍受保护，进程组退出才解锁；已经退出的用例解除遗留保护，缺少结果的会话继续标记为待恢复。额外重启一次后，九条会话记录再次校验通过，所有崩溃用例均未重跑。结果保存在 `artifacts/tests/agent-sandbox-phase1/desktop-mac-*/`。这次验证覆盖受管临时工作区和应用进程崩溃，任意现有工作区的原地接入和 Windows 原生实现仍待验证。
+在加锁后尚未启动、命令运行中、进程组退出后尚未解锁三个时点强制结束应用，再用同一个测试包重启。实测未启动的用例未派发或写入；运行中的用例在重启后仍受保护，进程组退出才解锁；已经退出的用例解除遗留保护，缺少结果的会话继续标记为待恢复。额外重启一次后，九条会话记录再次校验通过，所有崩溃用例均未重跑。结果保存在 `artifacts/tests/agent-sandbox/desktop-mac-*/`。这次验证覆盖受管临时工作区和应用进程崩溃，任意现有工作区的原地接入和 Windows 原生实现仍待验证。
 
 ## 阶段三：验证 OpenSandbox 的远端可见终端
 
@@ -99,7 +99,7 @@ Windows 在原生系统上选择可验证的后端后，复用同一套桌面验
 | --- | --- |
 | 开关默认关闭及持久化 | 真实桌面加载旧配置和空配置、切换、重新启动，核对实际执行行为 |
 | 本地执行 | 受限读写、网络规则、真实子进程、超时/取消、退出码与输出；真实安装包验证 |
-| SSH 兼容性 | 运行 `node scripts/verify-remote-sandbox.mjs --ui`，检查 Bubblewrap 正常、缺失和无法启动，以及关闭时拒绝已经批准的调用 |
+| SSH 兼容性 | 运行 `node scripts/remote-sandbox/verify-remote-sandbox.mjs --ui`，检查 Bubblewrap 正常、缺失和无法启动，以及关闭时拒绝已经批准的调用 |
 | 远端可见终端 | 真实 PTY 的输入租约、单命令完成、回放、断线结果和清理记录 |
 | 仓库检查 | 相关 Rust 与前端测试、`pnpm build`、Rust 格式与包含文件检查 |
 

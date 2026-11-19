@@ -117,7 +117,7 @@ CI 发布顺序：
 pnpm exec vitest run scripts/__tests__/release-pipeline.test.mjs scripts/__tests__/release-review-regressions.test.mjs scripts/__tests__/release-recovery.test.mjs scripts/__tests__/build-updater-json.test.mjs scripts/__tests__/ai-runtime-gates.test.mjs
 actionlint
 # 需要 minisign；macOS 可使用 brew install minisign
-node --test scripts/release-signatures.integration.mjs
+node --test scripts/release/release-signatures.integration.mjs
 ```
 
 签名测试会临时生成真实密钥，对实际文件签名，并检查文件篡改和错误公钥能够被拒绝，不使用替代签名。

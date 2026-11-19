@@ -124,7 +124,7 @@ impl Fixture<'_> {
         );
         inspector
             .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-File"])
-            .arg(root.join("../../scripts/native-input-p3/windows-loader-image.ps1"))
+            .arg(root.join("../../scripts/native-input/acceptance/windows-loader-image.ps1"))
             .args([
                 "-ConsoleProcessId",
                 &child_pid.to_string(),

@@ -1,5 +1,5 @@
 import {expect, it} from 'vitest';
-import {isFinalNativeResult} from '../native-input-p2/result-message.mjs';
+import {isFinalNativeResult} from '../native-input/integration/result-message.mjs';
 
 it('keeps evidence checkpoints pending until cleanup reports a final outcome', () => {
   const outcomes = [];

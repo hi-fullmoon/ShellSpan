@@ -5,7 +5,7 @@ import {resolve} from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
 import {build} from 'vite';
 import {chromium} from 'playwright';
-import {inside} from '../../../../scripts/native-input-p3/acceptance-inputs.mjs';
+import {inside} from '../../../../scripts/native-input/acceptance/acceptance-inputs.mjs';
 
 const root=resolve(import.meta.dirname,'../../../..'),directory=resolve(root,'artifacts/tests/native-package-viewport',randomUUID());await mkdir(directory,{recursive:true});
 assert(process.argv[2],'Explicit retained package directory required');

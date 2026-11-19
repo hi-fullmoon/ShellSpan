@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { evaluateZleCapture } from '../native-input-p3/zle-capture-evidence.mjs';
+import { evaluateZleCapture } from '../native-input/acceptance/zle-capture-evidence.mjs';
 
 const directory = resolve(import.meta.dirname, 'fixtures/zle-guards-native-20261106');
 const manifest = JSON.parse(readFileSync(resolve(directory, 'manifest.json'), 'utf8'));

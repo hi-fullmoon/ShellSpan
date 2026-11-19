@@ -25,11 +25,11 @@ describe('explicit native frontend integration gate', () => {
   it('builds asynchronously before Vitest and executes only the compiled exporter inside the integration suite', async () => {
     const [test, runner, manifest] = await Promise.all([
       readFile(path.join(root, nativeTest), 'utf8'),
-      readFile(path.join(root, 'scripts/verify-subagent-budget.mjs'), 'utf8'),
+      readFile(path.join(root, 'scripts/verification/agent/verify-subagent-budget.mjs'), 'utf8'),
       readFile(path.join(root, 'package.json'), 'utf8').then(JSON.parse),
     ]);
     expect(manifest.scripts.test).toBe('vitest run');
-    expect(manifest.scripts['test:subagent-budget:native']).toBe('node scripts/verify-subagent-budget.mjs');
+    expect(manifest.scripts['test:subagent-budget:native']).toBe('node scripts/verification/agent/verify-subagent-budget.mjs');
     expect(test).not.toContain('execFileSync');
     expect(test).not.toContain("'cargo'");
     expect(test).not.toMatch(/\b(?:it|describe)\.(?:skip|todo)\b/);

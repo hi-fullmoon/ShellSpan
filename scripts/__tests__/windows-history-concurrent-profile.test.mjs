@@ -1,5 +1,5 @@
 import fs from 'node:fs';import p from 'node:path';import {randomUUID} from 'node:crypto';import {expect,it} from 'vitest';
-import {prepareWindowsHistoryConcurrentProfile,readWindowsHistoryConcurrentCase} from '../native-input-p3/windows-history-concurrent-profile.mjs';
+import {prepareWindowsHistoryConcurrentProfile,readWindowsHistoryConcurrentCase} from '../native-input/acceptance/windows-history-concurrent-profile.mjs';
 const root=p.resolve(import.meta.dirname,'../../artifacts/tests/concurrent-profile-components');
 it.each(['history-default','history-small','history-save-at-exit','history-save-nothing'])('prepares two readers of one original namespace without writing history: %s',mode=>{
  const evidence=p.join(root,randomUUID());fs.mkdirSync(p.join(evidence,'home'),{recursive:true});fs.mkdirSync(p.join(evidence,'data'));const options={evidence,home:p.join(evidence,'home'),data:p.join(evidence,'data'),host:'powerShell7',mode,maximumVariable:'int71',reuseId:randomUUID()},plan=prepareWindowsHistoryConcurrentProfile(options);

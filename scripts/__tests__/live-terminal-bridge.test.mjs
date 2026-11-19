@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {afterEach, expect, it, vi} from 'vitest';
-import {driveTerminal} from '../native-input-p3/live-terminal-bridge.mjs';
+import {driveTerminal} from '../native-input/acceptance/live-terminal-bridge.mjs';
 
 const roots = [];
 afterEach(() => {for (const root of roots.splice(0)) fs.rmSync(root, {recursive: true, force: true});});

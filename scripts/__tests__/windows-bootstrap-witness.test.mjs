@@ -1,6 +1,6 @@
 import fs from 'node:fs';import p from 'node:path';import {createHash} from 'node:crypto';import {expect,it} from 'vitest';
-import {windowsBootstrapWitness} from '../native-input-p3/windows-bootstrap-witness.mjs';
-import {boundedWitnessFailure,recordWitnessFailure} from '../native-input-p3/windows-witness-diagnostic.mjs';
+import {windowsBootstrapWitness} from '../native-input/acceptance/windows-bootstrap-witness.mjs';
+import {boundedWitnessFailure,recordWitnessFailure} from '../native-input/acceptance/windows-witness-diagnostic.mjs';
 import {spawn} from 'node:child_process';
 const parent=p.resolve(import.meta.dirname,'../../artifacts/tests/windows-bootstrap-witness');
 function fixture(check){fs.mkdirSync(parent,{recursive:true});const root=fs.mkdtempSync(p.join(parent,'test-'));try{check(root);}finally{const relative=p.relative(parent,root);if(!relative||relative.startsWith('..')||p.isAbsolute(relative))throw Error('Unsafe fixture cleanup');fs.rmSync(root,{recursive:true,force:true});}}

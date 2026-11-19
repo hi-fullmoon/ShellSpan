@@ -10,7 +10,7 @@ describe('native macOS recovery entry isolation', () => {
     ['--native-terminal-recovery', 'bash', '--data-scope', 'com.shellspan.validation.native-input-p3'],
     ['--native-terminal-recovery', 'zsh', '--data-scope', 'com.shellspan.validation.native-input-p3', '--native-jobs'],
   ])('rejects missing ownership or mixed recovery before any App launch: %j', (...args) => {
-    const result = spawnSync(process.execPath, [resolve(root, 'scripts/verify-ai-session-stream.mjs'), ...args], { cwd: root,
+    const result = spawnSync(process.execPath, [resolve(root, 'scripts/verification/agent/verify-ai-session-stream.mjs'), ...args], { cwd: root,
       env: { ...process.env, SHELLSPAN_ALLOW_FOREGROUND_TESTS: '1', SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR: '', SHELLSPAN_DATA_DIR: '', SHELLSPAN_LOCAL_HOME: '' }, encoding: 'utf8', timeout: 5_000 });
     expect(result.error).toBeUndefined(); expect(result.status).toBe(1);
     expect(result.stderr).toContain('--native-terminal-recovery requires one isolated macOS real-model crash case');

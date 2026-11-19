@@ -20,7 +20,7 @@ impl ModelStreamSink for ReferenceObservation {
 /// Uses the real configured route and real history exported by the TypeScript
 /// projection. The observer records proposals; it never executes model tools.
 #[tokio::test]
-#[ignore = "requires real MiniMax keychain route and exported history; run scripts/verify-chat-reference-live.mjs"]
+#[ignore = "requires real MiniMax keychain route and exported history; run scripts/verification/agent/verify-chat-reference-live.mjs"]
 async fn real_minimax_summarizes_referenced_history_without_resuming_tasks() {
     let output = PathBuf::from(std::env::var("SHELLSPAN_LIVE_REFERENCE_OUTPUT").unwrap());
     let input: Value =

@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
+import {createHash,randomUUID} from 'node:crypto';
+import {copyFileSync,mkdirSync,readFileSync,writeFileSync,renameSync} from 'node:fs';
+import {resolve,dirname} from 'node:path';
+import {captureValidationSources} from '../integration/frozen-validation.mjs';
+import {createIndexReader} from './index-reader.mjs';
+const owner=resolve(import.meta.dirname,'../../..');
+const root=resolve(owner,'artifacts/tests/native-input-p3/inventory-probe',randomUUID());
+const meta=resolve(root,'artifacts/tests/native-input-p3');mkdirSync(meta,{recursive:true});
+for(const path of ['.gitignore','package.json','src/lib/README.md']){
+  mkdirSync(dirname(resolve(root,path)),{recursive:true});copyFileSync(resolve(owner,path),resolve(root,path));
+}
+const original=execFileSync('git',['rev-parse','--path-format=absolute','--git-path','index'],{cwd:owner,encoding:'utf8'}).trim();
+const head=execFileSync('git',['rev-parse','HEAD'],{cwd:owner,encoding:'utf8'}).trim();
+const {gitDirectory,index}=createIndexReader(meta,original,head);
+const originalBytes=readFileSync(index);const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
+writeFileSync(resolve(meta,'snapshot-index.json'),JSON.stringify({root,index,gitDirectory,indexSha256:sha(originalBytes)}));
+const before=captureValidationSources(root);assert.equal(Object.keys(before).length,3);
+const difference=()=>{const after=captureValidationSources(root);return [...new Set([...Object.keys(before),...Object.keys(after)])].filter(path=>before[path]!==after[path]);};
+const added=resolve(root,'snapshot-added-source.ts');copyFileSync(resolve(owner,'src/lib/terminal/native-input-display.ts'),added);
+assert.deepEqual(difference(),['snapshot-added-source.ts']);renameSync(added,resolve(meta,'added-original.ts'));
+const moved=resolve(root,'src/lib/README.md');renameSync(moved,resolve(meta,'readme-original.md'));
+assert.deepEqual(difference(),['src/lib/README.md']);renameSync(resolve(meta,'readme-original.md'),moved);
+const packagePath=resolve(root,'package.json');const packageBytes=readFileSync(packagePath);writeFileSync(packagePath,Buffer.concat([packageBytes,Buffer.from('\n')]));
+assert.deepEqual(difference(),['package.json']);writeFileSync(packagePath,packageBytes);
+const changed=Buffer.from(originalBytes);changed[0]^=1;writeFileSync(index,changed);
+assert.throws(()=>captureValidationSources(root),/Frozen source index changed/);writeFileSync(index,originalBytes);
+assert.deepEqual(captureValidationSources(root),before);
+const result={root,ok:true,additionDetected:true,deletionDetected:true,modificationDetected:true,indexTamperingDetected:true,originalsPreserved:true,nativeAcceptance:false};
+writeFileSync(resolve(meta,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));

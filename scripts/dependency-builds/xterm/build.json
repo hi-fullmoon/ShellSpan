@@ -9,13 +9,13 @@
   "webpack": "5.94.0",
   "esbuild": "0.25.2",
   "patches": {
-    "scripts/native-input-p0/xterm-cursor-reflow.patch": "8ee40207601e24bdf9370519f77db625536d88d9dd9436ae276e18f91fe83a7e",
-    "scripts/native-input-p0/xterm-copy-serialization.patch": "848172022f39f1ea42e312cef093333f3a6fa39504016ffe87d702945e256446",
-    "scripts/native-input-p0/xterm-el0-softwrap.patch": "49734e0287476acf28f24fa7895c1ef4068f4d8a0ce0ca66b2be1df12c12fb16",
-    "scripts/native-input-p0/xterm-selection-reflow.patch": "d8e8a47fc0cfa644cdcb5346425b32e1fc025f79ae776163ef9fb9b1a81821f7",
-    "scripts/native-input-p0/xterm-viewport-reflow.patch": "a47e57123492cc0330a2a22ca396c7ec4638add615dd83b81dcf7a999102f266",
-    "scripts/native-input-p0/xterm-utf8-interim.patch": "986eebb320ba815818af5a077174e020ddbbed94af5f0c218badc0f8f19c252b",
-    "scripts/native-input-p0/xterm-selection-height.patch": "25a476196a457ef977bc0dfe1effa38a3a3f72c26f3a15fed7eb9816131ba139"
+    "scripts/native-input/prototype/xterm-cursor-reflow.patch": "8ee40207601e24bdf9370519f77db625536d88d9dd9436ae276e18f91fe83a7e",
+    "scripts/native-input/prototype/xterm-copy-serialization.patch": "848172022f39f1ea42e312cef093333f3a6fa39504016ffe87d702945e256446",
+    "scripts/native-input/prototype/xterm-el0-softwrap.patch": "49734e0287476acf28f24fa7895c1ef4068f4d8a0ce0ca66b2be1df12c12fb16",
+    "scripts/native-input/prototype/xterm-selection-reflow.patch": "d8e8a47fc0cfa644cdcb5346425b32e1fc025f79ae776163ef9fb9b1a81821f7",
+    "scripts/native-input/prototype/xterm-viewport-reflow.patch": "a47e57123492cc0330a2a22ca396c7ec4638add615dd83b81dcf7a999102f266",
+    "scripts/native-input/prototype/xterm-utf8-interim.patch": "986eebb320ba815818af5a077174e020ddbbed94af5f0c218badc0f8f19c252b",
+    "scripts/native-input/prototype/xterm-selection-height.patch": "25a476196a457ef977bc0dfe1effa38a3a3f72c26f3a15fed7eb9816131ba139"
   },
   "sourceFiles": [
     "src/common/buffer/Buffer.ts",

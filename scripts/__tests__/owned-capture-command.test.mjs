@@ -1,5 +1,5 @@
 import fs from 'node:fs';import p from 'node:path';import {randomUUID} from 'node:crypto';import {expect,it} from 'vitest';
-import {runOwnedCaptureCommand} from '../native-input-p3/owned-capture-command.mjs';
+import {runOwnedCaptureCommand} from '../native-input/acceptance/owned-capture-command.mjs';
 const root=p.resolve(import.meta.dirname,'../../artifacts/tests/owned-capture-command');
 function fixture(){const evidence=p.join(root,randomUUID());fs.mkdirSync(evidence,{recursive:true});return evidence;}
 it('persists a real successful component child exit before returning its output',async()=>{

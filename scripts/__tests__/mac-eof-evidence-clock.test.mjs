@@ -6,8 +6,8 @@ import {randomUUID} from 'node:crypto';
 import {resolve} from 'node:path';
 import {createServer} from 'node:http';
 import {createServer as createViteServer} from 'vite';
-import {createMacEofEvidenceClock} from '../native-input-p3/mac-eof-evidence-clock.mjs';
-import {attachMacDailyCheckpoints} from '../native-input-p3/mac-daily.mjs';
+import {createMacEofEvidenceClock} from '../native-input/acceptance/mac-eof-evidence-clock.mjs';
+import {attachMacDailyCheckpoints} from '../native-input/acceptance/mac-daily.mjs';
 
 test('actual elapsed work stays cumulative across bounded image waits',async()=>{
  let expire;const expired=new Promise(done=>{expire=done;}),transitions=[];

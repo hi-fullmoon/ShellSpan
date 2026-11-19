@@ -11,7 +11,7 @@ import {
   supportedRustHosts,
   verifyBenchmarkRound,
   windowsTestEnvironment,
-} from '../verify-terminal-broker-windows.mjs';
+} from '../verification/terminal/verify-terminal-broker-windows.mjs';
 
 const throughputRows = [
   'local_pty_single\t10.000\t12.000\t200.00\t5',

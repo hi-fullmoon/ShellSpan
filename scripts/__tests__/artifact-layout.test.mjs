@@ -5,10 +5,10 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import frontend from '../../vitest.config.ts';
-import { artifactWorkspace } from '../artifact-paths.mjs';
-import { captureValidationSources, readValidationGit, nativeValidationResourceDirectory, captureValidationAssets } from '../native-input-p2/frozen-validation.mjs';
-import { createIndexReader } from '../native-input-p3/index-reader.mjs';
-import { editorValidationEnvironment } from '../native-input-p3/editor-validation.mjs';
+import { artifactWorkspace } from '../native-input/artifact-paths.mjs';
+import { captureValidationSources, readValidationGit, nativeValidationResourceDirectory, captureValidationAssets } from '../native-input/integration/frozen-validation.mjs';
+import { createIndexReader } from '../native-input/acceptance/index-reader.mjs';
+import { editorValidationEnvironment } from '../native-input/acceptance/editor-validation.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const artifactRoot = path.join(root, 'artifacts/tests/artifact-layout');
@@ -25,8 +25,8 @@ async function withArtifactDirectory(check) {
 
 describe('generated artifact layout', () => {
   it.each([
-    ['scripts/native-input-p0', 'Cargo.toml'],
-    ['scripts/native-input-p3/credential-cleanup', 'src/main.rs'],
+    ['scripts/native-input/prototype', 'Cargo.toml'],
+    ['scripts/native-input/acceptance/credential-cleanup', 'src/main.rs'],
   ])('excludes the %s Cargo cache from Git, frozen sources and ordinary test discovery', async (tool, sourceFile) => {
     expect(frontend.test.exclude).toContain(`**/${tool}/target/**`);
     await withArtifactDirectory(async directory => {
@@ -115,7 +115,7 @@ describe('generated artifact layout', () => {
   it('discovers sources and ignores generated files in a snapshot with no .git directory', async () => {
     await withArtifactDirectory(async directory => {
       const snapshot = path.join(directory, 'ShellSpan');
-      const source = 'scripts/native-input-p3/linux-run.py';
+      const source = 'scripts/native-input/acceptance/linux-run.py';
       await mkdir(path.dirname(path.join(snapshot, source)), { recursive: true });
       for (const file of ['.gitignore', source]) await copyFile(path.join(root, file), path.join(snapshot, file));
 

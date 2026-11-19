@@ -2,7 +2,7 @@ import fs from 'node:fs';import p from 'node:path';import {randomUUID} from 'nod
 import {expect,it} from 'vitest';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {readInitializationObserver} from '../native-input-p3/initialization-observer.mjs';
+import {readInitializationObserver} from '../native-input/acceptance/initialization-observer.mjs';
 function fixture(){
  const token=randomUUID(),root=p.resolve(import.meta.dirname,'../../artifacts/tests/initialization-observer',token);fs.mkdirSync(root,{recursive:true});
  const manifest=p.join(root,'frozen-manifest-'+token+'.json'),name='native-image-101-'+token,exe=p.join(root,'native-image-component/ShellSpan.exe');
@@ -35,7 +35,7 @@ it('does not use a prior App manifest or partially published observation',async(
  expect(await readInitializationObserver(f.root,f.token,f.manifest)).toEqual({ready:false});
 });
 it('rejects standalone observed initialization before any App can start',async()=>{
- const cli=p.resolve(import.meta.dirname,'../verify-ai-session-stream.mjs');
+ const cli=p.resolve(import.meta.dirname,'../verification/agent/verify-ai-session-stream.mjs');
  const result=await promisify(execFile)(process.execPath,[cli,'--native-input-p3-observed-initialize'],{timeout:15000,windowsHide:true,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'}}).then(()=>null,error=>error);
  expect(result).not.toBeNull();expect(result.code).toBe(1);expect(result.stderr).toContain('Observed initialization requires one isolated Windows no-model initializer');expect(result.stdout).not.toContain('Running DevCommand');
 });

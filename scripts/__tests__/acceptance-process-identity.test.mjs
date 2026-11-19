@@ -1,9 +1,9 @@
 import {afterEach,expect,it} from 'vitest';
 import {mkdir,mkdtemp,writeFile,readFile,rm} from 'node:fs/promises';
 import {resolve} from 'node:path';
-import {producerIdentityMatches,observeProducerProcesses,assertProducerIdentitiesExited} from '../native-input-p3/process-identity.mjs';
-import {sealCase,verifySeal} from '../native-input-p3/acceptance-evidence.mjs';
-import {inside} from '../native-input-p3/acceptance-inputs.mjs';
+import {producerIdentityMatches,observeProducerProcesses,assertProducerIdentitiesExited} from '../native-input/acceptance/process-identity.mjs';
+import {sealCase,verifySeal} from '../native-input/acceptance/acceptance-evidence.mjs';
+import {inside} from '../native-input/acceptance/acceptance-inputs.mjs';
 
 const expected={pid:42,exe:'D:\\Programs\\nodejs\\node.exe',start:'2026-11-05T06:35:01.614Z',end:'2026-11-05T06:35:01.882Z'};
 const observed={pid:42,exe:'d:/programs/nodejs/node.exe',created:'2026-11-05T06:35:01.700Z'};

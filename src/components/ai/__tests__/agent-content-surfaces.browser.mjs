@@ -18,7 +18,7 @@ const copyRegions = '[data-ai-tool-view], .ai-markdown-code-block, .ai-approval-
 await mkdir(screenshots, { recursive: true });
 const path = join(root, 'package.json');
 const file = await readFile(path, 'utf8');
-const codePath = 'scripts/check-ai-panel-styles.mjs';
+const codePath = 'scripts/checks/check-ai-panel-styles.mjs';
 const code = await readFile(join(root, codePath), 'utf8');
 const codeOutput = execFileSync(process.execPath, [codePath], { cwd: root, encoding: 'utf8' });
 const search = execFileSync('rg', ['--line-number', '.', 'package.json'], { cwd: root, encoding: 'utf8' });

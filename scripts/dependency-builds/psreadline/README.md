@@ -80,9 +80,9 @@ source paths and omit debug records so different owned build directories
 produce identical assemblies.
 
 ```text
-node scripts/rebuild-psreadline.mjs
-node scripts/rebuild-psreadline.mjs --install
-node scripts/rebuild-psreadline.mjs --verify-only
+node scripts/dependency-builds/psreadline/rebuild.mjs
+node scripts/dependency-builds/psreadline/rebuild.mjs --install
+node scripts/dependency-builds/psreadline/rebuild.mjs --verify-only
 ```
 
 Builds use unique directories under `src-tauri/target/dependencies/psreadline/`.

@@ -4,8 +4,8 @@ import {createServer as createViteServer} from 'vite';
 import {mkdir,mkdtemp,writeFile,readFile,symlink} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
-import {attachMacSubmissionWitness,macSubmissionControlMode,macSubmissionObservationConfiguration} from '../native-input-p3/mac-submission.mjs';
-import {macDailyAcceptance} from '../native-input-p3/mac-daily.mjs';
+import {attachMacSubmissionWitness,macSubmissionControlMode,macSubmissionObservationConfiguration} from '../native-input/acceptance/mac-submission.mjs';
+import {macDailyAcceptance} from '../native-input/acceptance/mac-daily.mjs';
 
 it('admits only owned no-model submission cases without taking a visual or human receipt',()=>{
  const root=resolve('artifacts/tests/mac-submission-selector');

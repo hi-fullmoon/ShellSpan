@@ -5,7 +5,7 @@ import {readFile,writeFile,mkdir} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {chromium,webkit} from 'playwright';
-import {displayModuleJavaScript,installedRuntimeManifest} from '../../../../scripts/native-input-p0/formal-runtime.mjs';
+import {displayModuleJavaScript,installedRuntimeManifest} from '../../../../scripts/native-input/prototype/formal-runtime.mjs';
 const fixture=JSON.parse(await readFile(new URL('./fixtures/native-selection-reflow.json',import.meta.url),'utf8'));
 const viewportFixture=JSON.parse(await readFile(new URL('./fixtures/native-viewport-reflow.json',import.meta.url),'utf8'));
 const viewportBytes=Buffer.from(viewportFixture.packet.base64,'base64');

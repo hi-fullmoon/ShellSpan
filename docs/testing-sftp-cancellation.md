@@ -3,7 +3,7 @@
 Run from the repository:
 
 ```bash
-node scripts/verify-sftp-cancellation.mjs
+node scripts/verification/sftp/verify-sftp-cancellation.mjs
 ```
 
 Requires Node and pnpm versions from `package.json`, Docker with Linux containers,

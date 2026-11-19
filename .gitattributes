@@ -16,7 +16,7 @@ scripts/__tests__/fixtures/zle-guards-native-20261106/*.json text eol=lf
 # Dependency patches and their reviewed inputs must keep identical bytes on
 # Windows: pnpm applies patch line endings to the installed xterm artifacts.
 patches/@xterm__xterm@6.0.0.patch text eol=lf
-scripts/native-input-p0/*.patch text eol=lf
+scripts/native-input/prototype/*.patch text eol=lf
 # Unified-diff context prefixes precede upstream tabs and empty lines. Check
 # the applied source hashes; those required prefixes are not source whitespace.
 scripts/dependency-builds/zsh/*.patch text eol=lf whitespace=-blank-at-eol,-space-before-tab

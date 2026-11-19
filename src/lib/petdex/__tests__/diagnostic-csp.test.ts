@@ -12,6 +12,6 @@ it('loads the shipped validators with string code generation forbidden', () => {
 });
 
 it('keeps the shipped Ajv validators synchronized with their schema', () => {
-  const script = resolve(import.meta.dirname, '../../../../scripts/generate-petdex-validators.mjs');
+  const script = resolve(import.meta.dirname, '../../../../scripts/generators/generate-petdex-validators.mjs');
   expect(() => execFileSync(process.execPath, [script, '--check'], { stdio: 'pipe' })).not.toThrow();
 });

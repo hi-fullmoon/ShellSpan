@@ -3,14 +3,14 @@ import {mkdirSync,writeFileSync,lstatSync,appendFileSync,readFileSync,readdirSyn
 import {resolve} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {execFileSync,spawnSync} from 'node:child_process';
-import {prepareZleAppHistory,readZleHistoryObservation,readZleAppHistoryDisk,zleAppHistoryModes} from '../native-input-p3/zle-app-history.mjs';
+import {prepareZleAppHistory,readZleHistoryObservation,readZleAppHistoryDisk,zleAppHistoryModes} from '../native-input/acceptance/zle-app-history.mjs';
 const root=resolve(import.meta.dirname,'../..');
 describe('owned ZLE App history observation',()=>{
  it.skipIf(process.platform!=='darwin'||process.env.SHELLSPAN_ALLOW_FOREGROUND_TESTS!=='1')('runs the real PTY observer without blocking later hooks or changing parent status',()=>{
   const directory=resolve(root,'artifacts/tests/zle-app-history',randomUUID());mkdirSync(resolve(directory,'home'),{recursive:true,mode:0o700});
   const plan=prepareZleAppHistory(root,directory,'default');
   appendFileSync(resolve(plan.home,'.zshrc'),'p3_probe_later_hook() { builtin print -r -- entered >> "$HOME/after-observer-hook"; }\nzle -N p3_probe_later_hook\nadd-zle-hook-widget line-init p3_probe_later_hook\n');
-  execFileSync('python3',['-B',resolve(root,'scripts/native-input-p3/zle-app-history-observer-probe.py'),'/bin/zsh',plan.home,directory],{stdio:'pipe',timeout:20000});
+  execFileSync('python3',['-B',resolve(root,'scripts/native-input/acceptance/zle-app-history-observer-probe.py'),'/bin/zsh',plan.home,directory],{stdio:'pipe',timeout:20000});
   const parent=resolve(plan.home,'history-observations'),snapshots=readdirSync(parent).filter(name=>existsSync(resolve(parent,name,'ready'))).map(name=>readZleHistoryObservation(resolve(parent,name)));
   expect(snapshots.some(value=>value.editor.buffer===''&&value.entries.includes('builtin print -r -- PASSIVE_OBSERVER_REAL_SOURCE'))).toBe(true);
   expect(readFileSync(resolve(directory,'raw.bin'),'utf8')).toContain('PASSIVE_STATUS=7\r\n');
@@ -34,7 +34,7 @@ describe('owned ZLE App history observation',()=>{
   ['--native-input-p3-zle-history','unknown','--native-input-p3','zsh','--data-scope','com.shellspan.validation.native-input-p3'],
   ['--native-input-p3-zle-history','default','--native-input-p3','zsh','--data-scope','com.shellspan.validation.native-input-p3','--no-model'],
  ])('rejects mixed or unowned history runs before App launch: %j',(...args)=>{
-  const outcome=spawnSync(process.execPath,[resolve(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
+  const outcome=spawnSync(process.execPath,[resolve(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
   expect(outcome.error).toBeUndefined();expect(outcome.status).toBe(1);expect(outcome.stderr).toContain('--native-input-p3-zle-history requires one isolated');
  });
  it('does not treat absent public completion as an empty successful history',()=>{

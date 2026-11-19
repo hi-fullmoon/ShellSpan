@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {it as test} from 'vitest';
-import {macDailyAcceptance,macDailyAppConfiguration,attachMacDailyCheckpoints,macHumanFinalEvidenceWindow,macDailyRuntimeTimeoutMilliseconds,macDailyCaptureConfiguration,macSystemSelectionObservationConfiguration,macHumanViewportObservationConfiguration,macHumanVisualCheckpoints,macDailyVisualCheckpoints} from '../native-input-p3/mac-daily.mjs';
+import {macDailyAcceptance,macDailyAppConfiguration,attachMacDailyCheckpoints,macHumanFinalEvidenceWindow,macDailyRuntimeTimeoutMilliseconds,macDailyCaptureConfiguration,macSystemSelectionObservationConfiguration,macHumanViewportObservationConfiguration,macHumanVisualCheckpoints,macDailyVisualCheckpoints} from '../native-input/acceptance/mac-daily.mjs';
 import {resolve} from 'node:path';
 import {readFileSync} from 'node:fs';
 const values={'native-mac-daily':'zsh','no-model':true,'data-scope':'com.shellspan.validation.native-input-p3'};

@@ -9,7 +9,7 @@ import { invokeListKeyCredentials, invokeRetrieveProfilePassword, isTauriRuntime
 import { persistPromptedPassword, promptForMissingPassword } from '@/lib/connections/password-prompt';
 import { usePasswordPromptStore } from '@/stores/passwordPromptStore';
 
-// Run only through scripts/verify-credential-refresh.mjs in a real Tauri window.
+// Run only through scripts/verification/app/verify-credential-refresh.mjs in a real Tauri window.
 // No IPC, store action or credential response is replaced by a test double.
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);

@@ -50,7 +50,7 @@ try {
     & $node scripts/fixtures/windows-desktop-data-audit.mjs (Join-Path $evidence 'user-data-before.json')
     if ($LASTEXITCODE -ne 0) { throw 'Original user data audit failed' }
     Save-WorkerStage 'native-data-initialize'
-    $initializeExit=Invoke-OwnedNativeNode @('scripts/verify-ai-session-stream.mjs','--data-initialize','--no-model','--data-scope','com.shellspan.validation.windows-stage4') 'native-data-initialize'
+    $initializeExit=Invoke-OwnedNativeNode @('scripts/verification/agent/verify-ai-session-stream.mjs','--data-initialize','--no-model','--data-scope','com.shellspan.validation.windows-stage4') 'native-data-initialize'
     if($initializeExit-ne 0){throw ('Actual native data initialization failed: '+$initializeExit)}
     & $node scripts/fixtures/windows-desktop-evidence.mjs initialized $evidence
     if($LASTEXITCODE-ne 0){throw 'Initialized native executable evidence failed'}
@@ -59,7 +59,7 @@ try {
     $importExit = $LASTEXITCODE
     $ErrorActionPreference = 'Stop'
     if ($importExit -ne 0) { throw ('Secret-free route import failed: ' + $importExit) }
-    $arguments=@('scripts/verify-ai-session-stream.mjs','--data-scope','com.shellspan.validation.windows-stage4')
+    $arguments=@('scripts/verification/agent/verify-ai-session-stream.mjs','--data-scope','com.shellspan.validation.windows-stage4')
     if($settings.mode-eq 'contention'){$arguments+='--terminal-contention'}
     elseif($settings.mode-eq 'composer-input'){$arguments+=@('--terminal-contention','--no-model','--composer-input-diagnostic')}
     elseif($settings.mode-eq 'close'){$arguments+=@('--terminal-contention','--no-model')}

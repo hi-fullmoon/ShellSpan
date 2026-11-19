@@ -4,7 +4,7 @@
 
 ## 源码和 Linux 资源
 
-- 在冻结候选上构建带 `native-input-acceptance` 的 macOS arm64 验收 App。Linux 资源沿用 [构建入口](../../scripts/native-input-p3/linux-build.sh)，按本批清单核对镜像 ID、实际 Main、Core、模块、relay 及其摘要。ZLE 使用 Linux aarch64、glibc 2.36 的 Debian 夹具，Bash 5.3 用独立 GNU 夹具，加 `--bash`。
+- 在冻结候选上构建带 `native-input-acceptance` 的 macOS arm64 验收 App。Linux 资源沿用 [构建入口](../../scripts/native-input/acceptance/linux-build.sh)，按本批清单核对镜像 ID、实际 Main、Core、模块、relay 及其摘要。ZLE 使用 Linux aarch64、glibc 2.36 的 Debian 夹具，Bash 5.3 用独立 GNU 夹具，加 `--bash`。
 
 ## 恢复后的执行顺序
 
@@ -15,8 +15,8 @@
 离线可随时查看全部或单项。`--check-fixture` 只读取本地封存路径下的 `owner.json` 与 `fixture.json`，无需运行 Docker。实机入口再核对容器实际标签、镜像、源码挂载、回环端口、sshd 公钥、账户 Shell、平台、glibc 和 Main 摘要。App 使用同一公钥的指纹进行正常 SSH 主机信任校验。
 
 ```bash
-node scripts/native-input-p3/ssh-recovery.mjs --list-cases
-node scripts/native-input-p3/ssh-recovery.mjs --list-cases --case after-key-timeout
+node scripts/native-input/acceptance/ssh-recovery.mjs --list-cases
+node scripts/native-input/acceptance/ssh-recovery.mjs --list-cases --case after-key-timeout
 ```
 
 恢复授权后，在封存根定义以下命令。函数每次都创建新夹具，且须从该封存根运行。实机入口将空模型路由、正常审批、真实 relay、PTY、账本和终端重绑绑定到同一批次。
@@ -27,10 +27,10 @@ export SHELLSPAN_P3_LINUX_IMAGE
 sealed_root="$PWD"
 zle_ssh_case() {
   local fixture
-  fixture=$(node scripts/native-input-p3/linux-peer.mjs "$sealed_root" --app) || return
+  fixture=$(node scripts/native-input/acceptance/linux-peer.mjs "$sealed_root" --app) || return
   printf '%s\n' "$fixture"
-  node scripts/native-input-p3/ssh-recovery.mjs --check-fixture --fixture "$fixture" || return
-  SHELLSPAN_ALLOW_FOREGROUND_TESTS=1 node scripts/native-input-p3/ssh-recovery.mjs \
+  node scripts/native-input/acceptance/ssh-recovery.mjs --check-fixture --fixture "$fixture" || return
+  SHELLSPAN_ALLOW_FOREGROUND_TESTS=1 node scripts/native-input/acceptance/ssh-recovery.mjs \
     --case "$1" --fixture "$fixture"
 }
 ```

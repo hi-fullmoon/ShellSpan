@@ -6,8 +6,8 @@ import {readFile,writeFile,mkdir} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {chromium,webkit} from 'playwright';
-import {displayModuleJavaScript,installedRuntimeManifest} from '../../../../scripts/native-input-p0/formal-runtime.mjs';
-import {captureValidationSources} from '../../../../scripts/native-input-p2/frozen-validation.mjs';
+import {displayModuleJavaScript,installedRuntimeManifest} from '../../../../scripts/native-input/prototype/formal-runtime.mjs';
+import {captureValidationSources} from '../../../../scripts/native-input/integration/frozen-validation.mjs';
 
 const root=resolve(import.meta.dirname,'../../../..'),fixture=JSON.parse(await readFile(resolve(import.meta.dirname,'fixtures/native-zle-ordinary-keyboard.json'),'utf8'));
 assert.equal(createHash('sha256').update(fixture.raw).digest('hex'),fixture.rawSha256);

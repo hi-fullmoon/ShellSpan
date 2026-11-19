@@ -128,12 +128,12 @@ jobs:
         if: runner.os == 'macOS'
         env:
           SHELLSPAN_NATIVE_BUILD_ROOT: artifacts/tests
-        run: python3 -B scripts/native-input-p2/build.py --versions 5.3
+        run: python3 -B scripts/native-input/integration/build.py --versions 5.3
       - name: Build pinned Zsh and ZLE test resources
         if: runner.os == 'macOS' && !inputs.macos-editor-artifact
         env:
           SHELLSPAN_NATIVE_BUILD_ROOT: artifacts/tests
-        run: bash scripts/native-input-p3/build-macos-editor.sh
+        run: bash scripts/native-input/acceptance/build-macos-editor.sh
       - name: Download pinned Zsh and ZLE test resources
         if: runner.os == 'macOS' && inputs.macos-editor-artifact
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -144,7 +144,7 @@ jobs:
         if: runner.os == 'macOS' && inputs.macos-editor-artifact
         run: chmod 500 artifacts/tests/native-input-p2/resources/native-input/zsh-5.9-zle-5.9-macos-arm64-native/zsh
       - name: Run Agent terminal contract tests
-        run: node scripts/verify-agent-terminal-contracts.mjs
+        run: node scripts/verification/agent/verify-agent-terminal-contracts.mjs
       - name: Run Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features --locked -- -D warnings
       - name: Run Rust tests

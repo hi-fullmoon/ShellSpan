@@ -326,7 +326,7 @@ fn linux_direct_sandbox_acceptance() {
 
     fs::write(
         fixture.workspace.join("network-probe.mjs"),
-        include_str!("../../../../../scripts/agent-sandbox-phase1/network-probe.mjs"),
+        include_str!("../../../../../scripts/agent-sandbox/network-probe.mjs"),
     )
     .unwrap();
     let loopback = UdpSocket::bind(("127.0.0.1", 0)).unwrap();

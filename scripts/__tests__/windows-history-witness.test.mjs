@@ -2,8 +2,8 @@ import {expect, it} from 'vitest';
 import fs from 'node:fs';
 import p from 'node:path';
 import {createHash} from 'node:crypto';
-import {prepareWindowsHistoryProfile} from '../native-input-p3/windows-history-profile.mjs';
-import {readWindowsHistoryDisk, readWindowsHistoryExit, windowsHistoryReaderArtifacts} from '../native-input-p3/windows-history-witness.mjs';
+import {prepareWindowsHistoryProfile} from '../native-input/acceptance/windows-history-profile.mjs';
+import {readWindowsHistoryDisk, readWindowsHistoryExit, windowsHistoryReaderArtifacts} from '../native-input/acceptance/windows-history-witness.mjs';
 
 function fixture() {
   const base = p.resolve(import.meta.dirname, '../../artifacts/tests/windows-history-witness');

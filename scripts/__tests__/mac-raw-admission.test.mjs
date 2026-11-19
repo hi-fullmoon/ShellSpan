@@ -4,7 +4,7 @@ import {resolve} from 'node:path';
 import {request} from 'node:http';
 import {createServer} from 'vite';
 import {expect,it} from 'vitest';
-import {macRawAdmission,attachMacRawAdmission} from '../native-input-p3/mac-raw-admission.mjs';
+import {macRawAdmission,attachMacRawAdmission} from '../native-input/acceptance/mac-raw-admission.mjs';
 const directory=resolve(import.meta.dirname,'../../artifacts/tests/native-input-p3/raw-admission-selection',randomUUID());
 const paths={evidence:directory,home:resolve(directory,'home'),data:resolve(directory,'data')};for(const p of [paths.home,paths.data])mkdirSync(p,{recursive:true,mode:0o700});
 const localIt=process.platform==='darwin'&&process.arch==='arm64'?it:it.skip;

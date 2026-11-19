@@ -5,7 +5,7 @@ import {resolve} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {createServer} from 'node:http';
 import {createServer as createViteServer} from 'vite';
-import {attachDisplayTraceChannel} from '../native-input-p3/display-trace-channel.mjs';
+import {attachDisplayTraceChannel} from '../native-input/acceptance/display-trace-channel.mjs';
 
 // Observed actual pinned Chromium/WebKit paste, not a Shell/native receipt.
 // Original: display-paste-checks/4500b306-e735-4298-bec6-da3bcee329ad/chromium.json.

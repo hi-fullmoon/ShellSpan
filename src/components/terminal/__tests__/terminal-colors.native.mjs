@@ -39,7 +39,7 @@ try {
     const config = JSON.stringify({ identifier: 'com.shellspan.validation.terminal-colors',
       build: { beforeDevCommand: '', devUrl: `${server.resolvedUrls.local[0]}?phase=${phase}` },
       app: { windows: [{ label: 'main', title: 'ShellSpan terminal color verification', width: 900, height: 760 }] } });
-    child = spawn('pnpm', ['exec', 'tauri', 'dev', '--no-watch', '--runner', resolve('scripts/dev-cargo-runner.mjs'),
+    child = spawn('pnpm', ['exec', 'tauri', 'dev', '--no-watch', '--runner', resolve('scripts/dev/dev-cargo-runner.mjs'),
       '--config', resolve('src-tauri/tauri.dev.conf.json'), '--config', config],
     { cwd: resolve('.'), env: { ...process.env, SHELLSPAN_DATA_DIR: directory }, stdio: ['ignore', 'ignore', 'inherit'], detached: true });
     const exited = new Promise(resolve => child.once('exit', code => {

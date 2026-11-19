@@ -7,7 +7,7 @@ describe('native manual entry isolation', () => {
     ['--native-terminal-manual-form','nfd'],
     ['--native-terminal-manual','zsh','--native-terminal-manual-form','other','--no-model','--data-scope','com.shellspan.validation.native-input-p3'],
   ])('rejects an unbound or unknown Unicode form before any App launch: %j',(...args)=>{
-    const result=spawnSync(process.execPath,[resolve(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
+    const result=spawnSync(process.execPath,[resolve(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000});
     expect(result.error).toBeUndefined();expect(result.status).toBe(1);expect(result.stderr).toContain('--native-terminal-manual-form requires one manual case');
   });
   it.each([
@@ -17,7 +17,7 @@ describe('native manual entry isolation', () => {
     ['--native-terminal-manual', 'zsh', '--no-model', '--data-scope', 'com.shellspan.validation.native-input-p3', '--native-jobs'],
     ['--native-terminal-manual', 'zsh', '--no-model', '--data-scope', 'com.shellspan.validation.native-input-p3', '--data-initialize'],
   ])('rejects unowned or mixed manual operation before any App launch: %j', (...args) => {
-    const result = spawnSync(process.execPath, [resolve(root, 'scripts/verify-ai-session-stream.mjs'), ...args], { cwd: root, env: { ...process.env, SHELLSPAN_ALLOW_FOREGROUND_TESTS: '1' }, encoding: 'utf8', timeout: 5_000 });
+    const result = spawnSync(process.execPath, [resolve(root, 'scripts/verification/agent/verify-ai-session-stream.mjs'), ...args], { cwd: root, env: { ...process.env, SHELLSPAN_ALLOW_FOREGROUND_TESTS: '1' }, encoding: 'utf8', timeout: 5_000 });
     expect(result.error).toBeUndefined(); expect(result.status).toBe(1);
     expect(result.stderr).toContain('--native-terminal-manual requires an isolated macOS no-model case');
   });

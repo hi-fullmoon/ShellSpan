@@ -3,8 +3,8 @@ import {createHash,randomUUID} from 'node:crypto';
 import fs from 'node:fs';
 import p from 'node:path';
 import {expect,it} from 'vitest';
-import {prepareWindowsHistoryReuseProfile} from '../native-input-p3/windows-history-reuse-profile.mjs';
-import {readWindowsHistoryReuseReceipt} from '../native-input-p3/windows-history-reuse-witness.mjs';
+import {prepareWindowsHistoryReuseProfile} from '../native-input/acceptance/windows-history-reuse-profile.mjs';
+import {readWindowsHistoryReuseReceipt} from '../native-input/acceptance/windows-history-reuse-witness.mjs';
 
 const project=p.resolve(import.meta.dirname,'../..'),sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 it('refuses invalid reuse identities before writing a profile',()=>{

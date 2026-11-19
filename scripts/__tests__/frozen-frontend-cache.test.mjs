@@ -3,8 +3,8 @@ import p from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {expect,it} from 'vitest';
-import {buildFrozenFrontend} from '../native-input-p3/frozen-frontend-cache.mjs';
-import {captureValidationAssets,captureValidationSources} from '../native-input-p2/frozen-validation.mjs';
+import {buildFrozenFrontend} from '../native-input/acceptance/frozen-frontend-cache.mjs';
+import {captureValidationAssets,captureValidationSources} from '../native-input/integration/frozen-validation.mjs';
 
 const artifacts=p.resolve(import.meta.dirname,'../../artifacts/tests/frozen-frontend-cache');
 function fixture(){

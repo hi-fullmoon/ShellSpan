@@ -1,7 +1,7 @@
 import {expect, it} from 'vitest';
 import fs from 'node:fs';import p from 'node:path';import {randomUUID} from 'node:crypto';import {DatabaseSync} from 'node:sqlite';
 import {execFileSync} from 'node:child_process';
-import {createAiCredentialWitness} from '../native-input-p3/ai-credential-lifecycle.mjs';
+import {createAiCredentialWitness} from '../native-input/acceptance/ai-credential-lifecycle.mjs';
 const workspace = p.resolve(import.meta.dirname, '../..');
 function fixture() {
   const base = p.join(workspace, 'artifacts/tests/ai-credential-lifecycle');fs.mkdirSync(base, {recursive: true});const directory = fs.mkdtempSync(p.join(base, 'case-'));fs.mkdirSync(p.join(directory, 'data'));
@@ -24,7 +24,7 @@ it('refuses absence validation without original ownership, independent deletion 
 it('binds absence to the owned committed reference, a deletion receipt and normal metadata cleanup order', async () => {
   const options = fixture(), provision = createAiCredentialWitness({...options, mode: 'provision'}), reference = 'llm-' + randomUUID();await provision.handle('config', {});await provision.handle('baseline', {});
   let db = new DatabaseSync(options.file);db.prepare("UPDATE preferences SET value=? WHERE key='llm.routes.v1'").run(JSON.stringify({schemaVersion: 1, revision: 2, routes: [{id: 'e07-ai-' + options.runId, revision: 1, adapterId: 'chat-completions', presetId: 'minimax', baseUrl: 'https://api.minimaxi.com', auth: {kind: 'keychain', reference}}]}));db.close();await provision.handle('receipt', {reference, readbackMatches: true});
-  execFileSync(process.execPath, [p.join(workspace, 'scripts/native-input-p3/credential-ownership.mjs'), 'recover', options.directory, options.runId, options.originalPath], {cwd: workspace, windowsHide: true, stdio: 'pipe'});
+  execFileSync(process.execPath, [p.join(workspace, 'scripts/native-input/acceptance/credential-ownership.mjs'), 'recover', options.directory, options.runId, options.originalPath], {cwd: workspace, windowsHide: true, stdio: 'pipe'});
   fs.writeFileSync(p.join(options.directory, 'credential-os-delete.json'), JSON.stringify({operation: 'delete', runId: options.runId, reference, presentAfter: false, secretRead: false}), {flag: 'wx'});
   const verify = createAiCredentialWitness({...options, mode: 'verify-absence'});expect((await verify.handle('config', {})).expectedReference).toBe(reference);
   await expect(verify.handle('cleared', {reference})).rejects.toThrow();await verify.handle('absence', {reference, missing: true});

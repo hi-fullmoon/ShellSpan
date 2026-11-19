@@ -2,7 +2,7 @@ import {expect,it} from 'vitest';
 import {mkdirSync,copyFileSync,readFileSync,writeFileSync,lstatSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {copySnapshotResources} from '../native-input-p3/acceptance-snapshot-resources.mjs';
+import {copySnapshotResources} from '../native-input/acceptance/acceptance-snapshot-resources.mjs';
 
 it('copies actual source bytes into regular independent files so validation metadata writes cannot alter retained inputs',()=>{
  const root=resolve(import.meta.dirname,'../..'),directory=resolve(root,'artifacts/tests/snapshot-resource-copy',randomUUID()),source=resolve(directory,'source'),destination=resolve(directory,'destination');

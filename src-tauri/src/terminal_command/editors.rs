@@ -198,12 +198,12 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<EditorArti
     if target == "macos-arm64" {
         for (path, contents) in [
             (
-                "scripts/native-input-p3/build.mjs",
-                include_str!("../../../scripts/native-input-p3/build.mjs"),
+                "scripts/native-input/acceptance/build.mjs",
+                include_str!("../../../scripts/native-input/acceptance/build.mjs"),
             ),
             (
-                "scripts/native-input-p3/zsh-build-check.c",
-                include_str!("../../../scripts/native-input-p3/zsh-build-check.c"),
+                "scripts/native-input/acceptance/zsh-build-check.c",
+                include_str!("../../../scripts/native-input/acceptance/zsh-build-check.c"),
             ),
         ] {
             if catalogue.sources.get(path) != Some(&nip::sha(contents)) {
@@ -226,16 +226,16 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<EditorArti
                 include_str!("../../native-input-adapter/src/bin/native-input-relay.rs"),
             ),
             (
-                "scripts/native-input-p3/linux-build.sh",
-                include_str!("../../../scripts/native-input-p3/linux-build.sh"),
+                "scripts/native-input/acceptance/linux-build.sh",
+                include_str!("../../../scripts/native-input/acceptance/linux-build.sh"),
             ),
             (
-                "scripts/native-input-p3/publish-linux.py",
-                include_str!("../../../scripts/native-input-p3/publish-linux.py"),
+                "scripts/native-input/acceptance/publish-linux.py",
+                include_str!("../../../scripts/native-input/acceptance/publish-linux.py"),
             ),
             (
-                "scripts/native-input-p3/zsh-build-check.c",
-                include_str!("../../../scripts/native-input-p3/zsh-build-check.c"),
+                "scripts/native-input/acceptance/zsh-build-check.c",
+                include_str!("../../../scripts/native-input/acceptance/zsh-build-check.c"),
             ),
         ] {
             if catalogue.sources.get(path) != Some(&nip::sha(contents)) {
@@ -295,8 +295,8 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<EditorArti
                     include_str!("../../../scripts/dependency-builds/zsh/native-display.patch"),
                 ),
                 (
-                    "scripts/native-input-p3/build-scoped-core.mjs",
-                    include_str!("../../../scripts/native-input-p3/build-scoped-core.mjs"),
+                    "scripts/native-input/acceptance/build-scoped-core.mjs",
+                    include_str!("../../../scripts/native-input/acceptance/build-scoped-core.mjs"),
                 ),
             ] {
                 if catalogue.sources.get(path) != Some(&nip::sha(contents)) {

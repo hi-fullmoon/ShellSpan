@@ -1,8 +1,8 @@
 import {expect, it} from 'vitest';
 import fs from 'node:fs';import p from 'node:path';import {randomUUID, createHash} from 'node:crypto';
-import {prepareWindowsHistoryReuseProfile} from '../native-input-p3/windows-history-reuse-profile.mjs';
-import {readWindowsHistoryReuseReceipt, readWindowsHistoryReuseCase} from '../native-input-p3/windows-history-reuse-witness.mjs';
-import {readOwnedHistoryJson} from '../native-input-p3/windows-history-witness.mjs';
+import {prepareWindowsHistoryReuseProfile} from '../native-input/acceptance/windows-history-reuse-profile.mjs';
+import {readWindowsHistoryReuseReceipt, readWindowsHistoryReuseCase} from '../native-input/acceptance/windows-history-reuse-witness.mjs';
+import {readOwnedHistoryJson} from '../native-input/acceptance/windows-history-witness.mjs';
 
 function fixture(){
  const root=p.resolve(import.meta.dirname,'../../artifacts/tests/history-reuse-witness',randomUUID());fs.mkdirSync(p.join(root,'home'),{recursive:true});fs.mkdirSync(p.join(root,'data'));

@@ -5,7 +5,7 @@ import {readFile,mkdir,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {chromium,webkit} from 'playwright';
 import {createHash} from 'node:crypto';
-import {displayModuleJavaScript,installedRuntimeManifest} from '../../../../scripts/native-input-p0/formal-runtime.mjs';
+import {displayModuleJavaScript,installedRuntimeManifest} from '../../../../scripts/native-input/prototype/formal-runtime.mjs';
 const installed=await installedRuntimeManifest();
 const fixture=JSON.parse(await readFile(new URL('./fixtures/native-input-display.json',import.meta.url),'utf8'));
 const decode=name=>{const packet=fixture.packets[name],bytes=Buffer.from(packet.base64,'base64');

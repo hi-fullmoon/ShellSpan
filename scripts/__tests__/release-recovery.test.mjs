@@ -4,10 +4,10 @@ import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { parse } from 'yaml';
-import { command, VERSION_FILES } from '../release-notes.mjs';
-import { replaceTag, recoverRelease } from '../recover-release.mjs';
-import { assertPreparedQuality, assertQuality } from '../release-quality.mjs';
-import { assertDraft, findReleaseByTag } from '../publish-release.mjs';
+import { command, VERSION_FILES } from '../release/release-notes.mjs';
+import { replaceTag, recoverRelease } from '../release/recover-release.mjs';
+import { assertPreparedQuality, assertQuality } from '../release/release-quality.mjs';
+import { assertDraft, findReleaseByTag } from '../release/publish-release.mjs';
 
 const directories = [];
 const root = path.resolve(import.meta.dirname, '../..');
@@ -104,7 +104,7 @@ describe.skipIf(!process.env.SHELLSPAN_RELEASE_QUALITY_SUCCESS_SHA)('real GitHub
     const before = await Promise.all(VERSION_FILES.map(file => readFile(path.join(checkout, file))));
     let failure;
     try {
-      execFileSync(process.execPath, [path.join(root, 'scripts/bump-version.mjs'), 'patch'], { cwd: checkout, encoding: 'utf8', stdio: 'pipe' });
+      execFileSync(process.execPath, [path.join(root, 'scripts/release/bump-version.mjs'), 'patch'], { cwd: checkout, encoding: 'utf8', stdio: 'pipe' });
     } catch (error) { failure = error; }
     expect(failure?.status).toBe(1);
     expect(failure?.stderr).toContain('Full Quality Gate has not passed');

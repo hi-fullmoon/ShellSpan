@@ -1,6 +1,6 @@
 import {expect, it} from 'vitest';
 import fs from 'node:fs';import p from 'node:path';import {randomUUID} from 'node:crypto';import {DatabaseSync} from 'node:sqlite';
-import {credentialLifecyclePhases, credentialLifecycleWindowOptions, createCredentialLifecycleWitness} from '../native-input-p3/credential-lifecycle.mjs';
+import {credentialLifecyclePhases, credentialLifecycleWindowOptions, createCredentialLifecycleWitness} from '../native-input/acceptance/credential-lifecycle.mjs';
 function fixture() {
   const base = p.resolve(import.meta.dirname, '../../artifacts/tests/credential-lifecycle');fs.mkdirSync(base, {recursive: true});const directory = fs.mkdtempSync(p.join(base, 'case-'));fs.mkdirSync(p.join(directory, 'data'));
   const database = new DatabaseSync(p.join(directory, 'data/shellspan-main.db'));database.exec('CREATE TABLE key_credentials(id TEXT,kind TEXT,service TEXT);CREATE TABLE preferences(key TEXT,value TEXT)');database.prepare('INSERT INTO preferences VALUES(?,?)').run('llm.routes.v1', JSON.stringify({routes: []}));

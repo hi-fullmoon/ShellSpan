@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { editorRecoveryTests, supportedRustHosts } from '../verify-terminal-broker-macos.mjs';
+import { editorRecoveryTests, supportedRustHosts } from '../verification/terminal/verify-terminal-broker-macos.mjs';
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -28,7 +28,7 @@ describe('macOS terminal rollout runner', () => {
       'native_editor_recovery_nvim_zsh',
     ]);
     const runner = await readFile(
-      path.join(repositoryRoot, 'scripts/verify-terminal-broker-macos.mjs'),
+      path.join(repositoryRoot, 'scripts/verification/terminal/verify-terminal-broker-macos.mjs'),
       'utf8',
     );
     expect(runner).toContain("process.argv.includes('--editors-only')");
@@ -38,7 +38,7 @@ describe('macOS terminal rollout runner', () => {
 
   it('keeps both native shells and every rollout phase in the consolidated gate', async () => {
     const runner = await readFile(
-      path.join(repositoryRoot, 'scripts/verify-terminal-broker-macos.mjs'),
+      path.join(repositoryRoot, 'scripts/verification/terminal/verify-terminal-broker-macos.mjs'),
       'utf8',
     );
     expect(runner).toContain("process.platform !== 'darwin'");

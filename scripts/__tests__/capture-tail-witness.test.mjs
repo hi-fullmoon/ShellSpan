@@ -3,7 +3,7 @@ import {createServer} from 'node:http';
 import {mkdir,mkdtemp,writeFile,readFile} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {createHash} from 'node:crypto';
-import {createCaptureTailWitness} from '../native-input-p3/capture-tail-witness.mjs';
+import {createCaptureTailWitness} from '../native-input/acceptance/capture-tail-witness.mjs';
 const servers=[];afterEach(async()=>{for(const server of servers.splice(0))await new Promise(resolve=>server.close(resolve));});
 describe('owned capture-tail witness (unit support only)',()=>{
  it('requires retained unknown observation and releases the owned gate once',async()=>{
