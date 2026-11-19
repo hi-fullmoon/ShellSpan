@@ -378,6 +378,7 @@
   border-bottom: 1px solid var(--border);
   background: transparent;
   box-shadow: none;
+  outline: none;
 }
 
 .ai-session-browser[data-compact] .ai-session-browser-filters {
