@@ -247,6 +247,24 @@ describe('release publication gates', () => {
     expect(releaseDownload.with.path).toBe(buildRoot);
   });
 
+  it('checks out release source bytes without CRLF conversion on Windows', async () => {
+    const release = parse(await readFile(path.join(root, '.github/workflows/release.yml'), 'utf8'));
+    const checkout = release.jobs.build.steps.find(step => step.uses?.startsWith('actions/checkout@'));
+    const directory = await temporaryDirectory();
+    const env = { ...process.env, GIT_CONFIG_COUNT: '0' };
+    const file = 'build_paths.py';
+    const original = execFileSync('git', ['cat-file', 'blob', `HEAD:scripts/native-input/${file}`], { cwd: root });
+    await writeFile(path.join(directory, file), original);
+    const git = (args, overrides = {}) => execFileSync('git', args, { cwd: directory, env: { ...env, ...overrides } });
+    git(['init', '--quiet']);
+    git(['config', 'core.autocrlf', 'true']);
+    git(['add', '--', file], checkout.env);
+    git(['checkout-index', '--prefix=runner-default/', '--', file]);
+    git(['checkout-index', '--prefix=release-checkout/', '--', file], checkout.env);
+    expect(await readFile(path.join(directory, 'runner-default', file), 'utf8')).toContain('\r\n');
+    expect(await readFile(path.join(directory, 'release-checkout', file))).toEqual(original);
+  });
+
   it('packs x86_64 SSH resources from the amd64 producer into both release clients', async () => {
     const release = parse(await readFile(path.join(root, '.github/workflows/release.yml'), 'utf8'));
     const producer = release.jobs['build-native-bash'];
