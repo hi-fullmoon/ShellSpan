@@ -4,9 +4,9 @@ set -euo pipefail
 preview_package="${0:A:h}"
 preview_runtime="$(<"$preview_package/runtime-directory.txt")"
 preview_store="$(<"$preview_package/webkit-store.txt")"
-preview_root="${HOME:A}/.shellspan/agent-sandbox"
+preview_root="${HOME:A}"
 if [[ "${preview_runtime:h}" != "$preview_root" ||
-      "${preview_runtime:t}" != preview-* ||
+      "${preview_runtime:t}" != .shellspan-agent-sandbox-preview-* ||
       "$preview_runtime" != "${preview_runtime:A}" || ! -d "$preview_runtime" ||
       ! -O "$preview_runtime" || ! -O "$preview_root" ]]; then
   print -u2 "The managed preview directory is missing or has moved."

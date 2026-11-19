@@ -78,10 +78,10 @@ node scripts/agent-sandbox-phase1/verify-mac-desktop.mjs
 
 ## macOS 手动内测包
 
-在 macOS arm64 上从仓库根目录运行 `node scripts/agent-sandbox-phase1/build-mac-sandbox-preview.mjs`。产物保存在 `artifacts/tests/agent-sandbox-phase1/preview-mac-*/`。脚本启动完整 ShellSpan 界面的 `ShellSpan Sandbox Preview.app`，再次启动使用包旁的「启动沙箱内测.command」。工作区和应用数据分别保存在 `~/.shellspan/agent-sandbox/preview-*/home` 和同级的 `data` 中。
+在 macOS arm64 上从仓库根目录运行 `node scripts/agent-sandbox-phase1/build-mac-sandbox-preview.mjs`。产物保存在 `artifacts/tests/agent-sandbox-phase1/preview-mac-*/`。脚本启动完整 ShellSpan 界面的 `ShellSpan Sandbox Preview.app`，再次启动使用包旁的「启动沙箱内测.command」。工作区和应用数据分别保存在 `~/.shellspan-agent-sandbox-preview-*/home` 和同级的 `data` 中。运行时保护该目录，并拒绝上层路径可以移动的主目录布局。
 
 在「设置 → AI → 终端 Agent」开启 Agent 沙箱后，从本地终端使用「直接执行」试用前台命令。三种审批模式共用同一沙箱。「帮我批准」沿用现有规则，符合条件的只读命令自动通过，写入、敏感路径和范围不明的命令仍需人工批准。「完全访问权限」保留启用时的确认，之后可执行的本地前台命令无需逐次批准，仍受沙箱的文件和网络限制。Agent 使用内测工作区作为命令起始目录。模型连接需在内测包中单独配置。关闭沙箱后，新开的普通本地终端从 macOS 登录用户的主目录启动，内测包会拒绝本地 Agent 命令。
 
 应用本身使用 macOS 登录环境访问系统钥匙串。每个包有独立的钥匙串凭据库，终端和 Agent 使用受管工作区。构建脚本先用已签名的包完成 SSH 密码在真实钥匙串的写入、读回和清理，再打开内测窗口。
 
-更新已在试用的包时，可传入 `--reuse-preview <旧内测包目录>`。新包沿用原来的内测数据和钥匙串标识，构建完成后等待手动切换。从 `/private/tmp` 下的旧内测包升级时，先退出旧包及其本地终端，构建脚本会复制工作区和应用数据到新的持久目录。退出旧窗口后，使用新包旁的启动器。
+更新已在试用的包时，可传入 `--reuse-preview <旧内测包目录>`。新包沿用原来的内测数据和钥匙串标识，构建完成后等待手动切换。从 `/private/tmp` 或 `~/.shellspan/agent-sandbox` 下的旧内测包升级时，先退出旧包及其本地终端，构建脚本会复制工作区和应用数据到新目录。退出旧窗口后，使用新包旁的启动器。

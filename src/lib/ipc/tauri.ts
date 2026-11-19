@@ -376,6 +376,7 @@ export type TerminalAcceptanceSourceKind = 'effect' | 'running' | 'manual-runnin
   | 'job-launch' | 'job-wait' | 'job-stop' | 'file-write' | 'file-read' | 'file-run'
   | 'sandbox-gate' | 'sandbox-init' | 'sandbox-exit' | 'sandbox-exit-125' | 'sandbox-cancel' | 'sandbox-timeout' | 'sandbox-restart'
   | 'sandbox-before' | 'sandbox-after' | 'sandbox-reviewed-read' | 'sandbox-reviewed-list'
+  | 'sandbox-cancel-before-launch' | 'sandbox-descendant'
   | 'sandbox-operator-write' | 'sandbox-operator-outside-read';
 
 export interface TerminalAcceptanceSubmission {

@@ -111,7 +111,7 @@ async function verify() {
       .then(() => '', String);
     assert(switchRejection.includes('SANDBOX_DIRECT_REQUIRED'), 'Rust rejects switching a sandbox session to a visible terminal');
 
-    root.render(<TooltipProvider><AgentExecutionSurfaceSelector surface="direct" realTerminalState="ready" sandboxDirectOnly /></TooltipProvider>);
+    root.render(<TooltipProvider><AgentExecutionSurfaceSelector surface="direct" realTerminalState="ready" sandboxDirectOnly="remote" /></TooltipProvider>);
     const surfaceTrigger = await until(() => document.querySelector<HTMLButtonElement>('[data-execution-surface="direct"]')
       ?? undefined, 'Direct execution selector');
     surfaceTrigger.click();

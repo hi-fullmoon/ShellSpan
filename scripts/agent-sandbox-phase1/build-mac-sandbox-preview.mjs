@@ -23,8 +23,8 @@ if (previous) {
 }
 const output = await mkdtemp(join(outputBase, 'preview-mac-'));
 
-function run(command, args) {
-  execFileSync(command, args, { cwd: root, stdio: 'inherit', env: { ...process.env, CARGO_PROFILE_DEV_DEBUG: '0' } });
+function run(command, args, environment = {}) {
+  execFileSync(command, args, { cwd: root, stdio: 'inherit', env: { ...process.env, CARGO_PROFILE_DEV_DEBUG: '0', ...environment } });
 }
 
 const probeTarget = join(outputBase, 'cargo-target');
@@ -32,6 +32,8 @@ run('cargo', ['build', '--locked', '--manifest-path', 'scripts/agent-sandbox-pha
 run('pnpm', ['build']);
 const config = join(output, 'tauri-preview.json');
 const launcher = join(probeTarget, 'debug/shellspan-sandbox-probe');
+const hash = async (file) => createHash('sha256').update(await readFile(file)).digest('hex');
+const launcherSha256 = await hash(launcher);
 const base = JSON.parse(await readFile(join(crate, 'tauri.conf.json'), 'utf8'));
 await writeFile(config, JSON.stringify({
   productName: label, identifier: 'com.shellspan.validation.agent-sandbox-preview-keychain',
@@ -41,12 +43,10 @@ await writeFile(config, JSON.stringify({
   plugins: { updater: { active: false } },
 }));
 run('pnpm', ['exec', 'tauri', 'build', '--debug', '--bundles', 'app', '--features',
-  'native-input-acceptance', '--config', config]);
+  'native-input-acceptance', '--config', config], { SHELLSPAN_MAC_SANDBOX_LAUNCHER_SHA256: launcherSha256 });
 const bundle = join(output, `${label}.app`);
 await cp(join(crate, 'target/debug/bundle/macos', `${label}.app`), bundle, { recursive: true, verbatimSymlinks: true });
 run('/usr/bin/codesign', ['--verify', '--deep', '--strict', bundle]);
-const hash = async (file) => createHash('sha256').update(await readFile(file)).digest('hex');
-const launcherSha256 = await hash(launcher);
 assert.equal(await hash(join(bundle, 'Contents/Resources/acceptance/nono-probe')), launcherSha256);
 const start = join(output, '启动沙箱内测.command');
 await cp(join(root, 'scripts/agent-sandbox-phase1/launch-mac-sandbox-preview.sh'), start);
@@ -58,20 +58,18 @@ async function verifyOwnedDirectory(path) {
     `Expected an owned directory at ${path}`);
 }
 
-const appDataRoot = join(await realpath(homedir()), '.shellspan');
-const sandboxRoot = join(appDataRoot, 'agent-sandbox');
-for (const directory of [appDataRoot, sandboxRoot]) {
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  await verifyOwnedDirectory(directory);
-}
+const userHome = await realpath(homedir());
+const sandboxPrefix = '.shellspan-agent-sandbox-preview-';
+const legacySandboxRoot = join(userHome, '.shellspan/agent-sandbox');
 
 async function prepareRuntime(previousRuntime) {
   if (previousRuntime) {
     await verifyOwnedDirectory(previousRuntime);
-    if (dirname(previousRuntime) === sandboxRoot && basename(previousRuntime).startsWith('preview-')) {
+    if (dirname(previousRuntime) === userHome && basename(previousRuntime).startsWith(sandboxPrefix)) {
       return previousRuntime;
     }
-    assert(dirname(previousRuntime) === '/private/tmp' && basename(previousRuntime).startsWith('ss-sandbox-desktop-'),
+    assert((dirname(previousRuntime) === '/private/tmp' && basename(previousRuntime).startsWith('ss-sandbox-desktop-'))
+      || (dirname(previousRuntime) === legacySandboxRoot && basename(previousRuntime).startsWith('preview-')),
       'Expected a managed legacy preview directory');
     const previousData = join(previousRuntime, 'data');
     await verifyOwnedDirectory(previousData);
@@ -83,7 +81,7 @@ async function prepareRuntime(previousRuntime) {
       'The previous preview needs to finish sandbox recovery before migrating');
   }
 
-  const runtime = await mkdtemp(join(sandboxRoot, 'preview-'));
+  const runtime = await mkdtemp(join(userHome, sandboxPrefix));
   for (const name of ['home', 'data', 'app-directories']) {
     const destination = join(runtime, name);
     if (previousRuntime) {

@@ -1,12 +1,16 @@
 //! Directory ownership and recovery for the isolated macOS acceptance bundle.
 use serde::{Deserialize, Serialize};
+use std::ffi::CString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::mem::MaybeUninit;
 use std::os::fd::AsRawFd;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+
+use super::process::local_process_group_gone;
 
 const JOURNAL: &str = "managed-directory-guard.json";
 
@@ -38,24 +42,11 @@ impl Directory {
                 .map(PathBuf::from)
                 .filter(|path| path.is_absolute())
                 .ok_or_else(|| io::Error::other("expected an absolute preview home directory"))?;
-            (
-                home.canonicalize()?.join(".shellspan/agent-sandbox"),
-                "preview-",
-            )
+            (home.canonicalize()?, ".shellspan-agent-sandbox-preview-")
         } else {
             (PathBuf::from("/private/tmp"), "ss-sandbox-desktop-")
         };
-        if root.parent() != Some(parent.as_path())
-            || !root
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with(prefix))
-            || root.canonicalize()? != root
-        {
-            return Err(io::Error::other(
-                "expected an owned desktop acceptance directory",
-            ));
-        }
+        validate_anchor_path(root, &parent, prefix)?;
         let anchor = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
@@ -144,7 +135,7 @@ impl Directory {
             return Err(io::Error::other("managed directory identity changed"));
         }
         if let Phase::Running { group } = record.phase {
-            if !group_gone(group)? {
+            if !local_process_group_gone(group)? {
                 return Ok(false);
             }
         }
@@ -155,18 +146,35 @@ impl Directory {
     }
 }
 
-fn group_gone(group: i32) -> io::Result<bool> {
-    if group <= 1 {
-        return Err(io::Error::other("invalid recorded process group"));
+fn validate_anchor_path(root: &Path, parent: &Path, prefix: &str) -> io::Result<()> {
+    if root.parent() != Some(parent)
+        || !root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with(prefix))
+        || root.canonicalize()? != root
+    {
+        return Err(io::Error::other(
+            "expected an owned desktop acceptance directory",
+        ));
     }
-    if unsafe { libc::kill(-group, 0) } == 0 {
-        return Ok(false);
+    // The immutable anchor protects its own name and direct entries.
+    // Replacing an ancestor requires mutation rights in its parent directory.
+    for ancestor in parent.ancestors().skip(1) {
+        let path = CString::new(ancestor.as_os_str().as_bytes())?;
+        if fs::metadata(ancestor)?.uid() == unsafe { libc::geteuid() }
+            || unsafe { libc::access(path.as_ptr(), libc::W_OK) } == 0
+        {
+            return Err(io::Error::other(
+                "an ancestor of the managed sandbox directory can be replaced",
+            ));
+        }
+        match io::Error::last_os_error().raw_os_error() {
+            Some(libc::EACCES | libc::EPERM | libc::EROFS) => {}
+            _ => return Err(io::Error::last_os_error()),
+        }
     }
-    match io::Error::last_os_error().raw_os_error() {
-        Some(libc::ESRCH) => Ok(true),
-        Some(libc::EPERM) => Ok(false),
-        _ => Err(io::Error::last_os_error()),
-    }
+    Ok(())
 }
 
 pub(super) struct Lease {
@@ -177,7 +185,7 @@ pub(super) struct Lease {
 impl Lease {
     pub(super) fn acquire(root: &Path) -> io::Result<Self> {
         let directory = Directory::open(root)?;
-        if directory.journal()?.is_some() || directory.flags()? & libc::UF_IMMUTABLE != 0 {
+        if !directory.recover()? || directory.flags()? & libc::UF_IMMUTABLE != 0 {
             return Err(io::Error::other(
                 "managed sandbox directory requires recovery",
             ));
@@ -188,6 +196,14 @@ impl Lease {
         };
         directory.save(record)?;
         directory.protect(true)?;
+        if !fs::symlink_metadata(root).is_ok_and(|current| {
+            current.is_dir() && (current.dev(), current.ino()) == record.anchor
+        }) {
+            directory.protect(false)?;
+            return Err(io::Error::other(
+                "managed sandbox directory changed during acquisition",
+            ));
+        }
         Ok(Self { directory, record })
     }
 
@@ -205,7 +221,7 @@ impl Lease {
 
     pub(super) fn record_ended(&mut self) -> io::Result<()> {
         if let Phase::Running { group } = self.record.phase {
-            if !group_gone(group)? {
+            if !local_process_group_gone(group)? {
                 return Err(io::Error::other("prior sandbox process group remains live"));
             }
         }
@@ -233,5 +249,57 @@ pub(crate) fn recover_on_startup(root: PathBuf) {
                 return;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::process::CommandExt;
+    use std::process::Command;
+
+    #[test]
+    fn managed_anchor_rejects_a_replaceable_ancestor() {
+        let root = tempfile::Builder::new()
+            .prefix("ss-sandbox-desktop-")
+            .tempdir_in("/private/tmp")
+            .unwrap();
+        validate_anchor_path(
+            root.path(),
+            Path::new("/private/tmp"),
+            "ss-sandbox-desktop-",
+        )
+        .unwrap();
+
+        let parent = root.path().join("parent");
+        let nested = parent.join("preview-workspace");
+        fs::create_dir_all(&nested).unwrap();
+        let error = validate_anchor_path(&nested, &parent, "preview-").unwrap_err();
+        assert!(error.to_string().contains("ancestor"));
+    }
+
+    #[test]
+    fn acquisition_recovers_a_previous_lease_once_its_group_exits() {
+        let root = tempfile::Builder::new()
+            .prefix("ss-sandbox-desktop-")
+            .tempdir_in("/private/tmp")
+            .unwrap();
+        fs::create_dir(root.path().join("data")).unwrap();
+        let mut lease = Lease::acquire(root.path()).unwrap();
+        let mut child = Command::new("/bin/sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        lease.record_group(child.id()).unwrap();
+        drop(lease);
+
+        let acquired_while_running = Lease::acquire(root.path()).is_ok();
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let recovered = Lease::acquire(root.path()).unwrap();
+        assert!(recovered.release().unwrap());
+        assert!(!acquired_while_running);
+        assert!(!root.path().join("data").join(JOURNAL).exists());
     }
 }

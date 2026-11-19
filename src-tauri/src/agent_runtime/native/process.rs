@@ -662,6 +662,7 @@ fn spawn_local_child_native(
         child,
         sandbox_temp,
         timeout,
+        false,
     )
 }
 
@@ -684,6 +685,7 @@ fn manage_local_child_native(
     mut child: Child,
     sandbox_temp: Option<tempfile::TempDir>,
     timeout: Duration,
+    wait_for_group: bool,
 ) -> Result<Arc<ManagedProcessNative>, String> {
     let containment = LocalProcessContainmentNative::attach(&mut child)?;
     let stdin = child.stdin.take();
@@ -753,6 +755,7 @@ fn manage_local_child_native(
             timeout,
             containment,
             io,
+            wait_for_group,
         )
     });
     readiness
@@ -767,7 +770,7 @@ fn manage_local_child_native(
     target_os = "macos",
     target_arch = "aarch64"
 ))]
-pub(super) fn spawn_mac_sandbox_acceptance_process(
+pub(super) fn prepare_mac_sandbox_acceptance_process(
     request: &crate::agent_runtime::AgentRequestNative,
     target_id: &str,
     command: &str,
@@ -776,14 +779,31 @@ pub(super) fn spawn_mac_sandbox_acceptance_process(
     launcher: &Path,
     timeout: Duration,
     lease: &mut super::mac_sandbox_workspace::Lease,
-) -> Result<(Arc<ManagedProcessNative>, std::fs::File), String> {
+) -> Result<
+    (
+        Arc<ManagedProcessNative>,
+        std::fs::File,
+        std::os::unix::net::UnixStream,
+    ),
+    String,
+> {
     use std::os::unix::net::UnixStream;
     use std::os::{fd::AsRawFd, unix::process::CommandExt};
 
-    let temporary = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let temporary_root = workspace
+        .parent()
+        .ok_or("Expected a managed sandbox workspace")?
+        .join("temporary");
+    if !std::fs::symlink_metadata(&temporary_root)
+        .map_err(|error| error.to_string())?
+        .is_dir()
+    {
+        return Err("Expected a real sandbox temporary directory".into());
+    }
+    let temporary = tempfile::tempdir_in(&temporary_root).map_err(|error| error.to_string())?;
     let receipt = tempfile::tempfile().map_err(|error| error.to_string())?;
     let fd = receipt.as_raw_fd();
-    let (gate_reader, mut gate_writer) = UnixStream::pair().map_err(|error| error.to_string())?;
+    let (gate_reader, gate_writer) = UnixStream::pair().map_err(|error| error.to_string())?;
     let gate_fd = gate_reader.as_raw_fd();
     let writable = if super::mac_sandbox_automated() && command.starts_with("printf init > init-") {
         temporary.path().join("absent")
@@ -847,11 +867,9 @@ pub(super) fn spawn_mac_sandbox_acceptance_process(
         child,
         Some(temporary),
         timeout,
+        true,
     )?;
-    gate_writer
-        .write_all(b"G")
-        .map_err(|error| error.to_string())?;
-    Ok((process, receipt))
+    Ok((process, receipt, gate_writer))
 }
 
 #[cfg(test)]
@@ -1083,6 +1101,21 @@ fn spawn_reader(
 #[cfg(not(target_os = "windows"))]
 struct LocalProcessContainmentNative;
 
+#[cfg(unix)]
+pub(super) fn local_process_group_gone(group: i32) -> std::io::Result<bool> {
+    if group <= 1 {
+        return Err(std::io::Error::other("invalid recorded process group"));
+    }
+    if unsafe { libc::kill(-group, 0) } == 0 {
+        return Ok(false);
+    }
+    match std::io::Error::last_os_error().raw_os_error() {
+        Some(libc::ESRCH) => Ok(true),
+        Some(libc::EPERM) => Ok(false),
+        _ => Err(std::io::Error::last_os_error()),
+    }
+}
+
 #[cfg(not(target_os = "windows"))]
 impl LocalProcessContainmentNative {
     fn attach(_child: &mut Child) -> Result<Self, String> {
@@ -1254,12 +1287,15 @@ fn run_local_worker(
     timeout: Duration,
     containment: LocalProcessContainmentNative,
     io: tokio::runtime::Runtime,
+    wait_for_group: bool,
 ) {
     let (output_tx, output_rx) = mpsc::sync_channel(32);
     spawn_reader(stdout, output_tx.clone(), true);
     spawn_reader(stderr, output_tx, false);
     let deadline = Instant::now() + timeout;
     let mut pending_input: Option<PendingLocalInput> = None;
+    let mut leader_exit = None;
+    let mut group_stop = None;
     loop {
         while let Ok(control) = controls.try_recv() {
             match control {
@@ -1282,6 +1318,13 @@ fn run_local_worker(
                     }
                 }
                 ProcessControlNative::Kill { signal } => {
+                    if wait_for_group {
+                        if group_stop.is_none() {
+                            containment.terminate(&mut child, ProcessSignalNative::Kill);
+                            group_stop = Some(ProcessLifecycleNative::Cancelled);
+                        }
+                        continue;
+                    }
                     let requested = containment.terminate(&mut child, signal);
                     let settle_deadline = Instant::now() + Duration::from_secs(2);
                     let mut status = None;
@@ -1310,32 +1353,60 @@ fn run_local_worker(
                 }
             }
         }
-        while let Ok(output) = output_rx.try_recv() {
+        for output in output_rx.try_iter().take(32) {
             process.push_output(output);
         }
-        match child.try_wait() {
-            Ok(Some(status)) => {
+        if leader_exit.is_none() {
+            match child.try_wait() {
+                Ok(status) => leader_exit = status,
+                Err(error) => {
+                    process.finish(
+                        ProcessLifecycleNative::Failed,
+                        None,
+                        false,
+                        Some(format!("Failed to observe local command: {error}")),
+                    );
+                    return;
+                }
+            }
+        }
+        if let Some(status) = leader_exit {
+            #[cfg(unix)]
+            let group_gone =
+                !wait_for_group || local_process_group_gone(child.id() as i32).unwrap_or(false);
+            #[cfg(not(unix))]
+            let group_gone = true;
+            if group_gone {
                 drain_process_output(&process, &output_rx);
-                process.finish(ProcessLifecycleNative::Exited, status.code(), true, None);
+                let lifecycle = group_stop.unwrap_or(ProcessLifecycleNative::Exited);
+                let code = if lifecycle == ProcessLifecycleNative::TimedOut {
+                    None
+                } else {
+                    status.code()
+                };
+                process.finish(lifecycle, code, true, None);
                 return;
             }
-            Ok(None) => {}
-            Err(error) => {
-                process.finish(
-                    ProcessLifecycleNative::Failed,
-                    None,
-                    false,
-                    Some(format!("Failed to observe local command: {error}")),
-                );
-                return;
+            if group_stop.is_none() {
+                // A foreground command owns its whole process group. Keep the
+                // handle and temporary directory until remaining members exit.
+                containment.terminate(&mut child, ProcessSignalNative::Kill);
+                group_stop = Some(ProcessLifecycleNative::Exited);
             }
         }
         if Instant::now() >= deadline {
-            let confirmed = containment.terminate(&mut child, ProcessSignalNative::Kill);
-            let _ = child.wait();
-            drain_process_output(&process, &output_rx);
-            process.finish(ProcessLifecycleNative::TimedOut, None, confirmed, None);
-            return;
+            if wait_for_group {
+                if group_stop.is_none() {
+                    containment.terminate(&mut child, ProcessSignalNative::Kill);
+                    group_stop = Some(ProcessLifecycleNative::TimedOut);
+                }
+            } else {
+                let confirmed = containment.terminate(&mut child, ProcessSignalNative::Kill);
+                let _ = child.wait();
+                drain_process_output(&process, &output_rx);
+                process.finish(ProcessLifecycleNative::TimedOut, None, confirmed, None);
+                return;
+            }
         }
         if let Some(input) = pending_input.as_mut() {
             let polled = input.poll(&mut stdin, &io);

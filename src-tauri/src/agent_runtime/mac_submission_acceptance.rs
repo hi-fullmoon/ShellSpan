@@ -194,6 +194,10 @@ impl AgentRuntime {
             "sandbox-operator-write" if sandbox_direct => format!("printf entered > exit-{id}"),
             "sandbox-operator-outside-read" if sandbox_direct => "cat ../launcher.json".into(),
             "sandbox-gate" if sandbox_direct => format!("printf gate > gate-{id}"),
+            "sandbox-cancel-before-launch" if sandbox_direct => format!("printf entered > cancelled-{id}"),
+            "sandbox-descendant" if sandbox_direct => {
+                format!("/bin/sleep 30 & printf '%s\\n' \"$!\" > pid-{id}; exit 0")
+            }
             "sandbox-init" if sandbox_direct => format!("printf init > init-{id}"),
             "sandbox-exit" if sandbox_direct => format!("printf entered > exit-{id}; printf nonzero >&2; exit 42"),
             "sandbox-exit-125" if sandbox_direct => format!("printf entered > exit-{id}; printf 'sandbox launcher: command diagnostic' >&2; exit 125"),

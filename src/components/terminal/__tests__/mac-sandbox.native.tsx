@@ -1,6 +1,7 @@
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { createRoot } from 'react-dom/client';
 import { AiSettingsSection } from '@/components/ai/ai-settings-section';
+import { AgentExecutionSurfaceSelector } from '@/components/ai/agent-execution-surface-selector';
 import { AgentPermissionSelector } from '@/components/ai/agent-permission-selector';
 import { AiApprovalPanel } from '@/components/ai/workspace/ai-approval-panel';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -9,7 +10,7 @@ import {
   invokeCancelAgentRuntime, invokeCreateAgentRuntimeSession, invokeCreateLocalSession,
   invokeDecideTerminalAcceptanceCommand, invokeGetAgentRuntimeEvents, invokeGetAgentRuntimeSession,
   invokeInspectAgentRuntimeRecovery, invokeListAiRoutes, invokeLoadPreferences,
-  invokeRunTerminalAcceptanceCommand, type TerminalAcceptanceSourceKind,
+  invokeRunTerminalAcceptanceCommand, invokeSetAgentRuntimeExecutionSurface, type TerminalAcceptanceSourceKind,
 } from '@/lib/ipc/tauri';
 import { initI18n, t } from '@/locales';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
@@ -166,6 +167,54 @@ async function verifyOperatorPermissionCopy(terminalId: string, sandboxEnabled: 
   }
 }
 
+async function verifyDirectOnly(home: string, terminalId: string) {
+  const section = document.createElement('section');
+  document.body.append(section);
+  const root = createRoot(section);
+  try {
+    for (const [locale, width] of [['zh-CN', 360], ['en-US', 760]] as const) {
+      section.style.width = `${width}px`;
+      await initI18n(locale);
+      useAppStore.setState({ locale });
+      root.render(<TooltipProvider><AgentExecutionSurfaceSelector surface="direct"
+        realTerminalState="ready" sandboxDirectOnly="local" /></TooltipProvider>);
+      const trigger = await until(async () => section.querySelector('button') ?? undefined, 'Execution surface trigger');
+      trigger.click();
+      const visible = await until(async () => [...document.querySelectorAll<HTMLElement>('.ai-execution-surface-menu [role=menuitemradio]')]
+        .find((option) => option.textContent?.startsWith(t('agent.executionSurface.v1.visibleCommand'))),
+      'Visible command option');
+      const menu = visible.closest<HTMLElement>('.ai-execution-surface-menu');
+      assert(visible.getAttribute('aria-disabled') === 'true'
+        && visible.getAttribute('aria-description') === t('ai.error.localSandboxDirectRequired')
+        && menu && menu.scrollWidth <= menu.clientWidth, `Invalid sandbox restriction in ${locale}`);
+      visible.click();
+      assert(trigger.getAttribute('data-execution-surface') === 'direct', 'Visible command was selected');
+      trigger.click();
+      await until(async () => document.querySelector('.ai-execution-surface-menu') ? undefined : true, 'Closed execution menu');
+    }
+  } finally {
+    root.unmount();
+    section.remove();
+    await initI18n('zh-CN');
+    useAppStore.setState({ locale: 'zh-CN' });
+  }
+
+  const sessionId = `phase3-submission-${crypto.randomUUID()}`;
+  const request = {
+    sessionId, taskId: sessionId, goal: 'Validate the execution surface',
+    target: { kind: 'local' as const, targetId: `terminal-${terminalId}`, sessionId: terminalId, cwd: home },
+    permissionMode: 'requestApproval' as const,
+  };
+  const rejection = (operation: Promise<unknown>) => operation.then(() => '', String);
+  assert((await rejection(invokeCreateAgentRuntimeSession({ ...request, executionSurface: 'boundTerminal' })))
+    .includes('MAC_SANDBOX_PREVIEW_DIRECT_ONLY'), 'A visible sandbox session could be created');
+  await invokeCreateAgentRuntimeSession({ ...request, executionSurface: 'direct' });
+  assert((await rejection(invokeSetAgentRuntimeExecutionSurface({ sessionId, surface: 'boundTerminal' })))
+    .includes('MAC_SANDBOX_PREVIEW_DIRECT_ONLY'), 'An existing sandbox session switched to visible execution');
+  assert((await invokeGetAgentRuntimeSession({ sessionId })).header.executionSurface === 'direct',
+    'The rejected change altered the saved execution surface');
+}
+
 async function verifyOperatorCommands(home: string, terminalId: string) {
   for (const kind of ['sandbox-operator-write', 'sandbox-operator-outside-read'] as const) {
     const { record, prepared } = await submitCase(home, terminalId, kind, 'operator');
@@ -253,11 +302,13 @@ async function exercise(home: string): Promise<Case[]> {
     && (await artifact(`exit-${disabledCall.record.callId}`)).content === null, JSON.stringify(disabledResult));
   await host('progress', { kind: 'sandbox-operator-disabled', result: disabledResult });
   await toggle(true);
+  await verifyDirectOnly(home, terminal.sessionId);
   await verifyOperatorPermissionCopy(terminal.sessionId, true);
   await verifyOperatorCommands(home, terminal.sessionId);
   await verifyReviewedCommands(home, terminal.sessionId);
   const records: Case[] = [];
-  for (const kind of ['sandbox-gate', 'sandbox-init', 'sandbox-exit', 'sandbox-exit-125', 'sandbox-cancel', 'sandbox-timeout', 'sandbox-restart'] as const) {
+  for (const kind of ['sandbox-gate', 'sandbox-init', 'sandbox-exit', 'sandbox-exit-125',
+    'sandbox-cancel-before-launch', 'sandbox-descendant', 'sandbox-cancel', 'sandbox-timeout', 'sandbox-restart'] as const) {
     const { record, decision } = await prepareCase(home, terminal.sessionId, kind,
       kind === 'sandbox-exit' ? 'scopedAutopilot' : 'requestApproval');
     if (kind === 'sandbox-gate') {
@@ -266,6 +317,11 @@ async function exercise(home: string): Promise<Case[]> {
         && event.data.callId === record.callId && event.data.status === 'approved'), 'Approval was not committed');
       await toggle(false);
       await host('release', {});
+    }
+    if (kind === 'sandbox-cancel-before-launch') {
+      await until(async () => (await host<{ ready: boolean }>('launch-ready')).ready ? true : undefined,
+        'Launcher is running behind a closed gate');
+      await invokeCancelAgentRuntime({ sessionId: record.sessionId });
     }
     if (kind === 'sandbox-cancel' || kind === 'sandbox-restart') {
       await until(async () => (await artifact(`pid-${record.callId}`)).running ? true : undefined, 'Actual command child');
@@ -298,6 +354,17 @@ async function exercise(home: string): Promise<Case[]> {
       assert(data?.started === true && data.exitCode === (kind === 'sandbox-exit' ? 42 : 125)
         && data.launcherExitCode === undefined
         && (await artifact(`exit-${record.callId}`)).content === 'entered', JSON.stringify(result));
+    } else if (kind === 'sandbox-cancel-before-launch') {
+      const guard = await readGuard();
+      assert(!dispatched(history, record) && result.status === 'cancelled' && data?.started === false
+        && (await artifact(`cancelled-${record.callId}`)).content === null
+        && !guard.protected && guard.phase === null, JSON.stringify({ result, guard }));
+    } else if (kind === 'sandbox-descendant') {
+      const child = await artifact(`pid-${record.callId}`);
+      const guard = await readGuard();
+      assert(result.status === 'completed' && data?.started === true && data.exitCode === 0
+        && data.terminationConfirmed === true && child.content && !child.running
+        && !guard.protected && guard.phase === null, JSON.stringify({ result, child, guard }));
     } else {
       const child = await artifact(`pid-${record.callId}`);
       assert(result.status === (kind === 'sandbox-cancel' ? 'cancelled' : 'timedOut')

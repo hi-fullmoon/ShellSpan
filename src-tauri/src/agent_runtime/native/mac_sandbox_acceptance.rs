@@ -1,9 +1,11 @@
 //! Scoped to installed arm64 debug acceptance bundles.
 use super::*;
 use std::fs;
-use std::os::unix::fs::MetadataExt;
+use std::io::Read;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
 pub(crate) const EXECUTOR: &str = "nonoMacAcceptance";
+const LAUNCHER_SHA256: Option<&str> = option_env!("SHELLSPAN_MAC_SANDBOX_LAUNCHER_SHA256");
 
 pub(crate) fn active() -> bool {
     automated() || preview_active()
@@ -27,6 +29,38 @@ pub(super) struct Binding {
     pub(super) digest: String,
 }
 
+fn verify_launcher(path: &Path, expected: &str) -> Result<(), String> {
+    let mut launcher = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|error| error.to_string())?;
+    if !launcher
+        .metadata()
+        .map_err(|error| error.to_string())?
+        .is_file()
+    {
+        return Err("Expected a bundled sandbox launcher file".into());
+    }
+    let mut digest = Sha256::new();
+    let mut buffer = [0; 64 * 1024];
+    loop {
+        let count = launcher
+            .read(&mut buffer)
+            .map_err(|error| error.to_string())?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    if hex::encode(digest.finalize()) != expected {
+        return Err(
+            "LOCAL_SANDBOX_LAUNCHER_CHANGED: bundled launcher failed its integrity check".into(),
+        );
+    }
+    Ok(())
+}
+
 fn identity(path: &Path, directory: bool) -> Result<(u64, u64), String> {
     let stat = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
     if (directory && !stat.is_dir()) || (!directory && !stat.is_file()) {
@@ -43,6 +77,7 @@ impl Binding {
             identity(&self.workspace, true)?,
             &self.launcher,
             identity(&self.launcher, false)?,
+            LAUNCHER_SHA256.ok_or("Missing bundled sandbox launcher checksum")?,
         ))
         .map_err(|error| error.to_string())?;
         Ok(hex::encode(Sha256::digest(bytes)))
@@ -52,7 +87,10 @@ impl Binding {
         if self.current_digest()? != self.digest {
             return Err("Acceptance workspace or launcher changed before dispatch".into());
         }
-        Ok(())
+        verify_launcher(
+            &self.launcher,
+            LAUNCHER_SHA256.ok_or("Missing bundled sandbox launcher checksum")?,
+        )
     }
 
     pub(super) fn wait_for_gate_case(
@@ -69,6 +107,26 @@ impl Binding {
         while !signals.join("release").is_file() {
             if cancel.is_cancelled() || Instant::now() >= deadline {
                 return Err("Acceptance dispatch barrier cancelled or timed out".into());
+            }
+            std::thread::sleep(Duration::from_millis(15));
+        }
+        Ok(())
+    }
+
+    pub(super) fn wait_for_launch_cancellation_case(
+        &self,
+        command: &str,
+        cancel: &CancellationToken,
+    ) -> Result<(), String> {
+        if !automated() || !command.starts_with("printf entered > cancelled-") {
+            return Ok(());
+        }
+        fs::write(self.directory.join("signals/launch-ready"), b"ready")
+            .map_err(|error| error.to_string())?;
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !cancel.is_cancelled() {
+            if Instant::now() >= deadline {
+                return Err("Acceptance timed out waiting for launch cancellation".into());
             }
             std::thread::sleep(Duration::from_millis(15));
         }
@@ -134,4 +192,31 @@ pub(super) fn resolve(
     };
     binding.digest = binding.current_digest()?;
     Ok(Some(binding))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn launcher_integrity_rejects_changed_bytes_under_the_same_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("launcher");
+        fs::copy("/bin/sh", &path).unwrap();
+        let original = identity(&path, false).unwrap();
+        let checksum = hex::encode(Sha256::digest(fs::read(&path).unwrap()));
+        verify_launcher(&path, &checksum).unwrap();
+
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(&[0])
+            .unwrap();
+        assert_eq!(identity(&path, false).unwrap(), original);
+        assert!(verify_launcher(&path, &checksum)
+            .unwrap_err()
+            .contains("LOCAL_SANDBOX_LAUNCHER_CHANGED"));
+    }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useLayoutEffect } from 'react';
 import type { AppSection } from '@/types';
 import { useTerminalTaskNavigation } from '@/components/terminal/agent-terminal-task-navigation';
 import { latestTerminalBusyAttempt } from '@/lib/ai/terminal-busy-feedback';
@@ -12,7 +12,7 @@ import { useAppStore } from '@/stores/appStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useReconnectSession } from '@/hooks/useReconnectSession';
-import { isLocalAgentSandboxPreview, isTauriRuntime } from '@/lib/ipc/tauri';
+import { isTauriRuntime } from '@/lib/ipc/tauri';
 import { AgentPermissionSelector } from '../agent-permission-selector';
 import { AgentExecutionSurfaceSelector } from '../agent-execution-surface-selector';
 import { AgentTerminalBusyNotice } from '../agent-terminal-busy-notice';
@@ -39,15 +39,6 @@ export function AiWorkspaceController({
 }: AiWorkspaceControllerProps): React.ReactNode {
   const controller = useAiSessionController({ scope, adapter, focusMode });
   const sandboxEnabled = useAiSettingsStore((state) => state.agentSandboxEnabled);
-  const [isSandboxPreview, setIsSandboxPreview] = useState(false);
-  useEffect(() => {
-    if (scope !== 'terminal' || !isTauriRuntime()) return;
-    let disposed = false;
-    void isLocalAgentSandboxPreview().then((preview) => {
-      if (!disposed) setIsSandboxPreview(preview);
-    }).catch(() => undefined);
-    return () => { disposed = true; };
-  }, [scope]);
   const displayedSessionId = controller.view?.summary.id ?? null;
   useLayoutEffect(() => {
     if (scope !== 'terminal') return;
@@ -180,7 +171,7 @@ export function AiWorkspaceController({
               variant="composer"
               disabled={runtimeSettingsLocked}
               mode={controller.selectedPermission}
-              localDirectSandboxEnabled={isSandboxPreview && sandboxEnabled && controller.selectedExecutionSurface === 'direct'}
+              localDirectSandboxEnabled={controller.sandboxDirectOnly === 'local' && sandboxEnabled && controller.selectedExecutionSurface === 'direct'}
               onModeChange={controller.view && !configuringContinuation ? controller.selectPermission : undefined}
             />
         )

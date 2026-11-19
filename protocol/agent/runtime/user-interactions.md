@@ -17,6 +17,12 @@ describe the restrictions for that approval. A command without such a binding
 retains the ordinary account-permission warning. The invocation result carries
 the evidence of whether a sandboxed process actually started.
 
+The macOS local sandbox preview accepts foreground Direct commands. Local terminal
+sessions reject visible execution when created or switched. The launcher remains
+behind its startup gate until the process group is durable, the Agent admits
+dispatch, and the process handle is registered. The handle stays active until
+the process group terminates.
+
 ## User questions
 
 `ask_user_question` collects non-sensitive decisions and information. Options are

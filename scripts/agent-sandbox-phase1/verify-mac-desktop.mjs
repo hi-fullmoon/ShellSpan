@@ -46,7 +46,7 @@ async function readOptional(path) {
 }
 
 async function witness(name) {
-  assert(/^(?:gate|init|exit|pid|before|after)-[0-9a-f-]{36}$/.test(name), 'Unexpected artifact name');
+  assert(/^(?:gate|init|exit|pid|before|after|cancelled)-[0-9a-f-]{36}$/.test(name), 'Unexpected artifact name');
   const content = await readOptional(join(home, name));
   const pid = name.startsWith('pid-') && content ? Number(content.trim().split('\n')[0]) : 0;
   let running = false;
@@ -81,6 +81,7 @@ const server = createServer(async (request, response) => {
   try {
     if (route === 'config') return reply({ home, phase, previous });
     if (route === 'ready') return reply({ ready: Boolean(await readOptional(join(signals, 'approval-ready'))) });
+    if (route === 'launch-ready') return reply({ ready: Boolean(await readOptional(join(signals, 'launch-ready'))) });
     if (route === 'guard') return reply(await guard());
     if (route === 'witness') return reply(await witness(url.searchParams.get('name') ?? ''));
     if (request.method !== 'POST') return response.writeHead(405).end();
@@ -192,7 +193,9 @@ try {
       resources: { ...base.bundle.resources, [relative(crateDirectory, launcher)]: 'acceptance/nono-probe' } },
   }));
   await run('pnpm', ['exec', 'tauri', 'build', '--debug', '--bundles', 'app', '--features',
-    'native-input-acceptance', '--config', config], { environment: { ...process.env, CARGO_PROFILE_DEV_DEBUG: '0' } });
+    'native-input-acceptance', '--config', config], { environment: {
+    ...process.env, CARGO_PROFILE_DEV_DEBUG: '0', SHELLSPAN_MAC_SANDBOX_LAUNCHER_SHA256: launcherSha256,
+  } });
   const bundle = join(output, `${label}.app`);
   await cp(join(root, 'src-tauri/target/debug/bundle/macos', `${label}.app`), bundle, { recursive: true, verbatimSymlinks: true });
   await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', bundle]);

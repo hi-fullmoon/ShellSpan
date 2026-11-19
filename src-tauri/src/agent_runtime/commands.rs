@@ -291,12 +291,13 @@ fn apply_connection_sandbox(
         target_os = "macos",
         target_arch = "aarch64"
     ))]
-    if super::native::mac_sandbox_preview_active() {
+    if super::native::mac_sandbox_trial_active() {
         if let Some(target) = request
             .target
             .as_mut()
             .filter(|target| target.kind == "local" && target.target_id != "workbench-ai")
         {
+            require_mac_sandbox_direct(target, request.execution_surface)?;
             let workspace = crate::commands::terminal_acceptance_directory()?.join("home");
             let workspace = workspace
                 .to_str()
@@ -336,6 +337,27 @@ fn apply_connection_sandbox(
         {
             target.root_path = Some(policy.workspace);
         }
+    }
+    Ok(())
+}
+
+#[cfg(all(
+    feature = "native-input-acceptance",
+    debug_assertions,
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+fn require_mac_sandbox_direct(
+    target: &super::AgentSessionTarget,
+    surface: super::AgentExecutionSurface,
+) -> Result<(), String> {
+    if target.kind == "local"
+        && target.target_id != "workbench-ai"
+        && surface != super::AgentExecutionSurface::Direct
+    {
+        return Err(
+            "MAC_SANDBOX_PREVIEW_DIRECT_ONLY: use Direct execution in the managed workspace".into(),
+        );
     }
     Ok(())
 }
@@ -572,6 +594,17 @@ pub(crate) fn agent_runtime_set_execution_surface(
     configure_runtime(&app, &runtime)?;
     if input.surface == super::AgentExecutionSurface::BoundTerminal {
         let snapshot = runtime.session(&input.session_id)?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        if super::native::mac_sandbox_trial_active() {
+            if let Some(target) = &snapshot.header.target {
+                require_mac_sandbox_direct(target, input.surface)?;
+            }
+        }
         if let Some(target) = snapshot
             .header
             .target

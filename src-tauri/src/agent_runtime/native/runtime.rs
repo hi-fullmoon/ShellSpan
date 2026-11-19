@@ -2001,7 +2001,7 @@ impl NativeToolEngine {
                             return Err("Restricted runner was cancelled before dispatch".into());
                         }
                         if let Some(journal) = runner_journal.take() {
-                            journal()?;
+                            journal(&mut || Ok(()))?;
                         }
                         if cancellation.is_cancelled() || Instant::now() >= deadline {
                             return Err("Restricted runner was cancelled before sending".into());
@@ -2144,28 +2144,55 @@ impl NativeToolEngine {
                 target_arch = "aarch64"
             ))]
             AgentToolTargetNative::Local { target_id, .. } if desktop_sandbox.is_some() => {
+                use std::io::Write;
+
                 let binding = desktop_sandbox.expect("desktop sandbox binding");
                 binding.wait_for_gate_case(&arguments.command, cancellation)?;
                 let launch = database.with_local_sandbox_dispatch(|| {
                     if cancellation.is_cancelled() {
                         return Err("Local sandbox launch cancelled".into());
                     }
-                    binding.revalidate()?;
                     let mut lease = super::mac_sandbox_workspace::Lease::acquire(&binding.directory)
                         .map_err(|error| error.to_string())?;
                     let admitted = (|| {
                         binding.hold_crash_cut(&arguments.command, "before", cancellation)?;
-                        runner_journal.ok_or("Missing acceptance dispatch journal")?()?;
-                        super::process::spawn_mac_sandbox_acceptance_process(
+                        let journal = runner_journal.ok_or("Missing acceptance dispatch journal")?;
+                        binding.revalidate()?;
+                        let (process, receipt, mut gate) =
+                            super::process::prepare_mac_sandbox_acceptance_process(
                             &context.request, target_id, &arguments.command, reviewed_command,
                             &binding.workspace, &binding.launcher, timeout, &mut lease,
-                        )
+                        )?;
+                        let mut registered = false;
+                        let dispatched = binding
+                            .wait_for_launch_cancellation_case(&arguments.command, cancellation)
+                            .and_then(|()| {
+                                journal(&mut || {
+                                    if cancellation.is_cancelled() {
+                                        return Err("Local sandbox launch cancelled".into());
+                                    }
+                                    self.processes.insert(Arc::clone(&process))?;
+                                    registered = true;
+                                    gate.write_all(b"G").map_err(|error| error.to_string())
+                                })
+                            });
+                        drop(gate);
+                        if let Err(error) = dispatched {
+                            let snapshot = process.wait(Duration::from_secs(3))?;
+                            if registered {
+                                self.processes.remove_terminal(&snapshot.process_handle, snapshot.state)?;
+                            }
+                            return Err(error);
+                        }
+                        Ok((process, receipt))
                     })();
                     match admitted {
                         Ok((process, receipt)) => Ok((process, receipt, lease)),
                         Err(error) => {
-                            if let Err(cleanup) = lease.release() {
-                                log::warn!("Managed sandbox recovery retained directory protection: {cleanup}");
+                            match lease.release() {
+                                Ok(true) => {}
+                                Ok(false) => log::warn!("Managed sandbox recovery is waiting for the previous process group"),
+                                Err(cleanup) => log::warn!("Managed sandbox recovery retained directory protection: {cleanup}"),
                             }
                             Err(error)
                         }
@@ -2185,7 +2212,11 @@ impl NativeToolEngine {
                             json!({"sandbox":mac_sandbox_acceptance::EXECUTOR,"started":false}),
                             false,
                         );
-                        result.status = AgentToolResultStatusNative::Failed;
+                        result.status = if cancellation.is_cancelled() {
+                            AgentToolResultStatusNative::Cancelled
+                        } else {
+                            AgentToolResultStatusNative::Failed
+                        };
                         return Ok(result);
                     }
                 }
@@ -2249,7 +2280,23 @@ impl NativeToolEngine {
             }
             _ => return Err("Direct Exec requires a local or remote target".into()),
         };
-        self.processes.insert(Arc::clone(&process))?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let process_registered = desktop_launch.is_some();
+        #[cfg(not(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        )))]
+        let process_registered = false;
+        if !process_registered {
+            self.processes.insert(Arc::clone(&process))?;
+        }
         let background = arguments.background.unwrap_or(false);
         let snapshot = if background {
             process.snapshot()?

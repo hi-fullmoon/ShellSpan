@@ -130,7 +130,8 @@ pub(crate) struct NativeToolPreparation {
     pub(crate) exclusive: bool,
 }
 
-pub(crate) type RunnerDispatchJournal = Box<dyn FnOnce() -> Result<(), String> + Send>;
+pub(crate) type RunnerDispatchJournal =
+    Box<dyn FnOnce(&mut dyn FnMut() -> Result<(), String>) -> Result<(), String> + Send>;
 
 fn is_restricted_sudo(preparation: &NativeToolPreparation) -> bool {
     preparation.call.native_name.as_deref() == Some("exec_command")
@@ -2409,10 +2410,11 @@ impl AgentToolPipeline {
             let entry = entry.clone();
             let request = request.clone();
             let preparation = preparation.clone();
-            Box::new(move || {
+            Box::new(move |dispatch: &mut dyn FnMut() -> Result<(), String>| {
                 entry
                     .with_input_admission(|| {
-                        pipeline.append_execution_dispatch(&request, &preparation)
+                        pipeline.append_execution_dispatch(&request, &preparation)?;
+                        dispatch()
                     })?
                     .ok_or_else(|| "Agent Session is stopping".into())
             }) as RunnerDispatchJournal
@@ -2483,6 +2485,64 @@ impl AgentToolPipeline {
                 artifacts: Vec::new(),
             };
         }
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let cancelled_sandbox_approval = if preparation.call.arguments["sandboxExecutor"]
+            == super::native::MAC_SANDBOX_ACCEPTANCE_EXECUTOR
+        {
+            let events = self.sessions.all_events(&request.session_id)?;
+            let mut approval = None;
+            let mut dispatched = false;
+            for event in events
+                .iter()
+                .filter(|item| item.step_id.as_ref() == Some(&request.step_id))
+            {
+                match &event.payload {
+                    AgentSessionEventPayload::ToolApproval {
+                        call_id,
+                        approval_id,
+                        status,
+                        ..
+                    } if call_id == &result.call_id => {
+                        approval = (*status == AgentToolApprovalStatus::Approved)
+                            .then(|| approval_id.clone());
+                    }
+                    AgentSessionEventPayload::ToolExecution { call_id, .. }
+                        if call_id == &result.call_id =>
+                    {
+                        dispatched = true;
+                    }
+                    _ => {}
+                }
+            }
+            approval.filter(|_| !dispatched).map(|approval_id| {
+                result.status = AgentToolResultStatus::Cancelled;
+                result.data = Some(serde_json::json!({
+                    "sandbox": super::native::MAC_SANDBOX_ACCEPTANCE_EXECUTOR,
+                    "started": false,
+                }));
+                AgentScopedPayload {
+                    turn_id: Some(request.turn_id.clone()),
+                    step_id: Some(request.step_id.clone()),
+                    payload: AgentSessionEventPayload::ToolApproval {
+                        request_id: request.request_id.clone(),
+                        call_id: result.call_id.clone(),
+                        approval_id,
+                        status: AgentToolApprovalStatus::Cancelled,
+                        risk: preparation.call.effect,
+                        reason: Some(result.summary.clone()),
+                        expires_at_unix_ms: Some(preparation.expires_at_unix_ms),
+                        prompt: None,
+                    },
+                }
+            })
+        } else {
+            None
+        };
         let terminal_call_failure = (result.status == AgentToolResultStatus::Failed
             && is_terminal_call_blocked(&result.summary))
         .then(|| result.summary.clone());
@@ -2563,6 +2623,13 @@ impl AgentToolPipeline {
                 },
             }))
             .collect::<Vec<_>>();
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        payloads.extend(cancelled_sandbox_approval);
         payloads.push(AgentScopedPayload {
             turn_id: Some(request.turn_id.clone()),
             step_id: Some(request.step_id.clone()),
@@ -2779,34 +2846,6 @@ impl AgentToolPipeline {
             .get(&key)
             .is_some_and(|record| record.status == PendingStatus::Executing);
         if still_executing {
-            #[cfg(all(
-                feature = "native-input-acceptance",
-                debug_assertions,
-                target_os = "macos",
-                target_arch = "aarch64"
-            ))]
-            if pending.preparation.call.arguments["sandboxExecutor"]
-                == super::native::MAC_SANDBOX_ACCEPTANCE_EXECUTOR
-            {
-                if let Ok(Ok(outcome)) = &result {
-                    if outcome.summary.starts_with("AGENT_SANDBOX_DISABLED:")
-                        && outcome
-                            .data
-                            .as_ref()
-                            .is_some_and(|data| data["started"] == false)
-                    {
-                        self.append_terminal_approval(
-                            &pending,
-                            AgentToolApprovalStatus::Cancelled,
-                            AgentToolResultStatus::Cancelled,
-                            &outcome.summary,
-                        )?;
-                        self.changed.notify_waiters();
-                        self.continue_after_pending(entry, &pending).await?;
-                        return Ok(AgentToolDecisionSettlement::Resolved);
-                    }
-                }
-            }
             if let Err(error) = self.finish_native(&pending.request, &pending.preparation, result) {
                 if is_terminal_call_blocked(&error) {
                     self.commit_pending_not_started(&pending, "terminalExecutionBlocked")?;

@@ -111,7 +111,7 @@ export interface AiSessionController {
   readonly selectedProvider?: AiProviderConfig;
   readonly selectedPermission?: AgentPermissionMode;
   readonly selectedExecutionSurface: AgentExecutionSurface;
-  readonly sandboxDirectOnly: boolean;
+  readonly sandboxDirectOnly: 'local' | 'remote' | undefined;
   readonly glibcMismatch: RemoteGlibcMismatch | null;
   readonly settingsBusy: boolean;
   readonly selectModel: (provider: AiProviderConfig) => Promise<void>;
@@ -278,6 +278,18 @@ export function useAiSessionController({
   const initialFocusSessionId = useRef(focusMode ? useFocusStore.getState().conversationSessionId : null).current;
   const focusRestored = useRef(false);
   const activeTerminal = useTerminalStore((state) => state.sessions.find(item => item.sessionId === (focusMode ? focusTargetId : state.activeSessionId)));
+  const localTarget = scope === 'terminal' && activeTerminal?.host === 'local' && activeTerminal.port === 0;
+  const [isSandboxPreview, setIsSandboxPreview] = useState<boolean | null>(() => isTauriRuntime() ? null : false);
+  useEffect(() => {
+    if (!localTarget || isSandboxPreview !== null) return;
+    let disposed = false;
+    void isLocalAgentSandboxPreview().then(
+      (preview) => { if (!disposed) setIsSandboxPreview(preview); },
+      () => { if (!disposed) setIsSandboxPreview(false); },
+    );
+    return () => { disposed = true; };
+  }, [isSandboxPreview, localTarget]);
+  const localSandboxPreview = localTarget && isSandboxPreview === true;
   const activeTerminalId = useTerminalStore((state) => focusMode ? focusTargetId : state.activeSessionId);
   const sandboxProfileId = scope === 'terminal' && isTauriRuntime() ? activeTerminal?.profileId : undefined;
   const [sandboxProfile, setSandboxProfile] = useState<{ id: string; configured: boolean | null }>();
@@ -513,18 +525,20 @@ export function useAiSessionController({
   const currentAgentTarget = view?.snapshot.value.header.target;
   const sameSandboxTarget = currentAgentTarget?.sessionId === activeTerminalId;
   const sandboxRequired = sameSandboxTarget && currentAgentTarget?.remoteSandboxRequired === true;
-  const sandboxDirectOnly = sandboxConfigured || sandboxRequired;
+  const sandboxDirectOnly = localSandboxPreview ? 'local'
+    : sandboxConfigured || sandboxRequired ? 'remote' : undefined;
   const sandboxSessionChanged = sameSandboxTarget && sandboxProfile?.id === sandboxProfileId
     && typeof sandboxProfile?.configured === 'boolean' && currentAgentTarget?.remoteSandboxRequired !== undefined
     && currentAgentTarget.remoteSandboxRequired !== sandboxConfigured;
-  const sandboxNeedsDirect = !focusMode && sandboxConfigured && sameSandboxTarget
+  const sandboxNeedsDirect = !focusMode && (sandboxConfigured || localSandboxPreview) && sameSandboxTarget
     && view?.snapshot.value.header.executionSurface === 'boundTerminal';
   const visibleExecutionRequired = focusMode && Boolean(view && view.snapshot.value.header.executionSurface !== 'boundTerminal');
   const sandboxUnavailableReason =
-    sandboxChecking ? t('connection.sandbox.loading')
-    : focusMode && sandboxDirectOnly ? t('focus.sandboxRequiresDirect')
+    sandboxChecking || (localTarget && isSandboxPreview === null) ? t('connection.sandbox.loading')
+    : focusMode && sandboxDirectOnly
+      ? t(localSandboxPreview ? 'focus.localSandboxRequiresDirect' : 'focus.sandboxRequiresDirect')
     : sandboxSessionChanged ? t('ai.error.sandboxSessionPolicyChanged')
-    : sandboxNeedsDirect ? t('ai.error.sandboxDirectRequired') : null;
+    : sandboxNeedsDirect ? t(localSandboxPreview ? 'ai.error.localSandboxDirectRequired' : 'ai.error.sandboxDirectRequired') : null;
   const canStartAgent = !terminalSessionRestoring && !visibleExecutionRequired && (scope === 'workbench'
     || activeTerminal?.status === 'connected');
   const realTerminalState: RealTerminalPresentationState = activeTerminal?.status === 'connected' && activeTerminal.integrationState === 'ready'
@@ -535,7 +549,7 @@ export function useAiSessionController({
   const glibcMismatch = scope === 'terminal' && activeTerminal?.status === 'connected'
     ? remoteGlibcMismatch(activeTerminal.integrationReason) : null;
   const terminalCreationSurface = focusMode ? 'boundTerminal'
-    : sandboxConfigured || glibcMismatch ? 'direct' : newExecutionSurface;
+    : localSandboxPreview || sandboxConfigured || glibcMismatch ? 'direct' : newExecutionSurface;
   const needsDirectFallback = !focusMode && glibcMismatch !== null
     && view?.snapshot.value.header.executionSurface === 'boundTerminal'
     && view.snapshot.value.header.target?.sessionId === activeTerminal?.sessionId
@@ -742,7 +756,7 @@ export function useAiSessionController({
       || (target.kind === 'remote' && !target.profileId)) return input;
     // The preview backend supplies its managed root. A pre-existing terminal
     // may still report the ordinary shell directory.
-    if (target.kind === 'local' && await isLocalAgentSandboxPreview().catch(() => false)) return input;
+    if (target.kind === 'local' && localSandboxPreview) return input;
     const root = await resolveProjectRoot();
     if (!root) {
       // The directory enables structured file tools; full-access shell execution
@@ -758,7 +772,7 @@ export function useAiSessionController({
           : { ...target, rootPath: root },
       },
     };
-  }, [createInput, resolveProjectRoot]);
+  }, [createInput, localSandboxPreview, resolveProjectRoot]);
   const ensureProjectSession = useCallback(async (root?: string): Promise<string> => {
     if (focusMode && viewRef.current && viewRef.current.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId) {
       throw new Error(t('focus.continueFirst'));
