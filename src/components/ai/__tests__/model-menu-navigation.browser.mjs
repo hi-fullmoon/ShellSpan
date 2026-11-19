@@ -60,6 +60,13 @@ try {
           await page.locator('.ai-model-menu-cell').nth(index).focus();
           await page.keyboard.press('Enter');
           assert.equal(await menu.getAttribute('data-pane'), pane);
+          const search = menu.getByRole('textbox', { name: '搜索模型或服务商' });
+          const searchFocus = await search.evaluate(input => ({
+            active: input === document.activeElement,
+            inputOutline: getComputedStyle(input).outlineStyle,
+            groupOutline: getComputedStyle(input.closest('[data-slot="input-group"]')).outlineStyle,
+          }));
+          assert.deepEqual(searchFocus, { active: true, inputOutline: 'none', groupOutline: 'none' });
           await page.keyboard.press('Escape');
           await page.keyboard.press('Escape');
           await menu.waitFor({ state: 'hidden' });

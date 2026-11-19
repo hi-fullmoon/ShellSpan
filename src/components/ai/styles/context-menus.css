@@ -127,6 +127,7 @@
   border-radius: 0;
   background: transparent;
   box-shadow: none;
+  outline: none;
 }
 
 .ai-model-search-input [data-slot='input-group-control'] {
