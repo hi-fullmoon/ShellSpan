@@ -1186,6 +1186,7 @@ export default {
   'sftp.newConnectionMenu.openLocal': '打开本地文件',
   'sftp.newConnectionMenu.openLocalHint': '无需连接远程主机，稍后可再选择',
   'sftp.source.switch': '切换文件系统',
+  'sftp.source.currentAccount': '当前账户：{username}',
   'sftp.source.emptyTitle': '选择右侧文件系统',
   'sftp.source.emptyDescription': '打开本地目录，或选择一个远程连接。',
   'sftp.source.local': '本地文件系统',

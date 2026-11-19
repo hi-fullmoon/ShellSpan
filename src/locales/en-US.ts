@@ -1186,6 +1186,7 @@ export default {
   'sftp.newConnectionMenu.openLocal': 'Open local files',
   'sftp.newConnectionMenu.openLocalHint': 'No remote connection required; choose one later',
   'sftp.source.switch': 'Switch file system',
+  'sftp.source.currentAccount': 'Current account: {username}',
   'sftp.source.emptyTitle': 'Choose the right file system',
   'sftp.source.emptyDescription': 'Open a local directory or choose a remote connection.',
   'sftp.source.local': 'Local file system',

@@ -12,6 +12,7 @@ import {
   invokeInspectRemotePath,
   invokePreviewRemoteFile,
   invokeUpdateProfile,
+  invokeWarmRemoteConnection,
   isTauriRuntime,
 } from '@/lib/ipc/tauri';
 import { initI18n } from '@/locales';
@@ -96,7 +97,7 @@ async function verify() {
       <AiMarkdownTargetContext.Provider value={{ kind: 'remote', sessionId, targetId: `terminal-${sessionId}`, profileId, host, port, username: login }}>
         <AssistantMessageContent blocks={[{ type: 'text', text: `\`${directory}\`\n\n\`${firstRouteFile}\`\n\n[主机名](${file})` }]} streaming={false} />
       </AiMarkdownTargetContext.Provider>
-      <div style={{ height: '85vh' }}><Sftp /></div>
+      <div id="sftp-location-surface" style={{ height: '85vh' }}><Sftp /></div>
     </TooltipProvider>));
   };
 
@@ -199,6 +200,48 @@ async function verify() {
     await dismissMenu();
     revealFile();
     assert((await verifySelection(first)).id === tabA.id, 'Editing the saved profile redirected the original SSH session');
+
+    const otherUsername = 'shellspan-zsh';
+    const otherConnection = { ...tabA.connection, username: otherUsername };
+    await invokeWarmRemoteConnection(otherConnection);
+    flushSync(() => useSftpStore.getState().attachRemoteConnection(tabA.id, 'local', {
+      ...terminalA, username: otherUsername,
+    }, otherConnection, profileId));
+    await until(() => activeSftpConnection()?.localPath === `/home/${otherUsername}`,
+      'The left pane did not load the second account’s home directory');
+
+    const sourceButton = (side: 'local' | 'remote') => {
+      const button = document.querySelector<HTMLButtonElement>(`[data-sftp-pane="${side}"] button[aria-label="切换文件系统"]`);
+      assert(button, `Missing file system switch button in the ${side} pane`);
+      return button;
+    };
+    const surface = document.getElementById('sftp-location-surface');
+    assert(surface, 'SFTP surface is missing');
+    for (const width of [1200, 640]) {
+      surface.style.width = `${width}px`;
+      await new Promise(requestAnimationFrame);
+      for (const [side, login] of [['local', otherUsername], ['remote', username]] as const) {
+        const button = sourceButton(side);
+        assert(button.getAttribute('aria-description') === `当前账户：${login}`, `Incorrect account in ${side} pane`);
+        const account = button.querySelector('bdi');
+        assert(account?.textContent === login, `Account is missing in ${side} pane`);
+        assert(account.clientWidth > 0 && account.scrollWidth <= account.clientWidth + 1,
+          `Account is clipped in ${side} pane at ${width}px (${account.clientWidth}/${account.scrollWidth}px)`);
+        const filter = button.parentElement?.querySelector('[data-slot="sftp-filter"]');
+        assert(filter && button.getBoundingClientRect().right <= filter.getBoundingClientRect().left,
+          `Account overlaps the filter in ${side} pane at ${width}px`);
+      }
+    }
+
+    flushSync(() => useSftpStore.getState().attachRemoteConnection(tabA.id, 'remote', {
+      ...terminalA, username: otherUsername,
+    }, otherConnection, profileId));
+    assert(sourceButton('remote').querySelector('bdi')?.textContent === otherUsername,
+      'Switching accounts on the same host left a stale username');
+    flushSync(() => useSftpStore.getState().setPaneLocal(tabA.id, 'remote'));
+    const localButton = sourceButton('remote');
+    assert(localButton.textContent === '本地' && !localButton.hasAttribute('aria-description'),
+      'The local file system still shows a remote account');
   } finally {
     root.unmount();
     await Promise.all(terminalIds.map(sessionId => invokeCloseSession(sessionId)));

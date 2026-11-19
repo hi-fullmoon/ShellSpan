@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDndContext, useDroppable } from '@dnd-kit/core';
-import { BookmarkIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsUpDownIcon, MoveDownIcon, SearchIcon, SquareTerminalIcon } from 'lucide-react';
+import { BookmarkIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsUpDownIcon, MoveDownIcon, SearchIcon, SquareTerminalIcon, UserRoundIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,7 @@ import { SftpBlankContextMenu, type SftpBlankContextMenuAction } from './sftp-bl
 import { SftpBookmarkMenu } from './sftp-bookmark-menu';
 import { useLocalDirectory } from '@/hooks/useLocalDirectory';
 import { useSftpConnection } from '@/hooks/useSftpConnection';
-import { getSftpPaneConnectionKey, getSftpPaneSource, useSftpStore, type SftpConnection, type SftpLocationRequest, type SftpSide } from '@/stores/sftpStore';
+import { getSftpPaneConnection, getSftpPaneConnectionKey, getSftpPaneSource, useSftpStore, type SftpConnection, type SftpLocationRequest, type SftpSide } from '@/stores/sftpStore';
 import { type UseSftpPaneActionsResult } from '@/hooks/useSftpPaneActions';
 import type { FileEntry } from './utils';
 import type { SftpDndPayload } from './sftp-dnd-context';
@@ -319,6 +319,15 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     }, []);
 
     const paneTitle = isLocal ? t('sftp.local') : side === 'local' ? (connection.leftTitle ?? connection.title) : connection.title;
+    const username = isLocal ? undefined : getSftpPaneConnection(connection, side).username;
+    const accountLabel = username ? t('sftp.source.currentAccount', { username }) : undefined;
+    const paneTitleHint = accountLabel ? `${paneTitle}\n${accountLabel}` : undefined;
+    const account = username && (
+      <span className="flex min-w-0 max-w-3/5 shrink-0 items-center gap-1 text-xs font-normal text-app-text-soft">
+        <UserRoundIcon aria-hidden="true" data-icon="inline-start" className="size-3 shrink-0" />
+        <bdi className="truncate">{username}</bdi>
+      </span>
+    );
 
     const selectedEntries = useMemo(() => visibleEntries.filter((entry) => selectedPaths.has(entry.path)), [visibleEntries, selectedPaths]);
     const selectedEntryPaths = useMemo(() => selectedEntries.map((entry) => entry.path), [selectedEntries]);
@@ -499,14 +508,18 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
               onClick={onTitleClick}
               disabled={connecting}
               aria-label={t('sftp.source.switch')}
+              aria-description={accountLabel}
+              title={paneTitleHint}
               className="min-w-0 max-w-[70%] justify-start px-1 h-8"
             >
               <span className="truncate text-sm font-semibold">{paneTitle}</span>
+              {account}
               <ChevronsUpDownIcon data-icon="inline-end" />
             </Button>
           ) : (
-            <div className="flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 items-center gap-2" title={paneTitleHint}>
               <span className="truncate text-sm font-semibold text-app-text">{paneTitle}</span>
+              {account}
             </div>
           )}
           <div className="ml-auto flex min-w-0 items-center justify-end gap-1.5">

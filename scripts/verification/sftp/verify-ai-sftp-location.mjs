@@ -34,7 +34,7 @@ let paused = false;
 function startContainer(name, options, command = []) {
   docker(['run', '--detach', '--rm', '--name', name, ...options, image, ...command]);
   cleanups.push(() => docker(['rm', '--force', name]));
-  docker(['exec', '-i', name, 'chpasswd'], `shellspan:${password}\n`);
+  docker(['exec', '-i', name, 'chpasswd'], `shellspan:${password}\nshellspan-zsh:${password}\n`);
 }
 
 async function gatewayKey(name) {
@@ -143,7 +143,7 @@ try {
   child.on('error', result.reject);
   child.on('exit', code => result.reject(new Error(`Desktop app exited before reporting (${code})`)));
   assert.equal(await Promise.race([result.promise, delay(240_000, 'Timed out', { ref: false })]), 'PASS');
-  process.stdout.write('PASS: Local and SFTP path actions require an existing entry on the selected route. SFTP selection survives tab switches.\n');
+  process.stdout.write('PASS: Agent path actions use verified paths and routes. SFTP selection survives tab switches, and pane headers show their own SSH accounts.\n');
 } catch (error) {
   process.stderr.write(`${error}\n${output}\n`);
   process.exitCode = 1;
