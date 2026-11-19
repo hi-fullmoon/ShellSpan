@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Separator } from '@/components/ui/separator';
+import { useContextMenuNavigation } from '@/hooks/useContextMenuNavigation';
 import { useI18n } from '@/hooks/useI18n';
 import { usePlatform } from '@/hooks/usePlatform';
 import { getShortcutKeys } from '@/lib/shortcuts';
@@ -24,9 +25,11 @@ interface MenuItemProps {
 const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, children }) => (
   <button
     type="button"
+    role="menuitem"
+    tabIndex={-1}
     onClick={onClick}
     disabled={disabled}
-    className="flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-xs text-app-text transition-colors hover:bg-accent hover:text-app-primary disabled:pointer-events-none disabled:opacity-40"
+    className="flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-xs text-app-text transition-colors focus:bg-accent focus:text-app-primary focus-visible:outline-hidden! disabled:pointer-events-none disabled:opacity-40"
   >
     <span className="leading-4">{children}</span>
   </button>
@@ -69,6 +72,8 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
   const [closeConfirm, setCloseConfirm] = useState(false);
   const [closeOthersConfirm, setCloseOthersConfirm] = useState(false);
   const [closeToRightConfirm, setCloseToRightConfirm] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const navigation = useContextMenuNavigation(menuRef, open && connection !== null, connection?.id);
 
   useEffect(() => {
     if (!open) return;
@@ -221,8 +226,12 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
             }}
           />
           <div
+            ref={menuRef}
+            role="menu"
+            aria-label={target.title}
             className="fixed z-[1700] w-fit min-w-52 overflow-hidden rounded-lg border border-app-border bg-app-surface p-1 shadow-[var(--shadow-dialog)]"
             style={{ left, top }}
+            {...navigation}
           >
         <MenuItem onClick={handleTogglePin}>
           {target.pinned ? t('sftp.tab.unpin') : t('sftp.tab.pin')}

@@ -9,6 +9,8 @@ import { TooltipProvider } from '../tooltip';
 import { SftpFileContextMenu } from '@/components/sftp/sftp-file-context-menu';
 import { SftpBlankContextMenu } from '@/components/sftp/sftp-blank-context-menu';
 import { SftpBookmarkMenu } from '@/components/sftp/sftp-bookmark-menu';
+import { SftpTabBar } from '@/components/sftp/sftp-tab-bar';
+import { SftpTabContextMenu } from '@/components/sftp/sftp-tab-context-menu';
 import { AssistantMessageContent } from '@/components/ai/assistant-message-content';
 import { TerminalContextMenu } from '@/components/terminal/terminal-context-menu';
 import { TerminalTabBar } from '@/components/terminal/terminal-tab-bar';
@@ -19,12 +21,13 @@ import { WorkbenchSidebar } from '@/components/workbench/workbench-sidebar';
 import { initI18n, t } from '@/locales';
 import { applyTheme } from '@/lib/theme';
 import { useAppStore } from '@/stores/appStore';
+import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import type { ConnectionProfile, LocalFileEntry, Locale } from '@/types';
 import '@/styles/base.css';
 import '@/components/ai/styles/styles.css';
 
-type MenuKind = 'account' | 'icon' | 'connection-actions' | 'connection-card' | 'log-actions' | 'terminal' | 'shared' | 'file' | 'agent-path' | 'blank' | 'bookmark';
+type MenuKind = 'account' | 'icon' | 'connection-actions' | 'connection-card' | 'log-actions' | 'terminal' | 'sftp-tab' | 'shared' | 'file' | 'agent-path' | 'blank' | 'bookmark';
 const root = createRoot(document.getElementById('root')!);
 
 function TerminalPreview() {
@@ -32,6 +35,14 @@ function TerminalPreview() {
   return <>
     <TerminalTabBar forceVisible onTabContextMenu={(session, x, y) => setMenu({ session, x, y })} />
     {menu && <TerminalContextMenu open {...menu} onClose={() => setMenu(null)} />}
+  </>;
+}
+
+function SftpTabPreview() {
+  const [menu, setMenu] = useState<{ connection: SftpConnection; x: number; y: number } | null>(null);
+  return <>
+    <SftpTabBar onTabContextMenu={(connection, x, y) => setMenu({ connection, x, y })} />
+    {menu && <SftpTabContextMenu open {...menu} onClose={() => setMenu(null)} />}
   </>;
 }
 
@@ -58,6 +69,7 @@ function Preview({ kind, entry, fileUrl, directory, profile }: {
     onDuplicate={close} onToggleFavorite={close} onImport={close} onExport={close} />;
   if (kind === 'log-actions') return <LogPanel />;
   if (kind === 'terminal') return <TerminalPreview />;
+  if (kind === 'sftp-tab') return <SftpTabPreview />;
   if (kind === 'agent-path') return <AssistantMessageContent
     blocks={[{ type: 'text', text: `[${entry.name}](${fileUrl})` }]} streaming={false} />;
   if (kind === 'shared') return <ContextMenu>
@@ -98,6 +110,9 @@ export async function show({ kind, theme, locale, entry, fileUrl, directory, use
       sessionId: crypto.randomUUID(), title: 'localhost', host: 'localhost', port: 22, username,
     }]);
   }
+  if (kind === 'sftp-tab' && useSftpStore.getState().connections.length === 0) {
+    useSftpStore.getState().addLocalConnection();
+  }
   flushSync(() => root.render(<TooltipProvider>
     <Preview key={++sequence} kind={kind} entry={entry} fileUrl={fileUrl} directory={directory} profile={profile} />
   </TooltipProvider>));
@@ -109,6 +124,7 @@ export async function show({ kind, theme, locale, entry, fileUrl, directory, use
     'connection-card': t('workbench.connections.moreActions', { name: profile.name }),
     'log-actions': t('workbench.logs.actions'),
     template: t('terminal.title.template'),
+    rename: t('common.rename'),
     copy: t('common.copy'),
     copyPath: t('ai.path.copy'),
     openWith: t('ai.path.openWith'),

@@ -27,6 +27,25 @@ const profile = {
   username: sshFixture.SHELLSPAN_E2E_SSH_USERNAME, createdAt: metadata.mtimeMs, updatedAt: metadata.mtimeMs,
 };
 const engine = process.env.SHELLSPAN_TEST_ENGINE ?? 'chromium';
+const keyboardMenus = ['terminal', 'sftp-tab', 'file', 'blank'];
+
+async function verifyMenuKeyboard(page, menu, background, kind) {
+  const focused = page.locator(':focus');
+  const enabled = menu.locator('[role="menuitem"]:not([disabled])');
+  await enabled.and(focused).waitFor();
+  await page.keyboard.press('Home');
+  await enabled.first().and(focused).waitFor();
+  await page.keyboard.press('ArrowDown');
+  const nextItem = enabled.nth(1).and(page.locator(':focus-visible'));
+  await nextItem.waitFor();
+  const style = await nextItem.evaluate(async element => {
+    await new Promise(requestAnimationFrame);
+    await Promise.all(element.getAnimations().map(animation => animation.finished));
+    const { backgroundColor, outlineStyle } = getComputedStyle(element);
+    return { backgroundColor, outlineStyle };
+  });
+  assert.deepEqual(style, { backgroundColor: background, outlineStyle: 'none' }, `${kind}: arrow keys highlight the item without an outline`);
+}
 
 async function verifyMenuAlignment(menu, kind) {
   await menu.evaluate(async element => {
@@ -111,7 +130,7 @@ try {
         let fileMenuAppearance;
         let disabledFileItemOpacity;
         const iconKinds = ['icon', 'connection-actions', 'log-actions'];
-        for (const kind of ['account', ...iconKinds, 'connection-card', 'terminal', 'shared', 'file', 'agent-path', 'blank', 'bookmark']) {
+        for (const kind of ['account', ...iconKinds, 'connection-card', 'terminal', 'sftp-tab', 'shared', 'file', 'agent-path', 'blank', 'bookmark']) {
           const labels = await page.evaluate(async options => {
             const { show } = await import('/src/components/ui/__tests__/context-menu-hover.browser-entry.tsx');
             return show(options);
@@ -125,14 +144,16 @@ try {
             await page.screenshot({ path: `${output}/${engine}-${theme}-${locale}-${width}-${kind}.png` });
             continue;
           }
-          if (kind === 'terminal') await page.getByRole('tab').click({ button: 'right' });
+          if (kind === 'terminal' || kind === 'sftp-tab') await page.getByRole('tab').click({ button: 'right' });
           if (kind === 'shared') await page.getByTestId('context-trigger').click({ button: 'right' });
           if (kind === 'agent-path') await page.getByRole('link', { name: entry.name, exact: true }).click({ button: 'right' });
           if (['account', 'file', 'blank'].includes(kind)) await verifyMenuAlignment(page.getByRole('menu'), kind);
+          if (keyboardMenus.includes(kind)) await verifyMenuKeyboard(page, page.getByRole('menu'), reference, kind);
           const isIcon = iconKinds.includes(kind);
           const targets = isIcon ? [button(labels[kind])] : {
             account: [menuItem(labels.appearance)],
             terminal: [menuItem(labels.template)],
+            'sftp-tab': [menuItem(labels.rename)],
             shared: [menuItem(labels.copy)],
             file: [menuItem(labels.copy), menuItem(labels.remove)],
             'agent-path': [menuItem(labels.copyPath)],
@@ -166,10 +187,12 @@ try {
             const result = await item.evaluate(element => ({
               background: getComputedStyle(element).backgroundColor,
               color: getComputedStyle(element).color,
+              outline: getComputedStyle(element).outlineStyle,
               text: element.textContent.trim(),
               height: element.getBoundingClientRect().height,
             }));
             reference ??= result.background;
+            if (keyboardMenus.includes(kind)) assert.equal(result.outline, 'none', `${kind}: pointer hover has no outline`);
             if (isIcon) {
               assert.equal(await item.getAttribute('aria-label'), labels[kind], 'Icon action has a readable label');
               assert.equal(result.height, 32, 'Icon action height');

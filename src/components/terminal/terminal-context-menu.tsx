@@ -5,6 +5,7 @@ import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useConnectSession } from '@/hooks/useConnectSession';
 import { useCloseTerminal } from '@/hooks/useCloseTerminal';
+import { useContextMenuNavigation } from '@/hooks/useContextMenuNavigation';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { CompactPromptDialog } from '@/components/ui/compact-dialog';
 import { Separator } from '@/components/ui/separator';
@@ -47,7 +48,7 @@ const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, title, children 
     onClick={onClick}
     disabled={disabled}
     title={title}
-    className="flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-xs text-app-text transition-colors hover:bg-accent hover:text-app-primary focus-visible:bg-accent disabled:pointer-events-none disabled:opacity-40"
+    className="flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-xs text-app-text transition-colors focus:bg-accent focus:text-app-primary focus-visible:outline-hidden! disabled:pointer-events-none disabled:opacity-40"
   >
     <span className="leading-4">{children}</span>
   </button>
@@ -99,6 +100,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const [closeOthersConfirm, setCloseOthersConfirm] = useState(false);
   const [closeToRightConfirm, setCloseToRightConfirm] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const navigation = useContextMenuNavigation(menuRef, open && session !== null, session?.sessionId);
 
   useEffect(() => {
     if (!open) return;
@@ -112,26 +114,6 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [open, onClose]);
-
-  useEffect(() => {
-    if (!open || !session) return;
-
-    const previouslyFocused = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    const frameId = window.requestAnimationFrame(() => {
-      menuRef.current
-        ?.querySelector<HTMLElement>('[role="menuitem"]:not([disabled])')
-        ?.focus({ preventScroll: true });
-    });
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      if (previouslyFocused?.isConnected) {
-        previouslyFocused.focus({ preventScroll: true });
-      }
-    };
-  }, [open, session?.sessionId]);
 
   const target = session ?? renameTarget ?? confirmationTarget;
   if (!target) return null;
@@ -252,33 +234,6 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
     onClose();
   };
 
-  const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
-
-    const items = Array.from(
-      menuRef.current?.querySelectorAll<HTMLElement>(
-        '[role="menuitem"]:not([disabled]), [role="menuitemradio"]:not([disabled])',
-      ) ?? [],
-    );
-    if (items.length === 0) return;
-
-    event.preventDefault();
-    const currentIndex = items.indexOf(document.activeElement as HTMLElement);
-    let nextIndex: number;
-    if (event.key === 'Home') {
-      nextIndex = 0;
-    } else if (event.key === 'End') {
-      nextIndex = items.length - 1;
-    } else if (event.key === 'ArrowUp') {
-      nextIndex = currentIndex <= 0 ? items.length - 1 : currentIndex - 1;
-    } else {
-      nextIndex = currentIndex < 0 || currentIndex === items.length - 1
-        ? 0
-        : currentIndex + 1;
-    }
-    items[nextIndex]?.focus({ preventScroll: true });
-  };
-
   return createPortal(
     <>
       {open && session && (
@@ -298,7 +253,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
             aria-label={target.title}
             className="fixed z-[1700] w-fit min-w-52 overflow-hidden rounded-lg border border-app-border bg-app-surface p-1 shadow-[var(--shadow-dialog)]"
             style={{ left, top }}
-            onKeyDown={handleMenuKeyDown}
+            {...navigation}
           >
         {focus.enabled && <>
           <MenuItem disabled={focus.busy || focus.targetSessionId === target.sessionId
