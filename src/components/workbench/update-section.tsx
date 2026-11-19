@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2Icon, DownloadIcon, RefreshCwIcon, RotateCcwIcon } from 'lucide-react';
+import { CheckCircle2Icon, CircleAlertIcon, DownloadIcon, RefreshCwIcon, RotateCcwIcon } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
 import { useUpdateStore } from '@/stores/updateStore';
 import { isTauriRuntime } from '@/lib/ipc/tauri';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 export const UpdateSection: React.FC = () => {
@@ -49,11 +49,13 @@ export const UpdateSection: React.FC = () => {
   const downloading = phase === 'downloading';
   const downloaded = phase === 'downloaded';
   const failed = phase === 'error';
+  const CheckIcon = failed ? RotateCcwIcon : RefreshCwIcon;
+  const checkLabel = failed ? 'settings.general.retry' : checking ? 'settings.general.checkingUpdate' : 'settings.general.checkUpdate';
   const targetVersion = version.downloadedVersion ?? version.latestVersion;
   const displayProgress = Math.max(0, Math.min(100, downloadProgress ?? 0));
 
   return (
-    <Field className="min-h-14 gap-2 px-4 py-2.5 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-5">
+    <Field className="min-h-14 min-w-0 gap-2 px-4 py-2.5 @min-[32rem]:grid @min-[32rem]:grid-cols-[minmax(0,1fr)_auto] @min-[32rem]:items-center @min-[32rem]:gap-x-5">
       <div data-slot="update-summary" className="flex min-w-0 flex-1 flex-col gap-0.5">
         <FieldLabel className="text-sm font-medium text-foreground">
           {t('settings.general.update')}
@@ -71,11 +73,11 @@ export const UpdateSection: React.FC = () => {
         </div>
       </div>
 
-      <div data-slot="update-actions" className="flex min-h-8 w-full flex-col items-stretch justify-center gap-2 @min-[32rem]:w-auto @min-[32rem]:min-w-44 @min-[32rem]:shrink-0 @min-[32rem]:items-end">
+      <div data-slot="update-actions" className="flex min-h-8 w-full flex-col items-stretch justify-center gap-2 @min-[32rem]:w-auto @min-[32rem]:min-w-44 @min-[32rem]:items-end">
         {!downloading && !downloaded && (
           <Button variant="outline" size="sm" disabled={checking} onClick={() => void runCheck('manual')}>
-            <RefreshCwIcon data-icon="inline-start" className={cn(checking && 'animate-spin')} />
-            {checking ? t('settings.general.checkingUpdate') : t('settings.general.checkUpdate')}
+            <CheckIcon data-icon="inline-start" className={cn(checking && 'animate-spin')} />
+            {t(checkLabel)}
           </Button>
         )}
 
@@ -105,22 +107,16 @@ export const UpdateSection: React.FC = () => {
             </Button>
           </div>
         )}
-
-        {failed && (
-          <div className="flex items-center justify-between gap-3">
-            <Tooltip>
-              <TooltipTrigger render={<p className="min-w-0 flex-1 truncate text-xs text-destructive" />}>
-                {error || t('update.failedFriendly')}
-              </TooltipTrigger>
-              <TooltipContent className="break-all">{error || t('update.failedFriendly')}</TooltipContent>
-            </Tooltip>
-            <Button variant="outline" size="sm" onClick={() => void runCheck('manual')}>
-              <RotateCcwIcon data-icon="inline-start" />
-              {t('settings.general.retry')}
-            </Button>
-          </div>
-        )}
       </div>
+
+      {failed && (
+        <Alert variant="destructiveSubtle" size="sm" className="min-w-0 border-0 @min-[32rem]:col-span-2">
+          <CircleAlertIcon aria-hidden="true" />
+          <AlertDescription className="min-w-0 wrap-anywhere">
+            {error || t('update.failedFriendly')}
+          </AlertDescription>
+        </Alert>
+      )}
     </Field>
   );
 };

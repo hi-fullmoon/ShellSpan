@@ -451,17 +451,20 @@ describe('SettingsPanel', () => {
     expect(screen.queryByText('update.checking')).not.toBeInTheDocument();
   });
 
-  it('falls back to a friendly update failure message when no error detail exists', async () => {
+  it('shows a single retry action and a persistent notice for a failed update', async () => {
     useUpdateStore.setState({ phase: 'error', error: undefined });
 
     render(<SettingsPanel />);
     await waitFor(() => {});
 
-    expect(screen.getByText('update.failedFriendly')).toBeInTheDocument();
-    expect(screen.queryByText('update.failed')).not.toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'settings.general.retry' }),
-    ).toBeInTheDocument();
+    const retry = screen.getByRole('button', { name: 'settings.general.retry' });
+    const row = retry.closest('[data-slot="field"]');
+    const notice = screen.getByRole('alert');
+
+    expect(row).toContainElement(notice);
+    expect(row?.querySelector('[data-slot="update-actions"]')).toContainElement(retry);
+    expect(row?.querySelectorAll('button')).toHaveLength(1);
+    expect(notice).toHaveTextContent('update.failedFriendly');
   });
 
   it('groups related settings into a responsive row card', async () => {

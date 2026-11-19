@@ -22,6 +22,9 @@ const server = await createServer({
         export { createRoot } from 'react-dom/client';
         export { SettingsPanel } from '/src/components/workbench/settings-panel.tsx';
         export { useAppStore } from '/src/stores/appStore.ts';
+        export { useUpdateStore } from '/src/stores/updateStore.ts';
+        export { updateFlowReducer } from '/src/lib/update.ts';
+        export { t } from '/src/locales/index.ts';
       `;
     },
     configureServer(vite) {
@@ -89,6 +92,43 @@ try {
     }
   };
 
+  const checkFailedUpdate = async ({ checkLabel, retryLabel, screenshot }) => {
+    const actions = page.locator('[data-slot="update-actions"]');
+    const check = actions.getByRole('button', { name: checkLabel, exact: true });
+    await check.scrollIntoViewIfNeeded();
+    const before = await check.boundingBox();
+    const message = await page.evaluate(async () => {
+      const { t, updateFlowReducer, useUpdateStore } = await import('/settings-runtime.js');
+      const message = t('update.failedFriendly');
+      useUpdateStore.setState((state) => updateFlowReducer(state, {
+        type: 'downloadFailed', payload: { message },
+      }));
+      return message;
+    });
+
+    const retry = actions.getByRole('button', { name: retryLabel, exact: true });
+    const notice = page.getByRole('alert').filter({ hasText: message });
+    await retry.waitFor();
+    assert.equal(await actions.getByRole('button').count(), 1);
+    const after = await retry.boundingBox();
+    assert.equal(after.height, 32, 'retry retains the settings button height');
+    assert.ok(Math.abs(after.x + after.width - before.x - before.width) <= 1, 'retry occupies the check button position');
+    assert.equal(await notice.evaluate((alert) => getComputedStyle(alert).borderWidth), '0px', 'the failure notice has no border');
+    assert.ok(await notice.evaluate((alert) => {
+      const summary = alert.parentElement.querySelector('[data-slot="update-summary"]');
+      const actions = alert.parentElement.querySelector('[data-slot="update-actions"]');
+      const description = alert.querySelector('[data-slot="alert-description"]');
+      const rect = alert.getBoundingClientRect();
+      return rect.top > actions.getBoundingClientRect().bottom
+        && Math.abs(rect.left - summary.getBoundingClientRect().left) <= 1
+        && Math.abs(rect.right - actions.getBoundingClientRect().right) <= 1
+        && description.scrollWidth <= description.clientWidth;
+    }), 'the complete failure notice fits across the row below the retry button');
+    await notice.locator('xpath=ancestor::*[@data-slot="card"]').screenshot({ path: screenshot, animations: 'disabled' });
+    await page.evaluate(async () => (await import('/settings-runtime.js')).useUpdateStore.getState().reset());
+    await notice.waitFor({ state: 'hidden' });
+  };
+
   for (const viewport of [{ width: 1280, height: 800 }, { width: 640, height: 720 }]) {
     await page.setViewportSize(viewport);
     await openSection('general');
@@ -137,6 +177,10 @@ try {
     assert.ok(general.sectionHeader >= 50 && general.sectionHeader <= 110, `section heading must fit its title and description at ${viewport.width}: ${general.sectionHeader}px`);
     assert.ok(general.dialogHeight <= general.viewportHeight, 'settings dialog exceeds viewport height');
     assert.match(general.rowDescriptionLeading, /^1[6-9]px$/, `description line height ${general.rowDescriptionLeading} is not compact`);
+    await checkFailedUpdate({
+      checkLabel: '检查更新', retryLabel: '重试',
+      screenshot: `${root}artifacts/tests/update-failure/zh-CN-${viewport.width}.png`,
+    });
 
     await openSection('shortcuts');
     const shortcutRow = await page.evaluate(() => {
@@ -305,6 +349,12 @@ try {
     await page.getByRole('heading', { name: 'Appearance', exact: true }).waitFor();
     assert.ok(await page.getByRole('tabpanel').evaluate(element => element.scrollWidth <= element.clientWidth), 'English settings must fit');
     await page.screenshot({ path: `/tmp/shellspan-settings-english-${viewport.width}.png` });
+    await openSection('general');
+    await checkFailedUpdate({
+      checkLabel: 'Check for updates', retryLabel: 'Retry',
+      screenshot: `${root}artifacts/tests/update-failure/en-US-${viewport.width}.png`,
+    });
+    await openSection('appearance');
     await page.getByRole('combobox', { name: 'Language', exact: true }).click();
     await page.getByRole('option', { name: '简体中文', exact: true }).click();
     await page.getByRole('heading', { name: '外观', exact: true }).waitFor();

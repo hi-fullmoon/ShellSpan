@@ -7,6 +7,7 @@ import {
   updateFlowReducer,
 } from '@/lib/update';
 import { invokeRequestAppRestart, isTauriRuntime } from '@/lib/ipc/tauri';
+import { useAppStore } from '@/stores/appStore';
 import { useToastStore } from '@/stores/toastStore';
 import { t } from '@/locales';
 import type { UpdateStatus, UpdateVersionInfo } from '@/types';
@@ -133,7 +134,8 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
       const message = t('update.failedFriendly');
       logger.error(`Update check/download failed (${mode})`, error);
       set(updateFlowReducer(get(), { type: 'downloadFailed', payload: { message } }));
-      if (mode === 'manual') {
+      const { settingsDialogOpen, activeSettingsSection } = useAppStore.getState();
+      if (mode === 'manual' && !(settingsDialogOpen && activeSettingsSection === 'general')) {
         useToastStore.getState().addToast(message, 'error');
       }
     } finally {
