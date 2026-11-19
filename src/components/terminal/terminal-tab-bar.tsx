@@ -751,33 +751,35 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
             onDoubleClick={(event) => event.stopPropagation()}
           >
             <DropdownMenuGroup>
-              <DropdownMenuItem onClick={onNewTabClick}>{t('terminal.newSession.title')}</DropdownMenuItem>
-              {onSwitchTab && <DropdownMenuItem onClick={onSwitchTab}>{t('terminal.tabSwitcher.title')}</DropdownMenuItem>}
+              <DropdownMenuItem size="sm" onClick={onNewTabClick}>{t('terminal.newSession.title')}</DropdownMenuItem>
+              {onSwitchTab && <DropdownMenuItem size="sm" onClick={onSwitchTab}>{t('terminal.tabSwitcher.title')}</DropdownMenuItem>}
             </DropdownMenuGroup>
             {onSplitTab && (
               <>
                 <DropdownMenuSeparator inset />
                 <DropdownMenuGroup>
                   <DropdownMenuItem
+                    size="sm"
                     disabled={!splitTarget || (actionsOpen && !canSplitTab?.('right'))}
                     onClick={() => { if (splitTarget) onSplitTab(splitTarget, 'right'); }}
                   >
                     {t('terminal.tab.splitRight')}
                   </DropdownMenuItem>
                   <DropdownMenuItem
+                    size="sm"
                     disabled={!splitTarget || (actionsOpen && !canSplitTab?.('bottom'))}
                     onClick={() => { if (splitTarget) onSplitTab(splitTarget, 'bottom'); }}
                   >
                     {t('terminal.tab.splitDown')}
                   </DropdownMenuItem>
-                  {onUnsplit && <DropdownMenuItem onClick={onUnsplit}>{t('terminal.tab.unsplit')}</DropdownMenuItem>}
+                  {onUnsplit && <DropdownMenuItem size="sm" onClick={onUnsplit}>{t('terminal.tab.unsplit')}</DropdownMenuItem>}
                 </DropdownMenuGroup>
               </>
             )}
             <DropdownMenuSeparator inset />
             <DropdownMenuGroup>
               <DropdownMenuItem
-                variant="destructive"
+                size="sm"
                 disabled={!canCloseCurrent}
                 onClick={() => { if (canCloseCurrent) handleCloseSession(activeTab.sessionId); }}
               >

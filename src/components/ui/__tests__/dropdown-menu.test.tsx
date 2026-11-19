@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { CopyIcon } from 'lucide-react';
+import { ContextMenuItem } from '../context-menu';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem,
   DropdownMenuTrigger, DropdownMenuRadioGroup, DropdownMenuRadioItem,
@@ -8,6 +9,25 @@ import {
 } from '../dropdown-menu';
 
 describe('menu text alignment', () => {
+  it('shares compact typography and spacing with context menu rows', () => {
+    render(<DropdownMenu defaultOpen>
+      <DropdownMenuTrigger>Menu</DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuGroup>
+          <DropdownMenuItem>Default</DropdownMenuItem>
+          <DropdownMenuItem size="sm">Compact</DropdownMenuItem>
+          <ContextMenuItem>Context</ContextMenuItem>
+          <DropdownMenuItem size="sm" variant="destructive">Delete</DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>);
+    for (const name of ['Compact', 'Context', 'Delete']) {
+      expect(screen.getByRole('menuitem', { name })).toHaveClass('text-xs', 'leading-4', 'px-2.5', 'py-1.5');
+    }
+    expect(screen.getByRole('menuitem', { name: 'Default' })).toHaveClass('text-sm');
+    expect(screen.getByRole('menuitem', { name: 'Delete' })).toHaveAttribute('data-variant', 'destructive');
+  });
+
   it('adjusts text once while preserving icons, composed content and accessible names', () => {
     render(<DropdownMenu defaultOpen>
       <DropdownMenuTrigger>Menu</DropdownMenuTrigger>

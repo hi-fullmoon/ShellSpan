@@ -261,6 +261,9 @@ describe('TerminalTabBar', () => {
     for (const name of labels) {
       const item = menu.getByRole('menuitem', { name });
       expect(item.querySelector('svg')).toBeNull();
+      expect(item).toHaveAttribute('data-size', 'sm');
+      expect(item).toHaveClass('text-xs', 'leading-4');
+      expect(item).toHaveAttribute('data-variant', 'default');
     }
     expect(menu.getAllByRole('group').map((group) => within(group).getAllByRole('menuitem').length))
       .toEqual([2, 3, 1]);
@@ -269,7 +272,6 @@ describe('TerminalTabBar', () => {
       expect(divider).toHaveAttribute('data-inset', 'true');
     }
     expect(menu.getByRole('menuitem', { name: 'terminal.tab.splitDown' })).toHaveAttribute('aria-disabled', 'true');
-    expect(menu.getByRole('menuitem', { name: 'terminal.tab.closeCurrent' })).toHaveAttribute('data-variant', 'destructive');
 
     await user.keyboard('{ArrowDown}{ArrowDown}');
     expect(menu.getByRole('menuitem', { name: 'terminal.tab.splitRight' })).toHaveFocus();

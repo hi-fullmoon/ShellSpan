@@ -54,7 +54,8 @@ function ContextMenuItem({
 }: React.ComponentProps<typeof DropdownMenuItem>) {
   return (
     <DropdownMenuItem
-      className={cn(compactItemClassName, className)}
+      size="sm"
+      className={className}
       {...props}
     />
   )
