@@ -28,6 +28,14 @@ server.middlewares.use(async (request, response, next) => {
 });
 
 const background = locator => locator.evaluate(element => getComputedStyle(element).backgroundColor);
+const tokenBackground = (locator, token) => locator.evaluate((element, token) => {
+  const probe = document.createElement('span');
+  probe.style.backgroundColor = `var(${token})`;
+  element.append(probe);
+  const color = getComputedStyle(probe).backgroundColor;
+  probe.remove();
+  return color;
+}, token);
 const settle = locator => locator.evaluate(element => Promise.all(
   element.getAnimations().map(animation => animation.finished),
 ));
@@ -80,14 +88,7 @@ try {
               '.ai-busy-preference-trigger', '.ai-context-meter-trigger',
             ].join(', '));
             assert.equal(await controls.count(), 5);
-            const expected = await toolbar.evaluate(element => {
-              const probe = document.createElement('span');
-              probe.style.background = 'var(--accent)';
-              element.append(probe);
-              const color = getComputedStyle(probe).backgroundColor;
-              probe.remove();
-              return color;
-            });
+            const expected = await tokenBackground(toolbar, '--accent');
             for (const control of await controls.all()) {
               assert.ok(await control.getAttribute('aria-label'), 'Toolbar actions retain readable labels');
               const before = await control.boundingBox();
@@ -120,8 +121,8 @@ try {
             const contextPanel = page.getByRole('dialog');
             const track = contextPanel.locator('.ai-context-meter-bar');
             await track.waitFor();
-            assert.equal(await background(track), theme === 'dark' ? 'rgb(40, 41, 42)' : 'rgb(233, 239, 245)',
-              'The context usage track uses the original muted background');
+            assert.equal(await background(track), await tokenBackground(track, '--muted'),
+              'The context usage track uses the muted background');
             await contextPanel.screenshot({ path: `${artifacts}/${engine.name()}-${locale}-${theme}-${width}-context-panel.png` });
             await page.keyboard.press('Escape');
             await contextPanel.waitFor({ state: 'hidden' });
@@ -131,14 +132,7 @@ try {
             const outside = page.getByTestId('outside');
             await outside.hover();
             await settle(outside);
-            const accent = await outside.evaluate(element => {
-              const probe = document.createElement('span');
-              probe.style.background = 'var(--accent)';
-              element.append(probe);
-              const color = getComputedStyle(probe).backgroundColor;
-              probe.remove();
-              return color;
-            });
+            const accent = await tokenBackground(outside, '--accent');
             assert.equal(await background(outside), accent, 'Buttons outside the toolbar retain the shared ghost style');
           }
         }

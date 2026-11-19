@@ -513,7 +513,7 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
                 {visibleCandidates.map((model) => (
                   <Field
                     key={model.id}
-                    className="flex-row items-center rounded-md px-2 py-2 hover:bg-muted/60"
+                    className="flex-row items-center rounded-md px-2 py-2 hover:bg-accent"
                   >
                     <Checkbox
                       id={`ai-model-candidate-${model.id}`}

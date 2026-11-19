@@ -314,7 +314,7 @@ describe('TerminalTabBar', () => {
       expect(tab).not.toHaveClass('border', 'shadow-xs');
     }
     expect(screen.getAllByRole('tab')[0]).toHaveClass('rounded-t-md', 'border-app-border/50', 'bg-app-surface', 'text-app-text');
-    expect(screen.getAllByRole('tab')[1]).toHaveClass('border-transparent', 'bg-transparent', 'hover:bg-app-surface-muted');
+    expect(screen.getAllByRole('tab')[1]).toHaveClass('border-transparent', 'bg-transparent', 'hover:bg-accent');
 
     expect(screen.queryByRole('button', { name: 'terminal.tab.moreActions' })).not.toBeInTheDocument();
   });

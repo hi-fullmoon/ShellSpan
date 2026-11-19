@@ -73,12 +73,13 @@ try {
     await import('/src/styles/base.css');
     const { React, createRoot, TerminalTabBar, useTerminalStore, SftpTabBar, useSftpStore } = await import('/tab-runtime.js');
     // Exercise the real pending-connection state without replacing IPC or browser geometry.
-    useTerminalStore.getState().beginConnectionAttempt({
+    const startConnection = () => useTerminalStore.getState().beginConnectionAttempt({
       title: localUser.shell, host: 'localhost', port: 22, username: localUser.username,
     });
+    startConnection();
     useSftpStore.getState().addLocalConnection();
     createRoot(document.getElementById('root')).render(React.createElement(React.Fragment, null,
-      React.createElement(TerminalTabBar), React.createElement(SftpTabBar)));
+      React.createElement(TerminalTabBar, { onNewTabClick: startConnection }), React.createElement(SftpTabBar)));
   }, { username: userInfo().username, shell: basename(userInfo().shell || process.env.SHELL) });
   await page.locator('[data-terminal-tab-bar] [role="tab"]').waitFor();
   const sftpBar = page.locator('[data-sftp-tab-bar]');
@@ -518,6 +519,19 @@ try {
   const closeTarget = targetTab.locator('xpath=following-sibling::button');
   const targetIcon = closeTarget.locator('[data-slot="focus-tab-target"]');
   const closeIcon = closeTarget.locator('svg.lucide-x');
+  const more = page.getByRole('button', { name: '终端页签操作' });
+  const sftpInactiveClose = sftpTabs.nth(1).locator('xpath=following-sibling::button');
+  const background = (control) => control.evaluate(async (element) => {
+    getComputedStyle(element).backgroundColor;
+    await Promise.all(element.getAnimations().map(animation => animation.finished));
+    return getComputedStyle(element).backgroundColor;
+  });
+  const backgroundPixel = async (control) => {
+    const image = await loadImage(await control.screenshot({ animations: 'disabled' }));
+    const context = createCanvas(image.width, image.height).getContext('2d');
+    context.drawImage(image, 0, 0);
+    return [...context.getImageData(3, Math.floor(image.height / 2), 1, 1).data];
+  };
   for (const { theme, width } of appearances) {
     await page.evaluate((theme) => document.documentElement.setAttribute('data-theme', theme), theme);
     await page.setViewportSize({ width, height: 720 });
@@ -553,6 +567,32 @@ try {
       await closeIcon.waitFor({ state: 'visible' });
       assert.equal(await targetIcon.isVisible(), false);
       assert.deepEqual(await closeTarget.boundingBox(), before);
+      await closeTarget.hover();
+      const closeFill = await background(closeTarget);
+      assert.notEqual(closeFill, 'rgba(0, 0, 0, 0)');
+      if (!active) {
+        const closePixel = await backgroundPixel(closeTarget);
+        await sftpTabs.nth(1).hover({ position: { x: 30, y: 16 } });
+        await sftpInactiveClose.hover();
+        assert.equal(await background(sftpInactiveClose), closeFill);
+        assert.deepEqual(await backgroundPixel(sftpInactiveClose), closePixel);
+
+        await more.hover();
+        assert.equal(await background(more), closeFill);
+        assert.deepEqual(await backgroundPixel(more), closePixel,
+          `${theme}/${width}: inactive close and more buttons paint the same hover over the tab strip`);
+        if (process.env.TAB_SCREENSHOT_DIR) {
+          await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-actions-hover-${theme}-${width}.png` });
+        }
+        await more.click();
+        const menu = page.getByRole('menu');
+        await menu.waitFor();
+        await page.mouse.move(width - 10, 300);
+        assert.equal(await background(more), closeFill, 'The expanded menu keeps the same highlight');
+        await page.keyboard.press('Escape');
+        await menu.waitFor({ state: 'hidden' });
+        assert.equal(await background(more), 'rgba(0, 0, 0, 0)', 'Closing the menu clears the highlight');
+      }
       await page.mouse.move(width - 10, 300);
       await closeTarget.focus();
       await closeIcon.waitFor({ state: 'visible' });

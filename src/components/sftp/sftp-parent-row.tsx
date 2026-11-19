@@ -28,7 +28,7 @@ export const SftpParentRow: React.FC<SftpParentRowProps> = ({
     onBlankContextMenu?.(e);
   };
 
-  const cellClass = 'flex h-full items-center border-b border-app-border/50 transition-colors group-hover:bg-app-primary/5';
+  const cellClass = 'flex h-full items-center border-b border-app-border/50 transition-colors group-hover:bg-accent';
 
   return (
     <div

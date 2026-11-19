@@ -96,7 +96,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         dragPreview && 'session-tab-drag-preview',
         !dragPreview && (active
           ? 'border-app-border/50 bg-app-surface text-app-text'
-          : 'border-transparent bg-transparent text-app-text-soft hover:bg-app-surface-muted hover:text-app-text'),
+          : 'border-transparent bg-transparent text-app-text-soft hover:bg-accent hover:text-app-text'),
         dragging && !dragPreview && 'opacity-80',
       )}
     >

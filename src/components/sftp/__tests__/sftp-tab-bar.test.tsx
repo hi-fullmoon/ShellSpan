@@ -400,7 +400,7 @@ describe('SftpTabBar', () => {
     expect(tabs[1].firstElementChild).toHaveClass('mr-6');
     expect(close).toHaveClass('session-tab-action', 'invisible', 'group-hover/session-tab-slot:visible', 'group-focus-within/session-tab-slot:visible');
     expect(close).not.toHaveClass('hidden');
-    expect(tabs[1]).toHaveClass('border-transparent', 'bg-transparent', 'hover:bg-app-surface-muted');
+    expect(tabs[1]).toHaveClass('border-transparent', 'bg-transparent', 'hover:bg-accent');
   });
 
   it('draws the active tab border on the tab itself', () => {

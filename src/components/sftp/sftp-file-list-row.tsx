@@ -248,7 +248,7 @@ export const SftpFileListRow = React.memo(function SftpFileListRow({
     // selected bottom border, without adding height or doubling shared borders.
     selected
       ? 'bg-app-primary/10 shadow-[0_-1px_0_color-mix(in_srgb,var(--app-border)_50%,transparent),0_-1px_0_color-mix(in_srgb,var(--app-primary)_10%,var(--app-surface))]'
-      : 'group-hover:bg-app-primary/5',
+      : 'group-hover:bg-accent',
   );
 
   return (

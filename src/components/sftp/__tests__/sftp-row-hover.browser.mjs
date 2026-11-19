@@ -30,8 +30,12 @@ server.middlewares.use('/__sftp_row_hover', (_request, response) => {
   response.setHeader('Content-Type', 'text/html');
   response.end('<!doctype html><html><body><main id="root" style="height:320px;background:var(--app-surface)"></main></body></html>');
 });
-const colors = row => row.locator('[data-sftp-file-cell]').evaluateAll(cells =>
-  cells.map(cell => getComputedStyle(cell).backgroundColor));
+const colors = row => row.locator('[data-sftp-file-cell]').evaluateAll(async cells => {
+  const styles = cells.map(cell => getComputedStyle(cell));
+  styles.forEach(style => { void style.backgroundColor; });
+  await Promise.all(cells.flatMap(cell => cell.getAnimations().map(animation => animation.finished)));
+  return styles.map(style => style.backgroundColor);
+});
 const assertSelectedBorders = async (page, rows, context) => {
   const screenshot = await loadImage(await page.screenshot({ path: join(artifacts, 'selected-borders.png') }));
   const canvas = createCanvas(screenshot.width, screenshot.height);
@@ -186,6 +190,7 @@ try {
         const selected = page.getByTestId('sftp-row').filter({ hasText: 'AGENTS.md' });
         const parent = page.getByTestId('sftp-parent-row').last();
         const sortByName = page.getByTestId('sftp-file-list-header-viewport').getByRole('button').first();
+        const inactiveNav = page.getByRole('navigation').locator('button:not([aria-current])').first();
         await row.waitFor();
         for (const theme of ['light', 'dark']) {
           await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
@@ -197,14 +202,20 @@ try {
             await page.setViewportSize({ width, height: 480 });
             await sortByName.hover();
             assert.equal(await sortByName.evaluate(element => getComputedStyle(element).cursor), 'default', 'Sortable column uses the default cursor');
+            await inactiveNav.hover();
+            const navHover = await inactiveNav.evaluate(async element => {
+              getComputedStyle(element).backgroundColor;
+              await Promise.all(element.getAnimations().map(animation => animation.finished));
+              return getComputedStyle(element).backgroundColor;
+            });
             await page.mouse.move(width - 1, 450);
             const initial = await colors(row);
             const selectedColor = await colors(selected);
             assert.equal(new Set(selectedColor).size, 1, 'Selection covers every column');
             await row.hover({ position: { x: 80, y: 16 } });
-            await waitForColor(row, '0.05');
             const hovered = await colors(row);
             assert.equal(new Set(hovered).size, 1, 'Hover covers every column');
+            assert.equal(hovered[0], navHover, 'File rows and navigation use the same hover color');
             assert.notEqual(hovered[0], initial[0], 'Hover changes the row background');
             assert.notEqual(hovered[0], selectedColor[0], 'Hover remains distinct from selection');
             await assertSelectedBorders(page, [selected], `${engine.name()}/${locale}/${theme}/${width}`);
@@ -212,12 +223,8 @@ try {
             await selected.hover({ position: { x: 80, y: 16 } });
             assert.deepEqual(await colors(selected), selectedColor, 'Hover preserves selection');
             await parent.hover({ position: { x: 80, y: 16 } });
-            await waitForColor(parent, '0.05');
             assert.deepEqual(await colors(parent), hovered, 'Parent navigation uses the same hover');
             await page.mouse.move(width - 1, 450);
-            await row.locator('[data-sftp-file-cell]').first().evaluate(cell => Promise.all(
-              cell.getAnimations().map(animation => animation.finished),
-            ));
             assert.deepEqual(await colors(row), initial, 'Leaving restores the background');
           }
         }

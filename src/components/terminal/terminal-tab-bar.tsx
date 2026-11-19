@@ -150,7 +150,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
         dragPreview && 'session-tab-drag-preview',
         !dragPreview && (active
           ? 'border-app-border/50 bg-app-surface text-app-text'
-          : 'border-transparent bg-transparent text-app-text-soft hover:bg-app-surface-muted hover:text-app-text'),
+          : 'border-transparent bg-transparent text-app-text-soft hover:bg-accent hover:text-app-text'),
         dragging && !dragPreview && 'opacity-80',
       )}
       style={session.color ? {
@@ -735,7 +735,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
                 type="button"
                 variant="ghost"
                 size="icon-xs"
-                className="mx-1 shrink-0 self-center hover:bg-app-tab-active aria-expanded:bg-app-tab-active"
+                className="mx-1 shrink-0 self-center aria-expanded:bg-accent"
               />
             )}
             aria-label={actionsLabel}

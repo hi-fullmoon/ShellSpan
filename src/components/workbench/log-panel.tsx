@@ -226,10 +226,10 @@ const LogLine: React.FC<LogLineProps> = ({
       onClick={onSelect}
       onDoubleClick={onDoubleClick}
       className={cn(
-        'relative grid w-full cursor-default items-start gap-2 px-3 py-1.5 text-left font-mono text-xs transition-colors before:absolute before:inset-y-0 before:left-0 before:w-0.5 hover:bg-muted/55',
+        'relative grid w-full cursor-default items-start gap-2 px-3 py-1.5 text-left font-mono text-xs transition-colors before:absolute before:inset-y-0 before:left-0 before:w-0.5',
         LOG_COLUMNS,
         '@max-[420px]:grid-cols-[minmax(0,max-content)_minmax(3.5rem,1fr)] @max-[420px]:gap-y-1',
-        selected && 'bg-muted/80',
+        selected ? 'bg-muted/80' : 'hover:bg-accent',
         getLevelRailClass(line.level),
       )}
       aria-label={`${timestamp} ${line.level ?? ''} ${message}`}

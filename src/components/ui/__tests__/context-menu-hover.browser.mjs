@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, stat } from 'node:fs/promises';
 import { userInfo } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
@@ -14,6 +14,7 @@ await mkdir(output, { recursive: true });
 const path = `${root}AGENTS.md`;
 const metadata = await stat(path);
 const entry = { path, name: 'AGENTS.md', kind: 'file', size: metadata.size, modifiedAt: metadata.mtimeMs };
+const fileUrl = pathToFileURL(path).href;
 const directory = root.slice(0, -1);
 const { username } = userInfo();
 const engine = process.env.SHELLSPAN_TEST_ENGINE ?? 'chromium';
@@ -72,13 +73,13 @@ try {
           const labels = await page.evaluate(async options => {
             const { show } = await import('/src/components/ui/__tests__/context-menu-hover.browser-entry.tsx');
             return show(options);
-          }, { kind, theme, locale, entry, directory, username });
+          }, { kind, theme, locale, entry, fileUrl, directory, username });
           const button = name => page.getByRole('button', { name, exact: true });
           const menuItem = name => page.getByRole('menuitem', { name, exact: true });
           if (kind === 'account') await button(labels.account).click();
           if (kind === 'terminal') await page.getByRole('tab').click({ button: 'right' });
           if (kind === 'shared') await page.getByTestId('context-trigger').click({ button: 'right' });
-          if (kind === 'agent-path') await page.getByRole('link', { name: path, exact: true }).click({ button: 'right' });
+          if (kind === 'agent-path') await page.getByRole('link', { name: entry.name, exact: true }).click({ button: 'right' });
           const isIcon = iconKinds.includes(kind);
           const targets = isIcon ? [button(labels[kind])] : {
             account: [menuItem(labels.appearance)],
@@ -93,7 +94,7 @@ try {
             const isDelete = kind === 'file' && (await item.textContent()).trim() === labels.remove;
             const expectedBackground = isDelete
               ? `color-mix(in oklab, var(--destructive) ${theme === 'dark' ? 20 : 10}%, transparent)`
-              : 'color-mix(in srgb, var(--popover-foreground) 5%, var(--popover))';
+              : 'color-mix(in srgb, var(--foreground) 5%, transparent)';
             await item.hover();
             await page.waitForFunction(({ element, expectedBackground }) => {
               const probe = document.createElement('span');

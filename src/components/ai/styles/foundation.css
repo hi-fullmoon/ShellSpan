@@ -20,7 +20,7 @@
   --ai-brand: var(--primary);
   --ai-button: var(--app-button);
   --ai-action-hover-solid: var(--muted);
-  --ai-action-hover: color-mix(in srgb, var(--foreground) 6%, transparent);
+  --ai-action-hover: var(--accent);
   --ai-text-caption: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
   --ai-text-dimmed: color-mix(in srgb, var(--foreground) 88%, transparent);
   --ai-on-accent: var(--primary-foreground);

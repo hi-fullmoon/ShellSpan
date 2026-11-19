@@ -50,7 +50,7 @@ export const ConnectionImportDialog: React.FC<ConnectionImportDialogProps> = ({
             return (
               <label
                 key={candidate.id}
-                className="flex cursor-default items-start gap-3 rounded-lg border border-border px-3 py-2 hover:bg-muted/50"
+                className="flex cursor-default items-start gap-3 rounded-lg border border-border px-3 py-2 hover:bg-accent"
               >
                 <Checkbox
                   checked={checked}

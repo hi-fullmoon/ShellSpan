@@ -177,7 +177,8 @@
 
 :root,
 [data-theme='dark'] {
-  --accent: color-mix(in srgb, var(--popover-foreground) 5%, var(--popover));
+  /* Layer the hover color over the control's own surface. */
+  --accent: color-mix(in srgb, var(--foreground) 5%, transparent);
 }
 
 :root {

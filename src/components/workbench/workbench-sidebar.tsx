@@ -74,7 +74,7 @@ const WorkbenchSidebarItem: React.FC<WorkbenchSidebarItemProps> = ({
         'flex h-8 w-full items-center justify-start gap-1 rounded-lg px-3 text-[13px] font-medium transition-colors [&_svg]:size-4',
         active
           ? 'bg-app-surface text-app-text shadow-sm ring-1 ring-app-border'
-          : 'text-app-text-soft hover:bg-app-surface/50 hover:text-app-text',
+          : 'text-app-text-soft hover:bg-accent hover:text-app-text',
       )}
     >
       <Icon aria-hidden="true" />
@@ -160,7 +160,7 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
             <Button
               type="button"
               variant="ghost"
-              className="h-auto w-full justify-start px-2 py-1.5 hover:bg-app-surface/70 data-popup-open:bg-app-surface"
+              className="h-auto w-full justify-start px-2 py-1.5 data-popup-open:bg-app-surface"
               aria-label={t('workbench.userMenu.open')}
             />
           }

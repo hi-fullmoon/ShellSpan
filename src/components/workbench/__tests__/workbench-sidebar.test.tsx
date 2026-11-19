@@ -112,7 +112,7 @@ describe('WorkbenchSidebar', () => {
     const trigger = screen.getByRole('button', { name: 'Open user menu' });
     expect(trigger).toHaveTextContent('Me');
     expect(trigger).toHaveTextContent('Local profile');
-    expect(trigger).toHaveClass('hover:bg-app-surface/70');
+    expect(trigger).toHaveClass('hover:bg-accent');
 
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));

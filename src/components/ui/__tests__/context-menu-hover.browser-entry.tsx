@@ -35,9 +35,10 @@ function TerminalPreview() {
   </>;
 }
 
-function Preview({ kind, entry, directory }: {
+function Preview({ kind, entry, fileUrl, directory }: {
   kind: MenuKind;
   entry: LocalFileEntry;
+  fileUrl: string;
   directory: string;
 }) {
   const [open, setOpen] = useState(true);
@@ -56,7 +57,7 @@ function Preview({ kind, entry, directory }: {
   if (kind === 'log-actions') return <LogPanel />;
   if (kind === 'terminal') return <TerminalPreview />;
   if (kind === 'agent-path') return <AssistantMessageContent
-    blocks={[{ type: 'text', text: `\`${entry.path}\`` }]} streaming={false} />;
+    blocks={[{ type: 'text', text: `[${entry.name}](${fileUrl})` }]} streaming={false} />;
   if (kind === 'shared') return <ContextMenu>
     <ContextMenuTrigger data-testid="context-trigger">{entry.name}</ContextMenuTrigger>
     <ContextMenuContent>
@@ -77,11 +78,12 @@ function Preview({ kind, entry, directory }: {
 }
 
 let sequence = 0;
-export async function show({ kind, theme, locale, entry, directory, username }: {
+export async function show({ kind, theme, locale, entry, fileUrl, directory, username }: {
   kind: MenuKind;
   theme: 'light' | 'dark';
   locale: Locale;
   entry: LocalFileEntry;
+  fileUrl: string;
   directory: string;
   username: string;
 }) {
@@ -94,7 +96,7 @@ export async function show({ kind, theme, locale, entry, directory, username }: 
     }]);
   }
   flushSync(() => root.render(<TooltipProvider>
-    <Preview key={++sequence} kind={kind} entry={entry} directory={directory} />
+    <Preview key={++sequence} kind={kind} entry={entry} fileUrl={fileUrl} directory={directory} />
   </TooltipProvider>));
   return {
     account: t('workbench.userMenu.open'),
