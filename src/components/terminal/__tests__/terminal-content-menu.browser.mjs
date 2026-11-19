@@ -121,7 +121,22 @@ try {
         await focusedSelectAll.waitFor();
         assert.deepEqual(await itemHighlight(focusedSelectAll), hovered, 'Returning from keyboard to pointer keeps the highlight');
 
+        const menuShadow = await menu.evaluate(element => getComputedStyle(element).boxShadow);
+        for (const separator of await menu.getByRole('separator').all()) {
+          await selectAll.hover();
+          await focusedSelectAll.waitFor();
+          await separator.hover();
+          await menu.and(page.locator(':focus')).waitFor();
+          const frame = await menu.evaluate(element => {
+            const { outlineStyle, boxShadow } = getComputedStyle(element);
+            return { outlineStyle, boxShadow };
+          });
+          assert.deepEqual(frame, { outlineStyle: 'none', boxShadow: menuShadow }, 'Hovering a separator leaves the menu frame unchanged');
+        }
         await page.screenshot({ path: `/tmp/shellspan-terminal-menu-${name}-${width}.png` });
+        await page.keyboard.press('ArrowDown');
+        await keyboardItem.waitFor();
+        assert.deepEqual(await itemHighlight(keyboardItem), hovered, 'ArrowDown resumes item highlighting from a separator');
         await page.keyboard.press('Escape');
         await menu.waitFor({ state: 'hidden' });
         assert.ok(await page.locator('.xterm-helper-textarea').evaluate(element => element === document.activeElement));

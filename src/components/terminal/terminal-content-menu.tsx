@@ -146,7 +146,7 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
         }} />
       <ContextMenuContent
         aria-label={t('terminal.menu.label')}
-        className="[&_[role=menuitem]:focus-visible]:outline-hidden!"
+        className="focus-visible:outline-hidden! [&_[role=menuitem]:focus-visible]:outline-hidden!"
         finalFocus={() => restoreFocus.current && valid() ? terminal?.textarea : false}
       >
         <ContextMenuGroup>
