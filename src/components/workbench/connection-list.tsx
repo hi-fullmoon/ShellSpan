@@ -177,12 +177,15 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
           actions={
             <>
               <Tooltip>
-                <TooltipTrigger render={<WorkbenchSearchInput
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={t('workbench.connections.searchPlaceholder')}
-                aria-label={t('workbench.connections.searchPlaceholder')}
-                />} />
+                <TooltipTrigger render={
+                  <WorkbenchSearchInput
+                    data-slot="input-group-control"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder={t('workbench.connections.searchPlaceholder')}
+                    aria-label={t('workbench.connections.searchPlaceholder')}
+                  />
+                } />
                 <TooltipContent>{t('workbench.connections.searchHint')}</TooltipContent>
               </Tooltip>
               <Button variant="default" size="sm" onClick={onAdd}>

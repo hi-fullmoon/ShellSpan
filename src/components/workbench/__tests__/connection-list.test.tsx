@@ -280,6 +280,7 @@ describe('ConnectionList', () => {
     const search = screen.getByRole('textbox', {
       name: 'workbench.connections.searchPlaceholder',
     });
+    expect(search).toHaveAttribute('data-slot', 'input-group-control');
     expect(search.parentElement).toHaveAttribute('data-slot', 'input-group');
     expect(search).not.toHaveAttribute('title');
   });
