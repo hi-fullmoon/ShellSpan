@@ -1,0 +1,10 @@
+[package]
+name = "shellspan-sandbox-probe"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+publish = false
+
+[dependencies]
+libc = "0.2"
+nono = { version = "=0.82.0", default-features = false }

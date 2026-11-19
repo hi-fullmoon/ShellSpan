@@ -700,7 +700,7 @@ mod tests {
             AgentPermissionModeNative::Operator,
         ] {
             assert_eq!(
-                super::super::auto_review::review_call(mode, &call, &destructive, &scope)
+                super::super::auto_review::review_call(mode, &call, &destructive, &scope, None)
                     .requires_approval,
                 mode != AgentPermissionModeNative::Operator
             );
@@ -720,7 +720,7 @@ mod tests {
             AgentPermissionModeNative::Operator,
         ] {
             assert_eq!(
-                super::super::auto_review::review_call(mode, &call, &destructive, &scope)
+                super::super::auto_review::review_call(mode, &call, &destructive, &scope, None)
                     .requires_approval,
                 mode != AgentPermissionModeNative::Operator
             );

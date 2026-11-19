@@ -137,6 +137,21 @@ fn is_restricted_sudo(preparation: &NativeToolPreparation) -> bool {
         && preparation.call.arguments["elevated"] == serde_json::json!(true)
 }
 
+fn requires_runner_dispatch_journal(preparation: &NativeToolPreparation) -> bool {
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    if preparation.call.arguments["sandboxExecutor"]
+        == super::native::MAC_SANDBOX_ACCEPTANCE_EXECUTOR
+    {
+        return true;
+    }
+    is_restricted_sudo(preparation)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct NativeToolArtifact {
     pub(crate) artifact_id: String,
@@ -1269,16 +1284,20 @@ impl AgentToolPipeline {
                         return Ok(settlement);
                     }
                     let cancellation = entry.tool_cancellation()?;
+                    let journal = self.runner_dispatch_journal(entry, &request, &preparation);
                     if entry.with_input_admission(|| {
                         self.append_auto_approved_call(&request, &preparation)?;
-                        self.append_execution_dispatch(&request, &preparation)
+                        if journal.is_none() {
+                            self.append_execution_dispatch(&request, &preparation)?;
+                        }
+                        Ok(())
                     })?.is_none() { continue; }
                     // spawn_blocking starts now; the pool owns its join until actual completion.
                     let native = self.native.clone();
                     let token = preparation.token.clone();
                     let worker = tokio::task::spawn_blocking(move || {
                         let _lease = lease;
-                        native.execute(&token, true, cancellation)
+                        native.execute_with_runner_journal(&token, true, cancellation, journal)
                     });
                     let index = next;
                     running.push(async move {
@@ -2379,17 +2398,13 @@ impl AgentToolPipeline {
         Ok(())
     }
 
-    async fn execute_native(
+    fn runner_dispatch_journal(
         &self,
         entry: &Arc<AgentEntry>,
         request: &NativeToolRequest,
         preparation: &NativeToolPreparation,
-        approved: bool,
-    ) -> Result<Result<NativeToolResult, String>, String> {
-        let native = Arc::clone(&self.native);
-        let token = preparation.token.clone();
-        let lease = PreparedLease::new(native.clone(), &token);
-        let journal: Option<RunnerDispatchJournal> = is_restricted_sudo(preparation).then(|| {
+    ) -> Option<RunnerDispatchJournal> {
+        requires_runner_dispatch_journal(preparation).then(|| {
             let pipeline = self.clone();
             let entry = entry.clone();
             let request = request.clone();
@@ -2401,7 +2416,20 @@ impl AgentToolPipeline {
                     })?
                     .ok_or_else(|| "Agent Session is stopping".into())
             }) as RunnerDispatchJournal
-        });
+        })
+    }
+
+    async fn execute_native(
+        &self,
+        entry: &Arc<AgentEntry>,
+        request: &NativeToolRequest,
+        preparation: &NativeToolPreparation,
+        approved: bool,
+    ) -> Result<Result<NativeToolResult, String>, String> {
+        let native = Arc::clone(&self.native);
+        let token = preparation.token.clone();
+        let lease = PreparedLease::new(native.clone(), &token);
+        let journal = self.runner_dispatch_journal(entry, request, preparation);
         let cancellation = entry.tool_cancellation()?;
         tokio::task::spawn_blocking(move || {
             let _lease = lease;
@@ -2731,7 +2759,7 @@ impl AgentToolPipeline {
                     prompt: None,
                 },
             )?;
-            if !is_restricted_sudo(&pending.preparation) {
+            if !requires_runner_dispatch_journal(&pending.preparation) {
                 self.append_execution_dispatch(&pending.request, &pending.preparation)?;
             }
             Ok(())
@@ -2751,6 +2779,34 @@ impl AgentToolPipeline {
             .get(&key)
             .is_some_and(|record| record.status == PendingStatus::Executing);
         if still_executing {
+            #[cfg(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            if pending.preparation.call.arguments["sandboxExecutor"]
+                == super::native::MAC_SANDBOX_ACCEPTANCE_EXECUTOR
+            {
+                if let Ok(Ok(outcome)) = &result {
+                    if outcome.summary.starts_with("AGENT_SANDBOX_DISABLED:")
+                        && outcome
+                            .data
+                            .as_ref()
+                            .is_some_and(|data| data["started"] == false)
+                    {
+                        self.append_terminal_approval(
+                            &pending,
+                            AgentToolApprovalStatus::Cancelled,
+                            AgentToolResultStatus::Cancelled,
+                            &outcome.summary,
+                        )?;
+                        self.changed.notify_waiters();
+                        self.continue_after_pending(entry, &pending).await?;
+                        return Ok(AgentToolDecisionSettlement::Resolved);
+                    }
+                }
+            }
             if let Err(error) = self.finish_native(&pending.request, &pending.preparation, result) {
                 if is_terminal_call_blocked(&error) {
                     self.commit_pending_not_started(&pending, "terminalExecutionBlocked")?;
@@ -3504,7 +3560,7 @@ impl AgentToolPipeline {
         self.validate_preparation(&pending.request, &pending.preparation)?;
         if entry
             .with_input_admission(|| {
-                if !is_restricted_sudo(&pending.preparation) {
+                if !requires_runner_dispatch_journal(&pending.preparation) {
                     self.append_execution_dispatch(&pending.request, &pending.preparation)?;
                 }
                 Ok(())

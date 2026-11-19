@@ -2498,7 +2498,8 @@ mod tests {
                 crate::agent_runtime::AgentPermissionModeNative::ScopedAutopilot,
                 &call,
                 &effect,
-                &scope
+                &scope,
+                None
             )
             .requires_approval
         );

@@ -1,16 +1,18 @@
-import { useLayoutEffect } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import type { AppSection } from '@/types';
 import { useTerminalTaskNavigation } from '@/components/terminal/agent-terminal-task-navigation';
 import { latestTerminalBusyAttempt } from '@/lib/ai/terminal-busy-feedback';
 import { terminalExecutionRecovery } from '@/lib/ai/terminal-execution-recovery';
 import { useResolvedModel } from '@/lib/ai/provider-contract';
 import { useFocusStore } from '@/stores/focusStore';
+import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { FocusNoTarget } from '@/components/focus/focus-no-target';
 import { FocusControls } from '@/components/focus/focus-controls';
 import { useAppStore } from '@/stores/appStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useReconnectSession } from '@/hooks/useReconnectSession';
+import { isTauriRuntime } from '@/lib/ipc/tauri';
 import { AgentPermissionSelector } from '../agent-permission-selector';
 import { AgentExecutionSurfaceSelector } from '../agent-execution-surface-selector';
 import { AgentTerminalBusyNotice } from '../agent-terminal-busy-notice';
@@ -36,6 +38,16 @@ export function AiWorkspaceController({
   onClose,
 }: AiWorkspaceControllerProps): React.ReactNode {
   const controller = useAiSessionController({ scope, adapter, focusMode });
+  const sandboxEnabled = useAiSettingsStore((state) => state.agentSandboxEnabled);
+  const [isSandboxPreview, setIsSandboxPreview] = useState(false);
+  useEffect(() => {
+    if (scope !== 'terminal' || !isTauriRuntime()) return;
+    let disposed = false;
+    void import('@tauri-apps/api/app').then(({ getIdentifier }) => getIdentifier()).then((identifier) => {
+      if (!disposed) setIsSandboxPreview(identifier === 'com.shellspan.validation.agent-sandbox-preview-keychain');
+    }).catch(() => undefined);
+    return () => { disposed = true; };
+  }, [scope]);
   const displayedSessionId = controller.view?.summary.id ?? null;
   useLayoutEffect(() => {
     if (scope !== 'terminal') return;
@@ -168,6 +180,7 @@ export function AiWorkspaceController({
               variant="composer"
               disabled={runtimeSettingsLocked}
               mode={controller.selectedPermission}
+              localDirectSandboxEnabled={isSandboxPreview && sandboxEnabled && controller.selectedExecutionSurface === 'direct'}
               onModeChange={controller.view && !configuringContinuation ? controller.selectPermission : undefined}
             />
         )

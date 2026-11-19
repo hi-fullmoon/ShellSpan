@@ -608,6 +608,44 @@ pub(crate) fn spawn_reviewed_local_process_native(
     spawn_local_child_native(task_id, request_id, owner_target_id, child, None, timeout)
 }
 
+#[cfg(all(test, target_os = "linux"))]
+pub(super) fn spawn_sandbox_acceptance_process(
+    request: &crate::agent_runtime::AgentRequestNative,
+    target_id: &str,
+    command: &str,
+    workspace: &Path,
+    launcher: &Path,
+    node: &Path,
+    timeout: Duration,
+) -> Result<Arc<ManagedProcessNative>, String> {
+    let temporary = sandbox_temp_native()?;
+    let shell = local_shell_command(command);
+    let mut child = Command::new(launcher);
+    child
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", workspace)
+        .env("TMPDIR", temporary.path())
+        .env("SHELLSPAN_ACCEPTANCE_NODE", node)
+        .current_dir(workspace)
+        .stdin(Stdio::piped())
+        .arg("--seccomp-network")
+        .arg(workspace)
+        .arg(temporary.path())
+        .arg(node)
+        .arg("--")
+        .arg(shell.get_program())
+        .args(shell.get_args());
+    spawn_local_child_native(
+        request.task_id.clone(),
+        request.request_id.clone(),
+        target_id.into(),
+        child,
+        Some(temporary),
+        timeout,
+    )
+}
+
 fn spawn_local_child_native(
     task_id: String,
     request_id: String,
@@ -616,15 +654,37 @@ fn spawn_local_child_native(
     sandbox_temp: Option<tempfile::TempDir>,
     timeout: Duration,
 ) -> Result<Arc<ManagedProcessNative>, String> {
+    let child = spawn_local_child_command(&mut child)?;
+    manage_local_child_native(
+        task_id,
+        request_id,
+        owner_target_id,
+        child,
+        sandbox_temp,
+        timeout,
+    )
+}
+
+fn spawn_local_child_command(child: &mut Command) -> Result<Child, String> {
     child.stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         child.process_group(0);
     }
-    let mut child = child
+    child
         .spawn()
-        .map_err(|error| format!("Failed to start local direct command: {error}"))?;
+        .map_err(|error| format!("Failed to start local direct command: {error}"))
+}
+
+fn manage_local_child_native(
+    task_id: String,
+    request_id: String,
+    owner_target_id: String,
+    mut child: Child,
+    sandbox_temp: Option<tempfile::TempDir>,
+    timeout: Duration,
+) -> Result<Arc<ManagedProcessNative>, String> {
     let containment = LocalProcessContainmentNative::attach(&mut child)?;
     let stdin = child.stdin.take();
     let stdout = child
@@ -699,6 +759,99 @@ fn spawn_local_child_native(
         .recv()
         .map_err(|_| "Process input worker exited before initialization".to_string())??;
     Ok(process)
+}
+
+#[cfg(all(
+    feature = "native-input-acceptance",
+    debug_assertions,
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+pub(super) fn spawn_mac_sandbox_acceptance_process(
+    request: &crate::agent_runtime::AgentRequestNative,
+    target_id: &str,
+    command: &str,
+    reviewed_command: Option<&super::ReviewedReadCommand>,
+    workspace: &Path,
+    launcher: &Path,
+    timeout: Duration,
+    lease: &mut super::mac_sandbox_workspace::Lease,
+) -> Result<(Arc<ManagedProcessNative>, std::fs::File), String> {
+    use std::os::unix::net::UnixStream;
+    use std::os::{fd::AsRawFd, unix::process::CommandExt};
+
+    let temporary = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let receipt = tempfile::tempfile().map_err(|error| error.to_string())?;
+    let fd = receipt.as_raw_fd();
+    let (gate_reader, mut gate_writer) = UnixStream::pair().map_err(|error| error.to_string())?;
+    let gate_fd = gate_reader.as_raw_fd();
+    let writable = if super::mac_sandbox_automated() && command.starts_with("printf init > init-") {
+        temporary.path().join("absent")
+    } else {
+        temporary.path().to_path_buf()
+    };
+    let launcher_command = |program: &std::ffi::OsStr, inherit_cwd: bool| {
+        let mut child = Command::new(launcher);
+        child
+            .arg("--receipt-fd")
+            .arg(fd.to_string())
+            .arg("--gate-fd")
+            .arg(gate_fd.to_string());
+        if inherit_cwd {
+            child.arg("--inherit-cwd");
+        }
+        child
+            .arg(workspace)
+            .arg(&writable)
+            .arg("/bin/sh")
+            .arg("--")
+            .arg(program);
+        child
+    };
+    let mut child = if let Some(plan) = reviewed_command {
+        plan.command_with(|program| launcher_command(std::ffi::OsStr::new(program), true))?
+    } else {
+        let shell = local_shell_command(command);
+        let mut child = launcher_command(shell.get_program(), false);
+        child
+            .args(shell.get_args())
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("HOME", workspace)
+            .env("TMPDIR", temporary.path())
+            .current_dir(workspace)
+            .stdin(Stdio::piped());
+        child
+    };
+    // Pass the private descriptor to the launcher. The launcher marks it
+    // close-on-exec before starting the sandboxed command.
+    unsafe {
+        child.pre_exec(move || {
+            if libc::fcntl(fd, libc::F_SETFD, 0) < 0 || libc::fcntl(gate_fd, libc::F_SETFD, 0) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut child = spawn_local_child_command(&mut child)?;
+    drop(gate_reader);
+    if let Err(error) = lease.record_group(child.id()) {
+        drop(gate_writer);
+        let _ = child.wait();
+        return Err(error.to_string());
+    }
+    let process = manage_local_child_native(
+        request.task_id.clone(),
+        request.request_id.clone(),
+        target_id.into(),
+        child,
+        Some(temporary),
+        timeout,
+    )?;
+    gate_writer
+        .write_all(b"G")
+        .map_err(|error| error.to_string())?;
+    Ok((process, receipt))
 }
 
 #[cfg(test)]

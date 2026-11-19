@@ -7,6 +7,13 @@ mod diagnostics;
 mod effect;
 mod filesystem;
 mod http_probe;
+#[cfg(all(
+    feature = "native-input-acceptance",
+    debug_assertions,
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+mod mac_sandbox_workspace;
 mod mcp;
 mod process;
 mod registry;
@@ -27,6 +34,13 @@ pub(crate) use checkpoint::*;
 pub(crate) use effect::*;
 pub(crate) use filesystem::*;
 use http_probe::*;
+#[cfg(all(
+    feature = "native-input-acceptance",
+    debug_assertions,
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+pub(crate) use mac_sandbox_workspace::recover_on_startup as recover_mac_sandbox_workspace;
 pub(crate) use mcp::*;
 pub(crate) use process::*;
 pub(crate) use registry::*;

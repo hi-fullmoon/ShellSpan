@@ -16,6 +16,9 @@ impl AgentRuntime {
         session_id: &str,
         home: &Path,
     ) -> Result<(), String> {
+        if super::super::native::mac_sandbox_preview_active() {
+            return Err("Fixed-command acceptance is unavailable in the manual preview".into());
+        }
         let snapshot = self.sessions.snapshot(session_id)?;
         let target = snapshot
             .header
@@ -34,6 +37,14 @@ impl AgentRuntime {
                 .parent_session_id
                 .as_deref()
                 .is_some_and(|id| id.starts_with("phase3-submission-"));
+        let execution_surface = if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO")
+            .as_deref()
+            == Ok("local-sandbox-direct")
+        {
+            AgentExecutionSurface::Direct
+        } else {
+            AgentExecutionSurface::BoundTerminal
+        };
         let target_owned = if crate::terminal_command::acceptance_trace::ssh_recovery_enabled() {
             let (user, profile) =
                 if std::env::var("SHELLSPAN_ACCEPTANCE_SSH_SHELL").as_deref() == Ok("bash") {
@@ -84,11 +95,15 @@ impl AgentRuntime {
                 && target.cwd.as_deref() == home.to_str()
                 && target.local_root.as_deref() == home.to_str()
         };
+        let permission_supported = snapshot.header.permission_mode
+            == Some(AgentSessionPermissionMode::RequestApproval)
+            || (execution_surface == AgentExecutionSurface::Direct
+                && snapshot.header.permission_mode.is_some());
         if snapshot.ended
             || (!session_id.starts_with("phase3-submission-") && !delegated)
             || snapshot.header.model_selection.is_some()
-            || snapshot.header.execution_surface != AgentExecutionSurface::BoundTerminal
-            || snapshot.header.permission_mode != Some(AgentSessionPermissionMode::RequestApproval)
+            || snapshot.header.execution_surface != execution_surface
+            || !permission_supported
             || !target_owned
         {
             return Err("ACCEPTANCE_ISOLATED_BOUND_TARGET_REQUIRED".into());
@@ -113,6 +128,7 @@ impl AgentRuntime {
         let ssh = crate::terminal_command::acceptance_trace::ssh_recovery_enabled();
         let scenario =
             std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO").unwrap_or_default();
+        let sandbox_direct = scenario == "local-sandbox-direct";
         if ssh
             && !match scenario.as_str() {
                 "reconnect-tail" | "display-geometry" | "ordinary-input" | "raw-no-sftp" => false,
@@ -173,6 +189,22 @@ impl AgentRuntime {
             "[[ $PWD == \"$HOME\" && $PHASE3_PARENT == parent-env && $(phase3_parent_fn) == parent-function ]] || return 31\nprintf '%s\\n' FILE_ONCE >> \"$HOME/phase3-effects\"\n"
         };
         let source = match source_kind {
+            "sandbox-reviewed-read" if sandbox_direct => "cat review-fixture/input.txt".into(),
+            "sandbox-reviewed-list" if sandbox_direct => "ls review-fixture".into(),
+            "sandbox-operator-write" if sandbox_direct => format!("printf entered > exit-{id}"),
+            "sandbox-operator-outside-read" if sandbox_direct => "cat ../launcher.json".into(),
+            "sandbox-gate" if sandbox_direct => format!("printf gate > gate-{id}"),
+            "sandbox-init" if sandbox_direct => format!("printf init > init-{id}"),
+            "sandbox-exit" if sandbox_direct => format!("printf entered > exit-{id}; printf nonzero >&2; exit 42"),
+            "sandbox-exit-125" if sandbox_direct => format!("printf entered > exit-{id}; printf 'sandbox launcher: command diagnostic' >&2; exit 125"),
+            "sandbox-before" if sandbox_direct => format!("printf before > before-{id}"),
+            "sandbox-after" if sandbox_direct => format!("printf after >> after-{id}"),
+            "sandbox-restart" if sandbox_direct => {
+                format!("printf '%s\\n' \"$$\" >> pid-{id}; i=0; while [ ! -f release-{id} ] && [ \"$i\" -lt 250 ]; do i=$((i+1)); /bin/sleep .1; done")
+            }
+            "sandbox-cancel" | "sandbox-timeout" if sandbox_direct => {
+                format!("printf '%s\\n' \"$$\" >> pid-{id}; exec /bin/sleep 30")
+            }
             "effect" if ssh && scenario == "after-key-disconnect" => {
                 format!("{effect}; exec /bin/sleep 30")
             }
@@ -234,6 +266,8 @@ impl AgentRuntime {
             _ => return Err("ACCEPTANCE_SOURCE_KIND_REQUIRED".into()),
         };
         let timeout_ms = match (source_kind, scenario.as_str()) {
+            ("sandbox-reviewed-read" | "sandbox-reviewed-list", "local-sandbox-direct") => 5_000,
+            ("sandbox-timeout", "local-sandbox-direct") => 1_500,
             (
                 "effect",
                 "timeout-unknown-accept"

@@ -89,6 +89,7 @@ export interface AgentPermissionSelectorProps {
   readonly mode?: AgentPermissionMode;
   readonly onModeChange?: (mode: AgentPermissionMode) => Promise<void>;
   readonly variant?: 'default' | 'composer';
+  readonly localDirectSandboxEnabled?: boolean;
 }
 
 export function AgentPermissionSelector({
@@ -97,6 +98,7 @@ export function AgentPermissionSelector({
   mode: selectedMode,
   onModeChange,
   variant = 'default',
+  localDirectSandboxEnabled = false,
 }: AgentPermissionSelectorProps): React.ReactNode {
   const { t } = useI18n();
   const binding = useAgentPermissionStore((state) => state.bindings[sessionId]);
@@ -107,6 +109,7 @@ export function AgentPermissionSelector({
     (session) => session.sessionId === sessionId,
   ));
   const connected = terminal?.status === 'connected';
+  const sandboxed = localDirectSandboxEnabled && connected && terminal?.host === 'local' && terminal.port === 0;
   const [fullAccessDialogOpen, setFullAccessDialogOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmationTarget, setConfirmationTarget] = useState<FullAccessConfirmationTarget | null>(null);
@@ -211,6 +214,10 @@ export function AgentPermissionSelector({
             <DropdownMenuRadioGroup value={visibleMode} onValueChange={selectMode}>
               {(composer ? COMPOSER_PERMISSION_OPTIONS : PERMISSION_OPTIONS).map((option) => {
                 const Icon = option.icon;
+                const sandboxedFullAccess = sandboxed && option.mode === 'fullAccess';
+                const description = sandboxedFullAccess
+                  ? 'agent.permission.sandboxedFullAccessDescription'
+                  : option.description;
                 return (
                   <DropdownMenuRadioItem
                     key={option.mode}
@@ -221,7 +228,7 @@ export function AgentPermissionSelector({
                         ? 'ai-permission-menu-option min-h-12 items-start gap-1 py-2 pr-8 pl-2'
                         : 'items-start gap-1 py-2 text-[13px]',
                     )}
-                    aria-description={composer ? t(option.description) : undefined}
+                    aria-description={composer ? t(description) : undefined}
                   >
                     {composer ? (
                       <>
@@ -246,7 +253,7 @@ export function AgentPermissionSelector({
                             )}
                           </span>
                           <span className="text-[11px] leading-4 text-muted-foreground" aria-hidden="true">
-                            {t(option.composerDescription)}
+                            {t(sandboxedFullAccess ? description : option.composerDescription)}
                           </span>
                         </span>
                       </>
@@ -276,7 +283,7 @@ export function AgentPermissionSelector({
                             )}
                           </span>
                           <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground sm:whitespace-nowrap">
-                            {t(option.description)}
+                            {t(description)}
                           </span>
                         </span>
                       </>
@@ -306,7 +313,7 @@ export function AgentPermissionSelector({
           if (!open) setConfirmationTarget(null);
         }}
         title={t('agent.permission.fullAccessTitle')}
-        description={t('agent.permission.fullAccessWarning')}
+        description={t(sandboxed ? 'agent.permission.sandboxedFullAccessWarning' : 'agent.permission.fullAccessWarning')}
         confirmLabel={t('agent.permission.fullAccessConfirm')}
         confirmVariant="warning"
         confirmDisabled={!confirmationTarget || !terminal || terminal.status !== 'connected'

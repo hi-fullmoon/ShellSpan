@@ -226,6 +226,10 @@ export function AiApprovalPanel({
     ? approval.arguments as Record<string, unknown>
     : null;
   const elevated = command !== null && argumentRecord?.elevated === true;
+  const commandImpactKey = elevated ? 'ai.workspace.approval.sudoImpact'
+    : approval.commandSandbox === 'macos' ? 'ai.workspace.approval.macSandboxImpact'
+      : approval.commandSandbox === 'remote' ? 'ai.workspace.approval.remoteSandboxImpact'
+        : 'ai.workspace.approval.unsandboxedImpact';
   const target = approval.target;
   const runner = argumentRecord?.sudoOperation && typeof argumentRecord.sudoOperation === 'object'
     ? argumentRecord.sudoOperation as Record<string, unknown> : null;
@@ -371,7 +375,7 @@ export function AiApprovalPanel({
               <AlertDescription className="flex flex-wrap items-center gap-x-1">
                 <span className="font-medium">{t('ai.workspace.approval.impact')}</span>
                 <span>{t(approval.toolName === 'trash_file' ? 'ai.workspace.approval.trashImpact' : riskKeys.description)}</span>
-                {command && <span>{t(elevated ? 'ai.workspace.approval.sudoImpact' : 'ai.workspace.approval.unsandboxedImpact')}</span>}
+                {command && <span>{t(commandImpactKey)}</span>}
               </AlertDescription>
             </Alert>
 

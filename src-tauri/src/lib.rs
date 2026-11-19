@@ -316,7 +316,15 @@ pub fn run() {
             if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION").as_deref() == Ok("1") {
                 let evidence =
                     commands::terminal_acceptance_directory().map_err(std::io::Error::other)?;
-                if !terminal_command::acceptance_trace::ssh_recovery_enabled() {
+                if agent_runtime::mac_sandbox_trial_active() {
+                    let directory = evidence.clone();
+                    tauri::async_runtime::spawn_blocking(move || {
+                        agent_runtime::recover_mac_sandbox_workspace(directory);
+                    });
+                }
+                if !terminal_command::acceptance_trace::ssh_recovery_enabled()
+                    && !agent_runtime::mac_sandbox_preview_active()
+                {
                     assert_eq!(home_dir, evidence.join("home"));
                 }
                 let root = evidence.join("app-directories");
@@ -335,6 +343,12 @@ pub fn run() {
             )?;
             let shellspan_dir = shellspan_data_dir(&home_dir);
             let database = db::Database::open(&shellspan_dir.join(db::DATABASE_FILE_NAME))?;
+            #[cfg(all(feature = "native-input-acceptance", debug_assertions, target_os = "macos", target_arch = "aarch64"))]
+            if agent_runtime::mac_sandbox_preview_active()
+                && !database.load_preferences()?.iter().any(|(key, _)| key == "ai.agentPermissionMode")
+            {
+                database.save_preferences(&[("ai.agentPermissionMode".into(), "\"requestApproval\"".into())])?;
+            }
             app.manage(frontend_storage::FrontendStorage::open(&shellspan_dir)?);
             let log_directory = path_utils::shellspan_log_dir(&home_dir);
             let backend = Target::new(TargetKind::Folder {
@@ -361,6 +375,18 @@ pub fn run() {
                     .build(),
             )?;
             let credentials = keychain::CredentialManager::new();
+            #[cfg(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            let credentials = if agent_runtime::mac_sandbox_preview_active() {
+                let identifier = std::env::var("SHELLSPAN_ACCEPTANCE_WEBKIT_STORE")?;
+                keychain::CredentialManager::for_sandbox_preview(uuid::Uuid::parse_str(&identifier)?)
+            } else {
+                credentials
+            };
             let petdex = petdex::PetdexAdapter::new(home_dir);
             let message_adapter = petdex.clone();
             let message_directory = shellspan_dir.clone();
@@ -376,6 +402,43 @@ pub fn run() {
             let runtime = app.state::<agent_runtime::AgentRuntime>();
             agent_runtime::configure_runtime(app.handle(), &runtime)?;
             runtime.configure_credentials(credentials)?;
+            #[cfg(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            if agent_runtime::mac_sandbox_preview_active()
+                && std::env::args_os().any(|argument| argument == "--check-preview-profile-keychain")
+            {
+                let credentials = app.state::<keychain::CredentialManager>().inner().clone();
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    let profile_id = format!("preview-check-{}", uuid::Uuid::new_v4());
+                    let password = uuid::Uuid::new_v4().to_string();
+                    let outcome = (|| {
+                        credentials.store_profile_password(&profile_id, &password)?;
+                        let matched = credentials.retrieve_profile_password(&profile_id);
+                        credentials.delete_profile_password(&profile_id)?;
+                        if matched?.as_deref() != Some(password.as_str()) {
+                            return Err("Preview profile password did not round-trip through Keychain".into());
+                        }
+                        Ok::<_, String>(())
+                    })();
+                    let code = match outcome {
+                        Ok(()) => {
+                            println!("PREVIEW_PROFILE_KEYCHAIN_OK");
+                            0
+                        }
+                        Err(error) => {
+                            eprintln!("PREVIEW_PROFILE_KEYCHAIN_FAILED: {error}");
+                            1
+                        }
+                    };
+                    handle.exit(code);
+                });
+                return Ok(());
+            }
             #[cfg(all(
                 feature = "native-input-acceptance",
                 debug_assertions,
@@ -633,6 +696,15 @@ pub fn run() {
     ))]
     let context = {
         let mut context = context;
+        if context.config().identifier == "com.shellspan.validation.agent-sandbox-preview-keychain"
+        {
+            assert!(
+                agent_runtime::mac_sandbox_preview_active()
+                    && std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION").as_deref() == Ok("1")
+                    && std::env::var_os("SHELLSPAN_ACCEPTANCE_WEBKIT_STORE").is_some(),
+                "Launch this preview with its companion launcher to use isolated application data"
+            );
+        }
         if let Ok(value) = std::env::var("SHELLSPAN_ACCEPTANCE_WEBKIT_STORE") {
             let evidence = std::env::var_os("SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR")
                 .map(std::path::PathBuf::from)
@@ -655,9 +727,17 @@ pub fn run() {
                 assert_eq!(evidence, directory);
                 assert_eq!(
                     context.config().identifier,
-                    "com.shellspan.validation.native-input-p3"
+                    if agent_runtime::mac_sandbox_preview_active() {
+                        "com.shellspan.validation.agent-sandbox-preview-keychain"
+                    } else if agent_runtime::mac_sandbox_automated() {
+                        "com.shellspan.validation.agent-sandbox"
+                    } else {
+                        "com.shellspan.validation.native-input-p3"
+                    }
                 );
-                if !terminal_command::acceptance_trace::ssh_recovery_enabled() {
+                if !terminal_command::acceptance_trace::ssh_recovery_enabled()
+                    && !agent_runtime::mac_sandbox_preview_active()
+                {
                     assert_eq!(
                         std::env::var_os("HOME"),
                         Some(directory.join("home").into_os_string())

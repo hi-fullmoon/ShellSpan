@@ -39,6 +39,7 @@ pub(crate) fn review_call(
     call: &AgentToolCallNative,
     effect: &AgentObservedEffectNative,
     scope: &CallPolicyScopeNative,
+    managed_workspace: Option<&Path>,
 ) -> ApprovalReview {
     if call.tool_name == "exec_command"
         && matches!(
@@ -87,7 +88,7 @@ pub(crate) fn review_call(
             command: None,
         };
     }
-    if let Some(command) = review_local_command(call) {
+    if let Some(command) = review_local_command(call, managed_workspace) {
         return ApprovalReview {
             requires_approval: false,
             reason: "bounded_local_read",
@@ -147,12 +148,18 @@ fn structured_read_is_scoped(call: &AgentToolCallNative, scope: &CallPolicyScope
 }
 
 #[cfg(not(unix))]
-fn review_local_command(_call: &AgentToolCallNative) -> Option<ReviewedReadCommand> {
+fn review_local_command(
+    _call: &AgentToolCallNative,
+    _managed_workspace: Option<&Path>,
+) -> Option<ReviewedReadCommand> {
     None
 }
 
 #[cfg(unix)]
-fn review_local_command(call: &AgentToolCallNative) -> Option<ReviewedReadCommand> {
+fn review_local_command(
+    call: &AgentToolCallNative,
+    managed_workspace: Option<&Path>,
+) -> Option<ReviewedReadCommand> {
     if call.tool_name != "exec_command" {
         return None;
     }
@@ -188,8 +195,11 @@ fn review_local_command(call: &AgentToolCallNative) -> Option<ReviewedReadComman
         return None;
     }
     let reader = LocalScopedReader::open(root).ok()?;
+    // A verified preview root sits under .shellspan. Its relative paths still
+    // receive the same sensitive-path review as any other workspace.
+    let managed_root = managed_workspace == Some(Path::new(reader.root()));
     if Path::new(reader.root()).parent().is_none()
-        || path_is_sensitive_native(reader.root())
+        || (!managed_root && path_is_sensitive_native(reader.root()))
         || super::protected_delete_path_native(reader.root())
     {
         return None;
@@ -224,7 +234,7 @@ fn review_local_command(call: &AgentToolCallNative) -> Option<ReviewedReadComman
                     return None;
                 }
             }
-            plan.directory = scoped_relative(&reader, path.unwrap_or("."))?;
+            plan.directory = scoped_relative(&reader, path.unwrap_or("."), managed_root)?;
             reader.open_command_directory(&plan.directory).ok()?;
         }
         "cat" | "head" | "tail" => {
@@ -240,7 +250,7 @@ fn review_local_command(call: &AgentToolCallNative) -> Option<ReviewedReadComman
                 }
                 _ => return None,
             };
-            let relative = scoped_relative(&reader, path)?;
+            let relative = scoped_relative(&reader, path, managed_root)?;
             reader.open_command_file(&relative).ok()?;
             // A single cat/head/tail file has the same output via stdin. Passing
             // an opened handle prevents later symlink swaps from redirecting it.
@@ -264,7 +274,7 @@ fn trusted_program(path: &str) -> bool {
 }
 
 #[cfg(unix)]
-fn scoped_relative(reader: &LocalScopedReader, value: &str) -> Option<String> {
+fn scoped_relative(reader: &LocalScopedReader, value: &str, managed_root: bool) -> Option<String> {
     let path = Path::new(value);
     if path.components().any(|p| matches!(p, Component::ParentDir)) {
         return None;
@@ -280,7 +290,8 @@ fn scoped_relative(reader: &LocalScopedReader, value: &str) -> Option<String> {
         .collect::<std::path::PathBuf>();
     let text = normalized.to_str()?;
     if path_is_sensitive_native(text)
-        || path_is_sensitive_native(&Path::new(reader.root()).join(relative).to_string_lossy())
+        || (!managed_root
+            && path_is_sensitive_native(&Path::new(reader.root()).join(relative).to_string_lossy()))
     {
         return None;
     }
@@ -290,6 +301,14 @@ fn scoped_relative(reader: &LocalScopedReader, value: &str) -> Option<String> {
 impl ReviewedReadCommand {
     #[cfg(unix)]
     pub(crate) fn command(&self) -> Result<Command, String> {
+        self.command_with(|program| Command::new(program))
+    }
+
+    #[cfg(unix)]
+    pub(super) fn command_with(
+        &self,
+        wrap: impl FnOnce(&str) -> Command,
+    ) -> Result<Command, String> {
         use std::os::{fd::AsRawFd, unix::process::CommandExt};
         let denied = || {
             "AUTO_REVIEW_CHANGED: the reviewed read can no longer be executed safely; no shell fallback was run".to_string()
@@ -304,7 +323,7 @@ impl ReviewedReadCommand {
         let directory = reader
             .open_command_directory(&self.directory)
             .map_err(|_| denied())?;
-        let mut command = Command::new(&self.program);
+        let mut command = wrap(&self.program);
         command.args(&self.arguments).env_clear().env("LC_ALL", "C");
         if let Some(path) = &self.input {
             let file = reader.open_command_file(path).map_err(|_| denied())?;
@@ -361,7 +380,7 @@ mod tests {
         )
         .unwrap();
         let scope = inspect_call_policy_scope_native(call).unwrap();
-        review_call(mode, call, &effect, &scope)
+        review_call(mode, call, &effect, &scope, None)
     }
 
     #[test]
@@ -524,6 +543,28 @@ mod tests {
         read.tool_name = "exec_command".into();
         read.arguments = json!({"command":"pwd", "explanation":"inspect", "channel":"direct"});
         assert!(review(AgentPermissionModeNative::ScopedAutopilot, &read).requires_approval);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn managed_preview_home_keeps_sensitive_paths_out_of_reviewed_reads() {
+        let fixture = tempfile::tempdir().unwrap();
+        let base = std::fs::canonicalize(fixture.path()).unwrap();
+        let root = base.join(".shellspan/agent-sandbox/preview-fixture/home");
+        std::fs::create_dir_all(&root).unwrap();
+        for name in ["input.txt", ".env"] {
+            std::fs::write(root.join(name), "sandbox review sample\n").unwrap();
+        }
+        std::fs::write(root.parent().unwrap().join("launcher.json"), "{}").unwrap();
+        let read = command(&root, "cat input.txt");
+        assert!(review_local_command(&read, None).is_none());
+        assert!(review_local_command(&read, Some(&root)).is_some());
+        for script in ["cat .env", "cat ../launcher.json", "ls .."] {
+            assert!(
+                review_local_command(&command(&root, script), Some(&root)).is_none(),
+                "{script}"
+            );
+        }
     }
 
     #[cfg(unix)]

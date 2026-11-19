@@ -248,6 +248,29 @@ impl NativeToolRuntime for NativeToolAdapter {
         self.configure(runtime)?;
         let known_hosts_path = &self.services.known_hosts_path;
         let mut owner_target = target_native(&request.target)?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        if super::native::mac_sandbox_preview_active()
+            && matches!(owner_target, AgentToolTargetNative::Local { .. })
+        {
+            crate::commands::terminal_acceptance_directory()?;
+            if request.execution_surface != super::AgentExecutionSurface::Direct
+                || request.model_call.name != "run_terminal_command"
+                || request.model_call.arguments["background"] == json!(true)
+                || request.model_call.arguments["handoffToUser"] == json!(true)
+                || request
+                    .model_call
+                    .arguments
+                    .get("sudoOperationId")
+                    .is_some()
+            {
+                return Err("MAC_SANDBOX_PREVIEW_DIRECT_ONLY: use a foreground Direct command in the managed workspace".into());
+            }
+        }
         let elevated_command = request.model_call.name == "run_terminal_command"
             && request
                 .model_call
@@ -579,6 +602,17 @@ impl NativeToolRuntime for NativeToolAdapter {
             if binding.state.policy.is_some() {
                 call.arguments["sandboxExecutor"] = json!("bubblewrapV1");
             }
+        }
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        if let Some(digest) = prepared.desktop_sandbox_digest() {
+            call.arguments["sandboxExecutor"] =
+                json!(super::native::MAC_SANDBOX_ACCEPTANCE_EXECUTOR);
+            call.arguments["connectionPolicyBinding"] = json!(digest);
         }
         let expires_at_unix_ms = current_unix_ms().saturating_add(DEFAULT_NATIVE_APPROVAL_TTL_MS);
         let preparation = NativeToolPreparation {

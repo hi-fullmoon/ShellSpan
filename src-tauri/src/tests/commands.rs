@@ -1,3 +1,5 @@
+    #[cfg(target_os = "macos")]
+    use super::configure_local_terminal_home;
     use super::{
         collect_local_output_batch, configure_local_terminal_environment, detect_key_type,
         expand_home_path, process_profile_avatar, remove_failed_session_registration,
@@ -518,6 +520,50 @@
                     .is_some_and(|locale| locale.ends_with(".UTF-8")));
             }
             assert_eq!(command.get_env("LC_TIME"), Some(OsStr::new("C")));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_local_pty_uses_login_home_without_a_managed_override() {
+        let managed = tempfile::tempdir().expect("create managed shell home");
+        let managed_home = managed.path().canonicalize().expect("resolve managed home");
+        let login_home = std::env::var_os("HOME").expect("read login home");
+
+        for override_home in [None, Some(managed_home.as_os_str())] {
+            let expected_home = override_home.unwrap_or(&login_home);
+            let expected_cwd = std::path::Path::new(expected_home)
+                .canonicalize()
+                .expect("resolve expected PTY working directory");
+            let pair = native_pty_system()
+                .openpty(PtySize::default())
+                .expect("open a real local PTY");
+            let mut reader = pair
+                .master
+                .try_clone_reader()
+                .expect("read local PTY output");
+            let mut command = CommandBuilder::new("/bin/sh");
+            command.args(["-c", "printf '%s\\n' \"$HOME\" && /bin/pwd -P"]);
+            configure_local_terminal_home(&mut command, override_home)
+                .expect("configure shell home");
+            let mut child = pair
+                .slave
+                .spawn_command(command)
+                .expect("start a local shell");
+            drop(pair.slave);
+            let mut output = String::new();
+            reader
+                .read_to_string(&mut output)
+                .expect("read shell home and cwd");
+            assert!(child.wait().expect("wait for shell").success());
+            assert_eq!(
+                output.replace("\r\n", "\n"),
+                format!(
+                    "{}\n{}\n",
+                    expected_home.to_string_lossy(),
+                    expected_cwd.display()
+                ),
+            );
         }
     }
 
