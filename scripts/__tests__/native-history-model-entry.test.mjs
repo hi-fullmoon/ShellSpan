@@ -2,7 +2,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import path from 'node:path';
 import {expect,it} from 'vitest';
-const root=path.resolve(import.meta.dirname,'../..'),run=promisify(execFile),cli=path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),evidence=path.join(root,'artifacts/tests/native-input-p2/history-selection-negative-only'),env={...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home')};
+const root=path.resolve(import.meta.dirname,'../..'),run=promisify(execFile),cli=path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),evidence=path.join(root,'artifacts/tests/native-input/integration/history-selection-negative-only'),env={...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home')};
 it.skipIf(process.platform!=='win32').each([
  ['native-input-p3-history-startup','unowned-home'],
  ['native-input-p3-history-lifecycle','unowned-home'],

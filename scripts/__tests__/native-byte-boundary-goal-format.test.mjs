@@ -3,7 +3,7 @@ import {promisify} from 'node:util';
 import path from 'node:path';
 import {expect,it} from 'vitest';
 const root=path.resolve(import.meta.dirname,'../..'),run=promisify(execFile),cli=path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs');
-const owned=path.join(root,'artifacts/tests/native-input-p2/goal-format-negative-only/data');
+const owned=path.join(root,'artifacts/tests/native-input/integration/goal-format-negative-only/data');
 it.each([
  ['missing boundary',['--native-input-p3-byte-boundary-goal-format','json'],'requires a byte-boundary case and exact raw/json/json-ascii format'],
  ['unknown format',['--native-input-p3-byte-boundary','8192','--native-input-p3-byte-boundary-goal-format','other'],'requires a byte-boundary case and exact raw/json/json-ascii format'],

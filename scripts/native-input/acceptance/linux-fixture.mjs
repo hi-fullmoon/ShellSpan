@@ -5,33 +5,33 @@ import {mkdirSync,copyFileSync,readFileSync,writeFileSync,openSync,closeSync} fr
 import {resolve} from 'node:path';
 import {captureValidationSources} from '../integration/frozen-validation.mjs';
 const owner=resolve(import.meta.dirname,'../../..');
-const root=resolve(process.argv[2]);assert(root.startsWith(resolve(owner,'artifacts/tests/native-input-p3/acceptance-source')+'/'));
+const root=resolve(process.argv[2]);assert(root.startsWith(resolve(owner,'artifacts/tests/native-input/acceptance/acceptance-source')+'/'));
 const sources=captureValidationSources(root);const id=randomUUID();
 const image=process.env.SHELLSPAN_P3_LINUX_IMAGE??'shellspan-native-input-p3:local';
 const imageId=execFileSync('docker',['image','inspect','--format','{{.Id}}',image],{encoding:'utf8'}).trim();
 const container=`shellspan-nip-p3-${id}`;
-const directory=resolve(root,'artifacts/tests/native-input-p3/ssh-fixture');mkdirSync(directory,{recursive:true});
-mkdirSync(resolve(root,'artifacts/tests/native-input-p3/dependencies'),{recursive:true});
-copyFileSync(resolve(owner,'artifacts/tests/native-input-p3/dependencies/zsh-5.9.tar.xz'),resolve(root,'artifacts/tests/native-input-p3/dependencies/zsh-5.9.tar.xz'));
+const directory=resolve(root,'artifacts/tests/native-input/acceptance/ssh-fixture');mkdirSync(directory,{recursive:true});
+mkdirSync(resolve(root,'artifacts/tests/native-input/acceptance/dependencies'),{recursive:true});
+copyFileSync(resolve(owner,'artifacts/tests/native-input/acceptance/dependencies/zsh-5.9.tar.xz'),resolve(root,'artifacts/tests/native-input/acceptance/dependencies/zsh-5.9.tar.xz'));
 execFileSync('docker',['run','-d','--name',container,'--label',`shellspan.native-input-p3=${id}`,'-p','127.0.0.1::22229',
-  '-v',`${root}:/work`,'-v',`${resolve(owner,'artifacts/tests/native-input-p2/cargo-registry')}:/usr/local/cargo/registry`,
+  '-v',`${root}:/work`,'-v',`${resolve(owner,'artifacts/tests/native-input/integration/cargo-registry')}:/usr/local/cargo/registry`,
   imageId,'sleep','infinity']);
 writeFileSync(resolve(directory,'owner.json'),JSON.stringify({id,container,root,image,imageId},null,2));
-writeFileSync(resolve(owner,'artifacts/tests/native-input-p3/latest-ssh-fixture-owner.json'),JSON.stringify({id,container,root,directory},null,2));
+writeFileSync(resolve(owner,'artifacts/tests/native-input/acceptance/latest-ssh-fixture-owner.json'),JSON.stringify({id,container,root,directory},null,2));
 const log=openSync(resolve(directory,'build.log'),'wx');
 const child=spawn('docker',['exec','-e','SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests',container,'sh','scripts/native-input/acceptance/linux-build.sh'],{stdio:['ignore',log,log]});
 const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve);});closeSync(log);
 writeFileSync(resolve(directory,'build-result.json'),JSON.stringify({exitCode:code}));assert.equal(code,0);
 assert.deepEqual(captureValidationSources(root),sources,'Complete Linux producer source set changed during build');
 writeFileSync(resolve(directory,'sshd_config'),'Port 22229\nListenAddress 0.0.0.0\nHostKey /tmp/p3-sshd/host_key\nPidFile /tmp/p3-sshd/pid\nPasswordAuthentication yes\nKbdInteractiveAuthentication no\nUsePAM no\nPermitRootLogin no\nAllowUsers nativeZle\nSubsystem sftp internal-sftp\nSetEnv LANG=en_US.UTF-8\nPrintMotd no\nLogLevel ERROR\n');
-const catalogue=JSON.parse(readFileSync(resolve(root,'artifacts/tests/native-input-p2/resources/native-input/editors-linux-aarch64-glibc-2.36.json'),'utf8'));
+const catalogue=JSON.parse(readFileSync(resolve(root,'artifacts/tests/native-input/integration/resources/native-input/editors-linux-aarch64-glibc-2.36.json'),'utf8'));
 const coreObserver=catalogue.profiles.some(profile=>profile.core||profile.editorSha256)?"p3_core_scope() { builtin printf '\\e]0;P3_CORE_BUDGET_%s\\a' \"$ZLE_NATIVE_APPEND\"; }\nzle -N p3_core_scope\nbindkey '^Xz' p3_core_scope\n":"";
 writeFileSync(resolve(directory,'zshrc'),"PROMPT='%F{cyan}P3-SSH>%f '\nHISTFILE=$HOME/history\nHISTSIZE=1000\nSAVEHIST=1000\nsetopt interactivecomments\n"+coreObserver);
 execFileSync('docker',['exec',container,'mkdir','-m','700','/tmp/p3-sshd']);
 execFileSync('docker',['exec',container,'ssh-keygen','-q','-t','ed25519','-N','','-f','/tmp/p3-sshd/host_key']);
 execFileSync('docker',['cp',resolve(directory,'zshrc'),`${container}:/home/nativeZle/.zshrc`]);
 execFileSync('docker',['exec',container,'chown','nativeZle:nativeZle','/home/nativeZle/.zshrc']);
-execFileSync('docker',['exec','-d',container,'/usr/sbin/sshd','-D','-e','-f','/work/artifacts/tests/native-input-p3/ssh-fixture/sshd_config']);
+execFileSync('docker',['exec','-d',container,'/usr/sbin/sshd','-D','-e','-f','/work/artifacts/tests/native-input/acceptance/ssh-fixture/sshd_config']);
 const ports=JSON.parse(execFileSync('docker',['inspect','--format','{{json .NetworkSettings.Ports}}',container],{encoding:'utf8'}));
 const publicKey=execFileSync('docker',['exec',container,'cat','/tmp/p3-sshd/host_key.pub'],{encoding:'utf8'}).trim().split(/\s+/);
 const fixture={id,container,root,image,imageId,host:'127.0.0.1',port:Number(ports['22229/tcp'][0].HostPort),username:'nativeZle',

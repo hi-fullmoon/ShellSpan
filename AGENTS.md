@@ -15,7 +15,7 @@
 不要手工修改 `node_modules/`、`dist/`、`src-tauri/target/` 或 `src-tauri/gen/`。`src-tauri/vendor/portable-pty/` 是项目维护的补丁依赖，只有任务明确涉及该依赖时才修改。
 
 根目录 `artifacts/tests/` 只存放测试与验收产物，包括日志、截图、报告、隔离快照和验收专用安装包。前端构建使用 `dist/`，Rust 构建与 Tauri 打包使用 `src-tauri/target/`。原生终端构建和打包资源放入 `src-tauri/target/native-input/`，依赖重建输出放入 `src-tauri/target/dependencies/`，正式发布的暂存文件、配置和输出放入 `src-tauri/target/releases/`。必须入库的测试采样和发布说明仍保留在源码目录。
-测试和验收入口调用原生资源构建脚本时，通过 `SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests` 显式指定验收目录。
+测试和验收入口调用原生资源构建脚本时，通过 `SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests` 显式指定验收目录。原生输入的产物按用途写入 `artifacts/tests/native-input/`。
 
 ## 常用命令
 

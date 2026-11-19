@@ -6,15 +6,19 @@ from pathlib import Path
 import platform
 import shutil
 import subprocess
+import sys
 
 root = Path(__file__).resolve().parents[3]
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(root / 'scripts/native-input'))
+from build_paths import BUILD_ROOT, build_directory
+
 assert platform.system() == 'Linux' and platform.machine() == 'aarch64'
 assert os.confstr('CS_GNU_LIBC_VERSION') == 'glibc 2.36'
 assert subprocess.check_output(['/bin/zsh', '-f', '-c', 'print -rn -- $ZSH_VERSION']) == b'5.9'
 identifier = 'zsh-5.9-zle-5.9-linux-aarch64-glibc-2.36-native'
-build_root = root / os.environ.get('SHELLSPAN_NATIVE_BUILD_ROOT', 'src-tauri/target/native-input')
-build_dir = build_root / 'native-input-p3'
-resources = build_root / 'native-input-p2/resources/native-input'
+build_dir = build_directory(BUILD_ROOT, 'acceptance')
+resources = build_directory(BUILD_ROOT, 'integration') / 'resources/native-input'
 destination = resources / identifier
 destination.mkdir(parents=True, exist_ok=True)
 sha = lambda path: hashlib.sha256(Path(path).read_bytes()).hexdigest()
@@ -46,7 +50,8 @@ paths += ['src-tauri/src/terminal_command/protocol.rs', 'src-tauri/src/terminal_
           'src-tauri/src/terminal_jobs.ps1', 'src-tauri/src/terminal_job_host.cs', 'src-tauri/src/terminal_console_signals.cs',
           'src-tauri/native-input-adapter/Cargo.toml', 'src-tauri/native-input-adapter/Cargo.lock',
           'src-tauri/native-input-adapter/src/bin/native-input-relay.rs',
-          'scripts/native-input/acceptance/linux-build.sh', 'scripts/native-input/acceptance/publish-linux.py', 'scripts/native-input/acceptance/zsh-build-check.c']
+          'scripts/native-input/acceptance/linux-build.sh', 'scripts/native-input/acceptance/publish-linux.py', 'scripts/native-input/acceptance/zsh-build-check.c',
+          'scripts/native-input/build_paths.py', 'scripts/native-input/integration/resource-paths.mjs']
 paths += ['scripts/dependency-builds/zsh/pin.json', 'scripts/dependency-builds/zsh/native-display.patch',
           'scripts/native-input/acceptance/build-scoped-core.mjs']
 profile = {'shell': 'zsh', 'shellVersion': '5.9', 'editor': 'zle', 'editorVersion': '5.9',

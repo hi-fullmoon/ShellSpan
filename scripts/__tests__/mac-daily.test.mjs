@@ -119,7 +119,7 @@ test('real checkpoint HTTP abort preserves pending evidence and cannot count as 
  }finally{await new Promise(done=>server.close(done));await vite.close();}
 },15000);
 test('retains window options and leaves the WebKit identifier to the runtime SDK API',async()=>{
- const root=resolve(import.meta.dirname,'../..'),directory=resolve(root,'artifacts/tests/native-input-p2/window-options-case');
+ const root=resolve(import.meta.dirname,'../..'),directory=resolve(root,'artifacts/tests/native-input/integration/window-options-case');
  const token='11111111-2222-4333-8444-555555555555',other='aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
  const base=JSON.parse(readFileSync(resolve(root,'src-tauri/tauri.conf.json'),'utf8')).app.windows;
  const first=await macDailyAppConfiguration(root,directory,token),second=await macDailyAppConfiguration(root,directory,other);

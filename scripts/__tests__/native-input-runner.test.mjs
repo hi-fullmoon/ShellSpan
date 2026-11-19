@@ -291,7 +291,7 @@ describe('native input runner argument validation', () => {
     const id='12345678-1234-1234-1234-123456789abc';
     const location=windowsShortSnapshotLocation(root,id);
     expect(location).toEqual({directory:path.join(root,'artifacts/tests/p3','12345678'),root:path.join(root,'artifacts/tests/p3','12345678','s')});
-    const cachedAssembly=path.join(location.root,'artifacts/tests/native-input-p2/w114/data/editors','0'.repeat(32),'PSReadLine/2.4.5/net6plus/Microsoft.PowerShell.PSReadLine.Polyfiller.dll');
+    const cachedAssembly=path.join(location.root,'artifacts/tests/native-input/integration/w114/data/editors','0'.repeat(32),'PSReadLine/2.4.5/net6plus/Microsoft.PowerShell.PSReadLine.Polyfiller.dll');
     if(process.platform==='win32')expect(cachedAssembly.length).toBeLessThan(260);
     expect(()=>windowsShortSnapshotLocation(root,'../elsewhere')).toThrow('UUID');
     expect(()=>windowsShortSnapshotLocation('relative',id)).toThrow('absolute owner');

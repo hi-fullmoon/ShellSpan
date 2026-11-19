@@ -149,7 +149,7 @@ def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--native',action='store_true')
-    parser.add_argument('--shell',default=str(ROOT/'artifacts/tests/native-input-p0/append-full-gate/bash'))
+    parser.add_argument('--shell',default=str(ROOT/'artifacts/tests/native-input/prototype/append-full-gate/bash'))
     args=parser.parse_args()
     args.output.mkdir(parents=True)
     cases=scenarios()

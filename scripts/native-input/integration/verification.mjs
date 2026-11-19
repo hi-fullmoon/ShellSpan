@@ -11,7 +11,7 @@ import { cargoLibraryTests, repositoryRoot as root, terminalFrontendTests, verif
 
 export async function verifyIntegration(args) {
   const {values}=parseArgs({args,options:{fixture:{type:'string'},'components-only':{type:'boolean'}}});
-  const directory=resolve(root,'artifacts/tests/native-input-p2/validation',randomUUID());await mkdir(directory,{recursive:true,mode:0o700});
+  const directory=resolve(root,'artifacts/tests/native-input/integration/validation',randomUUID());await mkdir(directory,{recursive:true,mode:0o700});
   const steps=[];let current;let fixture;let createdFixture=false;let failure;
   for(const signal of['SIGINT','SIGTERM'])process.once(signal,()=>current?.kill(signal));
   async function run(name,command,args,environment={}){
@@ -33,7 +33,7 @@ export async function verifyIntegration(args) {
         await run('fixture-image','docker',['build','-t','shellspan-native-input-p2:local','-f','scripts/native-input/integration/Dockerfile','scripts/native-input/integration']);
         fixture=await run('fixture-start',process.execPath,['scripts/native-input/integration/ssh.mjs']);createdFixture=true;
       }
-      assert(fixture.startsWith(resolve(root,'artifacts/tests/native-input-p2/ssh')+'/'));
+      assert(fixture.startsWith(resolve(root,'artifacts/tests/native-input/integration/ssh')+'/'));
       const owned=JSON.parse(await readFile(fixture,'utf8'));
       await run('producer-ssh','docker',['exec','-e','SHELLSPAN_NATIVE_BUILD_ROOT=artifacts/tests',owned.container,'python3','-B','scripts/native-input/integration/build.py']);
       await run('fixture-refresh',process.execPath,['scripts/native-input/integration/ssh.mjs','--refresh',fixture]);
@@ -45,7 +45,7 @@ export async function verifyIntegration(args) {
     if(!values['components-only']){
       const owned=JSON.parse(await readFile(fixture,'utf8'));
       await run('linux-geometry-inputs','cargo',[...cargoLibraryTests,'native_linux_geometry_inputs','--','--ignored']);
-      const inputs=JSON.parse(await readFile(resolve(root,'artifacts/tests/native-input-p2/linux-geometry-inputs.json'),'utf8'));
+      const inputs=JSON.parse(await readFile(resolve(root,'artifacts/tests/native-input/integration/linux-geometry-inputs.json'),'utf8'));
       await run('linux-geometry','docker',['exec',owned.container,'python3','-B','scripts/native-input/integration/linux-geometry.py',inputs.linuxInputs]);
       await run('linux-widget-signal','docker',['exec',owned.container,'python3','-B','scripts/native-input/integration/linux-geometry.py','--widget',inputs.linuxInputs.replace(/\/inputs\.json$/,'/widget-inputs.json')]);
       await run('linux-browser',process.execPath,['scripts/native-input/integration/browser.mjs','--linux']);

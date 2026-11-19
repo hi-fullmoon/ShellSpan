@@ -49,7 +49,7 @@ export async function buildFrozenFrontend({root,output,entry,sources,cacheRoot,b
   if(!cacheRoot){await build();return{enabled:false,reused:false};}
   assert(p.isAbsolute(cacheRoot),'Absolute frontend cache directory required');
   owned(p.join(root,'artifacts/tests'),cacheRoot);
-  owned(p.join(root,'artifacts/tests/native-input-p2'),output);
+  owned(p.join(root,'artifacts/tests/native-input/integration'),output);
   assert(!fs.existsSync(output),'Never overwrite a previous case frontend');
   assert(typeof entry==='string'&&Object.hasOwn(sources,entry),'Frozen source entry required');
   realDirectory(p.dirname(output));

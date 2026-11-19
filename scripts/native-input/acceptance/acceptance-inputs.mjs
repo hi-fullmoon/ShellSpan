@@ -129,7 +129,7 @@ export const buildInputRoots={
   native:['src-tauri/native-input-editors/src','src-tauri/native-input-editors/Cargo.toml','src-tauri/native-input-editors/Cargo.lock',
     'src-tauri/native-input-editors/psreadline.cs','src-tauri/native-input-editors/psreadline.ps1','src-tauri/native-input-editors/zle.c','src-tauri/native-input-editors/zle.zsh',
     'src-tauri/vendor','src-tauri/src/terminal_command/protocol.rs','src-tauri/src/terminal_jobs.rs','src-tauri/src/terminal_jobs.ps1',
-    'src-tauri/src/terminal_job_host.cs','src-tauri/src/terminal_console_signals.cs','scripts/native-input/acceptance/build-windows.mjs',
+    'src-tauri/src/terminal_job_host.cs','src-tauri/src/terminal_console_signals.cs','scripts/native-input/acceptance/build-windows.mjs','scripts/native-input/integration/resource-paths.mjs',
     'scripts/dependency-builds/psreadline','src-tauri/resources/powershell','src-tauri/resources/conpty'],
   frontend:['src','public','package.json','pnpm-lock.yaml','pnpm-workspace.yaml','patches','tsconfig.json','tsconfig.node.json'],
   package:['src-tauri/src','src-tauri/vendor','src-tauri/Cargo.toml','src-tauri/Cargo.lock','src-tauri/build.rs',

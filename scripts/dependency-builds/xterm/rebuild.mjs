@@ -37,7 +37,7 @@ const npmPackage=toolsRequire.resolve('npm/package.json');
 const npmMetadata=JSON.parse(readFileSync(npmPackage,'utf8'));
 assert.equal(npmMetadata.version,pin.npm);
 const npmCli=path.resolve(path.dirname(npmPackage),npmMetadata.bin.npm);
-const cachedArchive=path.join(root,'artifacts/tests/native-input-p0/formal-xterm-upstream/source.tar.gz');
+const cachedArchive=path.join(root,'artifacts/tests/native-input/prototype/formal-xterm-upstream/source.tar.gz');
 const archive=path.join(base,'source.tar.gz');
 if(existsSync(cachedArchive)&&sha(cachedArchive)===pin.archiveSha256)copyFileSync(cachedArchive,archive);
 else{const response=await fetch(pin.archiveUrl);if(!response.ok)throw new Error(`Archive HTTP ${response.status}`);writeFileSync(archive,new Uint8Array(await response.arrayBuffer()));}

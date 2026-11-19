@@ -224,13 +224,16 @@ describe('release publication gates', () => {
     expect(buildBash.env.SHELLSPAN_NATIVE_BUILD_ROOT).toBe('artifacts/tests');
     const build = preparation.find(step => step.name === 'Build pinned Zsh and ZLE test resources');
     const download = preparation.find(step => step.name === 'Download pinned Zsh and ZLE test resources');
-    const restore = preparation.find(step => step.name === 'Restore executable permission on downloaded Zsh');
+    const restore = preparation.find(step => step.name === 'Install downloaded Zsh test resources');
     expect(build.if).toBe("runner.os == 'macOS' && !inputs.macos-editor-artifact");
     expect(build.env.SHELLSPAN_NATIVE_BUILD_ROOT).toBe('artifacts/tests');
     expect(download.if).toBe("runner.os == 'macOS' && inputs.macos-editor-artifact");
-    expect(download.with).toEqual({ name: '${{ inputs.macos-editor-artifact }}', path: 'artifacts/tests' });
+    expect(download.with).toEqual({ name: '${{ inputs.macos-editor-artifact }}', path: '${{ runner.temp }}/native-macos-editor' });
     expect(preparation.indexOf(restore)).toBeGreaterThan(preparation.indexOf(download));
     expect(restore.if).toBe(download.if);
+    expect(restore.run).toContain('test_native_root=artifacts/tests/native-input');
+    expect(restore.run).toContain('$test_native_root/integration/resources/');
+    expect(restore.run).toContain('$test_native_root/acceptance/dependencies/');
     const producer = release.jobs['build-native-macos-editor'];
     expect(producer.steps.map(step => step.run)).toContain(build.run);
     const upload = producer.steps.find(step => step.uses?.startsWith('actions/upload-artifact@'));

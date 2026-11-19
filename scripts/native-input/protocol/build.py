@@ -8,7 +8,7 @@ import shutil
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[3]
-OUT = ROOT / 'artifacts/tests/native-input-p0/p1-protocol-build'
+OUT = ROOT / 'artifacts/tests/native-input/protocol/producer-build'
 
 def main():
     if platform.system() != 'Darwin' or platform.machine() != 'arm64':
@@ -18,6 +18,7 @@ def main():
     sources = [ROOT / name for name in ['scripts/native-input/prototype/src/lib.rs', 'scripts/native-input/prototype/src/native_protocol.rs',
         'scripts/native-input/prototype/bridge.c', 'scripts/native-input/prototype/inband-display.patch', 'scripts/native-input/protocol/display.patch',
         'scripts/native-input/prototype/Cargo.toml', 'scripts/native-input/prototype/Cargo.lock', 'scripts/native-input/protocol/build.py',
+        'scripts/native-input/build_paths.py',
         'src-tauri/src/terminal_command/protocol.rs']]
     before = {str(p.relative_to(ROOT)): sha(p) for p in sources}
     log = OUT / 'build.log'
@@ -34,8 +35,8 @@ def main():
     shutil.copy2(ROOT / 'scripts/native-input/prototype/bridge.c', source)
     for patch in ['scripts/native-input/prototype/inband-display.patch', 'scripts/native-input/protocol/display.patch']:
         run(['patch', '--batch', '-p1', '-i', ROOT / patch], OUT)
-    build = ROOT / 'artifacts/tests/native-input-p0/build-darwin'
-    upstream = ROOT / 'artifacts/tests/native-input-p0/upstream/bash-5.3'
+    build = ROOT / 'artifacts/tests/native-input/prototype/build-darwin'
+    upstream = ROOT / 'artifacts/tests/native-input/prototype/upstream/bash-5.3'
     includes = [build / 'readline-8.3.6/install/include', build / 'bash-5.3-readline-8.3.6', upstream, upstream / 'include']
     library = OUT / 'rust/debug/libshellspan_native_input_p0.a'
     run(['cc', '-bundle', '-undefined', 'dynamic_lookup', *[f'-I{p}' for p in includes], *[f'-I{p / "lib"}' for p in includes],

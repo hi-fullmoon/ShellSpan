@@ -21,7 +21,7 @@ fn verified_test_shell(owner: &std::path::Path) -> PathBuf {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
         super::editors::local_zle_shell(
-            &owner.join("artifacts/tests/native-input-p2/resources/native-input"),
+            &owner.join("artifacts/tests/native-input/integration/resources/native-input"),
         )
         .expect("Build the pinned private main/Core and explicitly select validation resources")
     }
@@ -184,7 +184,7 @@ fn native_zle_private_namespace_guards_preserve_user_definitions() {
     ] {
         let run = uuid::Uuid::new_v4().to_string();
         let evidence = owner
-            .join("artifacts/tests/native-input-p3/zle-guards")
+            .join("artifacts/tests/native-input/acceptance/zle-guards")
             .join(format!("{kind}-{run}"));
         let home = evidence.join("home");
         fs::create_dir_all(&home).unwrap();
@@ -219,7 +219,7 @@ fn native_zle_private_namespace_guards_preserve_user_definitions() {
         let shell = verified_test_shell(&owner);
         let prepared = PreparedNativeBash::prepare(
             &shell,
-            &owner.join("artifacts/tests/native-input-p2/resources/native-input"),
+            &owner.join("artifacts/tests/native-input/integration/resources/native-input"),
         )
         .unwrap();
         let pair = native_pty_system()
@@ -402,7 +402,7 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
     ] {
         let run = uuid::Uuid::new_v4().to_string();
         let evidence = owner
-            .join("artifacts/tests/native-input-p3/zle-eof")
+            .join("artifacts/tests/native-input/acceptance/zle-eof")
             .join(format!("{phase}-{run}"));
         fs::create_dir_all(&evidence).unwrap();
         let home = evidence.join("home");
@@ -419,7 +419,7 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
         let shell = verified_test_shell(&owner);
         let prepared = PreparedNativeBash::prepare(
             &shell,
-            &owner.join("artifacts/tests/native-input-p2/resources/native-input"),
+            &owner.join("artifacts/tests/native-input/integration/resources/native-input"),
         )
         .unwrap();
         let eof_display_binding = prepared.profile.display_binding();
@@ -1023,9 +1023,9 @@ fn native_zle_stock_shell_is_admitted_without_validation() {
     require_macos_arm64();
     assert!(std::env::var_os("SHELLSPAN_NATIVE_EDITOR_VALIDATION_ROOT").is_none());
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let resources = owner.join("artifacts/tests/native-input-p2/resources/native-input");
+    let resources = owner.join("artifacts/tests/native-input/integration/resources/native-input");
     let evidence = owner
-        .join("artifacts/tests/native-input-p3/editor-admission")
+        .join("artifacts/tests/native-input/acceptance/editor-admission")
         .join(uuid::Uuid::new_v4().to_string());
     fs::create_dir_all(&evidence).unwrap();
     let catalogue = super::editors::read_catalogue(&resources, "macos-arm64").unwrap();
@@ -1050,7 +1050,7 @@ fn native_zle_stock_shell_is_admitted_without_validation() {
 fn native_zle_private_main_resources_reject_invalid_paths_and_bytes() {
     require_macos_arm64();
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let resources = owner.join("artifacts/tests/native-input-p2/resources/native-input");
+    let resources = owner.join("artifacts/tests/native-input/integration/resources/native-input");
     let original: serde_json::Value =
         serde_json::from_slice(&fs::read(resources.join("editors-macos-arm64.json")).unwrap())
             .unwrap();
@@ -1059,7 +1059,7 @@ fn native_zle_private_main_resources_reject_invalid_paths_and_bytes() {
         .unwrap();
     let source = resources.join(original["profiles"][0]["shell"].as_str().unwrap());
     let evidence = owner
-        .join("artifacts/tests/native-input-p3/private-main-admission")
+        .join("artifacts/tests/native-input/acceptance/private-main-admission")
         .join(uuid::Uuid::new_v4().to_string());
     fs::create_dir_all(&evidence).unwrap();
     let mut cases = Vec::new();
@@ -1154,12 +1154,12 @@ fn native_zle_private_main_resources_reject_invalid_paths_and_bytes() {
 #[ignore = "requires actual macOS ZLE, rebuilt resource and the real Broker/private channel"]
 fn native_zle_manifest_paths_reject_before_prepare() {
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let resources = owner.join("artifacts/tests/native-input-p2/resources/native-input");
+    let resources = owner.join("artifacts/tests/native-input/integration/resources/native-input");
     let target = "macos-arm64";
     let actual = super::editors::read_catalogue(&resources, target).unwrap();
     assert!(!actual.is_empty());
     let evidence = owner
-        .join("artifacts/tests/native-input-p3/manifest-paths")
+        .join("artifacts/tests/native-input/acceptance/manifest-paths")
         .join(uuid::Uuid::new_v4().to_string());
     fs::create_dir_all(&evidence).unwrap();
     let original: serde_json::Value = serde_json::from_slice(
@@ -1225,7 +1225,7 @@ fn native_zle_actual_broker_display_binding() {
     require_macos_arm64();
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     let evidence = owner
-        .join("artifacts/tests/native-input-p3/broker-display-binding")
+        .join("artifacts/tests/native-input/acceptance/broker-display-binding")
         .join(uuid::Uuid::new_v4().to_string());
     fs::create_dir_all(&evidence).unwrap();
     let home = evidence.join("home");
@@ -1245,7 +1245,9 @@ fn native_zle_actual_broker_display_binding() {
     .unwrap();
     let resources = super::editors::validation_resource_root()
         .unwrap()
-        .unwrap_or_else(|| owner.join("artifacts/tests/native-input-p2/resources/native-input"));
+        .unwrap_or_else(|| {
+            owner.join("artifacts/tests/native-input/integration/resources/native-input")
+        });
     let shell = std::path::Path::new("/bin/zsh");
     fs::write(
         evidence.join("actual-resource-root.txt"),
@@ -1457,7 +1459,7 @@ fn native_zle_timeout_during_startup_keeps_ordinary_terminal() {
     require_macos_arm64();
     let home = tempfile::tempdir().unwrap();
     let resources = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../artifacts/tests/native-input-p2/resources/native-input");
+        .join("../artifacts/tests/native-input/integration/resources/native-input");
     fs::write(
         home.path().join(".zshrc"),
         "IFS= read -r startup_release\nPROMPT='FALLBACK> '\n",
@@ -1557,7 +1559,7 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
     let run = uuid::Uuid::new_v4().to_string();
     let session_id = format!("p3-zle-{run}");
     let evidence = owner
-        .join("artifacts/tests/native-input-p3/production-zle")
+        .join("artifacts/tests/native-input/acceptance/production-zle")
         .join(&run);
     fs::create_dir_all(&evidence).unwrap();
     let home = evidence.join("home");
@@ -1584,7 +1586,7 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
             owner
                 .canonicalize()
                 .unwrap()
-                .join("artifacts/tests/native-input-p3/handoff-baseline")
+                .join("artifacts/tests/native-input/acceptance/handoff-baseline")
         ));
         let bytes = fs::read(&path).unwrap();
         assert!(bytes.len() <= 65_536);
@@ -1746,7 +1748,7 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
     fs::write(home.join(".zlogin"), "P3_STARTUP_ORDER+=:login\n").unwrap();
     let prepared = PreparedNativeBash::prepare(
         shell,
-        &owner.join("artifacts/tests/native-input-p2/resources/native-input"),
+        &owner.join("artifacts/tests/native-input/integration/resources/native-input"),
     )
     .unwrap();
     let binding = prepared.profile.display_binding();

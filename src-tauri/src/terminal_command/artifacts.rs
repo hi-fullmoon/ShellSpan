@@ -76,6 +76,10 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<NativeArti
             include_str!("../../../scripts/native-input/integration/build.py"),
         ),
         (
+            "scripts/native-input/build_paths.py",
+            include_str!("../../../scripts/native-input/build_paths.py"),
+        ),
+        (
             "scripts/native-input/integration/Dockerfile",
             include_str!("../../../scripts/native-input/integration/Dockerfile"),
         ),
@@ -231,7 +235,7 @@ pub(crate) fn shellspan_bash(root: &Path) -> Result<std::path::PathBuf, String> 
 
 fn development_resource_root(manifest_dir: &Path, frozen_validation: bool) -> std::path::PathBuf {
     if frozen_validation {
-        manifest_dir.join("../artifacts/tests/native-input-p2/resources/native-input")
+        manifest_dir.join("../artifacts/tests/native-input/integration/resources/native-input")
     } else {
         manifest_dir.join("target/native-input/generated")
     }

@@ -21,7 +21,7 @@ image = os.environ.get('SHELLSPAN_P3_SSH_TEST_IMAGE')
 if image:
     image = Path(image).resolve()
     directory = image.parent
-    assert directory.parent == root / 'artifacts/tests/native-input-p3/scoped-ssh-runs'
+    assert directory.parent == root / 'artifacts/tests/native-input/acceptance/scoped-ssh-runs'
     assert image.name == 'actual-scoped-ssh-tests' and image.is_file()
 result = {'ok': False, 'testOk': False, 'credentialReference': reference}
 original_error = None
@@ -35,7 +35,7 @@ try:
     subprocess.run(['docker', 'exec', '-i', container, 'chpasswd'], input=f'nativeZle:{password}\n', text=True, check=True, stdout=subprocess.DEVNULL)
     environment = {**os.environ, 'SHELLSPAN_P3_SSH_FIXTURE': str(fixture_path),
                    'CARGO_TARGET_DIR': str(Path(__file__).resolve().parents[3] / 'src-tauri/target')}
-    before = set((root / 'artifacts/tests/native-input-p3/production-ssh-zle').glob('*/result.json'))
+    before = set((root / 'artifacts/tests/native-input/acceptance/production-ssh-zle').glob('*/result.json'))
     with (directory / 'production-test.log').open('xb') as log:
         command = ([str(image), 'session::remote_native::tests::production_remote_zle_parent_parser_and_background', '--ignored', '--exact'] if image else
             ['cargo', 'test', '--locked', '--manifest-path', 'src-tauri/Cargo.toml', '--lib',
@@ -44,7 +44,7 @@ try:
             cwd=root, env=environment, input=(password + '\n').encode(), stdout=log, stderr=log, check=False)
     password = None
     result['exitCode'] = completed.returncode
-    created = set((root / 'artifacts/tests/native-input-p3/production-ssh-zle').glob('*/result.json')) - before
+    created = set((root / 'artifacts/tests/native-input/acceptance/production-ssh-zle').glob('*/result.json')) - before
     assert len(created) == 1, 'The exact Rust test did not produce one new actual SSH result'
     observed = json.loads(next(iter(created)).read_text())
     expected_planned = int(os.environ.get('SHELLSPAN_P3_SSH_PLANNED_OPERATIONS', '10'))

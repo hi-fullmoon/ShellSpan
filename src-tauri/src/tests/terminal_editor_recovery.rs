@@ -372,7 +372,7 @@ fn native_prompt_recovers_terminal_after_editor_exit() {
     use crate::terminal_command::{artifacts, editors, local::PreparedNativeBash, protocol};
 
     let resources = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../artifacts/tests/native-input-p2/resources/native-input");
+        .join("../artifacts/tests/native-input/integration/resources/native-input");
     let shells = [
         artifacts::shellspan_bash(&resources).unwrap(),
         editors::local_zle_shell(&resources).unwrap(),

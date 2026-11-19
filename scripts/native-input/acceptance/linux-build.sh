@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/../../.."
-build_dir="${SHELLSPAN_NATIVE_BUILD_ROOT:-src-tauri/target/native-input}/native-input-p3"
+build_dir="$(python3 -B scripts/native-input/build_paths.py acceptance)"
 archive="$build_dir/dependencies/zsh-5.9.tar.xz"
 if [ ! -f "$archive" ]; then
     mkdir -p "$(dirname "$archive")"

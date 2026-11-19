@@ -14,7 +14,7 @@ discovery; they do not generate or admit any native profile. Isolated validation
 preparation remains under `artifacts/tests/` and does not replace release input.
 Ordinary development reads the prepared `src-tauri/target/native-input/generated/`
 tree. Frozen acceptance runs retain their snapshot's producer tree under
-`artifacts/tests/native-input-p2/resources/native-input/`; an explicitly admitted
+`artifacts/tests/native-input/integration/resources/native-input/`; an explicitly admitted
 `SHELLSPAN_NATIVE_EDITOR_VALIDATION_ROOT` continues to take precedence.
 
 Generated binaries are excluded from Git. The Tauri resource map preserves

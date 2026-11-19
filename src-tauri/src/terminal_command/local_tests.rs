@@ -540,10 +540,10 @@ fn prepared_local_wire_rejects_invalid_sequence() {
 #[ignore = "requires actual rebuilt Bash profiles and full frozen validation source"]
 fn prepared_bash_real_submit_draft_cancel_and_running_interrupt() {
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let resources = owner.join("artifacts/tests/native-input-p2/resources/native-input");
+    let resources = owner.join("artifacts/tests/native-input/integration/resources/native-input");
     let run = uuid::Uuid::new_v4().to_string();
     let evidence = owner
-        .join("artifacts/tests/native-input-p3/prepared-bash")
+        .join("artifacts/tests/native-input/acceptance/prepared-bash")
         .join(&run);
     fs::create_dir_all(&evidence).unwrap();
     let home = evidence.join("home");

@@ -45,7 +45,7 @@ export function createNativeBoundaryFixture(token,bytes){
 }
 
 export function installNativeBoundaryFixtureRoute(evidence,fixture,origin){
- const base=resolve(repository,'artifacts/tests/native-input-p2'),child=relative(base,resolve(evidence));assert(isAbsolute(evidence)&&child&&child!=='..'&&!child.startsWith('..'+sep)&&!isAbsolute(child),'A separate owned acceptance directory is required');
+ const base=resolve(repository,'artifacts/tests/native-input/integration'),child=relative(base,resolve(evidence));assert(isAbsolute(evidence)&&child&&child!=='..'&&!child.startsWith('..'+sep)&&!isAbsolute(child),'A separate owned acceptance directory is required');
  const data=resolve(evidence,'data');for(const folder of [evidence,data]){const info=lstatSync(folder);assert(info.isDirectory()&&!info.isSymbolicLink());assert.equal(resolve(realpathSync.native(folder)),resolve(folder));}
  const database=join(data,'shellspan-main.db'),info=lstatSync(database);assert(info.isFile()&&!info.isSymbolicLink());assert.equal(resolve(realpathSync.native(database)),resolve(database));
  const document=fixture.routeDocument(origin),validator=new Ajv2020({allErrors:true,strict:true});validator.addMetaSchema(draft7);validator.addSchema(JSON.parse(readFileSync(resolve(repository,'protocol/llm/catalog.schema.json'),'utf8')));const validate=validator.compile(JSON.parse(readFileSync(resolve(repository,'protocol/llm/routes.schema.json'),'utf8')));assert(validate(document),'Deterministic fixture route must satisfy the complete route schema');

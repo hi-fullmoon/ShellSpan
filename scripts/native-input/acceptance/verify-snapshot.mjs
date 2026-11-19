@@ -6,8 +6,8 @@ import {resolve,dirname} from 'node:path';
 import {captureValidationSources} from '../integration/frozen-validation.mjs';
 import {createIndexReader} from './index-reader.mjs';
 const owner=resolve(import.meta.dirname,'../../..');
-const root=resolve(owner,'artifacts/tests/native-input-p3/inventory-probe',randomUUID());
-const meta=resolve(root,'artifacts/tests/native-input-p3');mkdirSync(meta,{recursive:true});
+const root=resolve(owner,'artifacts/tests/native-input/acceptance/inventory-probe',randomUUID());
+const meta=resolve(root,'artifacts/tests/native-input/acceptance');mkdirSync(meta,{recursive:true});
 for(const path of ['.gitignore','package.json','src/lib/README.md']){
   mkdirSync(dirname(resolve(root,path)),{recursive:true});copyFileSync(resolve(owner,path),resolve(root,path));
 }

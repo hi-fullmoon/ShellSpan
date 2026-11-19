@@ -13,8 +13,11 @@ import urllib.request
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[3]
-BUILD_ROOT = ROOT / os.environ.get('SHELLSPAN_NATIVE_BUILD_ROOT', 'src-tauri/target/native-input')
-OUT = BUILD_ROOT / 'native-input-p2'
+sys.path.insert(0, str(ROOT / 'scripts/native-input'))
+from build_paths import BUILD_ROOT, build_directory
+
+OUT = build_directory(BUILD_ROOT, 'integration')
+UPSTREAM = build_directory(BUILD_ROOT, 'prototype') / 'upstream'
 
 
 def main():
@@ -67,7 +70,7 @@ def main():
         stamp += '-' + sha(bash_patch_lock)[:12]
         for number, expected in enumerate(pin, 1):
             name = f'bash53-{number:03d}'
-            official_patch = BUILD_ROOT / 'native-input-p0/upstream' / name
+            official_patch = UPSTREAM / name
             if not official_patch.exists():
                 with urllib.request.urlopen(f'https://ftp.gnu.org/gnu/bash/bash-5.3-patches/{name}', timeout=30) as response:
                     contents = response.read()
@@ -92,7 +95,7 @@ def main():
 
     def build_readline83():
         pin = json.loads((ROOT / 'scripts/native-input/prototype/readline-sources.json').read_text())
-        upstream = BUILD_ROOT / 'native-input-p0/upstream'
+        upstream = UPSTREAM
         archive = upstream / 'readline-8.3.tar.gz'
         if sha(archive) != pin['archive']:
             raise RuntimeError('GNU Readline archive checksum mismatch')
@@ -125,7 +128,7 @@ def main():
         if version not in patches:
             raise RuntimeError('Unaccepted GNU Bash version')
         patch=patches[version]
-        archive = BUILD_ROOT / f'native-input-p0/upstream/bash-{version}.tar.gz'
+        archive = UPSTREAM / f'bash-{version}.tar.gz'
         if sha(archive) != helper.PINNED[version]:
             raise RuntimeError('GNU Bash archive checksum mismatch')
         source = sources / f'bash-{version}'

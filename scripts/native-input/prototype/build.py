@@ -5,15 +5,19 @@ Sources are pinned GNU release archives. Artifacts stay outside test discovery.
 import argparse
 import hashlib
 import json
-import os
 from pathlib import Path
 import platform
 import shutil
 import subprocess
+import sys
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[3]
-OUT = ROOT / os.environ.get('SHELLSPAN_NATIVE_BUILD_ROOT', 'src-tauri/target/native-input') / 'native-input-p0'
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(ROOT / 'scripts/native-input'))
+from build_paths import BUILD_ROOT, build_directory
+
+OUT = build_directory(BUILD_ROOT, 'prototype')
 PINNED = {
     '4.1': '3f627124a83c6d34db503a923e20710d370573a29dd5d11d6f116d1aee7be1da',
     '4.4': 'd86b3392c1202e8ff5a423b302e6284db7f8f435ea9f39b5b1b20fd3ac36dfcb',
@@ -121,6 +125,8 @@ def main():
     sources={str(path.relative_to(ROOT)):hashlib.sha256(path.read_bytes()).hexdigest()
              for path in (ROOT/'scripts/native-input/prototype').rglob('*')
              if path.is_file() and '__pycache__' not in path.parts}
+    layout_source = ROOT / 'scripts/native-input/build_paths.py'
+    sources[str(layout_source.relative_to(ROOT))] = hashlib.sha256(layout_source.read_bytes()).hexdigest()
     metadata=json.loads(subprocess.check_output(['cargo','metadata','--locked','--format-version','1',
         '--manifest-path','scripts/native-input/prototype/Cargo.toml'],cwd=ROOT))
     manifest={'sources':sources,'artifacts':{},'dependencies':[

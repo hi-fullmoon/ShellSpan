@@ -14,7 +14,7 @@ if(localOnly)assert.equal(positionals.length,0,'Local-only acceptance does not u
 else if(values['list-cases'])assert(positionals.length<=1,'Provide at most one owned fixture path');
 else assert.equal(positionals.length,1,'Provide the owned fixture path');
 const fixture=positionals.length?resolve(positionals[0]):undefined;
-if(fixture)assert(fixture.startsWith(resolve(root,'artifacts/tests/native-input-p2/ssh')+'/'));
+if(fixture)assert(fixture.startsWith(resolve(root,'artifacts/tests/native-input/integration/ssh')+'/'));
 const combinations=[];
 const versions=values['include-legacy']?Object.keys(BASH_READLINE_VERSIONS):[RELEASE_BASH_VERSION];
 for(const version of versions)for(const transport of['local','ssh'])for(const scenario of['history-small','history-default','history-custom','history-empty','history-unset','jobs',...(transport==='ssh'?['lifecycle']:[])])combinations.push({version,transport,scenario});
@@ -27,7 +27,7 @@ const fullMatrix=!localOnly&&!selection;
 const scope=localOnly?'Local native application cases only':selection?'Selected independent cases':`Complete ${combinations.length}-case native application matrix`;
 if(values['list-cases']){console.log(JSON.stringify({execution:false,fullMatrix,localOnly,scope,cases:selected}));process.exit(0);}
 assertNativeGuiAllowed();
-const directory=resolve(root,'artifacts/tests/native-input-p2/app-matrix',randomUUID());await mkdir(directory,{recursive:true,mode:0o700});
+const directory=resolve(root,'artifacts/tests/native-input/integration/app-matrix',randomUUID());await mkdir(directory,{recursive:true,mode:0o700});
 const steps=[];const failures=[];let current;let interrupted=false;let preparationBlocked=false;
 for(const signal of['SIGINT','SIGTERM'])process.once(signal,()=>{interrupted=true;current?.kill(signal);});
 let failure;

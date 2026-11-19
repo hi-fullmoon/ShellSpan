@@ -8,7 +8,7 @@
 
 ## 恢复后的执行顺序
 
-1. 从新封存根核对源码索引、App 数据路径和本批 macOS 资源。在新根的 `artifacts/tests/native-input-p2/resources/native-input/` 放入摘要匹配的 macOS 和 Linux catalogue 与对应资源。按统一清单完成 A01–A06，检查冻结源码和 App 启动记录后，先做隔离 SSH/SFTP 传输回归。
+1. 从新封存根核对源码索引、App 数据路径和本批 macOS 资源。在新根的 `artifacts/tests/native-input/integration/resources/native-input/` 放入摘要匹配的 macOS 和 Linux catalogue 与对应资源。按统一清单完成 A01–A06，检查冻结源码和 App 启动记录后，先做隔离 SSH/SFTP 传输回归。
 2. 按下表顺序串行运行 ZLE 无模型 App 用例。每案新建一个 `linux-peer --app` 夹具和一个独立数据目录。前台时段内设置 `SHELLSPAN_ALLOW_FOREGROUND_TESTS=1`。每案完成后核对该案的 SQLite 账本、远端文件、应用退出和清理回执，再开始下一案。失败或证据不足时保留原记录，查明阻塞后用新夹具和新身份复验。
 3. 从本批台账核对 Bash 生命周期、原生作业和文件链、双 Shell 控制 EOF、App 崩溃重启及显示矩阵。按余项清单补齐控制切点和人工检查。ZLE 实际模型 `jobs` 和模型文件链在另行授权的时段使用新夹具。
 
@@ -47,5 +47,5 @@ zle_ssh_case() {
 
 ## 留档和清理
 
-- 单案目录为 `artifacts/tests/native-input-p2/ssh-recovery/<fixture UUID>/`。保留 `inputs.json`、冻结源码和已签名 App 身份、逐阶段 `.command.json` / `.log` / `.exit.json`、`native-webview-evidence.json`、`native-p3-progress-*.json`、原始 `native-control-trace-*.jsonl`、接受键切点、旧套接字断开或尾包放行回执、`ledger-after-app.json`、`effect-after-app.json` 和 `result.json`。发布验收台账使用实际断言与这些原始证据。失败记录保留实际阶段、退出码、最后 Broker 快照、原调用及相关 PTY 字节。
+- 单案目录为 `artifacts/tests/native-input/integration/ssh-recovery/<fixture UUID>/`。保留 `inputs.json`、冻结源码和已签名 App 身份、逐阶段 `.command.json` / `.log` / `.exit.json`、`native-webview-evidence.json`、`native-p3-progress-*.json`、原始 `native-control-trace-*.jsonl`、接受键切点、旧套接字断开或尾包放行回执、`ledger-after-app.json`、`effect-after-app.json` 和 `result.json`。发布验收台账使用实际断言与这些原始证据。失败记录保留实际阶段、退出码、最后 Broker 快照、原调用及相关 PTY 字节。
 - 入口按正常 API 关闭自己的终端、撤除并核对专属 CredentialRef，再确认容器归属、锁账号和停止容器。保留容器、数据目录、原意图及文件效果。若准备阶段中断且未进入自动清理，从夹具 `owner.json` / `fixture.json` 核对完整容器 ID、镜像 ID、回环映射和 `shellspan.native-input-p2=<UUID>`，确认没有该案运行中的 App、PTY 和转发器，再仅处理该夹具。参考 `credential-cleanup-command.json` 与本案输入中的引用，通过初始化入口执行 `--native-input-p2-credential cleanup`，经 stdin 传 `{"reference":"<本案引用>"}`，验证返回 0。只对已确认归属的容器执行 `docker exec "$container" usermod -L nativeZle` 与 `docker stop --timeout 5 "$container"`，记录 `.State.Running=false`。有仍运行或结果不明的原操作时保留账本和文件引用。密钥和密码不入档。

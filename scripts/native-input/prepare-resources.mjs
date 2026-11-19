@@ -5,7 +5,7 @@ import {cp,mkdir,readdir,readFile,writeFile,rm,chmod,stat,rename} from 'node:fs/
 import {captureValidationSources} from './integration/frozen-validation.mjs';
 import {basename,resolve} from 'node:path';
 import {parseArgs} from 'node:util';
-import {nativeInputBuildPath,nativeInputReleaseDirectory} from './integration/resource-paths.mjs';
+import {nativeInputBuildDirectory,nativeInputBuildPath,nativeInputReleaseDirectory} from './integration/resource-paths.mjs';
 import {copyNativeRebuildSources} from './integration/rebuild-sources.mjs';
 import {bashProfileId,BASH_READLINE_VERSIONS,RELEASE_BASH_VERSION} from './integration/bash-profiles.mjs';
 
@@ -18,6 +18,7 @@ const editorTargetsByBuildTarget=new Map([
   ['x86_64-pc-windows-msvc','windows-x64'],
 ]);
 const editorTarget=editorTargetsByBuildTarget.get(target);
+const pathSources=new Set(['scripts/native-input/build_paths.py','scripts/native-input/integration/resource-paths.mjs']);
 const linuxEditorTarget=editorTargetsByBuildTarget.get('aarch64-unknown-linux-gnu');
 const linuxX86BashTarget='linux-x86_64-glibc-2.28';
 const hostBashTarget=target==='aarch64-apple-darwin'?'macos-arm64':target==='aarch64-unknown-linux-gnu'?linuxEditorTarget:undefined;
@@ -26,18 +27,19 @@ const sshBashTargets=target==='aarch64-apple-darwin'||target==='aarch64-unknown-
   ?[linuxEditorTarget,linuxX86BashTarget]:target==='x86_64-pc-windows-msvc'?[linuxX86BashTarget]:[];
 const validationTargets=values['validation-editor']??[];const validationOnly=validationTargets.length>0;
 const buildRoot=validationOnly||values.acceptance?'artifacts/tests':nativeInputBuildPath;
-const sourceRoot=resolve(root,buildRoot,'native-input-p2/resources/native-input');
-const logDirectory=validationOnly?resolve(root,buildRoot,'native-input-p3/resource-build'):resolve(root,nativeInputBuildPath,'resource-build');await mkdir(logDirectory,{recursive:true,mode:0o700});
+const sourceRoot=resolve(nativeInputBuildDirectory(root,buildRoot,'integration'),'resources/native-input');
+const acceptanceBuild=nativeInputBuildDirectory(root,buildRoot,'acceptance');
+const logDirectory=validationOnly?resolve(acceptanceBuild,'resource-build'):resolve(root,nativeInputBuildPath,'resource-build');await mkdir(logDirectory,{recursive:true,mode:0o700});
 assert(validationTargets.every(value=>[...editorTargetsByBuildTarget.values()].includes(value)));
 const policy=JSON.parse(await readFile(resolve(root,'protocol/agent/runtime/native-editor-admission.json'),'utf8'));assert.equal(policy.version,1);assert(Array.isArray(policy.productionProfiles));
 const productionProfilesFor=editor=>policy.productionProfiles.filter(id=>id.endsWith(`-${editor}-native`));
 let frozenSources,sourceManifestSha256;
 if(validationOnly){
-  const stage=JSON.parse(await readFile(resolve(root,'artifacts/tests/native-input-p3/candidate-stage.json'),'utf8'));assert(stage.sealed&&stage.root===root,'Editor validation requires a sealed full source copy');
-  const manifest=await readFile(resolve(stage.directory,'sources.json'));frozenSources=JSON.parse(manifest.toString('utf8'));assert.deepEqual(captureValidationSources(root),frozenSources);sourceManifestSha256=createHash('sha256').update(manifest).digest('hex');await writeFile(resolve(root,'artifacts/tests/native-input-p3/editor-validation-sources.json'),manifest);
+  const stage=JSON.parse(await readFile(resolve(root,'artifacts/tests/native-input/acceptance/candidate-stage.json'),'utf8'));assert(stage.sealed&&stage.root===root,'Editor validation requires a sealed full source copy');
+  const manifest=await readFile(resolve(stage.directory,'sources.json'));frozenSources=JSON.parse(manifest.toString('utf8'));assert.deepEqual(captureValidationSources(root),frozenSources);sourceManifestSha256=createHash('sha256').update(manifest).digest('hex');await writeFile(resolve(root,'artifacts/tests/native-input/acceptance/editor-validation-sources.json'),manifest);
 }
 const runId=randomUUID(),generated=resolve(logDirectory,`staging-${runId}`);
-const destination=validationOnly?resolve(root,'artifacts/tests/native-input-p3/validation-resources',runId,'native-input'):nativeInputReleaseDirectory(root);
+const destination=validationOnly?resolve(root,'artifacts/tests/native-input/acceptance/validation-resources',runId,'native-input'):nativeInputReleaseDirectory(root);
 async function run(command,args,cwd=root){
   const log=await import('node:fs').then(fs=>fs.openSync(resolve(logDirectory,'prepare.log'),'a',0o600));
   const child=spawn(command,args,{cwd,env:{...process.env,SHELLSPAN_NATIVE_BUILD_ROOT:buildRoot,PYTHONDONTWRITEBYTECODE:'1'},stdio:['ignore',log,log]});
@@ -131,7 +133,7 @@ for(const name of editorNames){
     editorAllowed.push(id);
     if(profile.core){
       const pin=JSON.parse(await readFile(resolve(root,'scripts/dependency-builds/zsh/pin.json'),'utf8'));
-      const archive=resolve(root,buildRoot,`native-input-p3/dependencies/zsh-${pin.version}.tar.xz`);assert.equal(sha(await readFile(archive)),pin.archiveSha256);
+      const archive=resolve(acceptanceBuild,`dependencies/zsh-${pin.version}.tar.xz`);assert.equal(sha(await readFile(archive)),pin.archiveSha256);
       await mkdir(resolve(generated,'sources/dependencies'),{recursive:true});await cp(archive,resolve(generated,`sources/dependencies/zsh-${pin.version}.tar.xz`));
     }
   }
@@ -200,11 +202,11 @@ if(includeBash){
   for(const name of ['scripts/dependency-builds/bash-native','scripts/native-input/prototype']){
     await cp(resolve(root,name),resolve(tree,name),{recursive:true,filter:path=>!path.split('/').some(part=>['target','__pycache__'].includes(part))});
   }
-  for(const name of ['src-tauri/src/terminal_command/protocol.rs','scripts/native-input/integration/build.py','scripts/native-input/integration/Dockerfile','scripts/native-input/integration/Dockerfile.amd64']){
+  for(const name of ['src-tauri/src/terminal_command/protocol.rs','scripts/native-input/build_paths.py','scripts/native-input/integration/build.py','scripts/native-input/integration/Dockerfile','scripts/native-input/integration/Dockerfile.amd64']){
     await mkdir(resolve(tree,name,'..'),{recursive:true});await cp(resolve(root,name),resolve(tree,name));
   }
   for(const name of editorNames)for(const path of Object.keys(JSON.parse(await readFile(resolve(sourceRoot,name),'utf8')).sources)){
-    assert((path.startsWith('src-tauri/')||path.startsWith('scripts/native-input/acceptance/')||path.startsWith('scripts/dependency-builds/zsh/'))&&!path.includes('..'));
+    assert((path.startsWith('src-tauri/')||path.startsWith('scripts/native-input/acceptance/')||path.startsWith('scripts/dependency-builds/zsh/')||pathSources.has(path))&&!path.includes('..'));
     await mkdir(resolve(tree,path,'..'),{recursive:true});await cp(resolve(root,path),resolve(tree,path));
   }
   await run('cargo',['vendor','--locked','--versioned-dirs','--manifest-path','src-tauri/native-input-adapter/Cargo.toml','--sync','scripts/native-input/prototype/Cargo.toml','--sync','src-tauri/native-input-editors/Cargo.toml','vendor'],tree);
@@ -217,7 +219,7 @@ if(includeBash){
   const tree=resolve(generated,'sources/ShellSpan');await mkdir(tree,{recursive:true});
   await copyNativeRebuildSources(root,tree);
   for(const catalogue of editorNames)for(const path of Object.keys(JSON.parse(await readFile(resolve(sourceRoot,catalogue),'utf8')).sources)){
-    assert((path.startsWith('src-tauri/')||path.startsWith('scripts/native-input/acceptance/')||path.startsWith('scripts/dependency-builds/zsh/'))&&!path.includes('..'));
+    assert((path.startsWith('src-tauri/')||path.startsWith('scripts/native-input/acceptance/')||path.startsWith('scripts/dependency-builds/zsh/')||pathSources.has(path))&&!path.includes('..'));
     await mkdir(resolve(tree,path,'..'),{recursive:true});await cp(resolve(root,path),resolve(tree,path));
   }
   await run('cargo',['vendor','--locked','--versioned-dirs','--manifest-path','src-tauri/native-input-editors/Cargo.toml','--sync','src-tauri/native-input-adapter/Cargo.toml','vendor'],tree);

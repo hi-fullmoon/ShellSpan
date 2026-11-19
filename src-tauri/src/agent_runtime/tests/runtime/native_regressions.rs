@@ -206,7 +206,7 @@ impl Scenario {
         let mut writer =
             crate::local_terminal_input::take_writer(pair.master.as_ref(), shell).unwrap();
         let resources = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../artifacts/tests/native-input-p2/resources/native-input");
+            .join("../artifacts/tests/native-input/integration/resources/native-input");
         let executable = if native_input && shell == TerminalShellKind::Bash {
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             {

@@ -3,8 +3,8 @@ import {execFileSync} from 'node:child_process';
 import {createHash,randomUUID} from 'node:crypto';
 import {mkdirSync,openSync,closeSync,readFileSync,writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
-const owner=resolve(import.meta.dirname,'../../..');const root=resolve(process.argv[2]??owner);assert(root===owner||root.startsWith(resolve(owner,'artifacts/tests/native-input-p3/acceptance-source')+'/'));const source=resolve(root,'artifacts/tests/native-input-p3/dependencies/zsh-5.9');
-const directory=resolve(root,'artifacts/tests/native-input-p3/isolated-zsh-modules',randomUUID());mkdirSync(directory,{recursive:true});
+const owner=resolve(import.meta.dirname,'../../..');const root=resolve(process.argv[2]??owner);assert(root===owner||root.startsWith(resolve(owner,'artifacts/tests/native-input/acceptance/acceptance-source')+'/'));const source=resolve(root,'artifacts/tests/native-input/acceptance/dependencies/zsh-5.9');
+const directory=resolve(root,'artifacts/tests/native-input/acceptance/isolated-zsh-modules',randomUUID());mkdirSync(directory,{recursive:true});
 const output=openSync(resolve(directory,'install.log'),'wx');
 try{for(const target of['install.modules','install.fns'])execFileSync('make',[target,`DESTDIR=${directory}`],{cwd:source,stdio:['ignore',output,output]});}finally{closeSync(output);}
 const modulePath=resolve(directory,'usr/local/lib/zsh/5.9');const shell=resolve(source,'Src/zsh');

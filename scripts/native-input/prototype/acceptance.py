@@ -26,7 +26,7 @@ import time
 import traceback
 
 ROOT = Path(__file__).resolve().parents[3]
-ARTIFACTS = ROOT / 'artifacts/tests/native-input-p0'
+ARTIFACTS = ROOT / 'artifacts/tests/native-input/prototype'
 
 
 def sha(text):

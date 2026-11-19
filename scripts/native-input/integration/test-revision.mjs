@@ -9,12 +9,12 @@ import {captureValidationSources} from './frozen-validation.mjs';
 const owner=resolve(import.meta.dirname,'../../..');
 const parent=resolve(process.argv[2]);
 const zshHelper=process.argv[4]==='--zsh-helper';
-assert(parent.startsWith(resolve(owner,'artifacts/tests/native-input-p2/acceptance-source')+'/'));
-const parentMeta=JSON.parse(readFileSync(resolve(parent,'artifacts/tests/native-input-p2/source-snapshot.json'),'utf8'));
+assert(parent.startsWith(resolve(owner,'artifacts/tests/native-input/integration/acceptance-source')+'/'));
+const parentMeta=JSON.parse(readFileSync(resolve(parent,'artifacts/tests/native-input/integration/source-snapshot.json'),'utf8'));
 assert(parentMeta.ownerRoot===owner&&parentMeta.sharedDriftReviewed===true);
 const freezeLog=resolve(parent,process.argv[3]);assert(freezeLog.startsWith(parent+'/'));
-const baseline=readFileSync(freezeLog,'utf8').trim();assert(baseline.startsWith(resolve(parent,'artifacts/tests/native-input-p2/baseline')+'/'));
-const directory=resolve(owner,'artifacts/tests/native-input-p2/acceptance-source',randomUUID());mkdirSync(directory,{recursive:true,mode:0o700});
+const baseline=readFileSync(freezeLog,'utf8').trim();assert(baseline.startsWith(resolve(parent,'artifacts/tests/native-input/integration/baseline')+'/'));
+const directory=resolve(owner,'artifacts/tests/native-input/integration/acceptance-source',randomUUID());mkdirSync(directory,{recursive:true,mode:0o700});
 const sourceRoot=resolve(directory,'ShellSpan');
 const sha=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
 const head=readFileSync(resolve(baseline,'head.txt'),'utf8').trim();assert(/^[a-f0-9]{40}$/.test(head));
@@ -42,7 +42,7 @@ if(zshHelper){
 }
 const bundleResources=JSON.parse(readFileSync(resolve(parent,'src-tauri/tauri.conf.json'),'utf8')).bundle.resources;
 const packagedResources=Object.keys(bundleResources).find(path=>bundleResources[path]==='native-input/generated/');
-for(const path of['artifacts/tests/native-input-p2/resources/native-input','artifacts/tests/native-input-p2/producers','src-tauri/resources/native-input','src-tauri/resources/preview-licenses',...(packagedResources?[`src-tauri/${packagedResources}`]:[])]){
+for(const path of['artifacts/tests/native-input/integration/resources/native-input','artifacts/tests/native-input/integration/producers','src-tauri/resources/native-input','src-tauri/resources/preview-licenses',...(packagedResources?[`src-tauri/${packagedResources}`]:[])]){
   if(!existsSync(resolve(parent,path)))continue;
   mkdirSync(resolve(sourceRoot,path,'..'),{recursive:true});cpSync(resolve(parent,path),resolve(sourceRoot,path),{recursive:true});
 }
@@ -51,6 +51,6 @@ const metadata={createdAt:new Date().toISOString(),ownerRoot:owner,sourceRoot,pa
   head,baseline,archives:Object.fromEntries(['HEAD.tar.gz','worktree.patch','untracked.tgz'].map(name=>[name,sha(resolve(baseline,name))])),
   changes:changed.map(path=>({path,parentSha256:parentSources[path]??null,sha256:revised[path]})),
   sharedDrift:[],sharedDriftReviewed:true,modelConfiguration:'Current owning native preferences only; no old model configuration or credentials restored'};
-writeFileSync(resolve(sourceRoot,'artifacts/tests/native-input-p2/source-snapshot.json'),JSON.stringify(metadata,null,2),{mode:0o600});
+writeFileSync(resolve(sourceRoot,'artifacts/tests/native-input/integration/source-snapshot.json'),JSON.stringify(metadata,null,2),{mode:0o600});
 writeFileSync(resolve(directory,'snapshot.json'),JSON.stringify(metadata,null,2),{mode:0o600});
 console.log(JSON.stringify({sourceRoot,directory,changed,productionSourceIdentical:!zshHelper}));

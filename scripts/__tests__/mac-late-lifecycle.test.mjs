@@ -7,7 +7,7 @@ import {expect,it} from 'vitest';
 import {attachMacLateLifecycle} from '../native-input/acceptance/mac-late-lifecycle.mjs';
 
 it('releases the actual owned file once and never invents an old-program effect',async()=>{
- const directory=resolve(import.meta.dirname,'../../artifacts/tests/native-input-p3/late-channel',randomUUID());
+ const directory=resolve(import.meta.dirname,'../../artifacts/tests/native-input/acceptance/late-channel',randomUUID());
  mkdirSync(resolve(directory,'home'),{recursive:true,mode:0o700});
  const token=randomUUID(),server=await createServer({configFile:false,root:directory,cacheDir:resolve(directory,'vite-cache'),
   logLevel:'silent',appType:'custom',optimizeDeps:{noDiscovery:true,include:[]},server:{host:'127.0.0.1',port:0,watch:null}});

@@ -5,15 +5,15 @@ GNU Bash 5.3 / static Readline 8.3.6 producer using the P0 pinned archives and
 reviewed C patches, then exercises the shared NIP protocol through a real PTY
 and private Unix socket. No production session selects native mode here.
 
-`build.py` writes `artifacts/tests/native-input-p0/p1-protocol-build/manifest.json` containing
+`build.py` writes `artifacts/tests/native-input/protocol/producer-build/manifest.json` containing
 the exact producer sources and actual Shell/library/module hashes. Acceptance
 rejects stale or modified artifacts. `display.patch` applies after the reviewed
 P0 in-band patch and adds formal builtin aliases and the NIP display key only
 for explicitly enabled native protocol mode. P0 default behavior is independent.
 
 The entry saves per-step logs, exit codes, timings, the 504-case pure reducer
-matrix and actual-wire schema validation under `artifacts/tests/native-input-p0/p1-validation`.
-Live cases write raw PTY and private control captures under `p1-evidence`,
+matrix and actual-wire schema validation under `artifacts/tests/native-input/protocol/validation`.
+Live cases write raw PTY and private control captures under `artifacts/tests/native-input/protocol/evidence`,
 including actual SIGKILL driver/restart evidence and four browser screenshots.
 These contain controlled test commands only and stay outside Git/test discovery.
 No timestamped build/capture directory is required. Missing inputs are built or

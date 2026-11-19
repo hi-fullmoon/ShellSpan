@@ -5,7 +5,7 @@ import {randomUUID,createHash} from 'node:crypto';
 import {injectOccupiedScratch,scratchFaultOriginal} from '../native-input/acceptance/scratch-fault.mjs';
 
 async function ownedCase(){
- const evidence=resolve(import.meta.dirname,'../../artifacts/tests/native-input-p2','fault-unit-'+randomUUID());
+ const evidence=resolve(import.meta.dirname,'../../artifacts/tests/native-input/integration','fault-unit-'+randomUUID());
  for(const dir of ['home','data/tmp'])await mkdir(join(evidence,dir),{recursive:true});
  const token=randomUUID(),sessionId=randomUUID(),id='agent-file-fault-'+randomUUID();
  return {evidence,token,value:{id,target:{kind:'local',targetId:'terminal-'+sessionId,sessionId,cwd:join(evidence,'home')}}};

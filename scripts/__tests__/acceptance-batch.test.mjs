@@ -160,7 +160,7 @@ it('allocates fresh nonoverlapping case identities and data/home/WebView directo
 
 it('reserves a short exclusive Cargo output and never adopts another batch or the shared target',async()=>{
   const checkout=resolve(import.meta.dirname,'../..');let owner=await realpath(checkout);
-  const stageText=await readFile(resolve(checkout,'artifacts/tests/native-input-p3/candidate-stage.json'),'utf8').catch(error=>{if(error.code==='ENOENT')return undefined;throw error;});
+  const stageText=await readFile(resolve(checkout,'artifacts/tests/native-input/acceptance/candidate-stage.json'),'utf8').catch(error=>{if(error.code==='ENOENT')return undefined;throw error;});
   if(stageText){const stage=JSON.parse(stageText);expect(stage.root).toBe(checkout);expect(stage.sealed&&stage.completeOwnerSnapshot).toBe(true);owner=await realpath(stage.owner);expect(relative(owner,checkout).replaceAll('\\','/')).toMatch(/^artifacts\/tests\/(?:p3\/[a-f0-9]{8}\/s|native-input-p3\/acceptance-source\/[a-f0-9-]{36}\/ShellSpan)$/);}
   const id=randomUUID(),location=packageCargoLocation(owner,id),target=await reservePackageCargo(owner,id,checkout);
   const actualBase=await realpath(resolve(owner,'artifacts/tests/cb'));expect(relative(owner,actualBase).replaceAll('\\','/')).toBe('artifacts/tests/cb');expect(dirname(await realpath(location.directory))).toBe(actualBase);

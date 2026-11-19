@@ -3,11 +3,12 @@ import {execFileSync} from 'node:child_process';
 import {createHash,randomUUID} from 'node:crypto';
 import {mkdirSync,readFileSync,writeFileSync,existsSync,copyFileSync,openSync,closeSync,chmodSync} from 'node:fs';
 import {dirname,resolve} from 'node:path';
+import {nativeInputBuildDirectory,nativeInputBuildPath} from '../integration/resource-paths.mjs';
 const root=resolve(import.meta.dirname,'../../..');
 const target=process.platform==='darwin'&&process.arch==='arm64'?'macos-arm64':process.platform==='linux'&&process.arch==='arm64'?'linux-aarch64-glibc-2.36':null;
 assert(target,'Build and verify this provider on its real target');
-const buildRoot=resolve(root,process.env.SHELLSPAN_NATIVE_BUILD_ROOT??'src-tauri/target/native-input');
-const directory=resolve(buildRoot,'native-input-p3');const dependencies=resolve(directory,'dependencies');
+const buildRoot=process.env.SHELLSPAN_NATIVE_BUILD_ROOT??nativeInputBuildPath;
+const directory=nativeInputBuildDirectory(root,buildRoot,'acceptance');const dependencies=resolve(directory,'dependencies');
 mkdirSync(dependencies,{recursive:true,mode:0o700});
 const log=openSync(resolve(directory,'build.log'),'a',0o600);
 function run(command,args,cwd=root,env=process.env){execFileSync(command,args,{cwd,env,stdio:['ignore',log,log]});}
@@ -68,7 +69,7 @@ try{
   const sourcePaths=['Cargo.toml','Cargo.lock','src/lib.rs','src/ffi.rs','zle.c','zle.zsh','psreadline.cs','psreadline.ps1'].map(path=>`src-tauri/native-input-editors/${path}`);
   sourcePaths.push('src-tauri/src/terminal_command/protocol.rs');
   sourcePaths.push('src-tauri/src/terminal_jobs.rs','src-tauri/src/terminal_jobs.ps1','src-tauri/src/terminal_job_host.cs','src-tauri/src/terminal_console_signals.cs');
-  sourcePaths.push('scripts/native-input/acceptance/build.mjs','scripts/native-input/acceptance/zsh-build-check.c');
+  sourcePaths.push('scripts/native-input/acceptance/build.mjs','scripts/native-input/acceptance/zsh-build-check.c','scripts/native-input/integration/resource-paths.mjs');
   if(coreProducerPath){
     assert(coreProducer.nativeAcceptance===false&&coreProducer.productionChanges===false&&coreProducer.target===target);
     assert.equal(sha(coreProducer.editor),coreProducer.editorSha256);assert.equal(coreProducer.shell,shell);assert.equal(coreProducer.shellSha256,sha(shell));
@@ -88,7 +89,7 @@ try{
     sourcePaths.push('scripts/dependency-builds/zsh/pin.json','scripts/dependency-builds/zsh/native-display.patch','scripts/native-input/acceptance/build-scoped-core.mjs');
   }
   const sources=Object.fromEntries(sourcePaths.map(path=>[path,sha(resolve(root,path))]));
-  const resources=resolve(buildRoot,'native-input-p2/resources/native-input');
+  const resources=resolve(nativeInputBuildDirectory(root,buildRoot,'integration'),'resources/native-input');
   mkdirSync(resolve(resources,id),{recursive:true});const destination=resolve(resources,id,'ss_nip.so');if(existsSync(destination))chmodSync(destination,0o600);copyFileSync(module,destination);chmodSync(destination,0o500);
   const editor={profile,shellSha256:sha(shell),moduleSha256:sha(module),module:`${id}/ss_nip.so`};
   if(coreProducer){

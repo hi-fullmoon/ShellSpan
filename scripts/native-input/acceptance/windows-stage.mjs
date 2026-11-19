@@ -4,7 +4,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {mkdirSync,readFileSync,readdirSync,statSync,writeFileSync} from 'node:fs';
 import {resolve,relative} from 'node:path';
 const root=resolve(import.meta.dirname,'../../..');
-const id=randomUUID();const directory=resolve(root,'artifacts/tests/native-input-p3/windows',id);
+const id=randomUUID();const directory=resolve(root,'artifacts/tests/native-input/acceptance/windows',id);
 mkdirSync(directory,{recursive:true,mode:0o700});
 const destination=`D:/Developer/ShellSpan-native-input-p3-${id}`;
 const ssh=['-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','HostKeyAlias=100.64.0.254','-o','ConnectTimeout=8'];

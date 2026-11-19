@@ -36,7 +36,7 @@ export async function readReusablePackage(owner,directory,root,dependencies,tool
   assert.equal(plan.install,resolve(directory,'i'),'Retained installation binding changed');
   assert.equal(plan.binaryName,`ShellSpanBatch${batchId.slice(0,8)}`);assert.equal(plan.productName,`ShellSpan Package Batch ${batchId.slice(0,8)}`);
   assert.deepEqual(captureValidationSources(root),read(resolve(root,'../sources.json')),'Artifact source snapshot drift');
-  const stage=read(resolve(root,'artifacts/tests/native-input-p3/candidate-stage.json'));assertArtifactSourceContext(stage);assert.equal(stage.root,root);
+  const stage=read(resolve(root,'artifacts/tests/native-input/acceptance/candidate-stage.json'));assertArtifactSourceContext(stage);assert.equal(stage.root,root);
   const expected=productionDependencyInputs(read(resolve(directory,'installed-dependencies.json'))),actual=productionDependencyInputs(dependencies);
   const changed=Object.keys({...expected.files,...actual.files}).filter(path=>expected.files[path]!==actual.files[path]);
   const links=Object.keys({...expected.links,...actual.links}).filter(path=>JSON.stringify(expected.links[path])!==JSON.stringify(actual.links[path]));
@@ -60,7 +60,7 @@ export async function readReusablePackage(owner,directory,root,dependencies,tool
     assert.equal(input.target,plan.target,'Retained stage target changed');const actual=captured[input.stage];
     const decision=reuseDecision(input,actual);assert(decision.reuse,`Retained ${input.stage} inputs changed: ${JSON.stringify(decision)}`);
   }
-  const resources=resolve(root,'artifacts/tests/native-input-p2/resources/native-input');
+  const resources=resolve(root,'artifacts/tests/native-input/integration/resources/native-input');
   const catalogue=read(resolve(resources,'editors-windows-x64.json'));
   for(const profile of catalogue.profiles){
     inside(resources,resolve(resources,profile.module));assert.equal(await hashFile(resolve(resources,profile.module)),profile.moduleSha256,'Retained Core drift');

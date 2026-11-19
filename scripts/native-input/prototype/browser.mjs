@@ -12,7 +12,7 @@ const installed=formalRuntime?await installedRuntimeManifest():undefined;
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const unicode11 = process.env.SHELLSPAN_P0_UNICODE === '11';
-const input = process.env.SHELLSPAN_P0_CAPTURE_ROOT ?? 'artifacts/tests/native-input-p0/darwin-installed';
+const input = process.env.SHELLSPAN_P0_CAPTURE_ROOT ?? 'artifacts/tests/native-input/prototype/darwin-installed';
 const backgroundOnly=process.env.SHELLSPAN_P0_BACKGROUND_ONLY==='1';
 const reflowCursorLine=process.env.SHELLSPAN_P0_REFLOW_CURSOR==='1';
 const xtermLab=process.env.SHELLSPAN_P0_XTERM_LAB==='1';
@@ -20,7 +20,7 @@ const xtermBaseline=process.env.SHELLSPAN_P0_XTERM_LAB==='baseline';
 const output = path.resolve(process.env.SHELLSPAN_P0_OUTPUT_ROOT??path.resolve(root,input,'browser',`unicode${unicode11?'11':'6'}`,`${backgroundOnly?'background-only':'full'}${formalRuntime?'-formal':''}${reflowCursorLine?'-cursor-reflow':''}${xtermLab?'-dependency-lab':xtermBaseline?'-dependency-baseline':''}`));
 await mkdir(output, { recursive: true });
 if (unicode11) {
-  const dependencies = path.join(root,'artifacts/tests/native-input-p0/browser-deps');
+  const dependencies = path.join(root,'artifacts/tests/native-input/prototype/browser-deps');
   await mkdir(dependencies,{recursive:true});
   await writeFile(path.join(dependencies,'package.json'),await readFile(path.join(root,'scripts/native-input/prototype/browser-dependencies.json')));
   const installed=spawnSync('pnpm',['install','--dir',dependencies,'--ignore-workspace','--ignore-scripts'],{cwd:root,encoding:'utf8'});
@@ -38,11 +38,11 @@ if(!backgroundOnly) assert(sourceCapture, `Missing native source capture: ${capt
 assert(backgroundCapture, `Missing native background/resize capture: ${captureRoot}`);
 if(!backgroundOnly) assert.equal(geometries.length, 16, 'Need real user/bridge normal and oversized geometry pairs for all four widths');
 const assets = new Map([
-  ['/xterm.js', [candidateRuntime(xtermLab?'artifacts/tests/native-input-p0/xterm-reflow-lab/xterm.js':xtermBaseline?'artifacts/tests/native-input-p0/xterm-reflow-lab/xterm-baseline.js':'node_modules/@xterm/xterm/lib/xterm.js'),'application/javascript']],
+  ['/xterm.js', [candidateRuntime(xtermLab?'artifacts/tests/native-input/prototype/xterm-reflow-lab/xterm.js':xtermBaseline?'artifacts/tests/native-input/prototype/xterm-reflow-lab/xterm-baseline.js':'node_modules/@xterm/xterm/lib/xterm.js'),'application/javascript']],
   ['/search.js', ['node_modules/@xterm/addon-search/lib/addon-search.js','application/javascript']],
   ['/webgl.js', ['node_modules/@xterm/addon-webgl/lib/addon-webgl.js','application/javascript']],
   ['/xterm.css', ['node_modules/@xterm/xterm/css/xterm.css','text/css']],
-  ['/unicode11.js', ['artifacts/tests/native-input-p0/browser-deps/node_modules/@xterm/addon-unicode11/lib/addon-unicode11.js','application/javascript']],
+  ['/unicode11.js', ['artifacts/tests/native-input/prototype/browser-deps/node_modules/@xterm/addon-unicode11/lib/addon-unicode11.js','application/javascript']],
 ]);
 const html = `<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/xterm.css">
 <style>body { margin: 12px; background: #151515; } #surface { width: 1800px; height: 640px; }</style>
@@ -62,7 +62,7 @@ const environment={node:process.version,platform:process.platform,arch:process.a
   playwright:JSON.parse(await readFile(path.join(root,'node_modules/playwright/package.json'),'utf8')).version,
   xterm:JSON.parse(await readFile(path.join(root,'node_modules/@xterm/xterm/package.json'),'utf8')).version,
   captureRoot,unicode:unicode11?'11':'6',reflowCursorLine,xtermLab,
-  xtermLabManifest:xtermLab||xtermBaseline?JSON.parse(await readFile(path.join(root,`artifacts/tests/native-input-p0/xterm-reflow-lab/${xtermBaseline?'baseline-':''}manifest.json`),'utf8')):null,browsers:{}};
+  xtermLabManifest:xtermLab||xtermBaseline?JSON.parse(await readFile(path.join(root,`artifacts/tests/native-input/prototype/xterm-reflow-lab/${xtermBaseline?'baseline-':''}manifest.json`),'utf8')):null,browsers:{}};
 try {
   for (const [engine, type] of [['chromium', chromium], ['webkit', webkit]]) {
     const browser = await type.launch({ headless: true });

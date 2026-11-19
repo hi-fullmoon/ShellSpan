@@ -6,7 +6,7 @@ import {expect,it} from 'vitest';
 import {isMacLocalLifecycle,macLifecycleEvidenceClockEnabled,macLifecycleVisualCheckpoints,macLifecycleSnapshotCheckpoints} from '../native-input/acceptance/mac-local-lifecycle.mjs';
 import {attachMacDailyCheckpoints} from '../native-input/acceptance/mac-daily.mjs';
 
-const directory=resolve(import.meta.dirname,'../../artifacts/tests/native-input-p3/local-lifecycle-selection',randomUUID());
+const directory=resolve(import.meta.dirname,'../../artifacts/tests/native-input/acceptance/local-lifecycle-selection',randomUUID());
 const paths={evidence:directory,data:resolve(directory,'data'),home:resolve(directory,'home')};
 for(const path of [paths.data,paths.home])mkdirSync(path,{recursive:true,mode:0o700});
 const localIt=process.platform==='darwin'&&process.arch==='arm64'?it:it.skip;

@@ -9,9 +9,9 @@ const base=resolve(process.argv[2]),overrides=resolve(process.argv[3]);
 assert(/^D:\\Developer\\ShellSpan-native-input-p3-app-[a-f0-9-]{36}$/.test(base));
 const {captureValidationSources}=await import(pathToFileURL(resolve(base,'scripts/native-input/integration/frozen-validation.mjs')));
 const {createIndexReader}=await import(pathToFileURL(resolve(base,'scripts/native-input/acceptance/index-reader.mjs')));
-const id=randomUUID(),root=resolve('D:/Developer',`ShellSpan-native-input-p3-app-${id}`),meta=resolve(root,'artifacts/tests/native-input-p3');mkdirSync(meta,{recursive:true});
-const before=captureValidationSources(base);const parent=JSON.parse(readFileSync(resolve(base,'artifacts/tests/native-input-p3/import.json'),'utf8'));
-const baseIndex=JSON.parse(readFileSync(resolve(base,'artifacts/tests/native-input-p3/snapshot-index.json'),'utf8'));
+const id=randomUUID(),root=resolve('D:/Developer',`ShellSpan-native-input-p3-app-${id}`),meta=resolve(root,'artifacts/tests/native-input/acceptance');mkdirSync(meta,{recursive:true});
+const before=captureValidationSources(base);const parent=JSON.parse(readFileSync(resolve(base,'artifacts/tests/native-input/acceptance/import.json'),'utf8'));
+const baseIndex=JSON.parse(readFileSync(resolve(base,'artifacts/tests/native-input/acceptance/snapshot-index.json'),'utf8'));
 const changed=['.gitignore','scripts/verification/agent/verify-ai-session-stream.mjs','scripts/native-input/integration/frozen-validation.mjs','scripts/native-input/acceptance/desktop-evidence.mjs','scripts/native-input/acceptance/windows-source-revision.mjs','scripts/native-input/acceptance/windows-cargo-runner.mjs','src-tauri/src/terminal_command/windows.rs','src-tauri/src/terminal_integration.rs','src-tauri/resources/powershell/PSReadLine/2.4.5/netstd/Microsoft.PowerShell.PSReadLine.Polyfiller.dll','src-tauri/resources/powershell/PSReadLine/2.4.5/net6plus/Microsoft.PowerShell.PSReadLine.Polyfiller.dll','src-tauri/native-input-editors/psreadline.ps1','src-tauri/native-input-editors/examples/windows_acceptance.rs',
  'scripts/native-input/acceptance/credential-channel.mjs','scripts/native-input/acceptance/credential-relay.mjs','scripts/native-input/acceptance/credential-ownership.mjs','scripts/native-input/acceptance/credential-cleanup/Cargo.toml','scripts/native-input/acceptance/credential-cleanup/Cargo.lock','scripts/native-input/acceptance/credential-cleanup/src/main.rs','scripts/native-input/acceptance/windows-credential-worker.ps1','scripts/native-input/acceptance/windows-credential-quiesce.ps1','src-tauri/native-input-editors/src/ffi.rs',
  'src/components/terminal/__tests__/native-input-p3-credential.ts','src/components/terminal/__tests__/native-data-initialize.native.ts','src/components/terminal/__tests__/native-jobs.native.tsx','src/components/terminal/__tests__/native-input-p3-startup.native.html','src/components/terminal/__tests__/native-input-p3-startup.native.ts'];
@@ -29,14 +29,14 @@ const sources=captureValidationSources(root);
 assert.equal(Object.keys(sources).length,Object.keys(before).length+changed.filter(path=>!(path in before)).length);
 const actualChanges=Object.keys(sources).filter(path=>sources[path]!==before[path]).sort();
 assert(actualChanges.length>0&&actualChanges.every(path=>changed.includes(path)));
-const original=JSON.parse(readFileSync(resolve(base,'artifacts/tests/native-input-p3/sources.json'),'utf8'));
+const original=JSON.parse(readFileSync(resolve(base,'artifacts/tests/native-input/acceptance/sources.json'),'utf8'));
 const generated=Object.keys(before).filter(path=>before[path]!==original[path]);assert(generated.every(path=>path==='src-tauri/gen/schemas/windows-schema.json'));
 writeFileSync(resolve(meta,'sources.json'),JSON.stringify(sources,null,2));
 const files=resolve(meta,'source-files.list');writeFileSync(files,Object.keys(sources).join('\0')+'\0');execFileSync('tar.exe',['-czf',resolve(meta,'source.tar.gz'),'--null','-T',files],{cwd:root});
-writeFileSync(resolve(meta,'import.json'),JSON.stringify({id,head:parent.head,sourceParent:base,parentArchiveSha256:hash(resolve(base,'artifacts/tests/native-input-p3/source.tar.gz')),
+writeFileSync(resolve(meta,'import.json'),JSON.stringify({id,head:parent.head,sourceParent:base,parentArchiveSha256:hash(resolve(base,'artifacts/tests/native-input/acceptance/source.tar.gz')),
   generatedByActualWindowsCompiler:generated,explicitFixtureChanges:actualChanges,sourceCount:Object.keys(sources).length,sourceArchiveSha256:hash(resolve(meta,'source.tar.gz'))},null,2));
 execFileSync('cmd.exe',['/d','/c','mklink','/J',resolve(root,'node_modules'),resolve(base,'node_modules')],{stdio:'pipe'});
-cpSync(resolve(base,'artifacts/tests/native-input-p2/resources'),resolve(root,'artifacts/tests/native-input-p2/resources'),{recursive:true});
+cpSync(resolve(base,'artifacts/tests/native-input/integration/resources'),resolve(root,'artifacts/tests/native-input/integration/resources'),{recursive:true});
 const bundleResources=JSON.parse(readFileSync(resolve(base,'src-tauri/tauri.conf.json'),'utf8')).bundle.resources;
 const packagedResources=Object.keys(bundleResources).find(path=>bundleResources[path]==='native-input/generated/');
 if(packagedResources&&existsSync(resolve(base,'src-tauri',packagedResources))){

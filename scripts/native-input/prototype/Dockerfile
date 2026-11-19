@@ -6,4 +6,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssh-server 
     && useradd -m -u "$FIXTURE_UID" -s /bin/bash p0 && passwd -d p0 \
     && mkdir -p /run/sshd /home/p0/.ssh && chmod 700 /home/p0/.ssh
 EXPOSE 22229
-CMD ["/usr/sbin/sshd", "-D", "-e", "-f", "/work/artifacts/tests/native-input-p0/ssh/sshd_config"]
+CMD ["/usr/sbin/sshd", "-D", "-e", "-f", "/work/artifacts/tests/native-input/prototype/ssh/sshd_config"]

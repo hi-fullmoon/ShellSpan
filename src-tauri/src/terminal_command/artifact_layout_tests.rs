@@ -21,7 +21,7 @@ fn development_native_resources_match_the_package_input_and_keep_frozen_validati
     );
     assert_eq!(
         development_resource_root(manifest_dir, true),
-        manifest_dir.join("../artifacts/tests/native-input-p2/resources/native-input")
+        manifest_dir.join("../artifacts/tests/native-input/integration/resources/native-input")
     );
 }
 

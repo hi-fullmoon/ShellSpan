@@ -9,7 +9,7 @@ import {chromium,webkit} from 'playwright';
 import {displayModuleJavaScript,installedRuntimeManifest} from '../../../../scripts/native-input/prototype/formal-runtime.mjs';
 
 const root=resolve(import.meta.dirname,'../../../..'),capture=resolve(process.argv[2]??''),mode=process.argv[3]??'resize';
-assert(process.argv.length>=3&&process.argv.length<=4&&['resize','fit'].includes(mode)&&capture.includes('/artifacts/tests/native-input-p2/phase2/'),'Supply one actual owned App capture and optional fit mode');
+assert(process.argv.length>=3&&process.argv.length<=4&&['resize','fit'].includes(mode)&&capture.includes('/artifacts/tests/native-input/integration/phase2/'),'Supply one actual owned App capture and optional fit mode');
 const read=p=>JSON.parse(readFileSync(p,'utf8')),sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const evidence=read(resolve(capture,'native-webview-evidence.json'));
 const traceBytes=readFileSync(resolve(capture,'native-display-trace.json')),visibleBytes=readFileSync(resolve(capture,'native-display-visible-output.utf8'));

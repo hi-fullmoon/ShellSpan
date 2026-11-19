@@ -19,14 +19,14 @@ export function recordAcceptanceInputs(root,directory,selection,version,scenario
   const producers=[];
   for(const target of['macos-arm64','linux-aarch64-glibc-2.36']){
     const profile=`gnu-bash-${version}-readline-${{'4.1':'6.0','4.4':'7.0','5.3':'8.3.6'}[version]}-${target}-native`;
-    const path=resolve(root,'artifacts/tests/native-input-p2/producers',profile,'manifest.json');
+    const path=resolve(root,'artifacts/tests/native-input/integration/producers',profile,'manifest.json');
     if(target==='linux-aarch64-glibc-2.36'&&!existsSync(path))continue;
     const manifest=JSON.parse(readFileSync(path,'utf8'));
-    const cataloguePath=resolve(root,`artifacts/tests/native-input-p2/resources/native-input/catalogue-${target}.json`);
+    const cataloguePath=resolve(root,`artifacts/tests/native-input/integration/resources/native-input/catalogue-${target}.json`);
     const catalogue=JSON.parse(readFileSync(cataloguePath,'utf8'));
     producers.push({profile,manifest:relative(root,path),manifestSha256:sha(path),artifacts:manifest.artifacts,sources:manifest.sources,catalogueSha256:sha(cataloguePath),distributedArtifact:catalogue.profiles.find(value=>value.id===profile)});
   }
   writeFileSync(resolve(directory,'acceptance-inputs.json'),JSON.stringify({capturedAt:new Date().toISOString(),selection,version,scenario,modelRoutesSha256:sha(resolve(directory,'model-routes.json')),
     modelRouteSource:JSON.parse(readFileSync(resolve(directory,'route-source.json'),'utf8')),
-    ...(existsSync(resolve(root,'artifacts/tests/native-input-p2/source-snapshot.json'))?{sourceSnapshot:{path:'artifacts/tests/native-input-p2/source-snapshot.json',sha256:sha(resolve(root,'artifacts/tests/native-input-p2/source-snapshot.json'))}}:{}),sources,producers},null,2),{mode:0o600});
+    ...(existsSync(resolve(root,'artifacts/tests/native-input/integration/source-snapshot.json'))?{sourceSnapshot:{path:'artifacts/tests/native-input/integration/source-snapshot.json',sha256:sha(resolve(root,'artifacts/tests/native-input/integration/source-snapshot.json'))}}:{}),sources,producers},null,2),{mode:0o600});
 }

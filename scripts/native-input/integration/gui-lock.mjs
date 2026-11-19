@@ -9,7 +9,7 @@ export function assertNativeGuiAllowed(){
 
 export async function acquireNativeGui(){
   assertNativeGuiAllowed();
-  const root=resolve(import.meta.dirname,'../../../artifacts/tests/native-input-p2');mkdirSync(root,{recursive:true});
+  const root=resolve(import.meta.dirname,'../../../artifacts/tests/native-input/integration');mkdirSync(root,{recursive:true});
   const directory=resolve(root,'gui-lock');const deadline=Date.now()+900000;
   while(true){
     try{mkdirSync(directory,{mode:0o700});writeFileSync(resolve(directory,'owner.json'),JSON.stringify({pid:process.pid}),{mode:0o600});break;}

@@ -11,7 +11,7 @@ const fixture=JSON.parse(await readFile(new URL('./fixtures/native-input-display
 const decode=name=>{const packet=fixture.packets[name],bytes=Buffer.from(packet.base64,'base64');
   assert.equal(bytes.length,packet.length);assert.equal(createHash('sha256').update(bytes).digest('hex'),packet.sha256);return bytes;};
 const on=decode('enter'),off=decode('exit');
-const output=path.resolve(process.env.SHELLSPAN_P0_OUTPUT_ROOT??'artifacts/tests/native-input-p0/formal-validation/display-controller');await mkdir(output,{recursive:true});
+const output=path.resolve(process.env.SHELLSPAN_P0_OUTPUT_ROOT??'artifacts/tests/native-input/prototype/formal-validation/display-controller');await mkdir(output,{recursive:true});
 const assets={'/xterm.js':['node_modules/@xterm/xterm/lib/xterm.js','application/javascript'],
   '/webgl.js':['node_modules/@xterm/addon-webgl/lib/addon-webgl.js','application/javascript'],
   '/unicode11.mjs':['node_modules/@xterm/addon-unicode11/lib/addon-unicode11.mjs','application/javascript'],

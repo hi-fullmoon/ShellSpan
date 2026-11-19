@@ -2,7 +2,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import path from 'node:path';
 import {expect,it} from 'vitest';
-const run=promisify(execFile),root=path.resolve(import.meta.dirname,'../..'),cli=path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),evidence=path.join(root,'artifacts/tests/native-input-p2/file-edit-negative-only'),env={...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home')};
+const run=promisify(execFile),root=path.resolve(import.meta.dirname,'../..'),cli=path.join(root,'scripts/verification/agent/verify-ai-session-stream.mjs'),evidence=path.join(root,'artifacts/tests/native-input/integration/file-edit-negative-only'),env={...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home')};
 it.each([
  ['missing base mode',[]],
  ['missing Windows target',['--native-input-p3-file-chain']],

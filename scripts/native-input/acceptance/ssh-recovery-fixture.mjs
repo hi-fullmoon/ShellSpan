@@ -66,7 +66,7 @@ export function terminateOwnedSshRelay(fixture) {
 export function inspectLoadedSshResources(fixture, priorRoots) {
   const bash = fixture.shell === 'bash';
   const peer = inspectSshPeer(fixture);
-  const resources = resolve(fixture.root, 'artifacts/tests/native-input-p2/resources/native-input');
+  const resources = resolve(fixture.root, 'artifacts/tests/native-input/integration/resources/native-input');
   const catalogue = JSON.parse(readFileSync(resolve(resources, `${bash ? 'catalogue' : 'editors'}-linux-aarch64-glibc-2.36.json`), 'utf8'));
   const profileId = bash ? 'gnu-bash-5.3-readline-8.3.6-linux-aarch64-glibc-2.36-native' : 'zsh-5.9-zle-5.9-linux-aarch64-glibc-2.36-native';
   const profile = catalogue.profiles.find(entry => (entry.id ?? entry.profile.verifiedProfileId) === profileId);

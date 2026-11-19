@@ -18,7 +18,7 @@ for(const [kind,directory]of[['native',native],['ordinary',ordinary]]){
 }
 assert.equal(cases[0].geometry.sourceSha256,cases[1].geometry.sourceSha256);assert.equal(cases[1].result.actualBudget,0);assert.equal(cases[1].result.explicitCtrlL,false);
 const runtime=await installedRuntimeManifest(),display=await displayModuleJavaScript();files.displayJavaScript=hash(Buffer.from(display));
-const directory=resolve(root,'artifacts/tests/native-input-p3/matched-history-browser',randomUUID());await mkdir(directory,{recursive:true});
+const directory=resolve(root,'artifacts/tests/native-input/acceptance/matched-history-browser',randomUUID());await mkdir(directory,{recursive:true});
 const assets={'/xterm.js':'node_modules/@xterm/xterm/lib/xterm.js','/xterm.css':'node_modules/@xterm/xterm/css/xterm.css','/search.js':'node_modules/@xterm/addon-search/lib/addon-search.js','/unicode.js':'node_modules/@xterm/addon-unicode11/lib/addon-unicode11.js','/webgl.js':'node_modules/@xterm/addon-webgl/lib/addon-webgl.js'};
 const server=createServer(async(request,response)=>{try{if(request.url==='/display.js'){response.setHeader('Content-Type','application/javascript');response.end(display);return;}const asset=assets[request.url];response.setHeader('Content-Type',asset?(request.url.endsWith('.css')?'text/css':'application/javascript'):'text/html');response.end(asset?await readFile(resolve(root,asset)):'<!doctype html><link rel="stylesheet" href="/xterm.css"><div id="surface"></div><script src="/xterm.js"></script><script src="/search.js"></script><script src="/unicode.js"></script><script src="/webgl.js"></script>');}catch(error){response.writeHead(500).end(String(error));}});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const results=[];

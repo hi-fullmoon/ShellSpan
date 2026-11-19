@@ -6,7 +6,7 @@ import {saveScratchRestart,readScratchRestart,scratchRestartWitness} from '../na
 
 // These are disk-boundary helper fixtures, never App/model acceptance evidence.
 async function ownedCase(){
- const evidence=resolve(import.meta.dirname,'../../artifacts/tests/native-input-p2','restart-unit-'+randomUUID()),token=randomUUID(),sessionId=randomUUID(),id='agent-scratch-restart-'+randomUUID();
+ const evidence=resolve(import.meta.dirname,'../../artifacts/tests/native-input/integration','restart-unit-'+randomUUID()),token=randomUUID(),sessionId=randomUUID(),id='agent-scratch-restart-'+randomUUID();
  const target={kind:'local',targetId:'terminal-'+sessionId,sessionId,cwd:join(evidence,'home')},key=createHash('sha256').update(JSON.stringify([id,target])).digest('hex'),fileName=`acceptance-${token}.ps1`,content=`Write-Output 'SCRATCH_RESTART_${token}'`,path=join(evidence,'data/tmp',key.slice(0,16),fileName),sha256=createHash('sha256').update(content).digest('hex');
  for(const dir of ['home','data/tmp/'+key.slice(0,16),'data/agent-runtime/scratch/records'])await mkdir(join(evidence,dir),{recursive:true});
  await writeFile(path,content);const recordPath=join(evidence,'data/agent-runtime/scratch/records',key+'.json'),record={version:1,key,sessionId:id,target,uses:{}};await writeFile(recordPath,JSON.stringify(record));

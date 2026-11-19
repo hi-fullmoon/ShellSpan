@@ -17,7 +17,7 @@ function fixture(){
   const cacheRoot=p.join(root,'artifacts/tests/frontend-cache');
   let compiled=0;
   function options(){
-    const evidence=p.join(root,'artifacts/tests/native-input-p2',randomUUID());fs.mkdirSync(evidence,{recursive:true});
+    const evidence=p.join(root,'artifacts/tests/native-input/integration',randomUUID());fs.mkdirSync(evidence,{recursive:true});
     const output=p.join(evidence,'frontend');
     return{root,output,entry:'entry.html',sources:captureValidationSources(root),cacheRoot,build:async()=>{
       compiled++;fs.mkdirSync(p.join(output,'assets'),{recursive:true});

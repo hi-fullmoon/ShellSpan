@@ -11,8 +11,8 @@ assert(extra.length === 0 && ['integration', 'acceptance'].includes(lane),
 const root = resolve(import.meta.dirname, '../..');
 const integration = lane === 'integration';
 const directory = integration
-  ? resolve(root, 'artifacts/tests/native-input-p2/baseline', new Date().toISOString().replaceAll(':', '-'))
-  : resolve(root, 'artifacts/tests/native-input-p3/source-revisions', randomUUID());
+  ? resolve(root, 'artifacts/tests/native-input/integration/baseline', new Date().toISOString().replaceAll(':', '-'))
+  : resolve(root, 'artifacts/tests/native-input/acceptance/source-revisions', randomUUID());
 mkdirSync(directory, { recursive: true, mode: 0o700 });
 
 const git = args => execFileSync('git', args, { cwd: root, maxBuffer: 128 * 1024 * 1024 });

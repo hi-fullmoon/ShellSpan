@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve, sep } from 'node:path';
 
 const fixtureDirectory = resolve(import.meta.dirname, '../../src/lib/terminal/__tests__/fixtures');
-const captureRoot = 'artifacts/tests/native-input-p3/';
+const captureRoot = 'artifacts/tests/native-input/acceptance/';
 const displayCommand = 'node scripts/native-input/export-fixture.mjs display <ownership-window capture directory>';
 const usage = `Usage:
   ${displayCommand} [output.json]

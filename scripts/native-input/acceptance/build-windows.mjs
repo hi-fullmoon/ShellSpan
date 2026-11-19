@@ -5,15 +5,16 @@ import {statSync,mkdirSync,readFileSync,writeFileSync,copyFileSync,openSync,clos
 import {resolve,join,dirname,win32} from 'node:path';
 import {parseArgs} from 'node:util';
 import {selectWindowsProfiles} from './windows-profiles.mjs';
+import {nativeInputBuildDirectory,nativeInputBuildPath} from '../integration/resource-paths.mjs';
 const {values}=parseArgs({options:{shell:{type:'string',multiple:true},'list-shells':{type:'boolean'}}});
 const selected=selectWindowsProfiles(values.shell);
 if(values['list-shells']){console.log(JSON.stringify({execution:false,fullMatrix:values.shell===undefined,profiles:selected}));process.exit(0);}
 assert(process.platform==='win32'&&process.arch==='x64','Windows providers must be rebuilt on actual Windows x64');
 const root=resolve(import.meta.dirname,'../../..');
 execFileSync(process.execPath,[resolve(root,'scripts/dependency-builds/psreadline/rebuild.mjs'),'--verify-only'],{cwd:root,stdio:'pipe',windowsHide:true});
-const buildRoot=resolve(root,process.env.SHELLSPAN_NATIVE_BUILD_ROOT??'src-tauri/target/native-input');
-const resources=resolve(buildRoot,'native-input-p2/resources/native-input');mkdirSync(resources,{recursive:true});
-const directory=resolve(buildRoot,'native-input-p3');mkdirSync(directory,{recursive:true});
+const buildRoot=process.env.SHELLSPAN_NATIVE_BUILD_ROOT??nativeInputBuildPath;
+const resources=resolve(nativeInputBuildDirectory(root,buildRoot,'integration'),'resources/native-input');mkdirSync(resources,{recursive:true});
+const directory=nativeInputBuildDirectory(root,buildRoot,'acceptance');mkdirSync(directory,{recursive:true});
 const sha=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
 const conpty=resolve(root,'src-tauri/resources/conpty/1.25.260930003');
 for(const [path,expected]of Object.entries(JSON.parse(readFileSync(resolve(conpty,'pin.json'),'utf8')).files))

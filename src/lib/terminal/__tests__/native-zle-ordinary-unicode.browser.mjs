@@ -13,7 +13,7 @@ const root=resolve(import.meta.dirname,'../../../..'),fixture=JSON.parse(await r
 assert.equal(createHash('sha256').update(fixture.raw).digest('hex'),fixture.rawSha256);
 assert.equal(fixture.kind,'actual-macos-zle-ordinary-keyboard-capture');assert.equal(fixture.originalBinding.unicodeVersion,'11');assert.equal(fixture.originalBinding.unicodeScope,undefined);
 const sources=captureValidationSources(root),runtime=await installedRuntimeManifest(),display=await displayModuleJavaScript();
-const directory=resolve(root,'artifacts/tests/native-input-p3/ordinary-unicode-browser',randomUUID());await mkdir(directory,{recursive:true});
+const directory=resolve(root,'artifacts/tests/native-input/acceptance/ordinary-unicode-browser',randomUUID());await mkdir(directory,{recursive:true});
 const assets={'/xterm.js':'node_modules/@xterm/xterm/lib/xterm.js','/xterm.css':'node_modules/@xterm/xterm/css/xterm.css','/unicode.js':'node_modules/@xterm/addon-unicode11/lib/addon-unicode11.js','/webgl.js':'node_modules/@xterm/addon-webgl/lib/addon-webgl.js'};
 const server=createServer(async(request,response)=>{try{
  if(request.url==='/display.js'){response.setHeader('Content-Type','application/javascript');response.end(display);return;}

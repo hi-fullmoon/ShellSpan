@@ -25,7 +25,7 @@ pnpm build
 
 ```sh
 evidence="$PWD/artifacts/tests/agent-terminal-input/linux-x86_64-ssh"
-catalogue="$PWD/artifacts/tests/native-input-p2/resources/native-input/catalogue-linux-x86_64-glibc-2.28.json"
+catalogue="$PWD/artifacts/tests/native-input/integration/resources/native-input/catalogue-linux-x86_64-glibc-2.28.json"
 export CARGO_TARGET_DIR="$PWD/src-tauri/target/releases/linux-x86_64-ssh-acceptance"
 dmg_dir="$CARGO_TARGET_DIR/aarch64-apple-darwin/release/bundle/dmg"
 mkdir -p "$evidence"

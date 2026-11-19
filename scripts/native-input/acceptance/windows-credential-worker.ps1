@@ -55,7 +55,7 @@ try{
  $shells=@(@{kind='powerShell7';executable=(Get-Command pwsh.exe -CommandType Application -ErrorAction Stop).Source})
  if($settings.shellKinds -and ($settings.shellKinds.Count -ne 1 -or $settings.shellKinds[0] -cne 'powerShell7')){throw 'Native Windows acceptance requires PowerShell 7'}
  foreach($shell in $shells){
-  $phase=Join-Path $root ('artifacts/tests/native-input-p2/w7-'+$runId);New-Item -ItemType Directory -Path $phase|Out-Null
+  $phase=Join-Path $root ('artifacts/tests/native-input/integration/w7-'+$runId);New-Item -ItemType Directory -Path $phase|Out-Null
   $shell.phase=$phase;$env:SHELLSPAN_LOCAL_SHELL=$shell.executable;$env:SHELLSPAN_DATA_DIR=Join-Path $phase 'data'
   & $shell.executable -NoLogo -NoProfile -NonInteractive -File scripts/fixtures/windows-shell-history-metadata.ps1 -Output (Join-Path $phase 'history-before.json')
   if($LASTEXITCODE-ne 0){throw 'Actual selected shell history discovery failed'}

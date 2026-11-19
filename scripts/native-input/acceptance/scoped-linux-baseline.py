@@ -16,10 +16,10 @@ container=fixture['container']
 assert container=='shellspan-nip-p3-'+fixture['id']
 assert subprocess.check_output(['docker','inspect','--format','{{index .Config.Labels "shellspan.native-input-p3"}}',container],text=True).strip()==fixture['id']
 root=Path(fixture['root'])
-producer=json.loads((root/'artifacts/tests/native-input-p3/scoped-linux-producer.json').read_text())
-directory=owner/'artifacts/tests/native-input-p3/scoped-linux-baseline'/str(uuid.uuid4())
+producer=json.loads((root/'artifacts/tests/native-input/acceptance/scoped-linux-producer.json').read_text())
+directory=owner/'artifacts/tests/native-input/acceptance/scoped-linux-baseline'/str(uuid.uuid4())
 directory.mkdir(parents=True)
-resource_root=root/'artifacts/tests/native-input-p2/resources/native-input'
+resource_root=root/'artifacts/tests/native-input/integration/resources/native-input'
 catalogue=json.loads((resource_root/'editors-linux-aarch64-glibc-2.36.json').read_text())
 core=resource_root/catalogue['profiles'][0].get('core','scoped-core/linux-aarch64-glibc-2.36/zsh/zle.so')
 assert hashlib.sha256(core.read_bytes()).hexdigest()==producer['coreSha256']

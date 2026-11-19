@@ -18,9 +18,9 @@ args = parser.parse_args()
 root = Path(__file__).resolve().parents[3]
 readline = {'4.1': '6.0', '4.4': '7.0', '5.3': '8.3.6'}[args.version]
 target = 'macos-arm64' if sys.platform == 'darwin' else 'linux-aarch64-glibc-2.36'
-manifest = json.loads((root / 'artifacts/tests/native-input-p2/producers' /
+manifest = json.loads((root / 'artifacts/tests/native-input/integration/producers' /
     f'gnu-bash-{args.version}-readline-{readline}-{target}-native/manifest.json').read_text())
-directory = root / 'artifacts/tests/native-input-p2/history-baseline' / str(uuid.uuid4())
+directory = root / 'artifacts/tests/native-input/integration/history-baseline' / str(uuid.uuid4())
 home = directory / 'home'
 home.mkdir(parents=True, mode=0o700)
 (home / '.bash_profile').write_text("HISTSIZE=2\nPS1='HISTORY_BASELINE> '\nbind -x '\"\\C-xh\":builtin history'\n")

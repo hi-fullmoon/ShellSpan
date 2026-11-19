@@ -13,13 +13,13 @@ export function copySnapshotResources(source,destination){
 
 export async function selectSnapshotResources(owner,value){
   const root=realpathSync(value);inside(resolve(owner,'artifacts/tests/p3'),root);
-  const stage=JSON.parse(readFileSync(resolve(root,'artifacts/tests/native-input-p3/candidate-stage.json'),'utf8'));
+  const stage=JSON.parse(readFileSync(resolve(root,'artifacts/tests/native-input/acceptance/candidate-stage.json'),'utf8'));
   assert(stage.sealed&&stage.root===root,'Resource reuse requires a sealed source snapshot');
   inside(resolve(owner,'artifacts/tests/p3'),stage.directory);
   const manifest=resolve(stage.directory,'sources.json'),sources=JSON.parse(readFileSync(manifest,'utf8'));
   assert.deepEqual(captureValidationSources(root),sources,'Resource source snapshot changed');
   assert(auditEditorResources(root,'windows-x64').selectedValid,'Resource source does not match its frozen native inputs');
-  const directory=realpathSync(resolve(root,'artifacts/tests/native-input-p2/resources'));inside(root,directory);
+  const directory=realpathSync(resolve(root,'artifacts/tests/native-input/integration/resources'));inside(root,directory);
   const paths=readdirSync(directory),files=await inventory(directory,paths);
   return {root,directory,paths,files,sourceManifestSha256:await hashFile(manifest),resourcesSha256:digest(files)};
 }

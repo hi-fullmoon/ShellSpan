@@ -5,13 +5,13 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 
 const root=resolve(import.meta.dirname,'../../..');
-const sourceSnapshot=resolve(root,'artifacts/tests/native-input-p2/source-snapshot.json');
+const sourceSnapshot=resolve(root,'artifacts/tests/native-input/integration/source-snapshot.json');
 if(existsSync(sourceSnapshot))assert(JSON.parse(readFileSync(sourceSnapshot,'utf8')).sharedDriftReviewed===true,'Review the isolated P2 source snapshot before native acceptance');
 const version=process.argv[2]??'5.3';
 assert(['4.1','4.4','5.3'].includes(version));
 const readline={'4.1':'6.0','4.4':'7.0','5.3':'8.3.6'}[version];
-const producer=JSON.parse(readFileSync(resolve(root,`artifacts/tests/native-input-p2/producers/gnu-bash-${version}-readline-${readline}-macos-arm64-native/manifest.json`),'utf8'));
-const destination=resolve(root,`artifacts/tests/native-input-p2/app-${version}`,new Date().toISOString().replaceAll(':','-'));
+const producer=JSON.parse(readFileSync(resolve(root,`artifacts/tests/native-input/integration/producers/gnu-bash-${version}-readline-${readline}-macos-arm64-native/manifest.json`),'utf8'));
+const destination=resolve(root,`artifacts/tests/native-input/integration/app-${version}`,new Date().toISOString().replaceAll(':','-'));
 for(const name of ['home','data'])mkdirSync(resolve(destination,name),{recursive:true,mode:0o700});
 const originalHome=process.env.HOME;
 const sourcePath=['.shellspan-dev','.shellspan'].map(name=>resolve(originalHome,name,'shellspan-main.db')).find(existsSync);

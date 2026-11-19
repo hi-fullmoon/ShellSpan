@@ -12,7 +12,7 @@ import { cargoLibraryTests, repositoryRoot as root, terminalFrontendTests, verif
 
 export async function verifyProtocol(args) {
   const { values } = parseArgs({ args, options: { 'schema-only': { type: 'boolean' } } });
-  const output = path.join(root, 'artifacts/tests/native-input-p0/p1-validation');
+  const output = path.join(root, 'artifacts/tests/native-input/protocol/validation');
   await mkdir(output, { recursive: true });
   const steps = [];
   async function run(name, command, args, environment = {}) {
@@ -37,7 +37,7 @@ export async function verifyProtocol(args) {
         else if (entry.name.endsWith('control.bin')) files.push(file);
       }
     }
-    await walk('artifacts/tests/native-input-p0/p1-evidence');
+    await walk('artifacts/tests/native-input/protocol/evidence');
     const counts = {};
     for (const file of files) {
       let count = 0;

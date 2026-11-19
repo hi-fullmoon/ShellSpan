@@ -17,8 +17,10 @@ import sys
 sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[3]
-BUILD_ROOT = ROOT / os.environ.get('SHELLSPAN_NATIVE_BUILD_ROOT', 'src-tauri/target/native-input')
-OUT = BUILD_ROOT / 'native-input-p2'
+sys.path.insert(0, str(ROOT / 'scripts/native-input'))
+from build_paths import BUILD_ROOT, build_directory, is_test_build
+
+OUT = build_directory(BUILD_ROOT, 'integration')
 READLINE_VERSIONS = {'4.1': '6.0', '4.4': '7.0', '5.3': '8.3.6'}
 X86_GLIBC_MINIMUM = (2, 28)
 X86_GLIBC_VERSION = '.'.join(map(str, X86_GLIBC_MINIMUM))
@@ -90,7 +92,9 @@ def main():
     # Keep both Linux dependency builds, including the P0 build cache, isolated
     # when the ARM64 and x86_64 producers mount the same checkout.
     x86_linux = target == X86_TARGET
-    dependency_root = BUILD_ROOT / target if x86_linux else BUILD_ROOT
+    dependency_root = BUILD_ROOT
+    if x86_linux:
+        dependency_root = OUT / 'dependency-cache' / target if is_test_build(BUILD_ROOT) else BUILD_ROOT / target
     OUT.mkdir(parents=True, exist_ok=True)
     log = OUT / f'build-{target if x86_linux else host}.log'
 
@@ -105,13 +109,14 @@ def main():
     rust_environment = macos_rust_environment(manifest) if host == 'darwin' else os.environ
     inputs = [p for p in source.rglob('*') if p.is_file() and 'target' not in p.parts]
     inputs += [ROOT / 'src-tauri/src/terminal_command/protocol.rs', Path(__file__).resolve(), Path(__file__).with_name('Dockerfile'),
+        ROOT / 'scripts/native-input/build_paths.py',
         ROOT / 'scripts/native-input/prototype/build.py', ROOT / 'scripts/native-input/prototype/readline-sources.json',
         *[p for p in (ROOT/'scripts/dependency-builds/bash-native').iterdir() if p.is_file()]]
     if x86_linux:
         inputs.append(Path(__file__).with_name('Dockerfile.amd64'))
     sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
     before = {str(p.relative_to(ROOT)): sha(p) for p in inputs}
-    builds = json.loads((dependency_root / 'native-input-p2' / f'bash-{host}.json').read_text())
+    builds = json.loads((build_directory(dependency_root, 'integration') / f'bash-{host}.json').read_text())
     catalogue = OUT / 'resources/native-input'
     catalogue.mkdir(parents=True, exist_ok=True)
     profiles = []
@@ -181,7 +186,7 @@ def main():
         archives.extend(['readline-8.3.tar.gz', *(f'readline83-{n:03d}' for n in range(1, len(pin['patches']) + 1))])
         archives.extend(builds['5.3'].get('gnuBashPatches', {}))
     for name in archives:
-        shutil.copy2(dependency_root / 'native-input-p0/upstream' / name, notices / name)
+        shutil.copy2(build_directory(dependency_root, 'prototype') / 'upstream' / name, notices / name)
     for name in ['COPYING', 'AUTHORS']:
         shutil.copy2(upstream / name, notices / f'bash-{name}')
     for path in (ROOT / 'scripts/dependency-builds/bash-native').iterdir():

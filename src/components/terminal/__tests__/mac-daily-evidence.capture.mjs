@@ -5,7 +5,7 @@ import {resolve} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import ts from 'typescript';
 const root=resolve(import.meta.dirname,'../../../..'),directory=resolve(process.argv[2]??'');
-assert(process.argv.length===3&&directory.includes('/artifacts/tests/native-input-p2/phase2/'),'Supply one actual App capture');
+assert(process.argv.length===3&&directory.includes('/artifacts/tests/native-input/integration/phase2/'),'Supply one actual App capture');
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const evidenceFile=resolve(directory,'native-webview-evidence.json'),traceFile=resolve(directory,'native-display-trace.json');
 const evidenceBytes=readFileSync(evidenceFile),traceBytes=readFileSync(traceFile),evidence=JSON.parse(evidenceBytes),trace=JSON.parse(traceBytes);

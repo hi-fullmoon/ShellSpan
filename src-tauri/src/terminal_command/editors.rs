@@ -66,7 +66,8 @@ fn validation_admitted(root: &Path, target: &str) -> bool {
             return Some(false);
         }
         let snapshot: serde_json::Value = serde_json::from_slice(
-            &fs::read(source.join("artifacts/tests/native-input-p3/snapshot-index.json")).ok()?,
+            &fs::read(source.join("artifacts/tests/native-input/acceptance/snapshot-index.json"))
+                .ok()?,
         )
         .ok()?;
         if fs::canonicalize(snapshot["root"].as_str()?).ok()? != source {
@@ -77,9 +78,10 @@ fn validation_admitted(root: &Path, target: &str) -> bool {
         if hex::encode(sha2::Sha256::digest(index)) != snapshot["indexSha256"].as_str()? {
             return Some(false);
         }
-        let manifest =
-            fs::read(source.join("artifacts/tests/native-input-p3/editor-validation-sources.json"))
-                .ok()?;
+        let manifest = fs::read(
+            source.join("artifacts/tests/native-input/acceptance/editor-validation-sources.json"),
+        )
+        .ok()?;
         let marker: ValidationAdmission =
             serde_json::from_slice(&fs::read(actual.join("editor-validation.json")).ok()?).ok()?;
         Some(
@@ -205,6 +207,10 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<EditorArti
                 "scripts/native-input/acceptance/zsh-build-check.c",
                 include_str!("../../../scripts/native-input/acceptance/zsh-build-check.c"),
             ),
+            (
+                "scripts/native-input/integration/resource-paths.mjs",
+                include_str!("../../../scripts/native-input/integration/resource-paths.mjs"),
+            ),
         ] {
             if catalogue.sources.get(path) != Some(&nip::sha(contents)) {
                 return Err("TERMINAL_NATIVE_STALE_ARTIFACTS".into());
@@ -232,6 +238,14 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<EditorArti
             (
                 "scripts/native-input/acceptance/publish-linux.py",
                 include_str!("../../../scripts/native-input/acceptance/publish-linux.py"),
+            ),
+            (
+                "scripts/native-input/build_paths.py",
+                include_str!("../../../scripts/native-input/build_paths.py"),
+            ),
+            (
+                "scripts/native-input/integration/resource-paths.mjs",
+                include_str!("../../../scripts/native-input/integration/resource-paths.mjs"),
             ),
             (
                 "scripts/native-input/acceptance/zsh-build-check.c",

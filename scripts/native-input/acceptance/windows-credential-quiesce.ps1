@@ -18,7 +18,7 @@ do{
  if($deadline.ElapsedMilliseconds-ge 180000){throw 'Original owned writer has not exited; no recovery writer may start'}
  Start-Sleep -Milliseconds 100
 }while($true)
-$phases=@($evidence,(Join-Path $evidence 'provision'),(Join-Path $evidence 'verify-absence'),(Join-Path $root ('artifacts/tests/native-input-p2/w7-'+$runId)),(Join-Path $root ('artifacts/tests/native-input-p2/w51-'+$runId)))
+$phases=@($evidence,(Join-Path $evidence 'provision'),(Join-Path $evidence 'verify-absence'),(Join-Path $root ('artifacts/tests/native-input/integration/w7-'+$runId)),(Join-Path $root ('artifacts/tests/native-input/integration/w51-'+$runId)))
 foreach($phase in $phases){
  if(-not (Test-Path $phase)){continue}
  foreach($file in @(Get-ChildItem -LiteralPath $phase -Filter '*-process.json' -File)){
