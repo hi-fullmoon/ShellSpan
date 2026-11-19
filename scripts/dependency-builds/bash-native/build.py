@@ -58,7 +58,15 @@ def main():
         if not archive.is_absolute() or not archive.is_file():
             raise RuntimeError('The Linux x86_64 Bash build requires the libtinfo static archive (libncurses-dev)')
         static_tinfo = archive.resolve()
-    stamp = hashlib.sha256((''.join(sha(patch) for patch in [*patches.values(), *display_patches.values(), paste_patch, darwin_patch, bind_x_patch, unload_patch, combining_patch, native_history_patch, *setpgid_patches.values(), setpgid_header, *resize_patches.values()]) + sha(Path(__file__)) + sha(helper_path) + sha(ROOT / 'scripts/native-input/prototype/readline-sources.json')).encode()).hexdigest()[:20]
+    build_inputs = [
+        *patches.values(), *display_patches.values(), paste_patch, darwin_patch, bind_x_patch,
+        unload_patch, combining_patch, native_history_patch, *setpgid_patches.values(),
+        setpgid_header, *resize_patches.values(), Path(__file__), helper_path,
+        ROOT / 'scripts/native-input/prototype/readline-sources.json',
+    ]
+    inputs_digest = ''.join(sha(path) for path in build_inputs)
+    # Generated GNU Makefiles contain absolute source and install paths.
+    stamp = hashlib.sha256(f'{inputs_digest}\0{OUT.resolve()}'.encode()).hexdigest()[:20]
     if static_tinfo:
         stamp += '-' + sha(static_tinfo)[:12]
     bash_patch_lock = Path(__file__).with_name('bash-5.3-patches.json')

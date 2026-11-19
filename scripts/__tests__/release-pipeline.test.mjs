@@ -232,6 +232,8 @@ describe('release publication gates', () => {
     expect(preparation.indexOf(restore)).toBeGreaterThan(preparation.indexOf(download));
     expect(restore.if).toBe(download.if);
     expect(restore.run).toContain('test_native_root=artifacts/tests/native-input');
+    expect(restore.run).toContain('$release_native_root/integration/resources/.');
+    expect(restore.run).toContain('$release_native_root/acceptance/dependencies/.');
     expect(restore.run).toContain('$test_native_root/integration/resources/');
     expect(restore.run).toContain('$test_native_root/acceptance/dependencies/');
     const producer = release.jobs['build-native-macos-editor'];

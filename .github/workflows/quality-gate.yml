@@ -146,8 +146,8 @@ jobs:
           test_native_root=artifacts/tests/native-input
           release_native_root="$RUNNER_TEMP/native-macos-editor"
           mkdir -p "$test_native_root/integration/resources" "$test_native_root/acceptance/dependencies"
-          cp -R "$release_native_root/native-input-p2/resources/." "$test_native_root/integration/resources/"
-          cp -R "$release_native_root/native-input-p3/dependencies/." "$test_native_root/acceptance/dependencies/"
+          cp -R "$release_native_root/integration/resources/." "$test_native_root/integration/resources/"
+          cp -R "$release_native_root/acceptance/dependencies/." "$test_native_root/acceptance/dependencies/"
           chmod 500 "$test_native_root/integration/resources/native-input/zsh-5.9-zle-5.9-macos-arm64-native/zsh"
       - name: Run Agent terminal contract tests
         run: node scripts/verification/agent/verify-agent-terminal-contracts.mjs

@@ -20,4 +20,6 @@
 - Windows x64 的资源入口是 `node scripts/native-input/acceptance/build-windows.mjs`，打包和启动场景见 [统一验收标准](../../docs/design/agent-terminal-input-acceptance-checklist.md)。
 - `node scripts/native-input/integration/matrix.mjs --list-cases` 列出 Bash 场景。`node scripts/native-input/acceptance/ssh-recovery.mjs --list-cases` 列出双 Shell SSH 恢复场景。 [SSH 恢复前置条件](../../docs/design/agent-terminal-input-zle-ssh-recovery.md)
 
-`pnpm native:prepare` 准备打包资源。`node scripts/native-input/export-fixture.mjs --help` 查看如何从已采集的 PTY 和视口报告导出回归样本。`node scripts/native-input/freeze.mjs integration` 或 `node scripts/native-input/freeze.mjs acceptance` 冻结当前源码并按验收范围记录环境或归档摘要。测试产物按 `prototype/`、`protocol/`、`integration/` 和 `acceptance/` 写入 `artifacts/tests/native-input/`。发布构建资源位于 `src-tauri/target/native-input/`。冻结验收须使用与当前源码匹配的清单。
+`pnpm native:prepare` 准备打包资源。`node scripts/native-input/export-fixture.mjs --help` 查看如何从已采集的 PTY 和视口报告导出回归样本。`node scripts/native-input/freeze.mjs integration` 或 `node scripts/native-input/freeze.mjs acceptance` 冻结当前源码并按验收范围记录环境或归档摘要。测试产物按 `prototype/`、`protocol/`、`integration/` 和 `acceptance/` 写入 `artifacts/tests/native-input/`。发布构建按同样的用途写入 `src-tauri/target/native-input/`，打包资源位于其中的 `generated/`。冻结验收须使用与当前源码匹配的清单。
+
+旧工作区可在原生资源构建退出后运行 `node scripts/native-input/migrate-build-layout.mjs` 迁移本机缓存。命令保留已有文件和 x86_64 隔离缓存，遇到同名目标目录会停止。

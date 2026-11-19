@@ -8,6 +8,7 @@ import frontend from '../../vitest.config.ts';
 import { artifactWorkspace } from '../native-input/artifact-paths.mjs';
 import { captureValidationSources, readValidationGit, nativeValidationResourceDirectory, captureValidationAssets } from '../native-input/integration/frozen-validation.mjs';
 import { nativeInputBuildDirectory, nativeInputBuildPath } from '../native-input/integration/resource-paths.mjs';
+import { migrateBuildLayout } from '../native-input/migrate-build-layout.mjs';
 import { createIndexReader } from '../native-input/acceptance/index-reader.mjs';
 import { editorValidationEnvironment } from '../native-input/acceptance/editor-validation.mjs';
 
@@ -25,12 +26,42 @@ async function withArtifactDirectory(check) {
 }
 
 describe('generated artifact layout', () => {
-  it.each([['prototype', 'native-input-p0'], ['integration', 'native-input-p2'], ['acceptance', 'native-input-p3']])(
-    'groups %s test outputs and preserves the packaged-source build layout', (section, releaseSection) => {
+  it('moves existing release build directories and nested x86_64 caches without changing their files', async () => {
+    await withArtifactDirectory(async directory => {
+      const fixture = 'scripts/native-input/prototype/readline-sources.json';
+      const buildRoot = path.join(directory, nativeInputBuildPath);
+      const architecture = 'linux-x86_64-glibc-2.28';
+      const sections = [
+        ['native-input-p0', 'prototype'], ['native-input-p2', 'integration'], ['native-input-p3', 'acceptance'],
+        [`${architecture}/native-input-p0`, `${architecture}/prototype`],
+        [`${architecture}/native-input-p2`, `${architecture}/integration`],
+      ];
+      for (const [oldName] of sections) {
+        const output = path.join(buildRoot, oldName);
+        await mkdir(output, { recursive: true });
+        await copyFile(path.join(root, fixture), path.join(output, 'readline-sources.json'));
+      }
+      await mkdir(path.join(buildRoot, 'acceptance'));
+      expect(() => migrateBuildLayout(directory)).toThrow('Build directory already exists');
+      await access(path.join(buildRoot, 'native-input-p0/readline-sources.json'));
+      await rm(path.join(buildRoot, 'acceptance'), { recursive: true });
+      expect(migrateBuildLayout(directory)).toHaveLength(sections.length);
+      const expected = await readFile(path.join(root, fixture));
+      for (const [oldName, newName] of sections) {
+        await expect(access(path.join(buildRoot, oldName))).rejects.toMatchObject({ code: 'ENOENT' });
+        expect(await readFile(path.join(buildRoot, newName, 'readline-sources.json'))).toEqual(expected);
+      }
+      expect(migrateBuildLayout(directory)).toEqual([]);
+    });
+  });
+  it.each(['prototype', 'integration', 'acceptance'])(
+    'uses the same %s section name for test and release builds', section => {
       const nested = path.join(root, 'artifacts/tests/native-input/integration/dependency-cache/linux-x86_64-glibc-2.28');
       expect(nativeInputBuildDirectory(root, 'artifacts/tests', section)).toBe(path.join(root, 'artifacts/tests/native-input', section));
       expect(nativeInputBuildDirectory(root, nested, section)).toBe(path.join(nested, 'native-input', section));
-      expect(nativeInputBuildDirectory(root, nativeInputBuildPath, section)).toBe(path.join(root, nativeInputBuildPath, releaseSection));
+      expect(nativeInputBuildDirectory(root, nativeInputBuildPath, section)).toBe(path.join(root, nativeInputBuildPath, section));
+      const nestedRelease = path.join(nativeInputBuildPath, 'linux-x86_64-glibc-2.28');
+      expect(nativeInputBuildDirectory(root, nestedRelease, section)).toBe(path.join(root, nestedRelease, section));
     },
   );
   it.each([
@@ -168,7 +199,7 @@ describe('generated artifact layout', () => {
     const buildSteps = workflow.jobs.build.steps;
     const nativeUpload = nativeBuild.steps.find(step => step.uses?.startsWith('actions/upload-artifact@'));
     expect(nativeUpload.with.name).toBe('native-linux-bash-${{ matrix.arch }}');
-    expect(nativeUpload.with.path).toBe('src-tauri/target/native-input/native-input-p2/resources/native-input');
+    expect(nativeUpload.with.path).toBe('src-tauri/target/native-input/integration/resources/native-input');
     expect(nativeUpload.with['include-hidden-files']).toBe(true);
     const cacheIndex = buildSteps.findIndex(step => step.name === 'Cache Rust build');
     expect(cacheIndex).toBeGreaterThanOrEqual(0);

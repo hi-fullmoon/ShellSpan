@@ -152,7 +152,7 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: native-linux-bash-${{ matrix.arch }}
-          path: src-tauri/target/native-input/native-input-p2/resources/native-input
+          path: src-tauri/target/native-input/integration/resources/native-input
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
@@ -187,9 +187,9 @@ jobs:
         with:
           name: native-macos-editor
           path: |
-            src-tauri/target/native-input/native-input-p2/resources/native-input/editors-macos-arm64.json
-            src-tauri/target/native-input/native-input-p2/resources/native-input/zsh-5.9-zle-5.9-macos-arm64-native/
-            src-tauri/target/native-input/native-input-p3/dependencies/zsh-5.9.tar.xz
+            src-tauri/target/native-input/integration/resources/native-input/editors-macos-arm64.json
+            src-tauri/target/native-input/integration/resources/native-input/zsh-5.9-zle-5.9-macos-arm64-native/
+            src-tauri/target/native-input/acceptance/dependencies/zsh-5.9.tar.xz
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
@@ -264,14 +264,14 @@ jobs:
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: native-linux-bash-amd64
-          path: src-tauri/target/native-input/native-input-p2/resources/native-input
+          path: src-tauri/target/native-input/integration/resources/native-input
 
       - name: Download Linux ARM64 native resources
         if: runner.os == 'macOS'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: native-linux-bash-arm64
-          path: src-tauri/target/native-input/native-input-p2/resources/native-input
+          path: src-tauri/target/native-input/integration/resources/native-input
 
       - name: Download macOS native editor resources
         if: runner.os == 'macOS'
