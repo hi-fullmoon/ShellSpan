@@ -9,18 +9,22 @@ import { arch, platform } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+import { parseArgs } from 'node:util';
 import react from '@vitejs/plugin-react';
 import tailwind from '@tailwindcss/vite';
 import { build } from 'vite';
 
 assert(platform() === 'darwin' && arch() === 'arm64', 'The acceptance bundle requires macOS arm64');
+const { values: { 'keep-app': keepApp } } = parseArgs({ options: { 'keep-app': { type: 'boolean' } } });
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const crateDirectory = join(root, 'src-tauri');
 const entry = 'src/components/terminal/__tests__/mac-sandbox.native.html';
 const label = 'ShellSpan Sandbox Acceptance';
 const outputBase = join(root, 'artifacts/tests/agent-sandbox-phase1');
 await mkdir(outputBase, { recursive: true });
 const output = await mkdtemp(join(outputBase, 'desktop-mac-'));
-const scratch = await mkdtemp(join(await realpath('/tmp'), 'ss-sandbox-desktop-'));
+const temporaryRoot = await realpath('/tmp');
+const scratch = await mkdtemp(join(temporaryRoot, 'ss-sandbox-desktop-'));
 const token = randomUUID();
 const home = join(scratch, 'home');
 const signals = join(scratch, 'signals');
@@ -165,9 +169,10 @@ function launch(executable, store) {
 }
 
 const report = { ok: false, cases, crashes: {}, platform: 'macOS arm64' };
+let bundleDirectory;
 try {
   const crate = join(root, 'scripts/agent-sandbox-phase1/Cargo.toml');
-  const cargoTarget = join(outputBase, 'cargo-target');
+  const cargoTarget = join(crateDirectory, 'target/agent-sandbox-probe');
   await run('cargo', ['build', '--locked', '--manifest-path', crate, '--target-dir', cargoTarget]);
   const launcher = join(programs, 'nono-probe');
   await cp(join(cargoTarget, 'debug/shellspan-sandbox-probe'), launcher);
@@ -182,8 +187,7 @@ try {
     build: { outDir: frontend, rollupOptions: { input: join(root, entry) } },
   });
   const config = join(output, 'tauri-acceptance.json');
-  const base = JSON.parse(await readFile(join(root, 'src-tauri/tauri.conf.json'), 'utf8'));
-  const crateDirectory = join(root, 'src-tauri');
+  const base = JSON.parse(await readFile(join(crateDirectory, 'tauri.conf.json'), 'utf8'));
   await writeFile(config, JSON.stringify({
     productName: label, identifier: 'com.shellspan.validation.agent-sandbox',
     build: { beforeBuildCommand: '', frontendDist: relative(crateDirectory, frontend) },
@@ -196,13 +200,14 @@ try {
     'native-input-acceptance', '--config', config], { environment: {
     ...process.env, CARGO_PROFILE_DEV_DEBUG: '0', SHELLSPAN_MAC_SANDBOX_LAUNCHER_SHA256: launcherSha256,
   } });
-  const bundle = join(output, `${label}.app`);
-  await cp(join(root, 'src-tauri/target/debug/bundle/macos', `${label}.app`), bundle, { recursive: true, verbatimSymlinks: true });
+  bundleDirectory = keepApp ? output : await mkdtemp(join(temporaryRoot, 'ss-sandbox-bundle-'));
+  const bundle = join(bundleDirectory, `${label}.app`);
+  await cp(join(crateDirectory, 'target/debug/bundle/macos', `${label}.app`), bundle, { recursive: true, verbatimSymlinks: true });
   await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', bundle]);
   const installedLauncher = await readFile(join(bundle, 'Contents/Resources/acceptance/nono-probe'));
   assert.equal(createHash('sha256').update(installedLauncher).digest('hex'), launcherSha256);
   report.launcherSha256 = launcherSha256;
-  report.bundle = bundle;
+  if (keepApp) report.bundle = bundle;
   const binary = execFileSync('/usr/bin/plutil', ['-extract', 'CFBundleExecutable', 'raw',
     join(bundle, 'Contents/Info.plist')], { encoding: 'utf8' }).trim();
   const executable = join(bundle, 'Contents/MacOS', binary);
@@ -254,6 +259,16 @@ try {
   if (app && app.exitCode === null && app.signalCode === null) {
     app.kill('SIGKILL');
     await once(app, 'close');
+  }
+  if (bundleDirectory && !keepApp) {
+    try {
+      await rm(bundleDirectory, { recursive: true, force: true });
+    } catch (error) {
+      report.ok = false;
+      report.bundleCleanupError = error.message;
+      report.retainedBundleDirectory = bundleDirectory;
+      process.exitCode = 1;
+    }
   }
   await cp(scratch, join(output, 'runtime'), { recursive: true, verbatimSymlinks: true });
   const remaining = await guard();

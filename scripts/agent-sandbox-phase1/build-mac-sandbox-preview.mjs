@@ -27,7 +27,7 @@ function run(command, args, environment = {}) {
   execFileSync(command, args, { cwd: root, stdio: 'inherit', env: { ...process.env, CARGO_PROFILE_DEV_DEBUG: '0', ...environment } });
 }
 
-const probeTarget = join(outputBase, 'cargo-target');
+const probeTarget = join(crate, 'target/agent-sandbox-probe');
 run('cargo', ['build', '--locked', '--manifest-path', 'scripts/agent-sandbox-phase1/Cargo.toml', '--target-dir', probeTarget]);
 run('pnpm', ['build']);
 const config = join(output, 'tauri-preview.json');

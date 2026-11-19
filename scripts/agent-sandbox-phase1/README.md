@@ -4,13 +4,13 @@
 
 ## macOS
 
-需要 Rust 1.95、Node.js 22.12 或以上版本，以及 PATH 中的 `rg`。下列命令将构建产物与安装包放入验收目录。
+需要 Rust 1.95、Node.js 22.12 或以上版本，以及 PATH 中的 `rg`。沙箱启动器的编译缓存统一位于 `src-tauri/target/agent-sandbox-probe/`，独立验证、桌面验收和手动内测包共用该目录。
 
 ```sh
 npm install --prefix artifacts/tests/agent-sandbox-phase1/tools --ignore-scripts --no-audit --no-fund --save-exact @anthropic-ai/sandbox-runtime@0.0.83
-cargo build --locked --manifest-path scripts/agent-sandbox-phase1/Cargo.toml --target-dir artifacts/tests/agent-sandbox-phase1/cargo-target
+cargo build --locked --manifest-path scripts/agent-sandbox-phase1/Cargo.toml --target-dir src-tauri/target/agent-sandbox-probe
 node scripts/agent-sandbox-phase1/verify.mjs \
-  artifacts/tests/agent-sandbox-phase1/cargo-target/debug/shellspan-sandbox-probe \
+  src-tauri/target/agent-sandbox-probe/debug/shellspan-sandbox-probe \
   artifacts/tests/agent-sandbox-phase1/tools/node_modules/.bin/srt
 ```
 
@@ -74,7 +74,9 @@ node scripts/agent-sandbox-phase1/verify-mac-desktop.mjs
 
 退出信息通过独立文件描述符记录，退出码 `125` 在启动器失败与命令自己退出两种情况下仍能区分。应用在隔离数据目录持久保存受管目录身份和执行阶段，启动器在应用保存进程组后才接到执行许可。应用重启时，恢复逻辑只在确认命令尚未获准启动或原进程组已终止时解除目录保护。
 
-验收脚本在加锁后尚未启动、命令正在运行、进程组已终止但仍未解除保护三个时点向应用发送 `SIGKILL`。重启后读取真实目录标志、执行记录和工作区文件。运行中崩溃的用例会在核实保护标志依然有效后，通知原测试命令结束。最后再重启一次，核对三条命令均未重跑。验收脚本不修改目录保护标志；失败时如果应用仍保留保护，`report.json` 会记录隔离目录。验收包和记录保存在 `artifacts/tests/agent-sandbox-phase1/desktop-mac-*/`，复跑时由脚本重新生成包内验收页的本地连接配置。
+验收脚本在加锁后尚未启动、命令正在运行、进程组已终止但仍未解除保护三个时点向应用发送 `SIGKILL`。重启后读取真实目录标志、执行记录和工作区文件。运行中崩溃的用例会在核实保护标志依然有效后，通知原测试命令结束。最后再重启一次，核对三条命令均未重跑。验收脚本不修改目录保护标志，失败时如果应用仍保留保护，`report.json` 会记录隔离目录。
+
+报告、日志和运行记录保存在 `artifacts/tests/agent-sandbox-phase1/desktop-mac-*/`。默认从临时目录运行签名验收包，并在验收结束后清理该副本。运行 `node scripts/agent-sandbox-phase1/verify-mac-desktop.mjs --keep-app` 可将验收包一并保存在当次目录。复跑时脚本重新生成包内验收页的本地连接配置。
 
 ## macOS 手动内测包
 
