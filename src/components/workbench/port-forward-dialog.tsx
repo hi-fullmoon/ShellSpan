@@ -9,7 +9,6 @@ import {
   PlayIcon,
   PlusIcon,
   RotateCcwIcon,
-  SaveIcon,
   SquareIcon,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -151,7 +150,7 @@ export function PortForwardDialog({ profile: requestedProfile, onClose }: PortFo
 
   return (
     <Dialog open={Boolean(profile)} onOpenChange={(open) => !open && onClose()}>
-      <CompactDialogContent className="max-w-3xl">
+      <CompactDialogContent className="max-w-2xl">
         <CompactDialogHeader
           title={t('portForward.title')}
           description={profile ? t('portForward.description', { name: profile.name }) : t('portForward.descriptionEmpty')}
@@ -198,7 +197,7 @@ export function PortForwardDialog({ profile: requestedProfile, onClose }: PortFo
                       {draft.kind === 'local' ? t('portForward.kind.localDetail') : t('portForward.kind.remoteDetail')}
                     </FieldDescription>
                   </Field>
-                  <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="grid gap-x-2 gap-y-4 sm:grid-cols-3">
                     <Field>
                       <FieldLabel htmlFor="port-forward-local-port">
                         {draft.kind === 'local' ? t('portForward.form.listenPort') : t('portForward.form.localTargetPort')}
@@ -244,15 +243,14 @@ export function PortForwardDialog({ profile: requestedProfile, onClose }: PortFo
                       onCheckedChange={(checked) => setDraft({ ...draft, autoStart: checked })}
                     />
                   </Field>
-                  <FieldError>{validationError}</FieldError>
                 </FieldGroup>
               </CardContent>
-              <CardFooter className="justify-end gap-2">
-                <Button variant="ghost" size="sm" onClick={() => setDraft(undefined)}>
+              <CardFooter className="justify-end gap-2 border-t-0">
+                <FieldError className="min-w-0 flex-1">{validationError}</FieldError>
+                <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setDraft(undefined)}>
                   {t('common.cancel')}
                 </Button>
-                <Button size="sm" disabled={Boolean(validationError) || saving} onClick={() => void saveDraft()}>
-                  <SaveIcon data-icon="inline-start" />
+                <Button size="sm" className="shrink-0" disabled={Boolean(validationError) || saving} onClick={() => void saveDraft()}>
                   {t('common.save')}
                 </Button>
               </CardFooter>
