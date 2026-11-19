@@ -246,12 +246,14 @@ function DropdownMenuRadioItem({
 
 function DropdownMenuSeparator({
   className,
+  inset = false,
   ...props
-}: MenuPrimitive.Separator.Props) {
+}: MenuPrimitive.Separator.Props & { inset?: boolean }) {
   return (
     <MenuPrimitive.Separator
       data-slot="dropdown-menu-separator"
-      className={cn("-mx-1 my-1 h-px bg-border", className)}
+      data-inset={inset || undefined}
+      className={cn("h-px bg-border", inset ? "mx-0 my-0.5" : "-mx-1 my-1", className)}
       {...props}
     />
   )

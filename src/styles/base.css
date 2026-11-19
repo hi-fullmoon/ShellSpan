@@ -690,6 +690,11 @@ textarea,
 }
 
 @media (forced-colors: none) {
+  /* Shared menu rows already show keyboard focus through their background. */
+  :where([data-slot='dropdown-menu-item']):focus-visible {
+    outline: none;
+  }
+
   .sftp-split-pane > [data-slot='split-pane-divider']:focus-visible {
     outline: none;
     background-color: var(--ring);

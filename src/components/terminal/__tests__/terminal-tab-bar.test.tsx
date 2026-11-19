@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, act, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { TerminalTabBar } from '../terminal-tab-bar';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useAppStore } from '@/stores/appStore';
@@ -231,6 +232,51 @@ describe('TerminalTabBar', () => {
 
     rerender(<TerminalTabBar externalInsertIndex={null} />);
     expect(document.querySelector('[data-drop-indicator]')).not.toBeInTheDocument();
+  });
+
+  it('shows grouped text-only tab actions and keeps them keyboard accessible', async () => {
+    const user = userEvent.setup();
+    const onSplitTab = vi.fn();
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    useTerminalStore.getState().setActiveSession('s2');
+    render(
+      <TerminalTabBar
+        onNewTabClick={vi.fn()}
+        onSwitchTab={vi.fn()}
+        onSplitTab={onSplitTab}
+        canSplitTab={(direction) => direction === 'right'}
+        onUnsplit={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole('button', { name: 'terminal.tab.moreActions' });
+    trigger.focus();
+    await user.keyboard('{ArrowDown}');
+    const menu = within(await screen.findByRole('menu'));
+    const labels = [
+      'terminal.newSession.title', 'terminal.tabSwitcher.title', 'terminal.tab.splitRight',
+      'terminal.tab.splitDown', 'terminal.tab.unsplit', 'terminal.tab.closeCurrent',
+    ];
+    for (const name of labels) {
+      const item = menu.getByRole('menuitem', { name });
+      expect(item.querySelector('svg')).toBeNull();
+    }
+    expect(menu.getAllByRole('group').map((group) => within(group).getAllByRole('menuitem').length))
+      .toEqual([2, 3, 1]);
+    expect(menu.getAllByRole('separator')).toHaveLength(2);
+    for (const divider of menu.getAllByRole('separator')) {
+      expect(divider).toHaveAttribute('data-inset', 'true');
+    }
+    expect(menu.getByRole('menuitem', { name: 'terminal.tab.splitDown' })).toHaveAttribute('aria-disabled', 'true');
+    expect(menu.getByRole('menuitem', { name: 'terminal.tab.closeCurrent' })).toHaveAttribute('data-variant', 'destructive');
+
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+    expect(menu.getByRole('menuitem', { name: 'terminal.tab.splitRight' })).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(onSplitTab).toHaveBeenCalledWith('s2', 'right');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 
   it('close button asks for confirmation before removing a session', async () => {

@@ -746,7 +746,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
-            className="w-auto min-w-40 font-normal **:data-[slot=dropdown-menu-item]:text-xs/5"
+            className="w-max max-w-[calc(100vw-16px)]"
             onPointerDown={(event) => event.stopPropagation()}
             onDoubleClick={(event) => event.stopPropagation()}
           >
@@ -756,7 +756,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
             </DropdownMenuGroup>
             {onSplitTab && (
               <>
-                <DropdownMenuSeparator />
+                <DropdownMenuSeparator inset />
                 <DropdownMenuGroup>
                   <DropdownMenuItem
                     disabled={!splitTarget || (actionsOpen && !canSplitTab?.('right'))}
@@ -774,7 +774,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
                 </DropdownMenuGroup>
               </>
             )}
-            <DropdownMenuSeparator />
+            <DropdownMenuSeparator inset />
             <DropdownMenuGroup>
               <DropdownMenuItem
                 variant="destructive"

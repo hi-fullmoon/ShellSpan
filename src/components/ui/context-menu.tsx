@@ -67,11 +67,8 @@ function ContextMenuSubTrigger({
   return <DropdownMenuSubTrigger className={cn(compactItemClassName, className)} {...props} />
 }
 
-function ContextMenuSeparator({
-  className,
-  ...props
-}: React.ComponentProps<typeof DropdownMenuSeparator>) {
-  return <DropdownMenuSeparator className={cn("mx-0 my-0.5", className)} {...props} />
+function ContextMenuSeparator(props: React.ComponentProps<typeof DropdownMenuSeparator>) {
+  return <DropdownMenuSeparator inset {...props} />
 }
 
 export {
