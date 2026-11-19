@@ -1,7 +1,6 @@
 import '@xterm/xterm/css/xterm.css';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { SearchAddon } from '@xterm/addon-search';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { createTerminalResizeHandler, installTerminalScrollbarVisibility, measureTerminalGeometry, TERMINAL_CONTAINER_CLASS } from './terminal-geometry';
@@ -11,6 +10,7 @@ import { attachNativeInputDisplay, type NativeInputDisplayController } from '@/l
 import { attachRawInputDisplay } from '@/lib/terminal/raw-input-display';
 import { observeNativePromptOrigin } from '@/lib/terminal/native-prompt-origin';
 import { terminalInputReadiness } from '../terminal-input-readiness';
+import { TerminalSearchAddon } from '../terminal-search-addon';
 import { useToastStore } from '@/stores/toastStore';
 import {
   invokeGetSessionStatus,
@@ -403,7 +403,7 @@ export interface TerminalController {
   sessionId: string;
   terminal: Terminal;
   fitAddon: FitAddon;
-  searchAddon: SearchAddon;
+  searchAddon: TerminalSearchAddon;
   container: HTMLDivElement;
   host: HTMLElement | null;
   resizeObserver: ResizeObserver | null;
@@ -454,7 +454,7 @@ class TerminalControllerImpl implements TerminalController {
   sessionId: string;
   terminal: Terminal;
   fitAddon: FitAddon;
-  searchAddon: SearchAddon;
+  searchAddon: TerminalSearchAddon;
   container: HTMLDivElement;
   host: HTMLElement | null = null;
   resizeObserver: ResizeObserver | null = null;
@@ -538,7 +538,7 @@ class TerminalControllerImpl implements TerminalController {
       windowsPty: resolveWindowsPty(ptyInfo),
     });
     this.fitAddon = new FitAddon();
-    this.searchAddon = new SearchAddon();
+    this.searchAddon = new TerminalSearchAddon();
     this.terminal.loadAddon(this.fitAddon);
     this.terminal.loadAddon(this.searchAddon);
     this.commandDecorations = this.installInputRendering(ptyInfo);

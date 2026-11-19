@@ -110,7 +110,7 @@ export function useActiveController(
   const clearSearch = useCallback(() => {
     const controller =
       activeSessionId === null ? undefined : terminalRegistry.get(activeSessionId);
-    controller?.searchAddon.clearDecorations();
+    controller?.searchAddon.clearSearch();
   }, [activeSessionId]);
 
   return { focus, searchNext, searchPrevious, clearSearch };

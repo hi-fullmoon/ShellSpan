@@ -6,6 +6,89 @@ use crate::terminal_display_recovery::DisplayRecovery;
 
 const MAX_TITLE_BYTES: usize = 4_096;
 const PRIVATE_KEY_BOUNDARY_BYTES: usize = 64;
+// Allow for the UTF-8 size of xterm's 10,000,000 UTF-16 unit string limit.
+const DISPLAY_TAIL_LIMIT: usize = 32 * 1024 * 1024;
+
+#[derive(Default)]
+struct DisplayVtActions {
+    executed_c0: bool,
+}
+
+impl vtparse::VTActor for DisplayVtActions {
+    fn print(&mut self, _: char) {}
+    fn execute_c0_or_c1(&mut self, control: u8) {
+        self.executed_c0 = control < 0x20;
+    }
+    fn dcs_hook(&mut self, _: u8, _: &[i64], _: &[u8], _: bool) {}
+    fn dcs_put(&mut self, _: u8) {}
+    fn dcs_unhook(&mut self) {}
+    fn esc_dispatch(&mut self, _: &[i64], _: &[u8], _: bool, _: u8) {}
+    fn csi_dispatch(&mut self, _: &[vtparse::CsiParam], _: bool, _: u8) {}
+    fn osc_dispatch(&mut self, _: &[&[u8]]) {}
+}
+
+struct DisplayTail {
+    parser: vtparse::VTParser,
+    pending: Vec<u8>,
+    overflowed: bool,
+}
+
+impl DisplayTail {
+    fn new() -> Self {
+        Self {
+            parser: vtparse::VTParser::new(),
+            pending: Vec::new(),
+            overflowed: false,
+        }
+    }
+
+    fn observe(&mut self, display: &str) {
+        let bytes = display.as_bytes();
+        let first_control = if self.parser.is_ground() {
+            bytes
+                .iter()
+                .position(|&byte| byte == 0x1b || !byte.is_ascii())
+                .unwrap_or(bytes.len())
+        } else {
+            0
+        };
+        let mut fragment_start = first_control;
+        for (index, character) in display[first_control..].char_indices() {
+            let start = first_control + index;
+            let end = start + character.len_utf8();
+            let mut actions = DisplayVtActions::default();
+            // The webview parses Unicode code points. Only actual C1 controls
+            // may change state, even when a UTF-8 continuation has a C1 value.
+            self.parser
+                .parse_byte(character.min('\u{a0}') as u8, &mut actions);
+            if self.parser.is_ground() {
+                if !self.pending.is_empty() {
+                    self.pending = Vec::new();
+                }
+                self.overflowed = false;
+                fragment_start = end;
+            } else if actions.executed_c0 {
+                // A C0 executed inside a CSI or escape is already reflected
+                // in the screen. Retain the surrounding parser state only.
+                self.append(&bytes[fragment_start..start]);
+                fragment_start = end;
+            }
+        }
+        self.append(&bytes[fragment_start..]);
+    }
+
+    fn append(&mut self, bytes: &[u8]) {
+        if self.overflowed {
+            return;
+        }
+        if self.pending.len() + bytes.len() > DISPLAY_TAIL_LIMIT {
+            self.pending = Vec::new();
+            self.overflowed = true;
+        } else {
+            self.pending.extend_from_slice(bytes);
+        }
+    }
+}
 
 #[derive(Default)]
 struct PrivateKeyScreenFilter {
@@ -120,6 +203,7 @@ impl vt100::Callbacks for TerminalScreenCallbacks {
 
 pub(crate) struct TerminalScreenModel {
     parser: vt100::Parser<TerminalScreenCallbacks>,
+    display_tail: Option<Box<DisplayTail>>,
     private_key_filter: PrivateKeyScreenFilter,
     recovery: Option<DisplayRecovery>,
     version: u64,
@@ -145,6 +229,7 @@ impl TerminalScreenModel {
                 0,
                 TerminalScreenCallbacks::default(),
             ),
+            display_tail: None,
             private_key_filter: PrivateKeyScreenFilter::default(),
             recovery: None,
             version: 1,
@@ -186,21 +271,29 @@ impl TerminalScreenModel {
 
     pub(crate) fn observe_display(&mut self, sequence: u64, text: &str) -> String {
         let input = text.as_bytes();
-        let display = self
+        let display = match self
             .recovery
             .as_mut()
-            .map_or(Cow::Borrowed(input), |recovery| recovery.apply(input));
-        self.parser.process(&display);
-        self.through_output_sequence = sequence;
-        match display {
+            .map_or(Cow::Borrowed(input), |recovery| recovery.apply(input))
+        {
             Cow::Borrowed(_) => text.into(),
             Cow::Owned(bytes) => {
                 String::from_utf8(bytes).expect("recovery inserts ASCII at a parsed OSC boundary")
             }
-        }
+        };
+        self.parser.process(display.as_bytes());
+        self.display_tail
+            .get_or_insert_with(|| Box::new(DisplayTail::new()))
+            .observe(&display);
+        self.through_output_sequence = sequence;
+        display
     }
 
-    pub(crate) fn format_display(&self) -> (u64, String) {
+    pub(crate) fn format_display(&self) -> Result<(u64, String), String> {
+        let tail = self.display_tail.as_deref();
+        if tail.is_some_and(|tail| tail.overflowed) {
+            return Err("TERMINAL_DISPLAY_SEQUENCE_TOO_LARGE".into());
+        }
         let screen = self.parser.screen();
         let mut bytes = Vec::new();
         if screen.alternate_screen() {
@@ -213,10 +306,15 @@ impl TerminalScreenModel {
             bytes.extend_from_slice(b"\x1b[?1049h");
         }
         bytes.extend(screen.state_formatted());
-        (
+        if let Some(tail) = tail {
+            // Seed the renderer's parser after drawing the checkpoint. The
+            // next live frame can then complete the sequence naturally.
+            bytes.extend_from_slice(&tail.pending);
+        }
+        Ok((
             self.through_output_sequence,
             String::from_utf8_lossy(&bytes).into_owned(),
-        )
+        ))
     }
 
     pub(crate) fn resize(&mut self, geometry: TerminalGeometry) -> Result<bool, String> {
@@ -300,6 +398,50 @@ mod tests {
             byte_offset: 0,
             bytes: bytes.to_vec(),
         }
+    }
+
+    #[test]
+    fn display_snapshot_replays_an_incomplete_csi_with_embedded_line_feed_once() {
+        let geometry = TerminalGeometry::new(40, 8);
+        let mut model = TerminalScreenModel::new(geometry);
+        let name = env!("CARGO_PKG_NAME");
+        let prefix = format!("{name}\r\n{name}\x1b[\r");
+        let live_prefix = model.observe_display(1, &prefix);
+        let live_middle = model.observe_display(2, "\n");
+        let (sequence, snapshot) = model.format_display().unwrap();
+        let live_tail = model.observe_display(3, &format!("2A{name}"));
+
+        let mut continuous = vt100::Parser::new(8, 40, 0);
+        for part in [&live_prefix, &live_middle, &live_tail] {
+            continuous.process(part.as_bytes());
+        }
+        let mut restored = vt100::Parser::new(8, 40, 0);
+        restored.process(snapshot.as_bytes());
+        restored.process(live_tail.as_bytes());
+        assert_eq!(sequence, 2);
+        assert_eq!(live_prefix, prefix);
+        assert_eq!(live_middle, "\n");
+        assert_eq!(restored.screen().cursor_position(), (0, name.len() as u16));
+        assert_eq!(
+            restored.screen().state_formatted(),
+            continuous.screen().state_formatted()
+        );
+        assert_eq!(
+            model.format_display().unwrap().1.as_bytes(),
+            continuous.screen().state_formatted()
+        );
+    }
+
+    #[test]
+    fn display_snapshot_keeps_unicode_in_an_unterminated_control_string() {
+        let mut model = TerminalScreenModel::new(TerminalGeometry::new(40, 8));
+        let prefix = "\x1b_终端界";
+        model.observe_display(1, prefix);
+        let (sequence, snapshot) = model.format_display().unwrap();
+        assert_eq!(sequence, 1);
+        assert!(snapshot.ends_with(prefix));
+        model.observe_display(2, "\x1b\\");
+        assert!(!model.format_display().unwrap().1.contains(prefix));
     }
 
     #[test]

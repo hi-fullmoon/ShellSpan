@@ -221,6 +221,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     activeSessionId === null ? undefined : terminalRegistry.get(activeSessionId),
   );
   const terminal = controller?.terminal ?? null;
+  const searchAddon = controller?.searchAddon;
   const preparingInput = useSyncExternalStore(
     terminalInputReadiness.subscribe,
     () => terminalInputReadiness.isPreparing(activeSessionId),
@@ -413,7 +414,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     const selectionDisposable = terminal.onSelectionChange(() => {
       if (copyTimeout !== null) window.clearTimeout(copyTimeout);
       copyTimeout = null;
-      if (!terminal.getSelection()) return;
+      if (searchAddon?.selectingMatch || !terminal.getSelection()) return;
       copyTimeout = window.setTimeout(() => {
         copyTimeout = null;
         const selection = terminal.getSelection();
@@ -428,7 +429,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       if (copyTimeout !== null) window.clearTimeout(copyTimeout);
       selectionDisposable.dispose();
     };
-  }, [activeSessionId, terminal, copyOnSelect, trimTrailingWhitespace]);
+  }, [activeSessionId, terminal, searchAddon, copyOnSelect, trimTrailingWhitespace]);
 
   // useActiveController opens xterm in a layout effect only when visible.
   // Install after that effect, including the first hidden -> visible transition.
@@ -454,7 +455,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           />
         )}
         {searchOpen && (
-          <TerminalSearch addon={controller?.searchAddon} onClose={handleCloseSearch} active={isActive && isVisible} />
+          <TerminalSearch addon={searchAddon} onClose={handleCloseSearch} active={isActive && isVisible} />
         )}
         {showConnectingOverlay && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2" style={terminalSurfaceStyle}>

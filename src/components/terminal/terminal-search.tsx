@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
-import type { SearchAddon, ISearchOptions, ISearchResultChangeEvent } from '@xterm/addon-search';
+import type { ISearchOptions, ISearchResultChangeEvent } from '@xterm/addon-search';
 import { ArrowDownIcon, ArrowUpIcon, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
@@ -7,9 +7,10 @@ import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
 import { resolveTerminalTheme } from './registry/terminal-registry';
 import { terminalSearchDecorations } from '@/lib/terminal/terminal-colors';
+import type { TerminalSearchAddon } from './terminal-search-addon';
 
 export function TerminalSearch({ addon, onClose, active = true }: {
-  addon?: SearchAddon;
+  addon?: TerminalSearchAddon;
   onClose: () => void;
   active?: boolean;
 }) {
@@ -69,7 +70,7 @@ export function TerminalSearch({ addon, onClose, active = true }: {
   useEffect(() => {
     setResult(null);
     if (!addon || !query || invalidRegex) {
-      addon?.clearDecorations();
+      addon?.clearSearch();
       return;
     }
     const subscription = addon.onDidChangeResults(setResult);
@@ -81,7 +82,7 @@ export function TerminalSearch({ addon, onClose, active = true }: {
     return () => subscription.dispose();
   }, [addon, query, caseSensitive, regex, invalidRegex, decorations.matchBorder, decorations.activeMatchBorder, decorations.matchBackground, decorations.activeMatchBackground]);
 
-  useEffect(() => () => addon?.clearDecorations(), [addon]);
+  useEffect(() => () => addon?.clearSearch(), [addon]);
 
   const find = (previous: boolean) => {
     if (!query || !addon || invalidRegex) return;

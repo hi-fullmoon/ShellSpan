@@ -252,6 +252,64 @@ try {
         await page.keyboard.press('Escape');
       }
       await menu.waitFor({ state: 'hidden' });
+
+      await page.setViewportSize({ width: 1200, height: 700 });
+      const blankCell = await page.evaluate(async path => {
+        const { terminalRegistry } = window.runtime;
+        terminalRegistry.get(window.session.sessionId).fit();
+        const terminal = window.terminal;
+        terminal.reset();
+        await new Promise(resolve => terminal.write(path, resolve));
+        const col = path.length + 2;
+        if (terminal.buffer.active.getLine(0)?.getCell(col)?.getChars() !== '') throw new Error('Expected an empty cell after the path');
+        const bounds = terminal.element.querySelector('.xterm-screen').getBoundingClientRect();
+        return { x: (col + 0.5) * bounds.width / terminal.cols, y: 0.5 * bounds.height / terminal.rows };
+      }, path);
+      await screen.click({ button: 'right', position: blankCell });
+      await menu.waitFor();
+      assert.equal(await menu.getByRole('menuitem', { name: '复制路径', exact: true }).count(), 0);
+      await page.waitForFunction(() => document.activeElement?.closest('[role="menu"]'));
+      await page.keyboard.press('Escape');
+      await menu.waitFor({ state: 'hidden' });
+
+      await page.evaluate(async ({ path, name }) => {
+        if (name === 'chromium') {
+          await navigator.clipboard.writeText(path);
+          window.runtime.useAppStore.setState({ terminalCopyOnSelect: true });
+        }
+        document.dispatchEvent(new Event('shellspan:find-terminal'));
+      }, { path, name });
+      const search = page.locator('[data-terminal-search] input');
+      const file = path.split('/').at(-1);
+      await search.fill(file);
+      await page.waitForFunction(file => window.terminal.getSelection() === file, file);
+      if (name === 'chromium') {
+        // Allow the production copy-on-select debounce to fire if wrongly scheduled.
+        await page.waitForTimeout(350);
+        assert.equal(await page.evaluate(() => navigator.clipboard.readText()), path);
+      }
+      await search.fill('');
+      await page.waitForFunction(() => window.terminal.getSelection() === '');
+      await search.fill(file);
+      await page.waitForFunction(file => window.terminal.getSelection() === file, file);
+      await search.press('Escape');
+      await search.waitFor({ state: 'detached' });
+      assert.equal(await page.evaluate(() => window.terminal.getSelection()), '');
+
+      await page.evaluate(() => document.dispatchEvent(new Event('shellspan:find-terminal')));
+      await search.fill(file);
+      await page.waitForFunction(file => window.terminal.getSelection() === file, file);
+      await page.evaluate(async path => {
+        const terminal = window.terminal;
+        // Schedule an add-on refresh, then replace its match with a selection.
+        await new Promise(resolve => terminal.write('\r\n', resolve));
+        terminal.select(0, 0, path.length);
+      }, path);
+      await search.press('Escape');
+      await search.waitFor({ state: 'detached' });
+      await page.waitForTimeout(350);
+      assert.equal(await page.evaluate(() => window.terminal.getSelection()), path);
+
       // Connected clear-screen behavior is verified in terminal-clear-screen.native.tsx.
       await page.evaluate(() => {
         window.root.unmount();

@@ -95,3 +95,13 @@ cleanup. Expiry or a failed waiter closes the session and returns an error for
 both broker-enabled and legacy paths; it never returns a successful summary for
 a connection still in progress. Blocking OS DNS resolver work may finish later,
 but its result is no longer used to open a connection.
+
+## Display snapshots
+
+Display snapshots cover a sequence number in the same stream as live display
+frames. The serialized screen is followed by the unfinished control sequence, if
+any, so the next live frame continues parsing at the correct position. Control
+characters that have already updated the screen are omitted from the unfinished
+sequence. Live frames keep their original boundaries. If an unfinished sequence
+exceeds the 32 MiB replay limit, the broker can produce a snapshot again when the
+sequence ends.

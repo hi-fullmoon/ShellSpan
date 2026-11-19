@@ -101,7 +101,7 @@ fn display_snapshot_uses_visible_output_and_preserves_the_alternate_screen() {
         .unwrap()
         .unwrap();
     broker
-        .observe_display_output(transport, "\x1b[?1049hManual editor\x1b[3;4H")
+        .observe_display_output(transport, "\x1b[?1049hManual editor\x1b[3;4H\x1b[?104")
         .unwrap();
     let snapshot = read().unwrap();
     let mut restored = vt100::Parser::new(snapshot.rows as u16, snapshot.columns as u16, 0);
@@ -112,7 +112,7 @@ fn display_snapshot_uses_visible_output_and_preserves_the_alternate_screen() {
     assert!(!snapshot.contents.contains("raw-only"));
     assert_eq!(snapshot.through_sequence, 2);
     let tail = broker
-        .observe_display_output(transport, "\x1b[?1049lcontinued")
+        .observe_display_output(transport, "9lcontinued")
         .unwrap()
         .unwrap();
     restored.process(tail.text.as_bytes());

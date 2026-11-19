@@ -54,6 +54,7 @@ unicode-segmentation = "1.13.3"
 crossbeam-channel = "0.5"
 portable-pty = "0.9"
 vt100 = "0.16.2"
+vtparse = { version = "0.7.0", default-features = false, features = ["no_std"] }
 vte = "0.15.0"
 vte-capture = { package = "vte", version = "=0.14.1", default-features = false, features = ["no_std"] }
 trash = "5"

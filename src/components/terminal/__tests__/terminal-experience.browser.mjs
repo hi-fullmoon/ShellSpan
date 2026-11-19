@@ -35,7 +35,7 @@ const server = await createServer({
         export { createRoot } from 'react-dom/client';
         export { flushSync } from 'react-dom';
         export { Terminal } from '@xterm/xterm';
-        export { SearchAddon } from '@xterm/addon-search';
+        export { TerminalSearchAddon } from '/src/components/terminal/terminal-search-addon.ts';
         export { TerminalSearch } from '/src/components/terminal/terminal-search.tsx';
         export { TerminalPastePreview } from '/src/components/terminal/terminal-paste-preview.tsx';
         export { TerminalCloseDetails } from '/src/components/terminal/terminal-close-details.tsx';
@@ -89,12 +89,12 @@ try {
       // A browser can exercise the renderer rebind, while IPC listeners require Tauri.
       if (!(error instanceof TypeError) || !error.message.includes('__TAURI_INTERNALS__')) throw error;
     });
-    const { React, createRoot, Terminal, SearchAddon, FitAddon, resolveTerminalTheme, TERMINAL_CONTAINER_CLASS, TerminalSearch, useAppStore, initI18n } = runtime;
+    const { React, createRoot, Terminal, TerminalSearchAddon, FitAddon, resolveTerminalTheme, TERMINAL_CONTAINER_CLASS, TerminalSearch, useAppStore, initI18n } = runtime;
     useAppStore.setState({ locale: 'zh-CN' });
     await initI18n('zh-CN');
     document.documentElement.setAttribute('data-theme', 'light');
     const terminal = new Terminal({ cols: 100, rows: 14, scrollback: 10000, allowProposedApi: true, theme: resolveTerminalTheme('light') });
-    const addon = new SearchAddon();
+    const addon = new TerminalSearchAddon();
     const fit = new FitAddon();
     terminal.loadAddon(addon);
     terminal.loadAddon(fit);
@@ -1265,7 +1265,7 @@ try {
         path: `${root}artifacts/tests/terminal-tab-actions/overflow-hover-${theme}.png` });
       const hoverStyle = await actions.evaluate(element => {
         const reference = document.createElement('span');
-        reference.style.backgroundColor = 'var(--app-tab-active)';
+        reference.style.backgroundColor = 'var(--accent)';
         element.append(reference);
         const actual = getComputedStyle(element).backgroundColor;
         const expected = getComputedStyle(reference).backgroundColor;

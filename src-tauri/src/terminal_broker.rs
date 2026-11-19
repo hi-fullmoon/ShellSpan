@@ -2695,6 +2695,7 @@ impl TerminalSessionBroker {
             .display_screen
             .as_ref()
             .map(TerminalScreenModel::format_display)
+            .transpose()?
             .unwrap_or_default();
         Ok(TerminalDisplaySnapshot {
             through_sequence,

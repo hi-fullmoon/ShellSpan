@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { SearchAddon } from '@xterm/addon-search';
+import { TerminalSearchAddon } from '../terminal-search-addon';
 import { enableRealCanvas } from '@/tests/real-canvas';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -108,7 +108,7 @@ function makeMockTerminal(selection = '') {
   // the existing interaction observations used by these legacy selection tests.
   const backingTerminal = new Terminal();
   const fitAddon = new FitAddon();
-  const searchAddon = new SearchAddon();
+  const searchAddon = new TerminalSearchAddon();
   backingTerminal.loadAddon(fitAddon);
   backingTerminal.loadAddon(searchAddon);
   const element = document.createElement('div');

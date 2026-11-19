@@ -56,19 +56,30 @@ export function terminalContextTarget(terminal: Terminal, x: number, y: number):
   const link = findHttpLinksInBuffer(terminal.buffer.active, row, terminal.cols).find(({ range }) =>
     (row > range.start.y || column >= range.start.x) && (row < range.end.y || column <= range.end.x));
   if (link) return { url: link.text };
-  const line = terminal.buffer.active.getLine(row - 1);
-  let start = column - 1;
-  let end = column - 1;
-  const character = (index: number): string => line?.getCell(index)?.getChars() ?? '';
-  while (start > 0 && !/\s/.test(character(start - 1))) start--;
-  while (end < terminal.cols && !/\s/.test(character(end))) end++;
-  const word = line?.translateToString(true, start, end) ?? '';
   const selection = terminal.getSelection();
   const selected = terminal.getSelectionPosition();
   const withinSelection = selected && row - 1 >= selected.start.y && row - 1 <= selected.end.y
     && (row - 1 > selected.start.y || column - 1 >= selected.start.x)
     && (row - 1 < selected.end.y || column - 1 < selected.end.x);
-  const candidate = withinSelection && selection && !/[\r\n]/.test(selection) ? selection : word;
+  let candidate = selection;
+  if (!withinSelection || !selection || /[\r\n]/.test(selection)) {
+    const buffer = terminal.buffer.active;
+    const line = buffer.getLine(row - 1);
+    if (!line) return {};
+    const reusableCell = buffer.getNullCell();
+    const isBlank = (index: number): boolean => {
+      const cell = line.getCell(index, reusableCell);
+      if (!cell) return true;
+      const chars = cell.getChars();
+      return cell.getWidth() !== 0 && (!chars || /\s/.test(chars));
+    };
+    let start = column - 1;
+    let end = column;
+    if (isBlank(start)) return {};
+    while (start > 0 && !isBlank(start - 1)) start--;
+    while (end < terminal.cols && !isBlank(end)) end++;
+    candidate = line.translateToString(true, start, end);
+  }
   return /^(?:\/|[A-Za-z]:[\\/]|\\\\)[^\u0000-\u001f\u007f]+$/u.test(candidate) ? { path: candidate } : {};
 }
 
