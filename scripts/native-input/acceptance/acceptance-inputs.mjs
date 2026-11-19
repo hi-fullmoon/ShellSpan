@@ -125,11 +125,12 @@ export async function dependencyInventory(directory,options={}){
 
 // Enumerated source roots, not extension filters. Additions inside these roots
 // invalidate their stage. Full source/index freeze remains a separate gate.
+const resourceLayoutSource = 'scripts/native-input/integration/resource-paths.mjs';
 export const buildInputRoots={
   native:['src-tauri/native-input-editors/src','src-tauri/native-input-editors/Cargo.toml','src-tauri/native-input-editors/Cargo.lock',
     'src-tauri/native-input-editors/psreadline.cs','src-tauri/native-input-editors/psreadline.ps1','src-tauri/native-input-editors/zle.c','src-tauri/native-input-editors/zle.zsh',
     'src-tauri/vendor','src-tauri/src/terminal_command/protocol.rs','src-tauri/src/terminal_jobs.rs','src-tauri/src/terminal_jobs.ps1',
-    'src-tauri/src/terminal_job_host.cs','src-tauri/src/terminal_console_signals.cs','scripts/native-input/acceptance/build-windows.mjs','scripts/native-input/integration/resource-paths.mjs',
+    'src-tauri/src/terminal_job_host.cs','src-tauri/src/terminal_console_signals.cs','scripts/native-input/acceptance/build-windows.mjs',resourceLayoutSource,
     'scripts/dependency-builds/psreadline','src-tauri/resources/powershell','src-tauri/resources/conpty'],
   frontend:['src','public','package.json','pnpm-lock.yaml','pnpm-workspace.yaml','patches','tsconfig.json','tsconfig.node.json'],
   package:['src-tauri/src','src-tauri/vendor','src-tauri/Cargo.toml','src-tauri/Cargo.lock','src-tauri/build.rs',
@@ -144,12 +145,14 @@ export function stageToolchains(common,nativeCargoLockSha256){
 export async function fingerprint(root,stage,{toolchain,target,configuration,extraPaths=[],signal}){
   return (await fingerprints(root,[{stage,toolchain,target,configuration,extraPaths}],{signal}))[stage];
 }
-export async function fingerprints(root,descriptors,{signal}={}){
+export async function fingerprints(root,descriptors,{signal,legacyNativeLayout=false}={}){
   assert(descriptors.length,'Explicit build stages required');
   assert.equal(new Set(descriptors.map(item=>item.stage)).size,descriptors.length,'Duplicate build stage');
   const stages=descriptors.map(({stage,toolchain,target,configuration,extraPaths=[]})=>{
     assert(stage in buildInputRoots);assert(toolchain&&target&&configuration,'Explicit toolchain, target and build configuration required');
-    const roots=[...buildInputRoots[stage],...extraPaths].map(path=>relative(resolve(root),inside(root,resolve(root,path))).replaceAll('\\','/'));
+    // The pre-migration Windows builder did not import the resource layout helper.
+    const buildRoots=legacyNativeLayout&&stage==='native'?buildInputRoots.native.filter(path=>path!==resourceLayoutSource):buildInputRoots[stage];
+    const roots=[...buildRoots,...extraPaths].map(path=>relative(resolve(root),inside(root,resolve(root,path))).replaceAll('\\','/'));
     return {stage,toolchain,target,configuration,extraPaths,roots};
   });
   // One complete checkpoint scan. Shared files are hashed once and assigned to

@@ -76,6 +76,10 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<NativeArti
             include_str!("../../../scripts/native-input/integration/build.py"),
         ),
         (
+            "scripts/native-input/integration/bash-build-inputs.json",
+            include_str!("../../../scripts/native-input/integration/bash-build-inputs.json"),
+        ),
+        (
             "scripts/native-input/build_paths.py",
             include_str!("../../../scripts/native-input/build_paths.py"),
         ),

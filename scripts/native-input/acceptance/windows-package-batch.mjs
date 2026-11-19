@@ -9,7 +9,7 @@ import {randomUUID} from 'node:crypto';
 import {spawn,execFile} from 'node:child_process';
 import {promisify,parseArgs} from 'node:util';
 import {createServer} from 'node:http';
-import {captureValidationSources,captureValidationAssets} from '../integration/frozen-validation.mjs';
+import {captureValidationSources,captureValidationAssets,frozenNativeInputLayout} from '../integration/frozen-validation.mjs';
 import {nativeInputGeneratedPath,nativeInputReleaseDirectory} from '../integration/resource-paths.mjs';
 import {acquireNativeGui,assertNativeGuiAllowed} from '../integration/gui-lock.mjs';
 import {verifyNsisInstalledImage} from './windows-package-image.mjs';
@@ -41,7 +41,9 @@ async function main(){
   assert(values.root,'A fresh sealed source snapshot is required');
   const root=await realpath(values.root);inside(resolve(owner,'artifacts/tests/p3'),root);
   const read=async path=>JSON.parse(await readFile(path,'utf8'));
-  const stage=await read(resolve(root,'artifacts/tests/native-input/acceptance/candidate-stage.json'));
+  const layout=frozenNativeInputLayout(root);
+  assert(!layout.legacy||values['reuse-package-from'],'A new build requires a snapshot in the current native input layout');
+  const stage=await read(resolve(layout.metadataDirectory,'candidate-stage.json'));
   assertArtifactSourceContext(stage);
   assert(stage.sealed&&stage.root===root);const sources=await read(resolve(stage.directory,'sources.json'));
   assert.deepEqual(captureValidationSources(root),sources,'Full frozen source changed');
@@ -91,7 +93,7 @@ async function main(){
     await write(resolve(directory,'reuse-provenance.json'),{artifactSource:reusable.directory,artifactBatchId:id,runId,controllerRoot,
       dependencyInventoryMigration:'Declared Vite cacheDir outputs are excluded from production build inputs; all installed package bytes and links match',oldResultsReplayed:false});
   }
-  const resources=resolve(root,'artifacts/tests/native-input/integration/resources/native-input'),catalogue=await read(resolve(resources,'editors-windows-x64.json'));
+  const resources=layout.resourcesDirectory,catalogue=await read(resolve(resources,'editors-windows-x64.json'));
   const catalogueHosts = catalogue.profiles.map(({ profile }) => ({ shell: profile.shell, expectedVersion: profile.shellVersion }));
   assert.deepEqual(catalogueHosts, selectWindowsProfiles(), 'Windows native catalogue differs from the supported hosts');
   for(const [path,sha]of Object.entries(catalogue.sources))assert.equal(await hashFile(resolve(root,path)),sha,'Native source changed');
@@ -133,7 +135,7 @@ async function main(){
     if(inputRecords)assert.equal((await dependencyInventory(resolve(root,'node_modules'),{signal})).sha256,dependencies.sha256,'Installed dependency bytes or links changed');
     if(artifactRecords.length)await verifyRetainedArtifacts(artifactRecords);
     if(inputRecords){
-      const captured=await fingerprints(root,Object.values(inputRecords),{signal});
+      const captured=await fingerprints(root,Object.values(inputRecords),{signal,legacyNativeLayout:layout.legacy});
       for(const input of Object.values(inputRecords)){
       // Also detects additions and removals under the explicit build roots.
       const current=captured[input.stage];

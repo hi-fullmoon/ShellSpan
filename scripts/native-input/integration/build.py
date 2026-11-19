@@ -102,20 +102,17 @@ def main():
         with log.open('ab') as output:
             subprocess.run(list(map(str, command)), cwd=ROOT, env=env, stdout=output, stderr=subprocess.STDOUT, check=True)
 
+    input_manifest = json.loads(Path(__file__).with_name('bash-build-inputs.json').read_text())
+    inputs = [ROOT / p for p in [*input_manifest['adapter'], *input_manifest['common'],
+                                *input_manifest['targets'].get(target, [])]]
+    sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+    before = {p.relative_to(ROOT).as_posix(): sha(p) for p in inputs}
+
     run(['python3', '-B', 'scripts/dependency-builds/bash-native/build.py', '--versions', args.versions],
         {**os.environ, 'SHELLSPAN_NATIVE_BUILD_ROOT': str(dependency_root)})
     source = ROOT / 'src-tauri/native-input-adapter'
     manifest = source / 'Cargo.toml'
     rust_environment = macos_rust_environment(manifest) if host == 'darwin' else os.environ
-    inputs = [p for p in source.rglob('*') if p.is_file() and 'target' not in p.parts]
-    inputs += [ROOT / 'src-tauri/src/terminal_command/protocol.rs', Path(__file__).resolve(), Path(__file__).with_name('Dockerfile'),
-        ROOT / 'scripts/native-input/build_paths.py',
-        ROOT / 'scripts/native-input/prototype/build.py', ROOT / 'scripts/native-input/prototype/readline-sources.json',
-        *[p for p in (ROOT/'scripts/dependency-builds/bash-native').iterdir() if p.is_file()]]
-    if x86_linux:
-        inputs.append(Path(__file__).with_name('Dockerfile.amd64'))
-    sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
-    before = {str(p.relative_to(ROOT)): sha(p) for p in inputs}
     builds = json.loads((build_directory(dependency_root, 'integration') / f'bash-{host}.json').read_text())
     catalogue = OUT / 'resources/native-input'
     catalogue.mkdir(parents=True, exist_ok=True)
@@ -172,7 +169,7 @@ def main():
                          'buildShell': str(shell), 'captureFence': 1,
                          'readlineDisplayAbi': 1,
                          'relay': f'{profile}/native-input-relay', 'relaySha256':sha(relay)})
-    if before != {str(p.relative_to(ROOT)): sha(p) for p in inputs}:
+    if before != {p.relative_to(ROOT).as_posix(): sha(p) for p in inputs}:
         raise RuntimeError('Producer sources changed during build')
     (catalogue / f'catalogue-{target}.json').write_text(json.dumps({'version': 1, 'profiles': profiles, 'sources': before}, indent=2))
     # Source archives, exact GNU patches and license notices accompany modules.
@@ -189,8 +186,8 @@ def main():
         shutil.copy2(build_directory(dependency_root, 'prototype') / 'upstream' / name, notices / name)
     for name in ['COPYING', 'AUTHORS']:
         shutil.copy2(upstream / name, notices / f'bash-{name}')
-    for path in (ROOT / 'scripts/dependency-builds/bash-native').iterdir():
-        if path.is_file() and path.suffix in ['.patch', '.h']:
+    for path in inputs:
+        if path.parent == ROOT / 'scripts/dependency-builds/bash-native' and path.suffix in ['.patch', '.h']:
             shutil.copy2(path, notices / path.name)
     shutil.copy2(ROOT / 'scripts/native-input/prototype/readline-sources.json', notices / 'readline-sources.json')
     (catalogue / 'README.txt').write_text('GNU Bash/Readline: GPL-3.0-or-later. Exact source archives, official GNU patches, post-profile integration and native prompt-column patches are in sources/.\nReadline native display ABI: 1; explicit matching targets only. Linux x86_64 SSH uses the verified Bash in the private directory of a new session.\nShellSpan adapter source: src-tauri/native-input-adapter; rebuild: python3 scripts/native-input/integration/build.py\n')

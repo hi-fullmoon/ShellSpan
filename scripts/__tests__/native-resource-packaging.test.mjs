@@ -1,9 +1,9 @@
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, copyFile, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, copyFile, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, it } from 'vitest';
 import { nativeInputReleaseDirectory } from '../native-input/integration/resource-paths.mjs';
-import {copyNativeRebuildSources} from '../native-input/integration/rebuild-sources.mjs';
+import { bashBuildInputsForTarget, copyNativeRebuildSources, readBashBuildInputs } from '../native-input/integration/rebuild-sources.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 
@@ -13,7 +13,8 @@ it('packs an unsupported target twice and rejects a missing catalogue for an adm
   const directory = await mkdtemp(path.join(artifacts, 'run-'));
   try {
     for (const name of ['scripts/native-input/prepare-resources.mjs', 'scripts/native-input/integration/frozen-validation.mjs',
-      'scripts/native-input/integration/resource-paths.mjs','scripts/native-input/integration/rebuild-sources.mjs', 'scripts/native-input/integration/bash-profiles.mjs', 'protocol/agent/runtime/native-editor-admission.json']) {
+      'scripts/native-input/integration/resource-paths.mjs','scripts/native-input/integration/rebuild-sources.mjs', 'scripts/native-input/integration/bash-profiles.mjs',
+      'scripts/native-input/integration/bash-build-inputs.json', 'protocol/agent/runtime/native-editor-admission.json']) {
       await mkdir(path.dirname(path.join(directory, name)), { recursive: true });
       await copyFile(path.join(root, name), path.join(directory, name));
     }
@@ -49,17 +50,31 @@ it('packs an unsupported target twice and rejects a missing catalogue for an adm
   }
 });
 
-it('ships the Windows example capture include and excludes build/cache output',async()=>{
+it('ships the declared Bash sources and Windows capture include while excluding generated files',async()=>{
   const artifacts=path.join(root,'artifacts/tests/native-resource-packaging');await mkdir(artifacts,{recursive:true});const directory=await mkdtemp(path.join(artifacts,'sources-'));
   try{
     const input=path.join(directory,'input'),output=path.join(directory,'output');
-    for(const name of ['src-tauri/native-input-editors/examples','src-tauri/native-input-adapter','src-tauri/vendor/portable-pty','src-tauri/src/terminal_command','src-tauri/native-input-editors/target','src-tauri/native-input-editors/__pycache__'])await mkdir(path.join(input,name),{recursive:true});
-    for(const name of ['src-tauri/native-input-editors/examples/windows_acceptance.rs','src-tauri/src/terminal_command/capture.rs','src-tauri/src/terminal_command/protocol.rs'])await copyFile(path.join(root,name),path.join(input,name));
-    for(const name of ['target/old.dll','__pycache__/old.pyc'])await writeFile(path.join(input,'src-tauri/native-input-editors',name),'excluded generated fixture');
-    await copyNativeRebuildSources(input,output);
+    const manifest=await readBashBuildInputs(root);
+    const sources=bashBuildInputsForTarget(manifest,'linux-x86_64-glibc-2.28');
+    for(const name of [...sources,'src-tauri/native-input-editors/examples/windows_acceptance.rs','src-tauri/src/terminal_command/capture.rs','src-tauri/vendor/portable-pty/Cargo.toml']){
+      await mkdir(path.dirname(path.join(input,name)),{recursive:true});
+      await copyFile(path.join(root,name),path.join(input,name));
+    }
+    const generated=[
+      'src-tauri/native-input-adapter/.DS_Store','src-tauri/native-input-adapter/src/local-analysis.json',
+      'scripts/dependency-builds/bash-native/unapproved-local.patch','scripts/native-input/prototype/.DS_Store',
+      'src-tauri/native-input-editors/.DS_Store','src-tauri/native-input-editors/target/build.log',
+      'src-tauri/native-input-editors/__pycache__/build.pyc','src-tauri/vendor/portable-pty/.DS_Store',
+    ];
+    for(const name of generated){
+      await mkdir(path.dirname(path.join(input,name)),{recursive:true});
+      await copyFile(path.join(root,'scripts/native-input/integration/bash-build-inputs.json'),path.join(input,name));
+    }
+    await copyNativeRebuildSources(input,output,sources);
+    for(const name of sources)expect(await readFile(path.join(output,name))).toEqual(await readFile(path.join(root,name)));
     const example=path.join(output,'src-tauri/native-input-editors/examples/windows_acceptance.rs');
     expect(await readFile(path.resolve(path.dirname(example),'../../src/terminal_command/capture.rs'))).toEqual(await readFile(path.join(root,'src-tauri/src/terminal_command/capture.rs')));
     expect(await readFile(path.join(output,'src-tauri/src/terminal_command/protocol.rs'))).toEqual(await readFile(path.join(root,'src-tauri/src/terminal_command/protocol.rs')));
-    for(const name of ['target','__pycache__'])await expect(readdir(path.join(output,'src-tauri/native-input-editors',name))).rejects.toMatchObject({code:'ENOENT'});
+    for(const name of generated)await expect(access(path.join(output,name))).rejects.toMatchObject({code:'ENOENT'});
   }finally{const relative=path.relative(artifacts,directory);if(!relative||relative.startsWith('..')||path.isAbsolute(relative))throw Error('Unsafe fixture cleanup path');await rm(directory,{recursive:true,force:true});}
 });

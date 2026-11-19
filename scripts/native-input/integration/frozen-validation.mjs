@@ -6,18 +6,32 @@ import {isAbsolute,resolve,relative,sep} from 'node:path';
 
 const sha=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
 const within=(parent,path)=>{const child=relative(resolve(parent),resolve(path));return child!==''&&child!=='..'&&!child.startsWith(`..${sep}`)&&!isAbsolute(child);};
+const frozenLayouts = [
+  { metadata: 'artifacts/tests/native-input/acceptance', resources: 'artifacts/tests/native-input/integration/resources/native-input', legacy: false },
+  { metadata: 'artifacts/tests/native-input-p3', resources: 'artifacts/tests/native-input-p2/resources/native-input', legacy: true },
+];
+
+export function frozenNativeInputLayout(root) {
+  const layouts = frozenLayouts.filter(({metadata}) => ['snapshot-index.json', 'candidate-stage.json']
+    .some(marker => existsSync(resolve(root, metadata, marker))));
+  assert(layouts.length <= 1, 'Conflicting frozen native input layouts');
+  const { metadata, resources, legacy } = layouts[0] ?? frozenLayouts[0];
+  return { metadataDirectory: resolve(root, metadata), resourcesDirectory: resolve(root, resources), legacy };
+}
+
 export function nativeValidationResourceDirectory(root,selected){
-  const actual=realpathSync(resolve(root,selected??'artifacts/tests/native-input/integration/resources/native-input'));
+  const actual=realpathSync(resolve(root,selected??frozenNativeInputLayout(root).resourcesDirectory));
   assert(within(realpathSync(root),actual),'Selected validation resources must be a strict descendant of the frozen source root');
   return actual;
 }
 export function readValidationGit(root,args){
   assert(Array.isArray(args)&&['ls-files','check-ignore','rev-parse'].includes(args[0]),'Only read-only validation Git commands are allowed');
-  const snapshotIndex=resolve(root,'artifacts/tests/native-input/acceptance/snapshot-index.json');
+  const { metadataDirectory } = frozenNativeInputLayout(root);
+  const snapshotIndex=resolve(metadataDirectory,'snapshot-index.json');
   const snapshot=existsSync(snapshotIndex)?JSON.parse(readFileSync(snapshotIndex,'utf8')):undefined;
   if(snapshot){
     assert.equal(snapshot.root,resolve(root));
-    assert(within(resolve(root,'artifacts/tests/native-input/acceptance'),snapshot.index));
+    assert(within(metadataDirectory,snapshot.index),'Frozen source index must stay within snapshot metadata');
     assert.equal(sha(snapshot.index),snapshot.indexSha256,'Frozen source index changed');
   }
   return execFileSync('git',[

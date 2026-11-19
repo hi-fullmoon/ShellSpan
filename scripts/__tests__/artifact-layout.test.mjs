@@ -1,12 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { access, chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import frontend from '../../vitest.config.ts';
 import { artifactWorkspace } from '../native-input/artifact-paths.mjs';
-import { captureValidationSources, readValidationGit, nativeValidationResourceDirectory, captureValidationAssets } from '../native-input/integration/frozen-validation.mjs';
+import { captureValidationSources, readValidationGit, nativeValidationResourceDirectory, captureValidationAssets, frozenNativeInputLayout } from '../native-input/integration/frozen-validation.mjs';
 import { nativeInputBuildDirectory, nativeInputBuildPath } from '../native-input/integration/resource-paths.mjs';
 import { migrateBuildLayout } from '../native-input/migrate-build-layout.mjs';
 import { createIndexReader } from '../native-input/acceptance/index-reader.mjs';
@@ -152,21 +152,30 @@ describe('generated artifact layout', () => {
     });
   }, 25_000);
 
-  it('discovers sources and ignores generated files in a snapshot with no .git directory', async () => {
+  it.each([
+    ['artifacts/tests/native-input/acceptance', 'artifacts/tests/native-input/integration/resources/native-input', false],
+    ['artifacts/tests/native-input-p3', 'artifacts/tests/native-input-p2/resources/native-input', true],
+  ])('reads the sealed %s index and resources without a .git directory', async (metadata, resources, legacy) => {
     await withArtifactDirectory(async directory => {
       const snapshot = path.join(directory, 'ShellSpan');
       const source = 'scripts/native-input/acceptance/linux-run.py';
       await mkdir(path.dirname(path.join(snapshot, source)), { recursive: true });
       for (const file of ['.gitignore', source]) await copyFile(path.join(root, file), path.join(snapshot, file));
 
-      const meta = path.join(snapshot, 'artifacts/tests/native-input/acceptance');
+      const meta = path.join(snapshot, metadata);
       const originalIndex = readValidationGit(root, ['rev-parse', '--path-format=absolute', '--git-path', 'index']).toString().trim();
       const head = readValidationGit(root, ['rev-parse', 'HEAD']).toString().trim();
       const { gitDirectory, index } = createIndexReader(meta, originalIndex, head);
       await chmod(index, 0o400);
       const indexSha256 = createHash('sha256').update(await readFile(index)).digest('hex');
-      await writeFile(path.join(meta, 'snapshot-index.json'), JSON.stringify({ version: 1, root: snapshot, gitDirectory, index, indexSha256 }));
+      const indexReceipt = { version: 1, root: snapshot, gitDirectory, index, indexSha256 };
+      const indexPath = path.join(meta, 'snapshot-index.json');
+      await writeFile(indexPath, JSON.stringify(indexReceipt));
       await expect(access(path.join(snapshot, '.git'))).rejects.toMatchObject({ code: 'ENOENT' });
+      const resourceDirectory = path.join(snapshot, resources);
+      await mkdir(resourceDirectory, { recursive: true });
+      expect(frozenNativeInputLayout(snapshot)).toEqual({ metadataDirectory: meta, resourcesDirectory: resourceDirectory, legacy });
+      expect(nativeValidationResourceDirectory(snapshot)).toBe(await realpath(resourceDirectory));
 
       const before = captureValidationSources(snapshot);
       expect(Object.keys(before)).toEqual(['.gitignore', source]);
@@ -178,6 +187,14 @@ describe('generated artifact layout', () => {
       expect(captureValidationSources(snapshot)).toEqual(before);
       expect(createHash('sha256').update(await readFile(index)).digest('hex')).toBe(indexSha256);
       expect(() => readValidationGit(snapshot, ['add', '.'])).toThrow('Only read-only validation Git commands are allowed');
+      const outsideIndex = path.join(directory, 'outside-index');
+      await copyFile(index, outsideIndex);
+      await writeFile(indexPath, JSON.stringify({ ...indexReceipt, index: outsideIndex }));
+      expect(() => captureValidationSources(snapshot)).toThrow('Frozen source index must stay within snapshot metadata');
+      const competingMeta = path.join(snapshot, legacy ? 'artifacts/tests/native-input/acceptance' : 'artifacts/tests/native-input-p3');
+      await mkdir(competingMeta, { recursive: true });
+      await copyFile(indexPath, path.join(competingMeta, 'snapshot-index.json'));
+      expect(() => captureValidationSources(snapshot)).toThrow('Conflicting frozen native input layouts');
     });
   });
 

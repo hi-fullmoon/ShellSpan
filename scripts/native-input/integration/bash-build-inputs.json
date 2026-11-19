@@ -1,0 +1,48 @@
+{
+  "adapter": [
+    "src-tauri/native-input-adapter/Cargo.lock",
+    "src-tauri/native-input-adapter/Cargo.toml",
+    "src-tauri/native-input-adapter/bridge.c",
+    "src-tauri/native-input-adapter/src/bin/native-input-relay.rs",
+    "src-tauri/native-input-adapter/src/lib.rs",
+    "src-tauri/native-input-adapter/src/native_protocol.rs",
+    "src-tauri/src/terminal_command/protocol.rs"
+  ],
+  "common": [
+    "scripts/dependency-builds/bash-native/bash-5.3-patches.json",
+    "scripts/dependency-builds/bash-native/bash-bind-x-return-4.1.patch",
+    "scripts/dependency-builds/bash-native/bash-unload-hook-4.1.patch",
+    "scripts/dependency-builds/bash-native/build.py",
+    "scripts/dependency-builds/bash-native/darwin-headers-4.1.patch",
+    "scripts/dependency-builds/bash-native/darwin-setpgid-4.4.patch",
+    "scripts/dependency-builds/bash-native/darwin-setpgid-5.3.patch",
+    "scripts/dependency-builds/bash-native/darwin-setpgid.h",
+    "scripts/dependency-builds/bash-native/darwin-setpgid.patch",
+    "scripts/dependency-builds/bash-native/native-history-5.3.patch",
+    "scripts/dependency-builds/bash-native/readline-columns-6.0.patch",
+    "scripts/dependency-builds/bash-native/readline-columns-7.0.patch",
+    "scripts/dependency-builds/bash-native/readline-columns-8.3.6.patch",
+    "scripts/dependency-builds/bash-native/readline-combining-wrap.patch",
+    "scripts/dependency-builds/bash-native/readline-paste-6.0.patch",
+    "scripts/dependency-builds/bash-native/readline-resize-6.0.patch",
+    "scripts/dependency-builds/bash-native/readline-resize-7.0.patch",
+    "scripts/dependency-builds/bash-native/startup-init-4.1.patch",
+    "scripts/dependency-builds/bash-native/startup-init-4.4.patch",
+    "scripts/dependency-builds/bash-native/startup-init-5.3.patch",
+    "scripts/native-input/build_paths.py",
+    "scripts/native-input/integration/Dockerfile",
+    "scripts/native-input/integration/bash-build-inputs.json",
+    "scripts/native-input/integration/build.py",
+    "scripts/native-input/prototype/Cargo.lock",
+    "scripts/native-input/prototype/Cargo.toml",
+    "scripts/native-input/prototype/bridge.c",
+    "scripts/native-input/prototype/build.py",
+    "scripts/native-input/prototype/readline-sources.json",
+    "scripts/native-input/prototype/src/bin/p0-plan.rs",
+    "scripts/native-input/prototype/src/lib.rs",
+    "scripts/native-input/prototype/src/native_protocol.rs"
+  ],
+  "targets": {
+    "linux-x86_64-glibc-2.28": ["scripts/native-input/integration/Dockerfile.amd64"]
+  }
+}

@@ -3,10 +3,10 @@ import {createHash,randomUUID} from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {cp,mkdir,readdir,readFile,writeFile,rm,chmod,stat,rename} from 'node:fs/promises';
 import {captureValidationSources} from './integration/frozen-validation.mjs';
-import {basename,resolve} from 'node:path';
+import {basename,relative,resolve} from 'node:path';
 import {parseArgs} from 'node:util';
 import {nativeInputBuildDirectory,nativeInputBuildPath,nativeInputReleaseDirectory} from './integration/resource-paths.mjs';
-import {copyNativeRebuildSources} from './integration/rebuild-sources.mjs';
+import {bashBuildInputsForTarget,copyNativeRebuildSources,readBashBuildInputs} from './integration/rebuild-sources.mjs';
 import {bashProfileId,BASH_READLINE_VERSIONS,RELEASE_BASH_VERSION} from './integration/bash-profiles.mjs';
 
 const root=resolve(import.meta.dirname,'../..');
@@ -106,10 +106,15 @@ for(const editor of selectedEditors){
 }
 const editorSupported=editorNames.length>0;
 const editorAllowed=[];
+const editorSources=new Set();
 for(const name of editorNames){
   const catalogue=JSON.parse(await readFile(resolve(sourceRoot,name),'utf8'));
   assert.equal(catalogue.version,1);assert(catalogue.profiles.length>0&&catalogue.profiles.length<=8);
-  for(const[path,expected]of Object.entries(catalogue.sources))assert.equal(sha(await readFile(resolve(root,path))),expected,`Stale editor source: ${path}`);
+  for(const[path,expected]of Object.entries(catalogue.sources)){
+    assert((path.startsWith('src-tauri/')||path.startsWith('scripts/native-input/acceptance/')||path.startsWith('scripts/dependency-builds/zsh/')||pathSources.has(path))&&!path.includes('..'));
+    assert.equal(sha(await readFile(resolve(root,path))),expected,`Stale editor source: ${path}`);
+    editorSources.add(path);
+  }
   for(const profile of catalogue.profiles){
     const id=profile.profile.verifiedProfileId;assert(/^[a-zA-Z0-9][a-zA-Z0-9.-]+$/.test(id));
     assert.equal(profile.module,`${id}/${name==='editors-windows-x64.json'?'shellspan_native_input_editors.dll':'ss_nip.so'}`);
@@ -140,6 +145,9 @@ for(const name of editorNames){
   await cp(resolve(sourceRoot,name),resolve(generated,name));targets.push(name);
 }
 const bashTargets=validationOnly?[]:[...new Set([hostBashTarget,...sshBashTargets].filter(Boolean))];
+const bashInputs=await readBashBuildInputs(root);
+const bashSources=new Set();
+const bashNotices=new Set([`bash-${RELEASE_BASH_VERSION}.tar.gz`,'bash-COPYING','bash-AUTHORS','ncurses-COPYRIGHT','readline-8.3.tar.gz','readline-sources.json']);
 for(const catalogueTarget of bashTargets){
   const name=`catalogue-${catalogueTarget}.json`;
   const required=catalogueTarget===hostBashTarget||values['require-ssh']||values['with-ssh'];
@@ -152,7 +160,12 @@ for(const catalogueTarget of bashTargets){
   const catalogue=JSON.parse(bytes);
   assert.equal(catalogue.version,1);
   assert.deepEqual(catalogue.profiles.map(profile=>profile.id),[bashProfileId(RELEASE_BASH_VERSION,catalogueTarget)],`Unexpected release Bash profiles in ${name}`);
-  for(const [name,expected] of Object.entries(catalogue.sources))assert.equal(sha(await readFile(resolve(root,name))),expected,`Stale native source: ${name}`);
+  const inputs=bashBuildInputsForTarget(bashInputs,catalogueTarget);
+  assert.deepEqual(Object.keys(catalogue.sources).sort(),inputs.toSorted(),`Bash build input list changed for ${catalogueTarget}. Rebuild the native resources.`);
+  for(const path of inputs){
+    assert.equal(sha(await readFile(resolve(root,path))),catalogue.sources[path],`Stale native source: ${path}`);
+    bashSources.add(path);
+  }
   if(catalogueTarget==='macos-arm64'){
     const pinPath='scripts/dependency-builds/bash-native/bash-5.3-patches.json';
     const pinBytes=await readFile(resolve(root,pinPath));
@@ -163,6 +176,7 @@ for(const catalogueTarget of bashTargets){
     for(const [index,expected] of pins.entries()){
       const patch=`bash53-${String(index+1).padStart(3,'0')}`;
       assert.equal(sha(await readFile(resolve(sourceRoot,'sources',patch))),expected,`GNU Bash patch mismatch: ${patch}`);
+      bashNotices.add(patch);
     }
     const readline=JSON.parse(await readFile(resolve(root,'scripts/native-input/prototype/readline-sources.json'),'utf8'));
     assert.equal(readline.patches.length,6);
@@ -187,43 +201,30 @@ for(const catalogueTarget of bashTargets){
   await cp(resolve(sourceRoot,name),resolve(generated,name));targets.push(name);
 }
 const includeBash=targets.some(name=>name.startsWith('catalogue-'));
-if(includeBash){
+if(includeBash||editorSupported){
   // Keep only this build's verified profiles, never stale ignored binaries.
-  const allowed=new Set(['sources','README.txt',...targets,...editorAllowed]);
+  const allowed=new Set(['sources',...targets,...editorAllowed]);
+  if(includeBash)allowed.add('README.txt');
   for(const name of targets.filter(name=>name.startsWith('catalogue-')))for(const profile of JSON.parse(await readFile(resolve(generated,name),'utf8')).profiles)allowed.add(profile.id);
   for(const entry of await readdir(generated))if(!allowed.has(entry))await rm(resolve(generated,entry),{recursive:true});
-  await cp(resolve(sourceRoot,'sources'),resolve(generated,'sources'),{recursive:true,filter:path=>{
-    const name=basename(path);
-    if(/^bash53-\d{3}$/.test(name))return targets.includes('catalogue-macos-arm64.json');
-    return !/^bash-[\d.]+\.tar\.gz$/.test(name)||name===`bash-${RELEASE_BASH_VERSION}.tar.gz`;
-  }});
+  if(includeBash){
+    const readline=JSON.parse(await readFile(resolve(root,'scripts/native-input/prototype/readline-sources.json'),'utf8'));
+    for(const [index] of readline.patches.entries())bashNotices.add(`readline83-${String(index+1).padStart(3,'0')}`);
+    for(const path of bashSources){
+      if(path.startsWith('scripts/dependency-builds/bash-native/')&&/\.(patch|h)$/.test(path))bashNotices.add(basename(path));
+    }
+    const notices=resolve(sourceRoot,'sources');
+    await cp(notices,resolve(generated,'sources'),{recursive:true,filter:path=>path===notices||bashNotices.has(relative(notices,path))});
+    await cp(resolve(sourceRoot,'README.txt'),resolve(generated,'README.txt'));
+  }
   const tree=resolve(generated,'sources/ShellSpan');await mkdir(tree,{recursive:true});
-  await copyNativeRebuildSources(root,tree);
-  for(const name of ['scripts/dependency-builds/bash-native','scripts/native-input/prototype']){
-    await cp(resolve(root,name),resolve(tree,name),{recursive:true,filter:path=>!path.split('/').some(part=>['target','__pycache__'].includes(part))});
-  }
-  for(const name of ['src-tauri/src/terminal_command/protocol.rs','scripts/native-input/build_paths.py','scripts/native-input/integration/build.py','scripts/native-input/integration/Dockerfile','scripts/native-input/integration/Dockerfile.amd64']){
-    await mkdir(resolve(tree,name,'..'),{recursive:true});await cp(resolve(root,name),resolve(tree,name));
-  }
-  for(const name of editorNames)for(const path of Object.keys(JSON.parse(await readFile(resolve(sourceRoot,name),'utf8')).sources)){
-    assert((path.startsWith('src-tauri/')||path.startsWith('scripts/native-input/acceptance/')||path.startsWith('scripts/dependency-builds/zsh/')||pathSources.has(path))&&!path.includes('..'));
-    await mkdir(resolve(tree,path,'..'),{recursive:true});await cp(resolve(root,path),resolve(tree,path));
-  }
-  await run('cargo',['vendor','--locked','--versioned-dirs','--manifest-path','src-tauri/native-input-adapter/Cargo.toml','--sync','scripts/native-input/prototype/Cargo.toml','--sync','src-tauri/native-input-editors/Cargo.toml','vendor'],tree);
+  await copyNativeRebuildSources(root,tree,[...(includeBash?bashSources:bashInputs.adapter),...editorSources]);
+  const adapterManifest='src-tauri/native-input-adapter/Cargo.toml';
+  const editorManifest='src-tauri/native-input-editors/Cargo.toml';
+  const [primary,...extra]=includeBash?[adapterManifest,'scripts/native-input/prototype/Cargo.toml',editorManifest]:[editorManifest,adapterManifest];
+  await run('cargo',['vendor','--locked','--versioned-dirs','--manifest-path',primary,...extra.flatMap(path=>['--sync',path]),'vendor'],tree);
   await mkdir(resolve(tree,'.cargo'),{recursive:true});
   await writeFile(resolve(tree,'.cargo/config.toml'),'[source.crates-io]\nreplace-with = "vendored-sources"\n[source.vendored-sources]\ndirectory = "vendor"\n');
-  await cp(resolve(sourceRoot,'README.txt'),resolve(generated,'README.txt'));
-}else if(editorSupported){
-  const allowed=new Set(['sources',...targets,...editorAllowed]);
-  for(const entry of await readdir(generated))if(!allowed.has(entry))await rm(resolve(generated,entry),{recursive:true});
-  const tree=resolve(generated,'sources/ShellSpan');await mkdir(tree,{recursive:true});
-  await copyNativeRebuildSources(root,tree);
-  for(const catalogue of editorNames)for(const path of Object.keys(JSON.parse(await readFile(resolve(sourceRoot,catalogue),'utf8')).sources)){
-    assert((path.startsWith('src-tauri/')||path.startsWith('scripts/native-input/acceptance/')||path.startsWith('scripts/dependency-builds/zsh/')||pathSources.has(path))&&!path.includes('..'));
-    await mkdir(resolve(tree,path,'..'),{recursive:true});await cp(resolve(root,path),resolve(tree,path));
-  }
-  await run('cargo',['vendor','--locked','--versioned-dirs','--manifest-path','src-tauri/native-input-editors/Cargo.toml','--sync','src-tauri/native-input-adapter/Cargo.toml','vendor'],tree);
-  await mkdir(resolve(tree,'.cargo'),{recursive:true});await writeFile(resolve(tree,'.cargo/config.toml'),'[source.crates-io]\nreplace-with = "vendored-sources"\n[source.vendored-sources]\ndirectory = "vendor"\n');
 }else{for(const entry of await readdir(generated))await rm(resolve(generated,entry),{recursive:true});}
 if(validationOnly){assert.deepEqual(captureValidationSources(root),frozenSources);await writeFile(resolve(generated,'editor-validation.json'),JSON.stringify({protocol:'shellspan.native-editor-validation',resourceRoot:destination,sourceManifestSha256,editorTargets:validationTargets},null,2));}
 await writeFile(resolve(generated,'resource-manifest.json'),JSON.stringify({version:1,target,targets,sourceHashesVerified:includeBash||editorSupported,unsupportedHost:!includeBash&&!editorSupported,validationOnly,validationEditorTargets:validationTargets},null,2)+'\n');

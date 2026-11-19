@@ -99,6 +99,22 @@ it('assigns a shared checkpoint to every consuming stage without including unrel
   await expect(fingerprints(root,[descriptors[0],descriptors[0]])).rejects.toThrow('Duplicate');
 });
 
+it('rechecks legacy Windows native inputs with the pre-migration source recipe', async () => {
+  const repository = resolve(import.meta.dirname, '../..');
+  const resourceLayout = 'scripts/native-input/integration/resource-paths.mjs';
+  const descriptor = {
+    stage: 'native', target: 'x86_64-pc-windows-msvc', toolchain: { node: process.version },
+    configuration: { producer: 'build-windows.mjs' },
+  };
+  const { native: current } = await fingerprints(repository, [descriptor]);
+  const { native: legacy } = await fingerprints(repository, [descriptor], { legacyNativeLayout: true });
+  const { [resourceLayout]: resourceLayoutSha256, ...originalSources } = current.files;
+  expect(resourceLayoutSha256).toBe(await hashFile(resolve(repository, resourceLayout)));
+  expect(legacy.files).toEqual(originalSources);
+  expect(legacy.files['scripts/native-input/acceptance/build-windows.mjs']).toBeDefined();
+  expect(reuseDecision(legacy, current)).toMatchObject({ reuse: false, changed: [resourceLayout] });
+});
+
 it('hashes actual dependency bytes and link bindings instead of trusting a lockfile alone',async()=>{
   const root=await fresh();await mkdir(resolve(root,'store'));await writeFile(resolve(root,'store/tool'),'original');await symlink(resolve(root,'store'),resolve(root,'linked'),'junction');
   const before=await dependencyInventory(root);expect(Object.keys(before.links)).toEqual(['linked']);
