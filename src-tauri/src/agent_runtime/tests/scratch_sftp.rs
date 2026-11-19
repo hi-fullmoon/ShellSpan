@@ -157,6 +157,10 @@ fn scratch_remote_account_roots_execute_and_collect_without_project_writes() {
             known_hosts_path: known_hosts.clone(),
             timeout: std::time::Duration::from_secs(10),
         },
+        database.clone(),
+        crate::remote_sandbox::binding_for_target(&native_target, &database, &known_hosts)
+            .unwrap()
+            .unwrap(),
     )
     .unwrap();
     let actual = process.wait(std::time::Duration::from_secs(10)).unwrap();

@@ -62,9 +62,11 @@ function stepBadgeVariant(
 export function PreflightStepRow({
   step,
   onTrust,
+  trustDisabled,
 }: {
   step: ConnectionPreflightStep;
   onTrust: (host: string, port: number, fingerprint?: string) => void;
+  trustDisabled?: boolean;
 }): React.JSX.Element {
   const { t } = useI18n();
   const canTrust = step.trustable && step.host && step.port !== undefined;
@@ -95,6 +97,7 @@ export function PreflightStepRow({
         <Button
           size="sm"
           variant="outline"
+          disabled={trustDisabled}
           onClick={() => onTrust(step.host!, step.port!, step.fingerprint)}
       >
         {t('connection.preflight.trust')}

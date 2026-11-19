@@ -1008,7 +1008,8 @@
                   "username": { "type": "string" },
                   "cwd": { "type": "string" },
                   "rootPath": { "type": "string" },
-                  "localRoot": { "type": "string" }
+                  "localRoot": { "type": "string" },
+                  "remoteSandboxRequired": { "type": "boolean" }
                 }
               }
             }

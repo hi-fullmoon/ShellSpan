@@ -277,11 +277,17 @@ impl NativeToolRuntime for NativeToolAdapter {
                 .arguments
                 .get("sudoOperationId")
                 .is_some();
+        let connection_sandbox =
+            crate::remote_sandbox::binding_for_target(&owner_target, database, known_hosts_path)?;
+        crate::remote_sandbox::validate_session_requirement(
+            connection_sandbox.as_ref(),
+            request.target.remote_sandbox_required,
+        )?;
         let sandbox = if elevated_command {
             None
         } else {
             crate::sudo_policy::require_ordinary_remote_account(database, &owner_target)?;
-            crate::remote_sandbox::binding_for_target(&owner_target, database, known_hosts_path)?
+            connection_sandbox
         };
         crate::remote_sandbox::guard_tool(
             database,
@@ -481,10 +487,8 @@ impl NativeToolRuntime for NativeToolAdapter {
             return Ok(preparation);
         }
 
-        if sandbox_enabled && request.model_call.name == "run_terminal_command" {
-            // The public command tool can run from either session surface. A
-            // sandboxed connection always uses the isolated Direct executor.
-            request.execution_surface = super::AgentExecutionSurface::Direct;
+        if sandbox_enabled && request.execution_surface != super::AgentExecutionSurface::Direct {
+            return Err(crate::remote_sandbox::DIRECT_REQUIRED.into());
         }
         let direct_lifecycle_required =
             !elevated_command && terminal_command_requires_direct_lifecycle(&request)?;
@@ -1369,6 +1373,14 @@ pub(crate) fn list_remote_file_references(
         Ok(binding) => binding,
         Err(_) => return FileReferenceList::failed("SandboxPolicyChanged"),
     };
+    if crate::remote_sandbox::validate_session_requirement(
+        binding.as_ref(),
+        request.target.remote_sandbox_required,
+    )
+    .is_err()
+    {
+        return FileReferenceList::failed("SandboxPolicyChanged");
+    }
     let connection = match super::connection_for_remote_target(&target, database, credentials) {
         Ok(c) => c,
         Err(_) => return FileReferenceList::failed("Drift"),
@@ -1470,6 +1482,14 @@ pub(crate) fn read_remote_skills(
         Ok(binding) => binding,
         Err(_) => return SkillReadResult::failed(ScopeReadError::Drift),
     };
+    if crate::remote_sandbox::validate_session_requirement(
+        binding.as_ref(),
+        request.target.remote_sandbox_required,
+    )
+    .is_err()
+    {
+        return SkillReadResult::failed(ScopeReadError::Drift);
+    }
     let connection = match super::connection_for_remote_target(&target, database, credentials) {
         Ok(c) => c,
         Err(_) => return SkillReadResult::failed(ScopeReadError::Drift),

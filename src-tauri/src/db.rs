@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-const CURRENT_SCHEMA_VERSION: i32 = 4;
+const CURRENT_SCHEMA_VERSION: i32 = 5;
 pub(crate) const DATABASE_FILE_NAME: &str = "shellspan-main.db";
 const TERMINAL_WORKSPACE_VERSION: u64 = 1;
 const MAX_TERMINAL_WORKSPACE_BYTES: usize = 1024 * 1024;
@@ -146,6 +146,26 @@ END;
 INSERT INTO schema_version (version) VALUES (4);
 ";
 
+const SCHEMA_SANDBOX_HISTORY: &str = "
+ALTER TABLE profile_sandbox ADD COLUMN was_configured INTEGER NOT NULL DEFAULT 0;
+-- v4 policy saves used UUID strings and identity-only revisions used 32 hex digits.
+UPDATE profile_sandbox SET was_configured = 1 WHERE policy_json <> 'null' OR length(revision) = 36;
+
+DROP TRIGGER IF EXISTS revise_sandbox_on_identity_change;
+CREATE TRIGGER revise_sandbox_on_identity_change
+AFTER UPDATE OF host, port, username, auth_method, keychain_key_id, jump_host_config ON profiles
+WHEN OLD.host IS NOT NEW.host OR OLD.port IS NOT NEW.port OR OLD.username IS NOT NEW.username
+  OR OLD.auth_method IS NOT NEW.auth_method OR OLD.keychain_key_id IS NOT NEW.keychain_key_id
+  OR OLD.jump_host_config IS NOT NEW.jump_host_config
+BEGIN
+    INSERT INTO profile_sandbox (profile_id, revision, policy_json)
+    VALUES (NEW.id, lower(hex(randomblob(16))), 'null')
+    ON CONFLICT(profile_id) DO UPDATE SET revision=excluded.revision;
+END;
+
+INSERT INTO schema_version (version) VALUES (5);
+";
+
 #[derive(Clone)]
 pub(crate) struct Database {
     conn: Arc<Mutex<Connection>>,
@@ -240,6 +260,7 @@ impl Database {
                 .and_then(|_| tx.execute_batch(SCHEMA_PROFILE_SUDO_POLICY))
                 .and_then(|_| tx.execute_batch(SCHEMA_RESTRICTED_SUDO_RUNNER))
                 .and_then(|_| tx.execute_batch(SCHEMA_REMOTE_SANDBOX))
+                .and_then(|_| tx.execute_batch(SCHEMA_SANDBOX_HISTORY))
                 .map_err(|e| format!("failed to initialize database schema: {e}"))?;
             return tx
                 .commit()
@@ -261,7 +282,7 @@ impl Database {
                 "unsupported database schema version {version}; latest supported version is {CURRENT_SCHEMA_VERSION}"
             ));
         }
-        if versions == [1] || versions == [1, 2] || versions == [1, 2, 3] {
+        if matches!(versions.as_slice(), [1] | [1, 2] | [1, 2, 3] | [1, 2, 3, 4]) {
             let tx = conn.transaction().map_err(|e| e.to_string())?;
             if versions == [1] {
                 tx.execute_batch(SCHEMA_PROFILE_SUDO_POLICY)
@@ -271,11 +292,15 @@ impl Database {
                 tx.execute_batch(SCHEMA_RESTRICTED_SUDO_RUNNER)
                     .map_err(|e| e.to_string())?;
             }
-            tx.execute_batch(SCHEMA_REMOTE_SANDBOX)
+            if versions.len() < 4 {
+                tx.execute_batch(SCHEMA_REMOTE_SANDBOX)
+                    .map_err(|e| e.to_string())?;
+            }
+            tx.execute_batch(SCHEMA_SANDBOX_HISTORY)
                 .map_err(|e| e.to_string())?;
             return tx.commit().map_err(|e| e.to_string());
         }
-        if versions != [1, 2, 3, CURRENT_SCHEMA_VERSION] {
+        if versions != [1, 2, 3, 4, CURRENT_SCHEMA_VERSION] {
             return Err(format!(
                 "invalid database schema version: expected version {CURRENT_SCHEMA_VERSION}"
             ));
@@ -301,13 +326,14 @@ impl Database {
         conn: &Connection,
         id: &str,
     ) -> Result<crate::remote_sandbox::ProfileSandbox, String> {
-        let (host, port, username, auth, key, jump, revision, raw) = conn.query_row(
-            "SELECT host, port, username, auth_method, keychain_key_id, jump_host_config, revision, policy_json
+        let (host, port, username, auth, key, jump, revision, raw, was_configured) = conn.query_row(
+            "SELECT host, port, username, auth_method, keychain_key_id, jump_host_config, revision, policy_json,
+                    COALESCE(was_configured, 0)
              FROM profiles LEFT JOIN profile_sandbox ON profile_id = id WHERE id = ?1",
             [id],
             |r| Ok((r.get::<_, String>(0)?, r.get::<_, u16>(1)?, r.get::<_, String>(2)?,
                 r.get::<_, String>(3)?, r.get::<_, Option<String>>(4)?, r.get::<_, Option<String>>(5)?,
-                r.get::<_, Option<String>>(6)?, r.get::<_, Option<String>>(7)?)),
+                r.get::<_, Option<String>>(6)?, r.get::<_, Option<String>>(7)?, r.get::<_, bool>(8)?)),
         ).optional().map_err(|e| e.to_string())?.ok_or("SANDBOX_PROFILE_MISSING")?;
         let policy: Option<crate::remote_sandbox::Policy> =
             serde_json::from_str(raw.as_deref().unwrap_or("null"))
@@ -326,6 +352,7 @@ impl Database {
             port,
             username,
             policy,
+            was_configured,
         })
     }
 
@@ -355,8 +382,9 @@ impl Database {
             return Ok(());
         }
         conn.execute(
-            "INSERT INTO profile_sandbox VALUES (?1, ?2, ?3)
-             ON CONFLICT(profile_id) DO UPDATE SET revision=excluded.revision, policy_json=excluded.policy_json",
+            "INSERT INTO profile_sandbox (profile_id, revision, policy_json, was_configured)
+             VALUES (?1, ?2, ?3, 1)
+             ON CONFLICT(profile_id) DO UPDATE SET revision=excluded.revision, policy_json=excluded.policy_json, was_configured=1",
             params![id, uuid::Uuid::new_v4().to_string(), serde_json::to_string(&policy).map_err(|e| e.to_string())?],
         ).map_err(|e| e.to_string())?;
         Ok(())
@@ -383,10 +411,11 @@ impl Database {
         send: impl FnOnce() -> T,
     ) -> Result<T, String> {
         let conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
-        if Self::read_profile_sandbox(&conn, id)?.binding != binding {
+        let live = Self::read_profile_sandbox(&conn, id)?;
+        if live.binding != binding {
             return Err("SANDBOX_POLICY_CHANGED".into());
         }
-        if !Self::read_agent_sandbox_enabled(&conn)? {
+        if live.policy.is_some() && !Self::read_agent_sandbox_enabled(&conn)? {
             return Err(AGENT_SANDBOX_DISABLED.into());
         }
         Ok(send())

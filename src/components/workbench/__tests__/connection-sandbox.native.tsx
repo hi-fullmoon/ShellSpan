@@ -1,8 +1,14 @@
+import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
+import { AgentExecutionSurfaceSelector } from '@/components/ai/agent-execution-surface-selector';
 import { AiSettingsSection } from '@/components/ai/ai-settings-section';
 import { ConnectionFormDrawer } from '@/components/workbench/connection-form-drawer';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { invokeAddProfile, invokeDeleteProfilePassword, invokeGetProfileSandbox, invokeLoadPreferences, invokeRemoveProfile, invokeSaveProfileSandbox, invokeStoreProfilePassword, isTauriRuntime } from '@/lib/ipc/tauri';
+import {
+  invokeAddProfile, invokeCreateAgentRuntimeSession, invokeDeleteProfilePassword, invokeGetProfileSandbox,
+  invokeLoadPreferences, invokeRemoveProfile, invokeSaveProfileSandbox, invokeSetAgentRuntimeExecutionSurface,
+  invokeStoreProfilePassword, isTauriRuntime,
+} from '@/lib/ipc/tauri';
 import { initI18n, t, type LocaleKey } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
@@ -58,7 +64,9 @@ async function verify() {
     const trust = await until(() => button('connection.preflight.trust', dialog), 'SSH trust confirmation');
     const fingerprint = dialog.textContent?.match(/SHA256:[\w+/]+/)?.[0];
     assert(fingerprint, 'SSH fingerprint displayed');
-    trust.click();
+    flushSync(() => trust.click());
+    assert(trust.disabled && select.disabled && dialog.querySelector<HTMLInputElement>('input[data-slot="input"]')?.disabled
+      && button('common.save', dialog)?.disabled, 'Trust and automatic retest keep the tested draft fixed');
     const expected = config.available ? 'connection.sandbox.report.passed' : 'connection.sandbox.report.missing';
     await until(() => dialog.textContent?.includes(t(expected)) ? true : undefined, expected);
     if (config.available) {
@@ -83,6 +91,33 @@ async function verify() {
       || trigger.getAttribute('aria-expanded') === 'false' ? true : undefined, 'saved settings close');
     const saved = await invokeGetProfileSandbox(id);
     assert(saved.policy?.workspace === `${workspace}-changed` && saved.binding !== initial.binding, 'Rust persisted the new workspace and policy revision');
+
+    const agentSessionId = `agent-${id}`;
+    const request = {
+      sessionId: agentSessionId,
+      taskId: agentSessionId,
+      goal: 'Verify the sandbox execution surface',
+      target: {
+        kind: 'remote' as const, sessionId: id, targetId: id, profileId: id,
+        host: profile.host, port: profile.port, username: profile.username,
+      },
+    };
+    const visibleRejection = await invokeCreateAgentRuntimeSession({ ...request, executionSurface: 'boundTerminal' })
+      .then(() => '', String);
+    assert(visibleRejection.includes('SANDBOX_DIRECT_REQUIRED'), 'Rust rejects a visible sandbox session before creating it');
+    const session = await invokeCreateAgentRuntimeSession({ ...request, executionSurface: 'direct' });
+    assert(session.header.target?.remoteSandboxRequired === true, 'The sandbox requirement is stored on the new session');
+    const switchRejection = await invokeSetAgentRuntimeExecutionSurface({ sessionId: agentSessionId, surface: 'boundTerminal' })
+      .then(() => '', String);
+    assert(switchRejection.includes('SANDBOX_DIRECT_REQUIRED'), 'Rust rejects switching a sandbox session to a visible terminal');
+
+    root.render(<TooltipProvider><AgentExecutionSurfaceSelector surface="direct" realTerminalState="ready" sandboxDirectOnly /></TooltipProvider>);
+    const surfaceTrigger = await until(() => document.querySelector<HTMLButtonElement>('[data-execution-surface="direct"]')
+      ?? undefined, 'Direct execution selector');
+    surfaceTrigger.click();
+    const visibleOption = await until(() => [...document.querySelectorAll('[role="menuitemradio"]')]
+      .find(node => node.getAttribute('aria-description') === t('ai.error.sandboxDirectRequired')), 'sandbox visible option');
+    assert(visibleOption.getAttribute('aria-disabled') === 'true', 'Visible execution stays unavailable when the terminal is ready');
 
     const readEnabled = async () => (await invokeLoadPreferences())
       .find(([key]) => key === 'ai.agentSandboxEnabled')?.[1];

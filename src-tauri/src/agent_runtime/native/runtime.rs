@@ -2231,15 +2231,21 @@ impl NativeToolEngine {
             )?,
             AgentToolTargetNative::Remote { target_id, .. } => {
                 let connection = connection_for_remote_target(&call.target, database, credentials)?;
-                spawn_remote_process_native(RemoteProcessStartNative {
-                    task_id: context.request.task_id.clone(),
-                    request_id: context.request.request_id.clone(),
-                    owner_target_id: target_id.clone(),
-                    command: arguments.command,
-                    connection,
-                    known_hosts_path: known_hosts_path.to_path_buf(),
-                    timeout,
-                })?
+                let binding =
+                    sandbox.ok_or("Remote Direct requires a current SSH profile binding")?;
+                spawn_remote_process_native(
+                    RemoteProcessStartNative {
+                        task_id: context.request.task_id.clone(),
+                        request_id: context.request.request_id.clone(),
+                        owner_target_id: target_id.clone(),
+                        command: arguments.command,
+                        connection,
+                        known_hosts_path: known_hosts_path.to_path_buf(),
+                        timeout,
+                    },
+                    database.clone(),
+                    binding.clone(),
+                )?
             }
             _ => return Err("Direct Exec requires a local or remote target".into()),
         };
@@ -3596,7 +3602,13 @@ fn exec_process_result(
     snapshot: ProcessSnapshotNative,
     background: bool,
 ) -> AgentToolResultNative {
-    let status = if background && snapshot.state == ProcessLifecycleNative::Running {
+    let status = if snapshot
+        .error
+        .as_deref()
+        .is_some_and(|error| error.starts_with("EXECUTION_OUTCOME_UNKNOWN:"))
+    {
+        AgentToolResultStatusNative::Uncertain
+    } else if background && snapshot.state == ProcessLifecycleNative::Running {
         AgentToolResultStatusNative::Completed
     } else {
         match snapshot.state {

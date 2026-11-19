@@ -70,6 +70,7 @@ export interface AgentExecutionSurfaceSelectorProps {
   readonly realTerminalState?: RealTerminalPresentationState;
   readonly nativeStartupTimedOut?: boolean;
   readonly glibcMismatch?: RemoteGlibcMismatch | null;
+  readonly sandboxDirectOnly?: boolean;
   /** Reserved for a future authoritative runtime routing result. */
   readonly runtimeFallback?: TerminalSurfaceRuntimeFallbackSignal;
   readonly onSurfaceChange?: (surface: AgentExecutionSurface) => void;
@@ -82,6 +83,7 @@ export function AgentExecutionSurfaceSelector({
   realTerminalState = 'unavailable',
   nativeStartupTimedOut = false,
   glibcMismatch,
+  sandboxDirectOnly = false,
   runtimeFallback,
   onSurfaceChange,
 }: AgentExecutionSurfaceSelectorProps): React.ReactNode {
@@ -97,7 +99,10 @@ export function AgentExecutionSurfaceSelector({
   const CurrentIcon = current.icon;
   const disabledHint = disabled ? t('agent.executionSurface.switchHint') : undefined;
   const realTerminalCopy = REAL_TERMINAL_STATE_COPY[presentation.realTerminalState];
-  const realTerminalDescription = presentation.realTerminalState !== 'unavailable'
+  const visibleAvailable = !sandboxDirectOnly && presentation.realTerminalState === 'ready';
+  const realTerminalDescription = sandboxDirectOnly
+    ? t('ai.error.sandboxDirectRequired')
+    : presentation.realTerminalState !== 'unavailable'
     ? t(realTerminalCopy.description)
     : glibcMismatch
       ? t('agent.executionSurface.v1.remoteGlibcTooOld', { ...glibcMismatch })
@@ -153,7 +158,7 @@ export function AgentExecutionSurfaceSelector({
             value={surface}
             onValueChange={(value) => {
               if (value === 'direct') onSurfaceChange?.(value);
-              if (value === 'boundTerminal' && presentation.realTerminalState === 'ready') {
+              if (value === 'boundTerminal' && visibleAvailable) {
                 onSurfaceChange?.(value);
               }
             }}
@@ -162,11 +167,11 @@ export function AgentExecutionSurfaceSelector({
               const Icon = option.icon;
               const directFallback = option.surface === 'direct'
                 && presentation.state === 'directFallback';
-              const terminalState = option.surface === 'boundTerminal'
+              const terminalState = option.surface === 'boundTerminal' && !sandboxDirectOnly
                 ? realTerminalCopy
                 : undefined;
               const statusCopy = directFallback ? DIRECT_FALLBACK_COPY : terminalState;
-              const description = terminalState
+              const description = option.surface === 'boundTerminal'
                 ? realTerminalDescription
                 : t(directFallback ? DIRECT_FALLBACK_COPY.description : option.description);
               return (
@@ -174,8 +179,7 @@ export function AgentExecutionSurfaceSelector({
                   key={option.surface}
                   value={option.surface}
                   closeOnClick
-                  disabled={option.surface === 'boundTerminal'
-                    && presentation.realTerminalState !== 'ready'}
+                  disabled={option.surface === 'boundTerminal' && !visibleAvailable}
                   className="ai-execution-surface-menu-option min-h-12 items-start gap-1 py-2 pr-8 pl-2"
                   aria-description={description}
                 >

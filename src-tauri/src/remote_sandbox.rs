@@ -29,6 +29,10 @@ const OUTSIDE: &str = "/var/lib/shellspan-sandbox/outside-probe";
 const MAX_FRAME: usize = 512 * 1024;
 const POLL: Duration = Duration::from_millis(15);
 pub(crate) const SFTP_UNCERTAIN: &str = "SANDBOX_SFTP_UNCERTAIN: the SFTP operation or remote shutdown could not be confirmed; do not retry automatically";
+pub(crate) const DIRECT_REQUIRED: &str =
+    "SANDBOX_DIRECT_REQUIRED: use Direct execution for this SSH sandbox";
+const SESSION_POLICY_CHANGED: &str =
+    "SANDBOX_SESSION_POLICY_CHANGED: the connection sandbox requirement changed; start a new Agent Session or restore the policy";
 const PROBES: &[&str] = &[
     "executorProtocol",
     "linux",
@@ -105,6 +109,8 @@ pub(crate) struct ProfileSandbox {
     pub(crate) port: u16,
     #[serde(skip)]
     pub(crate) username: String,
+    #[serde(skip)]
+    pub(crate) was_configured: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -221,6 +227,18 @@ pub(crate) fn guard_tool(
         }
         _ => Err("SANDBOX_TOOL_UNAVAILABLE: this tool cannot run inside the remote sandbox".into()),
     }
+}
+
+pub(crate) fn validate_session_requirement(
+    binding: Option<&Binding>,
+    required: Option<bool>,
+) -> Result<(), String> {
+    let configured = binding.is_some_and(|binding| binding.state.policy.is_some());
+    let removed = !configured && binding.is_some_and(|binding| binding.state.was_configured);
+    if required.is_some_and(|required| required != configured) || (required.is_none() && removed) {
+        return Err(SESSION_POLICY_CHANGED.into());
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]

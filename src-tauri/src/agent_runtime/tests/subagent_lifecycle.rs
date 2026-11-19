@@ -63,6 +63,7 @@ fn setup_with_services(
         cwd: Some(root.path().to_string_lossy().into_owned()),
         root_path: None,
         local_root: None,
+        remote_sandbox_required: None,
     };
     let parent_request = CreateAgentSessionRequest {
         session_id: "lifecycle-parent".into(),

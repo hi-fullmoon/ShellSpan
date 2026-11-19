@@ -697,6 +697,7 @@ async fn configured_model_question_and_answer_follow_real_driver_lifecycle() {
                 cwd: Some(root.path().to_string_lossy().into_owned()),
                 root_path: Some(root.path().to_string_lossy().into_owned()),
                 local_root: Some(root.path().to_string_lossy().into_owned()),
+                remote_sandbox_required: None,
             }),
             permission_mode: Some(
                 crate::agent_runtime::AgentSessionPermissionMode::RequestApproval,

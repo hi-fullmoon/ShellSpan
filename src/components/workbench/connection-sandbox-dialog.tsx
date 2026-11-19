@@ -27,13 +27,15 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [trusting, setTrusting] = useState(false);
   const [report, setReport] = useState<SandboxTestResult>();
   const [testError, setTestError] = useState(false);
   const activeTest = useRef<string | null>(null);
+  const activeTrust = useRef<symbol | null>(null);
   const id = useId();
   const selectedPath = workspace.trim();
   const valid = /^\/srv\/shellspan-workspaces\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(selectedPath);
-  const ready = Boolean(saved) && !saving && !loading && !testing;
+  const ready = Boolean(saved) && !saving && !loading && !testing && !trusting;
   const modes = (['off', 'readOnly', 'workspaceWrite'] as const).map((value) => ({ value, label: t(`connection.sandbox.mode.${value}`) }));
 
   useEffect(() => {
@@ -44,6 +46,8 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
     setReport(undefined);
     setLoadFailed(false);
     setTestError(false);
+    setTesting(false);
+    setTrusting(false);
     void invokeGetProfileSandbox(profileId).then((value) => {
       if (!live) return;
       setSaved(value);
@@ -52,6 +56,7 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
     }, () => { if (live) setLoadFailed(true); }).finally(() => { if (live) setLoading(false); });
     return () => {
       live = false;
+      activeTrust.current = null;
       const operation = activeTest.current;
       activeTest.current = null;
       if (operation) void invokeCancelConnectionPreflight(operation).catch(() => {});
@@ -61,7 +66,7 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
   const clearReport = () => { setReport(undefined); setTestError(false); };
 
   async function test() {
-    if (!saved || !ready || mode === 'off' || !valid) return;
+    if (!saved || !ready || activeTest.current || mode === 'off' || !valid) return;
     const operation = createOperationId('sandbox-preflight');
     activeTest.current = operation;
     setTesting(true);
@@ -80,7 +85,7 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
   }
 
   async function save() {
-    if (!saved || !ready || (mode !== 'off' && !valid)) return;
+    if (!saved || !ready || activeTrust.current || (mode !== 'off' && !valid)) return;
     setSaving(true);
     try {
       await invokeSaveProfileSandbox(profileId, saved.binding, mode === 'off' ? null : { mode, workspace: selectedPath });
@@ -92,11 +97,21 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
   }
 
   async function trust(host: string, port: number, fingerprint?: string) {
-    if (!fingerprint) return;
+    if (!fingerprint || !ready || activeTrust.current) return;
+    const operation = Symbol();
+    activeTrust.current = operation;
+    setTrusting(true);
     try {
       await invokeTrustHost(host, port, fingerprint);
-      await test();
-    } catch { toast.error(t('connection.sandbox.trustFailed')); }
+      if (activeTrust.current === operation) await test();
+    } catch {
+      if (activeTrust.current === operation) toast.error(t('connection.sandbox.trustFailed'));
+    } finally {
+      if (activeTrust.current === operation) {
+        activeTrust.current = null;
+        setTrusting(false);
+      }
+    }
   }
 
   const sandboxStarted = report?.steps.find(([step]) => step === 'sandboxStart')?.[1];
@@ -111,7 +126,7 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
       </DialogTrigger>
       <CompactDialogContent className="h-[min(560px,calc(100dvh-2rem))] max-w-lg" showCloseButton={false}>
         <CompactDialogHeader title={t('connection.sandbox.title')} description={t('connection.sandbox.description')} />
-        <CompactDialogBody className="flex-1" aria-busy={loading || testing}>
+        <CompactDialogBody className="flex-1" aria-busy={loading || testing || trusting}>
           {loading && <p role="status" className="text-sm text-muted-foreground">{t('connection.sandbox.loading')}</p>}
           {loadFailed && <Alert variant="destructive"><AlertDescription>{t('connection.sandbox.loadFailed')}</AlertDescription></Alert>}
           {saved && <FieldGroup>
@@ -148,7 +163,7 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
               </AlertDescription>}
             </Alert>
             <ol className="flex flex-col gap-2">
-              {report.ssh.steps.map((step) => <PreflightStepRow key={step.id} step={step} onTrust={(host, port, fingerprint) => void trust(host, port, fingerprint)} />)}
+              {report.ssh.steps.map((step) => <PreflightStepRow key={step.id} step={step} trustDisabled={!ready} onTrust={(host, port, fingerprint) => void trust(host, port, fingerprint)} />)}
               {report.steps.map(([step, status]) => <li key={step} className="flex flex-wrap items-center gap-2 text-sm">
                 {t(`connection.sandbox.step.${step}`)}
                 {step === 'executorProtocol' && report.protocolVersion != null && <code>v{report.protocolVersion}</code>}

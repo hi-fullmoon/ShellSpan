@@ -196,6 +196,7 @@ export interface AgentSessionTarget {
   readonly cwd?: string;
   readonly rootPath?: string;
   readonly localRoot?: string;
+  readonly remoteSandboxRequired?: boolean;
 }
 
 export interface AgentCapabilityScope {

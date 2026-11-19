@@ -2626,6 +2626,7 @@ mod retry_policy_tests {
                     cwd: Some(root.path().to_string_lossy().into_owned()),
                     root_path: None,
                     local_root: None,
+                    remote_sandbox_required: None,
                 }),
                 permission_mode: Some(super::super::AgentSessionPermissionMode::Operator),
                 execution_surface: super::super::AgentExecutionSurface::Direct,
@@ -2841,6 +2842,7 @@ mod retry_policy_tests {
                 cwd: Some(root.path().to_string_lossy().into_owned()),
                 root_path: None,
                 local_root: None,
+                remote_sandbox_required: None,
             };
             let scope = AgentCapabilityScope {
                 tool_names: vec!["list_directory".into()],

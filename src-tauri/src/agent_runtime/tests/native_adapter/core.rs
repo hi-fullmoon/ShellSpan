@@ -52,6 +52,7 @@
             cwd: Some("/workspace".into()),
             root_path: None,
             local_root: None,
+            remote_sandbox_required: None,
         }
     }
 
@@ -68,6 +69,7 @@
             cwd: None,
             root_path: None,
             local_root: None,
+            remote_sandbox_required: None,
         }
     }
 

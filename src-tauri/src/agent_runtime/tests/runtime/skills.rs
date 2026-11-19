@@ -27,6 +27,7 @@ pub(super) fn create_skill_session(runtime: &AgentRuntime, session: &str, root: 
                 ),
                 root_path: None,
                 local_root: None,
+                remote_sandbox_required: None,
             }),
             permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
             execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,

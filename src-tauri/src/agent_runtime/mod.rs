@@ -63,6 +63,8 @@ pub(crate) fn terminal_execution_needs_user_action(error: &str) -> bool {
     [
         "TERMINAL_INPUT_RECOVERY_REQUIRED",
         "TERMINAL_DIRECT_REQUIRED",
+        "SANDBOX_DIRECT_REQUIRED",
+        "SANDBOX_SESSION_POLICY_CHANGED",
     ]
     .iter()
     .any(|code| {

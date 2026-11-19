@@ -312,15 +312,23 @@ fn apply_connection_sandbox(
             target.cwd = Some(workspace.into());
         }
     }
-    let Some(target) = request.target.as_mut().filter(|t| t.kind == "remote") else {
+    let Some(target) = request.target.as_mut() else {
         return Ok(());
     };
+    target.remote_sandbox_required = None;
+    if target.kind != "remote" {
+        return Ok(());
+    }
     let native = super::native_adapter::target_native(target)?;
     let db = app.state::<crate::db::Database>();
     let known_hosts = crate::known_hosts::known_hosts_path(app)?;
-    if let Some(policy) = crate::remote_sandbox::binding_for_target(&native, &db, &known_hosts)?
-        .and_then(|b| b.state.policy)
-    {
+    let binding = crate::remote_sandbox::binding_for_target(&native, &db, &known_hosts)?;
+    let policy = binding.and_then(|binding| binding.state.policy);
+    target.remote_sandbox_required = Some(policy.is_some());
+    if let Some(policy) = policy {
+        if request.execution_surface != super::AgentExecutionSurface::Direct {
+            return Err(crate::remote_sandbox::DIRECT_REQUIRED.into());
+        }
         if target
             .root_path
             .as_deref()
@@ -328,7 +336,6 @@ fn apply_connection_sandbox(
         {
             target.root_path = Some(policy.workspace);
         }
-        request.execution_surface = super::AgentExecutionSurface::Direct;
     }
     Ok(())
 }
@@ -563,6 +570,25 @@ pub(crate) fn agent_runtime_set_execution_surface(
     input: AgentExecutionSurfaceInput,
 ) -> Result<AgentSessionSnapshot, String> {
     configure_runtime(&app, &runtime)?;
+    if input.surface == super::AgentExecutionSurface::BoundTerminal {
+        let snapshot = runtime.session(&input.session_id)?;
+        if let Some(target) = snapshot
+            .header
+            .target
+            .filter(|target| target.kind == "remote")
+        {
+            let database = app.state::<crate::db::Database>();
+            let known_hosts = crate::known_hosts::known_hosts_path(&app)?;
+            let native = super::native_adapter::target_native(&target)?;
+            let binding =
+                crate::remote_sandbox::binding_for_target(&native, &database, &known_hosts)?;
+            if target.remote_sandbox_required == Some(true)
+                || binding.is_some_and(|binding| binding.state.policy.is_some())
+            {
+                return Err(crate::remote_sandbox::DIRECT_REQUIRED.into());
+            }
+        }
+    }
     runtime.set_execution_surface(&input.session_id, input.surface)
 }
 

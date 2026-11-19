@@ -963,8 +963,10 @@ pub(crate) struct RemoteProcessStartNative {
 
 pub(crate) fn spawn_remote_process_native(
     start: RemoteProcessStartNative,
+    database: crate::db::Database,
+    binding: crate::remote_sandbox::Binding,
 ) -> Result<Arc<ManagedProcessNative>, String> {
-    spawn_remote_process_with_io(start, None)
+    spawn_remote_process_with_io(start, None, Some((database, binding)))
 }
 
 struct DiagnosticProcessIo {
@@ -987,12 +989,13 @@ pub(super) fn spawn_remote_diagnostic_process_native(
         runtime: tokio::runtime::Handle::try_current()
             .map_err(|_| "Remote diagnostics require the native async runtime")?,
     };
-    spawn_remote_process_with_io(start, Some(io))
+    spawn_remote_process_with_io(start, Some(io), None)
 }
 
 fn spawn_remote_process_with_io(
     start: RemoteProcessStartNative,
     io: Option<DiagnosticProcessIo>,
+    dispatch: Option<(crate::db::Database, crate::remote_sandbox::Binding)>,
 ) -> Result<Arc<ManagedProcessNative>, String> {
     let secrets = known_connection_secret_values(&start.connection);
     let (control_tx, control_rx) = mpsc::channel();
@@ -1016,10 +1019,10 @@ fn spawn_remote_process_with_io(
             crate::connection::with_scoped_connection_io(
                 io.cancellation.clone(),
                 io.deadline,
-                || run_remote_worker(worker, start, control_rx, Some(&io)),
+                || run_remote_worker(worker, start, control_rx, Some(&io), dispatch),
             );
         } else {
-            run_remote_worker(worker, start, control_rx, None);
+            run_remote_worker(worker, start, control_rx, None, dispatch);
         }
     });
     Ok(process)
@@ -1434,10 +1437,11 @@ fn run_remote_worker(
     start: RemoteProcessStartNative,
     controls: mpsc::Receiver<ProcessControlNative>,
     io: Option<&DiagnosticProcessIo>,
+    dispatch: Option<(crate::db::Database, crate::remote_sandbox::Binding)>,
 ) {
     let deadline = io.map_or_else(|| Instant::now() + start.timeout, |io| io.deadline);
     if remote_diagnostic_interrupted(&process, io)
-        || remote_start_interrupted(&process, &controls, deadline)
+        || remote_start_interrupted(&process, &controls, deadline, false)
     {
         return;
     }
@@ -1457,7 +1461,7 @@ fn run_remote_worker(
         }
     };
     if remote_diagnostic_interrupted(&process, io)
-        || remote_start_interrupted(&process, &controls, deadline)
+        || remote_start_interrupted(&process, &controls, deadline, false)
     {
         return;
     }
@@ -1478,21 +1482,43 @@ fn run_remote_worker(
         }
     };
     if remote_diagnostic_interrupted(&process, io)
-        || remote_start_interrupted(&process, &controls, deadline)
+        || remote_start_interrupted(&process, &controls, deadline, false)
     {
         return;
     }
     set_diagnostic_phase(io, "dispatch");
-    if let Err(error) = crate::execution::start_ssh_exec_channel(&mut channel, &start.command) {
+    let outcome = if let Some((database, binding)) = dispatch {
+        let _blocking_mode = RemoteBlockingModeGuard::nonblocking(&session.target);
+        let mut awaiting_reply = false;
+        loop {
+            if remote_start_interrupted(&process, &controls, deadline, awaiting_reply) {
+                return;
+            }
+            let start_exec = binding.write(&database, &start.known_hosts_path, || {
+                crate::execution::start_ssh_exec_channel(&mut channel, &start.command)
+            });
+            match start_exec {
+                Ok(Ok(())) => break Ok(()),
+                Ok(Err(error)) if error.code() == ErrorCode::Session(LIBSSH2_ERROR_EAGAIN) => {
+                    awaiting_reply = true;
+                    thread::sleep(PROCESS_POLL_INTERVAL);
+                }
+                Ok(Err(error)) => break Err(format!("Failed to start remote process: {error}")),
+                Err(error) if awaiting_reply => {
+                    break Err(format!("EXECUTION_OUTCOME_UNKNOWN: {error}"));
+                }
+                Err(error) => break Err(error),
+            }
+        }
+    } else {
+        crate::execution::start_ssh_exec_channel(&mut channel, &start.command)
+            .map_err(|error| format!("Failed to start remote process: {error}"))
+    };
+    if let Err(error) = outcome {
         if remote_diagnostic_interrupted(&process, io) {
             return;
         }
-        process.finish(
-            ProcessLifecycleNative::Failed,
-            None,
-            false,
-            Some(format!("Failed to start remote process: {error}")),
-        );
+        process.finish(ProcessLifecycleNative::Failed, None, false, Some(error));
         return;
     }
     // Restore blocking mode before the channel is freed on every exit path.
@@ -1589,11 +1615,22 @@ fn remote_start_interrupted(
     process: &ManagedProcessNative,
     controls: &mpsc::Receiver<ProcessControlNative>,
     deadline: Instant,
+    awaiting_reply: bool,
 ) -> bool {
+    let unconfirmed = || {
+        awaiting_reply.then(|| {
+            "EXECUTION_OUTCOME_UNKNOWN: the SSH server did not confirm command startup".into()
+        })
+    };
     while let Ok(control) = controls.try_recv() {
         match control {
             ProcessControlNative::Kill { .. } => {
-                process.finish(ProcessLifecycleNative::Cancelled, None, false, None);
+                process.finish(
+                    ProcessLifecycleNative::Cancelled,
+                    None,
+                    false,
+                    unconfirmed(),
+                );
                 return true;
             }
             ProcessControlNative::Write { response, .. } => {
@@ -1602,7 +1639,7 @@ fn remote_start_interrupted(
         }
     }
     if Instant::now() >= deadline {
-        process.finish(ProcessLifecycleNative::TimedOut, None, false, None);
+        process.finish(ProcessLifecycleNative::TimedOut, None, false, unconfirmed());
         return true;
     }
     false
@@ -1793,7 +1830,8 @@ mod tests {
         assert!(remote_start_interrupted(
             &process,
             &receiver,
-            Instant::now() + Duration::from_secs(1)
+            Instant::now() + Duration::from_secs(1),
+            false,
         ));
         assert_eq!(
             process.snapshot().unwrap().state,
@@ -1812,7 +1850,8 @@ mod tests {
         assert!(remote_start_interrupted(
             &process,
             &receiver,
-            Instant::now() - Duration::from_millis(1)
+            Instant::now() - Duration::from_millis(1),
+            false,
         ));
         assert_eq!(
             process.snapshot().unwrap().state,

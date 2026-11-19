@@ -125,8 +125,18 @@ fn agent_sandbox_is_opt_in_and_rechecks_before_ssh_dispatch() {
     assert!(!db.agent_sandbox_enabled().unwrap());
     guard_tool(&db, Some(&unsandboxed), "exec_command", &args).unwrap();
     guard_tool(&db, None, "exec_command", &args).unwrap();
+    validate_session_requirement(Some(&unsandboxed), Some(false)).unwrap();
+    unsandboxed.write(&db, &known_hosts, || ()).unwrap();
 
     set_policy(&db, &profile, Mode::WorkspaceWrite);
+    assert_eq!(
+        unsandboxed
+            .write::<()>(&db, &known_hosts, || panic!(
+                "ordinary command dispatched after policy change"
+            ))
+            .unwrap_err(),
+        "SANDBOX_POLICY_CHANGED",
+    );
     let binding = binding_for_target(&target, &db, &known_hosts)
         .unwrap()
         .unwrap();
@@ -152,6 +162,43 @@ fn agent_sandbox_is_opt_in_and_rechecks_before_ssh_dispatch() {
         db.profile_sandbox(&profile.id).unwrap().policy,
         binding.state.policy
     );
+}
+
+#[test]
+fn removed_policy_requires_a_new_session_even_after_reopening_database() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("db");
+    let db = Database::open(&path).unwrap();
+    let profile = profile(2222);
+    db.insert_profile(&profile).unwrap();
+    let target = AgentToolTargetNative::Remote {
+        target_id: "remote".into(),
+        session_id: "terminal".into(),
+        profile_id: Some(profile.id.clone()),
+        host: profile.host.clone(),
+        port: profile.port,
+        username: profile.username.clone(),
+        root_path: Some(WORKSPACE.into()),
+        local_root: None,
+    };
+    let known_hosts = temp.path().join("known_hosts");
+    set_policy(&db, &profile, Mode::WorkspaceWrite);
+    let configured = binding_for_target(&target, &db, &known_hosts).unwrap();
+    validate_session_requirement(configured.as_ref(), Some(true)).unwrap();
+    validate_session_requirement(configured.as_ref(), None).unwrap();
+    assert!(validate_session_requirement(configured.as_ref(), Some(false)).is_err());
+
+    db.save_profile_sandbox(&profile.id, &configured.unwrap().state.binding, None)
+        .unwrap();
+    drop(db);
+    let db = Database::open(&path).unwrap();
+    let removed = binding_for_target(&target, &db, &known_hosts).unwrap();
+    for existing in [Some(true), None] {
+        assert!(validate_session_requirement(removed.as_ref(), existing)
+            .unwrap_err()
+            .starts_with("SANDBOX_SESSION_POLICY_CHANGED:"));
+    }
+    validate_session_requirement(removed.as_ref(), Some(false)).unwrap();
 }
 
 #[test]
@@ -327,6 +374,7 @@ fn linux_ssh_bubblewrap_acceptance() {
         cwd: None,
         root_path: Some(WORKSPACE.into()),
         local_root: Some(temp.path().to_str().unwrap().into()),
+        remote_sandbox_required: Some(true),
     };
     let data_root = temp.path().join("runtime");
     std::fs::create_dir(&data_root).unwrap();
@@ -345,7 +393,7 @@ fn linux_ssh_bubblewrap_acceptance() {
         engine,
     )
     .unwrap();
-    let prepare = |name: &str, arguments: Value| {
+    let prepare_on = |execution_surface, name: &str, arguments: Value| {
         adapter.prepare(NativeToolRequest {
             session_id: "fixture-agent".into(),
             task_id: "fixture-task".into(),
@@ -357,7 +405,7 @@ fn linux_ssh_bubblewrap_acceptance() {
             target: target.clone(),
             scratch_target: target.clone(),
             permission_mode: AgentSessionPermissionMode::RequestApproval,
-            execution_surface: AgentExecutionSurface::BoundTerminal,
+            execution_surface,
             model_call: ModelToolCall {
                 call_id: format!("fixture-{}", uuid::Uuid::new_v4().simple()),
                 provider_call_id: None,
@@ -366,6 +414,8 @@ fn linux_ssh_bubblewrap_acceptance() {
             },
         })
     };
+    let prepare =
+        |name: &str, arguments: Value| prepare_on(AgentExecutionSurface::Direct, name, arguments);
     let cmd = |command: &str| {
         prepare(
             "run_terminal_command",
@@ -390,6 +440,16 @@ fn linux_ssh_bubblewrap_acceptance() {
     assert!(
         ordinary.lstat(Path::new(OUTSIDE)).is_ok(),
         "manual SFTP must retain host visibility"
+    );
+    assert_eq!(
+        prepare_on(
+            AgentExecutionSurface::BoundTerminal,
+            "run_terminal_command",
+            json!({"command":"pwd","explanation":"Verify the selected execution surface"}),
+        )
+        .err()
+        .as_deref(),
+        Some(DIRECT_REQUIRED),
     );
     assert!(adapter
         .execute(

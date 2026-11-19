@@ -18,6 +18,7 @@
             ),
             root_path: None,
             local_root: None,
+            remote_sandbox_required: None,
         }
     }
     fn write(root: &std::path::Path, path: &str, name: &str, extra: &str) {

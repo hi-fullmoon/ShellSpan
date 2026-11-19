@@ -5746,6 +5746,12 @@ fn validate_session_target(target: &AgentSessionTarget) -> Result<(), String> {
     validate_optional_text(target.cwd.as_deref(), "target cwd")?;
     validate_optional_text(target.root_path.as_deref(), "target root path")?;
     validate_optional_text(target.local_root.as_deref(), "target local root")?;
+    if target.remote_sandbox_required.is_some() && target.kind != "remote" {
+        return Err("Agent sandbox requirement is only valid for a remote target".into());
+    }
+    if target.remote_sandbox_required == Some(true) && target.profile_id.is_none() {
+        return Err("Agent sandbox requirement needs a saved SSH profile".into());
+    }
     match target.kind.as_str() {
         "local" if target.host.is_some() || target.port.is_some() || target.username.is_some() => {
             Err("local tool target contains remote identity fields".into())

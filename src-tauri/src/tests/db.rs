@@ -124,6 +124,46 @@ fn migrates_existing_profiles_with_no_implicit_sudo_operations() {
 }
 
 #[test]
+fn migrates_v4_removed_sandbox_without_marking_identity_only_profiles() {
+    let conn = Connection::open_in_memory().unwrap();
+    for schema in [
+        SCHEMA_VERSION_TABLE,
+        SCHEMA_INITIAL,
+        "INSERT INTO schema_version (version) VALUES (1)",
+        SCHEMA_PROFILE_SUDO_POLICY,
+        SCHEMA_RESTRICTED_SUDO_RUNNER,
+        SCHEMA_REMOTE_SANDBOX,
+    ] {
+        conn.execute_batch(schema).unwrap();
+    }
+    let db = Database {
+        conn: Arc::new(Mutex::new(conn)),
+    };
+    let mut ordinary = test_profile("ordinary", "Ordinary SSH");
+    let removed = test_profile("removed", "Removed sandbox");
+    db.insert_profile(&ordinary).unwrap();
+    db.insert_profile(&removed).unwrap();
+    ordinary.port = 2222;
+    db.update_profile(&ordinary.id, &ordinary).unwrap();
+    db.with_connection(|conn| {
+        conn.execute(
+            "INSERT INTO profile_sandbox VALUES (?1, ?2, 'null')",
+            params![removed.id, uuid::Uuid::new_v4().to_string()],
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(())
+    })
+    .unwrap();
+
+    db.initialize_or_validate_schema().unwrap();
+
+    assert!(!db.profile_sandbox(&ordinary.id).unwrap().was_configured);
+    let state = db.profile_sandbox(&removed.id).unwrap();
+    assert!(state.policy.is_none());
+    assert!(state.was_configured);
+}
+
+#[test]
 fn migrates_version_two_sudo_lists_as_pending_without_dropping_ssh_configuration() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(SCHEMA_VERSION_TABLE).unwrap();

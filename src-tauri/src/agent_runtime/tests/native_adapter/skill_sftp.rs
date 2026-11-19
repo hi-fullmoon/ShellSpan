@@ -69,6 +69,7 @@
             cwd: None,
             root_path: Some(root.clone()),
             local_root: Some(dir.path().to_str().unwrap().into()),
+            remote_sandbox_required: None,
         };
         let request = |expected_scope| SkillReadRequest {
             target: target.clone(),
