@@ -2181,7 +2181,9 @@ describe('Queue mutation controller', () => {
     await waitFor(() => expect(result.current.queueMutation?.status).toBe('failed'));
     expect(result.current.queueMutation?.conflict).toBe(true);
     expect(agent.refresh).toHaveBeenCalledWith(view.summary.id);
+    const failure = result.current.queueMutation;
     act(() => result.current.retryQueueMutation());
+    expect(result.current.queueMutation).toEqual({ ...failure, status: 'retrying' });
     await waitFor(() => expect(result.current.queueMutation).toBeNull());
     expect(mutateInbox).toHaveBeenLastCalledWith({ sessionId: view.summary.id, type: 'steer', itemId: 'queued', expectedRevision: 9, clientOperationId: 'steer-retry' });
     expect(operationId).toHaveBeenCalledOnce();

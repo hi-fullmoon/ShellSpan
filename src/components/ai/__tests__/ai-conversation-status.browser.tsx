@@ -41,6 +41,12 @@ export async function mount(host: HTMLElement, locale: Locale) {
         onReconnectTerminal={() => { recoveryActions.push('reconnect'); }} />));
     },
     recoveryActions: () => [...recoveryActions],
+    verifyContinuation(busy: boolean) {
+      flushSync(() => root.render(<AiWorkspaceRoot scope="terminal" canStartAgent view={null}
+        agentUnavailableReason={t(busy ? 'ai.workspace.reconnectChecking' : 'ai.workspace.reconnectAvailable')}
+        terminalReconnectBusy={busy} onContinueOnReconnectedTerminal={() => { recoveryActions.push('verify'); }} />));
+      return { ready: t('ai.workspace.continueOnReconnectedTerminal'), pending: t('ai.workspace.reconnectChecking') };
+    },
     storageFault(mode: 'agent' | 'ask') {
       const recorded = conversationFoldRecording.direct.events;
       const firstText = recorded.findIndex(event => event.type === 'assistant/chunk' && event.data.textDelta?.trim());

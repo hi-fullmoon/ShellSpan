@@ -30,6 +30,7 @@ export function AiWorkspaceErrorNotices({
   const operationError = composerState?.lastError;
   const showOperationError = operationError && operationError !== syncError
     && !drafts.some(failed => failed.error === operationError);
+  const retrying = syncRecovery?.retrying ?? false;
 
   return (
     <div
@@ -48,9 +49,16 @@ export function AiWorkspaceErrorNotices({
           <AiErrorNotice
             title={t('ai.workspace.recovery.title')}
             action={onRetrySync && <AiNoticeAction
-              disabled={syncRecovery?.retrying} aria-busy={syncRecovery?.retrying || undefined}
+              className="inline-grid justify-items-end"
+              disabled={retrying} aria-busy={retrying || undefined}
               onClick={() => { void onRetrySync(); }}>
-              {t(syncRecovery?.retrying ? 'ai.error.streamSyncRetrying' : 'ai.error.streamSyncRetry')}
+              {/* Both labels size the same grid cell, keeping the notice from rewrapping. */}
+              <span className="col-start-1 row-start-1 aria-hidden:invisible" aria-hidden={retrying}>
+                {t('ai.error.streamSyncRetry')}
+              </span>
+              <span className="col-start-1 row-start-1 aria-hidden:invisible" aria-hidden={!retrying}>
+                {t('ai.error.streamSyncRetrying')}
+              </span>
             </AiNoticeAction>}
           >
             <span className="flex min-w-0 flex-col gap-1">

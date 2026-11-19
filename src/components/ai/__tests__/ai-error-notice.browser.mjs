@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
 
 // Run with the Vite development server: node src/components/ai/__tests__/ai-error-notice.browser.mjs
-const browser = await chromium.launch();
+const browser = await (process.env.SHELLSPAN_TEST_ENGINE === 'webkit' ? webkit : chromium).launch();
 try {
   const page = await browser.newPage();
   await page.goto(process.env.SHELLSPAN_TEST_URL ?? 'http://localhost:1420');
@@ -105,20 +105,41 @@ try {
   await page.locator('#notice-check button').focus();
   await page.keyboard.press('Enter');
   assert.equal(await page.locator('#notice-check').getAttribute('data-dismissed'), 'true');
-  await page.evaluate(async () => {
+  const syncPreview = await page.evaluateHandle(async () => {
     const { default: React } = await import('/node_modules/.vite/deps/react.js');
     const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js');
     const { AiWorkspaceErrorNotices } = await import('/src/components/ai/workspace/ai-workspace-error-notices.tsx');
+    const { initI18n, t } = await import('/src/locales/index.ts');
+    const { useAppStore } = await import('/src/stores/appStore.ts');
     const host = document.createElement('div');
     host.id = 'sync-notice-check';
     document.querySelector('#notice-check').replaceChildren(host);
-    ReactDOM.createRoot(host).render(React.createElement(AiWorkspaceErrorNotices, {
+    const root = ReactDOM.createRoot(host);
+    let recovery;
+    const render = () => root.render(React.createElement(AiWorkspaceErrorNotices, {
       syncError: { kind: 'unknown', message: 'Connection interrupted', retryable: true },
-      syncRecovery: { attempts: 3, retrying: false },
-      onRetrySync: async () => { host.dataset.retried = 'true'; },
+      syncRecovery: recovery,
+      onRetrySync: async () => {
+        recovery = { ...recovery, attempts: recovery.attempts + 1, retrying: true };
+        render();
+      },
     }));
+    return {
+      async show(locale) {
+        await initI18n(locale);
+        useAppStore.setState({ locale });
+        recovery = { attempts: 26, retrying: false, lastSyncedAt: Date.now() };
+        render();
+        return { idle: t('ai.error.streamSyncRetry'), busy: t('ai.error.streamSyncRetrying') };
+      },
+      finish() {
+        recovery = { ...recovery, retrying: false };
+        render();
+      },
+    };
   });
   const retry = page.locator('#sync-notice-check button');
+  await syncPreview.evaluate(preview => preview.show('en-US'));
   await retry.waitFor();
   for (const width of [640, 320, 240]) {
     await page.setViewportSize({ width, height: 800 });
@@ -143,9 +164,35 @@ try {
     assert.ok(style.fits);
     await page.locator('#sync-notice-check').screenshot({ path: `/tmp/shellspan-sync-notice-${width}.png` });
   }
-  await retry.focus();
-  await page.keyboard.press('Enter');
-  assert.equal(await page.locator('#sync-notice-check').getAttribute('data-retried'), 'true');
+  const geometry = () => retry.evaluate(button => {
+    const notice = button.closest('[data-ai-error-notice]');
+    const copy = button.parentElement.querySelector(':scope > span');
+    return [notice, copy, button].map(element => {
+      const { x, y, width, height } = element.getBoundingClientRect();
+      return { x, y, width, height };
+    });
+  });
+  for (const locale of ['zh-CN', 'en-US']) {
+    const labels = await syncPreview.evaluate((preview, locale) => preview.show(locale), locale);
+    const idle = page.getByRole('button', { name: labels.idle, exact: true });
+    const busy = page.getByRole('button', { name: labels.busy, exact: true });
+    for (const width of [304, 640, 320, 240]) {
+      await page.setViewportSize({ width, height: 800 });
+      await idle.waitFor();
+      await page.evaluate(() => document.fonts.ready);
+      assert.equal((await idle.innerText()).trim(), labels.idle);
+      const before = await geometry();
+      if (width === 640) await idle.click();
+      else await idle.press('Enter');
+      await busy.waitFor();
+      assert.equal(await busy.isDisabled(), true);
+      assert.equal((await busy.innerText()).trim(), labels.busy);
+      assert.deepEqual(await geometry(), before, `Retry must keep the notice layout stable in ${locale} at ${width}px`);
+      await syncPreview.evaluate(preview => preview.finish());
+      await idle.waitFor();
+      assert.deepEqual(await geometry(), before, `Failed retry must keep the notice layout stable in ${locale} at ${width}px`);
+    }
+  }
 } finally {
   await browser.close();
 }

@@ -14,6 +14,7 @@ import {
   CompactAlertDialogTitle,
 } from '@/components/ui/compact-alert-dialog';
 import { Spinner } from '@/components/ui/spinner';
+import { StableContent } from '@/components/ui/stable-content';
 import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
 
@@ -26,6 +27,8 @@ export interface ConfirmationDialogProps {
   title: React.ReactNode;
   description: React.ReactNode;
   confirmLabel: React.ReactNode;
+  confirmPendingLabel?: React.ReactNode;
+  confirmPendingSizingLabel?: React.ReactNode;
   onConfirm: () => void;
   confirmVariant?: React.ComponentProps<typeof AlertDialogAction>['variant'];
   buttonSize?: React.ComponentProps<typeof AlertDialogAction>['size'];
@@ -46,6 +49,8 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
   title,
   description,
   confirmLabel,
+  confirmPendingLabel,
+  confirmPendingSizingLabel,
   onConfirm,
   confirmVariant = 'default',
   buttonSize = 'sm',
@@ -97,8 +102,25 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
             aria-busy={confirmPending}
             onClick={onConfirm}
           >
-            {confirmPending && !textOnlyActions && <Spinner data-icon="inline-start" aria-hidden="true" />}
-            {confirmLabel}
+            {confirmPendingLabel === undefined ? (
+              <>
+                {confirmPending && !textOnlyActions && <Spinner data-icon="inline-start" aria-hidden="true" />}
+                {confirmLabel}
+              </>
+            ) : (
+              <StableContent
+                className={cn('justify-items-center', confirmPendingSizingLabel !== undefined && 'tabular-nums')}
+                active={confirmPending ? 1 : 0}
+                variants={[confirmLabel,
+                  textOnlyActions ? confirmPendingLabel : (
+                    <span className="inline-flex items-center gap-1">
+                      <Spinner className={confirmPending ? undefined : 'animate-none'} data-icon="inline-start" aria-hidden="true" />
+                      {confirmPendingLabel}
+                    </span>
+                  ), ...(confirmPendingSizingLabel === undefined ? [] : [confirmPendingSizingLabel]),
+                ]}
+              />
+            )}
           </AlertDialogAction>
         </CompactAlertDialogFooter>
       </CompactAlertDialogContent>

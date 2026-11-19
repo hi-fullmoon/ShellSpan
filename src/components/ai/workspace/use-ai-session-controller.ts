@@ -205,7 +205,7 @@ type AiQueueMutationIntent =
 
 export interface AiQueueMutationState {
   readonly intent: AiQueueMutationIntent;
-  readonly status: 'pending' | 'failed';
+  readonly status: 'pending' | 'retrying' | 'failed';
   readonly error: string | null;
   readonly conflict: boolean;
 }
@@ -1664,7 +1664,9 @@ export function useAiSessionController({
     queueOperationRef.current = operation;
     const isCurrent = (): boolean => mountedRef.current && queueOperationRef.current === operation
       && viewRef.current?.summary.id === input.sessionId;
-    setQueueMutation({ intent, status: 'pending', error: null, conflict: false });
+    setQueueMutation(failure => retry && failure?.status === 'failed'
+      ? { ...failure, status: 'retrying' }
+      : { intent, status: 'pending', error: null, conflict: false });
     void adapter.mutateInbox(input).then(
       () => {
         if (!isCurrent()) return;
@@ -2221,7 +2223,7 @@ export function useAiSessionController({
       type: 'reorder', lane, orderedItemIds,
     }),
     retryQueueMutation: () => {
-      if (queueMutation) executeQueueMutation(queueMutation.intent, true);
+      if (queueMutation?.status === 'failed') executeQueueMutation(queueMutation.intent, true);
     },
     renameSession,
     back,

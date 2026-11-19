@@ -17,6 +17,7 @@ export function AiSessionRecordsDeleteAll({ records, disabled, t, onBusyChange, 
 }) {
   const [targets, setTargets] = useState<readonly AgentSessionListItem[] | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
+  const total = targets?.length ?? 0;
   const running = useRef(false);
   const { success, error } = useToast();
 
@@ -59,9 +60,10 @@ export function AiSessionRecordsDeleteAll({ records, disabled, t, onBusyChange, 
         open={targets !== null}
         onOpenChange={(open) => { if (!open && !running.current) setTargets(null); }}
         title={t('settings.ai.records.deleteAllTitle')}
-        description={t('settings.ai.records.deleteAllDescription', { count: targets?.length ?? 0 })}
-        confirmLabel={progress === null ? t('settings.ai.records.deleteAll')
-          : t('settings.ai.records.deletingAll', { count: progress, total: targets?.length ?? 0 })}
+        description={t('settings.ai.records.deleteAllDescription', { count: total })}
+        confirmLabel={t('settings.ai.records.deleteAll')}
+        confirmPendingLabel={t('settings.ai.records.deletingAll', { count: progress ?? 0, total })}
+        confirmPendingSizingLabel={t('settings.ai.records.deletingAll', { count: total, total })}
         confirmVariant="destructive"
         confirmPending={progress !== null}
         confirmDisabled={disabled}

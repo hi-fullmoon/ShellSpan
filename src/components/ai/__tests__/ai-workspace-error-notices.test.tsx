@@ -130,13 +130,19 @@ describe('localized workspace errors', () => {
       syncRecovery={{ attempts: 1, retrying }}
       onRetrySync={async () => { retries++; }}
     />);
-    const button = screen.getByRole('button');
-    expect(button).toHaveTextContent(t(retrying ? 'ai.error.streamSyncRetrying' : 'ai.error.streamSyncRetry'));
+    const button = screen.getByRole('button', {
+      name: t(retrying ? 'ai.error.streamSyncRetrying' : 'ai.error.streamSyncRetry'),
+    });
     expect(button.querySelector('svg')).toBeNull();
     expect(button).toHaveClass('h-6', 'p-0', 'm-0', 'border-0', 'text-[11px]', 'hover:underline');
     expect(button).not.toHaveClass('border', 'bg-background');
-    if (retrying) expect(button).toBeDisabled();
-    else expect(button).toBeEnabled();
+    if (retrying) {
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute('aria-busy', 'true');
+    } else {
+      expect(button).toBeEnabled();
+      expect(button).not.toHaveAttribute('aria-busy');
+    }
     fireEvent.click(button);
     expect(retries).toBe(retrying ? 0 : 1);
   });

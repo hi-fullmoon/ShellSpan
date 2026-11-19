@@ -42,6 +42,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
+import { StableContent } from '@/components/ui/stable-content';
 import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
 import { requestOutputTokenBudget, type DiscoveredModel, type ModelDefinition } from '@/lib/ai/provider-contract';
@@ -268,12 +269,19 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
             variant="ghost"
             size="xs"
             disabled={disabled || discovering}
+            aria-busy={discovering || undefined}
             onClick={() => void openPicker()}
           >
-            {discovering
-              ? <Spinner data-icon="inline-start" />
-              : <RefreshCwIcon data-icon="inline-start" />}
-            {t(discovering ? 'settings.ai.loadingModels' : 'settings.ai.loadModels')}
+            <StableContent className="justify-items-center" active={discovering ? 1 : 0} variants={[
+              <span className="inline-flex items-center gap-1">
+                <RefreshCwIcon data-icon="inline-start" aria-hidden="true" />
+                {t('settings.ai.loadModels')}
+              </span>,
+              <span className="inline-flex items-center gap-1">
+                <Spinner className={discovering ? undefined : 'animate-none'} data-icon="inline-start" aria-hidden="true" />
+                {t('settings.ai.loadingModels')}
+              </span>,
+            ]} />
           </Button>
         </div>
       </div>

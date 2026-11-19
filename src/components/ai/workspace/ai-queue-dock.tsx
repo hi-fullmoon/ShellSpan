@@ -117,7 +117,8 @@ export function AiQueueDock({
   const restoreEditFocus = useRef<string | null>(null);
   const editInput = useRef<HTMLInputElement>(null);
   const submittedEdit = useRef<{ id: string; content: string; draft: string } | null>(null);
-  const pending = mutation?.status === 'pending';
+  const retrying = mutation?.status === 'retrying';
+  const pending = mutation?.status === 'pending' || retrying;
 
   const finishEditing = (): void => {
     restoreEditFocus.current = editingId;
@@ -175,8 +176,8 @@ export function AiQueueDock({
 
   return (
     <div className="flex w-full min-w-0 shrink-0 flex-col gap-3">
-      {mutation?.status === 'failed' && (
-        <AiQueueNotice conflict={mutation.conflict} error={mutation.error} onRetry={onRetry} />
+      {(mutation?.status === 'failed' || retrying) && (
+        <AiQueueNotice conflict={mutation.conflict} error={mutation.error} retrying={retrying} onRetry={onRetry} />
       )}
       {items.length > 0 && <section
       data-slot="ai-queue-dock"

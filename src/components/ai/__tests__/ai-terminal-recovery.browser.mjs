@@ -24,12 +24,20 @@ async function assertNoticeAboveTasks(notice, taskStrip) {
   assert.ok(noticeBox.y + noticeBox.height <= taskBox.y, 'The session notice must be above Tasks');
 }
 
+const geometryOf = notice => notice.evaluate(element => {
+  const origin = element.getBoundingClientRect();
+  return [element, ...element.querySelectorAll('[data-slot="alert-description"], button')].map(child => {
+    const box = child.getBoundingClientRect();
+    return [box.x - origin.x, box.y - origin.y, box.width, box.height];
+  });
+});
+
 try {
   await server.listen();
   for (const engine of [chromium, webkit]) {
     const browser = await engine.launch();
     try {
-      for (const width of [360, 900]) {
+      for (const width of [320, 360, 420, 640, 900]) {
         for (const locale of ['zh-CN', 'en-US']) {
           const page = await browser.newPage({ viewport: { width, height: 720 }, reducedMotion: 'reduce' });
           const errors = [];
@@ -47,6 +55,7 @@ try {
           const notice = page.locator('[data-terminal-recovery-notice]');
           const taskStrip = page.locator('[data-slot="ai-task-strip"]');
           await assertNoticeAboveTasks(notice, taskStrip);
+          await page.evaluate(() => document.fonts.ready);
           const stop = notice.getByRole('button', { name: locale === 'zh-CN' ? '停止任务' : 'Stop task', exact: true });
           const reconnect = notice.getByRole('button', { name: locale === 'zh-CN' ? '重新连接终端' : 'Reconnect terminal', exact: true });
           assert.ok((await notice.textContent()).includes(locale === 'zh-CN' ? '原命令可能已经执行' : 'The original command may still have run'));
@@ -54,20 +63,24 @@ try {
           assert.equal(await page.locator('[data-slot="ai-workspace-status-notices"] [data-slot="alert"]').count(), 1);
           assert.equal(await page.locator('[data-ai-running-indicator] .shimmer').count(), 0);
           await stop.focus();
+          const waiting = await geometryOf(notice);
           await stop.press('Enter');
           assert.deepEqual(await page.evaluate(() => window.recovery.recoveryActions()), ['stop']);
           await page.evaluate(() => window.recovery.recovery('stopping'));
           assert.equal(await notice.locator('button:not(:disabled)').count(), 0);
           assert.equal(await notice.locator('button[aria-busy="true"]').count(), 1);
+          assert.deepEqual(await geometryOf(notice), waiting, 'Stopping must keep the notice and both actions in place');
           await page.evaluate(() => window.recovery.recovery('stopped'));
           assert.equal(await stop.count(), 0);
           assert.equal(await reconnect.isEnabled(), true);
           await reconnect.focus();
+          const stopped = await geometryOf(notice);
           await reconnect.press('Enter');
           assert.deepEqual(await page.evaluate(() => window.recovery.recoveryActions()), ['stop', 'reconnect']);
           await page.evaluate(() => window.recovery.recovery('reconnecting'));
           assert.equal(await notice.locator('button:not(:disabled)').count(), 0);
           assert.equal(await notice.locator('button[aria-busy="true"]').count(), 1);
+          assert.deepEqual(await geometryOf(notice), stopped, 'Reconnecting must keep the notice and action in place');
           const geometry = await notice.evaluate(element => {
             const box = element.getBoundingClientRect();
             const icon = element.querySelector(':scope > svg').getBoundingClientRect();
@@ -86,6 +99,21 @@ try {
           await page.evaluate(() => window.recovery.recovery('disconnected'));
           const unavailable = page.getByRole('status', { name: locale === 'zh-CN' ? 'Agent 当前不可用' : 'Agent is unavailable' });
           await assertNoticeAboveTasks(unavailable, taskStrip);
+
+          const labels = await page.evaluate(() => window.recovery.verifyContinuation(false));
+          const ready = unavailable.getByRole('button', { name: labels.ready, exact: true });
+          const checking = unavailable.getByRole('button', { name: labels.pending, exact: true });
+          await ready.waitFor();
+          const beforeVerification = await geometryOf(unavailable);
+          await ready.press('Enter');
+          assert.equal(await page.evaluate(() => window.recovery.recoveryActions().at(-1)), 'verify');
+          await page.evaluate(() => window.recovery.verifyContinuation(true));
+          assert.equal((await checking.innerText()).trim(), labels.pending);
+          assert.equal(await checking.isDisabled(), true);
+          assert.deepEqual(await geometryOf(unavailable), beforeVerification, 'Verification must keep the notice and action in place');
+          await page.evaluate(() => window.recovery.verifyContinuation(false));
+          await ready.waitFor();
+          assert.deepEqual(await geometryOf(unavailable), beforeVerification, 'A failed verification must keep the same geometry');
           assert.deepEqual(errors, []);
           await page.close();
         }

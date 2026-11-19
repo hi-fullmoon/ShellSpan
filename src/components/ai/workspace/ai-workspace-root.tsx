@@ -2,6 +2,7 @@ import { Activity, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { CircleAlertIcon, InfoIcon, MessageCircleQuestionIcon, TriangleAlertIcon } from 'lucide-react';
 import { ShellSpanGlyph } from '@/components/brand/shellspan-mark';
 import { Spinner } from '@/components/ui/spinner';
+import { StableContent } from '@/components/ui/stable-content';
 
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
@@ -561,14 +562,24 @@ export function AiWorkspaceRoot({
   }, [navigation.returnFocus, onRouteReturnComplete, route.kind]);
 
   // Update the icon inset and text padding in the same render as the action.
+  const verifyingConnection = !terminalConflict && !onReconnectTerminal && Boolean(onContinueOnReconnectedTerminal);
+  const verificationReady = t('ai.workspace.reconnectAvailable');
+  const verificationPending = t('ai.workspace.reconnectChecking');
+  const availabilityDescription = agentUnavailableReason ?? (onContinueOnReconnectedTerminal
+    ? (terminalReconnectBusy ? verificationPending : verificationReady)
+    : t('ai.workspace.sessions.previousTerminalReadOnly'));
   const availabilityAction = terminalConflict ? null
     : onReconnectTerminal ? <AiNoticeAction onClick={onReconnectTerminal}>{t('ai.workspace.status.reconnect')}</AiNoticeAction>
       : onContinueOnReconnectedTerminal ? <AiNoticeAction
         disabled={terminalReconnectBusy}
-        onClick={onContinueOnReconnectedTerminal}>{t(terminalReconnectBusy
-          ? 'ai.workspace.reconnectChecking' : 'ai.workspace.continueOnReconnectedTerminal')}</AiNoticeAction>
+        aria-busy={terminalReconnectBusy || undefined}
+        onClick={onContinueOnReconnectedTerminal}>
+        <StableContent className="justify-items-end" active={terminalReconnectBusy ? 1 : 0}
+          variants={[t('ai.workspace.continueOnReconnectedTerminal'), verificationPending]} />
+      </AiNoticeAction>
         : !readOnlySession && canStartAgent && onOpenModel
           ? <AiNoticeAction onClick={onOpenModel}>{t('ai.workspace.status.openSettings')}</AiNoticeAction> : null;
+  const availabilityCopyClass = cn('min-w-0 flex-1 basis-48', availabilityAction && 'py-1');
 
   return (
     <section
@@ -777,9 +788,11 @@ export function AiWorkspaceRoot({
                       className={availabilityAction ? '[--alert-icon-inset:--spacing(1)]' : undefined}>
                       {terminalConflict ? <TriangleAlertIcon aria-hidden="true" /> : <InfoIcon aria-hidden="true" />}
                       <AlertDescription className="flex min-w-0 flex-wrap items-start gap-1 break-words">
-                        <span className={cn('min-w-0 flex-1 basis-48', availabilityAction && 'py-1')}>{agentUnavailableReason
-                          ?? t(onContinueOnReconnectedTerminal
-                            ? 'ai.workspace.reconnectAvailable' : 'ai.workspace.sessions.previousTerminalReadOnly')}</span>
+                        {verifyingConnection ? (
+                          <StableContent className={availabilityCopyClass} active={0} variants={[
+                            availabilityDescription, terminalReconnectBusy ? verificationReady : verificationPending,
+                          ]} />
+                        ) : <span className={availabilityCopyClass}>{availabilityDescription}</span>}
                         {availabilityAction}
                       </AlertDescription>
                     </Alert>

@@ -399,9 +399,8 @@ export function RemoteHealthSection(): React.JSX.Element {
             ? `${authorizationProfile.username}@${authorizationProfile.host}:${authorizationProfile.port}`
             : '',
         })}
-        confirmLabel={t(authorizationPending
-          ? 'remoteHealth.preparing'
-          : 'remoteHealth.authorization.confirm')}
+        confirmLabel={t('remoteHealth.authorization.confirm')}
+        confirmPendingLabel={t('remoteHealth.preparing')}
         confirmPending={authorizationPending}
         media={<ShieldCheckIcon />}
         onConfirm={() => void confirmAuthorization()}

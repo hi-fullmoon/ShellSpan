@@ -102,7 +102,7 @@ describe('RemoteHealthSection authorization', () => {
     const confirm = within(dialog).getByRole('button', {
       name: 'remoteHealth.authorization.confirm',
     });
-    expect(confirm.querySelector('svg')).toBeNull();
+    expect(confirm.querySelector('[data-slot="spinner"]')?.parentElement?.closest('[aria-hidden="true"]')).toBeInTheDocument();
     fireEvent.click(confirm);
 
     await waitFor(() => expect(collect).toHaveBeenCalledOnce());

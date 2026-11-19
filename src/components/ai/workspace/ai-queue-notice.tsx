@@ -8,9 +8,10 @@ import { AiToolCopyButton } from './ai-tool-presentation';
 import { AiNoticeAction } from './ai-notice-action';
 import { AI_CONTENT_CODE_CLASS, AI_NOTICE_ACTION_ROW_CLASS, AI_NOTICE_COPY_CLASS, AI_NOTICE_COPY_WITH_ACTION_CLASS } from './ai-style-classes';
 
-export function AiQueueNotice({ conflict, error, onRetry }: {
+export function AiQueueNotice({ conflict, error, retrying = false, onRetry }: {
   readonly conflict: boolean;
   readonly error: string | null;
+  readonly retrying?: boolean;
   readonly onRetry?: () => void;
 }): React.ReactNode {
   const { t } = useI18n();
@@ -26,11 +27,11 @@ export function AiQueueNotice({ conflict, error, onRetry }: {
           <span className={cn(AI_NOTICE_COPY_CLASS, onRetry && AI_NOTICE_COPY_WITH_ACTION_CLASS)}>
             {t(conflict ? 'ai.workspace.queue.conflictHint' : 'ai.workspace.queue.failureHint')}
           </span>
-          {onRetry && <AiNoticeAction onClick={onRetry}>
+          {onRetry && <AiNoticeAction onClick={onRetry} disabled={retrying} aria-busy={retrying || undefined}>
             {t('common.retry')}
           </AiNoticeAction>}
         </div>
-        {error && <Collapsible key={error} className="min-w-0">
+        {error && <Collapsible className="min-w-0">
           <CollapsibleTrigger render={<AiNoticeAction />}>
             {t('ai.workspace.queue.errorDetails')}
           </CollapsibleTrigger>

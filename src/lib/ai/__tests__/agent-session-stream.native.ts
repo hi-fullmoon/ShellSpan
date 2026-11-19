@@ -243,7 +243,7 @@ async function verify(): Promise<void> {
         await new Promise(requestAnimationFrame);
         const button = container.querySelector('button')!;
         const alert = container.querySelector('[data-ai-error-notice]')!;
-        assert(button.textContent?.includes(t('ai.error.streamSyncRetry')), 'Retry control is not readable');
+        assert(button.innerText.trim() === t('ai.error.streamSyncRetry'), 'Retry control is not readable');
         assert(button.getBoundingClientRect().right <= alert.getBoundingClientRect().right,
           'Retry control overflows the synchronization notice');
         assert(container.scrollWidth <= width + 1, 'Synchronization notice overflows its narrow container');
@@ -254,7 +254,7 @@ async function verify(): Promise<void> {
     const button = container.querySelector('button')!;
     button.click();
     assert(button.disabled && button.getAttribute('aria-busy') === 'true', 'Manual retry has no disabled busy feedback');
-    assert(button.textContent?.includes(t('ai.error.streamSyncRetrying')), 'Retry progress label is missing');
+    assert(button.innerText.trim() === t('ai.error.streamSyncRetrying'), 'Retry progress label is missing');
     await eventually(() => recoveryHeld, 'Manual retry did not immediately reach native storage');
     const retryReads = recoveryReads;
     button.click();
