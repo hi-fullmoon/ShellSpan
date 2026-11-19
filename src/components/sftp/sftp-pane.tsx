@@ -509,19 +509,19 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
               <span className="truncate text-sm font-semibold text-app-text">{paneTitle}</span>
             </div>
           )}
-          <div className="flex items-center gap-1.5">
-            {/* The fixed-width inner row is revealed by the transition.
-                Paint the frame above it so the button hover cannot cover the border. */}
+          <div className="ml-auto flex min-w-0 items-center justify-end gap-1.5">
+            {/* Clip without scrolling so focusing the input during expansion
+                keeps the search icon against the left edge. */}
             <div
               data-slot="sftp-filter"
               className={cn(
-                'relative h-[30px] overflow-hidden rounded-md transition-[width,background-color] duration-200 ease-out',
+                'relative h-[30px] min-w-7 overflow-clip rounded-md transition-[width,background-color] duration-200 ease-out',
                 showSearch
                   ? 'w-46 dark:bg-app-surface-muted after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] not-dark:after:inset-ring-1 not-dark:after:inset-ring-input not-dark:focus-within:after:inset-ring-ring'
                   : 'w-7 bg-transparent',
               )}
             >
-              <div className="flex h-full w-46 items-center">
+              <div className="flex h-full w-full items-center">
                 <Button
                   type="button"
                   variant="ghost"

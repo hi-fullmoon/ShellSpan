@@ -152,10 +152,38 @@ async function assertFileListFocus(page, row, selected, locale) {
 
 async function assertFilterBorders(page, width, locale) {
   await page.setViewportSize({ width, height: 480 });
-  await page.getByRole('button', { name: locale === 'en-US' ? 'Show Filter' : '显示筛选' }).click();
+  const frame = page.locator('[data-slot="sftp-filter"]');
+  await frame.waitFor();
+  const samples = await frame.evaluate(async element => {
+    const button = element.querySelector('button');
+    const measure = () => {
+      const { left, right } = element.getBoundingClientRect();
+      return { left, right, iconOffset: button.getBoundingClientRect().left - left };
+    };
+    const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
+    await Promise.all(element.getAnimations().map(animation => animation.finished));
+    const samples = [measure()];
+    button.click();
+    await nextFrame();
+    samples.push(measure());
+    const transition = element.getAnimations().find(animation => animation.transitionProperty === 'width');
+    if (!transition) throw new Error('The filter did not animate its width');
+    while (transition.playState === 'running') {
+      await nextFrame();
+      samples.push(measure());
+    }
+    return samples;
+  });
+  assert.ok(samples.at(-1).left < samples[0].left, 'The filter grows to the left');
+  for (const [index, sample] of samples.entries()) {
+    assert.ok(Math.abs(sample.right - samples[0].right) < 0.25, 'The right edge stays fixed throughout expansion');
+    assert.ok(Math.abs(sample.iconOffset) < 0.25, 'Input focus does not scroll the search icon out of the frame');
+    if (index > 0) {
+      assert.ok(sample.left <= samples[index - 1].left + 0.25, 'The left edge moves only left while expanding');
+    }
+  }
   const input = page.getByRole('textbox', { name: locale === 'en-US' ? 'Filter' : '筛选' });
   const icon = page.getByRole('button', { name: locale === 'en-US' ? 'Hide Filter' : '隐藏筛选' });
-  const frame = input.locator('xpath=../..');
   await icon.hover();
   assert.ok(await input.evaluate(element => element === document.activeElement), 'Opening the filter focuses its input');
   const screenshot = await loadImage(await frame.screenshot({ animations: 'disabled' }));
