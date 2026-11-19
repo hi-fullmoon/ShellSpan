@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
+import { useContextMenuNavigation } from '@/hooks/useContextMenuNavigation';
 import { useI18n } from '@/hooks/useI18n';
 import { useViewportConstrainedPosition } from '@/hooks/useViewportConstrainedPosition';
 import type { SftpSide } from '@/stores/sftpStore';
@@ -53,13 +54,14 @@ const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, icon, children }
   <button
     type="button"
     role="menuitem"
+    tabIndex={-1}
     onClick={onClick}
     disabled={disabled}
     className={cn(
       'flex w-full items-center gap-1 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors',
       disabled
         ? 'pointer-events-none text-app-text-soft opacity-40'
-        : 'text-app-text hover:bg-accent hover:text-app-primary',
+        : 'text-app-text focus:bg-accent focus:text-app-primary focus-visible:outline-hidden!',
     )}
   >
     <span className="flex size-3.5 shrink-0 items-center justify-center text-muted-foreground">
@@ -85,6 +87,7 @@ export const SftpBlankContextMenu: React.FC<SftpBlankContextMenuProps> = ({
   const { t } = useI18n();
   const { menuRef, position } =
     useViewportConstrainedPosition<HTMLDivElement>(open, x, y);
+  const navigation = useContextMenuNavigation(menuRef, open);
 
   useEffect(() => {
     if (!open) return;
@@ -123,6 +126,7 @@ export const SftpBlankContextMenu: React.FC<SftpBlankContextMenuProps> = ({
       role="menu"
       className="fixed z-[1700] max-h-[calc(100vh-1rem)] w-56 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto rounded-lg border border-app-border bg-app-surface p-1 shadow-[var(--shadow-dialog)]"
       style={position}
+      {...navigation}
     >
         {!isLocal && (
           <>

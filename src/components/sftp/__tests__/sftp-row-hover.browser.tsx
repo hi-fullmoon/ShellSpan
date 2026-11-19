@@ -4,10 +4,11 @@ import { SftpFileList } from '../sftp-file-list';
 import { SftpPane } from '../sftp-pane';
 import type { FileEntry } from '../utils';
 import { SectionNav } from '@/components/titlebar/section-nav';
+import { SplitPane } from '@/components/ui/split-pane';
 import { useSftpPaneActions } from '@/hooks/useSftpPaneActions';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
-import { useSftpStore } from '@/stores/sftpStore';
+import { useSftpStore, type SftpSide } from '@/stores/sftpStore';
 import type { Locale } from '@/types';
 import '@/styles/base.css';
 
@@ -44,17 +45,22 @@ export async function mountList(entries: FileEntry[], locale: Locale, currentPat
   root.render(<List />);
 }
 
-export function mountLocalPane(path: string) {
+export function mountLocalPane(path: string, split = false) {
   const store = useSftpStore.getState();
   store.addLocalConnection();
   const id = useSftpStore.getState().activeConnectionId!;
   store.setPath(id, 'local', path);
-  function LocalPane() {
+  if (split) {
+    store.setPaneLocal(id, 'remote');
+    store.setPath(id, 'remote', path);
+  }
+  function LocalPane({ side }: { side: SftpSide }) {
     const connection = useSftpStore(state => state.connections.find(item => item.id === id)!);
-    const actions = useSftpPaneActions(connection, 'local');
+    const actions = useSftpPaneActions(connection, side);
     const [selectedPaths, onSelectedPathsChange] = useState(new Set<string>());
-    return <SftpPane connection={connection} side="local" actions={actions}
+    return <SftpPane connection={connection} side={side} actions={actions} localMode
       selectedPaths={selectedPaths} onSelectedPathsChange={onSelectedPathsChange} />;
   }
-  root.render(<LocalPane />);
+  root.render(split ? <SplitPane className="sftp-split-pane" minWidth={500}
+    left={<LocalPane side="local" />} right={<LocalPane side="remote" />} /> : <LocalPane side="local" />);
 }

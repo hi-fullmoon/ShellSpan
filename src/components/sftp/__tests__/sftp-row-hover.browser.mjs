@@ -200,6 +200,46 @@ async function assertFilterBorders(page, width, locale) {
   await page.getByRole('button', { name: locale === 'en-US' ? 'Show Filter' : '显示筛选' }).waitFor();
 }
 
+async function assertSplitDividerFocus(page, engineName, locale, width) {
+  await page.setViewportSize({ width, height: 480 });
+  const divider = page.locator('[data-slot="split-pane-divider"]');
+  await divider.waitFor();
+  await page.mouse.move(width - 1, 0);
+  const tab = tabKey(engineName);
+  const initial = await divider.boundingBox();
+  assert.equal(initial.width, 1, 'The SFTP separator occupies a single pixel');
+  await divider.focus();
+  await page.keyboard.press(`Shift+${tab}`);
+  await page.keyboard.press(tab);
+  assert.ok(await divider.evaluate(element => element.matches(':focus-visible')), 'Tab focuses the SFTP separator');
+  assert.deepEqual(await divider.boundingBox(), initial, 'Focus keeps the split geometry');
+
+  for (const [theme, color] of [['light', 'rgb(40, 40, 40)'], ['dark', 'rgb(179, 179, 184)']]) {
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    const appearance = await divider.evaluate(element => {
+      const { outlineStyle, backgroundColor } = getComputedStyle(element);
+      return { outlineStyle, backgroundColor, indicatorColor: getComputedStyle(element, '::after').backgroundColor };
+    });
+    assert.deepEqual(appearance, {
+      outlineStyle: 'none', backgroundColor: color, indicatorColor: 'rgba(0, 0, 0, 0)',
+    }, `${engineName}/${theme}/${width}: focus highlights only the divider line`);
+    await page.screenshot({ path: join(artifacts, `${engineName}-${locale}-${theme}-${width}-split-focus.png`) });
+  }
+
+  await page.keyboard.press('ArrowRight');
+  const resized = await divider.boundingBox();
+  assert.ok(resized.x > initial.x, 'Arrow Right resizes the focused split');
+  await divider.evaluate(element => element.blur());
+  assert.notEqual(await divider.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(179, 179, 184)',
+    'The separator returns to its resting color after blur');
+  const y = resized.y + resized.height / 2;
+  await page.mouse.move(resized.x + resized.width / 2, y);
+  await page.mouse.down();
+  await page.mouse.move(initial.x + initial.width / 2, y);
+  await page.mouse.up();
+  assert.ok(Math.abs((await divider.boundingBox()).x - initial.x) <= 1, 'Dragging restores the original split');
+}
+
 try {
   await server.listen();
   for (const engine of [chromium, webkit]) {
@@ -274,6 +314,11 @@ try {
           mountLocalPane(root);
         }, root);
         for (const width of [960, 380]) await assertFilterBorders(page, width, locale);
+        await page.evaluate(async path => {
+          const { mountLocalPane } = await import('/src/components/sftp/__tests__/sftp-row-hover.browser.tsx');
+          mountLocalPane(path, true);
+        }, root);
+        for (const width of [1400, 1080]) await assertSplitDividerFocus(page, engine.name(), locale, width);
         assert.deepEqual(errors, []);
         await page.close();
       }
@@ -281,7 +326,7 @@ try {
       await browser.close();
     }
   }
-  console.log(`SFTP hover checks passed in Chromium/WebKit, both themes and languages, at 380px/960px. Screenshots: ${artifacts}`);
+  console.log(`SFTP hover and split focus checks passed in Chromium/WebKit, both themes and languages. Screenshots: ${artifacts}`);
 } finally {
   await server.close();
 }

@@ -873,6 +873,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
         />
         <div className="flex-1 min-h-0">
           <SplitPane
+            className="sftp-split-pane"
             minWidth={500}
             split={connection.splitRatio}
             onSplitChange={(ratio) => setSplitRatio(connection.id, ratio)}

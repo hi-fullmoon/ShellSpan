@@ -24,6 +24,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
+import { useContextMenuNavigation } from '@/hooks/useContextMenuNavigation';
 import { useI18n } from '@/hooks/useI18n';
 import { useViewportConstrainedPosition } from '@/hooks/useViewportConstrainedPosition';
 import type { SftpSide } from '@/stores/sftpStore';
@@ -76,13 +77,14 @@ const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, icon, children, 
   <button
     type="button"
     role="menuitem"
+    tabIndex={-1}
     onClick={onClick}
     disabled={disabled}
     className={cn(
-      'flex w-full items-center gap-1 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors disabled:pointer-events-none disabled:opacity-40',
+      'flex w-full items-center gap-1 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors focus-visible:outline-hidden! disabled:pointer-events-none disabled:opacity-40',
       danger
-        ? 'text-app-error hover:bg-destructive/10 dark:hover:bg-destructive/20'
-        : 'text-app-text hover:bg-accent hover:text-app-primary',
+        ? 'text-app-error focus:bg-destructive/10 dark:focus:bg-destructive/20'
+        : 'text-app-text focus:bg-accent focus:text-app-primary',
     )}
   >
     <span className={cn('flex size-3.5 shrink-0 items-center justify-center', !danger && 'text-muted-foreground')}>
@@ -108,6 +110,7 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
   const { t } = useI18n();
   const { menuRef, position } = useViewportConstrainedPosition<HTMLDivElement>(open, x, y);
   const [deleteTargets, setDeleteTargets] = useState<FileEntry[]>([]);
+  const navigation = useContextMenuNavigation(menuRef, open && deleteTargets.length === 0);
 
   useEffect(() => {
     if (!open) return;
@@ -176,6 +179,7 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
         role="menu"
         className="fixed z-[1700] max-h-[calc(100vh-1rem)] w-56 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto rounded-lg border border-app-border bg-app-surface p-1 shadow-[var(--shadow-dialog)]"
         style={position}
+        {...navigation}
       >
       {!isLocal && (
         <>
