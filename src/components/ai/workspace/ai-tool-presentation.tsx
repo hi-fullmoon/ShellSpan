@@ -146,6 +146,8 @@ function classifyAiToolName(name: string): AiToolVariant {
 const EXACT_TOOL_VARIANTS: Readonly<Record<string, AiToolVariant>> = {
   apply_patch: 'edit',
   exec_command: 'terminal',
+  insert_vim_text: 'edit',
+  inspect_vim_buffer: 'read',
   kill_process: 'terminal',
   list_directory: 'read',
   update_plan: 'plan',
@@ -153,6 +155,7 @@ const EXACT_TOOL_VARIANTS: Readonly<Record<string, AiToolVariant>> = {
   read_file: 'read',
   read_terminal: 'terminal',
   run_terminal_command: 'terminal',
+  save_vim_buffer: 'write',
   search_text: 'search',
   terminal_execute: 'terminal',
   wait_process: 'terminal',

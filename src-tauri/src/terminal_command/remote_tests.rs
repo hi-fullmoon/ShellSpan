@@ -102,7 +102,7 @@ fn remote_early_core_preserved(session: &Session, owner: &Path, evidence: &Path)
     let mut pty = session.channel_session().unwrap();
     pty.request_pty("xterm-256color", None, Some((100, 30, 0, 0)))
         .unwrap();
-    native.start_shell(&mut pty).unwrap();
+    native.start_shell(&mut pty, None).unwrap();
     session.set_blocking(false);
     let mut raw = Vec::new();
     let mut records = Vec::new();
@@ -271,7 +271,7 @@ fn production_remote_zle_parent_parser_and_background() {
     let mut pty = session.channel_session().unwrap();
     pty.request_pty("xterm-256color", None, Some((columns, 30, 0, 0)))
         .unwrap();
-    native.start_shell(&mut pty).unwrap();
+    native.start_shell(&mut pty, None).unwrap();
     session.set_blocking(false);
     let connection = nip::ConnectionIdentity {
         terminal_session_id: "p3-ssh-zle".into(),

@@ -45,6 +45,7 @@ use crate::{
         quote_remote_posix, remote_posix_bootstrap, TerminalIntegrationStreamDecoder,
         TerminalShellKind,
     },
+    terminal_vim_bridge::{EditorWrite, RemoteVimBridge},
 };
 
 const SSH_IDLE_WAIT_SLICE_MS: u64 = 20;
@@ -208,11 +209,11 @@ impl RemoteSshShellIntegration {
         })
     }
 
-    fn start_shell(&self, shell_channel: &mut Channel) -> Result<(), String> {
+    fn start_shell(&self, shell_channel: &mut Channel, bridge: Option<&str>) -> Result<(), String> {
         let command =
             remote_integrated_shell_command(self.shell, &self.shell_executable, &self.remote_root)?;
         shell_channel
-            .exec(&command)
+            .exec(&with_vim_bridge(bridge, command))
             .map_err(|error| format!("failed to start integrated remote shell: {error}"))
     }
 
@@ -242,6 +243,16 @@ impl RemoteSshShellIntegration {
         let _ = self.control.send_eof();
         let _ = self.control.close();
         self.cleanup_files(session);
+    }
+}
+
+fn with_vim_bridge(bridge: Option<&str>, command: String) -> String {
+    match bridge {
+        Some(path) => format!(
+            "export SHELLSPAN_VIM_BRIDGE={}\n{command}",
+            quote_remote_posix(path)
+        ),
+        None => command,
     }
 }
 
@@ -641,6 +652,7 @@ fn start_ssh_native_or_fallback(
     session_id: &str,
     initial_output: &mut Vec<u8>,
     initial_input: Option<&str>,
+    vim_source: Option<&str>,
 ) -> Result<Option<SshNativeStartup>, ConnectionError> {
     let prepared = native.as_mut().expect("native resources prepared");
     let private_bash = prepared.uses_private_bash();
@@ -652,7 +664,7 @@ fn start_ssh_native_or_fallback(
         )
         .map_err(|message| ConnectionError::Other { message })?;
     let started = Instant::now();
-    let startup = prepared.start_shell(channel).and_then(|()| {
+    let startup = prepared.start_shell(channel, vim_source).and_then(|()| {
         session.set_blocking(false);
         queue_initial_ssh_directory(session, channel, initial_input)?;
         wait_for_native_ssh_startup(
@@ -947,6 +959,20 @@ pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
         } else {
             (None, None)
         };
+    let mut vim_bridge = if native_integration.is_some() || remote_integration.is_some() {
+        let timeout = session.timeout();
+        session.set_timeout(if timeout == 0 {
+            1500
+        } else {
+            timeout.min(1500)
+        });
+        let bridge = RemoteVimBridge::prepare(&session).ok();
+        session.set_timeout(timeout);
+        bridge
+    } else {
+        None
+    };
+    let vim_source = vim_bridge.as_ref().map(RemoteVimBridge::source_path);
 
     let aborted = Cell::new(false);
     let result = with_remote_integration_cleanup(
@@ -992,12 +1018,15 @@ pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
                             session_id,
                             &mut initial_output,
                             initial_input.as_deref(),
+                            vim_source.as_deref(),
                         )?;
                         if startup.is_none() {
                             native_failure = Some("TERMINAL_NATIVE_SHELL_START_FAILED".into());
                         }
                     } else if let Some(integration) = remote_integration.as_ref() {
-                        if let Err(message) = integration.start_shell(channel) {
+                        if let Err(message) =
+                            integration.start_shell(channel, vim_source.as_deref())
+                        {
                             warn!(
                             "Integrated remote shell startup failed; using ordinary SSH shell session_id={session_id}"
                         );
@@ -1123,6 +1152,13 @@ pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
                         observe_terminal_raw_output(app, session_id, bytes);
                     }
 
+                    if integration_failure.is_none() && native_failure.is_none() {
+                        if let Some(bridge) = vim_bridge.as_ref() {
+                            let _ = sessions.register_vim_bridge(session_id, bridge.client());
+                        }
+                    } else {
+                        vim_bridge.take();
+                    }
                     publish_ssh_connection_ready(
                         || {
                             app.emit(crate::SSH_STATUS_EVENT, ready_event)
@@ -1146,6 +1182,7 @@ pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
                         &output_paused,
                         remote_integration.as_mut(),
                         native_integration.as_mut(),
+                        &mut vim_bridge,
                         initial_output,
                         &aborted,
                     )
@@ -1389,6 +1426,7 @@ fn session_loop(
     output_paused: &AtomicBool,
     remote_integration: Option<&mut RemoteSshShellIntegration>,
     native_integration: Option<&mut RemoteNativeBash>,
+    vim_bridge: &mut Option<RemoteVimBridge>,
     initial_pty_output: Vec<u8>,
     aborted: &Cell<bool>,
 ) -> Result<Option<String>, String> {
@@ -1412,6 +1450,7 @@ fn session_loop(
         &mut output_live,
         remote_integration,
         native_integration,
+        vim_bridge,
         aborted,
     );
     // Emit whatever decoded output remains so the final screen state is not
@@ -1446,6 +1485,7 @@ enum SshPayload {
     Pty(Vec<u8>),
     Native(NativeControlFrame),
     TtyReply { bytes: Vec<u8>, native: bool },
+    Vim(EditorWrite),
 }
 
 enum SshWrite {
@@ -1466,6 +1506,7 @@ impl SshWrite {
         pty: &mut Channel,
         native: Option<&mut Channel>,
         legacy: Option<&mut Channel>,
+        vim: Option<&mut Channel>,
     ) -> std::io::Result<bool> {
         match self {
             Self::Resize { cols, rows } => pty
@@ -1477,6 +1518,12 @@ impl SshWrite {
                     SshPayload::Pty(_) => Some(pty),
                     SshPayload::Native(_) | SshPayload::TtyReply { native: true, .. } => native,
                     SshPayload::TtyReply { native: false, .. } => legacy,
+                    SshPayload::Vim(frame) => {
+                        if vim.is_none() || !frame.begin() {
+                            return Ok(true);
+                        }
+                        vim
+                    }
                 };
                 let Some(target) = target else {
                     return Ok(true);
@@ -1508,6 +1555,7 @@ enum SshRetry {
     Write,
     NativeRead,
     LegacyRead,
+    VimRead,
     PtyRead,
 }
 
@@ -1516,6 +1564,7 @@ impl SshPayload {
         match self {
             Self::Pty(bytes) | Self::TtyReply { bytes, .. } => bytes,
             Self::Native(frame) => &frame.bytes,
+            Self::Vim(frame) => &frame.bytes,
         }
     }
 
@@ -1538,11 +1587,12 @@ fn advance_ssh_write_queue(
     pty: &mut Channel,
     native: Option<&mut Channel>,
     legacy: Option<&mut Channel>,
+    vim: Option<&mut Channel>,
 ) -> std::io::Result<Option<SshWrite>> {
     let Some(write) = writes.front_mut() else {
         return Ok(None);
     };
-    if !write.advance(pty, native, legacy)? {
+    if !write.advance(pty, native, legacy, vim)? {
         return Ok(None);
     }
     let completed = writes.pop_front();
@@ -1593,6 +1643,7 @@ fn session_loop_inner(
     output_live: &mut bool,
     mut remote_integration: Option<&mut RemoteSshShellIntegration>,
     mut native_integration: Option<&mut RemoteNativeBash>,
+    vim_bridge: &mut Option<RemoteVimBridge>,
     aborted: &Cell<bool>,
 ) -> Result<Option<String>, String> {
     let mut buffer = [0u8; 8192];
@@ -1696,6 +1747,13 @@ fn session_loop_inner(
             }
         }
 
+        if let Some(frame) = vim_bridge.as_mut().and_then(RemoteVimBridge::next_write) {
+            writes.push_back(SshWrite::Data {
+                payload: SshPayload::Vim(frame),
+                offset: 0,
+            });
+        }
+
         // libssh2 can retain an encrypted packet for the entire session after
         // EAGAIN. Retry its originating operation before making another one
         // that could send on the socket, even on a different SSH channel.
@@ -1727,6 +1785,7 @@ fn session_loop_inner(
                     .as_deref_mut()
                     .filter(|integration| integration.active)
                     .map(|integration| &mut integration.control),
+                vim_bridge.as_mut().map(|bridge| &mut bridge.channel),
             );
             match result {
                 Ok(_completed) => {
@@ -1783,6 +1842,12 @@ fn session_loop_inner(
                         }) => remote_integration
                             .as_deref()
                             .is_some_and(|integration| integration.control.eof()),
+                        Some(SshWrite::Data {
+                            payload: SshPayload::Vim(_),
+                            ..
+                        }) => vim_bridge
+                            .as_ref()
+                            .is_some_and(|bridge| bridge.channel.eof()),
                         _ => false,
                     };
                     if control_eof && !ssh_wants_write(session) {
@@ -1829,6 +1894,39 @@ fn session_loop_inner(
                     drain_remote_integration_control(app, session_id, session, integration)?;
                 if integration.active && ssh_wants_write(session) {
                     retry = Some(SshRetry::LegacyRead);
+                }
+            }
+        }
+
+        if matches!(retry, None | Some(SshRetry::VimRead)) {
+            retry = None;
+            if let Some(bridge) = vim_bridge.as_mut() {
+                let result = bridge.drain();
+                if result != Ok(false) {
+                    if let Some(runtime) = app.try_state::<crate::agent_runtime::AgentRuntime>() {
+                        if runtime
+                            .terminal_broker()
+                            .set_vim_attached(session_id, result.is_ok() && bridge.attached())
+                            == Ok(true)
+                        {
+                            crate::commands::emit_terminal_integration_state(app, session_id);
+                        }
+                    }
+                }
+                match result {
+                    Ok(progress) => {
+                        made_progress |= progress;
+                        if ssh_wants_write(session) {
+                            retry = Some(SshRetry::VimRead);
+                        }
+                    }
+                    Err(()) if ssh_wants_write(session) => {
+                        abort_ssh_transport(session, aborted);
+                        return Err("SSH editor relay closed with a packet in flight".into());
+                    }
+                    Err(()) => {
+                        vim_bridge.take();
+                    }
                 }
             }
         }
@@ -1936,6 +2034,11 @@ fn session_loop_inner(
         }
 
         // Wake for the socket, queued commands, or the next retry deadline.
+        if vim_bridge.as_ref().is_some_and(|bridge| {
+            bridge.channel.read_window().available > 0 || bridge.channel.eof()
+        }) {
+            continue;
+        }
         wait_for_terminal_session_events(
             session,
             channel,

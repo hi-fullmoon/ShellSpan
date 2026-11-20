@@ -310,6 +310,10 @@ pub(crate) trait NativeToolRuntime: Send + Sync {
         false
     }
 
+    fn vim_bridge_available(&self, _terminal_id: &str) -> bool {
+        false
+    }
+
     fn list_file_references(
         &self,
         request: super::file_references::FileReferenceRequest,
@@ -556,6 +560,11 @@ impl NativeToolRuntime for NativeToolRuntimeSlot {
     fn terminal_interactive_tools_enabled(&self, remote_target: bool) -> bool {
         self.runtime()
             .is_ok_and(|runtime| runtime.terminal_interactive_tools_enabled(remote_target))
+    }
+
+    fn vim_bridge_available(&self, terminal_id: &str) -> bool {
+        self.runtime()
+            .is_ok_and(|runtime| runtime.vim_bridge_available(terminal_id))
     }
 
     fn list_file_references(
@@ -821,6 +830,12 @@ impl AgentToolPipeline {
         self.native.terminal_interactive_tools_enabled(
             target.is_some_and(|target| target.kind == "remote"),
         )
+    }
+
+    pub(crate) fn vim_bridge_available(&self, target: Option<&AgentSessionTarget>) -> bool {
+        target.is_some_and(|target| {
+            target.kind == "remote" && self.native.vim_bridge_available(&target.session_id)
+        })
     }
 
     pub(crate) fn sync_terminal_execution_context(
@@ -2334,6 +2349,7 @@ impl AgentToolPipeline {
                             "retryable": false,
                             "recoveryAction": "inspectErrorAndCorrectRequest",
                             "inputSchema": super::model_tools::default_model_tools().into_iter()
+                                .chain(super::model_tools::vim_model_tools())
                                 .find(|tool| tool.name == request.model_call.name)
                                 .map(|tool| tool.input_schema),
                         })) },

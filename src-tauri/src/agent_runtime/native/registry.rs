@@ -7,7 +7,7 @@ use crate::agent_runtime::{
     AgentToolEffectModeNative, AGENT_TOOL_MANIFEST, NATIVE_TOOL_CONTRACT_VERSION,
 };
 
-const IMPLEMENTED_NATIVE_TOOLS: [&str; 21] = [
+const IMPLEMENTED_NATIVE_TOOLS: [&str; 24] = [
     "inspect_host",
     "inspect_service",
     "query_logs",
@@ -19,6 +19,9 @@ const IMPLEMENTED_NATIVE_TOOLS: [&str; 21] = [
     "read_terminal",
     "write_terminal_input",
     "wait_terminal",
+    crate::terminal_vim_bridge::INSPECT,
+    crate::terminal_vim_bridge::INSERT,
+    crate::terminal_vim_bridge::SAVE,
     "write_stdin",
     "wait_process",
     "kill_process",

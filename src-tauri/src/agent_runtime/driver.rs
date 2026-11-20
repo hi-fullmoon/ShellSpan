@@ -760,6 +760,7 @@ async fn apply_pre_step_hooks(
         model_tools_for(
             entry,
             tools.terminal_interactive_tools_enabled(snapshot.header.target.as_ref()),
+            tools.vim_bridge_available(snapshot.header.target.as_ref()),
         ),
     );
     scope_current_task_context(sessions, &snapshot, &mut assembly)?;
@@ -1060,6 +1061,7 @@ async fn run_step(
                 model_tools_for(
                     entry,
                     tools.terminal_interactive_tools_enabled(snapshot.header.target.as_ref()),
+                    tools.vim_bridge_available(snapshot.header.target.as_ref()),
                 ),
             );
             scope_current_task_context(sessions, &snapshot, &mut assembly)?;
@@ -1876,8 +1878,12 @@ fn ensure_model_context(
 fn model_tools_for(
     entry: &AgentEntry,
     interactive_terminal_enabled: bool,
+    vim_bridge_available: bool,
 ) -> Vec<super::ModelToolDefinition> {
-    let tools = model_tools_with_terminal_interaction(interactive_terminal_enabled);
+    let mut tools = model_tools_with_terminal_interaction(interactive_terminal_enabled);
+    if vim_bridge_available {
+        tools.extend(super::model_tools::vim_model_tools());
+    }
     let Some(scope) = &entry.capability_scope else {
         return tools;
     };

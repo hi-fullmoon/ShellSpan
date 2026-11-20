@@ -9,8 +9,8 @@
     "contractVersion": { "const": 3 },
     "tools": {
       "type": "array",
-      "minItems": 21,
-      "maxItems": 21,
+      "minItems": 24,
+      "maxItems": 24,
       "items": { "$ref": "#/$defs/toolDescriptor" }
     }
   },

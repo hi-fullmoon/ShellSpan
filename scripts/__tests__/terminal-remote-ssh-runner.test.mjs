@@ -59,13 +59,15 @@ describe('Terminal remote SSH runner contracts', () => {
     expect(runner).toContain('remote_control_failure_cleans_files_without_blocking_the_user_shell');
     expect(runner).toContain('remote_bound_terminal_bash_reuses_source_shell_acceptance');
     expect(runner).toContain('remote_bound_terminal_zsh_reuses_source_shell_smoke');
+    expect(runner).toContain('isolated_ssh_vim_bridge_edits_and_verifies_both_editors');
+    expect(runner).toContain('isolated_ssh_vim_bridge_guards_disk_versions_and_resumes');
     expect(runner).toContain('isolated_ssh_input_timeout_disconnect_and_reconnect_do_not_replay');
     expect(runner).toContain('ordinary_ssh_unsupported_shell_is_unavailable_without_a_second_transport');
     expect(runner).toContain('ordinary_ssh_without_sftp_falls_back_to_a_usable_shell');
     expect(runner).toContain('remote_integration_scope_cleans_resources_after_post_prepare_failure');
     expect(runner).toContain('isolated_ssh_sftp_end_to_end_reviewed_execution_uname');
     expect(sessionTests).toContain('.request_pty("xterm-256color"');
-    expect(sessionTests).toContain('.start_shell(&mut shell_channel)');
+    expect(sessionTests).toContain('.start_shell(&mut shell_channel, vim_source)');
     expect(session).toContain('exec env HOME={} {} -il');
     expect(session).toContain('ZDOTDIR=');
     expect(session).toContain('.shellspan-terminal-integration-');

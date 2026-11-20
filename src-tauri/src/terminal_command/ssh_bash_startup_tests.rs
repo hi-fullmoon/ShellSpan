@@ -140,6 +140,7 @@ fn real_ssh_bash_startup_fallback_preserves_predecessor_until_attachment() {
             transport,
             &mut output,
             None,
+            None,
         );
         if native.is_none() {
             assert!(

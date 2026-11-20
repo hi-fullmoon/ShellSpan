@@ -35,6 +35,9 @@
         "read_terminal",
         "write_terminal_input",
         "wait_terminal",
+        "inspect_vim_buffer",
+        "insert_vim_text",
+        "save_vim_buffer",
         "write_stdin",
         "wait_process",
         "kill_process",
@@ -515,6 +518,31 @@
       ],
       "unevaluatedProperties": false
     },
+    "vimSnapshotId": { "type": "string", "pattern": "^[a-f0-9]{64}-[1-9][0-9]{0,19}$" },
+    "vimPath": { "type": "string", "minLength": 2, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F\\u007F]+$" },
+    "vimEditorCall": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolCallBase" },
+        { "properties": { "target": { "$ref": "#/$defs/remoteTarget" } } },
+        { "oneOf": [
+          { "properties": { "toolName": { "const": "inspect_vim_buffer" }, "arguments": { "$ref": "#/$defs/readTerminalArguments" } } },
+          { "properties": { "toolName": { "const": "insert_vim_text" }, "arguments": {
+            "type": "object", "additionalProperties": false, "required": ["snapshotId", "path", "position", "text"],
+            "properties": {
+              "snapshotId": { "$ref": "#/$defs/vimSnapshotId" }, "path": { "$ref": "#/$defs/vimPath" },
+              "position": { "enum": ["start", "cursor", "end"] },
+              "text": { "type": "string", "minLength": 1, "maxLength": 32768 }
+            }
+          } } },
+          { "properties": { "toolName": { "const": "save_vim_buffer" }, "arguments": {
+            "type": "object", "additionalProperties": false, "required": ["snapshotId", "path"],
+            "properties": { "snapshotId": { "$ref": "#/$defs/vimSnapshotId" }, "path": { "$ref": "#/$defs/vimPath" } }
+          } } }
+        ] }
+      ],
+      "unevaluatedProperties": false
+    },
     "writeStdinCall": {
       "type": "object",
       "allOf": [
@@ -688,6 +716,7 @@
         { "$ref": "#/$defs/readTerminalCall" },
         { "$ref": "#/$defs/writeTerminalInputCall" },
         { "$ref": "#/$defs/waitTerminalCall" },
+        { "$ref": "#/$defs/vimEditorCall" },
         { "$ref": "#/$defs/writeStdinCall" },
         { "$ref": "#/$defs/waitProcessCall" },
         { "$ref": "#/$defs/killProcessCall" },
@@ -1134,6 +1163,38 @@
     "readTerminalResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "read_terminal" }, "data": { "$ref": "#/$defs/readTerminalResultData" } } }], "unevaluatedProperties": false },
     "writeTerminalInputResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "write_terminal_input" }, "data": { "$ref": "#/$defs/writeTerminalInputResultData" } } }], "unevaluatedProperties": false },
     "waitTerminalResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "wait_terminal" }, "data": { "$ref": "#/$defs/waitTerminalResultData" } } }], "unevaluatedProperties": false },
+    "vimEditorResult": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolResultBase" },
+        { "properties": {
+          "toolName": { "enum": ["inspect_vim_buffer", "insert_vim_text", "save_vim_buffer"] },
+          "data": { "oneOf": [
+            { "type": "object", "additionalProperties": false, "required": ["outcome", "editor", "snapshot"], "properties": {
+              "outcome": { "enum": ["observed", "inserted", "saved"] },
+              "editor": { "enum": ["vim", "neovim"] },
+              "snapshot": { "$ref": "#/$defs/vimEditorSnapshot" }
+            } },
+            { "type": "object", "additionalProperties": false, "required": ["reason"], "properties": {
+              "reason": { "type": "string" }, "activationCommand": { "const": ":source $SHELLSPAN_VIM_BRIDGE" },
+              "noAutoReplay": { "const": true }
+            } }
+          ] }
+        } }
+      ],
+      "unevaluatedProperties": false
+    },
+    "vimEditorSnapshot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "path", "windowId", "bufferId", "changedTick", "line", "byteColumn", "lineCount", "modified", "modifiable", "readOnly"],
+      "properties": {
+        "id": { "$ref": "#/$defs/vimSnapshotId" }, "path": { "$ref": "#/$defs/vimPath" },
+        "windowId": { "type": "integer", "minimum": 1 }, "bufferId": { "type": "integer", "minimum": 1 },
+        "changedTick": { "type": "integer", "minimum": 0 }, "line": { "type": "integer", "minimum": 1 },
+        "byteColumn": { "type": "integer", "minimum": 1 }, "lineCount": { "type": "integer", "minimum": 1 },
+        "modified": { "type": "boolean" }, "modifiable": { "type": "boolean" }, "readOnly": { "type": "boolean" }
+      }
+    },
     "writeStdinResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "write_stdin" }, "data": { "$ref": "#/$defs/writeStdinResultData" } } }], "unevaluatedProperties": false },
     "waitProcessResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "wait_process" }, "data": { "oneOf": [{ "$ref": "#/$defs/waitProcessResultData" }, { "$ref": "#/$defs/nativeJobManagementResultData" }] } } }], "unevaluatedProperties": false },
     "killProcessResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "kill_process" }, "data": { "oneOf": [{ "$ref": "#/$defs/killProcessResultData" }, { "$ref": "#/$defs/nativeJobManagementResultData" }] } } }], "unevaluatedProperties": false },
@@ -1164,6 +1225,7 @@
         { "$ref": "#/$defs/readTerminalResult" },
         { "$ref": "#/$defs/writeTerminalInputResult" },
         { "$ref": "#/$defs/waitTerminalResult" },
+        { "$ref": "#/$defs/vimEditorResult" },
         { "$ref": "#/$defs/writeStdinResult" },
         { "$ref": "#/$defs/waitProcessResult" },
         { "$ref": "#/$defs/killProcessResult" },

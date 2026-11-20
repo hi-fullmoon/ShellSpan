@@ -1007,6 +1007,7 @@ pub(crate) struct SessionTargetState {
 struct SessionRegistry {
     sessions: HashMap<String, ManagedSession>,
     ssh_jump_hosts: HashMap<String, (String, u16, String)>,
+    vim_bridges: HashMap<String, crate::terminal_vim_bridge::BridgeClient>,
     native_inflight: HashMap<String, Arc<std::sync::atomic::AtomicUsize>>,
     worker_shutdowns: HashMap<String, EventReceiver<()>>,
 }
@@ -1753,6 +1754,49 @@ impl Drop for DeleteProgressTracker {
 }
 
 impl SessionManager {
+    pub(crate) fn register_vim_bridge(
+        &self,
+        session_id: &str,
+        bridge: crate::terminal_vim_bridge::BridgeClient,
+    ) -> Result<(), String> {
+        let mut registry = self
+            .registry
+            .lock()
+            .map_err(|_| "session registry poisoned")?;
+        if !registry.sessions.contains_key(session_id) {
+            return Err("SSH terminal closed during editor bridge startup".into());
+        }
+        registry.vim_bridges.insert(session_id.into(), bridge);
+        Ok(())
+    }
+
+    pub(crate) fn has_vim_bridge(&self, session_id: &str) -> bool {
+        self.registry.lock().is_ok_and(|registry| {
+            registry
+                .vim_bridges
+                .get(session_id)
+                .is_some_and(|bridge| bridge.available())
+        })
+    }
+
+    pub(crate) fn enqueue_vim_command(
+        &self,
+        session_id: &str,
+        command: crate::terminal_vim_bridge::EditorCommand,
+    ) -> Result<crate::terminal_vim_bridge::PendingReply, crate::terminal_vim_bridge::BridgeFailure>
+    {
+        use crate::terminal_vim_bridge::BridgeFailure::Unavailable;
+
+        let registry = self.registry.lock().map_err(|_| Unavailable)?;
+        let managed = registry.sessions.get(session_id).ok_or(Unavailable)?;
+        let bridge = registry.vim_bridges.get(session_id).ok_or(Unavailable)?;
+        let pending = bridge.enqueue(command)?;
+        if let Some(waker) = managed.waker.as_ref() {
+            waker.wake();
+        }
+        Ok(pending)
+    }
+
     pub(crate) fn write_native_control(
         &self,
         session_id: &str,
@@ -1922,6 +1966,7 @@ impl SessionManager {
     ) -> Option<EventReceiver<()>> {
         let managed = guard.sessions.remove(session_id)?;
         guard.ssh_jump_hosts.remove(session_id);
+        guard.vim_bridges.remove(session_id);
         let completion = guard.worker_shutdowns.remove(session_id);
         guard.native_inflight.remove(session_id);
         // A disconnected command channel means its worker has already exited.

@@ -30,6 +30,9 @@ use crate::models::{
     SessionStatus, SessionTerminalKind,
 };
 use crate::remote_sandbox::VisibleTerminalDispatch;
+
+#[path = "vim.rs"]
+mod vim;
 use crate::terminal_broker::{
     TerminalBrokerAttachment, TerminalBrokerSnapshot, TerminalGenerationCloseReason,
     TerminalGeometry, TerminalIntegrationState, TerminalLeaseOwner, TerminalRawOutputFrame,
@@ -1409,6 +1412,16 @@ impl NativeToolEngine {
                 sessions,
                 tool.descriptor.default_timeout_ms,
                 cancellation,
+            ),
+            name if crate::terminal_vim_bridge::is_tool(name) => self.execute_vim_tool(
+                context,
+                &call,
+                &effect,
+                sessions,
+                cancellation,
+                terminal_dispatch
+                    .as_ref()
+                    .ok_or("Vim tools require a bound SSH terminal")?,
             ),
             "write_stdin" => self.write_process(context, &call, &effect),
             "wait_process" => self.wait_process(

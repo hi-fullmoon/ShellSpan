@@ -1705,6 +1705,7 @@ struct SessionRecord {
     prompt_ready_revision: u64,
     prompt_start_input_sequence: u64,
     prompt_next_input_sequence: u64,
+    vim_attached: bool,
     interactive_input: Option<InteractiveInput>,
     native_input: bool,
     native_checkpoints: bool,
@@ -1758,6 +1759,14 @@ impl SessionRecord {
         })
     }
 
+    fn user_controls_foreground(&self) -> bool {
+        self.foreground_handoff_active()
+            || (self.vim_attached
+                && !self.prompt_ready
+                && self.active_command.is_none()
+                && self.integration_state == TerminalIntegrationState::Ready)
+    }
+
     fn open(
         terminal_session_id: String,
         terminal_generation: u64,
@@ -1793,6 +1802,7 @@ impl SessionRecord {
             prompt_ready_revision: 0,
             prompt_start_input_sequence: 0,
             prompt_next_input_sequence: 0,
+            vim_attached: false,
             interactive_input: None,
             native_input: false,
             native_checkpoints: false,
@@ -1945,7 +1955,7 @@ impl SessionRecord {
                 native_recovery_required: self.native_recovery_required,
                 native_clear_pending: self.native_clear_pending.is_some(),
                 command_observation_unavailable,
-                foreground_handoff_active: self.foreground_handoff_active(),
+                foreground_handoff_active: self.user_controls_foreground(),
                 active_command: command_observation.ok().flatten(),
             },
             screen_version: self
@@ -2703,6 +2713,26 @@ impl TerminalSessionBroker {
             columns: record.geometry.columns,
             contents,
         })
+    }
+
+    pub(crate) fn set_vim_attached(
+        &self,
+        transport_session_id: &str,
+        attached: bool,
+    ) -> Result<bool, String> {
+        let mut state = self.lock()?;
+        let attachment = current_attachment(&state, transport_session_id)?.clone();
+        let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
+        if record.transport_kind != TerminalTransportKind::SshPty {
+            return Err("Vim bridge requires an SSH PTY".into());
+        }
+        let attached = attached && !record.prompt_ready;
+        if record.vim_attached != attached {
+            record.vim_attached = attached;
+            advance_integration_state_revision(record)?;
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     pub(crate) fn mark_output_ready(&self, transport_session_id: &str) -> Result<(), String> {
@@ -3553,6 +3583,7 @@ impl TerminalSessionBroker {
                 }
                 record.prompt_started = false;
                 record.prompt_ready = true;
+                record.vim_attached = false;
                 record.prompt_next_input_sequence = record.prompt_start_input_sequence;
                 record.command_input_pending =
                     record.native_recovery_required || record.native_clear_pending.is_some();
@@ -4698,7 +4729,7 @@ impl TerminalSessionBroker {
         let remote_interactive_enabled = state.remote_interactive_tools_rollout.enabled;
         let attachment = current_attachment(&state, transport_session_id)?.clone();
         let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
-        if record.foreground_handoff_active() {
+        if record.user_controls_foreground() {
             return Err("TERMINAL_BROKER_LEASE_BUSY".into());
         }
         if interactive {
@@ -4944,7 +4975,7 @@ impl TerminalSessionBroker {
                                 && record.terminal_generation == attachment.terminal_generation
                         })
                 })
-                .is_some_and(SessionRecord::foreground_handoff_active);
+                .is_some_and(SessionRecord::user_controls_foreground);
             if !handoff_active {
                 return Err("TERMINAL_INPUT_BLOCKED_BY_AGENT: user input is blocked while an Agent owns the terminal".into());
             }

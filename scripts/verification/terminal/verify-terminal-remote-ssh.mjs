@@ -80,6 +80,8 @@ try {
   cargoTest('session::tests::remote_bound_terminal_bash_reuses_source_shell_acceptance', ['--ignored', '--exact']);
   cargoTest('session::tests::remote_bound_terminal_zsh_reuses_source_shell_smoke', ['--ignored', '--exact']);
   cargoTest('session::tests::remote_prompt_recovers_tty_modes_after_vim_exit', ['--ignored', '--exact']);
+  cargoTest('session::tests::vim_bridge_tests::isolated_ssh_vim_bridge_edits_and_verifies_both_editors', ['--ignored', '--exact']);
+  cargoTest('session::tests::vim_bridge_tests::isolated_ssh_vim_bridge_guards_disk_versions_and_resumes', ['--ignored', '--exact']);
   if (process.platform !== 'win32') {
     cargoTest('session::tests::remote_ssh_write_queue_resumes_pinned_control_before_pty_input', ['--ignored', '--exact']);
     cargoTest('session::tests::remote_ssh_write_queue_retries_after_silent_window_update', ['--ignored', '--exact']);

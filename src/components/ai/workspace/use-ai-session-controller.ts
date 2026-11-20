@@ -242,7 +242,8 @@ function permissionModeForUi(mode: AgentSessionPermissionMode | undefined): Agen
 }
 
 function needsVolatileApprovalArguments(approval: AiPendingApproval): boolean {
-  if (approval.toolName !== 'write_terminal_input' && approval.toolName !== 'wait_terminal') {
+  if (approval.toolName !== 'write_terminal_input' && approval.toolName !== 'wait_terminal'
+    && approval.toolName !== 'insert_vim_text') {
     return false;
   }
   if (!approval.arguments || typeof approval.arguments !== 'object' || Array.isArray(approval.arguments)) {

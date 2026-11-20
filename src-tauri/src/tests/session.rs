@@ -121,6 +121,10 @@
         include!("session_terminal_recovery.rs");
     }
 
+    mod vim_bridge_tests {
+        include!("session_vim_bridge.rs");
+    }
+
     #[test]
     fn initial_directory_input_quotes_paths_and_restores_echo() {
         assert_eq!(
@@ -201,7 +205,7 @@
             .unwrap();
         channel.handle_extended_data(ExtendedData::Merge).unwrap();
         if let Some(integration) = integration.as_ref() {
-            integration.start_shell(&mut channel).unwrap();
+            integration.start_shell(&mut channel, None).unwrap();
         } else {
             channel.shell().unwrap();
         }
@@ -650,6 +654,16 @@
             predecessor: Option<&str>,
             broker: crate::terminal_broker::TerminalSessionBroker,
         ) -> Self {
+            Self::connect_with_vim_bridge(username, transport_id, predecessor, broker, false).0
+        }
+
+        fn connect_with_vim_bridge(
+            username: &str,
+            transport_id: &str,
+            predecessor: Option<&str>,
+            broker: crate::terminal_broker::TerminalSessionBroker,
+            vim: bool,
+        ) -> (Self, Option<RemoteVimBridge>) {
             let mut connection = crate::execution::fixture::isolated_ssh_connection();
             connection.username = username.to_string();
             let (known_hosts, known_hosts_path) =
@@ -669,7 +683,9 @@
                 Some(&known_hosts_path),
             )
             .expect("authenticate to isolated SSH fixture");
-            Self::from_session(
+            let bridge =
+                vim.then(|| RemoteVimBridge::prepare(&session).expect("start SSH editor relay"));
+            let fixture = Self::from_session_with_editor(
                 Some(known_hosts),
                 socket,
                 session,
@@ -677,7 +693,9 @@
                 transport_id,
                 predecessor,
                 broker,
-            )
+                bridge.as_ref().map(RemoteVimBridge::source_path).as_deref(),
+            );
+            (fixture, bridge)
         }
 
         fn from_session(
@@ -688,6 +706,28 @@
             transport_id: &str,
             predecessor: Option<&str>,
             broker: crate::terminal_broker::TerminalSessionBroker,
+        ) -> Self {
+            Self::from_session_with_editor(
+                known_hosts,
+                socket,
+                session,
+                username,
+                transport_id,
+                predecessor,
+                broker,
+                None,
+            )
+        }
+
+        fn from_session_with_editor(
+            known_hosts: Option<tempfile::TempDir>,
+            socket: std::net::TcpStream,
+            session: Session,
+            username: &str,
+            transport_id: &str,
+            predecessor: Option<&str>,
+            broker: crate::terminal_broker::TerminalSessionBroker,
+            vim_source: Option<&str>,
         ) -> Self {
             use crate::terminal_broker::TerminalGeometry;
             let integration = RemoteSshShellIntegration::prepare(&session, username)
@@ -701,7 +741,7 @@
                 .handle_extended_data(ExtendedData::Merge)
                 .expect("merge SSH PTY stderr");
             integration
-                .start_shell(&mut shell_channel)
+                .start_shell(&mut shell_channel, vim_source)
                 .expect("start integrated interactive SSH shell");
             broker
                 .attach_transport(
@@ -1469,7 +1509,8 @@
                     },
                     offset: 0,
                 });
-                match advance_ssh_write_queue(&mut writes, &mut pty, Some(&mut control), None) {
+                match advance_ssh_write_queue(&mut writes, &mut pty, Some(&mut control), None, None)
+                {
                     Ok(Some(_)) => false,
                     Err(error) if error.kind() == ErrorKind::WouldBlock => true,
                     _ => panic!("failed to send a complete control reply"),
@@ -1488,7 +1529,7 @@
                 Instant::now() < deadline,
                 "SSH write queue stalled after TCP resumed"
             );
-            match advance_ssh_write_queue(&mut writes, &mut pty, Some(&mut control), None) {
+            match advance_ssh_write_queue(&mut writes, &mut pty, Some(&mut control), None, None) {
                 Ok(Some(SshWrite::Data { payload, .. })) => {
                     completed.push(payload.bytes().to_vec())
                 }
@@ -1592,7 +1633,7 @@
             offset: 0,
         }]);
         assert!(matches!(
-            advance_ssh_write_queue(&mut writes, &mut pty, Some(&mut control), None),
+            advance_ssh_write_queue(&mut writes, &mut pty, Some(&mut control), None, None),
             Err(error) if error.kind() == ErrorKind::WouldBlock
         ));
         assert!(!ssh_wants_write(&session));
@@ -1637,7 +1678,7 @@
             "queued write slept until the idle deadline"
         );
         let completed =
-            advance_ssh_write_queue(&mut writes, &mut pty, Some(&mut control), None).unwrap();
+            advance_ssh_write_queue(&mut writes, &mut pty, Some(&mut control), None, None).unwrap();
         assert!(
             matches!(completed, Some(SshWrite::Data { payload, .. }) if payload.bytes() == reply)
         );
@@ -1739,7 +1780,13 @@
         let resize_deadline = Instant::now() + Duration::from_secs(5);
         while !writes.is_empty() {
             assert!(Instant::now() < resize_deadline, "SSH PTY resize timed out");
-            match advance_ssh_write_queue(&mut writes, &mut terminal.shell_channel, None, None) {
+            match advance_ssh_write_queue(
+                &mut writes,
+                &mut terminal.shell_channel,
+                None,
+                None,
+                None,
+            ) {
                 Ok(_) => {}
                 Err(error) if error.kind() == ErrorKind::Interrupted => {}
                 Err(error) if error.kind() == ErrorKind::WouldBlock => {

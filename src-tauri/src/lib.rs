@@ -44,6 +44,7 @@ pub(crate) mod terminal_jobs;
 #[path = "tests/terminal_native_protocol.rs"]
 mod terminal_native_protocol;
 pub(crate) mod terminal_screen;
+mod terminal_vim_bridge;
 #[cfg(all(test, windows))]
 #[path = "tests/windows_shell_history.rs"]
 mod windows_shell_history;

@@ -1,5 +1,7 @@
 use serde::de::DeserializeOwned;
 
+use crate::terminal_vim_bridge::{self as vim, EditorTarget, InsertArguments};
+
 use super::types::{
     AgentEffectKindNative, AgentObservedEffectNative, AgentRequestNative, AgentTargetKindNative,
     AgentToolCallNative, AgentToolTargetNative, ApplyPatchArgumentsNative, EditFileArgumentsNative,
@@ -27,6 +29,7 @@ pub struct AgentToolDescriptorNative {
 const LOCAL_REMOTE: &[AgentTargetKindNative] =
     &[AgentTargetKindNative::Local, AgentTargetKindNative::Remote];
 const PROCESS: &[AgentTargetKindNative] = &[AgentTargetKindNative::Process];
+const REMOTE: &[AgentTargetKindNative] = &[AgentTargetKindNative::Remote];
 const READ_ONLY: &[AgentEffectKindNative] = &[AgentEffectKindNative::ReadOnly];
 const SENSITIVE_READ: &[AgentEffectKindNative] = &[AgentEffectKindNative::SensitiveRead];
 const STATE_CHANGE: &[AgentEffectKindNative] = &[AgentEffectKindNative::StateChange];
@@ -47,7 +50,7 @@ const EXEC_EFFECTS: &[AgentEffectKindNative] = &[
     AgentEffectKindNative::ExternalSideEffect,
 ];
 
-pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 21] = [
+pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 24] = [
     AgentToolDescriptorNative {
         name: "inspect_host",
         target_kinds: LOCAL_REMOTE,
@@ -113,6 +116,24 @@ pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 21] = [
         target_kinds: LOCAL_REMOTE,
         effect_mode: AgentToolEffectModeNative::Fixed,
         allowed_effects: SENSITIVE_READ,
+    },
+    AgentToolDescriptorNative {
+        name: vim::INSPECT,
+        target_kinds: REMOTE,
+        effect_mode: AgentToolEffectModeNative::Fixed,
+        allowed_effects: SENSITIVE_READ,
+    },
+    AgentToolDescriptorNative {
+        name: vim::INSERT,
+        target_kinds: REMOTE,
+        effect_mode: AgentToolEffectModeNative::Fixed,
+        allowed_effects: STATE_CHANGE,
+    },
+    AgentToolDescriptorNative {
+        name: vim::SAVE,
+        target_kinds: REMOTE,
+        effect_mode: AgentToolEffectModeNative::Fixed,
+        allowed_effects: STATE_CHANGE,
     },
     AgentToolDescriptorNative {
         name: "write_stdin",
@@ -578,8 +599,28 @@ pub fn validate_tool_arguments_native(
                 return Err("invalid probe_http path".into());
             }
         }
-        "read_terminal" => {
+        "read_terminal" | vim::INSPECT => {
             decode_arguments::<ReadTerminalArgumentsNative>(arguments)?;
+        }
+        vim::INSERT => {
+            let insert = decode_arguments::<InsertArguments>(arguments)?;
+            if !vim::valid_id(&insert.snapshot_id)
+                || !vim::valid_path(&insert.path)
+                || insert.text.is_empty()
+                || insert.text.len() > vim::MAX_TEXT_BYTES
+                || insert
+                    .text
+                    .chars()
+                    .any(|ch| ch.is_control() && ch != '\n' && ch != '\t')
+            {
+                return Err("Invalid Vim buffer insertion arguments".into());
+            }
+        }
+        vim::SAVE => {
+            let target = decode_arguments::<EditorTarget>(arguments)?;
+            if !vim::valid_id(&target.snapshot_id) || !vim::valid_path(&target.path) {
+                return Err("Invalid Vim buffer save arguments".into());
+            }
         }
         "write_terminal_input" => {
             let value = decode_arguments::<WriteTerminalInputArgumentsNative>(arguments)?;

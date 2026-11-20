@@ -419,6 +419,14 @@ fn tool_available_on_target(name: &str, header: &AgentSessionHeader) -> bool {
             header.execution_surface == super::AgentExecutionSurface::BoundTerminal
                 && target.is_some_and(|target| matches!(target.kind.as_str(), "local" | "remote"))
         }
+        name if crate::terminal_vim_bridge::is_tool(name) => {
+            header.execution_surface == super::AgentExecutionSurface::BoundTerminal
+                && header.parent_session_id.is_none()
+                && header.subagent.is_none()
+                && target.is_some_and(|target| {
+                    target.kind == "remote" && target.remote_sandbox_required != Some(true)
+                })
+        }
         _ => true,
     }
 }

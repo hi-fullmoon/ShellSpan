@@ -210,6 +210,21 @@ impl NativeToolRuntime for NativeToolAdapter {
             })
     }
 
+    fn vim_bridge_available(&self, terminal_id: &str) -> bool {
+        self.services.sessions.has_vim_bridge(terminal_id)
+            && self
+                .engine
+                .terminal_broker_snapshot(Some(terminal_id))
+                .is_ok_and(|snapshot| {
+                    snapshot.remote_bound_terminal_rollout.enabled
+                        && snapshot.session.is_some_and(|session| {
+                            session.open
+                                && session.integration_state
+                                    == crate::terminal_broker::TerminalIntegrationState::Ready
+                        })
+                })
+    }
+
     fn list_file_references(
         &self,
         request: super::file_references::FileReferenceRequest,
@@ -1148,6 +1163,12 @@ fn normalize_arguments(
             if request.execution_surface != super::AgentExecutionSurface::BoundTerminal =>
         {
             Err("interactive terminal tools require a bound-terminal Session".into())
+        }
+        name if crate::terminal_vim_bridge::is_tool(name) => {
+            if request.execution_surface != super::AgentExecutionSurface::BoundTerminal || request.target.kind != "remote" {
+                return Err("Vim buffer tools require a bound SSH terminal".into());
+            }
+            Ok((name.into(), request.model_call.arguments.clone()))
         }
         "exec_command"
         | "inspect_host"

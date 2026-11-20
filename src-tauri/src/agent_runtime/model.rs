@@ -332,7 +332,10 @@ pub(crate) fn recorded_tool_arguments(
             "contentPersisted": false,
         });
     }
-    if tool_name == "wait_terminal" {
+    if matches!(
+        tool_name,
+        "wait_terminal" | crate::terminal_vim_bridge::INSERT
+    ) {
         if let Some(text) = arguments.get("text").and_then(serde_json::Value::as_str) {
             let mut recorded = arguments.as_object().cloned().unwrap_or_default();
             recorded.remove("text");
@@ -351,6 +354,7 @@ pub(crate) fn tool_call_arguments_are_ephemeral(
 ) -> bool {
     tool_name == "write_terminal_input"
         || tool_name == "write_process_input"
+        || tool_name == crate::terminal_vim_bridge::INSERT
         || (tool_name == "wait_terminal" && arguments.get("text").is_some())
 }
 
@@ -380,7 +384,7 @@ pub(crate) fn recorded_tool_call_omits_replay(call: &RecordedToolCall) -> bool {
                     .get("byteLength")
                     .is_some_and(|value| value.is_null() || value.as_u64().is_some())
         }
-        "wait_terminal" => {
+        "wait_terminal" | crate::terminal_vim_bridge::INSERT => {
             arguments
                 .get("textProvided")
                 .and_then(serde_json::Value::as_bool)

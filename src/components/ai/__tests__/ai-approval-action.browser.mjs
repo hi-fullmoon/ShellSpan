@@ -87,6 +87,17 @@ try {
           assert.ok(await action.getByText('/apps/for-you', { exact: true }).isVisible());
           if (toolName === 'search_text') assert.ok(await page.getByText('搜索内容：TODO', { exact: true }).isVisible());
         }
+        const vimMetadata = { path: '/apps/for-you/notes.txt', position: 'start', textProvided: true, contentPersisted: false };
+        await show({ toolName: 'insert_vim_text', risk: 'stateChange', arguments: vimMetadata });
+        assert.ok(await page.getByRole('button', { name: '允许执行一次', exact: true }).isDisabled());
+        const vimText = '夜坐\n:write\n';
+        await show({ toolName: 'insert_vim_text', risk: 'stateChange', arguments: { ...vimMetadata, text: vimText } });
+        await page.getByText('待插入文本（转义显示）', { exact: true }).waitFor();
+        assert.ok(await action.getByText(vimMetadata.path, { exact: true }).isVisible());
+        assert.ok(await page.getByText(JSON.stringify(vimText), { exact: true }).isVisible());
+        assert.ok(await page.getByRole('button', { name: '允许执行一次', exact: true }).isEnabled());
+        await show({ toolName: 'save_vim_buffer', risk: 'stateChange', arguments: { path: vimMetadata.path } }, 'en-US');
+        await page.getByText('Save entire editor buffer, including existing changes', { exact: true }).waitFor();
         await show({ toolName: 'custom_tool', arguments: null, target: null });
         await page.getByText('调用工具：custom_tool', { exact: true }).waitFor();
         await show({ toolName: 'run_terminal_command', arguments: { command: 'pwd' } });

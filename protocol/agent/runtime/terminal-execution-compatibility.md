@@ -236,6 +236,46 @@ An unresolved editor decision leaves the editor open. A child without the
 question tool reports the decision to its parent. Existing answers and task
 authorization do not require another question, and answers do not bypass native
 approval or recovery checks.
+
+### Editing the live Vim or Neovim buffer over SSH
+
+On an integrated Linux SSH terminal, load the connection-scoped adapter once
+in the current editor with `:source $SHELLSPAN_VIM_BRIDGE`. The editor stays open
+and retains its unsaved changes. A new editor instance or SSH connection needs
+its own activation. Bash or Zsh continues to use its existing visible command
+lifecycle independently of the editor.
+
+The root bound-terminal Agent can inspect the active named UTF-8 regular-file
+buffer, insert literal text at the cursor or either end, and separately save the
+entire buffer when authorized. Inspection returns metadata and a snapshot
+identifier. The adapter checks the foreground SSH PTY, editor instance, window,
+buffer, file, edit version, and applicable cursor position again at commit.
+A window or buffer switch, user edit, or format change can invalidate the
+snapshot. Suspending the editor invalidates its pending changes, and resuming
+republishes the foreground attachment. The user keeps the keyboard while an
+approval is pending.
+
+Requests and replies use a private channel on the same authenticated SSH
+connection. The relay transports bounded JSON lines through user-private FIFOs.
+Insert bodies are omitted from tool history, and the bridge accepts structured
+operations only. Setup creates a temporary adapter and pipe directory for the
+connection, with cleanup when the relay closes. Shell text and terminal display
+bytes carry no editor authorization. The SSH sandbox and protected-path rules
+continue to apply. Initial support covers existing UTF-8 regular files of at
+most 1 MiB, with LF or CRLF line endings and paths without symbolic links.
+
+Insert and save are prepared before a cancellable commit. The editor expires a
+prepared request and consumes it once. After a commit attempt, a lost reply is
+uncertain and is never replayed. Normal save runs the editor's write path and
+checks the actual file bytes against the authorized buffer representation.
+The adapter verifies the disk version known when the buffer was loaded or last
+saved, or proves that an already-open clean buffer matches the disk file.
+An existing draft without such a baseline stays open for the user to compare
+with the file and save manually if intended. Automatic saves require a file
+with a single hard link. An external edit, write error, or hook that changes the
+bytes prevents a saved result. The isolated SSH verification gate exercises both
+editors and checks the resulting file independently over SFTP.
+
 The optional native macOS gate `node scripts/verification/terminal/verify-terminal-broker-macos.mjs --editors-only` requires real
 `vim` and `nvim` executables on PATH and fails if either is missing. It explicitly
 runs four otherwise ignored PTY regressions (Bash/zsh × Vim/Neovim), each with

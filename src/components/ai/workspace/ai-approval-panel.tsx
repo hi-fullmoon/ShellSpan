@@ -126,6 +126,9 @@ const APPROVAL_ACTION_KEYS: Readonly<Record<string, LocaleKey>> = {
   read_file: 'ai.workspace.approval.action.readFile',
   write_file: 'ai.workspace.approval.action.writeFile',
   edit_file: 'ai.workspace.approval.action.editFile',
+  inspect_vim_buffer: 'ai.workspace.approval.action.inspectVimBuffer',
+  insert_vim_text: 'ai.workspace.approval.action.insertVimText',
+  save_vim_buffer: 'ai.workspace.approval.action.saveVimBuffer',
   search_text: 'ai.workspace.approval.action.searchText',
   trash_file: 'ai.workspace.approval.action.trashFile',
 };
@@ -207,8 +210,9 @@ export function AiApprovalPanel({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const pending = decision !== null;
   const command = argumentString(approval, 'command');
+  const vimInsertion = approval.toolName === 'insert_vim_text';
   const inputKind = argumentString(approval, 'inputKind');
-  const terminalInputText = approval.toolName === 'write_terminal_input'
+  const terminalInputText = approval.toolName === 'write_terminal_input' || vimInsertion
     ? argumentString(approval, 'text')
     : null;
   const terminalInput = terminalInputText !== null
@@ -245,10 +249,10 @@ export function AiApprovalPanel({
   const volatileArgumentsRequired = argumentRecord?.contentPersisted === false && (
     approval.toolName === 'write_terminal_input'
       ? inputKind === 'text' || inputKind === 'paste'
-      : approval.toolName === 'wait_terminal' && argumentRecord.textProvided === true
+      : (approval.toolName === 'wait_terminal' || vimInsertion) && argumentRecord.textProvided === true
   );
   const volatileArgumentsMissing = volatileArgumentsRequired
-    && (approval.toolName === 'write_terminal_input'
+    && (approval.toolName === 'write_terminal_input' || vimInsertion
       ? terminalInputText === null
       : terminalMatchText === null);
   const volatileArgumentsError = argumentsError
@@ -263,6 +267,7 @@ export function AiApprovalPanel({
   const searchQuery = approval.toolName === 'search_text' ? argumentString(approval, 'query') : null;
   const exactValueLabel = command
     ? 'ai.workspace.approval.command'
+    : vimInsertion ? 'ai.workspace.approval.vimText'
     : terminalMatch
       ? 'ai.workspace.approval.terminalMatch'
       : 'ai.workspace.approval.terminalInput';
@@ -313,7 +318,7 @@ export function AiApprovalPanel({
       <ScrollArea className="flex max-h-65 min-h-0 min-w-0 flex-col" viewportRender={<div className="h-auto min-h-0 flex-1" />}>
         <ScrollAreaContent style={{ minWidth: 0 }}>
           <CardContent className="flex min-w-0 flex-col gap-3 px-4 pb-2">
-            {!exactValue && (
+            {(!exactValue || vimInsertion) && (
               <div className="flex min-w-0 flex-col gap-1" data-slot="ai-approval-action">
                 <p className="text-xs font-medium text-muted-foreground">{t('ai.workspace.approval.action')}</p>
                 <p className="break-words text-sm">{action}</p>

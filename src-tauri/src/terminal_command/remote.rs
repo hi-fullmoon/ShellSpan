@@ -382,22 +382,32 @@ impl RemoteNativeBash {
     pub fn uses_private_bash(&self) -> bool {
         matches!(self.startup, RemoteShellStartup::PrivateBash)
     }
-    pub fn start_shell(&self, channel: &mut Channel) -> Result<(), String> {
+    pub fn start_shell(
+        &self,
+        channel: &mut Channel,
+        vim_bridge: Option<&str>,
+    ) -> Result<(), String> {
         if matches!(self.startup, RemoteShellStartup::Zle) {
             return channel
-                .exec(&format!(
-                    "{}\nexec env ZDOTDIR={} {} -il",
-                    include_str!("zle-ssh-initial-zdotdir.zsh"),
-                    quote_remote_posix(&self.root),
-                    quote_remote_posix(&self.executable)
+                .exec(&with_vim_bridge(
+                    vim_bridge,
+                    format!(
+                        "{}\nexec env ZDOTDIR={} {} -il",
+                        include_str!("zle-ssh-initial-zdotdir.zsh"),
+                        quote_remote_posix(&self.root),
+                        quote_remote_posix(&self.executable)
+                    ),
                 ))
                 .map_err(|_| "TERMINAL_NATIVE_SHELL_START_FAILED".into());
         }
         channel
-            .exec(&format!(
-                "exec {} --shellspan-native-init {} -il",
-                quote_remote_posix(&self.executable),
-                quote_remote_posix(&format!("{}/native-init", self.root))
+            .exec(&with_vim_bridge(
+                vim_bridge,
+                format!(
+                    "exec {} --shellspan-native-init {} -il",
+                    quote_remote_posix(&self.executable),
+                    quote_remote_posix(&format!("{}/native-init", self.root))
+                ),
             ))
             .map_err(|_| "TERMINAL_NATIVE_SHELL_START_FAILED".into())
     }
