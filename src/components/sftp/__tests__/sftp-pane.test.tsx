@@ -706,4 +706,105 @@ describe('SftpPane', () => {
       expect(invokeListLocalDirectory).toHaveBeenLastCalledWith('/home/docs');
     });
   });
+
+  it('separates remote pane title and account with a vertical separator inside the switch button', () => {
+    const connection = createConnection();
+    render(
+      <SftpPane
+        connection={connection}
+        side="remote"
+        onTitleClick={vi.fn()}
+        actions={createMockActions()}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+
+    const switchButton = screen.getByRole('button', { name: 'sftp.source.switch' });
+    const title = screen.getByText('Test');
+    const separator = switchButton.querySelector('[data-slot="separator"][data-orientation="vertical"]');
+    const account = switchButton.querySelector('bdi');
+
+    expect(separator).toBeInTheDocument();
+    expect(separator?.tagName).toBe('SPAN');
+    expect(separator).toHaveAttribute('aria-hidden', 'true');
+    expect(separator).toHaveClass('mx-0.5', 'h-3.5', 'data-vertical:self-center');
+    expect(account).toHaveTextContent('u');
+    expect(title.compareDocumentPosition(separator!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(separator!.compareDocumentPosition(account!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('separates remote pane title and account with a vertical separator when title is static', () => {
+    const connection = createConnection();
+    render(
+      <SftpPane
+        connection={connection}
+        side="remote"
+        actions={createMockActions()}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+
+    const title = screen.getByText('Test');
+    const titleContainer = title.parentElement;
+    const separator = titleContainer?.querySelector('[data-slot="separator"][data-orientation="vertical"]');
+    const account = titleContainer?.querySelector('bdi');
+
+    expect(titleContainer).toHaveClass('gap-1');
+    expect(separator).toBeInTheDocument();
+    expect(separator?.tagName).toBe('SPAN');
+    expect(separator).toHaveAttribute('aria-hidden', 'true');
+    expect(separator).toHaveClass('mx-0.5', 'h-3.5', 'data-vertical:self-center');
+    expect(account).toHaveTextContent('u');
+    expect(title.compareDocumentPosition(separator!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(separator!.compareDocumentPosition(account!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('does not render an account separator for local panes or remote panes without a username', () => {
+    const connection = createConnection();
+    const { container, rerender } = render(
+      <SftpPane
+        connection={connection}
+        side="local"
+        onTitleClick={vi.fn()}
+        actions={createMockActions()}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector('[data-slot="separator"]')).not.toBeInTheDocument();
+    expect(container.querySelector('bdi')).not.toBeInTheDocument();
+
+    rerender(
+      <SftpPane
+        connection={connection}
+        side="local"
+        actions={createMockActions()}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector('[data-slot="separator"]')).not.toBeInTheDocument();
+    expect(container.querySelector('bdi')).not.toBeInTheDocument();
+
+    rerender(
+      <SftpPane
+        connection={{
+          ...connection,
+          connection: { ...connection.connection, username: '' },
+        }}
+        side="remote"
+        onTitleClick={vi.fn()}
+        actions={createMockActions()}
+        selectedPaths={new Set()}
+        onSelectedPathsChange={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector('[data-slot="separator"]')).not.toBeInTheDocument();
+    expect(container.querySelector('bdi')).not.toBeInTheDocument();
+  });
 });

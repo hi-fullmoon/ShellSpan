@@ -4,6 +4,7 @@ import { BookmarkIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsUpDownIcon, Mo
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
+import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
 import { PathBreadcrumb } from './path-breadcrumb';
 import { SftpFileList } from './sftp-file-list';
@@ -323,10 +324,18 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     const accountLabel = username ? t('sftp.source.currentAccount', { username }) : undefined;
     const paneTitleHint = accountLabel ? `${paneTitle}\n${accountLabel}` : undefined;
     const account = username && (
-      <span className="flex min-w-0 max-w-3/5 shrink-0 items-center gap-1 text-xs font-normal text-app-text-soft">
-        <UserRoundIcon aria-hidden="true" data-icon="inline-start" className="size-3 shrink-0" />
-        <bdi className="truncate">{username}</bdi>
-      </span>
+      <>
+        <Separator
+          render={<span />}
+          orientation="vertical"
+          aria-hidden="true"
+          className="mx-0.5 h-3.5 data-vertical:self-center"
+        />
+        <span className="flex min-w-0 max-w-3/5 shrink-0 items-center gap-1 text-xs font-normal text-app-text-soft">
+          <UserRoundIcon aria-hidden="true" data-icon="inline-start" className="size-3 shrink-0" />
+          <bdi className="truncate">{username}</bdi>
+        </span>
+      </>
     );
 
     const selectedEntries = useMemo(() => visibleEntries.filter((entry) => selectedPaths.has(entry.path)), [visibleEntries, selectedPaths]);
@@ -517,7 +526,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
               <ChevronsUpDownIcon data-icon="inline-end" />
             </Button>
           ) : (
-            <div className="flex min-w-0 items-center gap-2" title={paneTitleHint}>
+            <div className="flex min-w-0 items-center gap-1" title={paneTitleHint}>
               <span className="truncate text-sm font-semibold text-app-text">{paneTitle}</span>
               {account}
             </div>
