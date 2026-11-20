@@ -1,6 +1,16 @@
 # Image attachment normalization
 
-Image admission validates the shared `src/lib/ai/vision-contract.json` limits before decoding. PNG, JPEG, WebP and single-frame GIF inputs are normalized in the existing blocking import task; cancellation, batch atomicity and content-addressed storage remain unchanged.
+Image admission validates the shared `src/lib/ai/vision-contract.json` limits before decoding. PNG, JPEG, WebP and single-frame GIF inputs are normalized in a blocking task. Draft preparation returns normalized bytes in memory. Admission and queue edits write content-addressed blobs before publishing their durable Inbox references.
+
+Blob writes and reference cleanup share a lock. Failed or cancelled admissions
+and edits reclaim unreferenced blobs. App startup reclaims abandoned blobs from
+interrupted or older preparations. Removing an archived session reclaims a
+blob only when no remaining active or archived session references it.
+
+Completed and rejected submissions release their in-flight operation records.
+The durable Inbox receipt still acknowledges retries. Explicit cancellation
+also retains a five-minute marker for delayed requests that have yet to arrive.
+An already active operation keeps its cancelled token until its last caller exits.
 
 Before committing a new image submission or a queue edit that adds images, the
 runtime checks the model's image count and normalized byte limits against the

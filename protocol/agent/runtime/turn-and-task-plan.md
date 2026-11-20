@@ -43,6 +43,13 @@ outcome, the target requires reconciliation before the Fleet can resume.
 An aborted Fleet also prevents approval recovery for its children after restart,
 even if their cancellation records were still being written when the app exited.
 
+A Fleet Verifier records a completed `verify-target` step through `update_plan`
+only after checking the assigned target. The runtime requires a completed native
+read-only result on that target in an earlier model step of the same turn. It
+records the child Session and result sequence as evidence. A normal child
+completion alone leaves the target failed and counts toward the failure
+threshold.
+
 At that threshold, a text-only child response is deterministically settled as `incomplete` unless the current turn has a nonempty task plan whose steps are all completed. An absent plan does not imply successful completion. This handoff suppresses the normal extra plan-completion attempt, retains the report, and follows the existing incomplete one-shot/continuable settlement contract.
 
 Failed child settlements, including token/tool/time/turn limits and provider errors, return `partial: true`, the latest `stopReason`, configured `budget`, cumulative `usage`, latest plan details and evidence references, and up to eight saved tool-result summaries (1,024 characters each, without raw tool data). `hasPartialResults` separately indicates whether an assistant report or completed tool result exists; `partial` alone does not claim useful work was completed. These fields are built from durable events without another model request. Successful later turns clear prior stop reasons. Cancellation returns preservation instructions and must not trigger an automatic restart.

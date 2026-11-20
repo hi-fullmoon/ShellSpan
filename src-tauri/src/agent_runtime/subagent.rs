@@ -16,12 +16,12 @@ use super::{
     default_model_tools, drive_agent, AgentCapabilityScope, AgentCompactionManager,
     AgentDriverConfig, AgentDriverSettlement, AgentEntry, AgentFleetState, AgentFleetTargetState,
     AgentHandle, AgentHookBus, AgentInboxLane, AgentInboxMessage, AgentLifecyclePhase,
-    AgentMessageSource, AgentRecoveryState, AgentRecoveryStatus, AgentRegistry, AgentSessionEffect,
-    AgentSessionEventPayload, AgentSessionSnapshot, AgentSessionStatus, AgentSessionStore,
-    AgentSubagentBudget, AgentSubagentInheritance, AgentSubagentModel, AgentSubagentRole,
-    AgentSubagentSession, AgentSubagentToolSettlement, AgentToolPipeline, AgentToolResultStatus,
-    CreateAgentSessionRequest, ModelRegistry, OrchestrationToolRequest, OrchestrationToolResult,
-    OrchestrationToolRuntime,
+    AgentMessageSource, AgentPlanStepStatus, AgentRecoveryState, AgentRecoveryStatus,
+    AgentRegistry, AgentSessionEffect, AgentSessionEventPayload, AgentSessionSnapshot,
+    AgentSessionStatus, AgentSessionStore, AgentSubagentBudget, AgentSubagentInheritance,
+    AgentSubagentModel, AgentSubagentRole, AgentSubagentSession, AgentSubagentToolSettlement,
+    AgentToolPipeline, AgentToolResultStatus, CreateAgentSessionRequest, ModelRegistry,
+    OrchestrationToolRequest, OrchestrationToolResult, OrchestrationToolRuntime,
 };
 
 pub(super) const DEFAULT_ONE_SHOT_MAX_STEPS_PER_TURN: u16 = 6;
@@ -344,6 +344,7 @@ impl SubAgentManager {
         self.sessions.snapshot(&request.child_session_id)
     }
 
+    /// Cancel native tasks across the whole tree. The caller settles the root.
     pub(crate) async fn cancel_descendants(&self, parent_session_id: &str) -> Result<(), String> {
         self.cancel_subtree(parent_session_id, false).await
     }
@@ -721,6 +722,15 @@ impl SubAgentManager {
                     break;
                 }
                 if role == AgentSubagentRole::Verifier {
+                    let evidence_seq = self.sessions.read_events(&child, |events| {
+                        fleet_verification_evidence(events, &target.target_id)
+                    })?;
+                    let Some(evidence_seq) = evidence_seq else {
+                        failed = Some(
+                            "Verifier did not record a passing check with native evidence".into(),
+                        );
+                        break;
+                    };
                     let evidence_id = format!("fleet-verifier-{}", Uuid::new_v4().simple());
                     self.sessions.append(
                         parent_session_id,
@@ -730,7 +740,7 @@ impl SubAgentManager {
                             evidence_id: evidence_id.clone(),
                             kind: "independent-fleet-verification".into(),
                             summary: format!(
-                                "Verifier Session {child} independently completed target {}",
+                                "Verifier Session {child} passed a check for target {} using committed tool result at sequence {evidence_seq}",
                                 target.target_id
                             ),
                         },
@@ -1680,58 +1690,95 @@ impl SubAgentManager {
                 .extend(order.iter().cloned());
             order
         };
-        for session_id in order {
-            let handle = {
-                let _gate = self.recovery_gate.lock().await;
-                let handles = self
-                    .handles
-                    .lock()
-                    .map_err(|_| "subagent handle registry is unavailable".to_string())?;
-                let handle = handles.get(&session_id).cloned();
-                if handle.is_none() {
-                    // Fence cold attachment until cancellation is durable too.
-                    let snapshot = self.sessions.snapshot(&session_id)?;
-                    if !snapshot.ended {
-                        self.sessions.cancel(&session_id)?;
-                    }
+        // Native processes can outlive their tool calls. Send cancellation to
+        // every resident task before waiting for any driver's settlement.
+        let native_stops = order
+            .iter()
+            .map(String::as_str)
+            .chain(std::iter::once(root).filter(|_| !include_root))
+            .map(|session_id| async move {
+                if self.agents.get(session_id)?.is_none() {
+                    return Ok(());
                 }
-                handle
-            };
-            if let Some(handle) = handle {
-                self.tools.cancel_session(&handle.entry())?;
-                self.tools.await_pending_executions(&handle.entry()).await?;
-                handle.dispose().await?;
-                self.handles
-                    .lock()
-                    .map_err(|_| "subagent handle registry is unavailable".to_string())?
-                    .remove(&session_id);
+                let tools = self.tools.clone();
+                let session_id = session_id.to_owned();
+                tokio::task::spawn_blocking(move || tools.cancel_native_task(&session_id))
+                    .await
+                    .map_err(|error| format!("Agent native cancellation worker failed: {error}"))?
+            });
+        let mut native_results = futures_util::future::join_all(native_stops).await;
+        let mut errors = Vec::new();
+        if !include_root {
+            if let Some(Err(error)) = native_results.pop() {
+                errors.push(format!("{root}: {error}"));
             }
-            if let Some(parent_session_id) = self
-                .sessions
-                .snapshot(&session_id)?
-                .header
-                .parent_session_id
+        }
+        for (session_id, native_result) in order.into_iter().zip(native_results) {
+            if let Err(error) = self
+                .finish_cancelled_child(&session_id, native_result)
+                .await
             {
-                let descriptor_id = self
-                    .sessions
-                    .snapshot(&session_id)?
-                    .header
-                    .subagent
-                    .map(|subagent| subagent.descriptor_id)
-                    .unwrap_or_else(|| "detached".into());
-                let parent = self.sessions.snapshot(&parent_session_id)?;
-                if !parent.ended {
-                    self.sessions.append(
-                        &parent_session_id,
-                        None,
-                        None,
-                        AgentSessionEventPayload::SubagentDetached {
-                            descriptor_id,
-                            child_session_id: session_id,
-                            reason: "cancelCascade".into(),
-                        },
-                    )?;
+                errors.push(format!("{session_id}: {error}"));
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("\n"))
+        }
+    }
+
+    async fn finish_cancelled_child(
+        &self,
+        session_id: &str,
+        native_result: Result<(), String>,
+    ) -> Result<(), String> {
+        let handle = {
+            let _gate = self.recovery_gate.lock().await;
+            let handles = self
+                .handles
+                .lock()
+                .map_err(|_| "subagent handle registry is unavailable".to_string())?;
+            let handle = handles.get(session_id).cloned();
+            if handle.is_none() {
+                // Fence cold attachment until cancellation is durable too.
+                let snapshot = self.sessions.snapshot(session_id)?;
+                if !snapshot.ended {
+                    self.sessions.cancel(session_id)?;
                 }
+            }
+            handle
+        };
+        if let Some(handle) = handle {
+            self.tools.cancel_session_interactions(&handle.entry())?;
+            native_result?;
+            self.tools.await_pending_executions(&handle.entry()).await?;
+            handle.dispose().await?;
+            self.handles
+                .lock()
+                .map_err(|_| "subagent handle registry is unavailable".to_string())?
+                .remove(session_id);
+        } else {
+            native_result?;
+        }
+        let header = self.sessions.snapshot(session_id)?.header;
+        if let Some(parent_session_id) = header.parent_session_id {
+            let descriptor_id = header
+                .subagent
+                .map(|subagent| subagent.descriptor_id)
+                .unwrap_or_else(|| "detached".into());
+            let parent = self.sessions.snapshot(&parent_session_id)?;
+            if !parent.ended {
+                self.sessions.append(
+                    &parent_session_id,
+                    None,
+                    None,
+                    AgentSessionEventPayload::SubagentDetached {
+                        descriptor_id,
+                        child_session_id: session_id.to_owned(),
+                        reason: "cancelCascade".into(),
+                    },
+                )?;
             }
         }
         Ok(())
@@ -2559,13 +2606,72 @@ fn fleet_role_goal(role: AgentSubagentRole, goal: &str) -> String {
             format!("Apply the bounded target change using only authorized native tools. {goal}")
         }
         AgentSubagentRole::Verifier => format!(
-            "Independently verify the target outcome. Do not trust the Operator's conclusion. {goal}"
+            "Independently verify the target outcome with a read-only native tool on this target. After observing a successful check, record a completed step with id verify-target using update_plan. If the check fails or you cannot verify the outcome, leave that step failed or blocked and explain why. {goal}"
         ),
         AgentSubagentRole::Reviewer => format!(
             "Review the target evidence and identify residual risk without changing state. {goal}"
         ),
         _ => goal.into(),
     }
+}
+
+fn fleet_verification_evidence(
+    events: &[super::AgentSessionEvent],
+    target_id: &str,
+) -> Option<u64> {
+    let turn_id = events
+        .iter()
+        .rfind(|event| matches!(event.payload, AgentSessionEventPayload::TurnEnd { .. }))?
+        .turn_id
+        .as_deref()?;
+    let (plan, steps) = events.iter().rev().find_map(|event| match &event.payload {
+        AgentSessionEventPayload::TaskPlan { steps, .. }
+            if event.turn_id.as_deref() == Some(turn_id) =>
+        {
+            Some((event, steps))
+        }
+        _ => None,
+    })?;
+    if !steps
+        .iter()
+        .any(|step| step.id == "verify-target" && step.status == AgentPlanStepStatus::Completed)
+    {
+        return None;
+    }
+
+    let mut reads = HashSet::new();
+    let mut evidence = None;
+    for event in events.iter().take_while(|event| event.seq < plan.seq) {
+        if event.turn_id.as_deref() != Some(turn_id) || event.step_id == plan.step_id {
+            continue;
+        }
+        match &event.payload {
+            AgentSessionEventPayload::ToolCall { call }
+                if call.native_name.is_some()
+                    && call.effect == Some(AgentSessionEffect::ReadOnly)
+                    && call
+                        .target
+                        .as_ref()
+                        .is_some_and(|target| target.target_id == target_id) =>
+            {
+                reads.insert((
+                    event.step_id.as_deref(),
+                    call.call_id.as_str(),
+                    call.name.as_str(),
+                ));
+            }
+            AgentSessionEventPayload::ToolResult {
+                call_id,
+                name,
+                status: AgentToolResultStatus::Completed,
+                ..
+            } if reads.contains(&(event.step_id.as_deref(), call_id.as_str(), name.as_str())) => {
+                evidence = Some(event.seq);
+            }
+            _ => {}
+        }
+    }
+    evidence
 }
 
 fn fleet_role_budget() -> AgentSubagentBudget {

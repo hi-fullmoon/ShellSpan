@@ -47,6 +47,9 @@ The committed client reconciles periodically and on foreground return. Child
 snapshot synchronization has its own cursor: committing a boundary event does
 not acknowledge its snapshot read. Failed snapshot reads remain pending across
 automatic or explicit retries even when no further event arrives.
+Subscription, snapshot and event-page IPC requests have a five-second deadline
+so a missing reply releases the stream queue. Manual retry replaces any
+reconciliation already in flight and ignores the old reply.
 
 An IPC reply timeout is **confirming**, not failed. The adapter backfills committed
 events independently of the pending command and can acknowledge a lost reply.

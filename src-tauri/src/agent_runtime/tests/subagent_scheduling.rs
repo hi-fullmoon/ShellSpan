@@ -12,7 +12,11 @@ async fn stopping_tree_fences_children_before_waiting_for_existing_workers() {
     parent.stop_admission().unwrap();
     assert!(child.with_input_admission(|| Ok(())).unwrap().is_none());
     let mut stop = Box::pin(manager.cancel_descendants(&parent.session_id));
-    assert!(std::future::poll_fn(|cx| Poll::Ready(stop.as_mut().poll(cx).is_pending())).await);
+    let cancellation = child.cancellation();
+    tokio::select! {
+        _ = &mut stop => panic!("stop returned before the child driver was released"),
+        result = tokio::time::timeout(Duration::from_secs(5), cancellation.cancelled()) => result.unwrap(),
+    }
     assert!(child.cancellation().is_cancelled());
 
     for owner in [&parent.session_id, &child.session_id] {

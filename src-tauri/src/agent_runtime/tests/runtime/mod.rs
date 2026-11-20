@@ -1354,10 +1354,28 @@ async fn fleet_uses_distinct_role_children_and_persists_target_evidence() {
     let adapter = FakeAdapter::new(vec![
         reply("explorer evidence", &[]),
         reply("operator evidence", &[]),
+        tool_response(vec![ModelToolCall {
+            call_id: "verify-read".into(),
+            provider_call_id: None,
+            name: "list_directory".into(),
+            arguments: json!({"path": "."}),
+        }]),
+        tool_response(vec![ModelToolCall {
+            call_id: "verify-plan".into(),
+            provider_call_id: None,
+            name: "update_plan".into(),
+            arguments: json!({
+                "steps": [{"id": "verify-target", "title": "Check target", "status": "completed"}]
+            }),
+        }]),
         reply("verifier evidence", &[]),
         reply("reviewer evidence", &[]),
     ]);
-    let (_root, runtime) = configured(adapter);
+    let (_root, runtime) = configured_with_native(
+        adapter,
+        AgentDriverConfig::default(),
+        RecordingNativeRuntime::new(false),
+    );
     create(&runtime, "fleet-parent");
     runtime.start("fleet-parent", provider(), None).unwrap();
     runtime.await_idle("fleet-parent").await.unwrap();
@@ -1414,6 +1432,58 @@ async fn fleet_uses_distinct_role_children_and_persists_target_evidence() {
     assert!(events.iter().any(|event| {
         matches!(event.payload, AgentSessionEventPayload::TaskEvidence { ref kind, .. } if kind == "independent-fleet-verification")
     }));
+}
+
+#[tokio::test]
+async fn fleet_verifier_requires_a_passing_plan_and_native_result() {
+    for record_plan in [false, true] {
+        let mut responses = vec![reply("explored", &[]), reply("operated", &[])];
+        if record_plan {
+            responses.push(tool_response(vec![ModelToolCall {
+                call_id: "unsubstantiated-plan".into(),
+                provider_call_id: None,
+                name: "update_plan".into(),
+                arguments: json!({
+                    "steps": [{"id": "verify-target", "title": "Check target", "status": "completed"}]
+                }),
+            }]));
+        }
+        responses.push(reply("I could not verify the target.", &[]));
+        let (_root, runtime) = configured(FakeAdapter::new(responses));
+        create(&runtime, "fleet-unverified");
+        runtime.start("fleet-unverified", provider(), None).unwrap();
+        let plan = runtime
+            .plan_fleet(AgentFleetPlanRequest {
+                parent_session_id: "fleet-unverified".into(),
+                targets: vec![AgentFleetTargetRequest {
+                    target_id: "target-local".into(),
+                    goal: "verify the target".into(),
+                }],
+                canary_size: 1,
+                wave_size: 1,
+                failure_threshold: 0,
+                budget: None,
+            })
+            .unwrap();
+        let report = runtime
+            .start_fleet(AgentFleetControlRequest {
+                parent_session_id: "fleet-unverified".into(),
+                fleet_id: plan.fleet.fleet_id.unwrap(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(report.fleet.status.as_deref(), Some("failed"));
+        let target = &report.fleet.targets[0];
+        assert_eq!(target.state, "failed");
+        assert_eq!(target.child_session_ids.len(), 3);
+        assert!(target.evidence_refs.is_empty());
+        assert!(!all_events(&runtime, "fleet-unverified")
+            .iter()
+            .any(|event| {
+                matches!(&event.payload, AgentSessionEventPayload::TaskEvidence { kind, .. }
+                if kind == "independent-fleet-verification")
+            }));
+    }
 }
 
 #[tokio::test]

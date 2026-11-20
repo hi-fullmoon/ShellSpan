@@ -1,5 +1,28 @@
 use super::*;
 
+#[test]
+fn configured_runtime_reads_do_not_repeat_artifact_reconciliation() {
+    let (root, runtime) = configured(FakeAdapter::new(vec![]));
+    create(&runtime, "cached-config");
+    std::fs::write(
+        root.path().join("agent-runtime/artifacts/unexpected"),
+        "invalid entry",
+    )
+    .unwrap();
+
+    runtime.configure(root.path().to_path_buf()).unwrap();
+    assert_eq!(
+        runtime.session("cached-config").unwrap().header.session_id,
+        "cached-config"
+    );
+
+    let cold = AgentRuntimeBuilder::new().build();
+    assert!(cold
+        .configure(root.path().to_path_buf())
+        .unwrap_err()
+        .contains("Agent artifact root"));
+}
+
 #[tokio::test]
 async fn archive_rejection_wakes_input_queued_while_the_worker_slot_was_reserved() {
     let adapter = FakeAdapter::new(vec![reply("Queued reply", &[])]);

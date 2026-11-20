@@ -862,21 +862,17 @@ pub(crate) fn agent_runtime_get_pending_approval_arguments(
 
 #[tauri::command]
 pub(crate) fn agent_runtime_get_session(
-    app: AppHandle,
     runtime: State<'_, AgentRuntime>,
     input: AgentSessionIdInput,
 ) -> Result<AgentSessionSnapshot, String> {
-    configure_runtime(&app, &runtime)?;
     runtime.session(&input.session_id)
 }
 
 #[tauri::command]
 pub(crate) fn agent_runtime_list_sessions(
-    app: AppHandle,
     runtime: State<'_, AgentRuntime>,
     request: AgentSessionListRequest,
 ) -> Result<AgentSessionListPage, String> {
-    configure_runtime(&app, &runtime)?;
     runtime.sessions(request)
 }
 
@@ -891,43 +887,43 @@ pub(crate) fn agent_runtime_archive_session(
 }
 
 #[tauri::command]
-pub(crate) fn agent_runtime_delete_session(
+pub(crate) async fn agent_runtime_delete_session(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,
     input: AgentSessionIdInput,
 ) -> Result<(), String> {
     configure_runtime(&app, &runtime)?;
-    runtime.delete_session(&input.session_id)
+    let runtime = runtime.inner().clone();
+    tokio::task::spawn_blocking(move || runtime.delete_session(&input.session_id))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
 pub(crate) fn agent_runtime_get_events(
-    app: AppHandle,
     runtime: State<'_, AgentRuntime>,
     request: AgentSessionEventsRequest,
 ) -> Result<AgentSessionEventPage, String> {
-    configure_runtime(&app, &runtime)?;
     runtime.events(request)
 }
 
 #[tauri::command]
 pub(crate) fn agent_runtime_get_committed_events(
-    app: AppHandle,
     runtime: State<'_, AgentRuntime>,
     request: AgentCommittedEventsRequest,
 ) -> Result<AgentSessionEventPage, String> {
-    configure_runtime(&app, &runtime)?;
     runtime.committed_events(request)
 }
 
 #[tauri::command]
-pub(crate) fn agent_runtime_get_artifact(
-    app: AppHandle,
+pub(crate) async fn agent_runtime_get_artifact(
     runtime: State<'_, AgentRuntime>,
     request: AgentArtifactRequest,
 ) -> Result<AgentArtifactResponse, String> {
-    configure_runtime(&app, &runtime)?;
-    runtime.artifact(request)
+    let runtime = runtime.inner().clone();
+    tokio::task::spawn_blocking(move || runtime.artifact(request))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

@@ -148,7 +148,9 @@ are rejected without execution; a fresh model step must use the actual choice.
 This also applies when the user selects an alternative or types a custom plan.
 
 Stopping closes native tool admission and signals native cancellation for the
-parent and its descendants before joining their workers. A stopped turn settles
+parent and its descendants before joining their workers. A cancellation or
+settlement error for one child does not skip the rest of the tree. Failed
+sessions retain their handles for another stop attempt. A stopped turn settles
 its outstanding approval even when only the journal is available. An approval
 decision keeps the model driver waiting until the remaining tool batch settles
 or reaches another interaction. A running one-shot child can receive approval

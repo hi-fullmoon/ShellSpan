@@ -4,6 +4,7 @@ import {
   listenToAgentRuntimeSession,
 } from '@/lib/ipc/tauri';
 import { CommittedEventBuffer } from './committed-event-buffer';
+import { withOperationDeadline } from './mutation-acknowledgement';
 import type { AiSessionSyncRecovery } from './session-adapter';
 import {
   isSupportedAgentSessionEventVersion,
@@ -17,6 +18,22 @@ const PAGE_SIZE = 1_024;
 const RECOVERY_DELAY_MS = 1_000;
 const MAX_RECOVERY_DELAY_MS = 30_000;
 const RECONCILIATION_DELAY_MS = 5_000;
+const TRANSPORT_TIMEOUT_MS = 5_000;
+
+function readTransport<T>(
+  signal: AbortSignal,
+  read: () => Promise<T>,
+  disposeLate?: (result: T) => void,
+): Promise<T> {
+  return withOperationDeadline(TRANSPORT_TIMEOUT_MS, () => new Error('Agent session IPC timed out'), async deadline => {
+    signal.throwIfAborted();
+    const result = await read();
+    if (signal.aborted || deadline.aborted) disposeLate?.(result);
+    signal.throwIfAborted();
+    deadline.throwIfAborted();
+    return result;
+  });
+}
 
 export interface AgentSessionStreamTransport {
   readonly snapshot: (sessionId: string) => Promise<AgentSessionSnapshot>;
@@ -112,18 +129,18 @@ export class AgentSessionCommittedClient {
   private async establish(signal: AbortSignal): Promise<AgentSessionStreamState> {
     this.buffering = true;
     try {
-      const unlisten = await this.transport.subscribe((event) => {
+      const unlisten = await readTransport(signal, () => this.transport.subscribe((event) => {
         if (signal.aborted || event.sessionId !== this.sessionId) return;
         if (this.buffering) {
           this.buffered.push(event);
           return;
         }
         this.enqueue(signal, () => this.ingestLive(event, signal));
-      });
+      }), unlistenLate => unlistenLate());
       if (signal.aborted) unlisten();
       signal.throwIfAborted();
       this.unlisten = unlisten;
-      const snapshot = await this.transport.snapshot(this.sessionId);
+      const snapshot = await readTransport(signal, () => this.transport.snapshot(this.sessionId));
       signal.throwIfAborted();
       this.snapshotValue = snapshot;
       this.childSnapshotSeq = snapshot.eventCount - 1;
@@ -191,6 +208,7 @@ export class AgentSessionCommittedClient {
 
   async retrySync(): Promise<AgentSessionStreamState> {
     if (!this.connection || !this.unlisten) return this.reconnect();
+    if (this.recoveryWork) return this.reconnect();
     await this.recover(this.connection.signal);
     return this.settled();
   }
@@ -266,7 +284,7 @@ export class AgentSessionCommittedClient {
       }
       // The event cursor can advance before this read succeeds. Keep a separate
       // cursor so a failed snapshot is retried even when no more events arrive.
-      const snapshot = await this.transport.snapshot(this.sessionId);
+      const snapshot = await readTransport(signal, () => this.transport.snapshot(this.sessionId));
       signal.throwIfAborted();
       this.snapshotValue = snapshot;
       this.childSnapshotSeq = Math.max(event.seq, snapshot.eventCount - 1);
@@ -292,11 +310,11 @@ export class AgentSessionCommittedClient {
     let cursor = afterSeq;
     for (;;) {
       signal.throwIfAborted();
-      const page = await this.transport.committedEvents({
+      const page = await readTransport(signal, () => this.transport.committedEvents({
         sessionId: this.sessionId,
         afterSeq: cursor,
         limit: PAGE_SIZE,
-      });
+      }));
       signal.throwIfAborted();
       for (const event of page.events) this.merge(event, events);
       const last = page.events[page.events.length - 1];
@@ -311,7 +329,7 @@ export class AgentSessionCommittedClient {
   }
 
   private async fullResync(signal: AbortSignal): Promise<void> {
-    const snapshot = await this.transport.snapshot(this.sessionId);
+    const snapshot = await readTransport(signal, () => this.transport.snapshot(this.sessionId));
     signal.throwIfAborted();
     // Publish a complete replacement only after replay succeeds. Failed repair
     // must not erase the committed text already visible to the reader.

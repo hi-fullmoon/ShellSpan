@@ -1,11 +1,12 @@
 //! Image admission owns bytes; durable events own only verified immutable references.
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 #[cfg(unix)]
 use std::fs::File;
 use std::fs::{self, OpenOptions};
 use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use image::{AnimationDecoder, DynamicImage, ImageDecoder, ImageFormat, ImageReader};
@@ -19,6 +20,59 @@ use crate::ai::AiProviderConfig;
 mod color;
 #[cfg(test)]
 mod color_tests;
+
+#[cfg(test)]
+mod operation_tests {
+    use super::*;
+
+    #[test]
+    fn completed_image_operations_do_not_accumulate_and_live_leases_share_cancellation() {
+        let store = ImageStore::default();
+        for index in 0..2050 {
+            drop(
+                store
+                    .begin_operation(&ImageOperation {
+                        session_id: "images".into(),
+                        client_operation_id: format!("operation-{index}"),
+                    })
+                    .unwrap(),
+            );
+        }
+        assert!(store.operations.lock().unwrap().entries.is_empty());
+
+        let operation = ImageOperation {
+            session_id: "images".into(),
+            client_operation_id: "cancelled".into(),
+        };
+        let first = store.begin_operation(&operation).unwrap();
+        let duplicate = store.begin_operation(&operation).unwrap();
+        store.cancel_operation(&operation).unwrap();
+        assert!(first.token.is_cancelled());
+        assert!(duplicate.token.is_cancelled());
+        drop(first);
+        drop(duplicate);
+        assert!(store
+            .begin_operation(&operation)
+            .unwrap()
+            .token
+            .is_cancelled());
+        {
+            let mut operations = store.operations.lock().unwrap();
+            operations
+                .entries
+                .values_mut()
+                .next()
+                .unwrap()
+                .cancelled_until = Some(Instant::now());
+        }
+        assert!(!store
+            .begin_operation(&operation)
+            .unwrap()
+            .token
+            .is_cancelled());
+        assert!(store.operations.lock().unwrap().entries.is_empty());
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -349,12 +403,64 @@ fn normalize(
 struct ImageStoreInner {
     root: Option<PathBuf>,
 }
+
+const CANCELLED_OPERATION_RETENTION: Duration = Duration::from_secs(5 * 60);
+type ImageOperationKey = (String, String);
+
+#[derive(Default)]
+struct ImageOperationState {
+    token: CancellationToken,
+    users: usize,
+    cancelled_until: Option<Instant>,
+}
+
+impl ImageOperationState {
+    fn cancel(&mut self) {
+        self.token.cancel();
+        self.cancelled_until = Some(Instant::now() + CANCELLED_OPERATION_RETENTION);
+    }
+}
+
+#[derive(Default)]
+struct ImageOperations {
+    entries: HashMap<ImageOperationKey, ImageOperationState>,
+}
+
+impl ImageOperations {
+    fn prune(&mut self) {
+        let now = Instant::now();
+        self.entries.retain(|_, state| {
+            state.users != 0 || state.cancelled_until.is_some_and(|deadline| deadline > now)
+        });
+    }
+}
+
+pub(crate) struct ImageOperationLease {
+    store: ImageStore,
+    key: ImageOperationKey,
+    pub(crate) token: CancellationToken,
+}
+
+impl Drop for ImageOperationLease {
+    fn drop(&mut self) {
+        if let Ok(mut operations) = self.store.operations.lock() {
+            if let Some(state) = operations.entries.get_mut(&self.key) {
+                state.users -= 1;
+                if state.users == 0 && state.cancelled_until.is_none() {
+                    operations.entries.remove(&self.key);
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct ImageStore {
     inner: Arc<Mutex<ImageStoreInner>>,
     imports: Arc<tokio::sync::Semaphore>,
+    blobs: Arc<Mutex<()>>,
     /// Held across the final Inbox append, linearizing cancellation with commit.
-    pub(crate) operations: Arc<Mutex<HashMap<(String, String), CancellationToken>>>,
+    operations: Arc<Mutex<ImageOperations>>,
     #[cfg(test)]
     pub(crate) observer: Arc<Mutex<Option<ImageBoundaryObserver>>>,
 }
@@ -363,6 +469,7 @@ impl Default for ImageStore {
         Self {
             inner: Arc::default(),
             imports: Arc::new(tokio::sync::Semaphore::new(2)),
+            blobs: Arc::default(),
             operations: Arc::default(),
             #[cfg(test)]
             observer: Arc::default(),
@@ -420,40 +527,98 @@ impl ImageStore {
             .clone()
             .ok_or_else(|| "IMAGE_STORE_NOT_CONFIGURED".into())
     }
-    pub(crate) fn token(&self, operation: &ImageOperation) -> Result<CancellationToken, String> {
+    fn operation_key(operation: &ImageOperation) -> Result<ImageOperationKey, String> {
         super::session::validate_identifier(&operation.session_id, "sessionId")?;
         super::session::validate_identifier(&operation.client_operation_id, "clientOperationId")?;
+        Ok((
+            operation.session_id.clone(),
+            operation.client_operation_id.clone(),
+        ))
+    }
+
+    pub(crate) fn begin_operation(
+        &self,
+        operation: &ImageOperation,
+    ) -> Result<ImageOperationLease, String> {
+        let key = Self::operation_key(operation)?;
         let mut operations = self
             .operations
             .lock()
             .map_err(|_| "IMAGE_OPERATION_UNAVAILABLE")?;
-        let key = (
-            operation.session_id.clone(),
-            operation.client_operation_id.clone(),
-        );
-        if !operations.contains_key(&key) && operations.len() >= 2048 {
-            return Err("IMAGE_OPERATION_LIMIT: restart before importing more images".into());
-        }
-        Ok(operations.entry(key).or_default().clone())
+        operations.prune();
+        let state = operations.entries.entry(key.clone()).or_default();
+        state.users += 1;
+        Ok(ImageOperationLease {
+            store: self.clone(),
+            key,
+            token: state.token.clone(),
+        })
     }
-    pub(crate) fn cancel_session(&self, session: &str) -> Result<(), String> {
-        for ((id, _), token) in self
+
+    pub(crate) fn cancel_operation(&self, operation: &ImageOperation) -> Result<(), String> {
+        let key = Self::operation_key(operation)?;
+        let mut operations = self
             .operations
             .lock()
-            .map_err(|_| "IMAGE_OPERATION_UNAVAILABLE")?
-            .iter()
-        {
-            if id == session {
-                token.cancel();
+            .map_err(|_| "IMAGE_OPERATION_UNAVAILABLE")?;
+        operations.prune();
+        operations.entries.entry(key).or_default().cancel();
+        Ok(())
+    }
+
+    pub(crate) fn commit_operation<T>(
+        &self,
+        operation: &ImageOperationLease,
+        commit: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        let _operations = self
+            .operations
+            .lock()
+            .map_err(|_| "IMAGE_OPERATION_UNAVAILABLE")?;
+        cancelled(&operation.token)?;
+        commit()
+    }
+
+    pub(crate) fn cancel_session(&self, session: &str) -> Result<(), String> {
+        let mut operations = self
+            .operations
+            .lock()
+            .map_err(|_| "IMAGE_OPERATION_UNAVAILABLE")?;
+        operations.prune();
+        for ((id, _), state) in &mut operations.entries {
+            if id == session && state.users != 0 {
+                state.cancel();
             }
         }
         Ok(())
     }
-    pub(crate) fn import(
+
+    pub(crate) fn lock_blobs(&self) -> Result<MutexGuard<'_, ()>, String> {
+        self.blobs
+            .lock()
+            .map_err(|_| "IMAGE_STORE_UNAVAILABLE".into())
+    }
+
+    pub(crate) fn normalize_draft(
+        &self,
+        uploads: &[ImageUpload],
+    ) -> Result<Vec<ImageUpload>, String> {
+        Ok(self
+            .normalize_uploads(uploads, &CancellationToken::new())?
+            .into_iter()
+            .map(|(reference, bytes)| ImageUpload {
+                data: STANDARD.encode(bytes),
+                name: reference.name,
+                media_type: reference.media_type,
+            })
+            .collect())
+    }
+
+    fn normalize_uploads(
         &self,
         uploads: &[ImageUpload],
         token: &CancellationToken,
-    ) -> Result<Vec<ImageRef>, String> {
+    ) -> Result<Vec<(ImageRef, Vec<u8>)>, String> {
         validate_upload_envelope(uploads)?;
         self.boundary("beforeNormalize", token)?;
         let prepared = uploads
@@ -468,6 +633,15 @@ impl ImageStore {
         if total_source_bytes > VISION.max_batch_bytes {
             return Err("IMAGE_BATCH_LIMIT".into());
         }
+        Ok(prepared)
+    }
+
+    pub(crate) fn import(
+        &self,
+        uploads: &[ImageUpload],
+        token: &CancellationToken,
+    ) -> Result<Vec<ImageRef>, String> {
+        let prepared = self.normalize_uploads(uploads, token)?;
         let root = self.root()?;
         for (reference, bytes) in &prepared {
             self.boundary("beforeWrite", token)?;
@@ -502,6 +676,24 @@ impl ImageStore {
             .into_iter()
             .map(|(reference, _)| reference)
             .collect())
+    }
+
+    pub(crate) fn cleanup_unreferenced(&self, referenced: &HashSet<String>) -> Result<(), String> {
+        for entry in fs::read_dir(self.root()?).map_err(image_error)? {
+            let entry = entry.map_err(image_error)?;
+            let name = entry.file_name();
+            let Some(hash) = name.to_str() else { continue };
+            if hash.len() == 64
+                && hash
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+                && !referenced.contains(hash)
+                && entry.file_type().map_err(image_error)?.is_file()
+            {
+                fs::remove_file(entry.path()).map_err(image_error)?;
+            }
+        }
+        Ok(())
     }
     pub(crate) fn read(&self, reference: &ImageRef) -> Result<Vec<u8>, String> {
         reference.validate()?;

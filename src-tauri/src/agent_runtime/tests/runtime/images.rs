@@ -104,7 +104,7 @@ fn image_import_concurrency_is_bounded_per_shared_store_not_across_runtimes() {
 }
 
 #[tokio::test]
-async fn image_second_blob_failure_keeps_first_blob_but_commits_no_partial_batch() {
+async fn image_second_blob_failure_reclaims_first_blob_and_commits_no_partial_batch() {
     let (storage, runtime, model) = setup();
     runtime.start("images", vision_provider(), None).unwrap();
     runtime.await_idle("images").await.unwrap();
@@ -126,7 +126,7 @@ async fn image_second_blob_failure_keeps_first_blob_but_commits_no_partial_batch
     batch.images.push(second);
     assert!(runtime.submit_images(batch).await.is_err());
     assert!(
-        std::fs::read_dir(storage.path().join("agent-runtime/images"))
+        !std::fs::read_dir(storage.path().join("agent-runtime/images"))
             .unwrap()
             .any(|entry| entry.unwrap().file_type().unwrap().is_file())
     );
@@ -376,17 +376,18 @@ async fn image_bad_batch_write_failure_and_every_cancel_boundary_never_enqueue()
         "written",
         "beforeInbox",
     ] {
-        let (_storage, runtime, model) = setup();
+        let (storage, runtime, model) = setup();
         runtime.start("images", vision_provider(), None).unwrap();
         runtime.await_idle("images").await.unwrap();
-        let token = runtime
+        let operation = runtime
             .models
             .images
-            .token(&ImageOperation {
+            .begin_operation(&ImageOperation {
                 session_id: "images".into(),
                 client_operation_id: "one".into(),
             })
             .unwrap();
+        let token = operation.token.clone();
         *runtime.models.images.observer.lock().unwrap() = Some(Arc::new(move |stage| {
             if stage == boundary {
                 token.cancel();
@@ -404,6 +405,12 @@ async fn image_bad_batch_write_failure_and_every_cancel_boundary_never_enqueue()
             .next_turn
             .is_empty());
         assert_eq!(model.request_count(), 0);
+        assert_eq!(
+            std::fs::read_dir(storage.path().join("agent-runtime/images"))
+                .unwrap()
+                .count(),
+            0
+        );
         assert!(!all_events(&runtime, "images")
             .iter()
             .any(|e| matches!(e.payload, AgentSessionEventPayload::UserMessage { .. })));
@@ -428,14 +435,18 @@ async fn image_bad_batch_write_failure_and_every_cancel_boundary_never_enqueue()
             .unwrap(),
     );
     let path = storage.path().join("agent-runtime/images").join(hash);
-    std::fs::remove_file(&path).unwrap();
+    assert!(!path.exists(), "draft normalization must not write a blob");
     std::fs::create_dir(&path).unwrap();
     assert!(runtime.submit_images(input("fail-write")).await.is_err());
     runtime
         .sessions
         .fail_appends_matching(|p| matches!(p, AgentSessionEventPayload::InboxSpliced { .. }));
-    std::fs::remove_dir(path).unwrap();
+    std::fs::remove_dir(&path).unwrap();
     assert!(runtime.submit_images(input("fail-log")).await.is_err());
+    assert!(
+        !path.exists(),
+        "failed journal append must reclaim the blob"
+    );
     assert_eq!(model.request_count(), 0);
 }
 
@@ -463,6 +474,37 @@ async fn cancelling_images_before_session_creation_keeps_the_submission_uncommit
 }
 
 #[tokio::test]
+async fn image_blob_is_reclaimed_only_after_its_last_session_is_deleted() {
+    let (storage, runtime, _) = setup();
+    create(&runtime, "other-images");
+    for id in ["images", "other-images"] {
+        runtime.start(id, vision_provider(), None).unwrap();
+        let mut upload = input("shared");
+        upload.session_id = id.into();
+        runtime
+            .submit_images_with_admission(upload, true, None)
+            .await
+            .unwrap();
+        runtime.cancel(id).await.unwrap();
+        runtime.archive_session(id).unwrap();
+    }
+    let directory = storage.path().join("agent-runtime/images");
+    let blob = std::fs::read_dir(&directory)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    runtime.delete_session("images").unwrap();
+    assert!(
+        blob.is_file(),
+        "the other archived Session still references the image"
+    );
+    runtime.delete_session("other-images").unwrap();
+    assert!(!blob.exists());
+}
+
+#[tokio::test]
 async fn image_commit_wins_cancel_idempotency_raw_conflict_and_cross_session_preview() {
     let (_storage, runtime, model) = setup();
     runtime.start("images", vision_provider(), None).unwrap();
@@ -471,7 +513,8 @@ async fn image_commit_wins_cancel_idempotency_raw_conflict_and_cross_session_pre
         session_id: "images".into(),
         client_operation_id: "one".into(),
     };
-    let token = runtime.models.images.token(&operation).unwrap();
+    let lease = runtime.models.images.begin_operation(&operation).unwrap();
+    let token = lease.token.clone();
     *runtime.models.images.observer.lock().unwrap() = Some(Arc::new(move |stage| {
         if stage == "afterInbox" {
             token.cancel();

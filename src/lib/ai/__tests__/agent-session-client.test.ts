@@ -335,7 +335,7 @@ describe('AgentSessionCommittedClient', () => {
     expect(reads).toHaveBeenCalledTimes(2);
   });
 
-  it('coalesces pending reconciliation and ignores its result after disconnection', async () => {
+  it('coalesces automatic reconciliation and lets a manual retry replace it', async () => {
     vi.useFakeTimers();
     const source = transport([created]);
     const client = createClient('session-fixture', source);
@@ -344,16 +344,29 @@ describe('AgentSessionCommittedClient', () => {
     const reads = vi.spyOn(source, 'committedEvents').mockImplementationOnce(() => new Promise(resolve => { resolvePage = resolve; }));
     await vi.advanceTimersByTimeAsync(5_000);
     window.dispatchEvent(new Event('focus'));
-    const retry = client.retrySync();
-    await vi.advanceTimersByTimeAsync(15_000);
     expect(reads).toHaveBeenCalledOnce();
-    client.disconnect();
-    await client.connect();
+    await client.retrySync();
+    expect(reads).toHaveBeenCalledTimes(2);
     const before = client.state().events;
     resolvePage({ events: [sessionEvent(1, { type: 'session/ended', data: { status: 'completed' } })] });
-    await retry;
+    await client.settled();
     expect(client.state().events).toBe(before);
     expect(client.state().hasTerminalEvent).toBe(false);
+  });
+
+  it('releases live events queued behind an unresponsive backfill', async () => {
+    vi.useFakeTimers();
+    const source = transport([created]);
+    const client = createClient('session-fixture', source);
+    await client.connect();
+    vi.spyOn(source, 'committedEvents').mockImplementationOnce(() => new Promise(() => {}));
+    await vi.advanceTimersByTimeAsync(5_000);
+    const ended = sessionEvent(1, { type: 'session/ended', data: { status: 'completed' } });
+    source.replace([created, ended]);
+    source.publish(ended);
+    expect(client.state().hasTerminalEvent).toBe(false);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await client.settled()).toMatchObject({ lastCommittedSeq: 1, hasTerminalEvent: true });
   });
 
   it('uses recovery backoff after reconciliation fails and preserves visible events', async () => {

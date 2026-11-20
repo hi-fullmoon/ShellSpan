@@ -3052,7 +3052,22 @@ impl AgentToolPipeline {
         Ok(())
     }
 
+    pub(crate) fn cancel_native_task(&self, session_id: &str) -> Result<(), String> {
+        self.native
+            .cancel_task(&self.sessions.snapshot(session_id)?.header.task_id)
+    }
+
+    #[cfg(test)]
     pub(crate) fn cancel_session(&self, entry: &Arc<AgentEntry>) -> Result<(), String> {
+        let interactions = self.cancel_session_interactions(entry);
+        let native = self.cancel_native_task(&entry.session_id);
+        interactions.and(native)
+    }
+
+    pub(crate) fn cancel_session_interactions(
+        &self,
+        entry: &Arc<AgentEntry>,
+    ) -> Result<(), String> {
         {
             let gate = self.question_gate(&entry.session_id)?;
             let _gate = gate.lock().map_err(|_| "question gate unavailable")?;
@@ -3121,8 +3136,7 @@ impl AgentToolPipeline {
                 .remove(&key);
             self.changed.notify_waiters();
         }
-        self.native
-            .cancel_task(&self.sessions.snapshot(session_id)?.header.task_id)
+        Ok(())
     }
 
     pub(crate) async fn await_pending_executions(&self, entry: &AgentEntry) -> Result<(), String> {

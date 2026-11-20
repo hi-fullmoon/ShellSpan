@@ -1,4 +1,5 @@
 use super::*;
+use crate::agent_runtime::AgentSubagentBudget;
 
 fn local_model_provider() -> AiProviderConfig {
     AiProviderConfig {
@@ -253,5 +254,104 @@ async fn failed_stop_releases_its_fence_and_preserves_terminal_protection() {
             .unwrap()
             .as_deref(),
         Some("stopped")
+    );
+}
+
+#[tokio::test]
+async fn failed_child_native_stop_still_cancels_parent_and_sibling() {
+    #[derive(Default)]
+    struct NativeStop {
+        failure: Mutex<Option<String>>,
+        cancelled: Mutex<Vec<String>>,
+    }
+
+    impl NativeToolRuntime for NativeStop {
+        fn prepare(&self, _: NativeToolRequest) -> Result<NativeToolPreparation, String> {
+            unreachable!("no tools are run by this test")
+        }
+
+        fn execute(
+            &self,
+            _: &str,
+            _: bool,
+            _: CancellationToken,
+        ) -> Result<NativeToolResult, String> {
+            unreachable!("no tools are run by this test")
+        }
+
+        fn abandon(&self, _: &str) {}
+
+        fn cancel_task(&self, task_id: &str) -> Result<(), String> {
+            self.cancelled.lock().unwrap().push(task_id.into());
+            let mut failure = self.failure.lock().unwrap();
+            if failure.as_deref() == Some(task_id) {
+                failure.take();
+                return Err("native process termination was not confirmed".into());
+            }
+            Ok(())
+        }
+    }
+
+    let native = Arc::new(NativeStop::default());
+    let (_root, runtime) = configured_with_native(
+        FakeAdapter::new(vec![]),
+        AgentDriverConfig::default(),
+        native.clone(),
+    );
+    let root = "tree-stop";
+    create(&runtime, root);
+    runtime.start(root, provider(), None).unwrap();
+    let create_child = || {
+        runtime
+            .subagents
+            .create_child(
+                root,
+                "Inspect directory contents".into(),
+                AgentSubagentRole::Explorer,
+                "blank",
+                vec!["target-local".into()],
+                AgentSubagentBudget {
+                    max_steps_per_turn: Some(2),
+                    max_turns: 1,
+                    max_tool_calls: None,
+                    max_tokens: None,
+                    timeout_ms: 60_000,
+                },
+                false,
+            )
+            .unwrap()
+    };
+    let failed = create_child();
+    let sibling = create_child();
+    let task_id = |id| runtime.session(id).unwrap().header.task_id;
+    *native.failure.lock().unwrap() = Some(task_id(&failed));
+    let error = runtime.interrupt(root).await.unwrap_err();
+    assert!(
+        error.contains("native process termination was not confirmed"),
+        "{error}"
+    );
+    for id in [root, failed.as_str(), sibling.as_str()] {
+        assert!(native.cancelled.lock().unwrap().contains(&task_id(id)));
+    }
+    assert!(runtime
+        .agents
+        .get(root)
+        .unwrap()
+        .unwrap()
+        .cancellation()
+        .is_cancelled());
+    assert_eq!(
+        runtime.session(&sibling).unwrap().status,
+        AgentSessionStatus::Cancelled
+    );
+    assert!(!runtime.session(&failed).unwrap().ended);
+
+    assert_eq!(
+        runtime.interrupt(root).await.unwrap().status,
+        AgentSessionStatus::Idle
+    );
+    assert_eq!(
+        runtime.session(&failed).unwrap().status,
+        AgentSessionStatus::Cancelled
     );
 }

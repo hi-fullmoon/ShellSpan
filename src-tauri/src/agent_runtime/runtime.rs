@@ -221,7 +221,7 @@ impl AgentRuntimeBuilder {
             sessions: self.sessions,
             agents,
             handles: Arc::new(Mutex::new(HashMap::new())),
-            restored_inputs_paused: Arc::new(Mutex::new(false)),
+            configured_root: Arc::new(Mutex::new(None)),
             terminal_submission_gate: Arc::new(Mutex::new(())),
             stopping_sessions: Arc::new(Mutex::new(HashSet::new())),
             closing_terminals: Arc::new(Mutex::new(HashSet::new())),
@@ -244,7 +244,7 @@ pub(crate) struct AgentRuntime {
     sessions: AgentSessionStore,
     agents: AgentRegistry,
     handles: Arc<Mutex<HashMap<String, super::AgentHandle>>>,
-    restored_inputs_paused: Arc<Mutex<bool>>,
+    configured_root: Arc<Mutex<Option<PathBuf>>>,
     terminal_submission_gate: Arc<Mutex<()>>,
     stopping_sessions: Arc<Mutex<HashSet<String>>>,
     closing_terminals: Arc<Mutex<HashSet<String>>>,
@@ -342,16 +342,7 @@ impl AgentRuntime {
         let store = self.models.images.clone();
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            let refs = store.import(&uploads, &tokio_util::sync::CancellationToken::new())?;
-            refs.into_iter()
-                .map(|r| {
-                    Ok(super::images::ImageUpload {
-                        data: base64::engine::general_purpose::STANDARD.encode(store.read(&r)?),
-                        name: r.name,
-                        media_type: r.media_type,
-                    })
-                })
-                .collect()
+            store.normalize_draft(&uploads)
         })
         .await
         .map_err(|e| e.to_string())?
@@ -370,6 +361,21 @@ impl AgentRuntime {
         paused: bool,
         target_turn_id: Option<&str>,
     ) -> Result<AgentSessionSnapshot, String> {
+        let runtime = self.clone();
+        let target_turn_id = target_turn_id.map(str::to_owned);
+        tokio::task::spawn_blocking(move || {
+            runtime.admit_images(input, paused, target_turn_id.as_deref())
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+
+    fn admit_images(
+        &self,
+        input: super::images::ImageSubmission,
+        paused: bool,
+        target_turn_id: Option<&str>,
+    ) -> Result<AgentSessionSnapshot, String> {
         use super::images::{digest, ImageOperation};
         self.check_terminal_submission_owner(&input.session_id, &input.client_operation_id)?;
         super::images::validate_upload_envelope(&input.images)?;
@@ -382,172 +388,140 @@ impl AgentRuntime {
             session_id: input.session_id.clone(),
             client_operation_id: input.client_operation_id.clone(),
         };
-        let token = self.models.images.token(&operation)?;
         // Fingerprint original input, not sanitized text or normalized pixels.
         let fingerprint = digest(&serde_json::to_vec(&serde_json::json!({"content":input.content, "lane":input.lane, "images":input.images})).map_err(|e| e.to_string())?);
-        for event in self.sessions.all_events(&input.session_id)? {
-            if let super::AgentSessionEventPayload::InboxSpliced {
-                operation: super::AgentInboxOperation::Enqueued,
-                messages,
-                ..
-            } = event.payload
+        if let Some(receipt) =
+            self.image_submission_receipt(&operation, &fingerprint, target_turn_id)?
+        {
+            return Ok(receipt);
+        }
+        let store = &self.models.images;
+        let lease = store.begin_operation(&operation)?;
+        let _permit = store.import_permit()?;
+        self.with_image_store(|| {
+            if let Some(receipt) =
+                self.image_submission_receipt(&operation, &fingerprint, target_turn_id)?
             {
-                if let Some(message) = messages
-                    .iter()
-                    .find(|m| m.client_submission_id.as_deref() == Some(&input.client_operation_id))
-                {
-                    return if message
-                        .source
+                return Ok(receipt);
+            }
+            let entry = self
+                .agents
+                .get(&input.session_id)?
+                .ok_or("IMAGE_SESSION_NOT_STARTED")?;
+            if entry.cancellation().is_cancelled() || lease.token.is_cancelled() {
+                return Err("IMAGE_CANCELLED".into());
+            }
+            super::images::vision_route(&entry.model()?.provider)?;
+            let images = store.import(&input.images, &lease.token)?;
+            store.boundary("beforeInbox", &lease.token)?;
+            let (snapshot, mut reservation, _terminal_gate) =
+                store.commit_operation(&lease, || {
+                    if entry.cancellation().is_cancelled() {
+                        return Err("IMAGE_CANCELLED".into());
+                    }
+                    let provider = entry.model()?.provider;
+                    let route = super::images::vision_route(&provider)?;
+                    let mut source = AgentMessageSource::user();
+                    source
                         .metadata
-                        .get("imageFingerprint")
-                        .and_then(serde_json::Value::as_str)
-                        == Some(&fingerprint)
-                        && message
-                            .source
-                            .metadata
-                            .get("targetTurnId")
-                            .and_then(serde_json::Value::as_str)
-                            == target_turn_id
-                    {
-                        self.sessions.snapshot(&input.session_id)
-                    } else {
-                        Err("IMAGE_SUBMISSION_CONFLICT".into())
-                    };
+                        .insert("imageFingerprint".into(), fingerprint.into());
+                    let terminal_gate = self
+                        .terminal_submission_gate
+                        .lock()
+                        .map_err(|_| "TERMINAL_ADMISSION_UNAVAILABLE")?;
+                    let mut reservation = self.reserve_terminal_submission(
+                        &input.session_id,
+                        &input.client_operation_id,
+                        paused,
+                    )?;
+                    let snapshot = self.sessions.enqueue_submission_checked(
+                        &input.session_id,
+                        input.lane,
+                        AgentInboxMessage {
+                            images,
+                            message_id: input.client_operation_id.clone(),
+                            client_submission_id: Some(input.client_operation_id),
+                            content: crate::redaction::redact_sensitive_text(&input.content),
+                            source,
+                            terminal_context,
+                        },
+                        paused,
+                        target_turn_id,
+                        Some(
+                            |snapshot: &AgentSessionSnapshot, message: &AgentInboxMessage| {
+                                validate_image_queue_budget(
+                                    &provider,
+                                    &route,
+                                    snapshot,
+                                    &message.content,
+                                    &message.images,
+                                    message.terminal_context.as_ref(),
+                                    None,
+                                )
+                            },
+                        ),
+                    )?;
+                    if let Some(guard) = reservation.as_mut() {
+                        guard.committed = !snapshot.ended && !paused;
+                    }
+                    Ok((snapshot, reservation, terminal_gate))
+                })?;
+            let _ = store.boundary("afterInbox", &lease.token);
+            // Inbox commit is the acknowledgement. A wake failure cannot undo acceptance.
+            if !paused && self.wake(&input.session_id).is_err() {
+                if let Some(guard) = reservation.as_mut() {
+                    guard.committed = false;
                 }
             }
-        }
-        let entry = self
-            .agents
-            .get(&input.session_id)?
-            .ok_or("IMAGE_SESSION_NOT_STARTED")?;
-        if entry.cancellation().is_cancelled() || token.is_cancelled() {
-            return Err("IMAGE_CANCELLED".into());
-        }
-        super::images::vision_route(&entry.model()?.provider)?;
-        let store = self.models.images.clone();
-        let uploads = input.images;
-        let import_token = token.clone();
-        let permit = self.models.images.import_permit()?;
-        let images = tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            store.import(&uploads, &import_token)
+            drop(reservation);
+            Ok(snapshot)
         })
-        .await
-        .map_err(|e| e.to_string())??;
-        self.models.images.boundary("beforeInbox", &token)?;
-        let gate = self
-            .models
-            .images
-            .operations
-            .lock()
-            .map_err(|_| "IMAGE_OPERATION_UNAVAILABLE")?;
-        for event in self.sessions.all_events(&input.session_id)? {
-            if let super::AgentSessionEventPayload::InboxSpliced {
-                operation: super::AgentInboxOperation::Enqueued,
-                messages,
-                ..
-            } = event.payload
-            {
-                if let Some(message) = messages
-                    .iter()
-                    .find(|m| m.client_submission_id.as_deref() == Some(&input.client_operation_id))
-                {
-                    return if message
-                        .source
-                        .metadata
+    }
+
+    fn image_submission_receipt(
+        &self,
+        operation: &super::images::ImageOperation,
+        fingerprint: &str,
+        target_turn_id: Option<&str>,
+    ) -> Result<Option<AgentSessionSnapshot>, String> {
+        let matches = self.sessions.read_events(&operation.session_id, |events| {
+            events.iter().find_map(|event| {
+                let super::AgentSessionEventPayload::InboxSpliced {
+                    operation: super::AgentInboxOperation::Enqueued,
+                    messages,
+                    ..
+                } = &event.payload
+                else {
+                    return None;
+                };
+                let message = messages.iter().find(|message| {
+                    message.client_submission_id.as_ref() == Some(&operation.client_operation_id)
+                })?;
+                let metadata = &message.source.metadata;
+                Some(
+                    metadata
                         .get("imageFingerprint")
                         .and_then(serde_json::Value::as_str)
-                        == Some(&fingerprint)
-                    {
-                        if message
-                            .source
-                            .metadata
+                        == Some(fingerprint)
+                        && metadata
                             .get("targetTurnId")
                             .and_then(serde_json::Value::as_str)
-                            != target_turn_id
-                        {
-                            return Err("IMAGE_SUBMISSION_CONFLICT".into());
-                        }
-                        self.sessions.snapshot(&input.session_id)
-                    } else {
-                        Err("IMAGE_SUBMISSION_CONFLICT".into())
-                    };
-                }
-            }
+                            == target_turn_id,
+                )
+            })
+        })?;
+        match matches {
+            Some(true) => self.sessions.snapshot(&operation.session_id).map(Some),
+            Some(false) => Err("IMAGE_SUBMISSION_CONFLICT".into()),
+            None => Ok(None),
         }
-        if token.is_cancelled() || entry.cancellation().is_cancelled() {
-            return Err("IMAGE_CANCELLED".into());
-        }
-        let provider = entry.model()?.provider;
-        let route = super::images::vision_route(&provider)?;
-        let mut source = AgentMessageSource::user();
-        source
-            .metadata
-            .insert("imageFingerprint".into(), fingerprint.into());
-        let terminal_gate = self
-            .terminal_submission_gate
-            .lock()
-            .map_err(|_| "TERMINAL_ADMISSION_UNAVAILABLE")?;
-        let mut reservation = self.reserve_terminal_submission(
-            &input.session_id,
-            &input.client_operation_id,
-            paused,
-        )?;
-        let snapshot = self.sessions.enqueue_submission_checked(
-            &input.session_id,
-            input.lane,
-            AgentInboxMessage {
-                images,
-                message_id: input.client_operation_id.clone(),
-                client_submission_id: Some(input.client_operation_id),
-                content: crate::redaction::redact_sensitive_text(&input.content),
-                source,
-                terminal_context,
-            },
-            paused,
-            target_turn_id,
-            Some(
-                |snapshot: &AgentSessionSnapshot, message: &AgentInboxMessage| {
-                    validate_image_queue_budget(
-                        &provider,
-                        &route,
-                        snapshot,
-                        &message.content,
-                        &message.images,
-                        message.terminal_context.as_ref(),
-                        None,
-                    )
-                },
-            ),
-        )?;
-        if let Some(guard) = reservation.as_mut() {
-            guard.committed = !snapshot.ended && !paused;
-        }
-        drop(gate);
-        let _ = self.models.images.boundary("afterInbox", &token);
-        // Inbox commit is the acknowledgement. A wake failure cannot undo acceptance.
-        if !paused && self.wake(&input.session_id).is_err() {
-            if let Some(guard) = reservation.as_mut() {
-                guard.committed = false;
-            }
-        }
-        drop(reservation);
-        drop(terminal_gate);
-        Ok(snapshot)
     }
 
     pub(crate) fn cancel_image_submission(
         &self,
         input: super::images::ImageOperation,
     ) -> Result<bool, String> {
-        let token = self.models.images.token(&input)?;
-        let _gate = self
-            .models
-            .images
-            .operations
-            .lock()
-            .map_err(|_| "IMAGE_OPERATION_UNAVAILABLE")?;
-        token.cancel();
+        self.models.images.cancel_operation(&input)?;
         // A new conversation may still be in creation when its image operation is
         // cancelled. The cancelled token prevents a later submit from committing.
         let events = match self.sessions.all_events(&input.session_id) {
@@ -1278,6 +1252,17 @@ impl AgentRuntime {
     }
 
     pub(crate) fn configure(&self, app_data_root: PathBuf) -> Result<(), String> {
+        let mut configured = self
+            .configured_root
+            .lock()
+            .map_err(|_| "Agent configuration is unavailable")?;
+        if let Some(root) = configured.as_ref() {
+            return if root == &app_data_root {
+                Ok(())
+            } else {
+                Err("Agent data root changed after initialization".into())
+            };
+        }
         self.native_engine
             .configure_terminal_submission_root(&app_data_root)?;
         self.native_engine.configure_terminal_broker_rollout()?;
@@ -1289,19 +1274,13 @@ impl AgentRuntime {
             })?;
         self.tools.configure_parallelism(parallelism.as_deref())?;
         self.sessions.configure(app_data_root.clone())?;
-        {
-            let mut restored = self
-                .restored_inputs_paused
-                .lock()
-                .map_err(|_| "Agent recovery gate unavailable")?;
-            if !*restored {
-                self.sessions.pause_restored_inputs()?;
-                *restored = true;
-            }
-        }
+        self.sessions.pause_restored_inputs()?;
         self.models.images.configure(&app_data_root)?;
+        self.cleanup_images();
         self.artifacts.configure(&app_data_root)?;
-        self.reconcile_artifacts()
+        self.reconcile_artifacts()?;
+        *configured = Some(app_data_root);
+        Ok(())
     }
 
     pub(crate) fn set_event_publisher(
@@ -2075,43 +2054,51 @@ impl AgentRuntime {
         // instances can still acknowledge an earlier successful operation.
         let resume = matches!(input.mutation, super::AgentInboxMutation::Resume { .. });
         let session_id = input.session_id.clone();
-        let snapshot = self.sessions.mutate_inbox_preparing_images(
-            input,
-            active,
-            |snapshot, current, content, edit| {
-                let mut images = edit.kept.clone();
-                if edit.added.is_empty() {
-                    return Ok(images);
-                }
-                let provider = match self.agents.get(&session_id)? {
-                    Some(entry) => entry.model()?.provider.clone(),
-                    None => self.models.restore_selection(
-                        snapshot
-                            .header
-                            .model_selection
-                            .as_ref()
-                            .ok_or("MODEL_SELECTION_REQUIRED")?,
-                    )?,
-                };
-                let route = super::images::vision_route(&provider)?;
-                let _permit = self.models.images.import_permit()?;
-                images.extend(
-                    self.models
-                        .images
-                        .import(&edit.added, &tokio_util::sync::CancellationToken::new())?,
-                );
-                validate_image_queue_budget(
-                    &provider,
-                    &route,
-                    snapshot,
-                    content,
-                    &images,
-                    current.terminal_context.as_ref(),
-                    Some(&current.message_id),
-                )?;
-                Ok(images)
-            },
-        )?;
+        let writes_images = matches!(&input.mutation, super::AgentInboxMutation::UpdateWithImages { images, .. } if !images.added.is_empty());
+        let mutate = || {
+            self.sessions.mutate_inbox_preparing_images(
+                input,
+                active,
+                |snapshot, current, content, edit| {
+                    let mut images = edit.kept.clone();
+                    if edit.added.is_empty() {
+                        return Ok(images);
+                    }
+                    let provider = match self.agents.get(&session_id)? {
+                        Some(entry) => entry.model()?.provider.clone(),
+                        None => self.models.restore_selection(
+                            snapshot
+                                .header
+                                .model_selection
+                                .as_ref()
+                                .ok_or("MODEL_SELECTION_REQUIRED")?,
+                        )?,
+                    };
+                    let route = super::images::vision_route(&provider)?;
+                    let _permit = self.models.images.import_permit()?;
+                    images.extend(
+                        self.models
+                            .images
+                            .import(&edit.added, &tokio_util::sync::CancellationToken::new())?,
+                    );
+                    validate_image_queue_budget(
+                        &provider,
+                        &route,
+                        snapshot,
+                        content,
+                        &images,
+                        current.terminal_context.as_ref(),
+                        Some(&current.message_id),
+                    )?;
+                    Ok(images)
+                },
+            )
+        };
+        let snapshot = if writes_images {
+            self.with_image_store(mutate)
+        } else {
+            mutate()
+        }?;
         if resume {
             self.wake(&session_id)?;
         }
@@ -2218,8 +2205,9 @@ impl AgentRuntime {
         if let Some(handle) = handle {
             let result = async {
                 handle.entry().stop_admission()?;
-                self.subagents.cancel_descendants(session_id).await?;
-                self.tools.cancel_session(&handle.entry())?;
+                let descendants = self.subagents.cancel_descendants(session_id).await;
+                self.tools.cancel_session_interactions(&handle.entry())?;
+                descendants?;
                 self.tools.await_pending_executions(&handle.entry()).await?;
                 handle.dispose().await
             }
@@ -2256,7 +2244,7 @@ impl AgentRuntime {
             serde_json::json!({"agentSessionId":session_id,"terminate":terminate}),
         )?;
         self.models.images.cancel_session(session_id)?;
-        self.subagents.cancel_descendants(session_id).await?;
+        let descendants = self.subagents.cancel_descendants(session_id).await;
         let handle = self
             .handles
             .lock()
@@ -2265,7 +2253,8 @@ impl AgentRuntime {
         let snapshot = if let Some(handle) = handle {
             let result = async {
                 handle.entry().stop_admission()?;
-                self.tools.cancel_session(&handle.entry())?;
+                self.tools.cancel_session_interactions(&handle.entry())?;
+                descendants?;
                 self.tools.await_pending_executions(&handle.entry()).await?;
                 if terminate {
                     handle.dispose().await
@@ -2290,6 +2279,7 @@ impl AgentRuntime {
             if self.agents.get(session_id)?.is_some() {
                 return Err("Agent Session is already stopping".into());
             }
+            descendants?;
             let gate = self.tools.question_gate(session_id)?;
             let _gate = gate.lock().map_err(|_| "question gate unavailable")?;
             self.tools.cancel_questions(session_id)?;
@@ -2697,7 +2687,32 @@ impl AgentRuntime {
     }
 
     pub(crate) fn delete_session(&self, session_id: &str) -> Result<(), String> {
-        self.sessions.delete_archived(session_id)
+        let _blobs = self.models.images.lock_blobs()?;
+        self.sessions.delete_archived(session_id)?;
+        self.cleanup_images();
+        Ok(())
+    }
+
+    fn with_image_store<T>(&self, write: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+        let _blobs = self.models.images.lock_blobs()?;
+        let result = write();
+        if result.is_err() {
+            self.cleanup_images();
+        }
+        result
+    }
+
+    fn cleanup_images(&self) {
+        let result = self
+            .sessions
+            .referenced_image_hashes()
+            .and_then(|referenced| self.models.images.cleanup_unreferenced(&referenced));
+        if let Err(error) = result {
+            log::warn!(
+                "Failed to reclaim unreferenced Agent images: {}",
+                crate::redaction::redact_sensitive_text(&error)
+            );
+        }
     }
 
     pub(crate) fn events(

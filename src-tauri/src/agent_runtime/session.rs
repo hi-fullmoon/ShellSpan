@@ -2902,6 +2902,48 @@ impl AgentSessionStore {
         Ok(ids)
     }
 
+    pub(super) fn referenced_image_hashes(&self) -> Result<HashSet<String>, String> {
+        let inner = self.lock_configured()?;
+        let mut hashes = HashSet::new();
+        for event in inner.sessions.values().flat_map(|session| &session.events) {
+            match &event.payload {
+                AgentSessionEventPayload::InboxSpliced { messages, .. } => {
+                    hashes.extend(
+                        messages
+                            .iter()
+                            .flat_map(|message| &message.images)
+                            .map(|image| image.sha256.clone()),
+                    );
+                }
+                AgentSessionEventPayload::UserMessage { message }
+                | AgentSessionEventPayload::SubagentRecoveryStarted { message, .. } => {
+                    hashes.extend(message.images.iter().map(|image| image.sha256.clone()));
+                }
+                AgentSessionEventPayload::InboxItemUpdated {
+                    images: Some(images),
+                    ..
+                } => {
+                    hashes.extend(images.iter().map(|image| image.sha256.clone()));
+                }
+                AgentSessionEventPayload::StepInputClaim {
+                    turn_messages,
+                    step_messages,
+                    ..
+                } => {
+                    hashes.extend(
+                        turn_messages
+                            .iter()
+                            .chain(step_messages)
+                            .flat_map(|message| &message.images)
+                            .map(|image| image.sha256.clone()),
+                    );
+                }
+                _ => {}
+            }
+        }
+        Ok(hashes)
+    }
+
     pub(crate) fn archive(&self, session_id: &str) -> Result<AgentSessionSnapshot, String> {
         validate_identifier(session_id, "sessionId")?;
         let mut inner = self.lock_configured()?;
