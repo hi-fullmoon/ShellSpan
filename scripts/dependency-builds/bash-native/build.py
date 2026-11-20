@@ -9,7 +9,6 @@ import platform
 import shutil
 import subprocess
 import sys
-import urllib.request
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[3]
@@ -79,14 +78,7 @@ def main():
         for number, expected in enumerate(pin, 1):
             name = f'bash53-{number:03d}'
             official_patch = UPSTREAM / name
-            if not official_patch.exists():
-                with urllib.request.urlopen(f'https://ftp.gnu.org/gnu/bash/bash-5.3-patches/{name}', timeout=30) as response:
-                    contents = response.read()
-                if hashlib.sha256(contents).hexdigest() != expected:
-                    raise RuntimeError(f'{name}: checksum mismatch')
-                official_patch.write_bytes(contents)
-            if sha(official_patch) != expected:
-                raise RuntimeError(f'{name}: checksum mismatch')
+            helper.ensure_gnu_source(f'bash/bash-5.3-patches/{name}', official_patch, expected)
             macos_bash_patches[official_patch] = expected
     base = OUT / f'bash-{host}' / stamp
     sources = base / 'source'

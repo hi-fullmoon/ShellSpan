@@ -2,6 +2,7 @@ use super::limits::*;
 use futures_util::StreamExt;
 use reqwest::{Client, Response};
 use serde_json::Value;
+use std::sync::OnceLock;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 pub(crate) async fn read_bounded_response_body(
@@ -61,6 +62,33 @@ pub(crate) fn build_streaming_client() -> Result<Client, String> {
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|error| format!("failed to create streaming AI HTTP client: {error}"))
+}
+
+static SHARED_CLIENT: OnceLock<Client> = OnceLock::new();
+static SHARED_STREAMING_CLIENT: OnceLock<Client> = OnceLock::new();
+
+/// Process-wide client for bounded requests. Cloning shares one connection pool,
+/// so repeated discovery calls reuse DNS, TCP and TLS state.
+pub(crate) fn shared_client() -> Result<Client, String> {
+    shared(&SHARED_CLIENT, build_client)
+}
+
+/// Process-wide client for model streams. Adapters are rebuilt per turn, but the
+/// pool must outlive them so consecutive turns reuse provider connections.
+pub(crate) fn shared_streaming_client() -> Result<Client, String> {
+    shared(&SHARED_STREAMING_CLIENT, build_streaming_client)
+}
+
+fn shared(
+    slot: &'static OnceLock<Client>,
+    build: fn() -> Result<Client, String>,
+) -> Result<Client, String> {
+    if let Some(client) = slot.get() {
+        return Ok(client.clone());
+    }
+    // A build failure is returned without being cached, so a later call can retry.
+    let client = build()?;
+    Ok(slot.get_or_init(|| client).clone())
 }
 
 pub(crate) async fn checked_response(response: Response) -> Result<Response, String> {

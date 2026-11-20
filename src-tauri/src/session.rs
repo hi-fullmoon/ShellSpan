@@ -746,10 +746,17 @@ fn attach_started_ssh_terminal(
     Ok((event, messages))
 }
 
+pub(crate) const SSH_NATIVE_RESOURCES_UNAVAILABLE: &str = "nativeResourcesUnavailable";
+
 fn native_ssh_unavailable_reason(reason: &str) -> &str {
     if reason.starts_with(remote_native::GLIBC_TOO_OLD_REASON) || reason == "nativeStartupTimedOut"
     {
         reason
+    } else if matches!(
+        reason,
+        "TERMINAL_NATIVE_ARTIFACTS_UNAVAILABLE" | "TERMINAL_NATIVE_STALE_ARTIFACTS"
+    ) {
+        SSH_NATIVE_RESOURCES_UNAVAILABLE
     } else {
         "nativeProfileMismatch"
     }

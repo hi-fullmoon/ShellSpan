@@ -64,14 +64,23 @@ Tauri 2 · Rust · React 19 · TypeScript · Tailwind CSS 4 · xterm.js
 
 ## 本地开发
 
-环境要求：Node.js 24+、pnpm 11、Rust stable，以及 [Tauri 2 所需的系统依赖](https://v2.tauri.app/start/prerequisites/)。
+使用 Node.js 24+、[`package.json`](./package.json) 固定的 pnpm 版本、[`rust-toolchain.toml`](./rust-toolchain.toml) 固定的 Rust 工具链，以及 [Tauri 2 所需的系统依赖](https://v2.tauri.app/start/prerequisites/)。
 
 ```bash
 pnpm install       # 安装依赖
 pnpm tauri:dev     # 启动桌面应用
-pnpm test          # 运行单元测试
+pnpm test          # 运行前端单元测试
 pnpm build         # 检查并构建前端
-pnpm tauri:build   # 构建桌面安装包
+```
+
+在 macOS 上，`pnpm tauri:dev` 默认使用本机的 `Apple Development` 签名身份。详见[开发签名说明](./docs/testing-credential-refresh.md#普通开发程序的只读检查)。
+
+`pnpm tauri:build` 会准备[原生输入资源](./scripts/native-input/README.md)，并按仓库的签名配置生成安装包和自动更新包。正式发行使用[发布流程](./docs/releasing.md)。
+
+在 macOS 本地构建 `.app` 和 `.dmg` 时，安装 Python 3 以构建 Bash。以下命令使用临时签名并关闭更新包生成。
+
+```bash
+pnpm tauri:build --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":false,"macOS":{"signingIdentity":"-"}}}'
 ```
 
 主线数据库从版本 1 开始，首次启动创建 `~/.shellspan/shellspan-main.db`；开发模式使用 `~/.shellspan-dev/shellspan-main.db`。主线不导入旧数据库数据。

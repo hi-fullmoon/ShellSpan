@@ -240,8 +240,13 @@ impl LlmRuntime {
             if latest.revision != snapshot.revision {
                 continue;
             }
+            let limiter = super::transport::RouteLimiter::for_route(
+                &route.id,
+                provider.kind,
+                route.retry_policy.max_server_delay_ms,
+            );
             let adapter = super::registry::create_adapter(super::transport::HttpConfig {
-                client: super::transport::build_streaming_client()?,
+                client: super::transport::shared_streaming_client()?,
                 provider: provider.clone(),
                 api_key: secret,
                 timeouts: super::transport::ModelTimeoutPolicy {
@@ -251,7 +256,11 @@ impl LlmRuntime {
                     first_byte: std::time::Duration::from_millis(route.timeouts.first_byte_ms),
                     stream_idle: std::time::Duration::from_millis(route.timeouts.stream_idle_ms),
                 },
+                limiter: Some(limiter.clone()),
             });
+            let adapter: Arc<dyn ModelAdapter> = Arc::new(
+                super::transport::ThrottledModelAdapter::new(adapter, limiter),
+            );
             return Ok(PreparedModel {
                 provider,
                 adapter,

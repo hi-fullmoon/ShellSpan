@@ -18,6 +18,7 @@ const PAGE_SIZE = 1_024;
 const RECOVERY_DELAY_MS = 1_000;
 const MAX_RECOVERY_DELAY_MS = 30_000;
 const RECONCILIATION_DELAY_MS = 5_000;
+const MAX_RECONCILIATION_DELAY_MS = 60_000;
 const TRANSPORT_TIMEOUT_MS = 5_000;
 
 function readTransport<T>(
@@ -87,6 +88,7 @@ export class AgentSessionCommittedClient {
   private syncRecovery?: AiSessionSyncRecovery;
   private recoveryWork?: Promise<void>;
   private reconciliationTimer?: ReturnType<typeof setTimeout>;
+  private reconciliationDelay = RECONCILIATION_DELAY_MS;
   private stopForegroundSync?: () => void;
   private childSnapshotSeq = -1;
   private storageFaultAtSeq?: number;
@@ -195,6 +197,7 @@ export class AgentSessionCommittedClient {
     this.recoveryTimer = undefined;
     if (this.reconciliationTimer !== undefined) clearTimeout(this.reconciliationTimer);
     this.reconciliationTimer = undefined;
+    this.reconciliationDelay = RECONCILIATION_DELAY_MS;
     this.stopForegroundSync?.();
     this.stopForegroundSync = undefined;
   }
@@ -263,6 +266,7 @@ export class AgentSessionCommittedClient {
     }
     signal.throwIfAborted();
     this.merge(event);
+    this.restoreReconciliationCadence(signal);
     await this.refreshChildSnapshot(signal);
     this.scheduleEmit();
   }
@@ -391,7 +395,17 @@ export class AgentSessionCommittedClient {
       // A missing final event has no later sequence to expose its gap.
       if (!this.syncError) void this.recover(signal, true);
       else this.scheduleReconciliation(signal);
-    }, RECONCILIATION_DELAY_MS);
+    }, this.reconciliationDelay);
+  }
+
+  /** Live activity can precede a missed final event, so return to the active cadence. */
+  private restoreReconciliationCadence(signal: AbortSignal): void {
+    if (this.reconciliationDelay === RECONCILIATION_DELAY_MS) return;
+    this.reconciliationDelay = RECONCILIATION_DELAY_MS;
+    if (this.reconciliationTimer === undefined) return;
+    clearTimeout(this.reconciliationTimer);
+    this.reconciliationTimer = undefined;
+    this.scheduleReconciliation(signal);
   }
 
   private recover(signal: AbortSignal, quiet = false): Promise<void> {
@@ -415,8 +429,15 @@ export class AgentSessionCommittedClient {
       }
       await this.refreshChildSnapshot(signal);
       signal.throwIfAborted();
-      if (!quiet || previousSeq !== (this.events.last?.seq ?? -1)
-        || previousSnapshot !== this.snapshotValue || previousStorageFault !== this.storageFaultAtSeq) this.scheduleEmit();
+      const changed = previousSeq !== (this.events.last?.seq ?? -1)
+        || previousSnapshot !== this.snapshotValue || previousStorageFault !== this.storageFaultAtSeq;
+      // Ended sessions only need a slow safety net; active ones keep the short cadence
+      // so a missed approval or question still surfaces promptly.
+      this.reconciliationDelay = quiet && !changed && this.hasTerminalEventValue
+        && this.storageFaultAtSeq === undefined
+        ? Math.min(this.reconciliationDelay * 2, MAX_RECONCILIATION_DELAY_MS)
+        : RECONCILIATION_DELAY_MS;
+      if (!quiet || changed) this.scheduleEmit();
     }).finally(() => {
       if (this.recoveryWork === work) this.recoveryWork = undefined;
       this.scheduleReconciliation(signal);

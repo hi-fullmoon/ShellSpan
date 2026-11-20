@@ -51,9 +51,10 @@ export function AiWorkspaceController({
   const sessionModel = controller.view?.snapshot.value.header.modelSelection;
   // Display the current route capacity even when its revision has changed and
   // the session must explicitly reselect the model before another request.
-  const routeContextWindow = useLlmRoutesStore(state => sessionModel
-    ? state.modelsByRoute[sessionModel.routeId]?.find(model => model.modelId === sessionModel.modelId)?.contextWindow
+  const routeModel = useLlmRoutesStore(state => sessionModel
+    ? state.modelsByRoute[sessionModel.routeId]?.find(model => model.modelId === sessionModel.modelId)
     : undefined);
+  const activeModel = routeModel ?? (modelResolution.status === 'ready' ? modelResolution.model : undefined);
   const reconnectSession = useReconnectSession();
   const focusTargetId = useFocusStore(state => state.targetSessionId);
   const terminalOpen = useFocusStore(state => state.terminalOpen);
@@ -105,8 +106,9 @@ export function AiWorkspaceController({
       headerActions={focusMode && !terminalOpen ? <FocusControls /> : undefined}
       mode={scope === 'workbench' ? 'ask' : 'agent'}
       view={controller.view}
-      contextWindow={routeContextWindow
-        ?? (modelResolution.status === 'ready' ? modelResolution.model.contextWindow : undefined)}
+      contextWindow={activeModel?.contextWindow}
+      maxOutputTokens={activeModel?.maxOutputTokens}
+      requestOutputTokens={activeModel?.requestOutputTokens}
       restoringSession={controller.restoringSession}
       imageControls={imageDraftVisible
         ? <AiImageDraftControls state={controller.imageDraft} selection={controller.selectedProvider} />

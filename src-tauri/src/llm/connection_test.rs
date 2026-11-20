@@ -134,7 +134,7 @@ async fn run(
     })?;
     let (provider, api_key) = api_key;
     let adapter = super::registry::create_adapter(super::transport::HttpConfig {
-        client: super::transport::build_streaming_client().map_err(terminal_error)?,
+        client: super::transport::shared_streaming_client().map_err(terminal_error)?,
         provider,
         api_key,
         timeouts: super::transport::ModelTimeoutPolicy {
@@ -142,6 +142,7 @@ async fn run(
             first_byte: DEADLINE,
             stream_idle: DEADLINE,
         },
+        limiter: None,
     });
     let response = adapter
         .stream(

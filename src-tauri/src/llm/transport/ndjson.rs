@@ -5,8 +5,8 @@ pub(crate) fn take_line(buffer: &mut Vec<u8>) -> Result<Option<String>, String> 
         return Ok(None);
     };
     ensure_provider_stream_frame_size(index)?;
-    let mut line = buffer.drain(..index).collect::<Vec<_>>();
-    buffer.drain(..1);
+    let mut line = buffer[..index].to_vec();
+    buffer.drain(..=index);
     if line.last() == Some(&b'\r') {
         line.pop();
     }

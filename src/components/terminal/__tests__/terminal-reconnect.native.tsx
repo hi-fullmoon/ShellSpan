@@ -10,15 +10,17 @@ import { invokeCreateLocalSession, invokeCloseSession, invokeCreateAgentRuntimeS
   invokeGetAgentRuntimeSession, invokeReconnectAgentTerminal, invokeArchiveAgentRuntimeSession,
   invokeResumeAgentRuntime, invokeAgentRuntimeFollowup, invokeMutateAgentRuntimeInbox,
   invokeDeleteAgentRuntimeSession, invokeGetCommittedAgentRuntimeEvents, invokeGetTerminalBrokerSnapshot } from '@/lib/ipc/tauri';
-import { buildSessionCreateRequest, invokeCreateSession, invokeCheckHostKey, invokeTrustHost, invokeRemoveKnownHost } from '@/lib/ipc/tauri';
+import { buildSessionCreateRequest, invokeCreateSession, invokeCheckHostKey, invokeTrustHost,
+  invokeRemoveKnownHost, invokeAddProfile, invokeRemoveProfile, invokeStoreProfilePassword,
+  invokeDeleteProfilePassword } from '@/lib/ipc/tauri';
 import { useProfileStore } from '@/stores/profileStore';
-import type { ConnectionProfile } from '@/types';
+import type { ConnectionProfile, ProfileRow } from '@/types';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useFocusStore } from '@/stores/focusStore';
 import { FocusNoTarget } from '@/components/focus/focus-no-target';
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
 import { useAppStore } from '@/stores/appStore';
-import { initI18n } from '@/locales';
+import { initI18n, t } from '@/locales';
 import { readTerminalCurrentDirectory } from '@/lib/terminal/terminal-current-directory';
 import { useCloseTerminal } from '@/hooks/useCloseTerminal';
 import { useReconnectSession } from '@/hooks/useReconnectSession';
@@ -27,9 +29,9 @@ import { canContinueOnReconnectedTerminal, canVerifyTerminalContinuation } from 
 import '@/styles/base.css';
 
 function assert(value: unknown, message: string): asserts value { if (!value) throw new Error(message); }
-async function eventually(check: () => boolean, message: string | (() => string)) {
+async function eventually(check: () => boolean | Promise<boolean>, message: string | (() => string)) {
   const deadline = Date.now() + 30_000;
-  while (!check()) {
+  while (!(await check())) {
     assert(Date.now() < deadline, typeof message === 'function' ? message() : message);
     await new Promise(resolve => setTimeout(resolve, 25));
   }
@@ -69,10 +71,11 @@ async function verify() {
   const agentId = `reconnect-${crypto.randomUUID()}`;
   let created = false;
   let trustedFixtureHost = false;
+  let savedProfile = false;
   const sshFixture = new URL(location.href).searchParams.get('sshFixture') === 'true';
-  // Public credentials for tests/ssh-e2e only; never saved to user configuration.
-  const profile: ConnectionProfile = { id: `reconnect-ssh-${crypto.randomUUID()}`, name: 'Isolated reconnect acceptance',
-    host: '127.0.0.1', port: 22222, username: 'shellspan', authMethod: 'password', password: 'shellspan-e2e', createdAt: Date.now(), updatedAt: Date.now() };
+  const profileRow: ProfileRow = { id: `reconnect-ssh-${crypto.randomUUID()}`, name: 'Isolated reconnect acceptance',
+    host: '127.0.0.1', port: 22222, username: 'shellspan', authMethod: 'password', createdAt: Date.now(), updatedAt: Date.now() };
+  const profile = { ...profileRow, password: 'shellspan-e2e' } satisfies ConnectionProfile;
   const live = () => useTerminalStore.getState().sessions.find(item => item.sessionId === useTerminalStore.getState().activeSessionId);
   try {
     useAppStore.getState().setActiveSection('terminal');
@@ -86,6 +89,10 @@ async function verify() {
         await invokeTrustHost(profile.host, profile.port, host.fingerprint);
         trustedFixtureHost = true;
       }
+      // Remote Agent reads use the saved profile and keychain reference.
+      await invokeAddProfile(profileRow);
+      savedProfile = true;
+      await invokeStoreProfilePassword(profile.id, profile.password);
       useProfileStore.setState(state => ({ profiles: [...state.profiles, profile] }));
     }
     const original = sshFixture ? await invokeCreateSession(buildSessionCreateRequest(profile, 100, 25)) : await invokeCreateLocalSession(100, 25);
@@ -143,18 +150,19 @@ async function verify() {
       return;
     }
     if (focusReconnect) assert(useFocusStore.getState().setTarget(original.sessionId), 'Cannot select the actual Focus target');
-    const projectRoot = sshFixture ? null : await readTerminalCurrentDirectory(live()!);
-    assert(sshFixture || projectRoot, 'Missing actual local project directory');
+    const projectRoot = await readTerminalCurrentDirectory(live()!);
+    assert(projectRoot, 'Missing actual terminal project directory');
     await invokeCreateAgentRuntimeSession({ sessionId: agentId, taskId: `task-${crypto.randomUUID()}`,
       goal: 'Verify terminal reconnect preserves this conversation', executionSurface: 'boundTerminal',
       permissionMode: 'operator', target: { kind: sshFixture ? 'remote' : 'local', targetId: `terminal-${original.sessionId}`, sessionId: original.sessionId,
-        ...(sshFixture ? { host: profile.host, port: profile.port, username: profile.username, profileId: profile.id } : { cwd: projectRoot! }) } });
+        ...(sshFixture ? { host: profile.host, port: profile.port, username: profile.username,
+          profileId: profile.id, rootPath: projectRoot } : { cwd: projectRoot }) } });
     created = true;
     if (focusReconnect) useFocusStore.getState().setConversation(agentId);
     flushSync(() => root.render(<NativeWorkspace panel />));
     await eventually(() => agent?.view?.summary.id === agentId, 'Native Agent did not restore its original conversation');
     const readProject = async () => {
-      if (projectRoot) {
+      if (!sshFixture) {
         const files = await agent!.listFileReferences('', new AbortController().signal);
         assert(files.status === 'ready' || files.status === 'truncated', `Native file references failed: ${files.code ?? files.status}`);
         assert(files.scope?.target.sessionId === live()?.sessionId, 'File reference scope retained the old transport');
@@ -330,12 +338,13 @@ async function verify() {
     await eventually(() => Boolean(live()?.promptReady), 'Restored shell did not reach its integrated prompt');
     assert(!agent!.historicalContinuationAvailable, 'Restore could bypass verification by creating a linked Session');
     const panel = document.querySelector<HTMLElement>('[data-agent-panel]')!;
+    const findAction = (label: string) => [...panel.querySelectorAll('button')]
+      .find(item => item.innerText.trim() === label);
     for (const locale of ['zh-CN', 'en-US'] as const) {
       await initI18n(locale);
       flushSync(() => useAppStore.setState({ locale }));
       await new Promise(resolve => requestAnimationFrame(resolve));
-      const label = locale === 'zh-CN' ? '验证当前连接并继续' : 'Verify connection and continue';
-      const button = [...panel.querySelectorAll('button')].find(item => item.textContent === label);
+      const button = findAction(t('ai.workspace.continueOnReconnectedTerminal'));
       assert(button, `Missing readable restore action in ${locale}`);
       button.focus();
       assert(document.activeElement === button, 'Restore action was not keyboard focusable');
@@ -368,23 +377,25 @@ async function verify() {
       clientOperationId: `remove-${queuedId}`, mutation: { type: 'remove', itemId: queuedId } });
     const beforeVerification = await invokeGetAgentRuntimeSession({ sessionId: agentId });
     const controller = terminalRegistry.get(current)!;
-    assert(await controller.writeUserInput(powershell ? 'Start-Sleep -Seconds 5\r' : 'sleep 5\r'),
+    assert(await controller.writeUserInput(powershell ? 'Start-Sleep -Seconds 5' : 'sleep 5')
+      && await controller.writeUserInput('\r'),
       'Could not start a real command to verify the current terminal busy gate');
-    await eventually(() => !live()?.promptReady, 'Real command did not make the shell busy');
+    const promptReady = async () => (await invokeGetTerminalBrokerSnapshot(current)).session?.promptReady;
+    await eventually(async () => await promptReady() === false, 'Real command did not make the shell busy');
     flushSync(() => agent!.continueOnReconnectedTerminal!());
     assert(agent!.terminalReconnectBusy, 'Restore did not expose its pending state');
-    const checking = [...panel.querySelectorAll('button')].find(item => item.textContent === 'Verifying connection and execution state…');
+    const checking = findAction(t('ai.workspace.reconnectChecking'));
     assert(checking?.disabled, 'Restore action remained enabled during verification');
     await eventually(() => !agent!.terminalReconnectBusy && Boolean(agent!.composer.lastError),
       'Busy execution did not produce an actionable verification error');
-    assert(agent!.composer.lastError!.message.includes('execution outcomes to resolve'), 'Busy execution error did not explain how to recover');
+    assert(agent!.composer.lastError!.message === t('ai.workspace.reconnectUnsettled'), 'Busy execution did not report unsettled work');
     assert(agent!.readOnlySession && agent!.view!.snapshot.value.header.target?.sessionId === closing.sessionId,
       'Failed verification changed the original binding');
     assert(agent!.composer.draft === 'Keep this draft through terminal reconnect', 'Failed verification discarded the draft');
     assert(JSON.stringify(await invokeGetAgentRuntimeSession({ sessionId: agentId })) === JSON.stringify(beforeVerification),
       'Failed verification mutated the persisted conversation');
-    await eventually(() => Boolean(live()?.promptReady), 'Real verification command did not finish');
-    const verifyButton = [...panel.querySelectorAll('button')].find(item => item.textContent === 'Verify connection and continue');
+    await eventually(async () => await promptReady() === true, 'Real verification command did not finish');
+    const verifyButton = findAction(t('ai.workspace.continueOnReconnectedTerminal'));
     assert(verifyButton, 'Failed verification did not retain a retry action');
     verifyButton.click();
     await eventually(() => agent?.view?.snapshot.value.header.target?.sessionId === current && !agent.terminalReconnectBusy,
@@ -412,7 +423,11 @@ async function verify() {
       terminalRegistry.dispose(id);
       useTerminalStore.getState().removeSession(id);
     }
-    if (sshFixture) useProfileStore.setState(state => ({ profiles: state.profiles.filter(item => item.id !== profile.id) }));
+    if (savedProfile) {
+      await invokeDeleteProfilePassword(profile.id);
+      await invokeRemoveProfile(profile.id);
+      useProfileStore.setState(state => ({ profiles: state.profiles.filter(item => item.id !== profile.id) }));
+    }
     if (trustedFixtureHost) await invokeRemoveKnownHost(profile.host, profile.port);
   }
 }

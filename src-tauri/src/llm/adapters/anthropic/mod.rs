@@ -240,14 +240,17 @@ impl ModelAdapter for AnthropicMessagesAdapter {
             .get("request-id")
             .and_then(|value| value.to_str().ok())
             .map(str::to_string);
-        let response =
-            match checked_stream_response(response, &cancellation, self.http.timeouts).await {
-                Ok(response) => response,
-                Err(mut error) => {
-                    attach_provider_request_id(&mut error, provider_request_id.as_deref());
-                    return Err(error);
-                }
-            };
+        let response = match self
+            .http
+            .checked_stream_response(response, &cancellation)
+            .await
+        {
+            Ok(response) => response,
+            Err(mut error) => {
+                attach_provider_request_id(&mut error, provider_request_id.as_deref());
+                return Err(error);
+            }
+        };
         stream_anthropic(response, &cancellation, sink, self.http.timeouts).await
     }
 }

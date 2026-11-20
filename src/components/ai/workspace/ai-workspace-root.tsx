@@ -240,6 +240,8 @@ export interface AiWorkspaceRootProps {
   readonly submissionContext?: object;
   readonly view: AiSessionView | null;
   readonly contextWindow?: number;
+  readonly maxOutputTokens?: number;
+  readonly requestOutputTokens?: number;
   readonly restoringSession?: boolean;
   readonly scope: Extract<AppSection, 'terminal' | 'workbench'>;
   readonly title?: string;
@@ -339,6 +341,8 @@ export function AiWorkspaceRoot({
   submissionContext,
   view,
   contextWindow,
+  maxOutputTokens,
+  requestOutputTokens,
   restoringSession = false,
   scope,
   title,
@@ -824,6 +828,9 @@ export function AiWorkspaceRoot({
           providerLabel={providerLabel}
           modelLabel={modelLabel}
           modelControl={modelControl}
+          contextWindow={contextWindow}
+          maxOutputTokens={maxOutputTokens}
+          requestOutputTokens={requestOutputTokens}
           contextUsage={surfaceMode === 'agent' && !readOnlySession
             ? contextUsageForModel(view?.contextUsage, contextWindow) : undefined}
           permissionControl={surfaceMode === 'agent' ? permissionControl : undefined}

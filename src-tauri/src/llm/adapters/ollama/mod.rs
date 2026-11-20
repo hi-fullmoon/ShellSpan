@@ -134,7 +134,10 @@ impl ModelAdapter for OllamaAdapter {
             self.http.timeouts,
         )
         .await?;
-        let response = checked_stream_response(response, &cancellation, self.http.timeouts).await?;
+        let response = self
+            .http
+            .checked_stream_response(response, &cancellation)
+            .await?;
         stream_ollama(response, &cancellation, sink, self.http.timeouts).await
     }
 }

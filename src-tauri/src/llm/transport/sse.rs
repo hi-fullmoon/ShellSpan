@@ -7,11 +7,11 @@ pub(crate) fn take_sse_event(buffer: &mut Vec<u8>) -> Result<Option<String>, Str
         return Ok(None);
     };
     ensure_provider_stream_frame_size(index)?;
-    let event = buffer.drain(..index).collect::<Vec<_>>();
-    buffer.drain(..separator_len);
+    let event = buffer[..index].to_vec();
+    buffer.drain(..index + separator_len);
     String::from_utf8(event)
         .map(Some)
-        .map_err(|error| format!("invalid UTF-8 in OpenAI stream event: {error}"))
+        .map_err(|error| format!("invalid UTF-8 in AI stream event: {error}"))
 }
 
 pub(crate) fn take_final_sse_event(buffer: &mut Vec<u8>) -> Result<Option<String>, String> {

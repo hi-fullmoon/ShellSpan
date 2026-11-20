@@ -593,6 +593,7 @@ fn unknown_tool_capability_passes_transport_validation() {
         provider: p.clone(),
         api_key: None,
         timeouts: Default::default(),
+        limiter: None,
     };
     let request = super::types::ModelRequest {
         request_id: "unknown-tools".into(),

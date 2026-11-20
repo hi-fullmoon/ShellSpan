@@ -32,6 +32,7 @@ pub(in crate::llm) struct HttpConfig {
     pub(in crate::llm) provider: AiProviderConfig,
     pub(in crate::llm) api_key: Option<String>,
     pub(in crate::llm) timeouts: ModelTimeoutPolicy,
+    pub(in crate::llm) limiter: Option<std::sync::Arc<super::RouteLimiter>>,
 }
 
 impl HttpConfig {
@@ -47,8 +48,30 @@ impl HttpConfig {
             provider: provider.clone(),
             api_key: self.api_key.clone(),
             timeouts: self.timeouts,
+            limiter: self.limiter.clone(),
         });
         Some((adapter, provider))
+    }
+
+    pub(in crate::llm) async fn checked_stream_response(
+        &self,
+        response: Response,
+        cancellation: &CancellationToken,
+    ) -> Result<Response, NormalizedModelError> {
+        match checked_stream_response(response, cancellation, self.timeouts).await {
+            Ok(response) => {
+                if let Some(limiter) = &self.limiter {
+                    limiter.observe_success_headers(response.headers());
+                }
+                Ok(response)
+            }
+            Err(error) => {
+                if let Some(limiter) = &self.limiter {
+                    limiter.observe_error(&error);
+                }
+                Err(error)
+            }
+        }
     }
 
     pub(in crate::llm) fn validate(

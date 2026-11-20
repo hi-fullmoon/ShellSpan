@@ -41,9 +41,12 @@ import {
 import { createAgentActivityProjector, projectAgentActivity } from '@/lib/ai/agent-session-projection';
 import { terminalLoginScopeKey } from '@/lib/ai/terminal-login-scope';
 import type {
+  AgentExecutionSurface,
   AgentSessionEvent,
   AgentSessionListPage,
+  AgentSessionPermissionMode,
   AgentSessionSnapshot,
+  AgentSubagentModel,
 } from '@/types/agent-session';
 import { createAgentChatProjector, projectAgentChatNodes } from './conversation-projection';
 import { findConversationTool } from './conversation-tool';
@@ -93,6 +96,7 @@ export interface AgentSessionAdapterDependencies {
   readonly sendChildInput: typeof invokeSendAgentRuntimeChildInput;
   readonly cancelChild: typeof invokeCancelAgentRuntimeChild;
   readonly resume?: typeof invokeResumeAgentRuntime;
+  readonly retryModel?: typeof invokeRetryAgentModel;
   readonly approve: typeof invokeApproveAgentRuntimeTool;
   readonly reject: typeof invokeRejectAgentRuntimeTool;
   readonly approvalArguments?: typeof invokeGetPendingAgentRuntimeApprovalArguments;
@@ -121,6 +125,7 @@ const defaultDependencies: AgentSessionAdapterDependencies = {
   sendChildInput: invokeSendAgentRuntimeChildInput,
   cancelChild: invokeCancelAgentRuntimeChild,
   resume: invokeResumeAgentRuntime,
+  retryModel: invokeRetryAgentModel,
   approve: invokeApproveAgentRuntimeTool,
   reject: invokeRejectAgentRuntimeTool,
   approvalArguments: invokeGetPendingAgentRuntimeApprovalArguments,
@@ -134,13 +139,67 @@ const defaultDependencies: AgentSessionAdapterDependencies = {
 };
 
 interface AgentAdapterEntry {
+  /** Committed journal state plus settings that are still pending. */
   readonly project: (state: AgentSessionStreamState) => AiSessionView;
+  /** Committed journal state only. */
+  readonly projectCommitted: (state: AgentSessionStreamState) => AiSessionView;
   readonly client: AgentCommittedClientLike;
   readonly listeners: Set<AiSessionListener>;
   readonly stopListening: () => void;
   connecting?: Promise<AiSessionView>;
   view?: AiSessionView;
   leases: number;
+  /** Settings chosen on an ended Session; applied when explicit input resumes it. */
+  pendingSettings?: PendingSessionSettings;
+}
+
+interface PendingSessionSettings {
+  readonly model?: AgentSubagentModel;
+  readonly permissionMode?: AgentSessionPermissionMode;
+  readonly executionSurface?: AgentExecutionSurface;
+}
+
+/** Changing a setting must not reopen an ended root Session; only explicit input does. */
+function defersSettings(view: AiSessionView): boolean {
+  const value = view.snapshot.value;
+  return value.ended && !view.summary.archived && !value.header.subagent;
+}
+
+function sameModel(left: AgentSubagentModel | undefined, right: AgentSubagentModel): boolean {
+  return left?.routeId === right.routeId && left.modelId === right.modelId
+    && (left.reasoningEffort ?? undefined) === (right.reasoningEffort ?? undefined);
+}
+
+/** Drop pending values that already match the committed header. */
+function normalizePendingSettings(
+  header: AgentSessionSnapshot['header'],
+  pending: PendingSessionSettings,
+): PendingSessionSettings | undefined {
+  const next: { -readonly [Key in keyof PendingSessionSettings]: PendingSessionSettings[Key] } = {};
+  if (pending.model && !sameModel(header.modelSelection, pending.model)) next.model = pending.model;
+  if (pending.permissionMode && pending.permissionMode !== header.permissionMode) next.permissionMode = pending.permissionMode;
+  if (pending.executionSurface && pending.executionSurface !== header.executionSurface) next.executionSurface = pending.executionSurface;
+  return next.model || next.permissionMode || next.executionSurface ? next : undefined;
+}
+
+function withPendingSessionSettings(view: AiSessionView, pending: PendingSessionSettings | undefined): AiSessionView {
+  if (!pending) return view;
+  const value = view.snapshot.value;
+  return {
+    ...view,
+    snapshot: {
+      ...view.snapshot,
+      value: {
+        ...value,
+        header: {
+          ...value.header,
+          ...(pending.model ? { modelSelection: pending.model } : {}),
+          ...(pending.permissionMode ? { permissionMode: pending.permissionMode } : {}),
+          ...(pending.executionSurface ? { executionSurface: pending.executionSurface } : {}),
+        },
+      },
+    },
+  };
 }
 
 function sessionSubagentSummary(
@@ -517,7 +576,8 @@ export function createAgentSessionAdapter(
   // Retain a small warm working set. Native runtimes own execution; evicting
   // a frontend subscription never stops a task or discards its durable journal.
   const trim = (): void => {
-    const idle = [...entries].filter(([, entry]) => !entry.listeners.size && !entry.leases && !entry.connecting);
+    const idle = [...entries].filter(([, entry]) => !entry.listeners.size && !entry.leases && !entry.connecting
+      && !entry.pendingSettings);
     let events = idle.reduce((count, [, entry]) => count + entry.client.state().events.length, 0);
     while (idle.length > 4 || events > 20_000) {
       const oldest = idle.shift();
@@ -536,8 +596,10 @@ export function createAgentSessionAdapter(
     }
     const client = dependencies.client(sessionId);
     const listeners = new Set<AiSessionListener>();
+    const projectCommitted = createAgentSessionViewProjector();
     const entry: AgentAdapterEntry = {
-      project: createAgentSessionViewProjector(),
+      projectCommitted,
+      project: (state) => withPendingSessionSettings(projectCommitted(state), entry.pendingSettings),
       client,
       listeners,
       leases: 0,
@@ -567,7 +629,7 @@ export function createAgentSessionAdapter(
     return entry.connecting;
   };
 
-  const resumeEndedSession = async (
+  const reopenEndedSession = async (
     sessionId: string,
     current?: AiSessionView,
     signal?: AbortSignal,
@@ -585,6 +647,68 @@ export function createAgentSessionAdapter(
     entry.view = resumed;
     for (const listener of entry.listeners) listener(resumed);
     return resumed;
+  };
+
+  const publish = (entry: AgentAdapterEntry, view: AiSessionView): AiSessionView => {
+    entry.view = view;
+    for (const listener of entry.listeners) listener(view);
+    return view;
+  };
+
+  /** Apply deferred settings to a live Session before it admits new input.
+   * Permission goes first so the next turn never runs under the old mode. Each
+   * applied value leaves the pending set immediately, so a failure keeps only
+   * what still needs to be applied and aborts the caller. */
+  const applyPendingSettings = async (
+    sessionId: string,
+    view: AiSessionView,
+    signal?: AbortSignal,
+  ): Promise<AiSessionView> => {
+    const entry = ensureEntry(sessionId);
+    if (!entry.pendingSettings) return view;
+    const without = (key: keyof PendingSessionSettings): void => {
+      const next: PendingSessionSettings = { ...entry.pendingSettings, [key]: undefined };
+      entry.pendingSettings = next.model || next.permissionMode || next.executionSurface ? next : undefined;
+    };
+    const { permissionMode, executionSurface, model } = entry.pendingSettings;
+    if (permissionMode) {
+      await (dependencies.setPermission ?? invokeSetAgentRuntimePermission)({ sessionId, mode: permissionMode });
+      without('permissionMode');
+      signal?.throwIfAborted();
+    }
+    if (executionSurface) {
+      await (dependencies.setExecutionSurface ?? invokeSetAgentRuntimeExecutionSurface)({ sessionId, surface: executionSurface });
+      without('executionSurface');
+      signal?.throwIfAborted();
+    }
+    if (model) {
+      await (dependencies.selectModel ?? invokeSelectAgentRuntimeModel)({ sessionId, selection: {
+        routeId: model.routeId, modelId: model.modelId, reasoningEffort: model.reasoningEffort } });
+      without('model');
+      signal?.throwIfAborted();
+    }
+    const state = await entry.client.reconnect();
+    signal?.throwIfAborted();
+    return publish(entry, entry.project(state));
+  };
+
+  const resumeEndedSession = async (
+    sessionId: string,
+    current?: AiSessionView,
+    signal?: AbortSignal,
+  ): Promise<AiSessionView> => applyPendingSettings(
+    sessionId,
+    await reopenEndedSession(sessionId, current, signal),
+    signal,
+  );
+
+  /** Record a setting for an ended Session instead of reopening it. */
+  const recordDeferredSetting = (sessionId: string, patch: PendingSessionSettings): void => {
+    const entry = ensureEntry(sessionId);
+    const committed = entry.projectCommitted(entry.client.state());
+    entry.pendingSettings = normalizePendingSettings(committed.snapshot.value.header,
+      { ...entry.pendingSettings, ...patch });
+    publish(entry, entry.project(entry.client.state()));
   };
 
   const waitForCommittedOperation = async (
@@ -736,6 +860,12 @@ export function createAgentSessionAdapter(
       // Reopening belongs to the explicit reconnect action, never to background
       // file/skill discovery that may finish after a terminal was closed.
       const entry = ensureEntry(sessionId);
+      // Reconnecting a terminal resets permissionMode to requestApproval on the backend;
+      // drop any deferred permission change so it cannot override that security reset.
+      if (entry.pendingSettings?.permissionMode) {
+        const next: PendingSessionSettings = { ...entry.pendingSettings, permissionMode: undefined };
+        entry.pendingSettings = next.model || next.executionSurface ? next : undefined;
+      }
       const rebound = entry.project(await entry.client.reconnect());
       entry.view = await resumeEndedSession(sessionId, rebound);
       for (const listener of entry.listeners) listener(entry.view);
@@ -750,21 +880,45 @@ export function createAgentSessionAdapter(
       return entry.view;
     },
     async selectModel(sessionId, provider) {
-      await resumeEndedSession(sessionId);
-      await (dependencies.selectModel ?? invokeSelectAgentRuntimeModel)({ sessionId, selection: { routeId: provider.id, modelId: provider.model, reasoningEffort: provider.reasoningEffort } });
+      const selection = { routeId: provider.id, modelId: provider.model, reasoningEffort: provider.reasoningEffort };
+      const view = await openEntry(sessionId);
+      if (defersSettings(view)) {
+        const value = view.snapshot.value;
+        const retainedImages = value.surface.messages.some(m => m.role === 'userImages')
+          || value.inbox.nextTurn.some(m => (m.images?.length ?? 0) > 0)
+          || value.inbox.nextStep.some(m => (m.images?.length ?? 0) > 0);
+        if (retainedImages) requireVision(provider);
+        recordDeferredSetting(sessionId, { model: selection });
+        return;
+      }
+      await resumeEndedSession(sessionId, view);
+      await (dependencies.selectModel ?? invokeSelectAgentRuntimeModel)({ sessionId, selection });
       const entry = ensureEntry(sessionId);
       entry.view = entry.project(await entry.client.reconnect());
       for (const listener of entry.listeners) listener(entry.view);
     },
     async setPermission(sessionId, mode) {
-      await resumeEndedSession(sessionId);
+      const view = await openEntry(sessionId);
+      if (defersSettings(view)) {
+        recordDeferredSetting(sessionId, { permissionMode: mode });
+        return;
+      }
+      await resumeEndedSession(sessionId, view);
       await (dependencies.setPermission ?? invokeSetAgentRuntimePermission)({ sessionId, mode });
       const entry = ensureEntry(sessionId);
       entry.view = entry.project(await entry.client.reconnect());
       for (const listener of entry.listeners) listener(entry.view);
     },
     async setExecutionSurface(sessionId, surface) {
-      await resumeEndedSession(sessionId);
+      const view = await openEntry(sessionId);
+      if (defersSettings(view)) {
+        if (view.snapshot.value.header.target?.windowsSandboxRequired === true && surface !== 'direct') {
+          throw new Error('WINDOWS_SANDBOX_DIRECT_REQUIRED');
+        }
+        recordDeferredSetting(sessionId, { executionSurface: surface });
+        return;
+      }
+      await resumeEndedSession(sessionId, view);
       await (dependencies.setExecutionSurface ?? invokeSetAgentRuntimeExecutionSurface)({ sessionId, surface });
       const entry = ensureEntry(sessionId);
       entry.view = entry.project(await entry.client.reconnect());
@@ -850,6 +1004,7 @@ export function createAgentSessionAdapter(
           mode: 'nextTurn',
         };
       }
+      const deferredModel = entries.get(resolvedSessionId)?.pendingSettings?.model;
       const paused = input.paused || (input.queued && view.status === 'failed');
       if (!paused || hasImages) view = await resumeEndedSession(resolvedSessionId, view);
       // An idle restored Session needs an owning runtime before its next input. start is idempotent.
@@ -858,7 +1013,10 @@ export function createAgentSessionAdapter(
       const retainedImages = view.snapshot.value.surface.messages.some(m => m.role === 'userImages');
       if (retainedImages) requireVision(input.provider);
       if (hasImages || (!paused && (input.mode === 'start' || view.status === 'idle' || retainedImages))) {
-        await dependencies.start({ sessionId: resolvedSessionId, selection: { routeId: input.provider.id, modelId: input.provider.model, reasoningEffort: input.provider.reasoningEffort } });
+        const selection = deferredModel
+          ? { routeId: deferredModel.routeId, modelId: deferredModel.modelId, reasoningEffort: deferredModel.reasoningEffort }
+          : { routeId: input.provider.id, modelId: input.provider.model, reasoningEffort: input.provider.reasoningEffort };
+        await dependencies.start({ sessionId: resolvedSessionId, selection });
       }
       const message = {
         sessionId: resolvedSessionId,
@@ -960,9 +1118,11 @@ export function createAgentSessionAdapter(
     async retryModel(sessionId, turnId): Promise<void> {
       // An old admission receipt does not prove a paused recovery was resumed.
       // Always dispatch the explicit action; native receipt handling is idempotent.
-      const before = await openEntry(sessionId);
+      let before = await openEntry(sessionId);
+      // A model switched after the failure must govern the retry itself.
+      if (entries.get(sessionId)?.pendingSettings) before = await resumeEndedSession(sessionId, before);
       const id = `${before.snapshot.value.header.subagent ? 'child' : 'model'}-retry-${turnId}`;
-      await waitForCommittedOperation(sessionId, id, () => invokeRetryAgentModel({ sessionId, turnId }), {
+      await waitForCommittedOperation(sessionId, id, () => (dependencies.retryModel ?? invokeRetryAgentModel)({ sessionId, turnId }), {
         confirmed: modelRetryConfirmation(before, turnId),
       });
     },

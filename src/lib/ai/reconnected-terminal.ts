@@ -55,7 +55,10 @@ export function canContinueOnReconnectedTerminal(
 
 export function terminalReconnectErrorKey(message: string):
   'ai.workspace.reconnectFailed' | 'ai.workspace.reconnectUnverified' | 'ai.workspace.reconnectUnsettled'
-  | 'ai.workspace.reconnectSourceActive' {
+  | 'ai.workspace.reconnectSourceActive' | 'ai.workspace.reconnectIntegrationUnavailable'
+  | 'ai.workspace.reconnectNativeResourcesUnavailable' {
+  if (message.includes('TERMINAL_RECONNECT_NATIVE_RESOURCES_UNAVAILABLE')) return 'ai.workspace.reconnectNativeResourcesUnavailable';
+  if (message.includes('TERMINAL_RECONNECT_INTEGRATION_UNAVAILABLE')) return 'ai.workspace.reconnectIntegrationUnavailable';
   if (message.includes('TERMINAL_RECONNECT_SOURCE_ACTIVE')) return 'ai.workspace.reconnectSourceActive';
   if (/TERMINAL_RECONNECT_UNVERIFIED|verified replacement transport|TERMINAL_BROKER_(?:TRANSPORT_NOT_FOUND|STALE_TRANSPORT)/.test(message)) {
     return 'ai.workspace.reconnectUnverified';

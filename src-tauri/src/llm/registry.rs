@@ -49,6 +49,7 @@ impl ModelAdapterFactory for HttpModelAdapterFactory {
             provider,
             api_key,
             timeouts: ModelTimeoutPolicy::default(),
+            limiter: None,
         }))
     }
 }

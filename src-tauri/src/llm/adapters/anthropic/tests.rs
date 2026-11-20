@@ -149,6 +149,7 @@
                 provider: anthropic_provider(base_url),
                 api_key: Some("stage-e-secret".into()),
                 timeouts: ModelTimeoutPolicy::default(),
+                limiter: None,
             },
         };
         let request = ModelRequest {
@@ -366,6 +367,7 @@
                 provider: anthropic_provider("http://127.0.0.1:9".into()),
                 api_key: Some("stage-e-secret".into()),
                 timeouts: ModelTimeoutPolicy::default(),
+                limiter: None,
             },
         }
         .stream(basic_request(), cancellation, Arc::new(Sink::default()))
@@ -417,6 +419,7 @@
                     provider: anthropic_provider(base_url),
                     api_key: Some("stage-e-secret".into()),
                     timeouts,
+                    limiter: None,
                 },
             }
             .stream(
@@ -452,6 +455,7 @@
                     provider: anthropic_provider(base_url),
                     api_key: Some("stage-e-secret".into()),
                     timeouts: ModelTimeoutPolicy::default(),
+                    limiter: None,
                 },
             }
             .stream(
@@ -497,6 +501,7 @@
                 provider: anthropic_provider("https://api.anthropic.com".into()),
                 api_key: Some(api_key),
                 timeouts: ModelTimeoutPolicy::default(),
+                limiter: None,
             },
         };
         let mut request = basic_request();

@@ -2,7 +2,7 @@
 use super::{
     catalog::{self, ModelDefinition, ReasoningEncoding, ReasoningOption, Support, VisionBudget},
     config::{endpoint_url, AiProviderConfig, AiProviderKind},
-    transport::{build_client, checked_json, format_transport_error},
+    transport::{checked_json, format_transport_error, shared_client},
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -223,7 +223,7 @@ async fn list_endpoint_models(
     provider: &AiProviderConfig,
     api_key: Option<String>,
 ) -> Result<Vec<DiscoveredModel>, String> {
-    let client = build_client()?;
+    let client = shared_client()?;
     let response = match provider.kind {
         AiProviderKind::Ollama => client
             .get(endpoint_url(provider, "api/tags")?)

@@ -14,6 +14,7 @@ import {
   ListPlusIcon,
   ShieldCheckIcon,
   SquareIcon,
+  TriangleAlertIcon,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -54,6 +55,7 @@ import { AiQueueEditComposer } from './ai-queue-edit-composer';
 import { useDocumentImport } from './use-document-import';
 import { DOCUMENT_ACCEPT, IMAGE_ACCEPT, documentErrorKey, isDocumentName } from '@/lib/ai/document-import';
 import { decodeDocumentMessage, encodeDocumentMessage } from '@/lib/ai/document-message';
+import { assessDocumentContextBudget } from '@/lib/ai/document-budget';
 import { AiDocumentAttachments } from './ai-document-attachments';
 import { AiDraftAttachmentRail, UnifiedAttachmentContext } from './ai-image-draft-rail';
 import { AiTaskStrip } from './ai-task-strip';
@@ -75,6 +77,9 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly providerLabel?: string;
   readonly modelLabel?: string;
   readonly modelControl?: React.ReactNode;
+  readonly contextWindow?: number;
+  readonly maxOutputTokens?: number;
+  readonly requestOutputTokens?: number;
   readonly contextUsage?: AiContextUsage;
   readonly permissionControl?: React.ReactNode;
   readonly executionSurfaceControl?: React.ReactNode;
@@ -136,6 +141,9 @@ export function AiComposerSeat({
   draft: controlledDraft,
   modelLabel,
   modelControl,
+  contextWindow,
+  maxOutputTokens,
+  requestOutputTokens,
   contextUsage,
   permissionControl,
   executionSurfaceControl,
@@ -256,12 +264,27 @@ export function AiComposerSeat({
     () => rawDraftRef.current, updateRawDraft, terminal || unavailable || submitting || imageLocked,
   );
   const empty = draft.trim().length === 0 && !hasImages && !message.documents.length;
+  const documentBudget = useMemo(() => assessDocumentContextBudget({
+    rawDraft,
+    hasDocuments: message.documents.length > 0,
+    contextWindow,
+    maxOutputTokens,
+    requestOutputTokens,
+    contextUsage,
+  }), [rawDraft, message.documents.length, contextWindow, maxOutputTokens, requestOutputTokens, contextUsage]);
+  const documentBudgetExceeded = Boolean(documentBudget?.exceeds);
+  const documentBudgetHintId = useId();
   const stopPrimary = running && (empty || unavailable || (mode === 'ask'));
+  const composerDescribedBy = [
+    unavailableReason ? availabilityHintId : undefined,
+    documentBudgetExceeded ? documentBudgetHintId : undefined,
+  ].filter(Boolean).join(' ') || undefined;
   const submitDisabled = terminal
     || stopping
     || submitting
     || documents.busy
     || documents.hasUnresolvedChatReference()
+    || (!stopPrimary && documentBudgetExceeded)
     || (!stopPrimary && mode === 'ask' && running && !empty)
     || (stopPrimary
       ? onStop === undefined
@@ -467,6 +490,7 @@ export function AiComposerSeat({
       if (gesture === 'primary') onStop?.();
       return;
     }
+    if (documentBudgetExceeded) return;
     try { encodeDocumentMessage(draft, message.documents, true, message.skills); }
     catch (error) { toast.error(t(documentErrorKey(error))); return; }
     // Focus synchronously while the user's gesture still owns focus. A later
@@ -494,6 +518,17 @@ export function AiComposerSeat({
       <div data-slot="ai-composer-notices" className="flex shrink-0 flex-col gap-[var(--ai-composer-stack-gap)] empty:hidden">
         {statusNotices}
         {mode === 'agent' && executionSurfaceNotice}
+        {documentBudgetExceeded && documentBudget && (
+          <Alert id={documentBudgetHintId} variant="warning" size="sm" role="alert" data-document-budget-notice="">
+            <TriangleAlertIcon aria-hidden="true" />
+            <AlertDescription>
+              {t('ai.workspace.documents.error.contextLimit', {
+                estimated: documentBudget.estimatedTokens.toLocaleString(),
+                available: documentBudget.availableInputTokens.toLocaleString(),
+              })}
+            </AlertDescription>
+          </Alert>
+        )}
         {mode === 'agent' && (
           <AiTaskStrip steps={taskSteps} active={taskPlanActive && (status === 'running' || status === 'waiting')} />
         )}
@@ -584,7 +619,7 @@ export function AiComposerSeat({
                 'w-full shrink overflow-y-auto pt-1 pr-3 pb-0 pl-4 [field-sizing:content] max-h-[min(336px,42vh)]',
                 phase === 'hero' ? 'min-h-13' : 'min-h-7',
               )}
-              aria-describedby={unavailableReason ? availabilityHintId : undefined}
+              aria-describedby={composerDescribedBy}
               value={draft}
               disabled={inputMode === 'supplement' && unavailable}
               chatTitles={[...chatReferences.current.documents.values()].map(document => document.chatTitle!)}
@@ -757,7 +792,7 @@ export function AiComposerSeat({
                         disabled={submitDisabled}
                         aria-label={primaryLabel}
                         aria-busy={submitting || undefined}
-                        aria-describedby={unavailableReason ? availabilityHintId : undefined}
+                        aria-describedby={!stopPrimary ? composerDescribedBy : (unavailableReason ? availabilityHintId : undefined)}
                       />
                     )}
                   >

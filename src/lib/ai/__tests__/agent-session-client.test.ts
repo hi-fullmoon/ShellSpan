@@ -275,6 +275,41 @@ describe('AgentSessionCommittedClient', () => {
     expect(client.state().events).toEqual([created, approval]);
   });
 
+  it('keeps the short reconciliation cadence while a session is active', async () => {
+    vi.useFakeTimers();
+    const source = transport([created]);
+    const reads = vi.spyOn(source, 'committedEvents');
+    const client = createClient('session-fixture', source);
+    await client.connect();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(reads).toHaveBeenCalledTimes(4);
+  });
+
+  it('backs off reconciliation for an ended session and restores it on live activity', async () => {
+    vi.useFakeTimers();
+    const ended = sessionEvent(1, { type: 'session/ended', data: { status: 'completed' } });
+    const source = transport([created, ended], true);
+    const reads = vi.spyOn(source, 'committedEvents');
+    const client = createClient('session-fixture', source);
+    expect(await client.connect()).toMatchObject({ hasTerminalEvent: true });
+    expect(reads).toHaveBeenCalledTimes(1);
+
+    // Quiet checks on an ended session double: 5s, 10s, 20s, 40s, then cap at 60s.
+    for (const [delay, total] of [[5_000, 2], [10_000, 3], [20_000, 4], [40_000, 5], [60_000, 6], [60_000, 7]]) {
+      await vi.advanceTimersByTimeAsync(delay - 1);
+      expect(reads).toHaveBeenCalledTimes(total - 1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(reads).toHaveBeenCalledTimes(total);
+    }
+
+    const resumed = sessionEvent(2, { type: 'session/resumed' });
+    source.replace([created, ended, resumed]);
+    source.publish(resumed);
+    expect(await client.settled()).toMatchObject({ lastCommittedSeq: 2, hasTerminalEvent: false });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(reads).toHaveBeenCalledTimes(8);
+  });
+
   it.each(['idle', 'ended'] as const)('publishes a storage fault and clears it at durable %s', async (settlement) => {
     vi.useFakeTimers();
     const status = sessionEvent(1, { type: 'agent/status', data: { status: 'running' } });

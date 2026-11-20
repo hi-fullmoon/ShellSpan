@@ -10,6 +10,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -23,6 +24,44 @@ PINNED = {
     '4.4': 'd86b3392c1202e8ff5a423b302e6284db7f8f435ea9f39b5b1b20fd3ac36dfcb',
     '5.3': '0d5cd86965f869a26cf64f4b71be7b96f90a3ba8b3d74e27e8e9d9d5550f31ba',
 }
+GNU_MIRRORS = ['https://ftp.gnu.org/gnu', 'https://mirrors.tuna.tsinghua.edu.cn/gnu']
+
+
+def ensure_gnu_source(relative_url, destination, expected_sha256):
+    if destination.exists():
+        if hashlib.sha256(destination.read_bytes()).hexdigest() != expected_sha256:
+            raise RuntimeError(f'{destination}: checksum mismatch')
+        return
+
+    failures = []
+    with tempfile.TemporaryDirectory(dir=destination.parent) as directory:
+        candidate = Path(directory) / destination.name
+        for mirror in GNU_MIRRORS:
+            url = f'{mirror}/{relative_url}'
+            try:
+                if sys.platform == 'darwin':
+                    # The system curl uses the macOS trust store, independently of Python's CA bundle.
+                    subprocess.run([
+                        '/usr/bin/curl', '--disable', '--fail', '--silent', '--show-error', '--location',
+                        '--proto', '=https', '--proto-redir', '=https', '--connect-timeout', '8',
+                        '--max-time', '120', '--output', str(candidate), url,
+                    ], check=True, capture_output=True, text=True)
+                else:
+                    with urllib.request.urlopen(url, timeout=30) as response, candidate.open('wb') as output:
+                        shutil.copyfileobj(response, output)
+            except (OSError, subprocess.CalledProcessError) as error:
+                detail = error.stderr.strip() if isinstance(error, subprocess.CalledProcessError) else str(error)
+                failures.append(f'{url}: {detail}')
+                continue
+            if hashlib.sha256(candidate.read_bytes()).hexdigest() != expected_sha256:
+                failures.append(f'{url}: checksum mismatch')
+                continue
+            candidate.replace(destination)
+            # Prefer the last verified mirror for the remaining archives and patches in this process.
+            GNU_MIRRORS.remove(mirror)
+            GNU_MIRRORS.insert(0, mirror)
+            return
+    raise RuntimeError(f'Could not download verified GNU source {destination.name}:\n' + '\n'.join(failures))
 
 
 def run(command, log, cwd=ROOT):
@@ -37,20 +76,14 @@ def run(command, log, cwd=ROOT):
 def build_readline(build, source_root, upstream, log):
     pinned=json.loads((ROOT/'scripts/native-input/prototype/readline-sources.json').read_text())
     archive=upstream/'readline-8.3.tar.gz'
-    if not archive.exists():
-        urllib.request.urlretrieve('https://ftp.gnu.org/gnu/readline/readline-8.3.tar.gz',archive)
-    if hashlib.sha256(archive.read_bytes()).hexdigest()!=pinned['archive']:
-        raise RuntimeError('Readline archive checksum mismatch')
+    ensure_gnu_source('readline/readline-8.3.tar.gz', archive, pinned['archive'])
     source=source_root/'readline-8.3'
     if not source.exists():
         run(['tar','-xzf',str(archive),'-C',str(source_root)],log)
     for number,expected in enumerate(pinned['patches'],1):
         name=f'readline83-{number:03d}'
         patch=upstream/name
-        if not patch.exists():
-            urllib.request.urlretrieve(f'https://ftp.gnu.org/gnu/readline/readline-8.3-patches/{name}',patch)
-        if hashlib.sha256(patch.read_bytes()).hexdigest()!=expected:
-            raise RuntimeError(f'{name}: checksum mismatch')
+        ensure_gnu_source(f'readline/readline-8.3-patches/{name}', patch, expected)
         stamp=source/f'.{name}.applied'
         if not stamp.exists():
             run(['patch','--batch','-p0','-i',str(patch)],log,source)
@@ -85,11 +118,7 @@ def main():
             if version not in args.versions.split(','):
                 continue
             archive = upstream / f'bash-{version}.tar.gz'
-            if not archive.exists():
-                urllib.request.urlretrieve(f'https://ftp.gnu.org/gnu/bash/bash-{version}.tar.gz', archive)
-            actual = hashlib.sha256(archive.read_bytes()).hexdigest()
-            if actual != expected:
-                raise RuntimeError(f'{archive}: checksum mismatch')
+            ensure_gnu_source(f'bash/bash-{version}.tar.gz', archive, expected)
             source_root = upstream if host=='darwin' else OUT/'upstream-linux'
             source_root.mkdir(exist_ok=True)
             source = source_root / f'bash-{version}'
@@ -116,7 +145,7 @@ def main():
             bridge = OUT / f'bridge-{host}-{version}.so'
             compile_bridge(build, [*([readline/'include'] if readline else []),target, source, source / 'include'], bridge, log)
             versions[version] = {'shell': str(target / 'bash'), 'bridge': str(bridge),
-                                 'archive_sha256':actual,'readline':'8.3.6 static (GNU patches 001-006)' if readline else 'bundled'}
+                                 'archive_sha256':expected,'readline':'8.3.6 static (GNU patches 001-006)' if readline else 'bundled'}
     else:
         bridge = OUT / f'bridge-{host}.so'
         compile_bridge(build, [Path(args.headers), Path(args.headers)/'include'], bridge, log)

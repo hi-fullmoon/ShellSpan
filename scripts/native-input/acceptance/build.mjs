@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash,randomUUID} from 'node:crypto';
-import {mkdirSync,readFileSync,writeFileSync,existsSync,copyFileSync,openSync,closeSync,chmodSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,readFileSync,writeFileSync,existsSync,copyFileSync,openSync,closeSync,chmodSync,renameSync,rmSync} from 'node:fs';
 import {dirname,resolve} from 'node:path';
 import {nativeInputBuildDirectory,nativeInputBuildPath} from '../integration/resource-paths.mjs';
 const root=resolve(import.meta.dirname,'../../..');
@@ -12,12 +12,37 @@ const directory=nativeInputBuildDirectory(root,buildRoot,'acceptance');const dep
 mkdirSync(dependencies,{recursive:true,mode:0o700});
 const log=openSync(resolve(directory,'build.log'),'a',0o600);
 function run(command,args,cwd=root,env=process.env){execFileSync(command,args,{cwd,env,stdio:['ignore',log,log]});}
-const archive=resolve(dependencies,'zsh-5.9.tar.xz');
+const pinPath=resolve(root,'scripts/dependency-builds/zsh/pin.json');
+const pin=JSON.parse(readFileSync(pinPath,'utf8'));
+const archive=resolve(dependencies,`zsh-${pin.version}.tar.xz`);
 const sha=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
 const buildScopedCore=process.argv.includes('--build-scoped-core');
 try{
-  if(!existsSync(archive))run('curl',['--fail','--location','--proto','=https','--tlsv1.2','https://www.zsh.org/pub/old/zsh-5.9.tar.xz','-o',archive]);
-  assert.equal(sha(archive),'9b8d1ecedd5b5e81fbf1918e876752a7dd948e05c1a0dba10ab863842d45acd5');
+  if (!existsSync(archive)) {
+    const stage = mkdtempSync(resolve(dependencies, '.zsh-download-'));
+    const candidate = resolve(stage, 'zsh.tar.xz');
+    const urls = [pin.archiveUrl, `https://mirrors.tuna.tsinghua.edu.cn/debian/pool/main/z/zsh/zsh_${pin.version}.orig.tar.xz`];
+    try {
+      for (const url of urls) {
+        try {
+          run('curl', ['--disable', '--fail', '--location', '--proto', '=https', '--proto-redir', '=https',
+            '--connect-timeout', '8', '--max-time', '120', '--tlsv1.2', '--output', candidate, url]);
+        } catch {
+          continue;
+        }
+        if (sha(candidate) !== pin.archiveSha256) {
+          writeFileSync(log, `${url}: checksum mismatch\n`);
+          continue;
+        }
+        renameSync(candidate, archive);
+        break;
+      }
+      assert(existsSync(archive), `Could not download verified Zsh source; see ${resolve(directory, 'build.log')}`);
+    } finally {
+      rmSync(stage, { recursive: true, force: true });
+    }
+  }
+  assert.equal(sha(archive), pin.archiveSha256, 'Zsh archive checksum mismatch');
   const coreProducerPath=buildScopedCore
     ? resolve(JSON.parse(execFileSync(process.execPath,['scripts/native-input/acceptance/build-scoped-core.mjs',archive],{cwd:root,encoding:'utf8',stdio:['ignore','pipe',log]})).directory,'producer.json')
     : process.env.SHELLSPAN_P3_SCOPED_CORE_PRODUCER;
@@ -73,8 +98,7 @@ try{
   if(coreProducerPath){
     assert(coreProducer.nativeAcceptance===false&&coreProducer.productionChanges===false&&coreProducer.target===target);
     assert.equal(sha(coreProducer.editor),coreProducer.editorSha256);assert.equal(coreProducer.shell,shell);assert.equal(coreProducer.shellSha256,sha(shell));
-    const pin=JSON.parse(readFileSync(resolve(root,'scripts/dependency-builds/zsh/pin.json'),'utf8'));
-    assert.equal(sha(resolve(root,'scripts/dependency-builds/zsh/pin.json')),coreProducer.pinSha256);
+    assert.equal(sha(pinPath),coreProducer.pinSha256);
     assert.equal(sha(resolve(root,pin.patch)),pin.patchSha256);assert.equal(coreProducer.patchSha256,pin.patchSha256);
     const expectedSources=boundHistory?{...pin.history.sourceHashes,...pin.macosRefresh.sourceHashes}:pin.sourceHashes;
     assert.deepEqual(coreProducer.nativeSourceHashes,expectedSources);

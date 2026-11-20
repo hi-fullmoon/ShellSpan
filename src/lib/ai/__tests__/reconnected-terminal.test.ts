@@ -74,6 +74,16 @@ describe('reconnected terminal Agent continuation', () => {
       .toBe('ai.workspace.reconnectUnsettled');
     expect(terminalReconnectErrorKey('IPC unavailable')).toBe('ai.workspace.reconnectFailed');
   });
+
+  it('reports unavailable terminal integration separately from active work', () => {
+    expect(terminalReconnectErrorKey('TERMINAL_RECONNECT_NATIVE_RESOURCES_UNAVAILABLE'))
+      .toBe('ai.workspace.reconnectNativeResourcesUnavailable');
+    expect(terminalReconnectErrorKey('TERMINAL_RECONNECT_INTEGRATION_UNAVAILABLE'))
+      .toBe('ai.workspace.reconnectIntegrationUnavailable');
+    expect(terminalReconnectErrorKey('TERMINAL_RECONNECT_BUSY: current terminal execution must settle'))
+      .toBe('ai.workspace.reconnectUnsettled');
+  });
+
   it('allows rebinding only to a replacement of the same SSH target', () => {
     expect(canContinueOnReconnectedTerminal(snapshot, terminal)).toBe(true);
     expect(canContinueOnReconnectedTerminal(snapshot, { ...terminal, host: 'other.example.com' })).toBe(false);

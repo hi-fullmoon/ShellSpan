@@ -173,7 +173,10 @@ impl ModelAdapter for ChatCompletionsAdapter {
             request_builder = request_builder.bearer_auth(api_key);
         }
         let response = send_request(request_builder, &cancellation, self.http.timeouts).await?;
-        let response = checked_stream_response(response, &cancellation, self.http.timeouts).await?;
+        let response = self
+            .http
+            .checked_stream_response(response, &cancellation)
+            .await?;
         stream_chat(
             response,
             &cancellation,

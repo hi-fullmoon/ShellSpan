@@ -353,6 +353,10 @@ workspace rows have no broker identity after a restart: their next connection
 starts a new broker lineage. Explicit human verification can restore a settled
 conversation after the backend checks the same host, port and login. Unknown
 outcomes restrict execution effects rather than blocking conversation access.
+Visible execution still requires the new terminal's integrated prompt. A
+terminal with unavailable integration reports that failure separately from
+pending execution or input. Missing or stale Linux SSH resources are reported
+as a build resource issue while the ordinary SSH shell remains usable.
 
 ## Visible command typing
 

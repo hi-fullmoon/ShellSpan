@@ -1934,3 +1934,213 @@ async fn qwen_thinking_only_sse_is_not_classified_as_empty() {
         matches!(&response.content[0], ModelContentBlock::Reasoning { text, .. } if text == "reason only")
     );
 }
+
+/// Keep-alive server that answers every request with `ok` and counts accepted TCP connections.
+fn serve_keep_alive_http() -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let accepted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = accepted.clone();
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { return };
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            thread::spawn(move || {
+                let mut pending = Vec::new();
+                let mut chunk = [0_u8; 4096];
+                loop {
+                    while let Some(end) =
+                        pending.windows(4).position(|window| window == b"\r\n\r\n")
+                    {
+                        pending.drain(..end + 4);
+                        if stream
+                            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                    match stream.read(&mut chunk) {
+                        Ok(0) | Err(_) => return,
+                        Ok(read) => pending.extend_from_slice(&chunk[..read]),
+                    }
+                }
+            });
+        }
+    });
+    (format!("http://{address}"), accepted)
+}
+
+#[tokio::test]
+async fn shared_streaming_client_reuses_provider_connections_across_turns() {
+    let (url, accepted) = serve_keep_alive_http();
+    // Each turn rebuilds its adapter; the shared client must keep one pool across them.
+    for _ in 0..2 {
+        let body = shared_streaming_client()
+            .unwrap()
+            .get(&url)
+            .send()
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap();
+        assert_eq!(&body[..], b"ok");
+    }
+    assert_eq!(
+        accepted.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "consecutive shared-client requests must reuse the pooled connection"
+    );
+
+    // Control: an independently built client owns a separate pool and reconnects.
+    build_streaming_client()
+        .unwrap()
+        .get(&url)
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    assert_eq!(accepted.load(std::sync::atomic::Ordering::SeqCst), 2);
+}
+
+#[test]
+fn stream_framing_consumes_separators_and_keeps_partial_frames() {
+    let mut sse = b"data: one\n\ndata: two\r\n\r\ndata: par".to_vec();
+    assert_eq!(
+        take_sse_event(&mut sse).unwrap().as_deref(),
+        Some("data: one")
+    );
+    assert_eq!(
+        take_sse_event(&mut sse).unwrap().as_deref(),
+        Some("data: two")
+    );
+    assert_eq!(take_sse_event(&mut sse).unwrap(), None);
+    assert_eq!(sse, b"data: par");
+
+    let mut invalid = b"data: \xff\n\nnext".to_vec();
+    let error = take_sse_event(&mut invalid).unwrap_err();
+    assert!(
+        error.starts_with("invalid UTF-8 in AI stream event"),
+        "{error}"
+    );
+    assert_eq!(invalid, b"next");
+
+    let mut ndjson = b"{\"a\":1}\r\n{\"b\":2}\n{\"c\"".to_vec();
+    assert_eq!(
+        take_line(&mut ndjson).unwrap().as_deref(),
+        Some("{\"a\":1}")
+    );
+    assert_eq!(
+        take_line(&mut ndjson).unwrap().as_deref(),
+        Some("{\"b\":2}")
+    );
+    assert_eq!(take_line(&mut ndjson).unwrap(), None);
+    assert_eq!(ndjson, b"{\"c\"");
+}
+
+#[tokio::test]
+async fn rate_limit_header_cooldown_paces_next_request_through_throttled_adapter() {
+    use super::adapter::ModelAdapter;
+
+    let sse = "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (arrival_tx, arrival_rx) = mpsc::channel::<std::time::Instant>();
+    let server = thread::spawn(move || {
+        for index in 0..2 {
+            let (mut stream, _) = listener.accept().unwrap();
+            arrival_tx.send(std::time::Instant::now()).unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0_u8; 4096];
+            let (header_end, content_length) = loop {
+                let read = stream.read(&mut chunk).unwrap();
+                assert!(read > 0);
+                request.extend_from_slice(&chunk[..read]);
+                if let Some(header_end) = request
+                    .windows(4)
+                    .position(|window| window == b"\r\n\r\n")
+                    .map(|end| end + 4)
+                {
+                    let headers = String::from_utf8_lossy(&request[..header_end]);
+                    let content_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.strip_prefix("content-length: ")
+                                .or_else(|| line.strip_prefix("Content-Length: "))
+                        })
+                        .and_then(|value| value.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    break (header_end, content_length);
+                }
+            };
+            while request.len() < header_end + content_length {
+                let read = stream.read(&mut chunk).unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+            }
+            let extra = if index == 0 {
+                "x-ratelimit-remaining-requests: 0\r\nx-ratelimit-reset-requests: 120ms\r\n"
+            } else {
+                ""
+            };
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{sse}",
+                sse.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        }
+    });
+
+    let provider: AiProviderConfig = serde_json::from_value(json!({
+        "id": "throttle-test",
+        "profile": "generic",
+        "kind": "openAiCompatible",
+        "model": "gpt-4o-mini",
+        "baseUrl": format!("http://{address}/v1"),
+        "requiresApiKey": false,
+        "modelDefinition": crate::llm::catalog::fixture_definition(AiProviderKind::OpenAiCompatible, 16384),
+    }))
+    .unwrap();
+    let limiter = Arc::new(RouteLimiter::new(2, MAX_SHARED_COOLDOWN_MS));
+    let raw_adapter = Arc::new(ChatCompletionsAdapter {
+        http: HttpConfig {
+            client: build_streaming_client().unwrap(),
+            provider,
+            api_key: None,
+            timeouts: ModelTimeoutPolicy::default(),
+            limiter: Some(limiter.clone()),
+        },
+    });
+    let adapter = ThrottledModelAdapter::new(raw_adapter, limiter);
+
+    for index in 0..2 {
+        adapter
+            .stream(
+                ModelRequest {
+                    request_id: format!("cooldown-{index}"),
+                    surface_generation: 0,
+                    system_prompt: "system".into(),
+                    messages: vec![],
+                    tools: vec![],
+                },
+                CancellationToken::new(),
+                Arc::new(RecordingSink::default()),
+            )
+            .await
+            .unwrap();
+    }
+
+    let first_at = arrival_rx.recv().unwrap();
+    let second_at = arrival_rx.recv().unwrap();
+    server.join().unwrap();
+    assert!(
+        second_at.duration_since(first_at) >= Duration::from_millis(100),
+        "second request arrived too early: {:?}",
+        second_at.duration_since(first_at)
+    );
+}

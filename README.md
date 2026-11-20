@@ -64,14 +64,23 @@ Tauri 2 · Rust · React 19 · TypeScript · Tailwind CSS 4 · xterm.js
 
 ## Local development
 
-Requirements: Node.js 24+, pnpm 11, stable Rust, and the [system dependencies required by Tauri 2](https://v2.tauri.app/start/prerequisites/).
+Use Node.js 24+, the pnpm version pinned in [`package.json`](./package.json), the Rust toolchain pinned in [`rust-toolchain.toml`](./rust-toolchain.toml), and the [system dependencies required by Tauri 2](https://v2.tauri.app/start/prerequisites/).
 
 ```bash
 pnpm install       # Install dependencies
 pnpm tauri:dev     # Start the desktop application
-pnpm test          # Run unit tests
+pnpm test          # Run frontend unit tests
 pnpm build         # Type-check and build the frontend
-pnpm tauri:build   # Build desktop installers
+```
+
+On macOS, `pnpm tauri:dev` uses a local `Apple Development` signing identity by default. See [development signing](./docs/testing-credential-refresh.md#普通开发程序的只读检查).
+
+`pnpm tauri:build` prepares [native input resources](./scripts/native-input/README.md) and uses the repository's signing configuration to generate installers and updater artifacts. See the [release workflow](./docs/releasing.md) for published builds.
+
+For local macOS `.app` and `.dmg` builds, install Python 3 for the Bash build. The following command uses ad hoc signing and disables updater artifacts.
+
+```bash
+pnpm tauri:build --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":false,"macOS":{"signingIdentity":"-"}}}'
 ```
 
 The main branch starts with database schema version 1. First launch creates `~/.shellspan/shellspan-main.db`; development uses `~/.shellspan-dev/shellspan-main.db`. Data from previous databases is not imported.

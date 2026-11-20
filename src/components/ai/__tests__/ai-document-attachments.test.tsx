@@ -199,4 +199,98 @@ describe('document attachment surfaces', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(decodeDocumentMessage(saved)).toEqual({ text: 'Summarize it', documents });
   });
+
+  it('blocks sending and shows a persistent alert when attached documents exceed a small context window', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const largeDocs = [{ id: 'big', name: 'big.txt', size: 30_720, text: 'a'.repeat(30_720) }];
+    const { rerender } = render(
+      <AiComposerSeat
+        phase="active"
+        status="idle"
+        contextWindow={8_192}
+        defaultDraft={encodeDocumentMessage('Summarize', largeDocs)}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const notice = document.querySelector('[data-document-budget-notice]');
+    expect(notice).toBeInTheDocument();
+    expect(notice).toHaveAttribute('role', 'alert');
+    expect(notice).toHaveTextContent(/exceed the current model input budget/i);
+
+    const sendButton = screen.getByRole('button', { name: 'Send' });
+    expect(sendButton).toBeDisabled();
+
+    const composer = screen.getByRole('textbox');
+    expect(composer.getAttribute('aria-describedby')).toContain(notice!.id);
+    await user.type(composer, '{Enter}');
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // Switching to a larger-context model clears the notice and re-enables sending.
+    rerender(
+      <AiComposerSeat
+        phase="active"
+        status="idle"
+        contextWindow={128_000}
+        defaultDraft={encodeDocumentMessage('Summarize', largeDocs)}
+        onSubmit={onSubmit}
+      />,
+    );
+    expect(document.querySelector('[data-document-budget-notice]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+
+    // Switching back to 8k re-shows the notice; removing the attachment also clears it.
+    rerender(
+      <AiComposerSeat
+        phase="active"
+        status="idle"
+        contextWindow={8_192}
+        defaultDraft={encodeDocumentMessage('Summarize', largeDocs)}
+        onSubmit={onSubmit}
+      />,
+    );
+    expect(document.querySelector('[data-document-budget-notice]')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Remove big.txt' }));
+    expect(document.querySelector('[data-document-budget-notice]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+  });
+
+  it('keeps the Stop action enabled while Ask mode is running even if attached documents exceed budget', () => {
+    const onStop = vi.fn();
+    const largeDocs = [{ id: 'big', name: 'big.txt', size: 30_720, text: 'a'.repeat(30_720) }];
+    render(
+      <AiComposerSeat
+        mode="ask"
+        phase="active"
+        status="running"
+        contextWindow={8_192}
+        defaultDraft={encodeDocumentMessage('Summarize', largeDocs)}
+        onStop={onStop}
+      />,
+    );
+
+    expect(document.querySelector('[data-document-budget-notice]')).toBeInTheDocument();
+    const stopButton = screen.getByRole('button', { name: 'Stop this turn' });
+    expect(stopButton).toBeEnabled();
+  });
+
+  it('renders localized zh-CN document context limit copy', async () => {
+    useAppStore.setState({ locale: 'zh-CN' });
+    await initI18n('zh-CN');
+    const largeDocs = [{ id: 'big', name: 'big.txt', size: 30_720, text: 'a'.repeat(30_720) }];
+    render(
+      <AiComposerSeat
+        phase="active"
+        status="idle"
+        contextWindow={8_192}
+        defaultDraft={encodeDocumentMessage('总结', largeDocs)}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    const notice = document.querySelector('[data-document-budget-notice]');
+    expect(notice).toBeInTheDocument();
+    expect(notice).toHaveTextContent(/超出当前模型可用输入上限/);
+  });
 });

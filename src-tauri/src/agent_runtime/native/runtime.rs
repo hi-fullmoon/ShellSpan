@@ -338,12 +338,25 @@ impl NativeToolEngine {
         if !session.open || session.transport_session_id != current {
             return Err("TERMINAL_RECONNECT_UNVERIFIED: current transport is closed".into());
         }
-        let capabilities = self.terminal_execution_capabilities(current)?;
         if session.active_command_id.is_some()
-            || capabilities.input_recovery_required
-            || (bound_terminal && !capabilities.prompt_ready)
+            || session.input_observation.native_recovery_required
+            || session.input_observation.native_clear_pending
         {
             return Err("TERMINAL_RECONNECT_BUSY: current terminal execution must settle".into());
+        }
+        if bound_terminal && !session.prompt_ready {
+            return Err(match session.integration_state {
+                TerminalIntegrationState::Initializing | TerminalIntegrationState::Ready => {
+                    "TERMINAL_RECONNECT_BUSY: current terminal execution must settle"
+                }
+                _ if session.integration_reason.as_deref()
+                    == Some(crate::session::SSH_NATIVE_RESOURCES_UNAVAILABLE) =>
+                {
+                    "TERMINAL_RECONNECT_NATIVE_RESOURCES_UNAVAILABLE"
+                }
+                _ => "TERMINAL_RECONNECT_INTEGRATION_UNAVAILABLE",
+            }
+            .into());
         }
         self.is_replacement_transport(previous, current)
     }
@@ -3905,6 +3918,48 @@ mod tests {
     };
     use crossbeam_channel::unbounded;
     use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn terminal_reconnect_reports_unavailable_integration_for_visible_execution() {
+        const TERMINAL: &str = "plain-ssh";
+        let broker = TerminalSessionBroker::phase4_enabled_for_test(256);
+        broker
+            .attach_transport(
+                TERMINAL,
+                None,
+                TerminalTransportKind::SshPty,
+                TerminalGeometry::new(80, 24),
+            )
+            .unwrap();
+        let engine = NativeToolEngine::with_terminal_broker(broker);
+        assert!(engine
+            .verify_reconnect_transport("previous", TERMINAL, true)
+            .unwrap_err()
+            .starts_with("TERMINAL_RECONNECT_BUSY:"));
+
+        for (reason, error) in [
+            (
+                crate::session::SSH_NATIVE_RESOURCES_UNAVAILABLE,
+                "TERMINAL_RECONNECT_NATIVE_RESOURCES_UNAVAILABLE",
+            ),
+            (
+                "nativeProfileMismatch",
+                "TERMINAL_RECONNECT_INTEGRATION_UNAVAILABLE",
+            ),
+        ] {
+            engine
+                .mark_terminal_integration_unavailable(TERMINAL, TerminalShellKind::Bash, reason)
+                .unwrap();
+            assert_eq!(
+                engine.verify_reconnect_transport("previous", TERMINAL, true),
+                Err(error.into())
+            );
+            assert_eq!(
+                engine.verify_reconnect_transport("previous", TERMINAL, false),
+                Ok(false)
+            );
+        }
+    }
 
     fn engine_with_terminal_broker_for_test(
         terminal_broker: TerminalSessionBroker,

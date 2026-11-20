@@ -1,4 +1,6 @@
+vi.mock('@tauri-apps/api/core', async () => ({ invoke: (await import('@/tests/llm-resolver-fixture')).fixtureResolve }));
 import { describe, expect, it, vi } from 'vitest';
+import { loadResolvedModel } from '@/lib/ai/provider-contract';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { projectAgentActivity } from '@/lib/ai/agent-session-projection';
 import { AgentSessionCommittedClient } from '@/lib/ai/agent-session-client';
@@ -627,7 +629,7 @@ describe('AgentSessionAdapter', () => {
     expect((await adapter.open('session-fixture')).snapshot.value.header.executionSurface).toBe('boundTerminal');
   });
 
-  it('resumes a completed conversation before switching its execution surface', async () => {
+  it('defers execution surface changes on a completed conversation until follow-up submission', async () => {
     const base = agentSessionEventFixture[0]!;
     const events: AgentSessionEvent[] = [base, {
       ...base, seq: 1, type: 'session/ended', data: { status: 'completed' },
@@ -636,26 +638,61 @@ describe('AgentSessionAdapter', () => {
     const dependencies = agentDependencies(events);
     const resume = vi.fn(async () => {
       order.push('resume');
-      events.push({ ...base, seq: 2, type: 'session/resumed', data: {} });
+      events.push({ ...base, seq: events.length, type: 'session/resumed', data: {} });
       return snapshot();
     });
     const setExecutionSurface = vi.fn(async () => {
       order.push('switch');
       events.push({
-        ...base, seq: 3, type: 'session/execution_surface_changed',
+        ...base, seq: events.length, type: 'session/execution_surface_changed',
         data: { surface: 'boundTerminal' },
       });
+      return snapshot();
+    });
+    vi.mocked(dependencies.start).mockImplementation(async () => {
+      order.push('start');
+      return snapshot();
+    });
+    vi.mocked(dependencies.followup).mockImplementation(async (input) => {
+      order.push('followup');
+      events.push(sessionEvent(events.length, {
+        type: 'agent/inbox/spliced',
+        data: {
+          operation: 'enqueued',
+          lane: 'nextTurn',
+          messages: [{
+            messageId: input.messageId,
+            clientSubmissionId: input.clientSubmissionId,
+            content: input.content,
+            source: { kind: 'user', label: 'User', producerId: 'shellspan-user' },
+          }],
+        },
+      }));
       return snapshot();
     });
     const adapter = createAgentSessionAdapter({ ...dependencies, resume, setExecutionSurface });
 
     await adapter.setExecutionSurface?.('session-fixture', 'boundTerminal');
 
-    expect(order).toEqual(['resume', 'switch']);
+    expect(resume).not.toHaveBeenCalled();
+    expect(setExecutionSurface).not.toHaveBeenCalled();
+    const deferred = await adapter.open('session-fixture');
+    expect(deferred.snapshot.value.ended).toBe(true);
+    expect(deferred.snapshot.value.header.executionSurface).toBe('boundTerminal');
+
+    await adapter.submit('session-fixture', {
+      content: 'Continue in bound terminal.',
+      mode: 'nextTurn',
+      clientOperationId: 'op-surface',
+      provider,
+    });
+
+    expect(order).toEqual(['resume', 'switch', 'start', 'followup']);
     expect((await adapter.open('session-fixture')).snapshot.value.header.executionSurface).toBe('boundTerminal');
+    adapter.dispose();
   });
 
-  it('resumes a failed conversation before changing its permission mode', async () => {
+  it('defers permission mode changes on a failed conversation until follow-up submission', async () => {
     const base = agentSessionEventFixture[0]!;
     const events: AgentSessionEvent[] = [base, {
       ...base, seq: 1, type: 'session/ended', data: { status: 'failed' },
@@ -664,57 +701,538 @@ describe('AgentSessionAdapter', () => {
     const dependencies = agentDependencies(events);
     const resume = vi.fn(async () => {
       order.push('resume');
-      events.push({ ...base, seq: 2, type: 'session/resumed', data: {} });
+      events.push({ ...base, seq: events.length, type: 'session/resumed', data: {} });
       return snapshot();
     });
     const setPermission = vi.fn(async () => {
       order.push('permission');
       events.push({
-        ...base, seq: 3, type: 'session/permission_changed', data: { mode: 'operator' },
+        ...base, seq: events.length, type: 'session/permission_changed', data: { mode: 'operator' },
       });
+      return snapshot();
+    });
+    vi.mocked(dependencies.start).mockImplementation(async () => {
+      order.push('start');
+      return snapshot();
+    });
+    vi.mocked(dependencies.followup).mockImplementation(async (input) => {
+      order.push('followup');
+      events.push(sessionEvent(events.length, {
+        type: 'agent/inbox/spliced',
+        data: {
+          operation: 'enqueued',
+          lane: 'nextTurn',
+          messages: [{
+            messageId: input.messageId,
+            clientSubmissionId: input.clientSubmissionId,
+            content: input.content,
+            source: { kind: 'user', label: 'User', producerId: 'shellspan-user' },
+          }],
+        },
+      }));
       return snapshot();
     });
     const adapter = createAgentSessionAdapter({ ...dependencies, resume, setPermission });
 
     await adapter.setPermission?.('session-fixture', 'operator');
 
-    expect(order).toEqual(['resume', 'permission']);
+    expect(resume).not.toHaveBeenCalled();
+    expect(setPermission).not.toHaveBeenCalled();
+    const deferred = await adapter.open('session-fixture');
+    expect(deferred.snapshot.value.ended).toBe(true);
+    expect(deferred.snapshot.value.header.permissionMode).toBe('operator');
+
+    await adapter.submit('session-fixture', {
+      content: 'Continue with operator permissions.',
+      mode: 'nextTurn',
+      clientOperationId: 'op-permission',
+      provider,
+    });
+
+    expect(order).toEqual(['resume', 'permission', 'start', 'followup']);
     expect((await adapter.open('session-fixture')).snapshot.value.header.permissionMode).toBe('operator');
+    adapter.dispose();
   });
 
-  it('resumes a failed conversation before changing its model', async () => {
+  it('defers model changes on a failed conversation until follow-up submission', async () => {
     const base = agentSessionEventFixture[0]!;
     const events: AgentSessionEvent[] = [base, {
       ...base, seq: 1, type: 'session/ended', data: { status: 'failed' },
     }];
+    const secondProvider = { ...provider, id: 'provider-second', model: 'model-second' };
     const order: string[] = [];
     const dependencies = agentDependencies(events);
     const resume = vi.fn(async () => {
       order.push('resume');
-      events.push({ ...base, seq: 2, type: 'session/resumed', data: {} });
+      events.push({ ...base, seq: events.length, type: 'session/resumed', data: {} });
       return snapshot();
     });
     const selectModel = vi.fn(async () => {
       order.push('model');
       events.push({
         ...base,
-        seq: 3,
+        seq: events.length,
         type: 'session/model_selected',
         data: {
-          provider: { routeId: provider.id, modelId: provider.model },
+          provider: { routeId: secondProvider.id, modelId: secondProvider.model },
         },
       });
       return snapshot();
     });
+    vi.mocked(dependencies.start).mockImplementation(async () => {
+      order.push('start');
+      return snapshot();
+    });
+    vi.mocked(dependencies.followup).mockImplementation(async (input) => {
+      order.push('followup');
+      events.push(sessionEvent(events.length, {
+        type: 'agent/inbox/spliced',
+        data: {
+          operation: 'enqueued',
+          lane: 'nextTurn',
+          messages: [{
+            messageId: input.messageId,
+            clientSubmissionId: input.clientSubmissionId,
+            content: input.content,
+            source: { kind: 'user', label: 'User', producerId: 'shellspan-user' },
+          }],
+        },
+      }));
+      return snapshot();
+    });
     const adapter = createAgentSessionAdapter({ ...dependencies, resume, selectModel });
 
-    await adapter.selectModel?.('session-fixture', provider);
+    await adapter.selectModel?.('session-fixture', secondProvider);
 
-    expect(order).toEqual(['resume', 'model']);
+    expect(resume).not.toHaveBeenCalled();
+    expect(selectModel).not.toHaveBeenCalled();
+    const deferred = await adapter.open('session-fixture');
+    expect(deferred.snapshot.value.ended).toBe(true);
+    expect(deferred.snapshot.value.header.modelSelection).toMatchObject({
+      routeId: secondProvider.id,
+      modelId: secondProvider.model,
+    });
+
+    await adapter.submit('session-fixture', {
+      content: 'Continue with second model.',
+      mode: 'nextTurn',
+      clientOperationId: 'op-model',
+      provider,
+    });
+
+    expect(order).toEqual(['resume', 'model', 'start', 'followup']);
+    expect(dependencies.start).toHaveBeenCalledWith({
+      sessionId: 'session-fixture',
+      selection: { routeId: secondProvider.id, modelId: secondProvider.model, reasoningEffort: undefined },
+    });
+    expect((await adapter.open('session-fixture')).snapshot.value.header.modelSelection).toMatchObject({
+      routeId: secondProvider.id,
+      modelId: secondProvider.model,
+    });
+    adapter.dispose();
+  });
+
+  it('applies a deferred model before retrying a failed turn', async () => {
+    const base = agentSessionEventFixture[0]!;
+    const events: AgentSessionEvent[] = [
+      base,
+      sessionEvent(1, { type: 'turn/start', turnId: 'turn-1' }),
+      sessionEvent(2, { type: 'turn/end', turnId: 'turn-1', data: { reason: 'modelError' } }),
+      sessionEvent(3, { type: 'session/ended', data: { status: 'failed' } }),
+    ];
+    const secondProvider = { ...provider, id: 'provider-second', model: 'model-second' };
+    const order: string[] = [];
+    let publish: ((event: AgentSessionEvent) => void) | undefined;
+    const baseDependencies = agentDependencies(events);
+    const dependencies: AgentSessionAdapterDependencies = {
+      ...baseDependencies,
+      client: (sessionId) => new AgentSessionCommittedClient(sessionId, {
+        subscribe: async (listener) => { publish = listener; return () => undefined; },
+        snapshot: async () => snapshot(),
+        committedEvents: async ({ afterSeq }) => ({
+          events: events.filter((event) => afterSeq === undefined || event.seq > afterSeq),
+        }),
+      }),
+    };
+    const resume = vi.fn(async () => {
+      order.push('resume');
+      events.push(sessionEvent(events.length, { type: 'session/resumed' }));
+      return snapshot();
+    });
+    const selectModel = vi.fn(async () => {
+      order.push('model');
+      events.push(sessionEvent(events.length, {
+        type: 'session/model_selected',
+        data: { provider: { routeId: secondProvider.id, modelId: secondProvider.model } },
+      }));
+      return snapshot();
+    });
+    const retryModel = vi.fn(async () => {
+      order.push('retry');
+      const retryEvent = sessionEvent(events.length, {
+        type: 'agent/inbox/spliced',
+        data: {
+          operation: 'enqueued',
+          lane: 'nextTurn',
+          messages: [{
+            messageId: 'model-retry-turn-1',
+            clientSubmissionId: 'model-retry-turn-1',
+            content: 'Retry turn-1',
+            source: {
+              kind: 'runtime',
+              label: 'model-failure-retry',
+              producerId: 'shellspan-runtime',
+              metadata: { retryTurnId: 'turn-1' },
+            },
+          }],
+        },
+      });
+      events.push(retryEvent);
+      publish?.(retryEvent);
+      return snapshot();
+    });
+    const adapter = createAgentSessionAdapter({ ...dependencies, resume, selectModel, retryModel });
+
+    await adapter.selectModel?.('session-fixture', secondProvider);
+    expect(resume).not.toHaveBeenCalled();
+    expect(selectModel).not.toHaveBeenCalled();
+
+    await adapter.retryModel?.('session-fixture', 'turn-1');
+
+    expect(order).toEqual(['resume', 'model', 'retry']);
+    expect((await adapter.open('session-fixture')).snapshot.value.header.modelSelection).toMatchObject({
+      routeId: secondProvider.id,
+      modelId: secondProvider.model,
+    });
+    adapter.dispose();
+  });
+
+  it('aborts submission if applying a deferred permission mode fails and retains it for retry', async () => {
+    const base = agentSessionEventFixture[0]!;
+    const events: AgentSessionEvent[] = [
+      base,
+      sessionEvent(1, { type: 'session/permission_changed', data: { mode: 'operator' } }),
+      sessionEvent(2, { type: 'session/ended', data: { status: 'completed' } }),
+    ];
+    const dependencies = agentDependencies(events);
+    const resume = vi.fn(async () => {
+      events.push(sessionEvent(events.length, { type: 'session/resumed' }));
+      return snapshot();
+    });
+    const setPermission = vi.fn()
+      .mockRejectedValueOnce(new Error('Permission update failed'))
+      .mockImplementationOnce(async () => {
+        events.push(sessionEvent(events.length, {
+          type: 'session/permission_changed',
+          data: { mode: 'requestApproval' },
+        }));
+        return snapshot();
+      });
+    vi.mocked(dependencies.followup).mockImplementation(async (input) => {
+      events.push(sessionEvent(events.length, {
+        type: 'agent/inbox/spliced',
+        data: {
+          operation: 'enqueued',
+          lane: 'nextTurn',
+          messages: [{
+            messageId: input.messageId,
+            clientSubmissionId: input.clientSubmissionId,
+            content: input.content,
+            source: { kind: 'user', label: 'User', producerId: 'shellspan-user' },
+          }],
+        },
+      }));
+      return snapshot();
+    });
+    const adapter = createAgentSessionAdapter({ ...dependencies, resume, setPermission });
+
+    await adapter.setPermission?.('session-fixture', 'requestApproval');
+    await expect(adapter.submit('session-fixture', {
+      content: 'Run under stricter mode.',
+      mode: 'nextTurn',
+      clientOperationId: 'op-perm-guard',
+      provider,
+    })).rejects.toThrow('Permission update failed');
+
+    expect(dependencies.start).not.toHaveBeenCalled();
+    expect(dependencies.followup).not.toHaveBeenCalled();
+    expect((await adapter.open('session-fixture')).snapshot.value.header.permissionMode).toBe('requestApproval');
+
+    await adapter.submit('session-fixture', {
+      content: 'Run under stricter mode.',
+      mode: 'nextTurn',
+      clientOperationId: 'op-perm-guard',
+      provider,
+    });
+    expect(setPermission).toHaveBeenCalledTimes(2);
+    expect(dependencies.start).toHaveBeenCalledOnce();
+    expect(dependencies.followup).toHaveBeenCalledOnce();
+    adapter.dispose();
+  });
+
+  it('drops deferred permission on reconnectTerminal while keeping deferred model', async () => {
+    const base = agentSessionEventFixture[0]!;
+    const events: AgentSessionEvent[] = [
+      base,
+      sessionEvent(1, { type: 'session/ended', data: { status: 'failed' } }),
+    ];
+    const secondProvider = { ...provider, id: 'provider-second', model: 'model-second' };
+    const reconnectedTarget = {
+      kind: 'remote' as const,
+      targetId: 'terminal-new',
+      sessionId: 'terminal-new',
+      host: 'example.com',
+      port: 22,
+      username: 'user',
+    };
+    const dependencies = agentDependencies(events);
+    const resume = vi.fn(async () => {
+      events.push(sessionEvent(events.length, { type: 'session/resumed' }));
+      return snapshot();
+    });
+    const setPermission = vi.fn(async () => snapshot());
+    const selectModel = vi.fn(async () => {
+      events.push(sessionEvent(events.length, {
+        type: 'session/model_selected',
+        data: { provider: { routeId: secondProvider.id, modelId: secondProvider.model } },
+      }));
+      return snapshot();
+    });
+    const reconnectTerminal = vi.fn(async () => {
+      events.push(sessionEvent(events.length, {
+        type: 'session/terminal_reconnected',
+        data: { previousSessionId: 'terminal-a', target: reconnectedTarget },
+      }));
+      return snapshot();
+    });
+    const adapter = createAgentSessionAdapter({
+      ...dependencies,
+      resume,
+      setPermission,
+      selectModel,
+      reconnectTerminal,
+    });
+
+    await adapter.setPermission?.('session-fixture', 'operator');
+    await adapter.selectModel?.('session-fixture', secondProvider);
+    const view = await adapter.reconnectTerminal?.('session-fixture', 'terminal-a', 'terminal-new');
+
+    expect(setPermission).not.toHaveBeenCalled();
+    expect(selectModel).toHaveBeenCalledWith({
+      sessionId: 'session-fixture',
+      selection: { routeId: secondProvider.id, modelId: secondProvider.model, reasoningEffort: undefined },
+    });
+    expect(view?.snapshot.value.header.permissionMode).toBe('requestApproval');
+    expect(view?.snapshot.value.header.modelSelection).toMatchObject({
+      routeId: secondProvider.id,
+      modelId: secondProvider.model,
+    });
+    adapter.dispose();
+  });
+
+  it('clears pending setting when reverted back to committed header value', async () => {
+    const base = agentSessionEventFixture[0]!;
+    const events: AgentSessionEvent[] = [
+      base,
+      sessionEvent(1, { type: 'session/permission_changed', data: { mode: 'requestApproval' } }),
+      sessionEvent(2, { type: 'session/ended', data: { status: 'completed' } }),
+    ];
+    const dependencies = agentDependencies(events);
+    const resume = vi.fn(async () => {
+      events.push(sessionEvent(events.length, { type: 'session/resumed' }));
+      return snapshot();
+    });
+    const setPermission = vi.fn(async () => snapshot());
+    vi.mocked(dependencies.followup).mockImplementation(async (input) => {
+      events.push(sessionEvent(events.length, {
+        type: 'agent/inbox/spliced',
+        data: {
+          operation: 'enqueued',
+          lane: 'nextTurn',
+          messages: [{
+            messageId: input.messageId,
+            clientSubmissionId: input.clientSubmissionId,
+            content: input.content,
+            source: { kind: 'user', label: 'User', producerId: 'shellspan-user' },
+          }],
+        },
+      }));
+      return snapshot();
+    });
+    const adapter = createAgentSessionAdapter({ ...dependencies, resume, setPermission });
+
+    await adapter.setPermission?.('session-fixture', 'operator');
+    await adapter.setPermission?.('session-fixture', 'requestApproval');
+    await adapter.submit('session-fixture', {
+      content: 'Proceed.',
+      mode: 'nextTurn',
+      clientOperationId: 'op-reverted',
+      provider,
+    });
+
+    expect(resume).toHaveBeenCalledOnce();
+    expect(setPermission).not.toHaveBeenCalled();
+    expect(dependencies.start).toHaveBeenCalledOnce();
+    expect(dependencies.followup).toHaveBeenCalledOnce();
+    adapter.dispose();
+  });
+
+  it('enforces vision preflight when deferring selectModel on an ended session with retained images', async () => {
+    const nonVisionProvider = {
+      id: 'fixture',
+      profile: 'openai' as const,
+      kind: 'openAi' as const,
+      baseUrl: 'https://proxy.example/v1',
+      model: 'gpt-4.1',
+      requiresApiKey: false,
+    };
+    await loadResolvedModel(nonVisionProvider);
+
+    const base = agentSessionEventFixture[0]!;
+    const events: AgentSessionEvent[] = [
+      base,
+      sessionEvent(1, {
+        type: 'session/model_selected',
+        data: { provider: { routeId: provider.id, modelId: provider.model } },
+      }),
+      sessionEvent(2, { type: 'session/ended', data: { status: 'completed' } }),
+    ];
+    const imageSnapshot: AgentSessionSnapshot = {
+      ...snapshot(true),
+      surface: {
+        generation: 0,
+        messages: [{
+          role: 'userImages',
+          messageId: 'img-msg',
+          content: 'Inspect screenshot',
+          source: { kind: 'user', label: 'User', producerId: 'shellspan-user' },
+          images: [{
+            version: 1,
+            sha256: 'abc123',
+            mediaType: 'image/png',
+            bytes: 128,
+            width: 32,
+            height: 32,
+            name: 'shot.png',
+          }],
+        }],
+      },
+    };
+    const dependencies = agentDependencies(events);
+    const resume = vi.fn(async () => imageSnapshot);
+    const adapter = createAgentSessionAdapter({
+      ...dependencies,
+      resume,
+      client: (sessionId) => new AgentSessionCommittedClient(sessionId, {
+        subscribe: async () => () => undefined,
+        snapshot: async () => imageSnapshot,
+        committedEvents: async ({ afterSeq }) => ({
+          events: events.filter((event) => afterSeq === undefined || event.seq > afterSeq),
+        }),
+      }),
+    });
+
+    await expect(adapter.selectModel?.('session-fixture', nonVisionProvider))
+      .rejects.toThrow('IMAGE_MODEL_UNSUPPORTED');
+    expect(resume).not.toHaveBeenCalled();
     expect((await adapter.open('session-fixture')).snapshot.value.header.modelSelection).toMatchObject({
       routeId: provider.id,
       modelId: provider.model,
     });
+    adapter.dispose();
+  });
+
+  it('applies deferred settings when resuming a paused inbox via mutateInbox', async () => {
+    const base = agentSessionEventFixture[0]!;
+    const events: AgentSessionEvent[] = [
+      base,
+      sessionEvent(1, {
+        type: 'agent/inbox/spliced',
+        data: {
+          operation: 'enqueued',
+          lane: 'nextTurn',
+          messages: [{
+            messageId: 'paused-item',
+            clientSubmissionId: 'paused-sub',
+            content: 'Run queued check.',
+            source: { kind: 'user', label: 'User', producerId: 'shellspan-user' },
+          }],
+        },
+      }),
+      sessionEvent(2, { type: 'agent/inbox/paused', data: { itemIds: ['paused-item'] } }),
+      sessionEvent(3, { type: 'session/ended', data: { status: 'failed' } }),
+    ];
+    const secondProvider = { ...provider, id: 'provider-second', model: 'model-second' };
+    const order: string[] = [];
+    let publish: ((event: AgentSessionEvent) => void) | undefined;
+    const baseDependencies = agentDependencies(events);
+    const dependencies: AgentSessionAdapterDependencies = {
+      ...baseDependencies,
+      client: (sessionId) => new AgentSessionCommittedClient(sessionId, {
+        subscribe: async (listener) => { publish = listener; return () => undefined; },
+        snapshot: async () => snapshot(),
+        committedEvents: async ({ afterSeq }) => ({
+          events: events.filter((event) => afterSeq === undefined || event.seq > afterSeq),
+        }),
+      }),
+    };
+    const resume = vi.fn(async () => {
+      order.push('resume');
+      events.push(sessionEvent(events.length, { type: 'session/resumed' }));
+      return snapshot();
+    });
+    const setPermission = vi.fn(async () => {
+      order.push('permission');
+      events.push(sessionEvent(events.length, {
+        type: 'session/permission_changed',
+        data: { mode: 'operator' },
+      }));
+      return snapshot();
+    });
+    const selectModel = vi.fn(async () => {
+      order.push('model');
+      events.push(sessionEvent(events.length, {
+        type: 'session/model_selected',
+        data: { provider: { routeId: secondProvider.id, modelId: secondProvider.model } },
+      }));
+      return snapshot();
+    });
+    vi.mocked(dependencies.start).mockImplementation(async () => {
+      order.push('start');
+      return snapshot();
+    });
+    vi.mocked(dependencies.mutateInbox).mockImplementation(async (input) => {
+      order.push('mutateInbox');
+      const resumedEvent = sessionEvent(events.length, {
+        type: 'agent/inbox/item_resumed',
+        data: {
+          itemId: 'paused-item',
+          previousRevision: input.expectedRevision,
+          clientOperationId: input.clientOperationId,
+        },
+      });
+      events.push(resumedEvent);
+      publish?.(resumedEvent);
+      return snapshot();
+    });
+    const adapter = createAgentSessionAdapter({ ...dependencies, resume, setPermission, selectModel });
+
+    await adapter.setPermission?.('session-fixture', 'operator');
+    await adapter.selectModel?.('session-fixture', secondProvider);
+    await adapter.mutateInbox({
+      type: 'resume',
+      sessionId: 'session-fixture',
+      itemId: 'paused-item',
+      expectedRevision: events.length,
+      clientOperationId: 'resume-paused-op',
+    });
+
+    expect(order).toEqual(['resume', 'permission', 'model', 'start', 'mutateInbox']);
+    expect(dependencies.start).toHaveBeenCalledWith({
+      sessionId: 'session-fixture',
+      selection: { routeId: secondProvider.id, modelId: secondProvider.model },
+    });
+    adapter.dispose();
   });
 
   it('passes the selected execution surface through Session creation', async () => {
