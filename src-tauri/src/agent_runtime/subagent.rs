@@ -25,6 +25,7 @@ use super::{
 };
 
 pub(super) const DEFAULT_ONE_SHOT_MAX_STEPS_PER_TURN: u16 = 6;
+pub(super) const DEFAULT_CONTINUABLE_MAX_STEPS_PER_TURN: u16 = 50;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1006,7 +1007,11 @@ impl SubAgentManager {
         if target_ids.is_empty() {
             return Err("subagent target scope cannot be empty".into());
         }
-        if !continuable {
+        if continuable {
+            budget
+                .max_steps_per_turn
+                .get_or_insert(DEFAULT_CONTINUABLE_MAX_STEPS_PER_TURN);
+        } else {
             budget.max_turns = 1;
             budget
                 .max_steps_per_turn

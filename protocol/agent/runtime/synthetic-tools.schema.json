@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shellspan.local/protocol/agent/runtime/synthetic-tools.schema.json",
+  "title": "ShellSpan Agent Runtime model-facing facades and Session-Runtime synthetic tools",
+  "description": "Catalogs model-facing tools that are not registered in built-in-tools.json: synthetic Session-Runtime tools intercepted directly by the turn coordinator, and model-facing adapter facades translated into native tool calls.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "syntheticTools", "modelFacades"],
+  "properties": {
+    "contractVersion": { "const": 1 },
+    "syntheticTools": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/syntheticToolDescriptor" }
+    },
+    "modelFacades": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/modelFacadeDescriptor" }
+    }
+  },
+  "$defs": {
+    "toolIdentifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "syntheticCategory": {
+      "enum": [
+        "sessionPlan",
+        "artifactRead",
+        "skillLoad",
+        "userInteraction",
+        "subagentOrchestration",
+        "fleetOrchestration"
+      ]
+    },
+    "syntheticToolDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "category",
+        "interceptedBy",
+        "neverDispatchedToNative",
+        "description"
+      ],
+      "properties": {
+        "name": { "$ref": "#/$defs/toolIdentifier" },
+        "category": { "$ref": "#/$defs/syntheticCategory" },
+        "interceptedBy": { "const": "sessionRuntime" },
+        "neverDispatchedToNative": { "const": true },
+        "description": { "type": "string", "minLength": 1, "maxLength": 512 }
+      }
+    },
+    "modelFacadeDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "adapter",
+        "nativeTools",
+        "description"
+      ],
+      "properties": {
+        "name": { "$ref": "#/$defs/toolIdentifier" },
+        "adapter": { "const": "nativeAdapter" },
+        "nativeTools": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://shellspan.local/protocol/agent/runtime/tool-contract.schema.json#/$defs/toolName"
+          }
+        },
+        "dynamicTargetKind": { "const": "mcp" },
+        "description": { "type": "string", "minLength": 1, "maxLength": 512 }
+      }
+    }
+  }
+}

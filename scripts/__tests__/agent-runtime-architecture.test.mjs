@@ -127,4 +127,52 @@ describe('single Agent Runtime architecture', () => {
     validator.addSchema(contractSchema);
     expect(validator.validate(manifestSchema, manifest), validator.errorsText()).toBe(true);
   });
+
+  it('distinguishes native tools, model facades, and synthetic session-runtime tools without overlap', async () => {
+    const protocolRoot = path.join(repositoryRoot, 'protocol/agent/runtime');
+    const [contractSchema, builtInManifest, syntheticSchema, syntheticManifest, nativeRegistry, toolPipeline] = await Promise.all([
+      readFile(path.join(protocolRoot, 'tool-contract.schema.json'), 'utf8').then(JSON.parse),
+      readFile(path.join(protocolRoot, 'built-in-tools.json'), 'utf8').then(JSON.parse),
+      readFile(path.join(protocolRoot, 'synthetic-tools.schema.json'), 'utf8').then(JSON.parse),
+      readFile(path.join(protocolRoot, 'synthetic-tools.json'), 'utf8').then(JSON.parse),
+      readFile(path.join(nativeRoot, 'registry.rs'), 'utf8'),
+      readFile(path.join(runtimeRoot, 'tool_pipeline.rs'), 'utf8'),
+    ]);
+
+    const validator = new Ajv2020({ allErrors: true, strict: true });
+    validator.addSchema(contractSchema);
+    expect(validator.validate(syntheticSchema, syntheticManifest), validator.errorsText()).toBe(true);
+
+    const nativeNames = new Set(builtInManifest.tools.map(({ name }) => name));
+    const syntheticNames = new Set(syntheticManifest.syntheticTools.map(({ name }) => name));
+    const facadeNames = new Set(syntheticManifest.modelFacades.map(({ name }) => name));
+
+    expect(syntheticNames.size).toBe(syntheticManifest.syntheticTools.length);
+    expect(facadeNames.size).toBe(syntheticManifest.modelFacades.length);
+    expect([...nativeNames].filter((name) => syntheticNames.has(name))).toEqual([]);
+    expect([...nativeNames].filter((name) => facadeNames.has(name))).toEqual([]);
+    expect([...syntheticNames].filter((name) => facadeNames.has(name))).toEqual([]);
+
+    for (const facade of syntheticManifest.modelFacades) {
+      for (const targetTool of facade.nativeTools) {
+        expect(nativeNames.has(targetTool)).toBe(true);
+      }
+    }
+
+    for (const name of syntheticNames) {
+      expect(nativeRegistry).not.toContain(`"${name}"`);
+    }
+
+    const orchBlock = toolPipeline
+      .split('ORCHESTRATION_TOOL_NAMES: &[&str] = &[')[1]
+      .split('];')[0];
+    const orchestrationTools = [...orchBlock.matchAll(/"([^"]+)"/g)].map(([, name]) => name);
+    expect(orchestrationTools.length).toBeGreaterThan(0);
+    const byName = new Map(syntheticManifest.syntheticTools.map((entry) => [entry.name, entry]));
+    for (const name of orchestrationTools) {
+      expect(
+        ['subagentOrchestration', 'fleetOrchestration'],
+      ).toContain(byName.get(name)?.category);
+    }
+  });
 });

@@ -3,6 +3,7 @@ use super::*;
 use std::fs;
 use std::io::Read;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::time::{Duration, Instant};
 
 pub(crate) const EXECUTOR: &str = "nonoMacAcceptance";
 const LAUNCHER_SHA256: Option<&str> = option_env!("SHELLSPAN_MAC_SANDBOX_LAUNCHER_SHA256");

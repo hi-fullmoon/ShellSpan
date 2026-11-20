@@ -1093,3 +1093,48 @@ export interface AgentActivityProjection {
   readonly evidenceCount: number;
   readonly nodes: readonly AgentActivityNode[];
 }
+
+export type KillProcessResultState =
+  | 'terminationRequested'
+  | 'terminated'
+  | 'unknown'
+  | 'running'
+  | 'exited'
+  | 'cancelled'
+  | 'timedOut'
+  | 'failed';
+
+export type LegacyKillProcessResultState =
+  | 'Running'
+  | 'Exited'
+  | 'Cancelled'
+  | 'TimedOut'
+  | 'Failed';
+
+export interface KillProcessResultData {
+  readonly state: KillProcessResultState;
+  readonly terminationConfirmed?: boolean;
+}
+
+const KILL_PROCESS_STATE_MAP: ReadonlyMap<string, KillProcessResultState> = new Map([
+  ['terminationRequested', 'terminationRequested'],
+  ['terminated', 'terminated'],
+  ['unknown', 'unknown'],
+  ['running', 'running'],
+  ['exited', 'exited'],
+  ['cancelled', 'cancelled'],
+  ['timedOut', 'timedOut'],
+  ['failed', 'failed'],
+  ['Running', 'running'],
+  ['Exited', 'exited'],
+  ['Cancelled', 'cancelled'],
+  ['TimedOut', 'timedOut'],
+  ['Failed', 'failed'],
+]);
+
+/** Normalize canonical lowerCamelCase and legacy PascalCase `kill_process` states. */
+export function normalizeKillProcessResultState(
+  state: string,
+): KillProcessResultState | undefined {
+  return KILL_PROCESS_STATE_MAP.get(state);
+}

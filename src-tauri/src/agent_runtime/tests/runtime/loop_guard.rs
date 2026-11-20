@@ -1,5 +1,7 @@
 use super::*;
-use crate::agent_runtime::{AgentInboxMutation, AgentInboxMutationInput};
+use crate::agent_runtime::{
+    AgentChildInputRequest, AgentInboxMutation, AgentInboxMutationInput, AgentSubagentBudget,
+};
 
 fn repeated_read_call(index: usize) -> ModelToolCall {
     ModelToolCall {
@@ -607,4 +609,193 @@ async fn model_request_is_not_sent_when_active_time_budget_is_exhausted() {
         AgentSessionEventPayload::SessionEnded { reason: Some(reason), .. }
             if reason.starts_with("taskActiveTimeExceeded:")
     )));
+}
+
+#[tokio::test]
+async fn continuable_subagent_defaults_to_fifty_steps_and_hands_back_recoverably() {
+    let mut scripts = Vec::with_capacity(53);
+    scripts.push(tool_response(vec![ModelToolCall {
+        call_id: "spawn-continuable".into(),
+        provider_call_id: None,
+        name: "spawn_continuable_agent".into(),
+        arguments: json!({
+            "goal": "Inspect all entries incrementally",
+            "role": "explorer",
+            "inheritanceMode": "blank",
+            "targetIds": ["target-local"],
+        }),
+    }]));
+    for index in 0..50usize {
+        let mut call = repeated_read_call(index);
+        call.arguments = json!({ "path": format!("./entry-{index}") });
+        scripts.push(tool_response(vec![call]));
+    }
+    scripts.push(reply("parent received partial handoff", &[]));
+    scripts.push(reply("completed remaining work in turn 2", &[]));
+
+    let model = FakeAdapter::new(scripts);
+    let (_root, runtime) = configured_with_native(
+        model.clone(),
+        AgentDriverConfig::default(),
+        RecordingNativeRuntime::new(false),
+    );
+    let parent_id = "continuable-default-parent";
+    create(&runtime, parent_id);
+    runtime
+        .followup(
+            parent_id,
+            "initial".into(),
+            "delegate the exploration".into(),
+        )
+        .unwrap();
+    runtime.start(parent_id, provider(), None).unwrap();
+    runtime.await_idle(parent_id).await.unwrap();
+
+    assert_eq!(model.request_count(), 52);
+    assert!(model.requests.lock().unwrap()[50]
+        .system_prompt
+        .contains("step 50 of 50; 0 further model steps remain in this turn"));
+
+    let parent_events = all_events(&runtime, parent_id);
+    let handoff = parent_events
+        .iter()
+        .find_map(|event| match &event.payload {
+            AgentSessionEventPayload::ToolResult {
+                name,
+                status: AgentToolResultStatus::Completed,
+                data: Some(data),
+                ..
+            } if name == "spawn_continuable_agent" => Some(data.clone()),
+            _ => None,
+        })
+        .expect("parent should record spawn_continuable_agent handoff");
+    assert_eq!(handoff["partial"], true);
+    assert_eq!(handoff["hasPartialResults"], true);
+    assert_eq!(handoff["continuable"], true);
+    assert_eq!(handoff["status"], "idle");
+    assert_eq!(
+        handoff["stopReason"],
+        "stepBudgetReached: maximum 50 Steps per Turn"
+    );
+    assert_eq!(handoff["budget"]["maxStepsPerTurn"], 50);
+    assert!(handoff["recentToolResults"]
+        .as_array()
+        .is_some_and(|items| !items.is_empty()));
+
+    let child_id = handoff["childSessionId"]
+        .as_str()
+        .expect("handoff should include childSessionId");
+    let child_snapshot = runtime.session(child_id).unwrap();
+    assert_eq!(child_snapshot.status, AgentSessionStatus::Idle);
+    assert!(!child_snapshot.ended);
+    assert_eq!(
+        child_snapshot
+            .header
+            .subagent
+            .as_ref()
+            .unwrap()
+            .budget
+            .max_steps_per_turn,
+        Some(50)
+    );
+    let child_events = all_events(&runtime, child_id);
+    assert!(child_events.iter().any(|event| matches!(
+        &event.payload,
+        AgentSessionEventPayload::TurnEnd { reason }
+            if reason == "stepBudgetReached: maximum 50 Steps per Turn"
+    )));
+    assert!(!child_events
+        .iter()
+        .any(|event| matches!(event.payload, AgentSessionEventPayload::SessionEnded { .. })));
+
+    runtime
+        .send_child_input(AgentChildInputRequest {
+            parent_session_id: parent_id.into(),
+            child_session_id: child_id.into(),
+            content: "Finish remaining work".into(),
+            client_submission_id: Some("continue-after-default-budget".into()),
+        })
+        .await
+        .unwrap();
+    runtime.await_idle(child_id).await.unwrap();
+
+    assert_eq!(model.request_count(), 53);
+    let continued_snapshot = runtime.session(child_id).unwrap();
+    assert_eq!(continued_snapshot.status, AgentSessionStatus::Idle);
+    assert!(!continued_snapshot.ended);
+    let last_turn_end = all_events(&runtime, child_id)
+        .into_iter()
+        .rev()
+        .find_map(|event| match event.payload {
+            AgentSessionEventPayload::TurnEnd { reason } => Some(reason),
+            _ => None,
+        });
+    assert_eq!(last_turn_end.as_deref(), Some("completed"));
+}
+
+#[tokio::test]
+async fn continuable_subagent_respects_explicit_step_budget_overrides() {
+    for (limit, expected_reason) in [
+        (2u16, "stepBudgetReached: maximum 2 Steps per Turn"),
+        (52u16, "stepBudgetReached: maximum 52 Steps per Turn"),
+    ] {
+        let scripts = (0..usize::from(limit))
+            .map(|index| {
+                let mut call = repeated_read_call(index);
+                call.arguments = json!({ "path": format!("./entry-{index}") });
+                tool_response(vec![call])
+            })
+            .collect();
+        let model = FakeAdapter::new(scripts);
+        let (_root, runtime) = configured_with_native(
+            model.clone(),
+            AgentDriverConfig::default(),
+            RecordingNativeRuntime::new(false),
+        );
+        let parent_id = "override-step-parent";
+        create(&runtime, parent_id);
+        runtime.start(parent_id, provider(), None).unwrap();
+        runtime.await_idle(parent_id).await.unwrap();
+
+        let child = runtime
+            .spawn_subagent(AgentSubagentSpawnRequest {
+                parent_session_id: parent_id.into(),
+                goal: "Respect explicit per-turn step override".into(),
+                role: AgentSubagentRole::Explorer,
+                inheritance_mode: "blank".into(),
+                target_ids: vec!["target-local".into()],
+                budget: Some(AgentSubagentBudget {
+                    max_steps_per_turn: Some(limit),
+                    max_turns: 4,
+                    max_tool_calls: None,
+                    max_tokens: None,
+                    timeout_ms: 60_000,
+                }),
+                continuable: true,
+            })
+            .await
+            .unwrap();
+        let child_id = child.header.session_id;
+        runtime.await_idle(&child_id).await.unwrap();
+
+        assert_eq!(model.request_count(), usize::from(limit));
+        let child_snapshot = runtime.session(&child_id).unwrap();
+        assert_eq!(child_snapshot.status, AgentSessionStatus::Idle);
+        assert!(!child_snapshot.ended);
+        assert_eq!(
+            child_snapshot
+                .header
+                .subagent
+                .as_ref()
+                .unwrap()
+                .budget
+                .max_steps_per_turn,
+            Some(limit)
+        );
+        let child_events = all_events(&runtime, &child_id);
+        assert!(child_events.iter().any(|event| matches!(
+            &event.payload,
+            AgentSessionEventPayload::TurnEnd { reason } if reason == expected_reason
+        )));
+    }
 }

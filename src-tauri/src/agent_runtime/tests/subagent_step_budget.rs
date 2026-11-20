@@ -28,9 +28,9 @@ fn optional_child_step_budgets_survive_creation_and_reload() {
             let snapshot = manager.sessions.snapshot(&child).unwrap();
             let metadata = snapshot.header.subagent.unwrap();
             let expected_limit = if continuable {
-                explicit_limit
+                explicit_limit.or(Some(DEFAULT_CONTINUABLE_MAX_STEPS_PER_TURN))
             } else {
-                explicit_limit.or(Some(6))
+                explicit_limit.or(Some(DEFAULT_ONE_SHOT_MAX_STEPS_PER_TURN))
             };
             assert_eq!(metadata.budget.max_steps_per_turn, expected_limit);
             assert_eq!(metadata.budget.max_turns, if continuable { 8 } else { 1 });

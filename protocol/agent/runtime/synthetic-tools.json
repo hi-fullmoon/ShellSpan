@@ -1,0 +1,145 @@
+{
+  "contractVersion": 1,
+  "syntheticTools": [
+    {
+      "name": "update_plan",
+      "category": "sessionPlan",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Replaces the current turn's durable task/plan event in the Session store."
+    },
+    {
+      "name": "read_tool_result",
+      "category": "artifactRead",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Reads bounded UTF-8 pages from a redacted tool-result artifact stored in Session artifacts."
+    },
+    {
+      "name": "skill",
+      "category": "skillLoad",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Loads an observed workspace Skill into the Session prompt surface without granting execution authority."
+    },
+    {
+      "name": "ask_user_question",
+      "category": "userInteraction",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Pauses the root Session at a durable question barrier until the user responds."
+    },
+    {
+      "name": "request_user_action",
+      "category": "userInteraction",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Pauses the root Session for external user action with explicit completion verification."
+    },
+    {
+      "name": "spawn_one_shot_agent",
+      "category": "subagentOrchestration",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Spawns a single-turn subagent child Session within parent/role capability bounds."
+    },
+    {
+      "name": "spawn_continuable_agent",
+      "category": "subagentOrchestration",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Spawns a multi-turn continuable subagent child Session within parent/role capability bounds."
+    },
+    {
+      "name": "send_child_input",
+      "category": "subagentOrchestration",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Delivers follow-up input to an existing continuable subagent child Session."
+    },
+    {
+      "name": "retry_child_agent",
+      "category": "subagentOrchestration",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Recovers a failed continuable subagent in its original Session under its remaining budget."
+    },
+    {
+      "name": "inspect_child_agent",
+      "category": "subagentOrchestration",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Returns the durable snapshot, continuation state, and failure recovery status of a child Session."
+    },
+    {
+      "name": "cancel_child_agent",
+      "category": "subagentOrchestration",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Cancels an active subagent child Session and drains its in-flight execution."
+    },
+    {
+      "name": "fleet_plan",
+      "category": "fleetOrchestration",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Creates a durable multi-target Fleet rollout plan owned by the Session scheduler."
+    },
+    {
+      "name": "fleet_start",
+      "category": "fleetOrchestration",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Starts execution of a planned Fleet rollout across canary and wave stages."
+    },
+    {
+      "name": "fleet_pause",
+      "category": "fleetOrchestration",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Pauses dispatching further Fleet waves while letting active workers settle."
+    },
+    {
+      "name": "fleet_resume",
+      "category": "fleetOrchestration",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Resumes a paused Fleet rollout scheduler from its durable state."
+    },
+    {
+      "name": "fleet_abort",
+      "category": "fleetOrchestration",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Aborts a Fleet rollout and cancels its registered child Sessions."
+    },
+    {
+      "name": "fleet_reconcile",
+      "category": "fleetOrchestration",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Records explicit reconciliation evidence for an uncertain Fleet target."
+    }
+  ],
+  "modelFacades": [
+    {
+      "name": "run_terminal_command",
+      "adapter": "nativeAdapter",
+      "nativeTools": ["exec_command", "terminal_execute"],
+      "description": "Model-facing command facade translated by native_adapter to exec_command (direct surface) or terminal_execute (boundTerminal surface)."
+    },
+    {
+      "name": "write_process_input",
+      "adapter": "nativeAdapter",
+      "nativeTools": ["write_stdin"],
+      "description": "Model-facing process stdin facade translated by native_adapter to the native write_stdin tool on a bound process handle."
+    },
+    {
+      "name": "call_mcp_tool",
+      "adapter": "nativeAdapter",
+      "nativeTools": [],
+      "dynamicTargetKind": "mcp",
+      "description": "Model-facing dynamic MCP facade translated by native_adapter to native MCP server/tool capability preparation and execution."
+    }
+  ]
+}

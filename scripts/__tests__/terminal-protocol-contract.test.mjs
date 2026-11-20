@@ -613,4 +613,120 @@ describe('terminal execution protocol contract', () => {
     });
   });
 
+  it('unifies killProcessResultData.state to lowerCamelCase on the canonical wire schema', async () => {
+    const schema = await readJson('tool-contract.schema.json');
+    const ajv = new Ajv2020({ allErrors: true, strict: true });
+    const validate = ajv.compile(schema);
+    const base = {
+      requestId: 'req-kill',
+      callId: 'call-kill',
+      toolName: 'kill_process',
+      targetId: 'process-proc-1',
+      status: 'completed',
+      summary: 'Process termination request was handled.',
+    };
+
+    for (const state of [
+      'terminationRequested',
+      'terminated',
+      'unknown',
+      'running',
+      'exited',
+      'cancelled',
+      'timedOut',
+      'failed',
+    ]) {
+      expect(
+        validate({ ...base, data: { state, terminationConfirmed: state !== 'running' } }),
+        `expected canonical state ${state} to validate: ${ajv.errorsText(validate.errors)}`,
+      ).toBe(true);
+    }
+
+    for (const legacyState of ['Running', 'Exited', 'Cancelled', 'TimedOut', 'Failed']) {
+      expect(validate({ ...base, data: { state: legacyState } })).toBe(false);
+    }
+  });
+
+  it('enforces full v5 event payload schemas across all recorded event fixtures', async () => {
+    const [schema, eventRs] = await Promise.all([
+      readJson('event-v5.schema.json'),
+      readFile(path.join(repositoryRoot, 'src-tauri/src/agent_runtime/event.rs'), 'utf8'),
+    ]);
+    const ajv = new Ajv2020({ allErrors: true, strict: true });
+    const validate = ajv.compile(schema);
+
+    const schemaTypes = schema.properties.type.enum;
+    const ruleTypes = schema.allOf.map((rule) => rule.if?.properties?.type?.const);
+    expect(new Set(ruleTypes)).toEqual(new Set(schemaTypes));
+    expect(ruleTypes).toHaveLength(schemaTypes.length);
+
+    const payloadSection = eventRs.split('pub(crate) enum AgentSessionEventPayload {')[1].split('pub(crate) struct AgentSessionEvent {')[0];
+    const rustEventTypes = [...payloadSection.matchAll(/#\[serde\(rename = "([^"]+)"\)\]/g)].map(([, name]) => name);
+    expect(new Set(schemaTypes)).toEqual(new Set(rustEventTypes));
+
+    for (const relativeFixture of [
+      'protocol/agent/runtime/fixtures/event-v5-terminal-compatibility.json',
+      'src/tests/fixtures/agent-inbox-timeline.json',
+      'src/tests/fixtures/child-failure-recovery/admitted-events.json',
+      'src/tests/fixtures/child-failure-recovery/failed-events.json',
+      'src/tests/fixtures/context-budget-review.json',
+      'src/tests/fixtures/skill-load-failure.json',
+      'src/tests/fixtures/task-token-budget.json',
+      'src/tests/fixtures/terminal-unknown-execution.json',
+    ]) {
+      const parsed = JSON.parse(await readFile(path.join(repositoryRoot, relativeFixture), 'utf8'));
+      const events = Array.isArray(parsed)
+        ? parsed
+        : parsed.events.filter((item) => item?.version === 5);
+      expect(events.length).toBeGreaterThan(0);
+      for (const event of events) {
+        expect(
+          validate(event),
+          `${relativeFixture} seq=${event.seq} (${event.type}): ${ajv.errorsText(validate.errors)}`,
+        ).toBe(true);
+      }
+    }
+
+    const sliced = JSON.parse(
+      await readFile(path.join(repositoryRoot, 'src/tests/fixtures/tool-result-read-recovery.json'), 'utf8'),
+    );
+    for (const { sourceSeq: _omitted, ...wireEvent } of sliced) {
+      expect(validate(wireEvent), ajv.errorsText(validate.errors)).toBe(true);
+    }
+
+    const legacySkills = JSON.parse(
+      await readFile(path.join(repositoryRoot, 'src/tests/fixtures/agent-skills-runtime.json'), 'utf8'),
+    );
+    for (const event of legacySkills.filter((item) => item.type !== 'request/header')) {
+      expect(validate(event), ajv.errorsText(validate.errors)).toBe(true);
+    }
+
+    const header = { version: 5, sessionId: 's1', seq: 1, timeUnixMs: 1000, turnId: 't1', stepId: 'st1' };
+    expect(validate({ ...header, type: 'turn/start' })).toBe(true);
+    expect(validate({ ...header, type: 'turn/start', data: {} })).toBe(false);
+    expect(validate({ ...header, type: 'step/start', data: { extra: true } })).toBe(false);
+    expect(validate({ ...header, type: 'task/plan', data: { version: 0, steps: [] } })).toBe(false);
+    expect(validate({ ...header, type: 'task/plan', data: { version: 1, steps: [{ id: 's', title: 'S', status: 'bogus' }] } })).toBe(false);
+    expect(validate({ ...header, type: 'task/plan', data: { version: 1, steps: [], unexpected: true } })).toBe(false);
+    expect(validate({ ...header, type: 'tool/execution', data: { callId: 'c1', status: 'dispatched', idempotency: 'maybe' } })).toBe(false);
+    expect(validate({ ...header, type: 'tool/execution', data: { callId: 'c1', status: 'pending', idempotency: 'yes' } })).toBe(false);
+    expect(validate({ ...header, type: 'tool/result', data: { callId: 'c1', name: 'exec_command', status: 'uncertain', summary: 'Unknown outcome' } })).toBe(true);
+    expect(validate({ ...header, type: 'tool/result', data: { callId: 'c1', name: 'exec_command', status: 'bogus', summary: 'x' } })).toBe(false);
+    expect(validate({ ...header, type: 'tool/result', data: { callId: 'c1', name: 'exec_command', status: 'completed', summary: 'ok', extraField: 1 } })).toBe(false);
+    expect(validate({ ...header, type: 'subagent/settled', data: { descriptorId: 'd1', childSessionId: 'c1', status: 'completed', summary: 'ok' } })).toBe(false);
+    expect(validate({ ...header, type: 'subagent/settled', data: { descriptorId: 'd1', settlementId: 'set1', childSessionId: 'c1', status: 'bogus', summary: 'ok' } })).toBe(false);
+    expect(validate({
+      version: 5, sessionId: 's1', seq: 2, timeUnixMs: 1000, type: 'subagent/descriptor',
+      data: {
+        descriptorId: 'd1', childSessionId: 'c1', parentSessionId: 's1', parentTaskId: 'task-1',
+        role: 'bogus', continuable: true, depth: 1, inheritance: { mode: 'blank' },
+        capabilityScope: { toolNames: ['read_file'], effects: ['readOnly'], targetIds: ['t1'] },
+        targetScope: [{ kind: 'local', targetId: 't1', sessionId: 'term1' }],
+        budget: { maxStepsPerTurn: 0, maxTurns: 1, timeoutMs: 1000 },
+      },
+    })).toBe(false);
+    expect(validate({ ...header, type: 'step/preparation_abandoned', data: { reason: 'abandoned', inputMessageIds: ['m1'] } })).toBe(true);
+    expect(validate({ ...header, type: 'step/preparation_abandoned', data: { reason: 'abandoned' } })).toBe(false);
+  });
+
 });

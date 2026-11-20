@@ -173,12 +173,20 @@
             assert_eq!(bounded.step_limit_for(Some(&child)), Some(expected));
         }
         child.budget.max_steps_per_turn = None;
-        assert_eq!(config.step_limit_for(Some(&child)), None);
+        assert_eq!(config.step_limit_for(Some(&child)), Some(50));
         let bounded = AgentDriverConfig {
             max_steps_per_turn: Some(16),
             ..config
         };
         assert_eq!(bounded.step_limit_for(Some(&child)), Some(16));
+        let wider_host = AgentDriverConfig {
+            max_steps_per_turn: Some(64),
+            ..config
+        };
+        assert_eq!(wider_host.step_limit_for(Some(&child)), Some(50));
+        child.budget.max_steps_per_turn = Some(64);
+        assert_eq!(config.step_limit_for(Some(&child)), Some(64));
+        child.budget.max_steps_per_turn = None;
         assert!(no_progress_from_counts((0, config.max_identical_tool_steps), config).is_some());
         assert!(step_budget_recoverable(None));
         assert!(step_budget_recoverable(Some(&child)));

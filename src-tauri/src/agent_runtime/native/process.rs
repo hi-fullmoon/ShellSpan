@@ -7,7 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use libssh2_sys::LIBSSH2_ERROR_EAGAIN;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ssh2::ErrorCode;
 use uuid::Uuid;
 
@@ -42,13 +42,18 @@ fn asynchronous_stdin(stdin: std::process::ChildStdin) -> std::io::Result<LocalC
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum ProcessLifecycleNative {
+    #[serde(alias = "Running")]
     Running,
+    #[serde(alias = "Exited")]
     Exited,
+    #[serde(alias = "Cancelled")]
     Cancelled,
+    #[serde(alias = "TimedOut")]
     TimedOut,
+    #[serde(alias = "Failed")]
     Failed,
 }
 
@@ -2249,5 +2254,28 @@ mod tests {
         assert_eq!(snapshot.state, ProcessLifecycleNative::Exited);
         assert_ne!(snapshot.exit_code, Some(0));
         assert!(snapshot.stderr.contains("Operation not permitted"));
+    }
+
+    #[test]
+    fn process_lifecycle_serializes_camel_case_and_deserializes_legacy_pascal_case() {
+        let cases = [
+            (ProcessLifecycleNative::Running, "running", "Running"),
+            (ProcessLifecycleNative::Exited, "exited", "Exited"),
+            (ProcessLifecycleNative::Cancelled, "cancelled", "Cancelled"),
+            (ProcessLifecycleNative::TimedOut, "timedOut", "TimedOut"),
+            (ProcessLifecycleNative::Failed, "failed", "Failed"),
+        ];
+        for (variant, canonical, legacy) in cases {
+            assert_eq!(serde_json::to_value(variant).unwrap(), canonical);
+            assert_eq!(
+                serde_json::from_str::<ProcessLifecycleNative>(&format!("\"{canonical}\""))
+                    .unwrap(),
+                variant
+            );
+            assert_eq!(
+                serde_json::from_str::<ProcessLifecycleNative>(&format!("\"{legacy}\"")).unwrap(),
+                variant
+            );
+        }
     }
 }

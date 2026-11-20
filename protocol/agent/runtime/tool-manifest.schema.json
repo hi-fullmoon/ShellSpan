@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://shellspan.local/protocol/agent/runtime/tool-manifest.schema.json",
   "title": "ShellSpan Agent Runtime built-in tool metadata manifest",
+  "description": "Metadata manifest exclusively for the 24 Native OS-effect built-in tools executed by NativeToolEngine. Model-facing facade aliases and Session-Runtime synthetic tools are defined separately in synthetic-tools.json.",
   "type": "object",
   "additionalProperties": false,
   "required": ["contractVersion", "tools"],

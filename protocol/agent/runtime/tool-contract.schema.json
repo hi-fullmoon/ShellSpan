@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://shellspan.local/protocol/agent/runtime/tool-contract.schema.json",
   "title": "ShellSpan Agent Runtime built-in tool call and result contracts",
+  "description": "Canonical call and result schemas exclusively for the 24 Native OS-effect built-in tools in built-in-tools.json. Model-facing adapter facades and Session-Runtime synthetic tools are cataloged in synthetic-tools.json.",
   "oneOf": [
     { "$ref": "#/$defs/agentToolCall" },
     { "$ref": "#/$defs/agentToolResult" }
@@ -956,7 +957,10 @@
       "additionalProperties": false,
       "required": ["state"],
       "properties": {
-        "state": { "enum": ["terminationRequested", "terminated", "unknown", "Running", "Exited", "Cancelled", "TimedOut", "Failed"] },
+        "state": {
+          "description": "Canonical lowerCamelCase process lifecycle or termination state. Readers loading legacy persisted v5 logs normalize historical PascalCase process states (Running, Exited, Cancelled, TimedOut, Failed) to these values.",
+          "enum": ["terminationRequested", "terminated", "unknown", "running", "exited", "cancelled", "timedOut", "failed"]
+        },
         "terminationConfirmed": { "type": "boolean" }
       }
     },

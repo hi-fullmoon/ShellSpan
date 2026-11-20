@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use uuid::Uuid;
 
@@ -9,13 +9,16 @@ use super::request_budget::estimate_request_budget;
 use super::{
     assemble_model_input, model_tools_with_terminal_interaction, recorded_tool_call,
     AgentActiveScope, AgentAssistantContentBlock, AgentCompactionManager, AgentEntry, AgentHookBus,
-    AgentLifecyclePhase, AgentPreStepContext, AgentPreStepDecision, AgentRequestReason,
-    AgentScopedPayload, AgentSessionEventPayload, AgentSessionStatus, AgentSessionStore,
-    AgentStopReason, AgentTokenUsage, AgentToolCallDelta, AgentToolPipeline, ModelContentBlock,
-    ModelFinishReason, ModelMessage, ModelRequest, ModelResponse, ModelStreamSink,
-    NormalizedModelError, NormalizedModelErrorKind, RetryPlan, RetryPolicy, StreamDelta,
-    ToolPipelineSettlement, MAX_AGENT_STREAM_DELTA_BYTES,
+    AgentLifecyclePhase, AgentPreStepContext, AgentPreStepDecision, AgentScopedPayload,
+    AgentSessionEventPayload, AgentSessionStatus, AgentSessionStore, AgentStopReason,
+    AgentTokenUsage, AgentToolCallDelta, AgentToolPipeline, ModelContentBlock, ModelFinishReason,
+    ModelMessage, ModelRequest, ModelResponse, ModelStreamSink, NormalizedModelError,
+    NormalizedModelErrorKind, RetryPolicy, StreamDelta, ToolPipelineSettlement,
+    MAX_AGENT_STREAM_DELTA_BYTES,
 };
+
+mod step;
+use step::run_step;
 
 #[cfg(test)]
 use super::{estimate_model_surface_budget, AgentInboxLane, AgentInboxMessage, AgentMessageSource};
@@ -39,7 +42,7 @@ pub(crate) struct AgentDriverConfig {
 impl Default for AgentDriverConfig {
     fn default() -> Self {
         Self {
-            // Root and continuable child turns are unlimited unless explicitly bounded.
+            // Root turns are unlimited unless explicitly bounded; child defaults apply in step_limit_for.
             max_steps_per_turn: None,
             max_turns_per_session: 64,
             max_identical_tool_steps: 5,
@@ -61,12 +64,15 @@ impl AgentDriverConfig {
             let child_limit = child
                 .budget
                 .max_steps_per_turn
-                .or_else(|| {
-                    (!child.continuable)
-                        .then_some(super::subagent::DEFAULT_ONE_SHOT_MAX_STEPS_PER_TURN)
-                })
-                .map(usize::from);
-            self.max_steps_per_turn.into_iter().chain(child_limit).min()
+                .unwrap_or(if child.continuable {
+                    super::subagent::DEFAULT_CONTINUABLE_MAX_STEPS_PER_TURN
+                } else {
+                    super::subagent::DEFAULT_ONE_SHOT_MAX_STEPS_PER_TURN
+                });
+            self.max_steps_per_turn
+                .into_iter()
+                .chain(Some(usize::from(child_limit)))
+                .min()
         })
     }
 }
@@ -180,6 +186,440 @@ fn settle_failed_driver(
     AgentDriverSettlement::Failed
 }
 
+fn effective_driver_config(
+    config: AgentDriverConfig,
+    subagent: Option<&super::AgentSubagentSession>,
+) -> AgentDriverConfig {
+    let Some(subagent) = subagent else {
+        return config;
+    };
+    AgentDriverConfig {
+        max_steps_per_turn: config.step_limit_for(Some(subagent)),
+        max_turns_per_session: config
+            .max_turns_per_session
+            .min(subagent.budget.max_turns as usize),
+        ..config
+    }
+}
+
+fn terminate_failed(
+    sessions: &AgentSessionStore,
+    entry: &Arc<AgentEntry>,
+    reason: String,
+) -> Result<AgentDriverSettlement, String> {
+    sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
+    entry.set_phase(AgentLifecyclePhase::Stopping)?;
+    Ok(AgentDriverSettlement::Failed)
+}
+
+fn settle_pre_step_hook_reason(
+    sessions: &AgentSessionStore,
+    entry: &Arc<AgentEntry>,
+    compactions: &AgentCompactionManager,
+    reason: String,
+) -> Result<AgentDriverSettlement, String> {
+    if reason.starts_with("contextBudgetExceeded:") {
+        pause_context_budget(sessions, entry, compactions, &reason)?;
+        return Ok(AgentDriverSettlement::Waiting);
+    }
+    close_open_scope(sessions, entry, &reason)?;
+    terminate_failed(sessions, entry, reason)
+}
+
+enum TurnAdmission {
+    Ready {
+        turn_id: String,
+        step_id: String,
+        step_index: usize,
+        prepared_model: Box<crate::llm::runtime::PreparedModel>,
+    },
+    ContinueLoop,
+    Settle(AgentDriverSettlement),
+}
+
+async fn continue_open_turn_step(
+    sessions: &AgentSessionStore,
+    entry: &Arc<AgentEntry>,
+    hooks: &AgentHookBus,
+    tools: &AgentToolPipeline,
+    compactions: &AgentCompactionManager,
+    prepared_model: crate::llm::runtime::PreparedModel,
+    turn_id: String,
+    turn_steps: usize,
+    config: AgentDriverConfig,
+) -> Result<TurnAdmission, String> {
+    let step_index = turn_steps.saturating_add(1);
+    if let Some(limit) = config
+        .max_steps_per_turn
+        .filter(|limit| step_index > *limit)
+    {
+        let recoverable = step_budget_recoverable(entry.subagent.as_ref());
+        let reason = step_budget_reason(limit, recoverable);
+        close_open_scope(sessions, entry, &reason)?;
+        if recoverable {
+            return Ok(TurnAdmission::ContinueLoop);
+        }
+        return Ok(TurnAdmission::Settle(terminate_failed(
+            sessions, entry, reason,
+        )?));
+    }
+    let step_id = format!("step-{}", Uuid::new_v4().simple());
+    if let Some(reason) = apply_pre_step_hooks(
+        sessions,
+        entry,
+        hooks,
+        tools,
+        &prepared_model,
+        compactions,
+        &turn_id,
+        &step_id,
+        step_index,
+        config.retry_policy,
+    )
+    .await?
+    {
+        return Ok(TurnAdmission::Settle(settle_pre_step_hook_reason(
+            sessions,
+            entry,
+            compactions,
+            reason,
+        )?));
+    }
+    entry.set_phase(AgentLifecyclePhase::Running)?;
+    sessions.begin_continuation_step(&entry.session_id, turn_id.clone(), step_id.clone())?;
+    Ok(TurnAdmission::Ready {
+        turn_id,
+        step_id,
+        step_index,
+        prepared_model: Box::new(prepared_model),
+    })
+}
+
+async fn start_new_turn_step(
+    sessions: &AgentSessionStore,
+    entry: &Arc<AgentEntry>,
+    hooks: &AgentHookBus,
+    tools: &AgentToolPipeline,
+    compactions: &AgentCompactionManager,
+    prepared_model: crate::llm::runtime::PreparedModel,
+    config: AgentDriverConfig,
+) -> Result<TurnAdmission, String> {
+    let turn_id = format!("turn-{}", Uuid::new_v4().simple());
+    let step_id = format!("step-{}", Uuid::new_v4().simple());
+    let (_, pending) = sessions.driver_control(&entry.session_id)?;
+    let prepared_input = pending
+        .next_turn
+        .into_iter()
+        .filter(|message| !pending.paused_ids.contains(&message.message_id))
+        .take(1)
+        .chain(
+            pending
+                .next_step
+                .into_iter()
+                .filter(|message| !pending.paused_ids.contains(&message.message_id)),
+        )
+        .collect::<Vec<_>>();
+    let preparation = apply_pre_step_hooks(
+        sessions,
+        entry,
+        hooks,
+        tools,
+        &prepared_model,
+        compactions,
+        &turn_id,
+        &step_id,
+        1,
+        config.retry_policy,
+    )
+    .await;
+    let abandon_preparation = |reason: &str| {
+        sessions.abandon_step_preparation(
+            &entry.session_id,
+            &turn_id,
+            &step_id,
+            prepared_input
+                .iter()
+                .map(|message| message.message_id.clone())
+                .collect(),
+            reason,
+        )
+    };
+    // Preparation failures belong to the input that triggered them.
+    // Commit that input to the transcript before settling the failure;
+    // subsequent queued turns remain available for paused recovery.
+    if !entry.is_admitting() || entry.cancellation().is_cancelled() {
+        abandon_preparation("stoppedByUser")?;
+        return Ok(TurnAdmission::Settle(AgentDriverSettlement::Cancelled));
+    }
+    if !matches!(&preparation, Ok(None)) {
+        let admitted = entry.with_input_admission(|| {
+            let claimed = sessions.begin_turn_step_checked(
+                &entry.session_id,
+                turn_id.clone(),
+                step_id.clone(),
+                Some(&prepared_input),
+            )?;
+            if claimed.is_some() {
+                entry.set_scope(Some(AgentActiveScope {
+                    turn_id: turn_id.clone(),
+                    step_id: Some(step_id.clone()),
+                }))?;
+            }
+            Ok(claimed)
+        })?;
+        match admitted {
+            None => {
+                abandon_preparation("stoppedByUser")?;
+                return Ok(TurnAdmission::Settle(AgentDriverSettlement::Cancelled));
+            }
+            Some(None) => {
+                abandon_preparation("inputChanged")?;
+                return Ok(TurnAdmission::ContinueLoop);
+            }
+            Some(Some(_)) => {}
+        }
+    }
+    if let Some(reason) = preparation? {
+        return Ok(TurnAdmission::Settle(settle_pre_step_hook_reason(
+            sessions,
+            entry,
+            compactions,
+            reason,
+        )?));
+    }
+    let admitted = entry.with_input_admission(|| {
+        let claimed =
+            sessions.begin_turn_step(&entry.session_id, turn_id.clone(), step_id.clone())?;
+        if claimed.is_some() {
+            entry.set_scope(Some(AgentActiveScope {
+                turn_id: turn_id.clone(),
+                step_id: Some(step_id.clone()),
+            }))?;
+            entry.set_phase(AgentLifecyclePhase::Running)?;
+            append_status(sessions, entry, AgentSessionStatus::Running, None)?;
+        } else {
+            entry.set_phase(AgentLifecyclePhase::Idle)?;
+            append_status(sessions, entry, AgentSessionStatus::Idle, None)?;
+        }
+        Ok(claimed)
+    })?;
+    match admitted {
+        None => {
+            abandon_preparation("stoppedByUser")?;
+            return Ok(TurnAdmission::Settle(AgentDriverSettlement::Cancelled));
+        }
+        Some(None) => {
+            abandon_preparation("inputChanged")?;
+            return Ok(TurnAdmission::Settle(AgentDriverSettlement::Idle));
+        }
+        Some(Some(_)) => {}
+    }
+    Ok(TurnAdmission::Ready {
+        turn_id,
+        step_id,
+        step_index: 1,
+        prepared_model: Box::new(prepared_model),
+    })
+}
+
+async fn admit_turn_step(
+    sessions: &AgentSessionStore,
+    entry: &Arc<AgentEntry>,
+    hooks: &AgentHookBus,
+    tools: &AgentToolPipeline,
+    compactions: &AgentCompactionManager,
+    existing_scope: Option<AgentActiveScope>,
+    turn_steps: usize,
+    config: AgentDriverConfig,
+) -> Result<TurnAdmission, String> {
+    let prepared_model = entry.prepare_model()?;
+    match existing_scope {
+        Some(AgentActiveScope {
+            turn_id,
+            step_id: Some(step_id),
+        }) => Ok(TurnAdmission::Ready {
+            turn_id,
+            step_id,
+            step_index: turn_steps,
+            prepared_model: Box::new(prepared_model),
+        }),
+        Some(AgentActiveScope {
+            turn_id,
+            step_id: None,
+        }) => {
+            continue_open_turn_step(
+                sessions,
+                entry,
+                hooks,
+                tools,
+                compactions,
+                prepared_model,
+                turn_id,
+                turn_steps,
+                config,
+            )
+            .await
+        }
+        None => {
+            start_new_turn_step(
+                sessions,
+                entry,
+                hooks,
+                tools,
+                compactions,
+                prepared_model,
+                config,
+            )
+            .await
+        }
+    }
+}
+
+async fn run_turn_steps(
+    sessions: &AgentSessionStore,
+    entry: &Arc<AgentEntry>,
+    hooks: &AgentHookBus,
+    tools: &AgentToolPipeline,
+    compactions: &AgentCompactionManager,
+    config: AgentDriverConfig,
+    turn_id: &str,
+    step_id: String,
+    mut step_index: usize,
+    prepared_model: &mut crate::llm::runtime::PreparedModel,
+) -> Result<Option<AgentDriverSettlement>, String> {
+    let mut current_step_id = step_id;
+    loop {
+        let (continue_after_tools, turn_end_reason) = match run_step(
+            sessions,
+            entry,
+            tools,
+            prepared_model,
+            compactions,
+            turn_id,
+            &current_step_id,
+            step_index,
+            config,
+        )
+        .await?
+        {
+            StepSettlement::Completed => (false, "completed"),
+            StepSettlement::Incomplete => (false, "incomplete"),
+            StepSettlement::ToolsCompleted => (true, "completed"),
+            StepSettlement::Waiting => return Ok(Some(AgentDriverSettlement::Waiting)),
+            StepSettlement::Cancelled => {
+                close_open_scope(sessions, entry, "cancelled")?;
+                return Ok(Some(AgentDriverSettlement::Cancelled));
+            }
+            StepSettlement::Failed(reason) => {
+                close_open_scope(sessions, entry, &reason)?;
+                return Ok(Some(terminate_failed(sessions, entry, reason)?));
+            }
+        };
+
+        if entry.cancellation().is_cancelled() {
+            close_open_scope(sessions, entry, "cancelled")?;
+            return Ok(Some(AgentDriverSettlement::Cancelled));
+        }
+        let (_, inbox) = sessions.driver_control(&entry.session_id)?;
+        let reason = no_progress_from_counts(
+            sessions.loop_progress_counts(&entry.session_id, turn_id)?,
+            config,
+        )
+        .filter(|_| {
+            continue_after_tools
+                && !inbox
+                    .next_step
+                    .iter()
+                    .any(|message| message.source.kind == super::AgentMessageSourceKind::User)
+        });
+        if let Some(reason) = recover_loop_if_possible(
+            sessions,
+            &entry.session_id,
+            turn_id,
+            reason,
+            !inbox.next_turn.is_empty(),
+        )? {
+            close_open_scope(sessions, entry, &reason)?;
+            if !sessions
+                .driver_control(&entry.session_id)?
+                .1
+                .next_turn
+                .is_empty()
+            {
+                break;
+            }
+            return Ok(Some(terminate_failed(sessions, entry, reason)?));
+        }
+        if !continue_after_tools
+            && sessions.end_turn_if_no_step_input(&entry.session_id, turn_id, turn_end_reason)?
+        {
+            entry.set_scope(None)?;
+            break;
+        }
+        if let Some(limit) = config
+            .max_steps_per_turn
+            .filter(|limit| step_index >= *limit)
+        {
+            let recoverable = step_budget_recoverable(entry.subagent.as_ref());
+            let reason = step_budget_reason(limit, recoverable);
+            close_open_scope(sessions, entry, &reason)?;
+            if recoverable {
+                break;
+            }
+            return Ok(Some(terminate_failed(sessions, entry, reason)?));
+        }
+        step_index += 1;
+        *prepared_model = entry.prepare_model()?;
+        current_step_id = format!("step-{}", Uuid::new_v4().simple());
+        if let Some(reason) = apply_pre_step_hooks(
+            sessions,
+            entry,
+            hooks,
+            tools,
+            prepared_model,
+            compactions,
+            turn_id,
+            &current_step_id,
+            step_index,
+            config.retry_policy,
+        )
+        .await?
+        {
+            return Ok(Some(settle_pre_step_hook_reason(
+                sessions,
+                entry,
+                compactions,
+                reason,
+            )?));
+        }
+        if continue_after_tools {
+            sessions.begin_continuation_step(
+                &entry.session_id,
+                turn_id.to_string(),
+                current_step_id.clone(),
+            )?;
+        } else if sessions
+            .begin_step_or_end_turn(
+                &entry.session_id,
+                turn_id.to_string(),
+                current_step_id.clone(),
+                turn_end_reason,
+            )?
+            .is_none()
+        {
+            // An operator may remove the final queued input while hooks
+            // run. End atomically instead of running a nonexistent step.
+            entry.set_scope(None)?;
+            break;
+        }
+        entry.set_scope(Some(AgentActiveScope {
+            turn_id: turn_id.to_string(),
+            step_id: Some(current_step_id.clone()),
+        }))?;
+    }
+    Ok(None)
+}
+
 async fn drive_agent_inner(
     sessions: &AgentSessionStore,
     entry: &Arc<AgentEntry>,
@@ -188,25 +628,7 @@ async fn drive_agent_inner(
     compactions: &AgentCompactionManager,
     config: AgentDriverConfig,
 ) -> Result<AgentDriverSettlement, String> {
-    let config = if let Some(subagent) = &entry.subagent {
-        AgentDriverConfig {
-            max_steps_per_turn: config.step_limit_for(Some(subagent)),
-            max_turns_per_session: config
-                .max_turns_per_session
-                .min(subagent.budget.max_turns as usize),
-            max_identical_tool_steps: config.max_identical_tool_steps,
-            max_model_tokens_per_session: config.max_model_tokens_per_session,
-            max_active_duration_ms: config.max_active_duration_ms,
-            max_model_stream_duration_ms: config.max_model_stream_duration_ms,
-            network_recovery_window_ms: config.network_recovery_window_ms,
-            network_recovery_max_attempts: config.network_recovery_max_attempts,
-            network_recovery_initial_delay_ms: config.network_recovery_initial_delay_ms,
-            network_recovery_max_delay_ms: config.network_recovery_max_delay_ms,
-            retry_policy: config.retry_policy,
-        }
-    } else {
-        config
-    };
+    let config = effective_driver_config(config, entry.subagent.as_ref());
     loop {
         if entry.cancellation().is_cancelled() {
             close_open_scope(sessions, entry, "cancelled")?;
@@ -233,9 +655,7 @@ async fn drive_agent_inner(
             subagent_budget_failure(entry.subagent.as_ref(), events)
         })?? {
             close_open_scope(sessions, entry, &reason)?;
-            sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
-            entry.set_phase(AgentLifecyclePhase::Stopping)?;
-            return Ok(AgentDriverSettlement::Failed);
+            return terminate_failed(sessions, entry, reason);
         }
         let metrics = sessions.driver_metrics(&entry.session_id)?;
         let started_turns = metrics.started_turns;
@@ -264,9 +684,7 @@ async fn drive_agent_inner(
                 if !inbox.next_turn.is_empty() {
                     continue;
                 }
-                sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
-                entry.set_phase(AgentLifecyclePhase::Stopping)?;
-                return Ok(AgentDriverSettlement::Failed);
+                return terminate_failed(sessions, entry, reason);
             }
         }
         // A waiting tool/question can resume inside the already admitted Turn.
@@ -278,9 +696,7 @@ async fn drive_agent_inner(
                 "turnLimitExceeded: maximum {} Turns per Session",
                 config.max_turns_per_session
             );
-            sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
-            entry.set_phase(AgentLifecyclePhase::Stopping)?;
-            return Ok(AgentDriverSettlement::Failed);
+            return terminate_failed(sessions, entry, reason);
         }
 
         // Descendant cancellation may still be joining. Never claim another
@@ -293,329 +709,46 @@ async fn drive_agent_inner(
             append_status(sessions, entry, AgentSessionStatus::Idle, None)?;
             return Ok(AgentDriverSettlement::Idle);
         }
-        let mut prepared_model = entry.prepare_model()?;
-        let (turn_id, step_id, mut step_index) = if let Some(AgentActiveScope {
-            turn_id,
-            step_id: Some(step_id),
-        }) = existing_scope.clone()
+        let (turn_id, step_id, step_index, mut prepared_model) = match admit_turn_step(
+            sessions,
+            entry,
+            hooks,
+            tools,
+            compactions,
+            existing_scope,
+            metrics.turn_steps,
+            config,
+        )
+        .await?
         {
-            let index = metrics.turn_steps;
-            (turn_id, step_id, index)
-        } else if let Some(AgentActiveScope {
-            turn_id,
-            step_id: None,
-        }) = existing_scope
-        {
-            let step_index = metrics.turn_steps.saturating_add(1);
-            if let Some(limit) = config
-                .max_steps_per_turn
-                .filter(|limit| step_index > *limit)
-            {
-                let recoverable = step_budget_recoverable(entry.subagent.as_ref());
-                let reason = step_budget_reason(limit, recoverable);
-                close_open_scope(sessions, entry, &reason)?;
-                if recoverable {
-                    continue;
-                }
-                sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
-                entry.set_phase(AgentLifecyclePhase::Stopping)?;
-                return Ok(AgentDriverSettlement::Failed);
-            }
-            let step_id = format!("step-{}", Uuid::new_v4().simple());
-            if let Some(reason) = apply_pre_step_hooks(
-                sessions,
-                entry,
-                hooks,
-                tools,
-                &prepared_model,
-                compactions,
-                &turn_id,
-                &step_id,
+            TurnAdmission::Ready {
+                turn_id,
+                step_id,
                 step_index,
-                config.retry_policy,
-            )
-            .await?
-            {
-                if reason.starts_with("contextBudgetExceeded:") {
-                    pause_context_budget(sessions, entry, compactions, &reason)?;
-                    return Ok(AgentDriverSettlement::Waiting);
-                }
-                close_open_scope(sessions, entry, &reason)?;
-                sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
-                entry.set_phase(AgentLifecyclePhase::Stopping)?;
-                return Ok(AgentDriverSettlement::Failed);
-            }
-            entry.set_phase(AgentLifecyclePhase::Running)?;
-            sessions.begin_continuation_step(
-                &entry.session_id,
-                turn_id.clone(),
-                step_id.clone(),
-            )?;
-            (turn_id, step_id, step_index)
-        } else {
-            let turn_id = format!("turn-{}", Uuid::new_v4().simple());
-            let step_id = format!("step-{}", Uuid::new_v4().simple());
-            let (_, pending) = sessions.driver_control(&entry.session_id)?;
-            let prepared_input = pending
-                .next_turn
-                .into_iter()
-                .filter(|message| !pending.paused_ids.contains(&message.message_id))
-                .take(1)
-                .chain(
-                    pending
-                        .next_step
-                        .into_iter()
-                        .filter(|message| !pending.paused_ids.contains(&message.message_id)),
-                )
-                .collect::<Vec<_>>();
-            let preparation = apply_pre_step_hooks(
-                sessions,
-                entry,
-                hooks,
-                tools,
-                &prepared_model,
-                compactions,
-                &turn_id,
-                &step_id,
-                1,
-                config.retry_policy,
-            )
-            .await;
-            let abandon_preparation = |reason: &str| {
-                sessions.abandon_step_preparation(
-                    &entry.session_id,
-                    &turn_id,
-                    &step_id,
-                    prepared_input
-                        .iter()
-                        .map(|message| message.message_id.clone())
-                        .collect(),
-                    reason,
-                )
-            };
-            // Preparation failures belong to the input that triggered them.
-            // Commit that input to the transcript before settling the failure;
-            // subsequent queued turns remain available for paused recovery.
-            if !entry.is_admitting() || entry.cancellation().is_cancelled() {
-                abandon_preparation("stoppedByUser")?;
-                return Ok(AgentDriverSettlement::Cancelled);
-            }
-            if !matches!(&preparation, Ok(None)) {
-                let admitted = entry.with_input_admission(|| {
-                    let claimed = sessions.begin_turn_step_checked(
-                        &entry.session_id,
-                        turn_id.clone(),
-                        step_id.clone(),
-                        Some(&prepared_input),
-                    )?;
-                    if claimed.is_some() {
-                        entry.set_scope(Some(AgentActiveScope {
-                            turn_id: turn_id.clone(),
-                            step_id: Some(step_id.clone()),
-                        }))?;
-                    }
-                    Ok(claimed)
-                })?;
-                match admitted {
-                    None => {
-                        abandon_preparation("stoppedByUser")?;
-                        return Ok(AgentDriverSettlement::Cancelled);
-                    }
-                    Some(None) => {
-                        abandon_preparation("inputChanged")?;
-                        continue;
-                    }
-                    Some(Some(_)) => {}
-                }
-            }
-            if let Some(reason) = preparation? {
-                if reason.starts_with("contextBudgetExceeded:") {
-                    pause_context_budget(sessions, entry, compactions, &reason)?;
-                    return Ok(AgentDriverSettlement::Waiting);
-                }
-                close_open_scope(sessions, entry, &reason)?;
-                sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
-                entry.set_phase(AgentLifecyclePhase::Stopping)?;
-                return Ok(AgentDriverSettlement::Failed);
-            }
-            let admitted = entry.with_input_admission(|| {
-                let claimed = sessions.begin_turn_step(
-                    &entry.session_id,
-                    turn_id.clone(),
-                    step_id.clone(),
-                )?;
-                if claimed.is_some() {
-                    entry.set_scope(Some(AgentActiveScope {
-                        turn_id: turn_id.clone(),
-                        step_id: Some(step_id.clone()),
-                    }))?;
-                    entry.set_phase(AgentLifecyclePhase::Running)?;
-                    append_status(sessions, entry, AgentSessionStatus::Running, None)?;
-                } else {
-                    entry.set_phase(AgentLifecyclePhase::Idle)?;
-                    append_status(sessions, entry, AgentSessionStatus::Idle, None)?;
-                }
-                Ok(claimed)
-            })?;
-            match admitted {
-                None => {
-                    abandon_preparation("stoppedByUser")?;
-                    return Ok(AgentDriverSettlement::Cancelled);
-                }
-                Some(None) => {
-                    abandon_preparation("inputChanged")?;
-                    return Ok(AgentDriverSettlement::Idle);
-                }
-                Some(Some(_)) => {}
-            }
-            (turn_id, step_id, 1)
+                prepared_model,
+            } => (turn_id, step_id, step_index, *prepared_model),
+            TurnAdmission::ContinueLoop => continue,
+            TurnAdmission::Settle(settlement) => return Ok(settlement),
         };
         entry.set_scope(Some(AgentActiveScope {
             turn_id: turn_id.clone(),
             step_id: Some(step_id.clone()),
         }))?;
-
-        let mut current_step_id = step_id;
-        loop {
-            let (continue_after_tools, turn_end_reason) = match run_step(
-                sessions,
-                entry,
-                tools,
-                &prepared_model,
-                compactions,
-                &turn_id,
-                &current_step_id,
-                step_index,
-                config,
-            )
-            .await?
-            {
-                StepSettlement::Completed => (false, "completed"),
-                StepSettlement::Incomplete => (false, "incomplete"),
-                StepSettlement::ToolsCompleted => (true, "completed"),
-                StepSettlement::Waiting => return Ok(AgentDriverSettlement::Waiting),
-                StepSettlement::Cancelled => {
-                    close_open_scope(sessions, entry, "cancelled")?;
-                    return Ok(AgentDriverSettlement::Cancelled);
-                }
-                StepSettlement::Failed(reason) => {
-                    close_open_scope(sessions, entry, &reason)?;
-                    sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
-                    entry.set_phase(AgentLifecyclePhase::Stopping)?;
-                    return Ok(AgentDriverSettlement::Failed);
-                }
-            };
-
-            if entry.cancellation().is_cancelled() {
-                close_open_scope(sessions, entry, "cancelled")?;
-                return Ok(AgentDriverSettlement::Cancelled);
-            }
-            let (_, inbox) = sessions.driver_control(&entry.session_id)?;
-            let reason = no_progress_from_counts(
-                sessions.loop_progress_counts(&entry.session_id, &turn_id)?,
-                config,
-            )
-            .filter(|_| {
-                continue_after_tools
-                    && !inbox
-                        .next_step
-                        .iter()
-                        .any(|message| message.source.kind == super::AgentMessageSourceKind::User)
-            });
-            if let Some(reason) = recover_loop_if_possible(
-                sessions,
-                &entry.session_id,
-                &turn_id,
-                reason,
-                !inbox.next_turn.is_empty(),
-            )? {
-                close_open_scope(sessions, entry, &reason)?;
-                if !sessions
-                    .driver_control(&entry.session_id)?
-                    .1
-                    .next_turn
-                    .is_empty()
-                {
-                    break;
-                }
-                sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
-                entry.set_phase(AgentLifecyclePhase::Stopping)?;
-                return Ok(AgentDriverSettlement::Failed);
-            }
-            if !continue_after_tools
-                && sessions.end_turn_if_no_step_input(
-                    &entry.session_id,
-                    &turn_id,
-                    turn_end_reason,
-                )?
-            {
-                entry.set_scope(None)?;
-                break;
-            }
-            if let Some(limit) = config
-                .max_steps_per_turn
-                .filter(|limit| step_index >= *limit)
-            {
-                let recoverable = step_budget_recoverable(entry.subagent.as_ref());
-                let reason = step_budget_reason(limit, recoverable);
-                close_open_scope(sessions, entry, &reason)?;
-                if recoverable {
-                    break;
-                }
-                sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
-                entry.set_phase(AgentLifecyclePhase::Stopping)?;
-                return Ok(AgentDriverSettlement::Failed);
-            }
-            step_index += 1;
-            prepared_model = entry.prepare_model()?;
-            current_step_id = format!("step-{}", Uuid::new_v4().simple());
-            if let Some(reason) = apply_pre_step_hooks(
-                sessions,
-                entry,
-                hooks,
-                tools,
-                &prepared_model,
-                compactions,
-                &turn_id,
-                &current_step_id,
-                step_index,
-                config.retry_policy,
-            )
-            .await?
-            {
-                if reason.starts_with("contextBudgetExceeded:") {
-                    pause_context_budget(sessions, entry, compactions, &reason)?;
-                    return Ok(AgentDriverSettlement::Waiting);
-                }
-                close_open_scope(sessions, entry, &reason)?;
-                sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
-                entry.set_phase(AgentLifecyclePhase::Stopping)?;
-                return Ok(AgentDriverSettlement::Failed);
-            }
-            if continue_after_tools {
-                sessions.begin_continuation_step(
-                    &entry.session_id,
-                    turn_id.clone(),
-                    current_step_id.clone(),
-                )?;
-            } else if sessions
-                .begin_step_or_end_turn(
-                    &entry.session_id,
-                    turn_id.clone(),
-                    current_step_id.clone(),
-                    turn_end_reason,
-                )?
-                .is_none()
-            {
-                // An operator may remove the final queued input while hooks
-                // run. End atomically instead of running a nonexistent step.
-                entry.set_scope(None)?;
-                break;
-            }
-            entry.set_scope(Some(AgentActiveScope {
-                turn_id: turn_id.clone(),
-                step_id: Some(current_step_id.clone()),
-            }))?;
+        if let Some(settlement) = run_turn_steps(
+            sessions,
+            entry,
+            hooks,
+            tools,
+            compactions,
+            config,
+            &turn_id,
+            step_id,
+            step_index,
+            &mut prepared_model,
+        )
+        .await?
+        {
+            return Ok(settlement);
         }
     }
 }
@@ -892,37 +1025,6 @@ enum StepSettlement {
     Failed(String),
 }
 
-struct PendingRetry {
-    previous_request_id: String,
-    reason: String,
-    plan: RetryPlan,
-    error: Option<NormalizedModelError>,
-    wait_for_network: bool,
-}
-
-fn network_transport_failure(error: &NormalizedModelError) -> bool {
-    matches!(
-        error.kind,
-        NormalizedModelErrorKind::Transport | NormalizedModelErrorKind::Timeout
-    ) && matches!(
-        error.code.as_deref(),
-        Some(
-            "CONNECT"
-                | "STREAM_READ"
-                | "STREAM_DECODE"
-                | "TRANSPORT_TIMEOUT"
-                | "REQUEST_HEADERS_TIMEOUT"
-                | "FIRST_BYTE_TIMEOUT"
-                | "STREAM_IDLE_TIMEOUT"
-        )
-    )
-}
-
-fn retry_random_sample() -> f64 {
-    let sample = Uuid::new_v4().as_u128() as u64;
-    (sample as f64) / (u64::MAX as f64)
-}
-
 fn model_block_has_output(block: &ModelContentBlock) -> bool {
     crate::llm::replay::model_block_has_output(block)
 }
@@ -935,886 +1037,6 @@ fn model_response_has_output(response: &ModelResponse) -> bool {
         ) || !matches!(block, ModelContentBlock::Reasoning { .. }))
             && model_block_has_output(block)
     })
-}
-
-fn empty_model_response_error() -> NormalizedModelError {
-    let mut error = NormalizedModelError::new(
-        NormalizedModelErrorKind::EmptyResponse,
-        "AI provider completed without answer text or tool calls",
-    );
-    error.code = Some("EMPTY_RESPONSE".into());
-    error
-}
-
-async fn run_step(
-    sessions: &AgentSessionStore,
-    entry: &Arc<AgentEntry>,
-    tools: &AgentToolPipeline,
-    model: &crate::llm::runtime::PreparedModel,
-    compactions: &AgentCompactionManager,
-    turn_id: &str,
-    step_id: &str,
-    step_index: usize,
-    config: AgentDriverConfig,
-) -> Result<StepSettlement, String> {
-    // A step and all its retries retain one provider/adapter pair.
-    let config = AgentDriverConfig {
-        retry_policy: model.provider.retry_policy.unwrap_or(config.retry_policy),
-        ..config
-    };
-    let compactions = compactions.clone().with_model(
-        model.adapter.clone(),
-        model.provider.clone(),
-        config.retry_policy,
-    );
-    let permission_mode = sessions.snapshot(&entry.session_id)?.header.permission_mode;
-    let mut attempt = 1_u32;
-    let mut request_reason = if step_index == 1 {
-        AgentRequestReason::Initial
-    } else {
-        AgentRequestReason::ToolContinuation
-    };
-    let mut pending_retry: Option<PendingRetry> = None;
-    let mut cumulative_delay_ms = 0_u64;
-    let mut prepared_call: Option<crate::llm::runtime::PreparedCall> = None;
-    let mut prepared_budget_recovery_attempted = false;
-    let mut network_recovery_started_at: Option<Instant> = None;
-    let mut network_recovery_round = 0_u32;
-    loop {
-        if entry.cancellation().is_cancelled() {
-            return Ok(StepSettlement::Cancelled);
-        }
-        if let Some(reason) = sessions.read_events(&entry.session_id, |events| {
-            subagent_budget_failure(entry.subagent.as_ref(), events)
-        })?? {
-            return Ok(StepSettlement::Failed(reason));
-        }
-        if let Some(reason) =
-            task_budget_failure(&sessions.driver_metrics(&entry.session_id)?, config)?
-        {
-            if reason.starts_with("taskTokenBudgetExceeded:") {
-                return Ok(stop_for_token_budget(
-                    &compactions,
-                    &entry.session_id,
-                    turn_id,
-                    step_id,
-                    config.max_model_tokens_per_session,
-                    &entry.cancellation(),
-                ));
-            }
-            return Ok(StepSettlement::Failed(reason));
-        }
-        let request_id = format!("request-{}", Uuid::new_v4().simple());
-        if let Some(pending) = pending_retry.take() {
-            if pending.wait_for_network {
-                append_status(
-                    sessions,
-                    entry,
-                    AgentSessionStatus::Waiting,
-                    Some("waitingForNetwork".into()),
-                )?;
-            }
-            cumulative_delay_ms = cumulative_delay_ms.saturating_add(pending.plan.delay_ms);
-            let error_kind = pending
-                .error
-                .as_ref()
-                .map(|error| format!("{:?}", error.kind).to_ascii_lowercase());
-            let error_status = pending.error.as_ref().and_then(|error| error.status);
-            let error_code = pending.error.as_ref().and_then(|error| error.code.clone());
-            sessions.append(
-                &entry.session_id,
-                Some(turn_id.to_string()),
-                Some(step_id.to_string()),
-                AgentSessionEventPayload::RequestRetry {
-                    request_id: request_id.clone(),
-                    previous_request_id: Some(pending.previous_request_id),
-                    attempt,
-                    reason: pending.reason,
-                    delay_ms: Some(pending.plan.delay_ms),
-                    cumulative_delay_ms: Some(cumulative_delay_ms),
-                    server_retry_after_ms: pending.plan.server_retry_after_ms,
-                    server_hint_capped: pending.plan.server_hint_capped,
-                    error_kind,
-                    error_status,
-                    error_code,
-                },
-            )?;
-            if !super::cancellable_retry_delay(pending.plan.delay_ms, &entry.cancellation()).await {
-                return Ok(StepSettlement::Cancelled);
-            }
-            if pending.wait_for_network {
-                append_status(
-                    sessions,
-                    entry,
-                    AgentSessionStatus::Running,
-                    Some("networkRetry".into()),
-                )?;
-            }
-        }
-        let mut request = if let Some(call) = &prepared_call {
-            call.request(request_id.clone())
-        } else {
-            let mut snapshot = sessions.snapshot(&entry.session_id)?;
-            snapshot.header.permission_mode = permission_mode;
-            let mut assembly = assemble_model_input(
-                &snapshot.header,
-                model_tools_for(
-                    entry,
-                    tools.terminal_interactive_tools_enabled(snapshot.header.target.as_ref()),
-                    tools.vim_bridge_available(snapshot.header.target.as_ref()),
-                ),
-            );
-            scope_current_task_context(sessions, &snapshot, &mut assembly)?;
-            tools.sync_terminal_execution_context(&snapshot.header, &mut assembly)?;
-            append_current_task_plan_context(
-                sessions,
-                &snapshot,
-                turn_id,
-                &mut assembly.system_prompt,
-            )?;
-            ensure_model_context(
-                sessions,
-                entry,
-                turn_id,
-                step_id,
-                &snapshot.surface,
-                &assembly,
-            )?;
-            tools.skills.prepare_step(entry, turn_id, step_id).await?;
-            tools
-                .skills
-                .republish_if_missing(&entry.session_id, turn_id, step_id)?;
-            let surface = sessions.model_surface(&entry.session_id)?;
-            let mut request = ModelRequest::from_surface(
-                request_id.clone(),
-                &surface,
-                assembly.system_prompt,
-                assembly.tools,
-            );
-            if let Some(mut inherited) = sessions.inherited_surface(&entry.session_id)? {
-                inherited.messages.retain(|message| {
-                !matches!(
-                    message,
-                    super::AgentSurfaceMessage::User { source, .. }
-                        if is_assembled_context_source(source) || source.producer_id == "shellspan.skills.v1"
-                )
-            });
-                inherited.messages.retain(|m| !matches!(m, super::AgentSurfaceMessage::Tool { name, .. } if name == super::skills::SKILL_TOOL));
-                for message in &mut inherited.messages {
-                    if let super::AgentSurfaceMessage::Assistant { content, .. } = message {
-                        content.retain(|b| !matches!(b, AgentAssistantContentBlock::ToolCall { call } if call.name == super::skills::SKILL_TOOL));
-                    }
-                }
-                if request
-                    .tools
-                    .iter()
-                    .any(|tool| tool.name == super::tool_output::READ_TOOL_RESULT)
-                {
-                    inherited = tools
-                        .materialize_inherited_results(
-                            &entry.session_id,
-                            turn_id,
-                            step_id,
-                            inherited,
-                            entry.cancellation(),
-                        )
-                        .await?;
-                }
-                let mut inherited_messages = ModelRequest::from_surface(
-                    format!("{request_id}-inherited"),
-                    &inherited,
-                    String::new(),
-                    Vec::new(),
-                )
-                .messages;
-                inherited_messages.append(&mut request.messages);
-                request.messages = inherited_messages;
-            }
-            tools.apply_ephemeral_terminal_results(&entry.session_id, turn_id, &mut request)?;
-            super::model_tools::apply_file_edit_budget(
-                &mut request,
-                crate::llm::catalog::resolve(&model.provider)?.output_token_budget(),
-                sessions.read_turn_events(&entry.session_id, |events| {
-                    output_limit_continuation_count(events, turn_id)
-                })?,
-            );
-            if let Some(child) = &entry.subagent {
-                if let Some(limit) = config.max_steps_per_turn {
-                    request
-                        .system_prompt
-                        .push_str(&step_budget_notice(limit, step_index));
-                }
-                let now = current_unix_ms()?;
-                let usage = sessions.read_events(&entry.session_id, |events| {
-                    super::subagent::child_budget_usage(events, now)
-                })?;
-                request
-                    .system_prompt
-                    .push_str(&child_cumulative_budget_notice(&child.budget, &usage));
-            }
-            request
-        };
-        let request_surface_generation = request.surface_generation;
-        if prepared_call.is_none() {
-            let raw_budget = estimate_request_budget(sessions, &entry.session_id, model, &request)?;
-            if raw_budget.requires_compaction() {
-                compactions.record_budget(
-                    &entry.session_id,
-                    turn_id,
-                    step_id,
-                    &request,
-                    &raw_budget,
-                )?;
-            }
-            request = tools
-                .bound_request_results(&entry.session_id, turn_id, step_id, request, raw_budget)
-                .await?;
-        }
-        let budget = estimate_request_budget(sessions, &entry.session_id, model, &request)?;
-        // Retries retain the same prepared request. Its input was already
-        // admitted; compaction is only appropriate when assembling a new call.
-        if budget.requires_compaction() && prepared_call.is_none() {
-            compactions.record_budget(&entry.session_id, turn_id, step_id, &request, &budget)?;
-            let before = request.surface_generation;
-            let result = compactions
-                .compact(
-                    &entry.session_id,
-                    turn_id,
-                    step_id,
-                    Some(turn_id),
-                    "skillsInputBudget",
-                    &budget,
-                    false,
-                    &entry.cancellation(),
-                )
-                .await;
-            if entry.cancellation().is_cancelled() {
-                return Ok(StepSettlement::Cancelled);
-            }
-            if sessions.snapshot(&entry.session_id)?.surface.generation != before {
-                continue;
-            }
-            if !budget.fits_hard_limit() {
-                let detail = result
-                    .err()
-                    .unwrap_or_else(|| "No smaller safe context was available".into());
-                let reason = format!("contextBudgetExceeded: {}; {detail}. Select a larger-context model or reduce attached input, then continue; completed work is preserved.", budget.diagnostic());
-                pause_context_budget(sessions, entry, &compactions, &reason)?;
-                return Ok(StepSettlement::Waiting);
-            }
-        }
-        // Preserve the existing early stop when even the unprepared input has
-        // exhausted the task budget; otherwise admit using the final input below.
-        if matches!(
-            sessions
-                .driver_metrics(&entry.session_id)?
-                .token_budget_decision(
-                    budget
-                        .estimated_input_tokens
-                        .saturating_add(budget.output_reserve_tokens),
-                    config.max_model_tokens_per_session
-                ),
-            super::driver_metrics::TaskTokenBudgetDecision::Stop
-        ) {
-            return Ok(stop_for_token_budget(
-                &compactions,
-                &entry.session_id,
-                turn_id,
-                step_id,
-                config.max_model_tokens_per_session,
-                &entry.cancellation(),
-            ));
-        }
-        if prepared_call.is_none() {
-            prepared_call = Some(model.prepare_request(request, "step", &entry.cancellation())?);
-        }
-        request = prepared_call
-            .as_ref()
-            .expect("prepared call")
-            .request(request_id.clone());
-        let budget = estimate_request_budget(sessions, &entry.session_id, model, &request)?;
-        if !budget.fits_hard_limit() {
-            compactions.record_budget(&entry.session_id, turn_id, step_id, &request, &budget)?;
-            let recovery = compact_prepared_budget(
-                &compactions,
-                &entry.session_id,
-                turn_id,
-                step_id,
-                request.surface_generation,
-                &budget,
-                &mut prepared_budget_recovery_attempted,
-                &entry.cancellation(),
-            )
-            .await;
-            if entry.cancellation().is_cancelled() {
-                return Ok(StepSettlement::Cancelled);
-            }
-            if matches!(recovery, Ok(true)) {
-                prepared_call = None;
-                continue;
-            }
-            let detail = recovery
-                .err()
-                .unwrap_or_else(|| "bounded prepared-input recovery was exhausted".into());
-            let reason = format!("contextBudgetExceeded: prepared provider input exceeds the available context; {}; {detail}. Select a larger-context model or reduce attached input, then continue; completed work is preserved.", budget.diagnostic());
-            pause_context_budget(sessions, entry, &compactions, &reason)?;
-            return Ok(StepSettlement::Waiting);
-        }
-        // Admission uses the prepared request, including private replay overhead.
-        match sessions
-            .driver_metrics(&entry.session_id)?
-            .token_budget_decision(
-                budget
-                    .estimated_input_tokens
-                    .saturating_add(budget.output_reserve_tokens),
-                config.max_model_tokens_per_session,
-            ) {
-            super::driver_metrics::TaskTokenBudgetDecision::Stop => {
-                return Ok(stop_for_token_budget(
-                    &compactions,
-                    &entry.session_id,
-                    turn_id,
-                    step_id,
-                    config.max_model_tokens_per_session,
-                    &entry.cancellation(),
-                ));
-            }
-            super::driver_metrics::TaskTokenBudgetDecision::Checkpoint => {
-                if compactions
-                    .checkpoint_task_budget(
-                        &entry.session_id,
-                        turn_id,
-                        step_id,
-                        config.max_model_tokens_per_session,
-                        super::TaskBudgetCheckpointStage::Approaching,
-                        &entry.cancellation(),
-                    )
-                    .is_err()
-                {
-                    if entry.cancellation().is_cancelled() {
-                        return Ok(StepSettlement::Cancelled);
-                    }
-                    // Existing committed history remains the recovery source.
-                    // Record the failed attempt so a storage error cannot cause
-                    // an unbounded checkpoint retry on every subsequent step.
-                    append_status(
-                        sessions,
-                        entry,
-                        AgentSessionStatus::Running,
-                        Some("taskBudgetCheckpointUnavailable".into()),
-                    )?;
-                }
-            }
-            super::driver_metrics::TaskTokenBudgetDecision::Continue => {}
-        }
-        let call = prepared_call.as_ref().expect("prepared call");
-        let estimated_input_tokens = Some(budget.estimated_input_tokens);
-        if entry.cancellation().is_cancelled() {
-            return Ok(StepSettlement::Cancelled);
-        }
-        let mut request_events = sessions
-            .read_events(&entry.session_id, |events| {
-                super::request_log::request_events(
-                    events,
-                    entry,
-                    &model.provider,
-                    &request,
-                    &call.snapshot,
-                    request_reason,
-                    attempt,
-                )
-            })?
-            .into_iter()
-            .map(|payload| AgentScopedPayload {
-                turn_id: Some(turn_id.to_string()),
-                step_id: Some(step_id.to_string()),
-                payload,
-            })
-            .collect::<Vec<_>>();
-        request_events.push(AgentScopedPayload {
-            turn_id: Some(turn_id.to_string()),
-            step_id: Some(step_id.to_string()),
-            payload: AgentSessionEventPayload::RequestContext {
-                request_id: request_id.clone(),
-                input_tokens: estimated_input_tokens,
-                context_window: Some(budget.context_window),
-                request_budget: Some(super::AgentRequestBudget {
-                    output_tokens: budget.output_reserve_tokens,
-                    safety_tokens: budget.safety_reserve_tokens,
-                    usable_input_tokens: budget.usable_input_tokens,
-                    compaction_threshold_tokens: budget.compaction_threshold_tokens,
-                    compaction_target_tokens: budget.compaction_target_tokens,
-                    input_measurement: budget.input_measurement.clone(),
-                }),
-                system_tokens: Some(budget.system_tokens),
-                tool_schema_tokens: Some(budget.tool_schema_tokens),
-                message_tokens: Some(budget.message_tokens),
-                surface_generation: request.surface_generation,
-                limited: None,
-                omitted_messages: None,
-            },
-        });
-        sessions.append_batch(&entry.session_id, request_events)?;
-        let collected = Arc::new(Mutex::new(PartialContentAccumulator::default()));
-        let cancellation = entry.cancellation();
-        let stream_cancellation = cancellation.child_token();
-        let sink = Arc::new(DurableModelStreamSink {
-            #[cfg(test)]
-            sessions: sessions.clone(),
-            turn_id: turn_id.to_string(),
-            step_id: step_id.to_string(),
-            request_id: request_id.clone(),
-            collected: Arc::clone(&collected),
-            cancellation: stream_cancellation.clone(),
-            pending: Mutex::new(StreamBatch::default()),
-            writer: super::stream_writer::StreamWriter::new(
-                sessions.clone(),
-                entry.session_id.clone(),
-            )?,
-        });
-        let remaining_active_ms = config.max_active_duration_ms.saturating_sub(
-            sessions
-                .driver_metrics(&entry.session_id)?
-                .active_duration_ms(current_unix_ms()?),
-        );
-        let remaining_network_ms = network_recovery_started_at.map_or(u64::MAX, |started| {
-            config
-                .network_recovery_window_ms
-                .saturating_sub(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX))
-        });
-        let stream_limit_ms = remaining_active_ms
-            .min(config.max_model_stream_duration_ms)
-            .min(remaining_network_ms);
-        let deadline_code = if remaining_network_ms <= remaining_active_ms
-            && remaining_network_ms <= config.max_model_stream_duration_ms
-        {
-            "NETWORK_RECOVERY_TIMEOUT"
-        } else if remaining_active_ms <= config.max_model_stream_duration_ms {
-            "TASK_ACTIVE_TIME_EXCEEDED"
-        } else {
-            "MODEL_STREAM_TOTAL_TIMEOUT"
-        };
-        let deadline_error = || {
-            let mut error = NormalizedModelError::new(
-                NormalizedModelErrorKind::Timeout,
-                format!("model stream exceeded its {stream_limit_ms} ms total deadline"),
-            );
-            error.code = Some(deadline_code.into());
-            error
-        };
-        let response = if stream_limit_ms == 0 {
-            Err(deadline_error())
-        } else {
-            // ModelStreamSink is synchronous. Poll the adapter on a blocking
-            // worker so bounded writer backpressure cannot block the scheduler.
-            let runtime = tokio::runtime::Handle::current();
-            let prepared = call.clone();
-            let worker_sink = sink.clone();
-            let worker_token = stream_cancellation.clone();
-            let worker_request = request_id.clone();
-            let mut worker = tokio::task::spawn_blocking(move || {
-                runtime.block_on(async move {
-                    let response =
-                        prepared.stream(worker_request, worker_token.clone(), worker_sink);
-                    let result = tokio::select! {
-                        biased;
-                        _ = worker_token.cancelled() => Err(NormalizedModelError::cancelled()),
-                        result = response => result,
-                    };
-                    // A provider may cancel while returning an already-ready
-                    // response/error. Cancellation still wins before any retry.
-                    if worker_token.is_cancelled() {
-                        Err(NormalizedModelError::cancelled())
-                    } else {
-                        result
-                    }
-                })
-            });
-            let deadline = tokio::time::sleep(std::time::Duration::from_millis(stream_limit_ms));
-            tokio::pin!(deadline);
-            let mut joined = false;
-            let mut flush_interval =
-                tokio::time::interval(std::time::Duration::from_millis(STREAM_FLUSH_INTERVAL_MS));
-            flush_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            let response = loop {
-                tokio::select! {
-                    biased;
-                    _ = cancellation.cancelled() => break Err(NormalizedModelError::cancelled()),
-                    _ = &mut deadline => break Err(deadline_error()),
-                    result = &mut worker => {
-                        joined = true;
-                        break result.unwrap_or_else(|error| Err(stream_storage_error(format!("model stream worker failed: {error}"))));
-                    }
-                    _ = flush_interval.tick() => {
-                        if let Err(error) = sink.flush_async(false).await {
-                            break Err(stream_storage_error(error));
-                        }
-                    }
-                }
-            };
-            if !joined {
-                stream_cancellation.cancel();
-                // Join before closing the sink: no accepted callback can race
-                // the final persistence fence or a subsequent model request.
-                let _ = worker.await;
-            }
-            response
-        };
-        // No response, retry, cancellation settlement or tool dispatch may pass
-        // buffered deltas. Close the sink as well, rejecting late provider emits.
-        sink.flush_async(true).await?;
-        let response = match response {
-            _ if cancellation.is_cancelled() => Err(NormalizedModelError::cancelled()),
-            Ok(response) if !model_response_has_output(&response) => {
-                Err(empty_model_response_error())
-            }
-            other => other,
-        };
-        match response {
-            Ok(response) => {
-                return commit_response(
-                    sessions,
-                    entry,
-                    tools,
-                    turn_id,
-                    step_id,
-                    &request_id,
-                    response,
-                )
-                .await
-            }
-            Err(error) if error.kind == NormalizedModelErrorKind::Cancelled => {
-                let (had_output, partial) = {
-                    let collected = collected
-                        .lock()
-                        .map_err(|_| "model stream accumulator is unavailable".to_string())?;
-                    (!collected.is_empty(), collected.content())
-                };
-                if had_output {
-                    append_interrupted_message(
-                        sessions,
-                        entry,
-                        turn_id,
-                        step_id,
-                        partial,
-                        AgentStopReason::Cancelled,
-                    )?;
-                }
-                return Ok(StepSettlement::Cancelled);
-            }
-            Err(error)
-                if matches!(
-                    error.code.as_deref(),
-                    Some(
-                        "TASK_ACTIVE_TIME_EXCEEDED"
-                            | "MODEL_STREAM_TOTAL_TIMEOUT"
-                            | "NETWORK_RECOVERY_TIMEOUT"
-                    )
-                ) =>
-            {
-                let (had_output, partial) = {
-                    let collected = collected
-                        .lock()
-                        .map_err(|_| "model stream accumulator is unavailable".to_string())?;
-                    (!collected.is_empty(), collected.content())
-                };
-                if had_output {
-                    append_interrupted_message(
-                        sessions,
-                        entry,
-                        turn_id,
-                        step_id,
-                        partial,
-                        AgentStopReason::Other,
-                    )?;
-                }
-                sessions.append(
-                    &entry.session_id,
-                    Some(turn_id.to_string()),
-                    Some(step_id.to_string()),
-                    request_failure_payload(
-                        &request_id,
-                        &error,
-                        attempt,
-                        config.retry_policy.max_attempts().max(attempt),
-                        cumulative_delay_ms,
-                        had_output,
-                    ),
-                )?;
-                return Ok(StepSettlement::Failed(format!(
-                    "{}: {}",
-                    match error.code.as_deref() {
-                        Some("TASK_ACTIVE_TIME_EXCEEDED") => "taskActiveTimeExceeded",
-                        Some("NETWORK_RECOVERY_TIMEOUT") => "networkRecoveryTimeout",
-                        _ => "modelStreamTotalTimeout",
-                    },
-                    error.message
-                )));
-            }
-            Err(error)
-                if error.kind == NormalizedModelErrorKind::ContextTooLarge
-                    && attempt < config.retry_policy.max_attempts()
-                    && collected
-                        .lock()
-                        .map_err(|_| "model stream accumulator is unavailable".to_string())?
-                        .is_empty() =>
-            {
-                prepared_call = None;
-                let before = request_surface_generation;
-                sessions.append(
-                    &entry.session_id,
-                    Some(turn_id.to_string()),
-                    Some(step_id.to_string()),
-                    request_failure_payload(
-                        &request_id,
-                        &error,
-                        attempt,
-                        config.retry_policy.max_attempts().max(attempt),
-                        cumulative_delay_ms,
-                        false,
-                    ),
-                )?;
-                let outcome = match compactions
-                    .compact(
-                        &entry.session_id,
-                        turn_id,
-                        step_id,
-                        Some(turn_id),
-                        "providerContextTooLarge",
-                        &budget,
-                        true,
-                        &cancellation,
-                    )
-                    .await
-                {
-                    Ok(outcome) => outcome,
-                    Err(_) if cancellation.is_cancelled() => return Ok(StepSettlement::Cancelled),
-                    Err(compaction_error) => {
-                        let reason = format!("contextBudgetExceeded: provider rejected the context; {}; {compaction_error}. Select a larger-context model or reduce attached input, then continue; completed work is preserved.", budget.diagnostic());
-                        pause_context_budget(sessions, entry, &compactions, &reason)?;
-                        return Ok(StepSettlement::Waiting);
-                    }
-                };
-                if outcome.previous_generation != before || outcome.surface_generation <= before {
-                    return Ok(StepSettlement::Failed(
-                        "contextTooLargeRecoveryFailed: Model Surface generation did not advance"
-                            .into(),
-                    ));
-                }
-                pending_retry = Some(PendingRetry {
-                    previous_request_id: request_id,
-                    reason: format!(
-                        "context compacted from generation {} to {}",
-                        before, outcome.surface_generation
-                    ),
-                    plan: RetryPlan {
-                        delay_ms: 0,
-                        server_retry_after_ms: None,
-                        server_hint_capped: false,
-                    },
-                    error: Some(error),
-                    wait_for_network: false,
-                });
-                attempt += 1;
-                request_reason = AgentRequestReason::Recovery;
-            }
-            Err(error) if error.kind == NormalizedModelErrorKind::ContextTooLarge => {
-                let partial = collected
-                    .lock()
-                    .map_err(|_| "model stream accumulator is unavailable".to_string())?
-                    .content();
-                let had_output = !partial.is_empty();
-                if had_output {
-                    append_interrupted_message(
-                        sessions,
-                        entry,
-                        turn_id,
-                        step_id,
-                        partial,
-                        AgentStopReason::Other,
-                    )?;
-                }
-                sessions.append(
-                    &entry.session_id,
-                    Some(turn_id.into()),
-                    Some(step_id.into()),
-                    request_failure_payload(
-                        &request_id,
-                        &error,
-                        attempt,
-                        config.retry_policy.max_attempts().max(attempt),
-                        cumulative_delay_ms,
-                        had_output,
-                    ),
-                )?;
-                let reason = format!("contextBudgetExceeded: provider rejected the context after bounded recovery; {}. Select a larger-context model or reduce attached input, then continue; completed work is preserved.", budget.diagnostic());
-                pause_context_budget(sessions, entry, &compactions, &reason)?;
-                return Ok(StepSettlement::Waiting);
-            }
-            Err(error) if error.retryable() => {
-                let network_failure = network_transport_failure(&error);
-                if network_failure && network_recovery_started_at.is_none() {
-                    network_recovery_started_at = Some(Instant::now());
-                }
-                let max_attempts = if network_failure {
-                    config
-                        .network_recovery_max_attempts
-                        .max(config.retry_policy.max_attempts())
-                } else {
-                    config.retry_policy.max_attempts()
-                }
-                .max(attempt);
-                let partial_is_empty = collected
-                    .lock()
-                    .map_err(|_| "model stream accumulator is unavailable".to_string())?
-                    .is_empty();
-                sessions.append(
-                    &entry.session_id,
-                    Some(turn_id.to_string()),
-                    Some(step_id.to_string()),
-                    request_failure_payload(
-                        &request_id,
-                        &error,
-                        attempt,
-                        max_attempts,
-                        cumulative_delay_ms,
-                        !partial_is_empty,
-                    ),
-                )?;
-                if !cancellation.is_cancelled() {
-                    let ordinary = config
-                        .retry_policy
-                        .plan(&error, attempt, retry_random_sample());
-                    let recovery =
-                        if ordinary.is_none() && network_failure && attempt < max_attempts {
-                            network_recovery_started_at.and_then(|started| {
-                                let remaining = config.network_recovery_window_ms.saturating_sub(
-                                    u64::try_from(started.elapsed().as_millis())
-                                        .unwrap_or(u64::MAX),
-                                );
-                                if remaining == 0 {
-                                    return None;
-                                }
-                                let delay_ms = config
-                                    .network_recovery_initial_delay_ms
-                                    .saturating_mul(1_u64 << network_recovery_round.min(20))
-                                    .min(config.network_recovery_max_delay_ms)
-                                    .min(remaining);
-                                Some(RetryPlan {
-                                    delay_ms,
-                                    server_retry_after_ms: None,
-                                    server_hint_capped: false,
-                                })
-                            })
-                        } else {
-                            None
-                        };
-                    let network_window_expired = ordinary.is_none()
-                        && network_failure
-                        && attempt < max_attempts
-                        && recovery.is_none()
-                        && network_recovery_started_at.is_some_and(|started| {
-                            u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
-                                >= config.network_recovery_window_ms
-                        });
-                    if network_window_expired {
-                        return Ok(StepSettlement::Failed(format!(
-                            "networkRecoveryTimeout: model network recovery window of {} ms expired",
-                            config.network_recovery_window_ms
-                        )));
-                    }
-                    let wait_for_network = recovery.is_some();
-                    if let Some(plan) = ordinary.or(recovery) {
-                        pending_retry = Some(PendingRetry {
-                            previous_request_id: request_id,
-                            reason: if wait_for_network {
-                                "network recovery after model transport failure".into()
-                            } else {
-                                format!(
-                                    "retryable model failure: kind={:?} code={}",
-                                    error.kind,
-                                    error.code.as_deref().unwrap_or("unspecified")
-                                )
-                            },
-                            plan,
-                            error: Some(error),
-                            wait_for_network,
-                        });
-                        if wait_for_network {
-                            network_recovery_round = network_recovery_round.saturating_add(1);
-                        }
-                        attempt += 1;
-                        request_reason = AgentRequestReason::Retry;
-                        continue;
-                    }
-                }
-                if cancellation.is_cancelled() {
-                    return Ok(StepSettlement::Cancelled);
-                }
-                return Ok(StepSettlement::Failed(model_error_reason(
-                    &error,
-                    attempt,
-                    max_attempts,
-                    cumulative_delay_ms,
-                )));
-            }
-            Err(error) if error.code.as_deref() == Some("OUTPUT_LIMIT") => {
-                let partial = collected
-                    .lock()
-                    .map_err(|_| "model stream accumulator is unavailable".to_string())?
-                    .content();
-                sessions.append(
-                    &entry.session_id,
-                    Some(turn_id.to_string()),
-                    Some(step_id.to_string()),
-                    request_failure_payload(
-                        &request_id,
-                        &error,
-                        attempt,
-                        config.retry_policy.max_attempts().max(attempt),
-                        cumulative_delay_ms,
-                        !partial.is_empty(),
-                    ),
-                )?;
-                return settle_output_limit(
-                    sessions,
-                    entry,
-                    turn_id,
-                    step_id,
-                    &request_id,
-                    partial,
-                    None,
-                );
-            }
-            Err(error) => {
-                let had_output = {
-                    let collected = collected
-                        .lock()
-                        .map_err(|_| "model stream accumulator is unavailable".to_string())?;
-                    !collected.is_empty()
-                };
-                sessions.append(
-                    &entry.session_id,
-                    Some(turn_id.to_string()),
-                    Some(step_id.to_string()),
-                    request_failure_payload(
-                        &request_id,
-                        &error,
-                        attempt,
-                        config.retry_policy.max_attempts().max(attempt),
-                        cumulative_delay_ms,
-                        had_output,
-                    ),
-                )?;
-                return Ok(StepSettlement::Failed(model_error_reason(
-                    &error,
-                    attempt,
-                    config.retry_policy.max_attempts().max(attempt),
-                    cumulative_delay_ms,
-                )));
-            }
-        }
-    }
 }
 
 fn scope_current_task_context(

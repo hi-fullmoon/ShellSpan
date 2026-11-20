@@ -306,6 +306,15 @@ async fn scratch_background_process_pins_files_until_confirmed_termination() {
         result(&scenario, session, "background-stop")["terminationConfirmed"],
         true
     );
+    let stopped_result = result(&scenario, session, "background-stop");
+    let stopped_state = stopped_result["state"].as_str();
+    assert!(
+        matches!(
+            stopped_state,
+            Some("exited" | "cancelled" | "timedOut" | "failed")
+        ),
+        "expected canonical camelCase kill_process state, got {stopped_state:?}"
+    );
     let reopened = crate::agent_runtime::scratch::ScratchStore::open(&data_root).unwrap();
     reopened.cleanup_at(future, &services).unwrap();
     assert!(!root.exists());
