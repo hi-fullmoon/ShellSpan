@@ -1,6 +1,6 @@
 # 双 Shell SSH 故障恢复验收
 
-本页覆盖[统一验收标准](agent-terminal-input-acceptance-checklist.md)中的 C01、C05、C06、D05、D06、E01、E07。旧回环批次与正式发布余项见[实施计划](agent-terminal-input-implementation-plan.md)。
+本页覆盖[统一验收标准](agent-terminal-input-acceptance-checklist.md)中的 C01、C05、C06、D05、D06、E01、E07。最终候选及远端验收要求见[完成判定](agent-terminal-input-acceptance-checklist.md#完成判定)。
 
 ## 源码和 Linux 资源
 

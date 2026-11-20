@@ -4,26 +4,7 @@ Thank you for contributing! Please follow these guidelines to maintain code qual
 
 ## Development Environment
 
-- **Node.js**: >=24 (see `package.json`; nvm recommended)
-- **Package manager**: pnpm 11.1.1 (see `packageManager` in `package.json`)
-- **Rust**: latest stable (for Tauri)
-
-```bash
-# Install dependencies
-pnpm install
-
-# Start the development server
-pnpm dev
-
-# Start Tauri in development mode
-pnpm tauri:dev
-
-# Build
-pnpm build
-
-# Run tests
-pnpm test
-```
+See [local development](./README.md#local-development) for toolchain requirements and commands. Use `pnpm dev` to start the frontend development server on its own.
 
 ## Generated Artifacts
 

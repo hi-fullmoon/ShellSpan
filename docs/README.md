@@ -38,15 +38,13 @@
 
 - [凭据刷新](testing-credential-refresh.md)
 - [SFTP 取消](testing-sftp-cancellation.md)
-- [Agent 与用户终端争用](testing-agent-terminal-contention.md)
-- [其他专项验证命令](testing.md)
+- [专项验证命令](testing.md)，含[终端争用与关闭](testing.md#终端争用与关闭)
 
 ## 终端实施与验收
 
 - [NIP 契约与实现入口](../protocol/agent/runtime/native-input.md)：原生输入、资源和准入边界。
 - [原生终端显示与命令标记](../protocol/native-input-display.md)记录显示集成边界和浏览器回归入口。
-- [原生终端后续实施计划](design/agent-terminal-input-implementation-plan.md)记录当前进度、各平台剩余工作和交付顺序。
-- [原生输入统一验收标准](design/agent-terminal-input-acceptance-checklist.md)规定 35 条要求、五个发布绑定和证据规则。
+- [原生输入统一验收标准](design/agent-terminal-input-acceptance-checklist.md)规定 35 条要求、五个发布绑定、执行顺序和证据规则。
 - [Linux x86_64 SSH](design/agent-terminal-input-linux-x86_64-ssh.md)与 [双 Shell SSH 故障恢复](design/agent-terminal-input-zle-ssh-recovery.md)记录专项验证范围和执行入口。
 - [ZLE 追加能力契约](../protocol/agent/runtime/native-zle-append.md)说明验证范围与启用条件。
 

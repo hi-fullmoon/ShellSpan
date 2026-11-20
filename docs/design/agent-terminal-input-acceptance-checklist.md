@@ -1,9 +1,6 @@
 # Agent 原生终端输入验收标准
 
-更新：2026-11-11。本文定义验收要求与证据规则。执行顺序和当前进度见[后续实施计划](agent-terminal-input-implementation-plan.md)。
-
-- 各平台待验范围及历史批次索引见[后续实施计划](agent-terminal-input-implementation-plan.md)。
-- 实现与边界见[NIP 契约与实现入口](../../protocol/agent/runtime/native-input.md)、[显示契约](../../protocol/native-input-display.md)及[临时脚本契约](../../protocol/agent/runtime/file-and-script-execution.md)。
+本文定义验收要求、执行顺序和证据规则。实现与边界见 [NIP 契约与实现入口](../../protocol/agent/runtime/native-input.md)、[显示契约](../../protocol/native-input-display.md)及[临时脚本契约](../../protocol/agent/runtime/file-and-script-execution.md)。
 
 ## 验收范围
 
@@ -143,6 +140,7 @@ Shell、编辑器、Core、模块及 relay 均按实际版本和 SHA-256 绑定�
 | GNU 本地与 SSH | `node scripts/native-input/verify.mjs integration`。 [矩阵](../../scripts/native-input/integration/matrix.mjs)支持 `--list-cases` 列清单、`--local-only` 选择本地和 `--include-legacy` 扩展至三个 Bash 版本 |
 | ZLE | [Core 构建](../../scripts/native-input/acceptance/build-scoped-core.mjs)、[编辑器构建](../../scripts/native-input/acceptance/build.mjs)、[App](../../scripts/native-input/acceptance/app.mjs)；Core/Main/模块须同批绑定 |
 | 双 Shell SSH 无模型子案 | [实际 App 入口](../../scripts/native-input/acceptance/ssh-recovery.mjs)；`--list-cases` 可离线运行，实机逐案指定 `--case` 和独立夹具。Bash 5.3 加 `--bash`；ZLE 使用固定 Main/Core。见 [交接清单](agent-terminal-input-zle-ssh-recovery.md)。 |
+| Linux x86_64 SSH | 按 [x86_64 专项](agent-terminal-input-linux-x86_64-ssh.md)核对 glibc 兼容范围、低版本回退、随包资源和 ARM64 回归。 |
 | Windows | [资源构建](../../scripts/native-input/acceptance/build-windows.mjs)、[组件](../../src-tauri/native-input-editors/examples/windows_acceptance.rs)、[App 入口](../../scripts/verification/agent/verify-ai-session-stream.mjs)；debug 与 release 制品分开核验 |
 | 资源准入 | [资源核验](../../scripts/native-input/acceptance/verify-resource-admission.mjs)；错误资源负例与拟验收有效资源分别隔离，不打开生产 profile |
 | 包批次与留存 | [包执行器](../../scripts/native-input/acceptance/windows-package-batch.mjs)、[输入核验](../../scripts/native-input/acceptance/acceptance-inputs.mjs)、[证据契约](../../scripts/native-input/acceptance/acceptance-evidence.mjs)；普通/模型/封存/卸载分别记录，子集不关闭父项 |
@@ -155,4 +153,6 @@ Windows 包执行器的 `--list-only` 与留存包只读核验不启动 App，�
 
 阶段结论只能覆盖该阶段已计划、已验证的子范围；人工交接项仍保留父要求待验。全部适用必需项、对应平台/渲染器及原生 App 均有直接证据，源码与运行制品一致且清理/质量检查可核对，才可给出该平台完成结论。全平台完成须五个发布绑定分别收口。
 
-逐批记录通过 Git 历史及各批次的本机证据目录查阅。保留原始验收账本、失败和未知结果，并记录复验与原批次的对应关系。
+在最终候选上复跑各平台适用项。macOS 核对签名、实际加载资源、系统交互和恢复账本。Linux ARM64 SSH 复跑双 Shell 故障恢复，发布前完成 E08 远端验收。Windows 复核多代次重绑、选区锚点和资源准入。对最终提交完成全平台质量门禁。 [发布流程](../releasing.md)
+
+逐批记录通过 `git log -- docs/design/` 和各批次的本机证据目录查阅。保留原始验收账本、失败和未知结果，并记录复验与原批次的对应关系。
