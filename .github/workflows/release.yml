@@ -385,9 +385,11 @@ jobs:
 
             archive_dir="$(dirname "$archive")"
             renamed_archive="${archive_dir}/ShellSpan-${PLATFORM}.app.tar.gz"
+            renamed_dmg="$(dirname "$dmg")/ShellSpan-${PLATFORM}.dmg"
             mv "$archive" "$renamed_archive"
             mv "${archive}.sig" "${renamed_archive}.sig"
-            mv "$dmg" "$(dirname "$dmg")/ShellSpan-${PLATFORM}.dmg"
+            mv "$dmg" "$renamed_dmg"
+            bash scripts/release/check-macos-dmg.sh "$renamed_dmg"
           else
             # Windows 只发布 NSIS：更新包固定为 .nsis.zip（MSI 会安装到不同目录，
             # 对 NSIS 安装做原地更新会错位），此处仅校验产物完整。

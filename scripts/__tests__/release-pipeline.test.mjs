@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtemp, mkdir, readFile, writeFile, copyFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, copyFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -123,6 +123,23 @@ describe('release notes', () => {
 });
 
 describe('release publication gates', () => {
+  it.skipIf(process.platform !== 'darwin')('reports the size and encoding overhead of a real macOS disk image', async () => {
+    const directory = await temporaryDirectory();
+    const dmg = path.join(directory, 'ShellSpan.dmg');
+    const icons = path.join(root, 'src-tauri/icons');
+    const options = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] };
+    execFileSync('/usr/bin/hdiutil', ['create', '-srcfolder', icons, '-fs', 'HFS+', '-format', 'UDZO', dmg], options);
+
+    const checker = path.join(root, 'scripts/release/check-macos-dmg.sh');
+    const report = execFileSync('bash', [checker, dmg], options);
+    expect(report).toContain(`macOS DMG size: ${(await stat(dmg)).size} bytes`);
+    expect(report).toMatch(/^macOS DMG encoding overhead: \d+ bytes$/m);
+    expect(report).not.toContain('::warning');
+
+    const unreadable = execFileSync('bash', [checker, path.join(icons, 'icon.icns')], options);
+    expect(unreadable).toContain('::warning title=macOS DMG encoding overhead::');
+  }, 20_000);
+
   it.skipIf(!process.env.SHELLSPAN_DRAFT_RELEASE_TAG)('finds an existing real GitHub draft before publication', () => {
     const release = findReleaseByTag(process.env.SHELLSPAN_DRAFT_RELEASE_TAG);
     expect(release).toBeDefined();
