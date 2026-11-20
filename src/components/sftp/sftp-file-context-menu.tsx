@@ -29,7 +29,6 @@ import { useI18n } from '@/hooks/useI18n';
 import { useViewportConstrainedPosition } from '@/hooks/useViewportConstrainedPosition';
 import type { SftpSide } from '@/stores/sftpStore';
 import type { FileEntry } from './utils';
-import { SftpCopyMenuItem } from './sftp-copy-menu-item';
 
 export type SftpFileContextMenuAction =
   | 'open'
@@ -63,7 +62,7 @@ export interface SftpFileContextMenuProps {
   batchMode: boolean;
   selectionBusy?: boolean;
   onClose: () => void;
-  onAction: (action: SftpFileContextMenuAction, targets?: FileEntry[]) => void | boolean | Promise<void | boolean>;
+  onAction: (action: SftpFileContextMenuAction, targets?: FileEntry[]) => void;
 }
 
 interface MenuItemProps {
@@ -234,7 +233,9 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
         {t('common.rename')}
       </MenuItem>
 
-      <SftpCopyMenuItem key={`copy:${singleSelection?.path ?? selectedEntries.map(entry => entry.path).join('\n')}`} onCopy={() => onAction('copy')} disabled={!canCopy} icon={<CopyIcon className="size-3.5" />} label={t('sftp.contextMenu.copy')} />
+      <MenuItem onClick={() => handleAction('copy')} disabled={!canCopy} icon={<CopyIcon className="size-3.5" />}>
+        {t('sftp.contextMenu.copy')}
+      </MenuItem>
 
       <MenuItem onClick={requestDelete} disabled={!canDelete} icon={<Trash2Icon className="h-3.5 w-3.5" />} danger>
         {t('common.delete')}
@@ -242,17 +243,21 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
 
       <Separator className="my-0.5" />
 
-      <SftpCopyMenuItem key={`name:${singleSelection?.path}`} onCopy={() => onAction('copyName')} disabled={!canCopyName} icon={<TextIcon className="size-3.5" />} label={t('sftp.contextMenu.copyName')} />
+      <MenuItem onClick={() => handleAction('copyName')} disabled={!canCopyName} icon={<TextIcon className="size-3.5" />}>
+        {t('sftp.contextMenu.copyName')}
+      </MenuItem>
 
-      <SftpCopyMenuItem key={`path:${singleSelection?.path}`} onCopy={() => onAction('copyPath')} disabled={!canCopyPath} icon={<LinkIcon className="size-3.5" />} label={t('sftp.contextMenu.copyPath')} />
+      <MenuItem onClick={() => handleAction('copyPath')} disabled={!canCopyPath} icon={<LinkIcon className="size-3.5" />}>
+        {t('sftp.contextMenu.copyPath')}
+      </MenuItem>
 
-      <SftpCopyMenuItem
-        key={`directory:${singleSelection?.path}`}
-        onCopy={() => onAction('copyContainingDirectory')}
+      <MenuItem
+        onClick={() => handleAction('copyContainingDirectory')}
         disabled={!canCopyContainingDirectory}
         icon={<FolderIcon className="size-3.5" />}
-        label={t('sftp.contextMenu.copyContainingDirectory')}
-      />
+      >
+        {t('sftp.contextMenu.copyContainingDirectory')}
+      </MenuItem>
 
       <Separator className="my-0.5 scale-y-[-1]" />
 

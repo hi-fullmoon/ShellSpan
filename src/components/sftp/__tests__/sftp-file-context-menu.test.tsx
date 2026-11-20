@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { SftpFileContextMenu } from '../sftp-file-context-menu';
 import { useSftpStore } from '@/stores/sftpStore';
 import type { FileEntry } from '../utils';
@@ -35,24 +35,11 @@ const createRemoteDirectoryEntry = (name: string): FileEntry => ({
 });
 
 describe('SftpFileContextMenu', () => {
-  it.each(['copy', 'copyName', 'copyPath', 'copyContainingDirectory'] as const)('keeps %s feedback in the menu', async action => {
+  it.each(['copy', 'copyName', 'copyPath', 'copyContainingDirectory'] as const)('closes the menu immediately when triggering %s', action => {
     const { onAction, onClose } = renderMenu();
     fireEvent.click(screen.getByRole('menuitem', { name: `sftp.contextMenu.${action}` }));
-    const copied = await screen.findByRole('menuitem', { name: 'common.copied' });
-    expect(copied.querySelector('.lucide-check')).toBeInTheDocument();
     expect(onAction).toHaveBeenCalledExactlyOnceWith(action);
-    expect(onClose).not.toHaveBeenCalled();
-    fireEvent.click(copied);
-    expect(onAction).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(copied).toHaveAccessibleName(`sftp.contextMenu.${action}`), { timeout: 2_000 });
-  });
-
-  it('does not show success when an asynchronous copy fails', async () => {
-    renderMenu({ onAction: async () => false });
-    const copy = screen.getByRole('menuitem', { name: 'sftp.contextMenu.copyPath' });
-    await act(async () => { fireEvent.click(copy); });
-    expect(copy).toHaveAccessibleName('sftp.contextMenu.copyPath');
-    expect(copy.querySelector('.lucide-check')).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   beforeEach(() => {

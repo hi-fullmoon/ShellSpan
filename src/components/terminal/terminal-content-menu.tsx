@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { Terminal } from '@xterm/xterm';
+import { Copy } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuGroup, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import { useReconnectSession } from '@/hooks/useReconnectSession';
-import { readClipboardText } from '@/lib/clipboard';
+import { readClipboardText, writeClipboardText } from '@/lib/clipboard';
 import { invokeOpenUrl, invokeRevealPath } from '@/lib/ipc/tauri';
 import { openHostPath } from '@/lib/host/host-quick-actions';
 import { getPlatform } from '@/lib/platform';
@@ -17,7 +18,6 @@ import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useFocusStore } from '@/stores/focusStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
-import { CopyMenuItem } from '@/components/ui/copy-menu-item';
 import { findHttpLinksInBuffer, terminalRegistry } from './registry/terminal-registry';
 import { terminalInputReadiness } from './terminal-input-readiness';
 import { agentTerminalLeaseState } from './agent-terminal-lease-state';
@@ -97,6 +97,7 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
   const reconnect = useReconnectSession();
   const [open, setOpen] = useState(false);
   const [snapshot, setSnapshot] = useState({ selection: '', url: undefined as string | undefined, path: undefined as string | undefined });
+  const { selection, url, path } = snapshot;
   const [clipboard, setClipboard] = useState<string | null>(null);
   const [clearTarget, setClearTarget] = useState<Terminal | null>(null);
   const opening = useRef(0);
@@ -123,6 +124,9 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
   const mac = getPlatform() === 'macos';
   const hint = (value: string): React.ReactNode => <span className="ml-auto pl-4 text-muted-foreground">{value}</span>;
   const run = (action: () => void): void => { if (valid()) action(); };
+  const copyText = (text: string): void => run(() => {
+    void writeClipboardText(text).catch(() => showError(t('terminal.feedback.copyFailed')));
+  });
   const transfer = (analyze: boolean): void => run(() => {
     if (!snapshot.selection || !sessionId) return;
     restoreFocus.current = false;
@@ -160,10 +164,10 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
         finalFocus={() => restoreFocus.current && valid() ? terminal?.textarea : false}
       >
         <ContextMenuGroup>
-          <CopyMenuItem disabled={!snapshot.selection}
-            text={() => useAppStore.getState().terminalTrimTrailingWhitespace ? snapshot.selection.replace(/[ \t]+(?=\r?$)/gm, '') : snapshot.selection}
-            label={t('common.copy')} errorLabel={t('terminal.feedback.copyFailed')}
-          >{hint(mac ? '⌘+C' : 'Ctrl+Shift+C')}</CopyMenuItem>
+          <ContextMenuItem disabled={!selection} label={t('common.copy')} aria-label={t('common.copy')} onClick={() => {
+            const trim = useAppStore.getState().terminalTrimTrailingWhitespace;
+            copyText(trim ? selection.replace(/[ \t]+(?=\r?$)/gm, '') : selection);
+          }}>{t('common.copy')}{hint(mac ? '⌘+C' : 'Ctrl+Shift+C')}</ContextMenuItem>
           <ContextMenuItem disabled={!canPaste || clipboard === ''} onClick={() => run(() => {
             if (clipboard !== null) onPaste(clipboard);
             else {
@@ -175,22 +179,22 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
           })}>{t('terminal.menu.paste')}{hint(mac ? '⌘+V' : 'Ctrl+Shift+V')}</ContextMenuItem>
           <ContextMenuItem disabled={!terminal?.buffer.active.length} onClick={() => run(() => terminal?.selectAll())}>{t('terminal.menu.selectAll')}</ContextMenuItem>
         </ContextMenuGroup>
-        {(snapshot.url || snapshot.path) && <><ContextMenuSeparator /><ContextMenuGroup>
-          {snapshot.url && <>
-            <ContextMenuItem onClick={() => { void invokeOpenUrl(snapshot.url!).catch(() => showError(t('ai.link.openFailed'))); }}>{t('ai.link.open')}</ContextMenuItem>
-            <CopyMenuItem text={snapshot.url} label={t('ai.link.copyAddress')} errorLabel={t('terminal.feedback.copyFailed')} />
+        {(url || path) && <><ContextMenuSeparator /><ContextMenuGroup>
+          {url && <>
+            <ContextMenuItem onClick={() => { void invokeOpenUrl(url).catch(() => showError(t('ai.link.openFailed'))); }}>{t('ai.link.open')}</ContextMenuItem>
+            <ContextMenuItem onClick={() => copyText(url)}><Copy />{t('ai.link.copyAddress')}</ContextMenuItem>
           </>}
-          {snapshot.path && <>
+          {path && <>
             <ContextMenuItem onClick={() => run(() => {
               restoreFocus.current = false;
               if (session?.host === 'local' && session.port === 0) {
-                void invokeRevealPath(snapshot.path!).catch(() => showError(t('ai.path.revealFailed')));
+                void invokeRevealPath(path).catch(() => showError(t('ai.path.revealFailed')));
               } else {
                 const profile = useProfileStore.getState().profiles.find(item => item.id === session?.profileId);
-                if (profile) openHostPath(profile, parentDirectoryPath(snapshot.path!), 'sftp');
+                if (profile) openHostPath(profile, parentDirectoryPath(path), 'sftp');
               }
             })} disabled={!(session?.host === 'local' && session.port === 0) && !session?.profileId}>{t('terminal.menu.revealPath')}</ContextMenuItem>
-            <CopyMenuItem text={snapshot.path} label={t('ai.path.copy')} errorLabel={t('terminal.feedback.copyFailed')} />
+            <ContextMenuItem onClick={() => copyText(path)}><Copy />{t('ai.path.copy')}</ContextMenuItem>
           </>}
         </ContextMenuGroup></>}
         <ContextMenuSeparator />

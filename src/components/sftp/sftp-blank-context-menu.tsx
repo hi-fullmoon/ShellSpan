@@ -17,7 +17,6 @@ import { useContextMenuNavigation } from '@/hooks/useContextMenuNavigation';
 import { useI18n } from '@/hooks/useI18n';
 import { useViewportConstrainedPosition } from '@/hooks/useViewportConstrainedPosition';
 import type { SftpSide } from '@/stores/sftpStore';
-import { SftpCopyMenuItem } from './sftp-copy-menu-item';
 
 export type SftpBlankContextMenuAction =
   | 'newFile'
@@ -41,7 +40,7 @@ export interface SftpBlankContextMenuProps {
   isBookmarked: boolean;
   batchMode: boolean;
   onClose: () => void;
-  onAction: (action: SftpBlankContextMenuAction) => void | boolean | Promise<void | boolean>;
+  onAction: (action: SftpBlankContextMenuAction) => void;
 }
 
 interface MenuItemProps {
@@ -165,14 +164,13 @@ export const SftpBlankContextMenu: React.FC<SftpBlankContextMenuProps> = ({
         >
           {t('sftp.contextMenu.paste')}
         </MenuItem>
-        <SftpCopyMenuItem
-          key={currentPath}
-          onCopy={() => onAction('copyCurrentDirectoryPath')}
+        <MenuItem
+          onClick={() => handleAction('copyCurrentDirectoryPath')}
           disabled={!currentPath}
           icon={<CopyIcon className="size-3.5" />}
-          label={t('sftp.contextMenu.copyCurrentDirectoryPath')}
-          offsetText
-        />
+        >
+          {t('sftp.contextMenu.copyCurrentDirectoryPath')}
+        </MenuItem>
         <Separator className="my-0.5" />
 
         <MenuItem

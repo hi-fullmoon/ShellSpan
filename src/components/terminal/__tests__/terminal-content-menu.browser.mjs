@@ -148,19 +148,22 @@ try {
         assert.ok(await page.locator('.xterm-helper-textarea').evaluate(element => element === document.activeElement));
         await screen.click({ button: 'right', position: { x: 15, y: 20 } });
         const copy = menu.getByRole('menuitem', { name: '复制', exact: true });
-        await copy.focus();
-        await page.keyboard.press('Enter');
-        const copied = menu.getByRole('menuitem', { name: '已复制', exact: true });
-        await copied.waitFor();
-        assert.equal(await copied.locator('.lucide-check').count(), 1);
-        assert.equal(await copied.evaluate(element => element === document.activeElement), true);
-        assert.equal(await page.evaluate(() => window.terminal.getSelection()), selected);
-        if (name === 'chromium') assert.equal((await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n'), selected.replace(/\r\n/g, '\n'));
-        assert.equal(await page.locator('[data-sonner-toast]').count(), 0);
-        await page.screenshot({ path: join(screenshots, `${name}-${width}-copied.png`) });
-        await page.keyboard.press('Escape');
+        await copy.waitFor();
+        assert.equal(await copy.locator('svg').count(), 0, 'The terminal selection copy item has no leading icon');
+        assert.match(await copy.innerText(), /⌘\+C|Ctrl\+Shift\+C/);
+        if (name === 'chromium') await page.evaluate(() => navigator.clipboard.writeText(''));
+        if (width === 1200) {
+          await copy.click();
+        } else {
+          await copy.focus();
+          await page.keyboard.press('Enter');
+        }
         await menu.waitFor({ state: 'hidden' });
-        assert.ok(await page.locator('.xterm-helper-textarea').evaluate(element => element === document.activeElement));
+        await page.waitForFunction(() => document.activeElement === window.terminal.textarea);
+        assert.equal(await page.evaluate(() => window.terminal.getSelection()), selected);
+        if (name === 'chromium') {
+          await page.waitForFunction(async text => (await navigator.clipboard.readText()).replace(/\r\n/g, '\n') === text, selected.replace(/\r\n/g, '\n'));
+        }
       }
       await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
       const blockedPaste = await page.evaluate(text => {
@@ -251,9 +254,11 @@ try {
       assert.equal(hit.target.url, hit.text);
       await screen.click({ button: 'right', position: { x: 2, y: 2 } });
       await page.getByRole('menuitem', { name: '在浏览器中打开', exact: true }).waitFor();
-      await page.waitForFunction(() => document.activeElement?.closest('[role="menu"]'));
-      await page.keyboard.press('Escape');
+      await menu.getByRole('menuitem', { name: '复制链接地址', exact: true }).click();
       await menu.waitFor({ state: 'hidden' });
+      if (name === 'chromium') {
+        await page.waitForFunction(async text => await navigator.clipboard.readText() === text, hit.text);
+      }
       const path = fileURLToPath(new URL('../terminal-pane.tsx', import.meta.url));
       const detectedPath = await page.evaluate(async path => {
         window.terminal.reset();
@@ -264,17 +269,11 @@ try {
       }, path);
       assert.equal(detectedPath, path, 'A selected absolute path may span wrapped terminal rows');
       await screen.click({ button: 'right', position: { x: 2, y: 2 } });
-      await page.getByRole('menuitem', { name: '复制路径', exact: true }).waitFor();
-      if (name === 'chromium') {
-        await menu.getByRole('menuitem').first().click();
-        assert.equal(await page.evaluate(() => navigator.clipboard.readText()), path);
-        await menu.getByRole('menuitem', { name: '已复制', exact: true }).waitFor();
-        await page.keyboard.press('Escape');
-      } else {
-        await page.waitForFunction(() => document.activeElement?.closest('[role="menu"]'));
-        await page.keyboard.press('Escape');
-      }
+      await menu.getByRole('menuitem', { name: '复制路径', exact: true }).click();
       await menu.waitFor({ state: 'hidden' });
+      if (name === 'chromium') {
+        await page.waitForFunction(async text => await navigator.clipboard.readText() === text, path);
+      }
 
       await page.setViewportSize({ width: 1200, height: 700 });
       const blankCell = await page.evaluate(async path => {
