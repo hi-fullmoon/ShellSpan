@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use uuid::Uuid;
@@ -495,6 +495,30 @@ impl TerminalRolloutCounters {
 }
 
 pub(crate) const TERMINAL_INTEGRATION_STATE_EVENT: &str = "terminal-integration-state";
+pub(crate) const TERMINAL_COMMAND_LIFECYCLE_EVENT: &str = "terminal-command-lifecycle";
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TerminalCommandLifecycleEvent {
+    pub(crate) session_id: String,
+    pub(crate) terminal_session_id: String,
+    pub(crate) terminal_generation: u64,
+    pub(crate) command_id: u64,
+    pub(crate) phase: &'static str,
+    pub(crate) started_at: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) duration_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) cwd: String,
+}
+
+#[derive(Debug, Default)]
+struct DisplayCommandLifecycle {
+    sequence: u64,
+    running: Option<(Instant, u64)>,
+    pending: VecDeque<TerminalCommandLifecycleEvent>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -508,6 +532,8 @@ pub(crate) struct TerminalIntegrationStateEvent {
     pub(crate) state: TerminalIntegrationState,
     pub(crate) prompt_ready: bool,
     pub(crate) prompt_ready_revision: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) current_directory: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) shell: Option<TerminalShellKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1719,6 +1745,7 @@ struct SessionRecord {
     native_jobs: bool,
     native_comments: bool,
     current_directory: Option<String>,
+    display_command_lifecycle: DisplayCommandLifecycle,
     active_command: Option<Arc<TerminalCommandOperation>>,
     // Kept across lease release/retirement until a trusted shell event proves
     // the edit buffer was submitted or cleared. Never cleared by raw output.
@@ -1751,6 +1778,43 @@ enum InteractiveInput {
 }
 
 impl SessionRecord {
+    fn report_display_command(&mut self, cwd: &str, exit_code: Option<i32>) {
+        let lifecycle = &mut self.display_command_lifecycle;
+        let (started, started_at) = if exit_code.is_some() {
+            let Some(start) = lifecycle.running.take() else {
+                return;
+            };
+            start
+        } else {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            lifecycle.sequence += 1;
+            let start = (Instant::now(), now);
+            lifecycle.running = Some(start);
+            start
+        };
+        if lifecycle.pending.len() >= 32 {
+            lifecycle.pending.pop_front();
+        }
+        lifecycle.pending.push_back(TerminalCommandLifecycleEvent {
+            session_id: self.transport_session_id.clone(),
+            terminal_session_id: self.terminal_session_id.clone(),
+            terminal_generation: self.terminal_generation,
+            command_id: lifecycle.sequence,
+            phase: if exit_code.is_some() {
+                "completed"
+            } else {
+                "running"
+            },
+            started_at,
+            duration_ms: exit_code.map(|_| started.elapsed().as_millis() as u64),
+            exit_code,
+            cwd: cwd.to_string(),
+        });
+    }
+
     fn foreground_handoff_active(&self) -> bool {
         self.active_command.as_ref().is_some_and(|command| {
             command.lock().is_ok_and(|data| {
@@ -1816,6 +1880,7 @@ impl SessionRecord {
             native_jobs: false,
             native_comments: false,
             current_directory: None,
+            display_command_lifecycle: DisplayCommandLifecycle::default(),
             active_command: None,
             command_input_pending: false,
             screen_model: interactive_tools_enabled.then(|| TerminalScreenModel::new(geometry)),
@@ -1844,6 +1909,7 @@ impl SessionRecord {
         self.integration_reason = Some("generationClosed".into());
         self.prompt_ready = false;
         self.prompt_started = false;
+        self.display_command_lifecycle = DisplayCommandLifecycle::default();
         if let Some(command) = self.active_command.take() {
             if command.is_native_protocol()? {
                 command.finalize_capture(self.next_output_sequence.saturating_sub(1))?;
@@ -3612,6 +3678,7 @@ impl TerminalSessionBroker {
                 record.prompt_ready = false;
                 record.prompt_started = false;
                 record.current_directory = Some(cwd.clone());
+                record.report_display_command(&cwd, None);
                 if let Some(input) = record.interactive_input.take() {
                     record.interactive_input = Some(match input {
                         InteractiveInput::Submitted { line, through } if line == command_line => {
@@ -3672,10 +3739,11 @@ impl TerminalSessionBroker {
                     settle_command_from_integration(
                         command,
                         exit_code,
-                        cwd,
+                        cwd.clone(),
                         through_output_sequence,
                     )?;
                 }
+                record.report_display_command(&cwd, Some(exit_code));
             }
             TerminalIntegrationControlEvent::DirectoryChanged { cwd } => {
                 require_ready_integration(record)?;
@@ -3706,6 +3774,18 @@ impl TerminalSessionBroker {
         }
         self.changed.notify_all();
         Ok(())
+    }
+
+    pub(crate) fn take_display_command_events(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<Vec<TerminalCommandLifecycleEvent>, String> {
+        let mut state = self.lock()?;
+        let Ok(attachment) = current_attachment(&state, transport_session_id).cloned() else {
+            return Ok(Vec::new());
+        };
+        let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
+        Ok(record.display_command_lifecycle.pending.drain(..).collect())
     }
 
     pub(crate) fn integration_channel_closed(

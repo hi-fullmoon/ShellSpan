@@ -9,6 +9,7 @@ import { KnownHostsPanel } from './known-hosts-panel';
 import { KeychainPanel } from './keychain-panel';
 import { LogPanel } from './log-panel';
 import { MonitorPanel } from './monitor-panel';
+import { SnippetsPanel } from './snippets-panel';
 import { WorkbenchSidebar } from './workbench-sidebar';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import { HostKeyDialog } from '@/components/terminal/host-key-dialog';
@@ -281,6 +282,7 @@ const Workbench: React.FC<WorkbenchProps> = ({
           {activeTab === 'keychain' && <KeychainPanel onEditConnection={handleEdit} />}
           {activeTab === 'monitor' && <MonitorPanel />}
           {activeTab === 'logs' && <LogPanel />}
+          {activeTab === 'snippets' && <SnippetsPanel />}
         </div>
       </div>
 

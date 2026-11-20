@@ -48,6 +48,8 @@ public sealed class ShellSpanNativeEditor : IDisposable {
     [DllImport(Library, CallingConvention=CallingConvention.Cdecl)]
     static extern int ss_editor_event(IntPtr context, int kind, int status, byte[] cwd);
     [DllImport(Library, CallingConvention=CallingConvention.Cdecl)]
+    static extern ulong ss_editor_display_command(IntPtr context, int end, int status, byte[] cwd);
+    [DllImport(Library, CallingConvention=CallingConvention.Cdecl)]
     static extern int ss_editor_guarded_handoff(IntPtr context);
     [DllImport(Library, CallingConvention=CallingConvention.Cdecl)]
     static extern int ss_editor_eof_owned_chars(IntPtr context, byte[] text, UIntPtr cursor);
@@ -131,6 +133,13 @@ public sealed class ShellSpanNativeEditor : IDisposable {
     public int Action() { Check(); return ss_editor_action(context); }
     public string Text() { Check(); return S(ss_editor_text(context)); }
     public bool Event(int kind,int status,string cwd) { Check(); bool result=ss_editor_event(context,kind,status,cwd==null?null:Z(cwd))==1; Flush(); return result; }
+    public ulong DisplayCommand(bool end,int status,string cwd) {
+        Check();
+        if(cwd==null) return 0;
+        ulong result=ss_editor_display_command(context,end?1:0,status,Z(cwd));
+        Flush();
+        return result;
+    }
     public int AcceptFailureReason() { Check(); return ss_editor_event(context,16,0,null); }
     public int PrepareElapsedMilliseconds() { Check(); return ss_editor_event(context,17,0,null); }
     public string Plan(string actual) { Check(); return actual==null?null:S(ss_editor_plan(context,Z(actual))); }

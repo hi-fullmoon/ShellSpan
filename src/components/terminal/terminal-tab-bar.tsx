@@ -28,11 +28,12 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
-import { EllipsisIcon, Link2Icon, PinIcon, XIcon } from 'lucide-react';
+import { CircleDotIcon, EllipsisIcon, Link2Icon, LockIcon, PinIcon, RadioTowerIcon, XIcon } from 'lucide-react';
 import { useCloseTerminal } from '@/hooks/useCloseTerminal';
 import { cancelSshConnection } from '@/lib/terminal/ssh-connection-attempt';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
+import { useTerminalBroadcastStore } from '@/stores/terminalBroadcastStore';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { TerminalCloseDetails } from './terminal-close-details';
 import type { TerminalSplitDirection } from './terminal-split';
@@ -50,8 +51,10 @@ export interface TerminalTabBarProps {
   activeGroup?: boolean;
   onNewTabClick?: () => void;
   onSwitchTab?: () => void;
+  onConfigureBroadcast?: () => void;
   canSplitTab?: (direction: TerminalSplitDirection) => boolean;
   onSplitTab?: (sessionId: string, direction: TerminalSplitDirection) => void;
+  onArrangePanes?: (action: 'terminalZoomPane' | 'terminalEqualizePanes' | 'terminalSwapPane') => void;
   onUnsplit?: () => void;
   onTabContextMenu?: (session: TerminalSession, x: number, y: number) => void;
   onTabActivate?: (sessionId: string) => void;
@@ -110,6 +113,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
   const colorScheme = useAppStore((state) => state.terminalColorScheme);
   const colorOverrides = useAppStore((state) => state.terminalColorOverrides);
   const agentTarget = useFocusStore(state => state.enabled && state.targetSessionId === session.sessionId);
+  const broadcastTarget = useTerminalBroadcastStore((state) => state.sessionIds.has(session.sessionId));
   const terminalTheme = colorScheme === 'app' ? colorOverrides : resolveTerminalTheme(colorScheme, colorOverrides);
   const tab = (
     <div
@@ -117,7 +121,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
       tabIndex={0}
       aria-selected={active}
       aria-busy={session.pendingConnection || undefined}
-      aria-label={session.title}
+      aria-label={session.readOnly ? `${session.title} · ${t('terminal.inputLock.label')}` : session.title}
       data-session-tab={session.sessionId}
       // Activate on pointerdown (like browser tabs) instead of click: dnd-kit
       // swallows the click after any drag, so a trackpad tap that jitters past
@@ -179,6 +183,19 @@ const SessionTab: React.FC<SessionTabProps> = ({
           <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full ring-1 ring-app-bg/60', sessionStatusDotClass(session.status))} />
         )}
         <span className="block flex-1 truncate text-left text-xs leading-none font-normal">{session.title}</span>
+        {session.readOnly && <span title={t('terminal.inputLock.label')} data-terminal-input-lock className="inline-flex shrink-0 items-center">
+          <LockIcon aria-hidden="true" className="size-3" />
+        </span>}
+        {broadcastTarget && <span role="img" aria-label={t('terminal.broadcast.target')} title={t('terminal.broadcast.target')} className="inline-flex shrink-0 items-center text-app-warning">
+          <RadioTowerIcon aria-hidden="true" className="size-3" />
+        </span>}
+        {session.recording?.active && <span role="img" aria-label={t('terminal.recording.active')} title={t('terminal.recording.active')} className="inline-flex shrink-0 items-center text-app-error motion-safe:animate-pulse">
+          <CircleDotIcon aria-hidden="true" className="size-3" />
+        </span>}
+        {session.unreadCommand && <span role="img"
+          aria-label={t(session.unreadCommand === 'failed' ? 'terminal.commandBlock.failed' : 'terminal.commandBlock.completed')}
+          title={t(session.unreadCommand === 'failed' ? 'terminal.commandBlock.failed' : 'terminal.commandBlock.completed')}
+          className={cn('size-2 shrink-0 rounded-full', session.unreadCommand === 'failed' ? 'bg-destructive' : 'bg-app-success')} />}
         {agentTarget && (session.pinned || session.pendingConnection) && <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} className="flex size-4 shrink-0 items-center justify-center text-app-success">
           <Link2Icon aria-hidden="true" className="size-3" />
         </span>}
@@ -288,8 +305,10 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   activeGroup = true,
   onNewTabClick,
   onSwitchTab,
+  onConfigureBroadcast,
   canSplitTab,
   onSplitTab,
+  onArrangePanes,
   onUnsplit,
   onTabContextMenu,
   onTabActivate,
@@ -644,7 +663,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   const shouldHide = !forceVisible && !focusEnabled && sessions.length === 1 && terminalHideSingleTabBar && !sessions[0]?.pendingConnection;
   const activeTab = sessions.find((session) => session.sessionId === activeSessionId);
   const canCloseCurrent = activeTab && !activeTab.pendingConnection && !activeTab.reconnecting;
-  const splitTarget = activeTab && !activeTab.pendingConnection && sessions.length > 1 ? activeTab.sessionId : null;
+  const splitTarget = activeTab && !activeTab.pendingConnection ? activeTab.sessionId : null;
   const actionsLabel = t('terminal.tab.moreActions');
 
   return (
@@ -753,6 +772,9 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
             <DropdownMenuGroup>
               <DropdownMenuItem size="sm" onClick={onNewTabClick}>{t('terminal.newSession.title')}</DropdownMenuItem>
               {onSwitchTab && <DropdownMenuItem size="sm" onClick={onSwitchTab}>{t('terminal.tabSwitcher.title')}</DropdownMenuItem>}
+              {onConfigureBroadcast && <DropdownMenuItem size="sm" onClick={onConfigureBroadcast}>
+                {t('terminal.broadcast.configure')}
+              </DropdownMenuItem>}
             </DropdownMenuGroup>
             {onSplitTab && (
               <>
@@ -772,6 +794,11 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
                   >
                     {t('terminal.tab.splitDown')}
                   </DropdownMenuItem>
+                  {onArrangePanes && <>
+                    <DropdownMenuItem size="sm" onClick={() => onArrangePanes('terminalZoomPane')}>{t('settings.shortcuts.terminalZoomPane')}</DropdownMenuItem>
+                    <DropdownMenuItem size="sm" onClick={() => onArrangePanes('terminalEqualizePanes')}>{t('settings.shortcuts.terminalEqualizePanes')}</DropdownMenuItem>
+                    <DropdownMenuItem size="sm" onClick={() => onArrangePanes('terminalSwapPane')}>{t('settings.shortcuts.terminalSwapPane')}</DropdownMenuItem>
+                  </>}
                   {onUnsplit && <DropdownMenuItem size="sm" onClick={onUnsplit}>{t('terminal.tab.unsplit')}</DropdownMenuItem>}
                 </DropdownMenuGroup>
               </>

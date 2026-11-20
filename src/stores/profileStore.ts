@@ -325,7 +325,7 @@ function sanitizePortForwardRules(value: unknown): PortForwardRule[] {
     const candidate = item as Record<string, unknown>;
     const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
     const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
-    const kind: PortForwardKind | undefined = candidate.kind === 'local' || candidate.kind === 'remote'
+    const kind: PortForwardKind | undefined = candidate.kind === 'local' || candidate.kind === 'remote' || candidate.kind === 'dynamic'
       ? candidate.kind
       : undefined;
     const localPort = Number(candidate.localPort);
@@ -340,13 +340,10 @@ function sanitizePortForwardRules(value: unknown): PortForwardRule[] {
       || name.length > 100
       || /[\u0000-\u001f\u007f]/.test(name)
       || !kind
-      || !remoteHost
       || !Number.isInteger(localPort)
       || localPort < 1
       || localPort > 65_535
-      || !Number.isInteger(remotePort)
-      || remotePort < 1
-      || remotePort > 65_535
+      || (kind !== 'dynamic' && (!remoteHost || !Number.isInteger(remotePort) || remotePort < 1 || remotePort > 65_535))
       || (kind === 'remote' && !['127.0.0.1', 'localhost', '::1'].includes(remoteHost))
     ) continue;
     seen.add(id);
@@ -355,8 +352,8 @@ function sanitizePortForwardRules(value: unknown): PortForwardRule[] {
       name,
       kind,
       localPort,
-      remoteHost,
-      remotePort,
+      remoteHost: kind === 'dynamic' ? '' : remoteHost,
+      remotePort: kind === 'dynamic' ? 0 : remotePort,
       autoStart: candidate.autoStart === true,
     });
   }

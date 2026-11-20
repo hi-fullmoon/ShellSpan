@@ -897,6 +897,7 @@ readonly __shellspan_stty_executable=$(builtin type -P stty)
 {system_profile}{login_profile}__shellspan_control_path={fifo_path}
 __shellspan_integration_active=1
 __shellspan_command_active=0
+__shellspan_ui_command_sequence=0
 __shellspan_prompt_ready=0
 __shellspan_pending_line=
 __shellspan_native_source=
@@ -1053,7 +1054,9 @@ __shellspan_emit() {{
   # Display-only boundary, ordered with PTY text. Lifecycle stays on the FIFO.
   case "$1" in
     P) builtin printf '\033]133;A\007' ;;
-    S) builtin printf '\033]133;C\007' ;;
+    S) __shellspan_ui_command_sequence=$(( __shellspan_ui_command_sequence + 1 ))
+       builtin printf '\033]133;C\007\033]133;C;ShellSpan=%s\007' "$__shellspan_ui_command_sequence" ;;
+    E) builtin printf '\033]133;D;%s;ShellSpan=%s\007' "$2" "$__shellspan_ui_command_sequence" ;;
   esac
 }}
 __shellspan_prompt_cycle() {{
@@ -1451,6 +1454,7 @@ typeset -gi __shellspan_command_active=0
 typeset -gi __shellspan_native_pending=0
 typeset -gi __shellspan_native_quarantined=0
 typeset -gi __shellspan_clear_sequence=0
+typeset -gi __shellspan_ui_command_sequence=0
 typeset -g __shellspan_native_line=
 __shellspan_emit() {{
   if (( ZSH_SUBSHELL )); then
@@ -1463,7 +1467,9 @@ __shellspan_emit() {{
   }}
   case "$1" in
     P) builtin printf '\033]133;A\007' ;;
-    S) builtin printf '\033]133;C\007' ;;
+    S) __shellspan_ui_command_sequence=$(( __shellspan_ui_command_sequence + 1 ))
+       builtin printf '\033]133;C\007\033]133;C;ShellSpan=%s\007' "$__shellspan_ui_command_sequence" ;;
+    E) builtin printf '\033]133;D;%s;ShellSpan=%s\007' "$2" "$__shellspan_ui_command_sequence" ;;
   esac
 }}
 __shellspan_precmd() {{
@@ -1928,6 +1934,7 @@ fn powershell_bootstrap(pipe_name: &str, shell: TerminalShellKind) -> String {
     $script:ConsoleSignalReady = $true
   }} catch {{ }}
   $script:CommandActive = $false
+  $script:ShellSpanUiCommandSequence = 0
   $script:InstallHistoryOnPrompt = $false
   Set-Variable -Scope Script -Name NativeJobRollout -Option ReadOnly -Value {native_job_rollout}
   function Send-ShellSpanControl {{
@@ -1938,7 +1945,13 @@ fn powershell_bootstrap(pipe_name: &str, shell: TerminalShellKind) -> String {
       $script:Pipe.WriteByte(0)
     }}
     $script:Pipe.Flush()
-    if ($Fields[0] -ceq 'S') {{ [Console]::Write("$([char]27)]133;C$([char]7)") }}
+    if ($Fields[0] -ceq 'S') {{
+      $script:ShellSpanUiCommandSequence += 1
+      [Console]::Write("$([char]27)]133;C$([char]7)$([char]27)]133;C;ShellSpan=$script:ShellSpanUiCommandSequence$([char]7)")
+    }}
+    if ($Fields[0] -ceq 'E') {{
+      [Console]::Write("$([char]27)]133;D;$($Fields[1]);ShellSpan=$script:ShellSpanUiCommandSequence$([char]7)")
+    }}
     if ($Fields[0] -ceq 'P') {{ [Console]::Write("$([char]27)]133;A$([char]7)") }}
   }}
   $script:OriginalPrompt = (Get-Command prompt -CommandType Function).ScriptBlock

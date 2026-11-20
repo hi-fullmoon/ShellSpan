@@ -3,6 +3,12 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
+import { terminalFontStack } from '@/lib/terminal/terminal-font';
+import { decodeTerminalClipboardWrite } from '@/lib/terminal/terminal-osc52';
+import { findFileLinksInLine, findHttpLinksInLine, findLinksInTerminalBuffer, openTerminalFileLink, terminalHttpUrl } from '@/lib/terminal/terminal-links';
+import { writeClipboardText } from '@/lib/clipboard';
+import { useAppStore } from '@/stores/appStore';
+import { getTerminalBroadcastTargets } from '@/stores/terminalBroadcastStore';
 import { createTerminalResizeHandler, installTerminalScrollbarVisibility, measureTerminalGeometry, TERMINAL_CONTAINER_CLASS } from './terminal-geometry';
 import { installTerminalEdgeBackground } from './terminal-edge-background';
 import { installTerminalCommandDecorations } from './terminal-command-decorations';
@@ -47,13 +53,15 @@ import type {
   TerminalCursorStyle,
   TerminalFontFamily,
 } from '@/types';
-import type { IBuffer, IBufferCellPosition, IDisposable, ILink } from '@xterm/xterm';
+import type { IDisposable, ILink } from '@xterm/xterm';
 import { useTerminalStore } from '@/stores/terminalStore';
 import type { TerminalDisplayBinding } from '@/types/agent-session';
 import { restoreTerminalDisplay } from '@/lib/terminal/terminal-display-restore';
 import { applyTerminalColorOverrides, type TerminalColorOverrides } from '@/lib/terminal/terminal-colors';
 
 const logger = createLogger('terminal');
+
+export { findHttpLinksInBuffer, findHttpLinksInLine } from '@/lib/terminal/terminal-links';
 
 function resolveWindowsPty(ptyInfo?: SessionPtyInfo): { backend: 'conpty'; buildNumber?: number } | undefined {
   if (ptyInfo?.transportKind !== 'windowsConPty') return undefined;
@@ -85,6 +93,9 @@ export type TerminalLifecycleCallback = (event: TerminalLifecycleEvent) => void;
 export interface TerminalDisplayPreferences {
   fontSize: number;
   fontFamily: TerminalFontFamily;
+  customFontFamily?: string;
+  macOptionIsMeta?: boolean;
+  altClickMovesCursor?: boolean;
   cursorBlink: boolean;
   cursorStyle: TerminalCursorStyle;
   scrollback: number;
@@ -96,14 +107,6 @@ export interface TerminalDisplayPreferences {
   urlDetection: boolean;
   bellStyle: TerminalBellStyle;
 }
-
-const TERMINAL_FONT_FAMILIES: Record<TerminalFontFamily, string> = {
-  system: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-  menlo: 'Menlo, monospace',
-  monaco: 'Monaco, monospace',
-  consolas: 'Consolas, monospace',
-  courierNew: '"Courier New", monospace',
-};
 
 const DEFAULT_TERMINAL_PREFERENCES: TerminalDisplayPreferences = {
   fontSize: 14,
@@ -119,78 +122,12 @@ const DEFAULT_TERMINAL_PREFERENCES: TerminalDisplayPreferences = {
   bellStyle: 'none',
 };
 
-const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
-
 const RESIZE_RETRY_BASE_MS = 250;
 const RESIZE_RETRY_MAX_MS = 2000;
 const OUTPUT_PAUSE_HIGH_WATERMARK = 512 * 1024;
 const OUTPUT_RESUME_LOW_WATERMARK = 128 * 1024;
 const OUTPUT_RESUME_RETRY_BASE_MS = 250;
 const OUTPUT_RESUME_RETRY_MAX_MS = 2000;
-
-function trimUrlPunctuation(url: string): string {
-  return url.replace(/[),.;!?\]}]+$/g, '');
-}
-
-export function findHttpLinksInLine(line: string): Array<{ text: string; start: number; end: number }> {
-  const links: Array<{ text: string; start: number; end: number }> = [];
-  for (const match of line.matchAll(URL_PATTERN)) {
-    if (match.index === undefined) continue;
-    const text = trimUrlPunctuation(match[0]);
-    if (!text) continue;
-    links.push({ text, start: match.index + 1, end: match.index + text.length });
-  }
-  return links;
-}
-
-export function findHttpLinksInBuffer(
-  buffer: IBuffer,
-  bufferLineNumber: number,
-  columns: number,
-): Array<Pick<ILink, 'text' | 'range'>> {
-  const targetIndex = bufferLineNumber - 1;
-  const targetLine = buffer.getLine(targetIndex);
-  if (!targetLine) return [];
-
-  let firstLineIndex = targetIndex;
-  while (firstLineIndex > 0 && buffer.getLine(firstLineIndex)?.isWrapped) {
-    firstLineIndex -= 1;
-  }
-
-  let text = '';
-  const starts: IBufferCellPosition[] = [];
-  const ends: IBufferCellPosition[] = [];
-  const reusableCell = buffer.getNullCell();
-  for (let lineIndex = firstLineIndex; lineIndex < buffer.length; lineIndex += 1) {
-    const line = buffer.getLine(lineIndex);
-    if (!line || (lineIndex > firstLineIndex && !line.isWrapped)) break;
-
-    const columnCount = Math.min(columns, line.length);
-    for (let column = 0; column < columnCount; column += 1) {
-      const cell = line.getCell(column, reusableCell);
-      if (!cell) continue;
-      const width = cell.getWidth();
-      if (width === 0) continue;
-      const chars = cell.getChars() || ' ';
-      const start = { x: column + 1, y: lineIndex + 1 };
-      const end = { x: column + Math.max(1, width), y: lineIndex + 1 };
-      text += chars;
-      for (let offset = 0; offset < chars.length; offset += 1) {
-        starts.push(start);
-        ends.push(end);
-      }
-    }
-
-    if (!buffer.getLine(lineIndex + 1)?.isWrapped) break;
-  }
-
-  return findHttpLinksInLine(text).flatMap((detected) => {
-    const start = starts[detected.start - 1];
-    const end = ends[detected.end - 1];
-    if (!start || !end || bufferLineNumber < start.y || bufferLineNumber > end.y) return [];
-    return [{ text: detected.text, range: { start, end } }];
-  });
-}
 
 function playBellSound(): void {
   const AudioContextConstructor = window.AudioContext;
@@ -423,6 +360,8 @@ export interface TerminalController {
   hasKnownCredentialPrompt(): boolean;
   suppressUserInput(onBlocked?: () => void, shouldBlock?: () => boolean): () => void;
   writeUserInput(data: string): Promise<boolean>;
+  writeUserBinaryInput(data: Uint8Array): Promise<boolean>;
+  pasteUserText(text: string, broadcast?: boolean): void;
   writeInput(data: string): Promise<void>;
   whenOutputReady(): Promise<void>;
   restoreDisplay(binding: TerminalDisplayBinding): void;
@@ -443,6 +382,8 @@ export interface TerminalController {
 }
 
 class TerminalControllerImpl implements TerminalController {
+  private keyboardBroadcastData?: string;
+  private compositionBroadcastText?: { data: string; until: number };
   inputMode: TerminalController['inputMode'] = 'raw';
   private nativeDisplay?: NativeInputDisplayController;
   private rawDisplay?: IDisposable;
@@ -525,7 +466,13 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal = new Terminal({
       // Search result counts and match highlights use xterm's decoration API.
       allowProposedApi: true,
-      fontFamily: TERMINAL_FONT_FAMILIES[preferences.fontFamily],
+      fontFamily: terminalFontStack(preferences.fontFamily, preferences.customFontFamily),
+      macOptionIsMeta: preferences.macOptionIsMeta ?? false,
+      altClickMovesCursor: preferences.altClickMovesCursor ?? true,
+      linkHandler: {
+        allowNonHttpProtocols: false,
+        activate: (_event, text) => this.activateUrl(text),
+      },
       fontSize: preferences.fontSize,
       theme: resolveTerminalTheme(preferences.colorScheme, preferences.colorOverrides),
       cursorBlink: preferences.cursorBlink,
@@ -545,6 +492,18 @@ class TerminalControllerImpl implements TerminalController {
 
     this.container = document.createElement('div');
     this.container.className = TERMINAL_CONTAINER_CLASS;
+    this.container.addEventListener('input', (event) => {
+      const input = event as InputEvent;
+      if (input.isTrusted && input.target === this.terminal.textarea && input.data && input.inputType === 'insertText') {
+        this.keyboardBroadcastData = input.data;
+        queueMicrotask(() => { this.keyboardBroadcastData = undefined; });
+      }
+    }, true);
+    this.container.addEventListener('compositionend', (event) => {
+      if (event.isTrusted && event.target === this.terminal.textarea && event.data && !/[\u0000-\u001f\u007f]/.test(event.data)) {
+        this.compositionBroadcastText = { data: event.data, until: performance.now() + 100 };
+      }
+    }, true);
 
     this.unlisten = {
       data: undefined,
@@ -552,14 +511,25 @@ class TerminalControllerImpl implements TerminalController {
       closed: undefined,
     };
 
-    this.terminal.onData((data) => {
-      this.handleInput(data);
+    this.terminal.onKey(({ key, domEvent }) => {
+      if (!domEvent.isTrusted) return;
+      this.keyboardBroadcastData = key;
+      queueMicrotask(() => { this.keyboardBroadcastData = undefined; });
     });
-    this.terminal.onBinary((data) => {
-      this.handleBinaryInput(data);
-    });
+    this.terminal.onData((data) => this.handleInput(data, this.takeBroadcastOrigin(data)));
+    this.terminal.onBinary((data) => this.handleBinaryInput(data, this.takeBroadcastOrigin(data)));
     this.terminal.onBell(() => {
       if (this.preferences.bellStyle === 'sound') playBellSound();
+    });
+    this.terminal.onTitleChange((title) => useTerminalStore.getState().setOscTitle(this.sessionId, title));
+    this.suppressUserInput(undefined, () => this.isReadOnly());
+    this.terminal.parser.registerOscHandler(52, (payload) => {
+      if (this.restoringDisplay || this.getStatus(this.sessionId) !== 'connected') return true;
+      const text = decodeTerminalClipboardWrite(payload, useAppStore.getState().terminalOsc52Policy);
+      if (text !== null) void writeClipboardText(text).catch(() => {
+        useToastStore.getState().addToast(t('terminal.feedback.copyFailed'), 'error');
+      });
+      return true;
     });
     this.updateLinkProvider();
 
@@ -621,16 +591,17 @@ class TerminalControllerImpl implements TerminalController {
     if (this.rawDisplay === rawDisplay) this.rawDisplay = undefined;
   }
 
-  private handleInput(data: string): void {
+  private handleInput(data: string, broadcast = false): void {
     const status = this.getStatus(this.sessionId);
 
     if (status === 'connected') {
-      void this.writeUserInput(data).catch((error) => {
+      void this.writeUserInput(data, broadcast).catch((error) => {
         logger.error(`Failed to write input to session ${this.sessionId}`, error);
         this.showWriteFailure();
       });
       return;
     }
+    if (this.isReadOnly()) return;
 
     // While the session is still connecting the pane shows a connecting
     // overlay, so stray keystrokes are dropped silently instead of printing a
@@ -658,10 +629,19 @@ class TerminalControllerImpl implements TerminalController {
     }
   }
 
-  private handleBinaryInput(data: string): void {
+  private takeBroadcastOrigin(data: string): boolean {
+    const composition = this.compositionBroadcastText;
+    const composed = composition?.data === data && composition.until >= performance.now();
+    const broadcast = composed || this.keyboardBroadcastData === data;
+    if (composed) this.compositionBroadcastText = undefined;
+    this.keyboardBroadcastData = undefined;
+    return broadcast;
+  }
+
+  private handleBinaryInput(data: string, broadcast: boolean): void {
     if (this.getStatus(this.sessionId) !== 'connected') return;
     const bytes = Uint8Array.from(data, (character) => character.charCodeAt(0) & 0xff);
-    void this.writeUserBinaryInput(bytes).catch((error) => {
+    void this.writeUserBinaryInput(bytes, broadcast).catch((error) => {
       logger.error(`Failed to write binary input to session ${this.sessionId}`, error);
       this.showWriteFailure();
     });
@@ -718,6 +698,11 @@ class TerminalControllerImpl implements TerminalController {
     }
   }
 
+  private activateUrl(text: string): void {
+    const url = this.preferences.urlDetection ? terminalHttpUrl(text) : null;
+    if (url) void invokeOpenUrl(url).catch(() => useToastStore.getState().addToast(t('ai.link.openFailed'), 'error'));
+  }
+
   private updateLinkProvider(): void {
     this.linkProviderDisposable?.dispose();
     this.linkProviderDisposable = undefined;
@@ -725,19 +710,25 @@ class TerminalControllerImpl implements TerminalController {
     this.linkProviderDisposable = this.terminal.registerLinkProvider({
       provideLinks: (bufferLineNumber, callback) => {
         const links: ILink[] = [];
-        for (const detected of findHttpLinksInBuffer(
+        for (const detected of findLinksInTerminalBuffer(
           this.terminal.buffer.active,
           bufferLineNumber,
           this.terminal.cols,
+          (text) => [...findHttpLinksInLine(text), ...findFileLinksInLine(text)],
         )) {
           links.push({
             text: detected.text,
             range: detected.range,
             decorations: { pointerCursor: true, underline: true },
             activate: (_event, text) => {
-              void invokeOpenUrl(text).catch((error) => {
-                logger.warn(`Failed to open terminal URL: ${text}`, error);
-              });
+              if (terminalHttpUrl(text)) {
+                this.activateUrl(text);
+                return;
+              }
+              const session = useTerminalStore.getState().sessions.find((item) => item.sessionId === this.sessionId);
+              if (session) void openTerminalFileLink(session, text).then((opened) => {
+                if (!opened) useToastStore.getState().addToast(t('ai.path.revealFailed'), 'error');
+              }).catch(() => useToastStore.getState().addToast(t('ai.path.revealFailed'), 'error'));
             },
           });
         }
@@ -1391,10 +1382,13 @@ class TerminalControllerImpl implements TerminalController {
     }
   }
 
+  private isReadOnly(): boolean {
+    return useTerminalStore.getState().sessions.some((session) => session.sessionId === this.sessionId && session.readOnly);
+  }
+
   private canWriteUserInput(): boolean {
     const blockers = [...this.userInputSuppressions].filter(({ shouldBlock }) => !shouldBlock || shouldBlock());
     if (blockers.length > 0) {
-      logger.debug(`Dropped user input while an Agent command owns session=${this.sessionId}`);
       if (!this.agentInputBlockedFeedbackRef) {
         this.agentInputBlockedFeedbackRef = true;
         for (const { onBlocked } of blockers) onBlocked?.();
@@ -1450,7 +1444,16 @@ class TerminalControllerImpl implements TerminalController {
     } finally {this.originPending.delete(request.requestId);release?.();}
   }
 
-  writeUserInput(data: string): Promise<boolean> {
+  pasteUserText(text: string, broadcast = false): void {
+    if (this.disposed || this.getStatus(this.sessionId) !== 'connected' || !this.canWriteUserInput()) return;
+    this.terminal.paste(text);
+    if (!broadcast) return;
+    for (const sessionId of getTerminalBroadcastTargets(this.sessionId)) {
+      terminalRegistry.get(sessionId)?.pasteUserText(text);
+    }
+  }
+
+  writeUserInput(data: string, broadcast = false): Promise<boolean> {
     if (this.disposed || this.getStatus(this.sessionId) !== 'connected') {
       return Promise.resolve(false);
     }
@@ -1466,15 +1469,28 @@ class TerminalControllerImpl implements TerminalController {
         generation: session?.terminalGeneration, revision: session?.integrationStateRevision };
     }
     this.trackUserInput(data);
-    return this.writeInput(data).then(() => true);
+    const written = this.writeInput(data).then(() => true);
+    if (broadcast) this.broadcastInput((target) => target.writeUserInput(data));
+    return written;
   }
 
-  private writeUserBinaryInput(bytes: Uint8Array): Promise<boolean> {
+  writeUserBinaryInput(bytes: Uint8Array, broadcast = false): Promise<boolean> {
     if (this.disposed || this.getStatus(this.sessionId) !== 'connected') {
       return Promise.resolve(false);
     }
     if (!this.canWriteUserInput()) return Promise.resolve(false);
-    return invokeWriteSessionBytes(this.sessionId, bytes).then(() => true);
+    const written = invokeWriteSessionBytes(this.sessionId, bytes).then(() => true);
+    if (broadcast) this.broadcastInput((target) => target.writeUserBinaryInput(bytes));
+    return written;
+  }
+
+  private broadcastInput(write: (controller: TerminalController) => Promise<boolean>): void {
+    for (const sessionId of getTerminalBroadcastTargets(this.sessionId)) {
+      const target = terminalRegistry.get(sessionId);
+      if (target) void write(target).catch(() => {
+        useToastStore.getState().addToast(t('terminal.broadcast.writeFailed'), 'error');
+      });
+    }
   }
 
   writeInput(data: string): Promise<void> {
@@ -1626,17 +1642,24 @@ class TerminalControllerImpl implements TerminalController {
     if (this.disposed) return;
     const previous = this.preferences;
     this.preferences = preferences;
+    const fontChanged = previous.fontFamily !== preferences.fontFamily || previous.customFontFamily !== preferences.customFontFamily;
     const geometryChanged =
       previous.fontSize !== preferences.fontSize
-      || previous.fontFamily !== preferences.fontFamily
+      || fontChanged
       || previous.lineHeight !== preferences.lineHeight
       || previous.letterSpacing !== preferences.letterSpacing;
 
     if (previous.fontSize !== preferences.fontSize) {
       this.terminal.options.fontSize = preferences.fontSize;
     }
-    if (previous.fontFamily !== preferences.fontFamily) {
-      this.terminal.options.fontFamily = TERMINAL_FONT_FAMILIES[preferences.fontFamily];
+    if (fontChanged) {
+      this.terminal.options.fontFamily = terminalFontStack(preferences.fontFamily, preferences.customFontFamily);
+    }
+    if (previous.macOptionIsMeta !== preferences.macOptionIsMeta) {
+      this.terminal.options.macOptionIsMeta = preferences.macOptionIsMeta ?? false;
+    }
+    if (previous.altClickMovesCursor !== preferences.altClickMovesCursor) {
+      this.terminal.options.altClickMovesCursor = preferences.altClickMovesCursor ?? true;
     }
     if (previous.cursorBlink !== preferences.cursorBlink) {
       this.terminal.options.cursorBlink = preferences.cursorBlink;
@@ -1758,7 +1781,7 @@ export const terminalRegistry: TerminalRegistry = retainedRegistry ?? (() => {
         .find((element) => element.dataset.terminalMeasureSession === sessionId);
       if (!host) return undefined;
       return measureTerminalGeometry(host, {
-        fontFamily: TERMINAL_FONT_FAMILIES[preferences.fontFamily],
+        fontFamily: terminalFontStack(preferences.fontFamily, preferences.customFontFamily),
         fontSize: preferences.fontSize,
         lineHeight: preferences.lineHeight,
         letterSpacing: preferences.letterSpacing,

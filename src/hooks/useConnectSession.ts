@@ -29,7 +29,10 @@ export interface ConnectSessionOptions {
   color?: string;
   initialDirectory?: string;
   connectionAttemptId?: string;
+  onAttemptStarted?: (attemptId: string) => void;
 }
+
+type LocalSessionOptions = Pick<ConnectSessionOptions, 'insertAfterId' | 'onAttemptStarted'>;
 
 const logger = createLogger('connect');
 
@@ -38,7 +41,7 @@ export function useConnectSession(): {
     profile: ConnectionProfile,
     options?: ConnectSessionOptions,
   ) => Promise<void>;
-  openLocal: (localProfile?: LocalTerminalProfile) => Promise<void>;
+  openLocal: (localProfile?: LocalTerminalProfile, options?: LocalSessionOptions) => Promise<void>;
 } {
   const beginConnectionAttempt = useTerminalStore((state) => state.beginConnectionAttempt);
   const resolveConnectionAttempt = useTerminalStore((state) => state.resolveConnectionAttempt);
@@ -124,6 +127,7 @@ export function useConnectSession(): {
           color: options?.color,
         }, connectionAttemptId);
         attempt ??= beginSshConnection(connectionAttemptId);
+        options?.onAttemptStarted?.(connectionAttemptId);
         setActiveSection('terminal');
 
         try {
@@ -144,6 +148,10 @@ export function useConnectSession(): {
           return;
         } catch (error) {
           const message = getErrorMessage(error);
+          if (message === 'SSH interactive authentication cancelled') {
+            cancelled = true;
+            return;
+          }
           const missingKeyTarget = getMissingKeychainKeyTarget(preparedProfile, message);
           if (
             !keyPromptShown &&
@@ -199,15 +207,17 @@ export function useConnectSession(): {
     }
   }, [beginConnectionAttempt, endConnectionAttempt, handleConnectionError, resolveConnectionAttempt, setActiveSection]);
 
-  const openLocal = async (localProfile?: LocalTerminalProfile): Promise<void> => {
+  const openLocal = useCallback(async (localProfile?: LocalTerminalProfile, options?: LocalSessionOptions): Promise<void> => {
     const connectionAttemptId = beginConnectionAttempt({
       title: t('terminal.newSession.localTerminal'),
       host: '',
       port: 0,
       username: '',
+      insertAfterId: options?.insertAfterId,
     });
     setActiveSection('terminal');
     try {
+      options?.onAttemptStarted?.(connectionAttemptId);
       const dimensions = await terminalRegistry.measureInitialDimensions(connectionAttemptId);
       if (!useTerminalStore.getState().sessions.some((session) => session.sessionId === connectionAttemptId)) return;
       const summary = localProfile
@@ -219,7 +229,7 @@ export function useConnectSession(): {
     } finally {
       endConnectionAttempt(connectionAttemptId);
     }
-  };
+  }, [beginConnectionAttempt, endConnectionAttempt, resolveConnectionAttempt, setActiveSection]);
 
   return {
     connect,

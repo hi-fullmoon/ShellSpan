@@ -792,39 +792,49 @@ pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
     let known_hosts =
         known_hosts_path(app).map_err(|message| ConnectionError::Other { message })?;
     let known_hosts_ref = Some(known_hosts.as_path());
-    let session_result = if let Some(ref jump) = request.jump_host {
-        connect_through_jump_host(
-            jump,
-            &request.host,
-            request.port,
-            &request.username,
-            request.auth_method,
-            request.password.as_deref(),
-            request.private_key_data.as_deref(),
-            request.passphrase.as_deref(),
-            known_hosts_ref,
-        )
-        .map(|(jump_session, target_session)| {
-            _jump_session_holder = Some(Box::new(jump_session));
-            target_session
-        })
-    } else {
-        connect_tcp_stream(&request.host, request.port)
-            .map_err(|message| ConnectionError::Other { message })
-            .and_then(|tcp| {
-                open_authenticated_session(
-                    tcp,
+    let session_result = crate::connection::interactive_auth::with_prompt_scope(
+        app.clone(),
+        request
+            .operation_id
+            .clone()
+            .unwrap_or_else(|| session_id.to_string()),
+        || false,
+        || {
+            if let Some(ref jump) = request.jump_host {
+                connect_through_jump_host(
+                    jump,
+                    &request.host,
+                    request.port,
                     &request.username,
                     request.auth_method,
                     request.password.as_deref(),
                     request.private_key_data.as_deref(),
                     request.passphrase.as_deref(),
-                    &request.host,
-                    request.port,
                     known_hosts_ref,
                 )
-            })
-    };
+                .map(|(jump_session, target_session)| {
+                    _jump_session_holder = Some(Box::new(jump_session));
+                    target_session
+                })
+            } else {
+                connect_tcp_stream(&request.host, request.port)
+                    .map_err(|message| ConnectionError::Other { message })
+                    .and_then(|tcp| {
+                        open_authenticated_session(
+                            tcp,
+                            &request.username,
+                            request.auth_method,
+                            request.password.as_deref(),
+                            request.private_key_data.as_deref(),
+                            request.passphrase.as_deref(),
+                            &request.host,
+                            request.port,
+                            known_hosts_ref,
+                        )
+                    })
+            }
+        },
+    );
 
     let session = match session_result {
         Ok(session) => session,

@@ -1,6 +1,58 @@
 use super::*;
 
 #[test]
+fn command_lifecycle_reports_ordered_metadata_from_shell_control() {
+    let broker = TerminalSessionBroker::phase5_enabled_for_test(4096);
+    let transport = "display-command-observer";
+    broker
+        .attach_transport(
+            transport,
+            None,
+            TerminalTransportKind::LocalPty,
+            TerminalGeometry::new(80, 24),
+        )
+        .unwrap();
+    broker
+        .register_integration_channel(transport, "integration", TerminalShellKind::Bash)
+        .unwrap();
+    let observe = |event| {
+        broker
+            .accept_integration_event(transport, "integration", event)
+            .unwrap()
+    };
+    observe(TerminalIntegrationControlEvent::Ready {
+        shell: TerminalShellKind::Bash,
+    });
+    let mut previous = 0;
+    for exit_code in [0, 7] {
+        observe(TerminalIntegrationControlEvent::CommandStart {
+            command_line: "false".into(),
+            cwd: "/tmp".into(),
+        });
+        std::thread::sleep(Duration::from_millis(3));
+        observe(TerminalIntegrationControlEvent::CommandEnd {
+            exit_code,
+            cwd: "/tmp".into(),
+        });
+        let events = broker.take_display_command_events(transport).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!((events[0].phase, events[1].phase), ("running", "completed"));
+        assert_eq!(events[0].command_id, events[1].command_id);
+        assert!(events[0].command_id > previous);
+        previous = events[0].command_id;
+        assert_eq!(events[0].started_at, events[1].started_at);
+        assert_eq!(events[1].exit_code, Some(exit_code));
+        assert!(events[1].duration_ms.unwrap() > 0);
+        let exported = serde_json::to_string(&events).unwrap();
+        assert!(!exported.contains("false"));
+        assert!(broker
+            .take_display_command_events(transport)
+            .unwrap()
+            .is_empty());
+    }
+}
+
+#[test]
 fn prompt_markers_do_not_acknowledge_unconsumed_interactive_input() {
     let broker = TerminalSessionBroker::phase5_enabled_for_test(4096);
     broker

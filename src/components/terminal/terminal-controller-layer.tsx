@@ -56,6 +56,7 @@ async function refreshTerminalIntegrationState(sessionId: string): Promise<void>
           : integrated.integrationState,
       promptReady: integrated.promptReady,
       promptReadyRevision: integrated.promptReadyRevision,
+      currentDirectory: integrated.currentDirectory,
       shell: integrated.integrationShell,
       reason: integrated.integrationState === 'ready' && executionRolloutMissing
         ? remoteRolloutMissing ? 'remoteBoundTerminalDisabled' : 'terminalExecuteDisabled'
@@ -786,6 +787,9 @@ export const TerminalControllerLayer: React.FC = () => {
   const reconnectSession = useReconnectSession();
   const terminalFontSize = useAppStore((s) => s.terminalFontSize);
   const terminalFontFamily = useAppStore((s) => s.terminalFontFamily);
+  const terminalCustomFontFamily = useAppStore((s) => s.terminalCustomFontFamily);
+  const terminalMacOptionIsMeta = useAppStore((s) => s.terminalMacOptionIsMeta);
+  const terminalAltClickMovesCursor = useAppStore((s) => s.terminalAltClickMovesCursor);
   const terminalCursorBlink = useAppStore((s) => s.terminalCursorBlink);
   const terminalCursorStyle = useAppStore((s) => s.terminalCursorStyle);
   const terminalScrollback = useAppStore((s) => s.terminalScrollback);
@@ -803,6 +807,9 @@ export const TerminalControllerLayer: React.FC = () => {
     terminalRegistry.updateOptions({
       fontSize: terminalFontSize,
       fontFamily: terminalFontFamily,
+      customFontFamily: terminalCustomFontFamily,
+      macOptionIsMeta: terminalMacOptionIsMeta,
+      altClickMovesCursor: terminalAltClickMovesCursor,
       cursorBlink: terminalCursorBlink,
       cursorStyle: terminalCursorStyle,
       scrollback: terminalScrollback,
@@ -814,7 +821,7 @@ export const TerminalControllerLayer: React.FC = () => {
       urlDetection: terminalUrlDetection,
       bellStyle: terminalBellStyle,
     });
-  }, [terminalAutoReconnect, terminalBellStyle, terminalColorScheme, terminalColorOverrides, terminalCursorBlink, terminalCursorStyle, terminalFontFamily, terminalFontSize, terminalLetterSpacing, terminalLineHeight, terminalScrollback, terminalUrlDetection]);
+  }, [terminalAltClickMovesCursor, terminalAutoReconnect, terminalBellStyle, terminalColorScheme, terminalColorOverrides, terminalCursorBlink, terminalCursorStyle, terminalCustomFontFamily, terminalFontFamily, terminalFontSize, terminalLetterSpacing, terminalLineHeight, terminalMacOptionIsMeta, terminalScrollback, terminalUrlDetection]);
 
   useEffect(() => {
     const root = document.documentElement;

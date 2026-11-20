@@ -16,8 +16,9 @@ export const TERMINAL_COLOR_SCHEME_IDS = [
 ] as const;
 export type TerminalColorScheme = (typeof TERMINAL_COLOR_SCHEME_IDS)[number];
 export type TerminalBellStyle = 'none' | 'sound';
+export type TerminalOsc52Policy = 'writeOnly' | 'disabled';
 export type SftpConflictPolicy = 'ask' | 'overwrite' | 'skip';
-export type WorkbenchTab = 'connections' | 'knownHosts' | 'keychain' | 'monitor' | 'logs';
+export type WorkbenchTab = 'connections' | 'knownHosts' | 'keychain' | 'monitor' | 'logs' | 'snippets';
 export type SettingsSection = 'appearance' | 'general' | 'terminal' | 'sftp' | 'ai' | 'shortcuts' | 'experimental' | 'feedback';
 export type PetdexConnectionStatus =
   | 'disabled'
@@ -76,9 +77,14 @@ export type ShortcutAction =
   | 'terminalFocusRight'
   | 'terminalSplitRight'
   | 'terminalSplitDown'
+  | 'terminalZoomPane'
+  | 'terminalEqualizePanes'
+  | 'terminalSwapPane'
+  | 'terminalPreviousCommand'
+  | 'terminalNextCommand'
   | 'terminalClosePane';
 export type ShortcutBindings = Record<ShortcutAction, string>;
-export type AuthMethod = 'password' | 'key';
+export type AuthMethod = 'password' | 'key' | 'agent' | 'keyboardInteractive';
 export type KeychainKeyKind = 'password' | 'keyFile';
 /** Per-profile secrets stored in the OS keychain besides the main password. */
 export type ProfileSecretKind = 'passphrase' | 'jump-password' | 'jump-passphrase';
@@ -113,7 +119,7 @@ export interface JumpHostConfig {
   passphrase?: string;
 }
 
-export type PortForwardKind = 'local' | 'remote';
+export type PortForwardKind = 'local' | 'remote' | 'dynamic';
 export type PortForwardStartMode = 'manual' | 'auto';
 export type PortForwardStatus = 'starting' | 'running' | 'stopping' | 'stopped' | 'failed';
 export type PortForwardErrorCategory =
@@ -499,8 +505,21 @@ export interface TerminalIntegrationStateEvent {
   state: TerminalBrokerIntegrationState;
   promptReady: boolean;
   promptReadyRevision?: number;
+  currentDirectory?: string;
   shell?: TerminalBrokerSessionSnapshot['integrationShell'];
   reason?: string;
+}
+
+export interface TerminalCommandLifecycleEvent {
+  sessionId: string;
+  terminalSessionId: string;
+  terminalGeneration: number;
+  commandId: number;
+  phase: 'running' | 'completed';
+  startedAt: number;
+  durationMs?: number;
+  exitCode?: number;
+  cwd: string;
 }
 
 export interface RemoteConnectionRequest {

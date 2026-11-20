@@ -94,6 +94,7 @@ impl SessionPtyInfo {
 pub(crate) enum PortForwardKind {
     Local,
     Remote,
+    Dynamic,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -103,7 +104,9 @@ pub(crate) struct PortForwardConfig {
     pub(crate) name: String,
     pub(crate) kind: PortForwardKind,
     pub(crate) local_port: u16,
+    #[serde(default)]
     pub(crate) remote_host: String,
+    #[serde(default)]
     pub(crate) remote_port: u16,
 }
 
@@ -707,6 +710,8 @@ pub(crate) struct TrustHostRequest {
 pub(crate) enum AuthMethod {
     Password,
     Key,
+    Agent,
+    KeyboardInteractive,
 }
 
 impl AuthMethod {
@@ -714,6 +719,8 @@ impl AuthMethod {
         match self {
             AuthMethod::Password => "password",
             AuthMethod::Key => "key",
+            AuthMethod::Agent => "agent",
+            AuthMethod::KeyboardInteractive => "keyboardInteractive",
         }
     }
 }
@@ -723,6 +730,8 @@ impl AuthMethod {
 pub(crate) enum ProfileAuthMethod {
     Password,
     Key,
+    Agent,
+    KeyboardInteractive,
 }
 
 impl ProfileAuthMethod {
@@ -730,6 +739,8 @@ impl ProfileAuthMethod {
         match self {
             ProfileAuthMethod::Password => "password",
             ProfileAuthMethod::Key => "key",
+            ProfileAuthMethod::Agent => "agent",
+            ProfileAuthMethod::KeyboardInteractive => "keyboardInteractive",
         }
     }
 }

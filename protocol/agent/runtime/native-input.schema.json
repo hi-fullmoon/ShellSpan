@@ -19,7 +19,8 @@
         },
         "payload": { "oneOf": [
           { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "probe" } } },
-          { "$ref": "#/$defs/capabilities" }, { "$ref": "#/$defs/editorReady" }, { "$ref": "#/$defs/directory" }, { "$ref": "#/$defs/jobObservation" }, { "$ref": "#/$defs/editorOptions" }
+          { "$ref": "#/$defs/capabilities" }, { "$ref": "#/$defs/editorReady" }, { "$ref": "#/$defs/directory" }, { "$ref": "#/$defs/jobObservation" }, { "$ref": "#/$defs/editorOptions" },
+          { "$ref": "#/$defs/displayCommand" }
         ] }
       }
     },
@@ -145,6 +146,15 @@
     "directory": {
       "type": "object", "additionalProperties": false, "required": ["kind", "cwd"],
       "properties": { "kind": { "const": "directory" }, "cwd": { "type": "string", "maxLength": 4096, "pattern": "^[^\u0000-\u001f\u007f-\u009f]*$" } }
+    },
+    "displayCommand": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "commandId", "cwd", "exitCode"],
+      "properties": {
+        "kind": { "const": "displayCommand" },
+        "commandId": { "$ref": "#/$defs/counter" },
+        "cwd": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^[^\u0000-\u001f\u007f-\u009f]*$" },
+        "exitCode": { "type": ["integer", "null"], "minimum": -2147483648, "maximum": 2147483647 }
+      }
     },
     "jobObservation": {
       "type": "object", "additionalProperties": false, "required": ["kind", "handle", "state", "exitCode"],

@@ -207,7 +207,13 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('settings.terminal.cursorBlink')).toBeInTheDocument();
     expect(screen.getByText('settings.terminal.copyOnSelect')).toBeInTheDocument();
     expect(screen.getByText('settings.terminal.scrollback')).toBeInTheDocument();
-    expect(screen.getAllByRole('switch')).toHaveLength(8);
+    const customFontInput = screen.getByRole('textbox', { name: 'settings.terminal.customFont' });
+    expect(customFontInput).toBeInTheDocument();
+    expect(customFontInput).toHaveClass('h-8');
+    expect(customFontInput).toHaveAttribute('placeholder', 'JetBrains Mono');
+    expect(screen.getByRole('switch', { name: 'settings.terminal.altClickMovesCursor' })).toBeChecked();
+    expect(screen.getByRole('switch', { name: 'settings.terminal.osc52' })).toBeChecked();
+    expect(screen.getByRole('combobox', { name: 'terminal.commandBlock.notifications' })).toBeInTheDocument();
 
     openSection('settings.sftp.title');
     expect(screen.getByText('settings.sftp.showHiddenFiles')).toBeInTheDocument();

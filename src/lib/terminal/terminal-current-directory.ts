@@ -1,6 +1,12 @@
 import { terminalRegistry, type TerminalOutputFilter } from '@/components/terminal/registry/terminal-registry';
-import { invokeGetTerminalBrokerSnapshot } from '@/lib/ipc/tauri';
-import type { TerminalSession } from '@/stores/terminalStore';
+import { invokeGetTerminalBrokerSnapshot, invokeRevealPath } from '@/lib/ipc/tauri';
+import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
+import type { SftpLocationRequest } from '@/stores/sftpStore';
+import { useProfileStore } from '@/stores/profileStore';
+import { openHostPath } from '@/lib/host/host-quick-actions';
+import { sshRouteKey } from '@/lib/connections/ssh-route';
+import { agentTerminalLeaseState } from '@/components/terminal/agent-terminal-lease-state';
+import { terminalInputReadiness } from '@/components/terminal/terminal-input-readiness';
 
 const QUERY_TIMEOUT_MS = 4_000;
 const QUERY_BUFFER_LIMIT = 16 * 1024;
@@ -17,11 +23,12 @@ function decodeDirectory(value: string): string | null {
   }
 }
 
-function isAbsoluteDirectory(session: TerminalSession, directory: string): boolean {
+export function isAbsoluteTerminalPath(session: Pick<TerminalSession, 'host' | 'port'>, directory: string): boolean {
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(directory)) return false;
   const local = session.host === 'local' && session.port === 0;
   return local
-    ? /^(?:\/|[A-Za-z]:[\\/])/.test(directory)
-    : directory.startsWith('/') && !directory.includes('\\');
+    ? /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(directory)
+    : directory.startsWith('/');
 }
 
 function queryCommand(token: string): { command: string; terminator: string } {
@@ -36,7 +43,10 @@ function queryCommand(token: string): { command: string; terminator: string } {
  * integration can answer through a private OSC probe. A partial user command
  * is never disturbed.
  */
-export async function readTerminalCurrentDirectory(session: TerminalSession): Promise<string | null> {
+export async function readTerminalCurrentDirectory(
+  session: TerminalSession,
+  mayProbe: () => boolean = () => true,
+): Promise<string | null> {
   const controller = terminalRegistry.get(session.sessionId);
   if (!controller || controller.hasPendingUserInput() || controller.hasUnverifiedUserSubmission()) return null;
   await controller.whenOutputReady();
@@ -46,15 +56,16 @@ export async function readTerminalCurrentDirectory(session: TerminalSession): Pr
   try {
     const integrated = (await invokeGetTerminalBrokerSnapshot(session.sessionId)).session;
     const directory = integrated?.currentDirectory;
-    if (integrated?.promptReady && directory && isAbsoluteDirectory(session, directory)) {
+    if (integrated?.promptReady && directory && isAbsoluteTerminalPath(session, directory)) {
       return directory;
     }
+    if (integrated?.integrationState === 'ready') return null;
   } catch {
     // Older or unintegrated remote sessions can still use the interactive probe.
   }
   // PowerShell echoes the injected command before its response can be filtered.
   // Never write a background directory probe into a local interactive terminal.
-  if (local) return null;
+  if (local || !mayProbe() || controller.hasPendingUserInput() || controller.hasUnverifiedUserSubmission()) return null;
 
   const token = crypto.randomUUID().replace(/-/g, '');
   const prefix = `${OSC}${token}:`;
@@ -92,7 +103,7 @@ export async function readTerminalCurrentDirectory(session: TerminalSession): Pr
       if (end < 0) return '';
       const directory = decodeDirectory(buffer.slice(payloadStart, end));
       matched = true;
-      matchedDirectory = directory && isAbsoluteDirectory(session, directory) ? directory : null;
+      matchedDirectory = directory && isAbsoluteTerminalPath(session, directory) ? directory : null;
       buffer = '';
       settleAfterPrompt(matchedDirectory);
       return '';
@@ -120,4 +131,41 @@ export async function readTerminalCurrentDirectory(session: TerminalSession): Pr
     removeFilter();
     releaseInput();
   }
+}
+
+export async function getTerminalMenuDirectory(sessionId: string, allowProbe = true): Promise<string | null> {
+  const getSession = () => useTerminalStore.getState().sessions.find((item) => item.sessionId === sessionId);
+  const session = getSession();
+  if (session?.status !== 'connected') return null;
+  if (session.currentDirectory && isAbsoluteTerminalPath(session, session.currentDirectory)) return session.currentDirectory;
+  const mayProbe = () => {
+    const current = getSession();
+    const controller = terminalRegistry.get(sessionId);
+    return allowProbe && current?.status === 'connected' && !current.readOnly
+      && !current.foregroundHandoffActive && !terminalInputReadiness.isPreparing(sessionId)
+      && !agentTerminalLeaseState.get(sessionId)
+      && controller?.terminal.buffer.active.type === 'normal'
+      && !controller.hasKnownCredentialPrompt();
+  };
+  return await readTerminalCurrentDirectory(session, mayProbe).catch(() => null);
+}
+
+export function openTerminalSftpPath(
+  session: TerminalSession,
+  path: string,
+  options?: Pick<SftpLocationRequest, 'entryName' | 'uploadPaths'>,
+): boolean {
+  const profile = session.profileId && useProfileStore.getState().getProfile(session.profileId);
+  if (!profile || !isAbsoluteTerminalPath(session, path)) return false;
+  const routeKey = session.sshRouteKey;
+  if (!routeKey && (session.host !== profile.host || session.port !== profile.port
+    || session.username !== profile.username || profile.jumpHost)) return false;
+  return openHostPath(profile, path, 'sftp', 'remote', { path, routeKey: routeKey ?? sshRouteKey(profile), ...options });
+}
+
+export async function revealTerminalCurrentDirectory(sessionId: string): Promise<boolean> {
+  const path = await getTerminalMenuDirectory(sessionId, false);
+  if (!path || !useTerminalStore.getState().sessions.some((session) => session.sessionId === sessionId)) return false;
+  await invokeRevealPath(path);
+  return true;
 }

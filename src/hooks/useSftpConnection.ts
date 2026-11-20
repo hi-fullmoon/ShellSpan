@@ -323,6 +323,9 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
           setPaneState(connection.id, side, {
             locationRequest: undefined,
             ...(entry && { selectedPaths: [entry.path], revealRequest: { path: entry.path } }),
+            ...(location.uploadPaths?.length && {
+              terminalUpload: { paths: location.uploadPaths, destination: listing.path, routeKey: location.routeKey },
+            }),
           });
           if (entryName !== undefined && !entry) {
             useToastStore.getState().addToast(t('sftp.location.entryMissing'), 'error');

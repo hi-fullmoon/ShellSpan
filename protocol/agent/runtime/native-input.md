@@ -5,6 +5,10 @@
 stdout、OSC、前端 ready 和显示完成都不是控制报文。
 [schema](native-input.schema.json) 与 Rust `terminal_command/protocol.rs` 同源审查。
 
+原生 ZLE 和 PSReadLine 可在私有通道发送 `displayCommand`，供终端命令块和完成通知使用。
+报文包含单调命令序号、当前目录和可选退出码。对应的 OSC 133 标记只定位终端缓冲区中的文本，
+与报文均不参与 Agent 输入许可、编辑器就绪或恢复确认。
+
 ## 实现与资源入口
 
 | 范围 | 入口 |

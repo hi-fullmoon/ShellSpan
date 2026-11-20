@@ -27,6 +27,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
+import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
@@ -87,6 +88,11 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
       'terminalFocusRight',
       'terminalSplitRight',
       'terminalSplitDown',
+      'terminalZoomPane',
+      'terminalEqualizePanes',
+      'terminalSwapPane',
+      'terminalPreviousCommand',
+      'terminalNextCommand',
       'terminalClosePane',
     ],
   },
@@ -211,6 +217,29 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const setTerminalFontSize = useAppStore((state) => state.setTerminalFontSize);
   const terminalFontFamily = useAppStore((state) => state.terminalFontFamily);
   const setTerminalFontFamily = useAppStore((state) => state.setTerminalFontFamily);
+  const terminalCustomFontFamily = useAppStore((state) => state.terminalCustomFontFamily);
+  const setTerminalCustomFontFamily = useAppStore((state) => state.setTerminalCustomFontFamily);
+  const terminalMacOptionIsMeta = useAppStore((state) => state.terminalMacOptionIsMeta);
+  const terminalPlatform = usePlatform();
+  const setTerminalMacOptionIsMeta = useAppStore((state) => state.setTerminalMacOptionIsMeta);
+  const terminalAltClickMovesCursor = useAppStore((state) => state.terminalAltClickMovesCursor);
+  const setTerminalAltClickMovesCursor = useAppStore((state) => state.setTerminalAltClickMovesCursor);
+  const terminalOsc52Policy = useAppStore((state) => state.terminalOsc52Policy);
+  const setTerminalOsc52Policy = useAppStore((state) => state.setTerminalOsc52Policy);
+  const commandNotificationThreshold = useAppStore((state) => state.terminalCommandNotificationThresholdSec);
+  const setCommandNotificationThreshold = useAppStore((state) => state.setTerminalCommandNotificationThresholdSec);
+  const commandNotificationItems = useMemo(() => [0, 5, 10, 30, 60].map((seconds) => ({
+    value: String(seconds),
+    label: seconds ? t('terminal.commandBlock.thresholdSeconds', { seconds }) : t('terminal.commandBlock.notificationsOff'),
+  })), [t]);
+  const terminalFontFamilies = useMemo(() => (['system', 'menlo', 'monaco', 'consolas', 'courierNew'] as const)
+    .map((value) => ({ value, label: t(`settings.terminal.fontFamily.${value}`) })), [t]);
+  const terminalFontSizeItems = useMemo(() => {
+    const sizes = [12, 13, 14, 15, 16, 18];
+    if (!sizes.includes(terminalFontSize)) sizes.push(terminalFontSize);
+    return sizes.sort((a, b) => a - b)
+      .map((size) => ({ value: String(size), label: t('settings.terminal.fontSizeValue', { size }) }));
+  }, [t, terminalFontSize]);
   const terminalCursorBlink = useAppStore((state) => state.terminalCursorBlink);
   const setTerminalCursorBlink = useAppStore((state) => state.setTerminalCursorBlink);
   const terminalCursorStyle = useAppStore((state) => state.terminalCursorStyle);
@@ -445,6 +474,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       terminalFocusRight: t('settings.shortcuts.terminalFocusRight'),
       terminalSplitRight: t('settings.shortcuts.terminalSplitRight'),
       terminalSplitDown: t('settings.shortcuts.terminalSplitDown'),
+      terminalZoomPane: t('settings.shortcuts.terminalZoomPane'),
+      terminalEqualizePanes: t('settings.shortcuts.terminalEqualizePanes'),
+      terminalSwapPane: t('settings.shortcuts.terminalSwapPane'),
+      terminalPreviousCommand: t('settings.shortcuts.terminalPreviousCommand'),
+      terminalNextCommand: t('settings.shortcuts.terminalNextCommand'),
       terminalClosePane: t('settings.shortcuts.terminalClosePane'),
     }),
     [t],
@@ -751,34 +785,39 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               <SettingsGrid>
                 <SettingGroupLabel>{t('settings.terminal.groupAppearance')}</SettingGroupLabel>
                 <SettingRow label={t('settings.terminal.fontFamily')} description={t('settings.terminal.fontFamilyDescription')}>
-                  <Select value={terminalFontFamily} onValueChange={(value) => setTerminalFontFamily(value as TerminalFontFamily)}>
+                  <Select items={terminalFontFamilies} value={terminalFontFamily} onValueChange={(value) => { if (value) setTerminalFontFamily(value); }}>
                     <SelectTrigger size="sm" aria-label={t('settings.terminal.fontFamily')}>
-                      <SelectValue>{t(`settings.terminal.fontFamily.${terminalFontFamily}`)}</SelectValue>
+                      <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        {(['system', 'menlo', 'monaco', 'consolas', 'courierNew'] as const).map((font) => (
-                          <SelectItem key={font} value={font}>
-                            {t(`settings.terminal.fontFamily.${font}`)}
+                        {terminalFontFamilies.map((font) => (
+                          <SelectItem key={font.value} value={font.value}>
+                            {font.label}
                           </SelectItem>
                         ))}
                       </SelectGroup>
                     </SelectContent>
                   </Select>
                 </SettingRow>
+                <SettingRow label={t('settings.terminal.customFont')} description={t('settings.terminal.customFontDescription')}>
+                  <Input aria-label={t('settings.terminal.customFont')} placeholder="JetBrains Mono"
+                    className="h-8 text-xs @min-[32rem]:w-52" maxLength={128} value={terminalCustomFontFamily}
+                    onChange={(event) => setTerminalCustomFontFamily(event.target.value)} />
+                </SettingRow>
                 <SettingRow label={t('settings.terminal.colorScheme')} description={t('settings.terminal.colorSchemeDescription')}>
                   <TerminalColorSchemeControl />
                 </SettingRow>
                 <SettingRow label={t('settings.terminal.fontSize')} description={t('settings.terminal.fontSizeDescription')}>
-                  <Select value={String(terminalFontSize)} onValueChange={(value) => setTerminalFontSize(Number(value))}>
+                  <Select items={terminalFontSizeItems} value={String(terminalFontSize)} onValueChange={(value) => { if (value) setTerminalFontSize(Number(value)); }}>
                     <SelectTrigger size="sm" aria-label={t('settings.terminal.fontSize')}>
-                      <SelectValue>{t('settings.terminal.fontSizeValue', { size: terminalFontSize })}</SelectValue>
+                      <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        {[12, 13, 14, 15, 16, 18].map((size) => (
-                          <SelectItem key={size} value={String(size)}>
-                            {t('settings.terminal.fontSizeValue', { size })}
+                        {terminalFontSizeItems.map((size) => (
+                          <SelectItem key={size.value} value={size.value}>
+                            {size.label}
                           </SelectItem>
                         ))}
                       </SelectGroup>
@@ -847,6 +886,30 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       onCheckedChange={setTerminalCopyOnSelect}
                     />
                   </div>
+                </SettingRow>
+                {terminalPlatform === 'macos' && <SettingRow label={t('settings.terminal.macOptionIsMeta')} description={t('settings.terminal.macOptionIsMetaDescription')}>
+                  <div className="flex justify-end">
+                    <Switch aria-label={t('settings.terminal.macOptionIsMeta')} checked={terminalMacOptionIsMeta} onCheckedChange={setTerminalMacOptionIsMeta} />
+                  </div>
+                </SettingRow>}
+                <SettingRow label={t('settings.terminal.altClickMovesCursor')} description={t('settings.terminal.altClickMovesCursorDescription')}>
+                  <div className="flex justify-end">
+                    <Switch aria-label={t('settings.terminal.altClickMovesCursor')} checked={terminalAltClickMovesCursor} onCheckedChange={setTerminalAltClickMovesCursor} />
+                  </div>
+                </SettingRow>
+                <SettingRow label={t('settings.terminal.osc52')} description={t('settings.terminal.osc52Description')}>
+                  <div className="flex justify-end">
+                    <Switch aria-label={t('settings.terminal.osc52')} checked={terminalOsc52Policy === 'writeOnly'}
+                      onCheckedChange={(enabled) => setTerminalOsc52Policy(enabled ? 'writeOnly' : 'disabled')} />
+                  </div>
+                </SettingRow>
+                <SettingRow label={t('terminal.commandBlock.notifications')} description={t('terminal.commandBlock.notificationsDescription')}>
+                  <Select items={commandNotificationItems} value={String(commandNotificationThreshold)}
+                    onValueChange={(value) => { if (value) setCommandNotificationThreshold(Number(value)); }}>
+                    <SelectTrigger size="sm" aria-label={t('terminal.commandBlock.notifications')}><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectGroup>{commandNotificationItems.map((item) =>
+                      <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectGroup></SelectContent>
+                  </Select>
                 </SettingRow>
                 <SettingRow
                   label={t('settings.terminal.trimTrailingWhitespace')}

@@ -45,6 +45,11 @@ export const SHORTCUT_SCOPES: Record<ShortcutAction, ShortcutScope> = {
   terminalFocusRight: 'terminal',
   terminalSplitRight: 'terminal',
   terminalSplitDown: 'terminal',
+  terminalZoomPane: 'terminal',
+  terminalEqualizePanes: 'terminal',
+  terminalSwapPane: 'terminal',
+  terminalPreviousCommand: 'terminal',
+  terminalNextCommand: 'terminal',
   terminalClosePane: 'terminal',
 };
 
@@ -57,6 +62,11 @@ export const LEADER_SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
   'terminalFocusRight',
   'terminalSplitRight',
   'terminalSplitDown',
+  'terminalZoomPane',
+  'terminalEqualizePanes',
+  'terminalSwapPane',
+  'terminalPreviousCommand',
+  'terminalNextCommand',
   'terminalClosePane',
 ];
 

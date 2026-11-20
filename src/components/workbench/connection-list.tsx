@@ -48,6 +48,8 @@ import {
   ZapIcon,
   KeyRoundIcon,
   LockKeyholeIcon,
+  FingerprintIcon,
+  ShieldQuestionMarkIcon,
 } from 'lucide-react';
 import { WorkbenchPage, WorkbenchPageContent, WorkbenchPageHeader, WorkbenchSearchInput, WorkbenchPageToolbar } from './workbench-page';
 
@@ -403,8 +405,13 @@ const ConnectionCard = React.memo<ConnectionCardProps>(
     const { t } = useI18n();
     const displayName = profile.name.trim() || profile.host;
     const tags = profile.tags ?? [];
-    const authLabel = profile.authMethod === 'password' ? t('connection.form.auth.password') : t('connection.form.auth.key');
-    const AuthIcon = profile.authMethod === 'password' ? LockKeyholeIcon : KeyRoundIcon;
+    const authLabel = t(`connection.form.auth.${profile.authMethod}`);
+    const AuthIcon = {
+      password: LockKeyholeIcon,
+      key: KeyRoundIcon,
+      agent: FingerprintIcon,
+      keyboardInteractive: ShieldQuestionMarkIcon,
+    }[profile.authMethod];
     const handleConnectTerminal = useDebouncedCallback(() => onConnectTerminal(profile), CARD_ACTION_DEBOUNCE_MS);
     const handleConnectSftp = useDebouncedCallback(() => onConnectSftp(profile), CARD_ACTION_DEBOUNCE_MS);
     const handleOpenHealth = useDebouncedCallback(() => onOpenHealth(profile), CARD_ACTION_DEBOUNCE_MS);

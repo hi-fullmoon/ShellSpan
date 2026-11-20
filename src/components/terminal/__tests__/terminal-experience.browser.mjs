@@ -89,7 +89,8 @@ try {
     window.runtime = runtime;
     window.observeReboundOutput = (controller) => controller.whenOutputReady().catch((error) => {
       // A browser can exercise the renderer rebind, while IPC listeners require Tauri.
-      if (!(error instanceof TypeError) || !error.message.includes('__TAURI_INTERNALS__')) throw error;
+      if (!(error instanceof TypeError) || window.__TAURI_INTERNALS__
+        || !/(__TAURI_INTERNALS__|transformCallback)/.test(error.message)) throw error;
     });
     const { React, createRoot, Terminal, TerminalSearchAddon, FitAddon, resolveTerminalTheme, TERMINAL_CONTAINER_CLASS, TerminalSearch, useAppStore, initI18n } = runtime;
     useAppStore.setState({ locale: 'zh-CN' });
@@ -218,6 +219,26 @@ try {
   await regexToggle.click();
   await page.getByRole('status', { name: '未找到匹配项' }).waitFor();
   assert.equal(await search.getAttribute('aria-invalid'), null);
+  const word = 'word' + crypto.randomUUID().replaceAll('-', '');
+  await page.evaluate(async (value) => {
+    await new Promise(resolve => window.terminal.write('\r\n' + value + ' ' + value + 's ' + value + '\r\n', resolve));
+  }, word);
+  await search.fill(word);
+  const searchStatus = searchBar.getByRole('status');
+  await page.waitForFunction(() => document.querySelector('[data-terminal-search] [role=status]')?.textContent.endsWith('/3'));
+  const wholeWordToggle = searchBar.getByRole('button', { name: '全词匹配', exact: true });
+  await wholeWordToggle.click();
+  await page.waitForFunction(() => document.querySelector('[data-terminal-search] [role=status]')?.textContent.endsWith('/2'));
+  const firstWord = await searchStatus.textContent();
+  await search.press('Control+g');
+  assert.notEqual(await searchStatus.textContent(), firstWord);
+  await search.press('Control+Shift+g');
+  assert.equal(await searchStatus.textContent(), firstWord);
+  await wholeWordToggle.click();
+  await page.evaluate(async (text) => {
+    window.terminal.reset();
+    await new Promise(resolve => window.terminal.write(text.replace(/\n/g, '\r\n'), resolve));
+  }, output);
   await search.fill('terminal');
   await page.mouse.move(0, 400);
 
@@ -292,8 +313,8 @@ try {
     assert.ok(geometry.controls.every((height) => height === geometry.controls[0]), JSON.stringify(geometry));
     assert.ok(geometry.buttons.every(({ width, height }) => width === height), `Search buttons must be square: ${JSON.stringify(geometry.buttons)}`);
     assert.ok(geometry.fieldRadius > 0 && geometry.fieldRadius < geometry.barRadius, 'The search field should have tighter corners than the search bar');
-    const [input, caseOption, regexOption, status, previous, next, close] = geometry.centers;
-    assert.equal(caseOption, regexOption, 'Both search options must stay together');
+    const [input, caseOption, regexOption, wholeWordOption, status, previous, next, close] = geometry.centers;
+    assert.ok(caseOption === regexOption && regexOption === wholeWordOption, 'The search options must stay together');
     assert.ok(previous === next && next === close, 'The arrows and close button must stay together');
     if (paneWidth === 900) {
       assert.equal(geometry.height, 32, 'The single-line search bar should be 32px tall');
@@ -1462,17 +1483,65 @@ try {
     await groups.nth(1).waitFor();
     const splitActions = groups.nth(1).getByRole('button', { name: '终端页签操作', exact: true });
     await splitActions.click();
-    assert.equal(await splitRight.isDisabled(), true, 'A group with one tab cannot split it out');
+    assert.equal(await splitRight.isDisabled(), true, 'A pane narrower than 240 px cannot split horizontally');
+    await actionsMenu.getByRole('menuitem', { name: '最大化或还原窗格', exact: true }).click();
+    const restore = host.getByRole('button', { name: /窗格已最大化/ });
+    await restore.waitFor();
+    assert.equal(await groups.count(), 1);
+    await restore.click();
+    await groups.nth(1).waitFor();
+    await splitActions.click();
     await actionsMenu.getByRole('menuitem', { name: '退出分屏', exact: true }).click();
     await groups.first().waitFor({ state: 'detached' });
 
     await host.locator(`[data-session-tab="${neighbor}"]`).click();
     await host.locator(`[data-terminal-pane-session="${neighbor}"] .xterm-helper-textarea:focus`).waitFor({ state: 'attached' });
+    await host.locator(`[data-session-tab="${neighbor}"]`).click({ button: 'right' });
+    await page.getByRole('menuitem', { name: '锁定终端输入', exact: true }).click();
+    const unlock = host.getByRole('button', { name: '解除只读', exact: true });
+    await unlock.waitFor();
+    await host.locator(`[data-session-tab="${neighbor}"] [data-terminal-input-lock]`).waitFor();
+    await unlock.click();
+    await unlock.waitFor({ state: 'detached' });
+
+    await page.evaluate(() => {
+      const store = window.runtime.useTerminalStore.getState();
+      for (const { sessionId } of store.sessions) store.setStatus(sessionId, { sessionId, status: 'connected' });
+      document.dispatchEvent(new Event('shellspan:configure-terminal-broadcast'));
+    });
+    const broadcast = page.getByRole('dialog', { name: '广播输入', exact: true });
+    await broadcast.getByRole('checkbox').first().click();
+    await broadcast.getByRole('checkbox').last().click();
+    await broadcast.getByRole('button', { name: '向所选终端广播', exact: true }).click();
+    const broadcastAlert = host.getByRole('alert').filter({ hasText: '正在广播至' });
+    await broadcastAlert.waitFor();
+    for (const width of [700, 120]) {
+      await host.evaluate((element, width) => { element.style.width = width + 'px'; }, width);
+      const alignment = await broadcastAlert.evaluate((element) => {
+        const icon = element.querySelector('svg').getBoundingClientRect();
+        const description = element.querySelector('[data-slot="alert-description"]');
+        const message = document.createTreeWalker(description, NodeFilter.SHOW_TEXT).nextNode();
+        const range = document.createRange();
+        range.selectNodeContents(message);
+        const lines = range.getClientRects();
+        const lineHeight = parseFloat(getComputedStyle(message.parentElement).lineHeight);
+        const textCenter = message.parentElement.getBoundingClientRect().top + lineHeight / 2;
+        return {
+          centerOffset: icon.top + icon.height / 2 - textCenter,
+          gap: lines[0].left - icon.right,
+          wrapped: lines[lines.length - 1].top > lines[0].top,
+        };
+      });
+      assert.equal(alignment.wrapped, width === 120, JSON.stringify(alignment));
+      assert.ok(Math.abs(alignment.centerOffset) <= 0.5 && Math.abs(alignment.gap - 4) <= 0.5,
+        'The broadcast icon must align to the first line with a 4px gap: ' + JSON.stringify(alignment));
+    }
+    await broadcastAlert.getByRole('button', { name: '停止', exact: true }).click();
   } finally {
     await page.evaluate(() => window.disposeWheelCheck());
   }
   assert.deepEqual(errors, []);
-  process.stdout.write('Terminal experience regressions passed with real xterm and WebKit at wide and narrow sizes.\n');
+  process.stdout.write(`Terminal experience regressions passed with real xterm and ${browser.browserType().name()} at wide and narrow sizes.\n`);
 } finally {
   await browser?.close();
   await server.close();

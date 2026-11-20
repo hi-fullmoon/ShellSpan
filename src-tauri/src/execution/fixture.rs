@@ -319,6 +319,8 @@ fn profile_for_connection(profile_id: &str, connection: &RemoteConnectionRequest
         auth_method: match connection.auth_method {
             AuthMethod::Password => ProfileAuthMethod::Password,
             AuthMethod::Key => ProfileAuthMethod::Key,
+            AuthMethod::Agent => ProfileAuthMethod::Agent,
+            AuthMethod::KeyboardInteractive => ProfileAuthMethod::KeyboardInteractive,
         },
         keychain_key_id: connection.keychain_key_id.clone(),
         jump_host_config: connection.jump_host.as_ref().map(|jump| {

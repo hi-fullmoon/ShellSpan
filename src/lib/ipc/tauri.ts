@@ -7,6 +7,74 @@ import type { AiLocalFileReference } from '@/lib/ai/file-reference';
 import { sshRouteKey } from '@/lib/connections/ssh-route';
 import { createOperationId, findOperationId } from '@/lib/operation-id';
 import { listen, type EventCallback, type UnlistenFn } from '@tauri-apps/api/event';
+import { getCurrentWindow, type DragDropEvent } from '@tauri-apps/api/window';
+import type { CommandSnippet, SnippetInput } from '@/lib/terminal/snippet-template';
+
+export function listenToWindowDragDrop(callback: (payload: DragDropEvent) => void): Promise<UnlistenFn> {
+  return getCurrentWindow().onDragDropEvent(({ payload }) => callback(payload));
+}
+
+export function invokeListCommandSnippets(): Promise<CommandSnippet[]> {
+  return invoke('list_command_snippets');
+}
+
+export function invokeSaveCommandSnippet(id: string | undefined, input: SnippetInput): Promise<CommandSnippet> {
+  return invoke('save_command_snippet', { id, input });
+}
+
+export function invokeDeleteCommandSnippet(id: string): Promise<void> {
+  return invoke('delete_command_snippet', { id });
+}
+
+export type TerminalRecordingFormat = 'plain-log' | 'asciinema-v2';
+export type TerminalExportFormat = 'text' | 'ansi';
+
+export interface TerminalRecordingStatus {
+  path: string;
+  active: boolean;
+  droppedFrames: number;
+}
+
+export function invokeExportTerminalBuffer(format: TerminalExportFormat, content: string): Promise<string | null> {
+  return invoke('export_terminal_buffer', { format, content });
+}
+
+export function invokeStartTerminalRecording(
+  sessionId: string, format: TerminalRecordingFormat, cols: number, rows: number,
+): Promise<TerminalRecordingStatus | null> {
+  return invoke('start_terminal_recording', { sessionId, format, cols, rows });
+}
+
+export function invokeStopTerminalRecording(sessionId: string): Promise<TerminalRecordingStatus | null> {
+  return invoke('stop_terminal_recording', { sessionId });
+}
+
+export function invokeGetTerminalRecordingStatus(sessionId: string): Promise<TerminalRecordingStatus | null> {
+  return invoke('get_terminal_recording_status', { sessionId });
+}
+
+export interface SshInteractiveAuthPrompt {
+  operationId: string;
+  promptId: string;
+  host: string;
+  username: string;
+  instructions: string;
+  prompts: Array<{ text: string; echo: boolean }>;
+}
+
+export function listenToSshInteractiveAuthPrompt(callback: EventCallback<SshInteractiveAuthPrompt>): Promise<UnlistenFn> {
+  return listen('ssh-interactive-auth-prompt', callback);
+}
+
+export function listenToSshInteractiveAuthClosed(callback: EventCallback<string>): Promise<UnlistenFn> {
+  return listen('ssh-interactive-auth-closed', callback);
+}
+
+export function invokeRespondToSshInteractiveAuth(
+  operationId: string, promptId: string, answers: string[] | null,
+): Promise<void> {
+  return invoke('respond_to_ssh_interactive_auth', { operationId, promptId, answers });
+}
 
 import type {
   AuthMethod,
@@ -60,6 +128,7 @@ import type {
   TerminalBrokerSnapshot,
   TerminalSubmissionIntent,
   TerminalIntegrationStateEvent,
+  TerminalCommandLifecycleEvent,
   RemoteHealthSnapshotRequest,
   RemoteHealthSnapshotResult,
   TransferBatchResult,
@@ -1150,7 +1219,7 @@ export function buildRemoteConnectionRequest(
     host: profile.host,
     port: profile.port,
     username: profile.username,
-    authMethod: mapAuthMethodForBackend(profile.authMethod),
+    authMethod: profile.authMethod,
     password: profile.password,
     keychainKeyId: profile.authMethod === 'key' ? profile.keychainKeyId : undefined,
     privateKeyData: profile.privateKeyData,
@@ -1172,7 +1241,7 @@ export function buildSessionCreateRequest(
     host: profile.host,
     port: profile.port,
     username: profile.username,
-    authMethod: mapAuthMethodForBackend(profile.authMethod),
+    authMethod: profile.authMethod,
     password: profile.password,
     keychainKeyId: profile.authMethod === 'key' ? profile.keychainKeyId : undefined,
     privateKeyData: profile.privateKeyData,
@@ -1184,15 +1253,9 @@ export function buildSessionCreateRequest(
   };
 }
 
-function mapAuthMethodForBackend(authMethod: AuthMethod): AuthMethod {
-  if (authMethod === 'password') return 'password';
-  return 'key';
-}
-
 function mapJumpHostAuthMethod(jumpHost: JumpHostConfig): JumpHostConfig {
   return {
     ...jumpHost,
-    authMethod: mapAuthMethodForBackend(jumpHost.authMethod),
     keychainKeyId: jumpHost.authMethod === 'key' ? jumpHost.keychainKeyId : undefined,
     privateKeyData: jumpHost.privateKeyData,
   };
@@ -1280,6 +1343,14 @@ export async function listenToTerminalIntegrationState(
   return listen<TerminalIntegrationStateEvent>('terminal-integration-state', (event) => {
     callback(event);
   });
+}
+
+export function listenToTerminalCommandLifecycle(callback: EventCallback<TerminalCommandLifecycleEvent>): Promise<UnlistenFn> {
+  return listen('terminal-command-lifecycle', callback);
+}
+
+export function invokeNotifyTerminalCommand(title: string, body: string): Promise<void> {
+  return invoke('notify_terminal_command', { title, body });
 }
 
 export function isTauriRuntime(): boolean {

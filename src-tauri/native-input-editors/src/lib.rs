@@ -51,6 +51,8 @@ pub struct Editor {
     retired: HashSet<String>,
     last: Option<nip::Identity>,
     result: Option<i32>,
+    display_sequence: u64,
+    display_running: bool,
     output: VecDeque<Vec<u8>>,
     output_bytes: usize,
     failed: bool,
@@ -72,6 +74,8 @@ impl Editor {
             retired: HashSet::new(),
             last: None,
             result: None,
+            display_sequence: 0,
+            display_running: false,
             output: VecDeque::new(),
             output_bytes: 0,
             failed: false,
@@ -575,6 +579,35 @@ impl Editor {
             owned_draft_absent: self.draft.is_none(),
             after_command: self.last.clone(),
         });
+    }
+    fn display_command(&mut self, cwd: &str, exit_code: Option<i32>) -> u64 {
+        if !self.check_thread()
+            || self.connection.is_none()
+            || !self.supported
+            || cwd.is_empty()
+            || cwd.len() > 4096
+            || cwd.chars().any(char::is_control)
+        {
+            return 0;
+        }
+        if exit_code.is_some() {
+            if !std::mem::replace(&mut self.display_running, false) {
+                return 0;
+            }
+        } else {
+            self.display_sequence += 1;
+            self.display_running = true;
+        }
+        self.connection_reply(nip::ConnectionPayload::DisplayCommand {
+            command_id: self.display_sequence,
+            cwd: cwd.into(),
+            exit_code,
+        });
+        if self.failed {
+            0
+        } else {
+            self.display_sequence
+        }
     }
     pub fn take_output(&mut self) -> Option<Vec<u8>> {
         let bytes = self.output.pop_front()?;

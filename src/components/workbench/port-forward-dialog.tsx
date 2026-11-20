@@ -24,7 +24,7 @@ import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useI18n } from '@/hooks/useI18n';
 import { getErrorMessage } from '@/lib/error';
-import { formatBytes, generateId } from '@/lib/utils';
+import { cn, formatBytes, generateId } from '@/lib/utils';
 import { isPortForwardActive, type ManagedPortForwardRuntime, usePortForwardStore } from '@/stores/portForwardStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -98,6 +98,7 @@ export function PortForwardDialog({ profile: requestedProfile, onClose }: PortFo
     if (!Number.isInteger(localPort) || localPort < 1 || localPort > 65_535) {
       return t('portForward.validation.port');
     }
+    if (draft.kind === 'dynamic') return undefined;
     if (!draft.remoteHost.trim()) return t('portForward.validation.host');
     if (!Number.isInteger(remotePort) || remotePort < 1 || remotePort > 65_535) {
       return t('portForward.validation.port');
@@ -114,8 +115,8 @@ export function PortForwardDialog({ profile: requestedProfile, onClose }: PortFo
       name: draft.name.trim(),
       kind: draft.kind,
       localPort: Number(draft.localPort),
-      remoteHost: draft.remoteHost.trim(),
-      remotePort: Number(draft.remotePort),
+      remoteHost: draft.kind === 'dynamic' ? '' : draft.remoteHost.trim(),
+      remotePort: draft.kind === 'dynamic' ? 0 : Number(draft.remotePort),
       autoStart: draft.autoStart,
     };
     const nextRules = draft.id ? rules.map((rule) => (rule.id === draft.id ? nextRule : rule)) : [...rules, nextRule];
@@ -150,7 +151,7 @@ export function PortForwardDialog({ profile: requestedProfile, onClose }: PortFo
 
   return (
     <Dialog open={Boolean(profile)} onOpenChange={(open) => !open && onClose()}>
-      <CompactDialogContent className="max-w-2xl">
+      <CompactDialogContent className="@container max-w-2xl">
         <CompactDialogHeader
           title={t('portForward.title')}
           description={profile ? t('portForward.description', { name: profile.name }) : t('portForward.descriptionEmpty')}
@@ -192,15 +193,16 @@ export function PortForwardDialog({ profile: requestedProfile, onClose }: PortFo
                     >
                       <ToggleGroupItem value="local">{t('portForward.kind.local')}</ToggleGroupItem>
                       <ToggleGroupItem value="remote">{t('portForward.kind.remote')}</ToggleGroupItem>
+                      <ToggleGroupItem value="dynamic">{t('portForward.kind.dynamic')}</ToggleGroupItem>
                     </ToggleGroup>
                     <FieldDescription>
-                      {draft.kind === 'local' ? t('portForward.kind.localDetail') : t('portForward.kind.remoteDetail')}
+                      {t(`portForward.kind.${draft.kind}Detail`)}
                     </FieldDescription>
                   </Field>
-                  <div className="grid gap-x-2 gap-y-4 sm:grid-cols-3">
+                  <div className={cn('grid gap-x-2 gap-y-4', draft.kind !== 'dynamic' && '@min-[30rem]:grid-cols-3')}>
                     <Field>
                       <FieldLabel htmlFor="port-forward-local-port">
-                        {draft.kind === 'local' ? t('portForward.form.listenPort') : t('portForward.form.localTargetPort')}
+                        {draft.kind === 'remote' ? t('portForward.form.localTargetPort') : t('portForward.form.listenPort')}
                       </FieldLabel>
                       <Input
                         id="port-forward-local-port"
@@ -209,7 +211,7 @@ export function PortForwardDialog({ profile: requestedProfile, onClose }: PortFo
                         onChange={(event) => setDraft({ ...draft, localPort: event.target.value })}
                       />
                     </Field>
-                    <Field>
+                    {draft.kind !== 'dynamic' && <><Field>
                       <FieldLabel htmlFor="port-forward-remote-host">
                         {draft.kind === 'local' ? t('portForward.form.remoteTargetHost') : t('portForward.form.remoteListenHost')}
                       </FieldLabel>
@@ -231,6 +233,7 @@ export function PortForwardDialog({ profile: requestedProfile, onClose }: PortFo
                         onChange={(event) => setDraft({ ...draft, remotePort: event.target.value })}
                       />
                     </Field>
+                    </>}
                   </div>
                   <Field className="flex-row items-center justify-between rounded-lg border p-3">
                     <div>
@@ -289,7 +292,7 @@ export function PortForwardDialog({ profile: requestedProfile, onClose }: PortFo
                         </Badge>
                       </CardTitle>
                       <CardDescription>
-                        {rule.kind === 'local'
+                        {rule.kind === 'dynamic' ? `SOCKS5 · 127.0.0.1:${rule.localPort}` : rule.kind === 'local'
                           ? `127.0.0.1:${rule.localPort} → ${rule.remoteHost}:${rule.remotePort}`
                           : `${rule.remoteHost}:${rule.remotePort} → 127.0.0.1:${rule.localPort}`}
                       </CardDescription>

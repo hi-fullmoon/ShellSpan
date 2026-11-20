@@ -12,7 +12,8 @@ import type {
 import { generateId } from '@/lib/utils';
 import { useAppStore } from './appStore';
 import { useProfileStore } from './profileStore';
-import { formatTabTitle, resolveTabTitleValues } from '@/lib/terminal/tab-title';
+import { cleanTerminalTitle, formatTabTitle, resolveTabTitleValues } from '@/lib/terminal/tab-title';
+import type { TerminalRecordingStatus } from '@/lib/ipc/tauri';
 
 export interface TerminalSession {
   sessionId: string;
@@ -28,6 +29,11 @@ export interface TerminalSession {
   promptReady?: boolean;
   promptReadyRevision?: number;
   foregroundHandoffActive?: boolean;
+  currentDirectory?: string;
+  oscTitle?: string;
+  readOnly?: boolean;
+  recording?: TerminalRecordingStatus;
+  unreadCommand?: 'completed' | 'failed';
   title: string;
   baseTitle?: string;
   manualTitle?: string;
@@ -131,6 +137,8 @@ interface TerminalState {
   workspaceViews: Partial<Record<TerminalWorkspace, WorkspaceView>>;
   workspaceSplit: TerminalSplitState | null;
   workspaceFocusedSlot: string;
+  zoomedGroupSlot: string | null;
+  toggleWorkspaceZoom: (slot: string) => void;
   switchWorkspace: (workspace: TerminalWorkspace) => void;
   setWorkspaceSplit: (update: TerminalSplitState | null | ((current: TerminalSplitState | null) => TerminalSplitState | null)) => void;
   setWorkspaceFocusedSlot: (slot: string) => void;
@@ -174,6 +182,10 @@ interface TerminalState {
   setClosed: (sessionId: string, event: ClosedEvent) => void;
   setIntegrationState: (event: TerminalIntegrationStateEvent) => void;
   updateTitle: (sessionId: string, title: string) => void;
+  setOscTitle: (sessionId: string, title: string) => void;
+  toggleReadOnly: (sessionId: string) => void;
+  setRecording: (sessionId: string, recording?: TerminalRecordingStatus) => void;
+  setUnreadCommand: (sessionId: string, unreadCommand?: TerminalSession['unreadCommand']) => void;
   resetTitle: (sessionId: string) => void;
   togglePin: (sessionId: string) => void;
   setTabColor: (sessionId: string, color?: string) => void;
@@ -186,6 +198,11 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
   workspaceViews: {},
   workspaceSplit: null,
   workspaceFocusedSlot: 'first',
+  zoomedGroupSlot: null,
+  toggleWorkspaceZoom: (slot) => set(state => ({
+    zoomedGroupSlot: state.zoomedGroupSlot !== slot && state.workspaceSplit
+      && getTerminalGroups(state.workspaceSplit).some(group => group.id === slot) ? slot : null,
+  })),
   switchWorkspace: (workspace) => set(state => {
     if (state.workspace === workspace) return state;
     const current: WorkspaceView = { activeSessionId: state.activeSessionId,
@@ -197,10 +214,19 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
     const byId = new Map(state.sessions.map(session => [session.sessionId, session]));
     return { workspace, workspaceViews: { ...state.workspaceViews, [state.workspace]: current },
       sessions: sortSessions(next.order.map(id => byId.get(id)!)), activeSessionId: next.activeSessionId,
-      workspaceSplit: next.split, workspaceFocusedSlot: next.focusedSlot };
+      workspaceSplit: next.split, workspaceFocusedSlot: next.focusedSlot, zoomedGroupSlot: null };
   }),
-  setWorkspaceSplit: (update) => set(state => ({ workspaceSplit: typeof update === 'function' ? update(state.workspaceSplit) : update })),
-  setWorkspaceFocusedSlot: (workspaceFocusedSlot) => set({ workspaceFocusedSlot }),
+  setWorkspaceSplit: (update) => set(state => {
+    const workspaceSplit = typeof update === 'function' ? update(state.workspaceSplit) : update;
+    const zoomedGroupSlot = state.zoomedGroupSlot && workspaceSplit
+      && getTerminalGroups(workspaceSplit).some(group => group.id === state.zoomedGroupSlot)
+      ? state.zoomedGroupSlot : null;
+    return { workspaceSplit, zoomedGroupSlot };
+  }),
+  setWorkspaceFocusedSlot: (workspaceFocusedSlot) => set(state => ({
+    workspaceFocusedSlot,
+    zoomedGroupSlot: state.zoomedGroupSlot === workspaceFocusedSlot ? state.zoomedGroupSlot : null,
+  })),
   restoredLayout: null,
   beginConnectionAttempt: (pending, attemptId = `pending-${generateId()}`) => {
     set((state) => {
@@ -416,6 +442,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
         profileId,
         pinned: old.pinned,
         color: old.color,
+        readOnly: old.readOnly,
         reconnecting: true,
         replacesSessionId: oldSessionId,
         replacedSessionIds: [...(old.replacedSessionIds ?? []), oldSessionId].slice(-32),
@@ -483,6 +510,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
           ...session,
           closed: event,
           status: event.reasonKind === 'error' ? 'error' : 'disconnected',
+          recording: undefined,
         };
       });
       return changed ? { sessions } : state;
@@ -510,6 +538,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
           && session.integrationStateRevision === event.integrationStateRevision
           && session.promptReady === event.promptReady
           && session.promptReadyRevision === event.promptReadyRevision
+          && session.currentDirectory === event.currentDirectory
         ) return session;
         changed = true;
         return {
@@ -521,6 +550,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
           integrationStateRevision: event.integrationStateRevision,
           promptReady: event.promptReady,
           promptReadyRevision: event.promptReadyRevision,
+          currentDirectory: event.currentDirectory,
           foregroundHandoffActive: event.inputObservation?.foregroundHandoffActive,
         };
       });
@@ -536,6 +566,27 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
       });
       return changed ? { sessions } : state;
     }),
+  setOscTitle: (sessionId, title) => set((state) => {
+    const oscTitle = cleanTerminalTitle(title, 256) || undefined;
+    const target = state.sessions.find((session) => session.sessionId === sessionId);
+    if (!target || target.oscTitle === oscTitle) return state;
+    return { sessions: state.sessions.map((session) => session === target ? { ...session, oscTitle } : session) };
+  }),
+  toggleReadOnly: (sessionId) => set((state) => ({
+    sessions: state.sessions.map((session) => session.sessionId === sessionId && !session.pendingConnection
+      ? { ...session, readOnly: !session.readOnly } : session),
+  })),
+  setRecording: (sessionId, recording) => set((state) => ({
+    sessions: state.sessions.map((session) => session.sessionId === sessionId
+      ? { ...session, recording: session.status === 'connected' ? recording : undefined }
+      : session),
+  })),
+  setUnreadCommand: (sessionId, unreadCommand) => set((state) => {
+    const target = state.sessions.find((session) => session.sessionId === sessionId);
+    return !target || target.unreadCommand === unreadCommand ? state : {
+      sessions: state.sessions.map((session) => session === target ? { ...session, unreadCommand } : session),
+    };
+  }),
   resetTitle: (sessionId) => set((state) => ({
     sessions: state.sessions.map((session) => session.sessionId === sessionId
       ? { ...session, manualTitle: undefined } : session),

@@ -29,6 +29,7 @@ import { CredentialPromptDialog } from '@/components/terminal/credential-prompt-
 import { AiSudoDialogHost } from '@/components/ai/workspace/ai-sudo-dialog';
 import { KeychainKeyPromptDialog } from '@/components/terminal/keychain-key-prompt-dialog';
 import { HostKeyDialogHost } from '@/components/terminal/host-key-dialog-host';
+import { SshInteractiveAuthDialogHost } from '@/components/terminal/ssh-interactive-auth-dialog';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { AiPanel } from '@/components/ai/ai-panel';
 import { FocusLayout } from '@/components/focus/focus-layout';
@@ -291,6 +292,7 @@ export const App: React.FC = () => {
       <AiSudoDialogHost />
       <KeychainKeyPromptDialog />
       <HostKeyDialogHost />
+      <SshInteractiveAuthDialogHost />
       <CommandPalette />
 
       <Toaster />

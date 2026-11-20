@@ -56,6 +56,14 @@ unavailable process inspection retain native writes without synchronization.
 
 ## Connection deadlines
 
+Terminal connections and preflight accept password, key, SSH Agent, and
+keyboard-interactive authentication. The SSH Agent uses the local agent endpoint
+selected by libssh2. Interactive connections can spend up to 120 seconds on
+startup, and a prompt round expires after at most 60 seconds. Challenges are
+scoped to the connection operation and only sent after host-key verification.
+Answers are kept in memory for the round and are excluded from profile storage
+and application logs.
+
 “Open terminal here” supplies an optional `initialDirectory` in the session
 creation request. The backend rejects empty paths and control characters (which
 could be interpreted by the terminal line editor), quotes the path

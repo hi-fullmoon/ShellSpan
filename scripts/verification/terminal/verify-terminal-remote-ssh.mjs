@@ -1,4 +1,7 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { once } from 'node:events';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -34,7 +37,7 @@ function run(command, args, options = {}) {
   return result.stdout;
 }
 
-function cargoTest(filter, testArgs = []) {
+function cargoTest(filter, testArgs = [], env = fixtureEnvironment) {
   const output = run(cargo, [
     'test',
     '--locked',
@@ -46,9 +49,37 @@ function cargoTest(filter, testArgs = []) {
     ...testArgs,
     '--nocapture',
     '--test-threads=1',
-  ], { env: fixtureEnvironment, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
+  ], { env, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
   if (!/^test result: ok\. 1 passed; 0 failed; 0 ignored;/m.test(output)) {
     throw new Error(`Expected exactly one passing SSH regression for ${filter}`);
+  }
+}
+
+async function verifyAgentAuthentication() {
+  const directory = mkdtempSync('/tmp/shellspan-agent-test-');
+  const socket = path.join(directory, 'agent.sock');
+  const key = path.join(directory, 'identity');
+  const environment = { ...fixtureEnvironment, SSH_AUTH_SOCK: socket };
+  let agent;
+  try {
+    run('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', key]);
+    agent = spawn('ssh-agent', ['-D', '-a', socket], { cwd: directory, stdio: 'ignore' });
+    await once(agent, 'spawn');
+    const deadline = Date.now() + 3_000;
+    while (!existsSync(socket) && agent.exitCode === null && Date.now() < deadline) await delay(25);
+    if (!existsSync(socket)) throw new Error('The isolated SSH agent did not create its socket');
+    run('ssh-add', [key], { env: environment });
+    run(docker, [...compose, 'exec', '-T', 'ssh', 'sh', '-c',
+      'install -d -m 700 -o shellspan -g shellspan /home/shellspan/.ssh && umask 077 && cat > /home/shellspan/.ssh/authorized_keys && chown shellspan:shellspan /home/shellspan/.ssh/authorized_keys',
+    ], { input: readFileSync(key + '.pub'), stdio: ['pipe', 'inherit', 'inherit'] });
+    cargoTest('connection::tests::isolated_ssh_preflight_authenticates_with_the_local_agent', ['--ignored', '--exact'], environment);
+  } finally {
+    if (agent?.pid && agent.exitCode === null && agent.signalCode === null) {
+      const exited = once(agent, 'exit');
+      agent.kill();
+      await exited;
+    }
+    rmSync(directory, { recursive: true, force: true });
   }
 }
 
@@ -57,6 +88,11 @@ try {
   run(docker, ['build', '-t', 'shellspan-ssh-e2e:local', 'tests/ssh-e2e']);
   run(docker, [...compose, 'up', '-d', '--wait']);
   fixtureStarted = true;
+  cargoTest(
+    'port_forward::tests::isolated_ssh_dynamic_socks5_forward_routes_remote_traffic_and_stops',
+    ['--ignored', '--exact'],
+  );
+  if (process.platform !== 'win32') await verifyAgentAuthentication();
   cargoTest(
     'session::tests::initial_directory_ssh_integrated_shell_runs_after_login_scripts',
     ['--ignored', '--exact'],
@@ -111,7 +147,7 @@ try {
     ['--ignored', '--exact'],
   );
   console.log(
-    '\nIsolated SSH gate completed with shared ordinary bash/zsh PTYs, startup compatibility, cleanup, Direct SSH exec, and scoped remote-loopback HTTP.',
+    '\nIsolated SSH gate completed with ordinary bash/zsh PTYs, startup compatibility, cleanup, Direct SSH exec, scoped remote-loopback HTTP, and SOCKS5 forwarding.',
   );
 } finally {
   if (fixtureStarted) run(docker, [...compose, 'down']);

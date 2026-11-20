@@ -422,6 +422,24 @@ pub unsafe extern "C" fn ss_editor_event(
     }
 }
 #[no_mangle]
+pub unsafe extern "C" fn ss_editor_display_command(
+    context: *mut Context,
+    end: i32,
+    status: i32,
+    cwd: *const c_char,
+) -> u64 {
+    let Some(context) = context.as_mut() else {
+        return 0;
+    };
+    let Some(cwd) = string(cwd) else {
+        return 0;
+    };
+    context
+        .editor
+        .display_command(cwd, (end != 0).then_some(status))
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn ss_editor_output(context: *mut Context, size: *mut usize) -> *const u8 {
     let (Some(context), Some(size)) = (context.as_mut(), size.as_mut()) else {
         return std::ptr::null();

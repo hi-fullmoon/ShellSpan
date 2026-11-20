@@ -31,7 +31,7 @@ export function TerminalTitleSettings({ profileId }: { profileId?: string }) {
     setCustom(templateCustom || !TAB_TITLE_PRESETS.some((value) => value === template));
   }, [template, scope, templateCustom]);
   const valid = validTabTitleTemplate(draft);
-  const presetKeys = ['terminal.title.preset0', 'terminal.title.preset1', 'terminal.title.preset2', 'terminal.title.preset3', 'terminal.title.preset4'] as const;
+  const presetKeys = ['terminal.title.preset0', 'terminal.title.preset1', 'terminal.title.preset2', 'terminal.title.preset3', 'terminal.title.preset4', 'terminal.title.preset5', 'terminal.title.preset6'] as const;
   const items: { value: string; label: string }[] = TAB_TITLE_PRESETS.map((value, index) => ({ value, label: t(presetKeys[index]) }));
   items.push({ value: 'custom', label: t('terminal.title.custom') });
   const scopeItems = [{ value: '__global__', label: t('terminal.title.global') }, ...profiles.map((profile) => ({ value: profile.id, label: profile.name || profile.host }))];

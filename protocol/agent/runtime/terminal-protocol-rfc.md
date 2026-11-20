@@ -1235,7 +1235,10 @@ command retirement. Missing/unavailable observations must remain unknown.
 This is a read-only projection, not authorization. The existing
 `terminal-integration-state` event may attach the same optional
 `inputObservation` after actual control events, so confirmed typing/start/end
-can update the status without per-frame IPC pulls. `snapshotSequence` covers the
+can update the status without per-frame IPC pulls. The event also includes the
+optional `currentDirectory` last reported by this shell generation. It changes
+with the integration revision and may be absent before a directory is known.
+`snapshotSequence` covers the
 complete public session projection, advancing only on changes. `legacyRevision`
 and `integrationStateRevision` do not cover every command/gate fact and MUST NOT
 merge the whole observation. Agent/task/operation and terminal ID/generation
@@ -1243,6 +1246,11 @@ must match the current view before consuming it.
 Existing generation, lease, turn guard,
 approval, frontend readiness and admission checks remain required; consumers MUST
 NOT use the observation to acknowledge readiness, clear recovery or enable input.
+The separate terminal-command-lifecycle event carries a generation-bound,
+monotonic display command ID with start, completion, working folder and exit
+metadata. It contains no command line. ShellSpan pairs this event with OSC 133
+display markers bearing the same command ID. The OSC markers only locate cells
+for the terminal overlay and do not convey execution or input authority.
 The existing command registration and typed IPC adapter are reused. The separate
 `get_terminal_submission_recovery` command reads the durable SQLite intent fence
 through spawn_blocking. State authority, Revoking ownership, complete proofs,

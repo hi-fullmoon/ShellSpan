@@ -1,18 +1,33 @@
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { ISearchOptions, ISearchResultChangeEvent } from '@xterm/addon-search';
-import { ArrowDownIcon, ArrowUpIcon, XIcon } from 'lucide-react';
+import { ArrowDownIcon, ArrowUpIcon, CaseSensitiveIcon, RegexIcon, WholeWordIcon, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
 import { resolveTerminalTheme } from './registry/terminal-registry';
 import { terminalSearchDecorations } from '@/lib/terminal/terminal-colors';
+import { eventMatchesShortcut } from '@/lib/shortcuts';
 import type { TerminalSearchAddon } from './terminal-search-addon';
 
-export function TerminalSearch({ addon, onClose, active = true }: {
+// Match the addon's separator set. The addon skips the rest of a line when
+// its first substring match fails the whole-word check, so prefilter with
+// zero-width boundaries and keep the built-in boundary check as well.
+const WORD_CHARACTER = String.raw`[^ ~!@#$%^&*()+\x60\-= \[\]{}|\\;:"',./<>?]`;
+const HAS_LOOKBEHIND = (() => {
+  try {
+    new RegExp('(?<!.)');
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+export function TerminalSearch({ addon, onClose, active = true, initialQuery = '' }: {
   addon?: TerminalSearchAddon;
   onClose: () => void;
   active?: boolean;
+  initialQuery?: string;
 }) {
   const { t } = useI18n();
   const colorScheme = useAppStore((state) => state.terminalColorScheme);
@@ -35,9 +50,16 @@ export function TerminalSearch({ addon, onClose, active = true }: {
     color: foreground,
     borderColor: 'var(--input)',
   } as CSSProperties;
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery);
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [regex, setRegex] = useState(false);
+  const [wholeWord, setWholeWord] = useState(false);
+  const filterWholeWords = wholeWord && HAS_LOOKBEHIND;
+  const searchTerm = useMemo(() => {
+    if (!filterWholeWords || !query) return query;
+    const pattern = regex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return '(?<!' + WORD_CHARACTER + ')(?:' + pattern + ')(?!' + WORD_CHARACTER + ')';
+  }, [filterWholeWords, query, regex]);
   const statusId = useId();
   const invalidRegex = useMemo(() => {
     if (!regex || !query) return false;
@@ -54,7 +76,8 @@ export function TerminalSearch({ addon, onClose, active = true }: {
   const decorations = terminalSearchDecorations(resolveTerminalTheme(colorScheme, colorOverrides), colorOverrides);
   const options: ISearchOptions = {
     caseSensitive,
-    regex,
+    regex: regex || filterWholeWords,
+    wholeWord,
     decorations,
   };
   const optionsRef = useRef(options);
@@ -62,7 +85,11 @@ export function TerminalSearch({ addon, onClose, active = true }: {
 
   useEffect(() => {
     if (!active) return;
-    const focusInput = () => inputRef.current?.focus();
+    const focusInput = () => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    };
+    focusInput();
     document.addEventListener('shellspan:find-terminal', focusInput);
     return () => document.removeEventListener('shellspan:find-terminal', focusInput);
   }, [active]);
@@ -77,18 +104,18 @@ export function TerminalSearch({ addon, onClose, active = true }: {
     // SearchAddon 0.16 does not invalidate highlights when only options change.
     // Clear its cached term here; next/previous navigation retains the cache.
     addon.clearDecorations();
-    const found = addon.findNext(query, { ...optionsRef.current, incremental: true });
+    const found = addon.findNext(searchTerm, { ...optionsRef.current, incremental: true });
     if (!found) setResult({ resultIndex: -1, resultCount: 0 });
     return () => subscription.dispose();
-  }, [addon, query, caseSensitive, regex, invalidRegex, decorations.matchBorder, decorations.activeMatchBorder, decorations.matchBackground, decorations.activeMatchBackground]);
+  }, [addon, query, searchTerm, caseSensitive, regex, wholeWord, invalidRegex, decorations.matchBorder, decorations.activeMatchBorder, decorations.matchBackground, decorations.activeMatchBackground]);
 
   useEffect(() => () => addon?.clearSearch(), [addon]);
 
   const find = (previous: boolean) => {
     if (!query || !addon || invalidRegex) return;
     const found = previous
-      ? addon.findPrevious(query, optionsRef.current)
-      : addon.findNext(query, optionsRef.current);
+      ? addon.findPrevious(searchTerm, optionsRef.current)
+      : addon.findNext(searchTerm, optionsRef.current);
     if (!found) setResult({ resultIndex: -1, resultCount: 0 });
   };
 
@@ -106,6 +133,13 @@ export function TerminalSearch({ addon, onClose, active = true }: {
       style={surfaceStyle}
       className="absolute right-2 top-2 z-20 flex max-h-[calc(100%-0.5rem)] min-h-8 w-[26rem] max-w-[calc(100%-1rem)] flex-wrap items-center gap-x-1 gap-y-0.5 overflow-y-auto rounded-lg border px-1 py-0.5 shadow-md [&_button]:size-5.5"
       onKeyDown={(event) => {
+        const previous = eventMatchesShortcut(event.nativeEvent, 'mod+shift+g');
+        if (previous || eventMatchesShortcut(event.nativeEvent, 'mod+g')) {
+          event.preventDefault();
+          event.stopPropagation();
+          find(previous);
+          return;
+        }
         if (event.key !== 'Escape') return;
         event.preventDefault();
         event.stopPropagation();
@@ -131,10 +165,13 @@ export function TerminalSearch({ addon, onClose, active = true }: {
         />
         <InputGroupAddon align="inline-end" className="ml-auto shrink-0 px-0.5 py-0 has-[>button]:mr-0">
           <Button variant={caseSensitive ? 'secondary' : 'ghost'} size="icon-xs" onClick={() => setCaseSensitive(!caseSensitive)} aria-pressed={caseSensitive} aria-label={t('terminal.search.caseSensitive')} title={t('terminal.search.caseSensitive')}>
-            Aa
+            <CaseSensitiveIcon />
           </Button>
           <Button variant={regex ? 'secondary' : 'ghost'} size="icon-xs" onClick={() => setRegex(!regex)} aria-pressed={regex} aria-label={t('terminal.search.regex')} title={t('terminal.search.regex')}>
-            .*
+            <RegexIcon />
+          </Button>
+          <Button variant={wholeWord ? 'secondary' : 'ghost'} size="icon-xs" onClick={() => setWholeWord(!wholeWord)} aria-pressed={wholeWord} aria-label={t('terminal.search.wholeWord')} title={t('terminal.search.wholeWord')}>
+            <WholeWordIcon />
           </Button>
         </InputGroupAddon>
       </InputGroup>

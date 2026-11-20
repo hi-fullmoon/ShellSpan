@@ -50,6 +50,7 @@
 
 ## 后续设计与历史记录
 
+- [终端能力增强实施计划](design/terminal-capabilities-plan.md)：按三阶段规划终端交互、Shell Integration 体验释放、运维核心能力与 SSH 协议扩展。
 - [终端兼容与分阶段上线记录](../protocol/agent/runtime/terminal-execution-compatibility.md)
 - [in-band 完成帧阶段 0 攻击记录](design/agent-direct-shell-execution-stage-0-gate.md)及[独立实验夹具](../tests/agent-direct-shell-gate/README.md)：保留被否决方案的反例，避免将终端输出当成可信完成信号。
 

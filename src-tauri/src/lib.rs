@@ -43,6 +43,7 @@ pub(crate) mod terminal_jobs;
 #[cfg(all(test, unix))]
 #[path = "tests/terminal_native_protocol.rs"]
 mod terminal_native_protocol;
+mod terminal_recorder;
 pub(crate) mod terminal_screen;
 mod terminal_vim_bridge;
 #[cfg(all(test, windows))]
@@ -140,6 +141,9 @@ pub(crate) fn emit_data(
 /// Agent wrapper filtering. Broker failures are diagnostic in Phase 2: the
 /// established display path remains authoritative and keeps running.
 pub(crate) fn observe_terminal_raw_output(app: &AppHandle, session_id: &str, bytes: &[u8]) {
+    if let Some(recorder) = app.try_state::<terminal_recorder::TerminalRecorder>() {
+        recorder.output(session_id, bytes);
+    }
     if let Some(runtime) = app.try_state::<agent_runtime::AgentRuntime>() {
         match runtime.observe_terminal_raw_output(session_id, bytes) {
             Err(error) => log::warn!(
@@ -236,6 +240,9 @@ pub(crate) fn emit_closed(
     reason_kind: ClosedReasonKind,
     retryable: bool,
 ) -> Result<(), String> {
+    if let Some(recorder) = app.try_state::<terminal_recorder::TerminalRecorder>() {
+        recorder.close(session_id);
+    }
     if let Some(runtime) = app.try_state::<agent_runtime::AgentRuntime>() {
         if let Err(error) = runtime.terminal_closed(session_id) {
             log::warn!("Failed to clean Agent terminal lease after terminal close session_id={session_id}: {error}");
@@ -475,11 +482,13 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(SessionManager::default())
+        .manage(terminal_recorder::TerminalRecorder::default())
         .manage(terminal_display_origin::DisplayOriginRegistry::default())
         .manage(agent_runtime::AgentRuntime::default())
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())
         .manage(PreflightCancellationRegistry::default())
+        .manage(connection::interactive_auth::InteractiveAuthRegistry::default())
         .manage(RemoteHealthCancellationRegistry::default())
         .manage(execution::ExecutionCancellationRegistry::default())
         .manage(DownloadCancellationRegistry::default())
@@ -574,8 +583,13 @@ pub fn run() {
             commands::mark_session_ready,
             commands::set_session_output_paused,
             commands::resize_session,
+            terminal_recorder::export_terminal_buffer,
+            terminal_recorder::start_terminal_recording,
+            terminal_recorder::stop_terminal_recording,
+            terminal_recorder::get_terminal_recording_status,
             commands::write_session_bytes,
             commands::get_terminal_broker_snapshot,
+            commands::notify_terminal_command,
             commands::get_terminal_acceptance_raw_output,
             commands::prepare_terminal_acceptance_raw_command,
             commands::run_terminal_acceptance_command,
@@ -630,6 +644,7 @@ pub fn run() {
             commands::update_remote_permissions,
             commands::check_host_key,
             commands::preflight_connection,
+            connection::interactive_auth::respond_to_ssh_interactive_auth,
             commands::cancel_connection_preflight,
             commands::trust_host,
             commands::list_known_hosts,
@@ -657,6 +672,9 @@ pub fn run() {
             commands::list_port_forwards,
             commands::open_url,
             commands::list_profiles,
+            commands::list_command_snippets,
+            commands::save_command_snippet,
+            commands::delete_command_snippet,
             commands::add_profile,
             commands::update_profile,
             commands::remove_profile,

@@ -2,16 +2,19 @@ import React from 'react';
 import {
   BotIcon,
   CableIcon,
+  CodeIcon,
   FolderIcon,
   FolderOpenIcon,
   FolderSyncIcon,
   InfoIcon,
   KeyboardIcon,
   LogsIcon,
+  LockIcon,
   MonitorIcon,
   PaletteIcon,
   PanelBottomIcon,
   PanelRightIcon,
+  RadioTowerIcon,
   SearchIcon,
   ServerIcon,
   Settings2Icon,
@@ -37,7 +40,10 @@ import {
   openHostPath,
   runHostConnectionAction,
 } from '@/lib/host/host-quick-actions';
-import { invokeListSftpBookmarks } from '@/lib/ipc/tauri';
+import { invokeListSftpBookmarks, isTauriRuntime } from '@/lib/ipc/tauri';
+import { TerminalSnippetDialog } from '@/components/terminal/terminal-snippet-dialog';
+import { useSnippetStore } from '@/stores/snippetStore';
+import type { CommandSnippet } from '@/lib/terminal/snippet-template';
 import type { LocaleKey } from '@/locales';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
@@ -45,6 +51,7 @@ import { isPortForwardActive, usePortForwardStore } from '@/stores/portForwardSt
 import { useProfileStore } from '@/stores/profileStore';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { canSplitTerminalPane, getTerminalGroups } from '@/components/terminal/terminal-split';
 import type { TerminalSession } from '@/stores/terminalStore';
 import type {
   AppSection,
@@ -99,6 +106,9 @@ interface BuildCommandPaletteItemsOptions {
   openBookmark: (profile: ConnectionProfile, bookmark: SftpBookmarkRow) => void;
   runQuickAction: (profile: ConnectionProfile, action: HostQuickAction) => void | Promise<void>;
   splitTerminal: (direction: 'right' | 'bottom') => void;
+  canSplitTerminal?: (direction: 'right' | 'bottom') => boolean;
+  snippets?: CommandSnippet[];
+  openSnippet?: (snippet: CommandSnippet, sessionId: string) => void;
   startForward: (profile: ConnectionProfile, ruleId: string) => void | Promise<void>;
 }
 
@@ -155,6 +165,9 @@ export function buildCommandPaletteItems({
   openBookmark,
   runQuickAction,
   splitTerminal,
+  canSplitTerminal,
+  snippets = [],
+  openSnippet,
   startForward,
 }: BuildCommandPaletteItemsOptions): CommandPaletteItem[] {
   const navigation: CommandPaletteItem[] = [
@@ -181,8 +194,38 @@ export function buildCommandPaletteItems({
     run: () => openSettings('general'),
   });
 
-  const canSplit = terminalSessions.length >= 2
-    && terminalSessions.some((session) => session.sessionId === activeTerminalSessionId);
+  const activeTerminal = terminalSessions.find((session) => session.sessionId === activeTerminalSessionId);
+  navigation.push({
+    id: 'navigation-snippets',
+    group: 'navigation',
+    label: label('terminal.snippets.title'),
+    keywords: 'manage reusable global command snippets',
+    icon: CodeIcon,
+    run: () => navigate('workbench', 'snippets'),
+  });
+  if (activeTerminal && !activeTerminal.pendingConnection) navigation.push({
+    id: 'terminal-toggle-read-only',
+    group: 'navigation',
+    label: label(activeTerminal.readOnly ? 'terminal.inputLock.unlock' : 'terminal.inputLock.lock'),
+    keywords: 'terminal input lock read only',
+    icon: LockIcon,
+    run: () => useTerminalStore.getState().toggleReadOnly(activeTerminal.sessionId),
+  });
+  if (terminalSessions.filter((session) => session.status === 'connected').length >= 2) navigation.push({
+    id: 'terminal-configure-broadcast',
+    group: 'navigation',
+    label: label('terminal.broadcast.configure'),
+    keywords: 'terminal broadcast input synchronize panes',
+    icon: RadioTowerIcon,
+    run: () => {
+      useAppStore.getState().setActiveSection('terminal');
+      requestAnimationFrame(() => document.dispatchEvent(new Event('shellspan:configure-terminal-broadcast')));
+    },
+  });
+  const canSplit = (direction: 'right' | 'bottom'): boolean =>
+    canSplitTerminal?.(direction) ?? Boolean(activeTerminal && !activeTerminal.pendingConnection
+      && (terminalSessions.length > 1 || (activeTerminal.host === 'local' && activeTerminal.port === 0)
+        || profiles.some((profile) => profile.id === activeTerminal.profileId)));
   navigation.push(
     {
       id: 'terminal-split-right',
@@ -190,8 +233,8 @@ export function buildCommandPaletteItems({
       label: label('commandPalette.action.splitRight'),
       keywords: 'terminal split pane right vertical',
       icon: PanelRightIcon,
-      disabled: !canSplit,
-      disabledReason: !canSplit ? label('commandPalette.disabled.split') : undefined,
+      disabled: !canSplit('right'),
+      disabledReason: !canSplit('right') ? label('commandPalette.disabled.split') : undefined,
       run: () => splitTerminal('right'),
     },
     {
@@ -200,8 +243,8 @@ export function buildCommandPaletteItems({
       label: label('commandPalette.action.splitBottom'),
       keywords: 'terminal split pane bottom horizontal down',
       icon: PanelBottomIcon,
-      disabled: !canSplit,
-      disabledReason: !canSplit ? label('commandPalette.disabled.split') : undefined,
+      disabled: !canSplit('bottom'),
+      disabledReason: !canSplit('bottom') ? label('commandPalette.disabled.split') : undefined,
       run: () => splitTerminal('bottom'),
     },
   );
@@ -330,7 +373,8 @@ export function buildCommandPaletteItems({
         id: `forward-${profile.id}-${rule.id}`,
         group: 'forward',
         label: `${label('commandPalette.action.startForward')}: ${rule.name}`,
-        detail: `${profile.name} · ${rule.kind === 'local' ? rule.localPort : rule.remotePort} → ${rule.remoteHost}:${rule.remotePort}`,
+        detail: rule.kind === 'dynamic' ? `${profile.name} · SOCKS5 · 127.0.0.1:${rule.localPort}`
+          : `${profile.name} · ${rule.kind === 'local' ? rule.localPort : rule.remotePort} → ${rule.remoteHost}:${rule.remotePort}`,
         keywords: `${profile.name} ${profile.host} ${rule.name} ${rule.kind} port forward tunnel`,
         icon: CableIcon,
         disabled: active,
@@ -339,6 +383,19 @@ export function buildCommandPaletteItems({
       };
     })
   ));
+
+  const availableTerminal = activeTerminal?.status === 'connected' && !activeTerminal.readOnly;
+  const snippetItems = openSnippet ? snippets.map((snippet): CommandPaletteItem => ({
+    id: `snippet-${snippet.id}`,
+    group: 'quickAction',
+    label: snippet.name,
+    detail: [snippet.groupName, snippet.description].filter(Boolean).join(' · ') || snippet.commandTemplate,
+    keywords: [snippet.name, snippet.groupName, snippet.commandTemplate, 'snippet', ...snippet.tags].join(' '),
+    icon: CodeIcon,
+    disabled: !availableTerminal,
+    disabledReason: availableTerminal ? undefined : label('terminal.snippets.inputUnavailable'),
+    run: () => { if (activeTerminal && availableTerminal) openSnippet(snippet, activeTerminal.sessionId); },
+  })) : [];
 
   const settings = SETTINGS.map(({ id, icon }): CommandPaletteItem => ({
     id: `settings-${id}`,
@@ -357,6 +414,7 @@ export function buildCommandPaletteItems({
     ...openSftpSessions,
     ...bookmarkItems,
     ...quickActions,
+    ...snippetItems,
     ...forwards,
     ...settings,
   ];
@@ -388,6 +446,9 @@ export const CommandPalette: React.FC = () => {
   const profiles = useProfileStore((state) => state.profiles);
   const terminalSessions = useTerminalStore((state) => state.sessions);
   const activeTerminalSessionId = useTerminalStore((state) => state.activeSessionId);
+  const terminalSplit = useTerminalStore((state) => state.workspaceSplit);
+  const snippets = useSnippetStore((state) => state.snippets);
+  const [activeSnippet, setActiveSnippet] = React.useState<{ snippet: CommandSnippet; sessionId: string }>();
   const sftpConnections = useSftpStore((state) => state.connections);
   const portForwardRuntimes = usePortForwardStore((state) => state.runtimes);
   const [open, setOpen] = React.useState(false);
@@ -410,12 +471,18 @@ export const CommandPalette: React.FC = () => {
     return () => { cancelled = true; };
   }, [open, profiles]);
 
+  React.useEffect(() => {
+    if (open && isTauriRuntime()) void useSnippetStore.getState().load().catch(() => showError(t('terminal.snippets.loadFailed')));
+  }, [open, showError, t]);
+
 
   const items = React.useMemo(
     () => buildCommandPaletteItems({
       profiles,
       terminalSessions,
       activeTerminalSessionId,
+      snippets,
+      openSnippet: (snippet, sessionId) => setActiveSnippet({ snippet, sessionId }),
       sftpConnections,
       bookmarks,
       portForwardRuntimes,
@@ -469,9 +536,22 @@ export const CommandPalette: React.FC = () => {
       },
       splitTerminal: (direction) => {
         useAppStore.getState().setActiveSection('terminal');
-        document.dispatchEvent(new CustomEvent('shellspan:split-terminal-pane', {
+        requestAnimationFrame(() => document.dispatchEvent(new CustomEvent('shellspan:split-terminal-pane', {
           detail: { direction },
-        }));
+        })));
+      },
+      canSplitTerminal: (direction) => {
+        const session = terminalSessions.find((item) => item.sessionId === activeTerminalSessionId);
+        if (!session || session.pendingConnection) return false;
+        const group = terminalSplit && getTerminalGroups(terminalSplit)
+          .find((item) => item.sessionIds.includes(session.sessionId));
+        const area = document.querySelector('[data-terminal-workspace-area]');
+        const groupElement = group ? Array.from(area?.querySelectorAll<HTMLElement>('[data-terminal-group]') ?? [])
+          .find((element) => element.dataset.terminalGroup === group.id) : area;
+        return canSplitTerminalPane(direction, groupElement?.querySelector('[data-terminal-content]'))
+          && ((group ? group.sessionIds.length : terminalSessions.length) > 1
+            || (session.host === 'local' && session.port === 0)
+            || profiles.some((profile) => profile.id === session.profileId));
       },
       startForward: async (profile, ruleId) => {
         const rule = profile.portForwards?.find((candidate) => candidate.id === ruleId);
@@ -488,6 +568,9 @@ export const CommandPalette: React.FC = () => {
       t,
       terminalSessions,
       activeTerminalSessionId,
+      terminalSplit,
+      snippets,
+      open,
     ],
   );
   const filteredItems = React.useMemo(
@@ -519,7 +602,7 @@ export const CommandPalette: React.FC = () => {
     'settings',
   ];
 
-  return (
+  return (<>
     <Dialog open={open} onOpenChange={(nextOpen) => {
       setOpen(nextOpen);
       if (!nextOpen) setQuery('');
@@ -599,5 +682,6 @@ export const CommandPalette: React.FC = () => {
         </div>
       </DialogContent>
     </Dialog>
-  );
+    {activeSnippet && <TerminalSnippetDialog {...activeSnippet} close={() => setActiveSnippet(undefined)} />}
+  </>);
 };

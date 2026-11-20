@@ -28,6 +28,7 @@ extern int ss_editor_complete_source(void *, const char *);
 extern int ss_editor_action(void *);
 extern const char *ss_editor_text(void *);
 extern int ss_editor_event(void *, int, int, const char *);
+extern uint64_t ss_editor_display_command(void *, int, int, const char *);
 extern const unsigned char *ss_editor_output(void *, size_t *);
 extern const char *ss_editor_marker(void *, int);
 extern const char *ss_editor_plan(void *, const char *);
@@ -302,6 +303,20 @@ static int bin_ssnip(char *name, char **args, Options opts, int func) {
     if(count == 4 && !strcmp(args[0],"job-observation")) {
         int result=ss_editor_job_observation(editor,args[1],args[2],atoi(args[3]),strcmp(args[3],"-")!=0);
         return flush_output() || !result;
+    }
+    if(count == 3 && (!strcmp(args[0],"display-begin") || !strcmp(args[0],"display-end"))) {
+        const int end = !strcmp(args[0],"display-end");
+        const int status = atoi(args[2]);
+        char *cwd = plain(args[1]); if(!cwd) return 1;
+        uint64_t sequence = ss_editor_display_command(editor,end,status,cwd);
+        zsfree(cwd);
+        if(flush_output()) return 1;
+        if(sequence) {
+            if(end) fprintf(stdout,"\033]133;D;%d;ShellSpan=%llu\007",status,(unsigned long long)sequence);
+            else fprintf(stdout,"\033]133;C;ShellSpan=%llu\007",(unsigned long long)sequence);
+            fflush(stdout);
+        }
+        return 0;
     }
     if(count == 2 && !strcmp(args[0],"settle")) {
 #if defined(SHELLSPAN_ZLE_BOUND_HISTORY) || defined(__linux__)

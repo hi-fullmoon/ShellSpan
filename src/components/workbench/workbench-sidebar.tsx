@@ -21,6 +21,7 @@ import { useAppStore } from '@/stores/appStore';
 import {
   ActivityIcon,
   ChevronUpIcon,
+  CodeIcon,
   FileTextIcon,
   InfoIcon,
   KeyboardIcon,
@@ -138,6 +139,7 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
       label: t('workbench.logs.title'),
       icon: FileTextIcon,
     },
+    { key: 'snippets', label: t('terminal.snippets.title'), icon: CodeIcon },
   ];
 
   return (

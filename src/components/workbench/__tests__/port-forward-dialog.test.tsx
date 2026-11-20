@@ -120,4 +120,20 @@ describe('PortForwardDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'portForward.retry' }));
     expect(retry).toHaveBeenCalledWith('op-failed');
   });
+
+  it('hides remote target fields and drops the 3-column grid in dynamic SOCKS5 mode', () => {
+    render(<PortForwardDialog profile={profile} onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'portForward.create' }));
+    const localPortField = screen.getByLabelText('portForward.form.listenPort').closest('[data-slot="field"]')!;
+    const portGrid = localPortField.parentElement!;
+    expect(portGrid).toHaveClass('@min-[30rem]:grid-cols-3');
+
+    fireEvent.click(screen.getByRole('button', { name: 'portForward.kind.dynamic' }));
+    expect(portGrid).not.toHaveClass('@min-[30rem]:grid-cols-3');
+    expect(screen.queryByLabelText('portForward.form.remoteTargetHost')).toBeNull();
+    expect(screen.queryByLabelText('portForward.form.remoteListenHost')).toBeNull();
+    expect(screen.queryByLabelText('portForward.form.remoteTargetPort')).toBeNull();
+    expect(screen.queryByLabelText('portForward.form.remoteListenPort')).toBeNull();
+  });
 });

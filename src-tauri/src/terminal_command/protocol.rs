@@ -114,6 +114,11 @@ pub enum ConnectionPayload {
     Directory {
         cwd: String,
     },
+    DisplayCommand {
+        command_id: u64,
+        cwd: String,
+        exit_code: Option<i32>,
+    },
     EditorOptions {
         interactive_comments: bool,
         native_jobs: bool,
@@ -176,6 +181,16 @@ impl ConnectionEnvelope {
             }
         }
         match &self.payload {
+            ConnectionPayload::DisplayCommand {
+                command_id, cwd, ..
+            } if *command_id == 0
+                || *command_id > 9_007_199_254_740_991
+                || cwd.is_empty()
+                || cwd.len() > 4096
+                || cwd.chars().any(char::is_control) =>
+            {
+                return Err(ErrorCode::Limit)
+            }
             ConnectionPayload::Directory { cwd }
                 if cwd.len() > 4096 || cwd.chars().any(char::is_control) =>
             {

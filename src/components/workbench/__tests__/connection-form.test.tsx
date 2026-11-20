@@ -469,4 +469,23 @@ describe('ConnectionFormDrawer', () => {
     expect(onSubmit).not.toHaveBeenCalled();
     expect(onConnect).not.toHaveBeenCalled();
   });
+
+  it('lays out auth methods in a 2x2 grid and shows hints for agent and keyboard-interactive modes', () => {
+    render(<ConnectionFormDrawer open={true} onClose={noop} onSubmit={noop} onConnect={noop} />);
+
+    const authGroup = document.body.querySelector('[data-slot="toggle-group"]');
+    expect(authGroup).toHaveClass('grid', 'grid-cols-2');
+
+    const agentToggle = Array.from(
+      document.body.querySelectorAll('[data-slot="toggle-group-item"]'),
+    ).find((item) => item.textContent === 'connection.form.auth.agent');
+    fireEvent.click(agentToggle!);
+    expect(screen.getByText('connection.form.auth.agentHint')).toBeInTheDocument();
+
+    const interactiveToggle = Array.from(
+      document.body.querySelectorAll('[data-slot="toggle-group-item"]'),
+    ).find((item) => item.textContent === 'connection.form.auth.keyboardInteractive');
+    fireEvent.click(interactiveToggle!);
+    expect(screen.getByText('connection.form.auth.keyboardInteractiveHint')).toBeInTheDocument();
+  });
 });

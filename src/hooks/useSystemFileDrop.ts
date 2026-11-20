@@ -4,6 +4,7 @@ import type { DragDropEvent } from '@tauri-apps/api/window';
 import type { Event as TauriEvent } from '@tauri-apps/api/event';
 
 export interface UseSystemFileDropOptions {
+  enabled?: boolean;
   leftPaneRef: React.RefObject<HTMLElement | null>;
   rightPaneRef: React.RefObject<HTMLElement | null>;
   onDrop: (paths: string[], side: 'local' | 'remote') => void;
@@ -21,8 +22,14 @@ export function useSystemFileDrop(options: UseSystemFileDropOptions): UseSystemF
   const [hoveredSide, setHoveredSide] = useState<'local' | 'remote' | null>(null);
   const optionsRef = useRef(options);
   optionsRef.current = options;
+  const enabled = options.enabled !== false;
 
   useEffect(() => {
+    if (!enabled) {
+      setDragActive(false);
+      setHoveredSide(null);
+      return;
+    }
     let cancelled = false;
 
     const unlistenPromise = getCurrentWindow().onDragDropEvent((event: TauriEvent<DragDropEvent>) => {
@@ -71,7 +78,7 @@ export function useSystemFileDrop(options: UseSystemFileDropOptions): UseSystemF
       // registration promise so the unlisten function is never dropped.
       void unlistenPromise.then((unlisten) => unlisten?.());
     };
-  }, []);
+  }, [enabled]);
 
   return { dragActive, hoveredSide };
 }

@@ -25,6 +25,8 @@ export function serializeTerminalWorkspace(
       title,
       baseTitle,
       manualTitle,
+      currentDirectory,
+      oscTitle,
       titleIndex,
       host,
       port,
@@ -34,7 +36,7 @@ export function serializeTerminalWorkspace(
       color,
     }) => ({
       sessionId,
-      title,
+      title: manualTitle ?? ((currentDirectory || oscTitle) ? baseTitle ?? title : title),
       baseTitle,
       manualTitle,
       titleIndex,

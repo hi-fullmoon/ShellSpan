@@ -5,11 +5,11 @@ use crate::directory_request_registry::{
     DirectoryRequestRegistry, DIRECTORY_REQUEST_SUPERSEDED_MESSAGE,
 };
 use crate::models::{
-    ClosedReasonKind, ConnectionError, ConnectionPreflightRequest, ConnectionPreflightResult,
-    CopyLocalPathsRequest, CopyRemotePathRequest, CopyRemoteToRemoteRequest,
-    CreateRemoteEntryRequest, CreateSessionError, DeleteRemotePathRequest,
-    DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult, JumpHostConfig,
-    KeyCredentialSummary, KnownHostEntry, LocalDirectoryListing, LocalFileEntry,
+    AuthMethod, ClosedReasonKind, ConnectionError, ConnectionPreflightRequest,
+    ConnectionPreflightResult, CopyLocalPathsRequest, CopyRemotePathRequest,
+    CopyRemoteToRemoteRequest, CreateRemoteEntryRequest, CreateSessionError,
+    DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult,
+    JumpHostConfig, KeyCredentialSummary, KnownHostEntry, LocalDirectoryListing, LocalFileEntry,
     LocalTerminalProfile, LogFileInfo, ManagedSession, OpenRemoteFileRequest,
     PortForwardStartRequest, PreflightCancellationRegistry, ProfileRow, ReadRemoteFileRequest,
     ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
@@ -428,6 +428,7 @@ pub(crate) fn publish_terminal_integration_state(
         state,
         prompt_ready: session.prompt_ready,
         prompt_ready_revision: session.prompt_ready_revision,
+        current_directory: session.current_directory,
         shell: session.integration_shell,
         reason,
     };
@@ -435,7 +436,18 @@ pub(crate) fn publish_terminal_integration_state(
         crate::terminal_broker::TERMINAL_INTEGRATION_STATE_EVENT,
         event,
     )
-    .map_err(|error| format!("failed to emit terminal integration state: {error}"))
+    .map_err(|error| format!("failed to emit terminal integration state: {error}"))?;
+    for event in runtime
+        .terminal_broker()
+        .take_display_command_events(session_id)?
+    {
+        app.emit(
+            crate::terminal_broker::TERMINAL_COMMAND_LIFECYCLE_EVENT,
+            event,
+        )
+        .map_err(|error| format!("failed to emit terminal command lifecycle: {error}"))?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -592,6 +604,18 @@ async fn create_remote_terminal_session(
         session_id, summary.title, summary.host, summary.port, summary.username
     );
     let connection_request = remote_connection_request_from_session(&request);
+    let interactive = request.auth_method == AuthMethod::KeyboardInteractive
+        || request
+            .jump_host
+            .as_ref()
+            .is_some_and(|jump| jump.auth_method == AuthMethod::KeyboardInteractive);
+    let connect_budget = if interactive {
+        crate::connection::interactive_auth::CONNECTION_TIMEOUT
+    } else {
+        terminal_deadline::TERMINAL_CONNECT_TIMEOUT
+    };
+    let result_budget = SSH_CONNECT_RESULT_WAIT
+        + connect_budget.saturating_sub(terminal_deadline::TERMINAL_CONNECT_TIMEOUT);
     spawn_ssh_thread(
         app.clone(),
         session_id.clone(),
@@ -603,11 +627,11 @@ async fn create_remote_terminal_session(
         pool.clone(),
         connection_request,
         Some(connection_result_tx),
-        Instant::now() + crate::connection::terminal_deadline::TERMINAL_CONNECT_TIMEOUT,
+        Instant::now() + connect_budget,
     );
 
     let connection_result = match tauri::async_runtime::spawn_blocking(move || {
-        connection_result_rx.recv_timeout(SSH_CONNECT_RESULT_WAIT)
+        connection_result_rx.recv_timeout(result_budget)
     })
     .await
     {
@@ -1938,6 +1962,7 @@ pub(crate) fn set_session_output_paused(
 #[tauri::command]
 pub(crate) fn resize_session(
     state: State<'_, SessionManager>,
+    recorder: State<'_, crate::terminal_recorder::TerminalRecorder>,
     agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
     session_id: String,
     cols: u32,
@@ -1951,6 +1976,7 @@ pub(crate) fn resize_session(
         );
     }
     if result.is_ok() {
+        recorder.resize(&session_id, cols, rows);
         if let Err(error) = agent_runtime.resize_terminal_broker(&session_id, cols, rows) {
             warn!("Failed to update terminal broker geometry session_id={session_id}: {error}");
         }
@@ -1964,6 +1990,27 @@ pub(crate) fn get_terminal_broker_snapshot(
     session_id: Option<String>,
 ) -> Result<crate::terminal_broker::TerminalBrokerSnapshot, String> {
     agent_runtime.terminal_broker_snapshot(session_id.as_deref())
+}
+
+#[tauri::command]
+pub(crate) fn notify_terminal_command(
+    app: AppHandle,
+    title: String,
+    body: String,
+) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    if title.len() > 512
+        || body.len() > 4096
+        || title.chars().chain(body.chars()).any(char::is_control)
+    {
+        return Err("terminal notification text is invalid".into());
+    }
+    app.notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show()
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2442,7 +2489,12 @@ pub(crate) async fn warm_remote_connection(
     let pool = pool.inner().clone();
     let known_hosts = remote_known_hosts_path(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        warm_remote_connection_blocking(request, Some(&pool), Some(&known_hosts))
+        crate::connection::interactive_auth::with_prompt_scope(
+            app,
+            format!("sftp-connect-{}", uuid::Uuid::new_v4()),
+            || false,
+            || warm_remote_connection_blocking(request, Some(&pool), Some(&known_hosts)),
+        )
     })
     .await
     .map_err(|error| RemoteFsError::Other {
@@ -3797,7 +3849,7 @@ pub(crate) fn start_port_forward(
     let known_hosts = crate::known_hosts::known_hosts_path(&app)?;
     resolve_keychain_key_for_remote(&credentials, &mut request.connection)?;
 
-    let local_listener = if request.forward.kind == crate::models::PortForwardKind::Local {
+    let local_listener = if request.forward.kind != crate::models::PortForwardKind::Remote {
         Some(crate::port_forward::bind_local_listener(&request.forward)?)
     } else {
         None
@@ -3915,11 +3967,19 @@ pub(crate) async fn preflight_connection(
 
     let task_operation_id = operation_id.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        crate::connection::preflight_connection(
-            request.connection,
-            task_operation_id,
-            &known_hosts_path,
-            &cancel_flag,
+        let prompt_cancellation = Arc::clone(&cancel_flag);
+        crate::connection::interactive_auth::with_prompt_scope(
+            app,
+            task_operation_id.clone(),
+            move || prompt_cancellation.load(AtomicOrdering::SeqCst),
+            || {
+                crate::connection::preflight_connection(
+                    request.connection,
+                    task_operation_id,
+                    &known_hosts_path,
+                    &cancel_flag,
+                )
+            },
         )
     })
     .await;
@@ -3966,42 +4026,56 @@ pub(crate) async fn trust_host(
     result
 }
 
+fn verified_open_url(url: &str) -> Result<url::Url, String> {
+    if url.len() > 16_384 || url.chars().any(char::is_control) {
+        return Err("invalid external URL".into());
+    }
+    let parsed = url::Url::parse(url).map_err(|_| "invalid external URL")?;
+    if !matches!(parsed.scheme(), "http" | "https" | "mailto") {
+        return Err("refused to open URL with disallowed scheme".into());
+    }
+    Ok(parsed)
+}
+
 #[tauri::command]
 pub(crate) fn open_url(url: String) -> Result<(), String> {
-    let lower = url.to_ascii_lowercase();
-    let allowed = lower.starts_with("https://")
-        || lower.starts_with("http://")
-        || lower.starts_with("mailto:");
-    if !allowed {
-        return Err(format!("refused to open URL with disallowed scheme: {url}"));
-    }
-    if url.contains('\n') || url.contains('\r') {
-        return Err("refused to open URL containing newline characters".to_string());
-    }
-    if contains_shell_metacharacters(&url) {
-        return Err(format!(
-            "refused to open URL containing shell metacharacters: {url}"
-        ));
-    }
+    let url = verified_open_url(&url)?;
 
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/c", "start", "", &url])
-            .spawn()
-            .map_err(|error| format!("failed to open URL: {error}"))?;
+        use std::ptr::{null, null_mut};
+        use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
+        let wide: Vec<u16> = url
+            .as_str()
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        // The association handler receives the URL directly as a document.
+        let result = unsafe {
+            ShellExecuteW(
+                null_mut(),
+                null(),
+                wide.as_ptr(),
+                null(),
+                null(),
+                SW_SHOWNORMAL,
+            )
+        } as isize;
+        if result <= 32 {
+            return Err(format!("failed to open URL: shell error {result}"));
+        }
     }
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
-            .arg(&url)
+            .arg(url.as_str())
             .spawn()
             .map_err(|error| format!("failed to open URL: {error}"))?;
     }
     #[cfg(target_os = "linux")]
     {
         std::process::Command::new("xdg-open")
-            .arg(&url)
+            .arg(url.as_str())
             .spawn()
             .map_err(|error| format!("failed to open URL: {error}"))?;
     }
@@ -4371,12 +4445,6 @@ fn configure_local_bash_locale(command: &mut CommandBuilder) {
     }
 }
 
-fn contains_shell_metacharacters(input: &str) -> bool {
-    input
-        .chars()
-        .any(|c| matches!(c, '&' | '|' | '<' | '>' | '(' | ')' | '^' | '"' | '%' | '!'))
-}
-
 fn remote_connection_request_from_session(
     request: &SessionCreateRequest,
 ) -> RemoteConnectionRequest {
@@ -4578,6 +4646,39 @@ fn petdex_ssh_failure_phase(
 #[tauri::command]
 pub(crate) fn list_profiles(db: State<'_, Database>) -> Result<Vec<ProfileRow>, String> {
     db.list_profiles()
+}
+
+#[tauri::command]
+pub(crate) async fn list_command_snippets(
+    db: State<'_, Database>,
+) -> Result<Vec<crate::db::terminal_snippets::CommandSnippet>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || db.list_command_snippets())
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn save_command_snippet(
+    db: State<'_, Database>,
+    id: Option<String>,
+    input: crate::db::terminal_snippets::SnippetInput,
+) -> Result<crate::db::terminal_snippets::CommandSnippet, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || db.save_command_snippet(id, input))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn delete_command_snippet(
+    db: State<'_, Database>,
+    id: String,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || db.delete_command_snippet(&id))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

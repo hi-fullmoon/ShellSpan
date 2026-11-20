@@ -47,6 +47,7 @@ fn initializes_empty_database_to_current_version() {
     assert_eq!(
         tables,
         [
+            "command_snippets",
             "key_credentials",
             "preferences",
             "profile_sandbox",
@@ -97,6 +98,86 @@ fn initializes_empty_database_to_current_version() {
         .unwrap()
         .any(|name| name.as_deref() == Ok("organization_json"));
     assert!(has_organization_column);
+}
+
+#[test]
+fn terminal_schema_upgrade_preserves_profile_relations_and_triggers() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+    for sql in [
+        SCHEMA_VERSION_TABLE,
+        SCHEMA_INITIAL,
+        "INSERT INTO schema_version(version) VALUES (1);",
+        SCHEMA_PROFILE_SUDO_POLICY,
+        SCHEMA_RESTRICTED_SUDO_RUNNER,
+        SCHEMA_REMOTE_SANDBOX,
+        SCHEMA_SANDBOX_HISTORY,
+    ] {
+        conn.execute_batch(sql).unwrap();
+    }
+    let db = Database {
+        conn: Arc::new(Mutex::new(conn)),
+    };
+    let mut profile = test_profile("existing", "Existing connection");
+    db.insert_profile(&profile).unwrap();
+    db.touch_recent_profile(&profile.id).unwrap();
+    db.with_connection(|conn| {
+        conn.execute_batch(
+            "INSERT INTO profile_sudo_policy VALUES ('existing','sudo-v5','[]',NULL);
+             UPDATE profile_sandbox SET revision='sandbox-v5',was_configured=1 WHERE profile_id='existing';
+             INSERT OR IGNORE INTO profile_sandbox VALUES ('existing','sandbox-v5','null',1);",
+        ).map_err(|error| error.to_string())
+    }).unwrap();
+    db.initialize_or_validate_schema().unwrap();
+    assert_eq!(db.list_recent_profiles().unwrap(), [profile.id.clone()]);
+    db.with_connection(|conn| {
+        let foreign_keys: bool = conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .unwrap();
+        assert!(foreign_keys);
+        assert_eq!(
+            conn.query_row("SELECT revision FROM profile_sudo_policy", [], |row| row
+                .get::<_, String>(
+                0
+            ))
+            .unwrap(),
+            "sudo-v5"
+        );
+        assert_eq!(
+            conn.query_row("SELECT revision FROM profile_sandbox", [], |row| row
+                .get::<_, String>(0))
+                .unwrap(),
+            "sandbox-v5"
+        );
+        Ok(())
+    })
+    .unwrap();
+    profile.auth_method = ProfileAuthMethod::Agent;
+    db.update_profile(&profile.id, &profile).unwrap();
+    assert_eq!(
+        db.get_profile(&profile.id).unwrap().unwrap().auth_method,
+        ProfileAuthMethod::Agent
+    );
+    db.with_connection(|conn| {
+        assert!(!conn
+            .prepare("SELECT 1 FROM profile_sudo_policy")
+            .unwrap()
+            .exists([])
+            .unwrap());
+        let (revision, configured): (String, bool) = conn
+            .query_row(
+                "SELECT revision,was_configured FROM profile_sandbox",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_ne!(revision, "sandbox-v5");
+        assert!(configured);
+        Ok(())
+    })
+    .unwrap();
+    db.delete_profile(&profile.id).unwrap();
+    assert!(db.list_recent_profiles().unwrap().is_empty());
 }
 
 #[test]

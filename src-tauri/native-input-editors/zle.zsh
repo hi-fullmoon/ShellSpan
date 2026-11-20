@@ -185,6 +185,7 @@ __shellspan_nip_preexec() {
   if [[ $SS_NIP_JOB_KIND == launch ]]; then
     __shellspan_job_arm_zsh "$SS_NIP_JOB_HANDLE" || return
   fi
+  builtin ss_nip display-begin "$PWD" 0
   builtin ss_nip begin
 }
 __shellspan_nip_precmd() {
@@ -196,6 +197,8 @@ __shellspan_nip_precmd() {
     __shellspan_job_release_marker_zsh
   fi
   builtin ss_nip settle "$__shellspan_status"
+  builtin ss_nip display-end "$PWD" "$__shellspan_status"
+  builtin printf '\e]133;A\a'
   return "$__shellspan_status"
 }
 __shellspan_nip_line_init() {

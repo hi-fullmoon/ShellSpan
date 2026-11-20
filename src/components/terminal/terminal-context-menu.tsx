@@ -16,6 +16,8 @@ import { TerminalCloseDetails } from './terminal-close-details';
 import { CopyButton } from '@/components/ui/copy-button';
 import { useAppStore } from '@/stores/appStore';
 import { useFocusStore } from '@/stores/focusStore';
+import { useToast } from '@/hooks/useToast';
+import { getTerminalMenuDirectory, openTerminalSftpPath, revealTerminalCurrentDirectory } from '@/lib/terminal/terminal-current-directory';
 
 const MENU_WIDTH = 256;
 const MENU_HEIGHT = 480;
@@ -68,6 +70,7 @@ export interface TerminalContextMenuProps {
   orderedSessionIds?: string[];
   onClose: () => void;
   canSplit?: boolean;
+  canSplitDirection?: (direction: TerminalSplitDirection) => boolean;
   isSplit?: boolean;
   onSplit?: (sessionId: string, direction: TerminalSplitDirection) => void;
   onUnsplit?: () => void;
@@ -81,11 +84,13 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   orderedSessionIds,
   onClose,
   canSplit = false,
+  canSplitDirection,
   isSplit = false,
   onSplit,
   onUnsplit,
 }) => {
   const { t } = useI18n();
+  const { error: showError } = useToast();
   const focus = useFocusStore();
   const sessions = useTerminalStore((state) => state.sessions);
   const closeTerminal = useCloseTerminal();
@@ -152,12 +157,22 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   };
 
   const handleOpenSftp = (): void => {
-    if (target.profileId) {
-      document.dispatchEvent(new CustomEvent('shellspan:connect-profile', {
-        detail: { profileId: target.profileId, target: 'sftp' },
-      }));
-    }
     onClose();
+    if (!target.profileId) return;
+    const openDefault = (profileId: string) => document.dispatchEvent(new CustomEvent('shellspan:connect-profile', {
+      detail: { profileId, target: 'sftp' },
+    }));
+    const current = useTerminalStore.getState().sessions.find((session) => session.sessionId === target.sessionId);
+    if (current?.status !== 'connected') {
+      openDefault(target.profileId);
+      return;
+    }
+    void getTerminalMenuDirectory(target.sessionId).then((directory) => {
+      const current = useTerminalStore.getState().sessions.find((session) => session.sessionId === target.sessionId);
+      if (!current?.profileId) return;
+      if (directory && openTerminalSftpPath(current, directory)) return;
+      openDefault(current.profileId);
+    });
   };
 
   const handleClose = (): void => {
@@ -246,8 +261,8 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
             ref={menuRef}
             role="menu"
             aria-label={target.title}
-            className="fixed z-[1700] w-fit min-w-52 overflow-hidden rounded-lg border border-app-border bg-app-surface p-1 shadow-[var(--shadow-dialog)]"
-            style={{ left, top }}
+            className="fixed z-[1700] w-fit min-w-52 overflow-y-auto rounded-lg border border-app-border bg-app-surface p-1 shadow-[var(--shadow-dialog)]"
+            style={{ left, top, maxHeight: Math.max(120, window.innerHeight - top - 8) }}
             {...navigation}
           >
         {focus.enabled && <>
@@ -291,11 +306,28 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         <MenuItem onClick={handleOpenSftp} disabled={!target.profileId}>
           {t('terminal.tab.openSftp')}
         </MenuItem>
+        {target.host === 'local' && target.port === 0 && (
+          <MenuItem disabled={target.status !== 'connected'} onClick={() => {
+            onClose();
+            void revealTerminalCurrentDirectory(target.sessionId).then((opened) => {
+              if (!opened) showError(t('terminal.menu.noCurrentDirectory'));
+            }).catch(() => showError(t('ai.path.revealFailed')));
+          }}>
+            {t('terminal.menu.revealCurrentDirectory')}
+          </MenuItem>
+        )}
+        <MenuItem onClick={() => {
+          useTerminalStore.getState().toggleReadOnly(target.sessionId);
+          onClose();
+        }}>
+          {t(sessions.find((session) => session.sessionId === target.sessionId)?.readOnly
+            ? 'terminal.inputLock.unlock' : 'terminal.inputLock.lock')}
+        </MenuItem>
         <Separator className="my-0.5" />
-        <MenuItem onClick={() => handleSplit('right')} disabled={!canSplit}>
+        <MenuItem onClick={() => handleSplit('right')} disabled={!canSplit || canSplitDirection?.('right') === false}>
           {t('terminal.tab.splitRight')}
         </MenuItem>
-        <MenuItem onClick={() => handleSplit('bottom')} disabled={!canSplit}>
+        <MenuItem onClick={() => handleSplit('bottom')} disabled={!canSplit || canSplitDirection?.('bottom') === false}>
           {t('terminal.tab.splitDown')}
         </MenuItem>
         {isSplit && (

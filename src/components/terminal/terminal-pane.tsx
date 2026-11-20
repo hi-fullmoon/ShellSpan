@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Spinner } from '@/components/ui/empty-state';
 import { useI18n } from '@/hooks/useI18n';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { useActiveController } from '@/components/terminal/hooks/use-active-controller';
@@ -17,11 +18,14 @@ import { TerminalSearch } from './terminal-search';
 import { TerminalResizeIndicator } from './terminal-resize-indicator';
 import { TerminalPastePreview } from './terminal-paste-preview';
 import { TerminalContentMenu } from './terminal-content-menu';
+import { TerminalCommandBlockOverlay } from './terminal-command-block-overlay';
 import { openTerminalTask, terminalTaskWorkspace, useTerminalTaskNavigation } from './agent-terminal-task-navigation';
 import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useTerminalAgentExecution } from '@/hooks/useTerminalAgentExecution';
 import { useFocusStore } from '@/stores/focusStore';
 import { eventMatchesShortcut } from '@/lib/shortcuts';
+import { terminalFontSizeAfterKey } from '@/lib/terminal/terminal-font';
+import { getTerminalBroadcastTargets } from '@/stores/terminalBroadcastStore';
 import { cn } from '@/lib/utils';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import type { ShortcutBindings } from '@/types';
@@ -35,7 +39,7 @@ import {
   agentTerminalLeaseState,
   type AgentTerminalLeaseView,
 } from '@/components/terminal/agent-terminal-lease-state';
-import { ArrowUpRightIcon, TerminalIcon } from 'lucide-react';
+import { ArrowUpRightIcon, LockIcon, RadioTowerIcon, TerminalIcon } from 'lucide-react';
 
 const effectiveShortcuts = (): ShortcutBindings => ({
   ...DEFAULT_SHORTCUTS,
@@ -220,7 +224,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     color: terminalTheme?.foreground ?? 'var(--app-text)',
   };
   const [searchOpen, setSearchOpen] = useState(false);
-  const [pendingPaste, setPendingPaste] = useState<{ sessionId: string; text: string; target: string } | null>(null);
+  const [searchInitialQuery, setSearchInitialQuery] = useState('');
+  const [pendingPaste, setPendingPaste] = useState<{ sessionId: string; text: string; target: string; targets: string[] } | null>(null);
   const activeSessionId = activeSession?.sessionId ?? null;
   const focusUsesVisibleCommands = useFocusStore(state => state.enabled && state.targetSessionId === activeSessionId);
   const { executionSurface } = useTerminalAgentExecution(activeSession ?? undefined);
@@ -299,8 +304,11 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     && !showPreparingInputPrompt && !showInputBlockedPrompt;
 
   const handleOpenSearch = useCallback((): void => {
+    if (searchOpen) return;
+    const selection = terminal?.getSelection() ?? '';
+    setSearchInitialQuery(selection.trim() && !/[\r\n]/.test(selection) ? selection : '');
     setSearchOpen(true);
-  }, []);
+  }, [searchOpen, terminal]);
 
   const handleCloseSearch = useCallback((): void => {
     clearSearch();
@@ -311,20 +319,26 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const pasteText = useCallback((text: string): void => {
     if (!activeSessionId || !text || !terminal) return;
     const session = useTerminalStore.getState().sessions.find(item => item.sessionId === activeSessionId);
+    const controller = terminalRegistry.get(activeSessionId);
     if (currentSessionIdRef.current !== activeSessionId || session?.status !== 'connected'
-      || terminalRegistry.get(activeSessionId)?.terminal !== terminal
+      || session.readOnly
+      || !controller || controller.terminal !== terminal
       || terminalInputReadiness.isPreparing(activeSessionId)
       || agentTerminalLeaseState.blocksUserInput(activeSessionId, session.foregroundHandoffActive)) {
       showError(t('terminal.feedback.pasteUnavailable'));
       return;
     }
-    if ((multiLinePasteWarning && /[\r\n]/.test(text))
-      || (largePasteWarning && new Blob([text]).size > 5 * 1024)) {
-      setPendingPaste({ sessionId: activeSessionId, text,
+    const targets = getTerminalBroadcastTargets(activeSessionId);
+    const multiline = /[\r\n]/.test(text);
+    const large = new Blob([text]).size > 5 * 1024;
+    if (((multiLinePasteWarning || targets.length > 0) && multiline)
+      || ((largePasteWarning || targets.length > 0) && large)) {
+      setPendingPaste({ sessionId: activeSessionId, text, targets,
         target: `${session.title} (${session.username}@${session.host}:${session.port})` });
       return;
     }
-    terminal.paste(text);
+    if (targets.length) controller.pasteUserText(text, true);
+    else terminal.paste(text);
   }, [activeSessionId, terminal, multiLinePasteWarning, largePasteWarning, showError, t]);
 
   useEffect(() => {
@@ -350,6 +364,14 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       }
 
       const platform = getPlatform();
+      const settings = useAppStore.getState();
+      const fontSize = terminalFontSizeAfterKey(event, platform, settings.terminalFontSize);
+      if (fontSize !== null) {
+        event.preventDefault();
+        event.stopPropagation();
+        settings.setTerminalFontSize(fontSize);
+        return false;
+      }
       const isCopyShortcut =
         (platform === 'macos' && event.metaKey && event.key.toLowerCase() === 'c') ||
         (platform !== 'macos' && event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'c');
@@ -452,14 +474,22 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
   return (
     <div ref={resizeBoundaryRef} className="relative flex h-full w-full flex-col overflow-hidden bg-app-bg" data-terminal-pane-session={activeSessionId}>
+      {activeSession?.readOnly && <div role="status" className="flex shrink-0 flex-wrap items-center justify-between gap-1 border-b border-app-border/50 bg-app-surface px-2.5 py-1 text-xs text-app-text">
+        <span className="flex items-center gap-1"><LockIcon aria-hidden="true" className="size-3.5 shrink-0 text-app-text-soft" />{t('terminal.inputLock.label')}</span>
+        <Button type="button" size="xs" variant="ghost" onClick={() => {
+          useTerminalStore.getState().toggleReadOnly(activeSession.sessionId);
+          focus();
+        }}>{t('terminal.inputLock.unlock')}</Button>
+      </div>}
       {(activeLease || visibleCommandsSelected) && (
         <AgentTerminalStatusBar
           lease={activeLease}
           inputLocked={inputLocked}
-          inputAvailable={activeSession?.status === 'connected' && !activeSession.reconnecting && !preparingInput}
+          inputAvailable={activeSession?.status === 'connected' && !activeSession.readOnly && !activeSession.reconnecting && !preparingInput}
         />
       )}
-      <div className="relative min-h-0 flex-1" style={{ backgroundColor: terminalSurfaceStyle.backgroundColor }}>
+      <div className={cn('relative min-h-0 flex-1', activeSession?.currentDirectory && 'pl-3')}
+        style={{ backgroundColor: terminalSurfaceStyle.backgroundColor }}>
         {activeLease && !activeLease.waitingForUserAction && (
           <div
             className="agent-visible-terminal-aura pointer-events-none absolute inset-0 z-10"
@@ -468,7 +498,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           />
         )}
         {searchOpen && (
-          <TerminalSearch addon={searchAddon} onClose={handleCloseSearch} active={isActive && isVisible} />
+          <TerminalSearch addon={searchAddon} initialQuery={searchInitialQuery} onClose={handleCloseSearch} active={isActive && isVisible} />
         )}
         {showConnectingOverlay && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2" style={terminalSurfaceStyle}>
@@ -494,6 +524,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         <TerminalContentMenu session={activeSession} terminal={terminal} onPaste={pasteText} onSearch={handleOpenSearch}>
           <div ref={paneRef} data-terminal-measure-session={activeSession?.sessionId} className="h-full w-full p-0" />
         </TerminalContentMenu>
+        {terminal && activeSessionId && activeSession?.currentDirectory && <TerminalCommandBlockOverlay terminal={terminal} sessionId={activeSessionId} />}
         {showResizeIndicator && terminal && (
           <TerminalResizeIndicator key={`resize:${activeSessionId}`} terminal={terminal} boundary={resizeBoundaryRef} />
         )}
@@ -501,27 +532,42 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       <ConfirmationDialog
         open={Boolean(pendingPaste)}
         onOpenChange={(open) => { if (!open) setPendingPaste(null); }}
-        title={t('terminal.pasteWarning.title')}
+        title={t(pendingPaste?.targets.length ? 'terminal.broadcast.confirmPaste' : 'terminal.pasteWarning.title')}
         description={t('terminal.pasteWarning.description', {
           lines: pendingPaste ? pendingPaste.text.split(/\r\n|\r|\n/).length : 0,
           characters: pendingPaste?.text.length ?? 0,
         })}
         confirmLabel={t('terminal.pasteWarning.confirm')}
+        confirmVariant={pendingPaste?.targets.length ? 'warning' : 'default'}
+        media={pendingPaste?.targets.length ? <RadioTowerIcon /> : undefined}
+        mediaVariant={pendingPaste?.targets.length ? 'warning' : 'default'}
         onConfirm={() => {
           if (pendingPaste) {
             const target = terminalRegistry.get(pendingPaste.sessionId);
             const targetSession = useTerminalStore.getState().sessions.find((session) => session.sessionId === pendingPaste.sessionId);
             if (!target || targetSession?.status !== 'connected'
+              || targetSession.readOnly
               || terminalInputReadiness.isPreparing(pendingPaste.sessionId)
               || agentTerminalLeaseState.blocksUserInput(pendingPaste.sessionId, targetSession.foregroundHandoffActive)) {
               showError(t('terminal.feedback.pasteUnavailable'));
-            } else {
-              target.terminal.paste(pendingPaste.text);
-            }
+            } else if (pendingPaste.targets.length) {
+              const current = getTerminalBroadcastTargets(pendingPaste.sessionId);
+              if (current.length !== pendingPaste.targets.length || current.some((id) => !pendingPaste.targets.includes(id))) {
+                showError(t('terminal.broadcast.targetsChanged'));
+              } else target.pasteUserText(pendingPaste.text, true);
+            } else target.terminal.paste(pendingPaste.text);
           }
           setPendingPaste(null);
         }}
       >
+        {Boolean(pendingPaste?.targets.length) && (
+          <Alert variant="warning" size="sm">
+            <RadioTowerIcon />
+            <AlertDescription>
+              {t('terminal.broadcast.pasteTargets', { count: (pendingPaste?.targets.length ?? 0) + 1 })}
+            </AlertDescription>
+          </Alert>
+        )}
         {pendingPaste && <TerminalPastePreview text={pendingPaste.text} target={pendingPaste.target} />}
       </ConfirmationDialog>
     </div>

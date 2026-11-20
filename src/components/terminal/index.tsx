@@ -1,11 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { usePlatform } from '@/hooks/usePlatform';
-import { useAppStore } from '@/stores/appStore';
+import { useToast } from '@/hooks/useToast';
+import { useTerminalFileDrop } from '@/hooks/useTerminalFileDrop';
+import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
+import { useProfileStore } from '@/stores/profileStore';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
-import { SquareTerminalIcon } from 'lucide-react';
+import { Dialog } from '@/components/ui/dialog';
+import { CompactDialogBody, CompactDialogContent, CompactDialogFooter, CompactDialogHeader } from '@/components/ui/compact-dialog';
+import { Minimize2Icon, SquareTerminalIcon } from 'lucide-react';
 import { SplitPane } from '@/components/ui/split-pane';
 import { useConnectSession } from '@/hooks/useConnectSession';
 import { serializeTerminalWorkspace } from '@/lib/terminal/terminal-workspace';
@@ -18,6 +23,10 @@ import { createLogger } from '@/lib/logger';
 import { invokeGetLocalTerminalOptions, isTauriRuntime } from '@/lib/ipc/tauri';
 import type { LocalTerminalOptions } from '@/types';
 import { cn } from '@/lib/utils';
+import { getShortcutKeys } from '@/lib/shortcuts';
+import { getTerminalMenuDirectory, isAbsoluteTerminalPath, openTerminalSftpPath } from '@/lib/terminal/terminal-current-directory';
+import { quoteTerminalDropPaths } from '@/lib/terminal/terminal-file-drop';
+import { sshRouteKey } from '@/lib/connections/ssh-route';
 import { terminalRegistry } from './registry/terminal-registry';
 import { TerminalControllerLayer } from './terminal-controller-layer';
 import { agentTerminalLeaseState } from './agent-terminal-lease-state';
@@ -26,7 +35,11 @@ import { TerminalTabSwitcher } from './terminal-tab-switcher';
 import { TerminalPane } from './terminal-pane';
 import { NewSessionDialog } from './new-session-dialog';
 import { TerminalContextMenu } from './terminal-context-menu';
+import { TerminalBroadcastControls } from './terminal-broadcast-controls';
+import { TerminalCommandActivity } from './terminal-command-activity';
 import {
+  canSplitTerminalPane,
+  equalizeTerminalPanes,
   findAdjacentTerminalGroup,
   findTerminalGroup,
   ensureUniqueTerminalGroupIds,
@@ -37,6 +50,8 @@ import {
   repartitionTerminalLayoutPinnedFirst,
   replaceTerminalGroup,
   replaceTerminalSessionId,
+  swapTerminalPane,
+  TERMINAL_MIN_PANE_SIZE,
   updateTerminalGroup,
   updateTerminalSplitAtPath,
   type TerminalGroupSlot,
@@ -54,10 +69,9 @@ type DropPreview =
   | { kind: 'move'; slot: TerminalGroupSlot }
   | { kind: 'tab-bar'; slot: TerminalGroupSlot; insertIndex: number };
 
-const TERMINAL_MIN_PANE_SIZE = 120;
-
 const Terminal: React.FC = () => {
   const { t } = useI18n();
+  const { error: showError } = useToast();
   const platform = usePlatform();
   const sessions = useTerminalStore((state) => state.sessions);
   const activeSessionId = useTerminalStore((state) => state.activeSessionId);
@@ -78,7 +92,12 @@ const Terminal: React.FC = () => {
   } | null>(null);
   const split = useTerminalStore(state => state.workspaceSplit);
   const setSplit = useTerminalStore(state => state.setWorkspaceSplit);
+  const zoomedSlot = useTerminalStore(state => state.zoomedGroupSlot);
+  const zoomLeader = useAppStore(state => state.shortcuts.terminalLeader ?? DEFAULT_SHORTCUTS.terminalLeader);
+  const zoomKey = useAppStore(state => state.shortcuts.terminalZoomPane ?? DEFAULT_SHORTCUTS.terminalZoomPane);
+  const companionRequests = useRef(new Set<string>());
   const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
+  const [remoteFileDrop, setRemoteFileDrop] = useState<{ sessionId: string; paths: string[] } | null>(null);
   const terminalAreaRef = useRef<HTMLDivElement>(null);
   const focusedSlot = useTerminalStore(state => state.workspaceFocusedSlot);
   const focusedGroupRef = useRef<TerminalGroupSlot>(focusedSlot);
@@ -96,7 +115,6 @@ const Terminal: React.FC = () => {
   const usedGroupIdsRef = useRef(new Set(
     split ? getTerminalGroups(split).map((group) => group.id) : [],
   ));
-  const previousSessionsRef = useRef(sessions);
   const restoredLayoutAppliedRef = useRef(false);
   const pinnedSessionKey = useMemo(
     () => sessions.filter((session) => session.pinned).map((session) => session.sessionId).join('\0'),
@@ -104,6 +122,8 @@ const Terminal: React.FC = () => {
   );
   const splitEnabled = split !== null;
   const terminalVisible = activeSection === 'terminal';
+  const configureBroadcast = sessions.filter((session) => session.status === 'connected').length >= 2
+    ? () => document.dispatchEvent(new Event('shellspan:configure-terminal-broadcast')) : undefined;
 
   const focusGroup = useCallback((slot: TerminalGroupSlot): void => {
     focusedGroupRef.current = slot;
@@ -187,6 +207,7 @@ const Terminal: React.FC = () => {
     setTabSwitcherOpen(false);
     setContextMenu(null);
     setDropPreview(null);
+    setRemoteFileDrop(null);
     if (activeSessionId) focusSession(activeSessionId, true);
   }, [workspace]);
 
@@ -231,8 +252,6 @@ const Terminal: React.FC = () => {
 
   // Keep terminal groups in sync when sessions are opened or closed elsewhere.
   useEffect(() => {
-    const previousSessions = previousSessionsRef.current;
-    previousSessionsRef.current = sessions;
     if (!split) return;
     let nextLayout: TerminalLayoutNode = split;
 
@@ -241,16 +260,7 @@ const Terminal: React.FC = () => {
     // stays in the same terminal group, including during automatic reconnect.
     for (const session of sessions) {
       if (!session.replacesSessionId) continue;
-      const previous = previousSessions.find(
-        (candidate) => candidate.sessionId === session.replacesSessionId,
-      );
-      if (previous && previous.sessionId !== session.sessionId) {
-        nextLayout = replaceTerminalSessionId(
-          nextLayout,
-          previous.sessionId,
-          session.sessionId,
-        );
-      }
+      nextLayout = replaceTerminalSessionId(nextLayout, session.replacesSessionId, session.sessionId);
     }
 
     const availableIds = new Set(sessions.map((session) => session.sessionId));
@@ -360,12 +370,7 @@ const Terminal: React.FC = () => {
       : null;
     const content = group?.querySelector<HTMLElement>('[data-terminal-content]')
       ?? terminalAreaRef.current?.querySelector<HTMLElement>('[data-terminal-content]');
-    const rect = content?.getBoundingClientRect();
-    if (!rect) return true;
-    const size = direction === 'left' || direction === 'right' ? rect.width : rect.height;
-    // JSDOM and temporarily hidden sections report zero; defer enforcement
-    // until a real measurable region is available.
-    return size <= 0 || size >= TERMINAL_MIN_PANE_SIZE * 2;
+    return canSplitTerminalPane(direction, content);
   }, []);
 
   const getTabInsertIndex = useCallback((element: HTMLElement, x: number): number => {
@@ -401,6 +406,7 @@ const Terminal: React.FC = () => {
     direction: TerminalSplitDirection,
     targetGroupId?: TerminalGroupSlot,
   ): boolean => {
+    const { sessions, activeSessionId, workspaceSplit: split } = useTerminalStore.getState();
     const incomingFirst = direction === 'left' || direction === 'top';
     const orientation = direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical';
 
@@ -501,7 +507,93 @@ const Terminal: React.FC = () => {
     useTerminalStore.getState().setActiveSession(sessionId);
     setDropPreview(null);
     return true;
-  }, [activeSessionId, canCreateSplitAt, createGroupId, focusGroup, sessions, split]);
+  }, [canCreateSplitAt, createGroupId, focusGroup, setSplit]);
+
+  const canSplitTab = useCallback((sessionId: string, direction: TerminalSplitDirection): boolean => {
+    const state = useTerminalStore.getState();
+    const source = state.sessions.find((session) => session.sessionId === sessionId);
+    if (!source || source.pendingConnection) return false;
+    const group = state.workspaceSplit
+      && getTerminalGroups(state.workspaceSplit).find((item) => item.sessionIds.includes(sessionId));
+    const count = group ? group.sessionIds.length : state.sessions.length;
+    return canCreateSplitAt(direction, group ? group.id : undefined)
+      && (count > 1 || (source.host === 'local' && source.port === 0)
+        || Boolean(source.profileId && useProfileStore.getState().getProfile(source.profileId)));
+  }, [canCreateSplitAt]);
+
+  const splitTab = useCallback((sessionId: string, direction: TerminalSplitDirection): void => {
+    if (!canSplitTab(sessionId, direction) || companionRequests.current.has(sessionId)) return;
+    const state = useTerminalStore.getState();
+    const source = state.sessions.find((session) => session.sessionId === sessionId);
+    if (!source) return;
+    const group = state.workspaceSplit
+      && getTerminalGroups(state.workspaceSplit).find((item) => item.sessionIds.includes(sessionId));
+    if ((group ? group.sessionIds.length : state.sessions.length) > 1) {
+      createOrArrangeSplit(sessionId, direction);
+      return;
+    }
+    if (direction !== 'right' && direction !== 'bottom') return;
+    const profile = source.profileId ? useProfileStore.getState().getProfile(source.profileId) : undefined;
+    if (!profile && (source.host !== 'local' || source.port !== 0)) return;
+
+    const onAttemptStarted = (attemptId: string): void => {
+      const current = useTerminalStore.getState();
+      if (current.workspace !== state.workspace
+        || !current.sessions.some((session) => session.sessionId === sessionId)) return;
+      const layout = current.workspaceSplit;
+      const groups = layout ? getTerminalGroups(layout) : [];
+      if (groups.some((item) => item.sessionIds.includes(attemptId))) return;
+      const original = groups.find((item) => item.sessionIds.includes(sessionId));
+      if ((layout && !original) || !canCreateSplitAt(direction, original?.id)) return;
+      const first: TerminalGroupState = original ?? {
+        kind: 'group',
+        id: 'first',
+        sessionIds: current.sessions.map((session) => session.sessionId).filter((id) => id !== attemptId),
+        activeSessionId: sessionId,
+      };
+      const second: TerminalGroupState = {
+        kind: 'group', id: createGroupId(), sessionIds: [attemptId], activeSessionId: attemptId,
+      };
+      const branch: TerminalSplitState = {
+        kind: 'split', first, second, orientation: direction === 'right' ? 'horizontal' : 'vertical', split: 0.5,
+      };
+      focusGroup(second.id);
+      setSplit(layout ? replaceTerminalGroup(layout, first.id, branch) as TerminalSplitState : branch);
+    };
+    companionRequests.current.add(sessionId);
+    const options = { insertAfterId: sessionId, onAttemptStarted };
+    const openCompanion = async (): Promise<void> => {
+      if (!profile) {
+        await openLocal(source.ptyInfo?.localProfile, options);
+        return;
+      }
+      const initialDirectory = source.sshRouteKey === sshRouteKey(profile)
+        ? await getTerminalMenuDirectory(source.sessionId, false) : null;
+      const current = useTerminalStore.getState();
+      if (current.workspace !== state.workspace || !canSplitTab(sessionId, direction)) return;
+      await connect(profile, { ...options, initialDirectory: initialDirectory ?? undefined });
+    };
+    void openCompanion().catch((error: unknown) => logger.error('Could not open companion terminal', error))
+      .finally(() => companionRequests.current.delete(sessionId));
+  }, [canCreateSplitAt, canSplitTab, connect, createGroupId, focusGroup, openLocal, setSplit]);
+
+  const arrangePanes = useCallback((action: string): void => {
+    const state = useTerminalStore.getState();
+    if (!state.workspaceSplit) return;
+    const slot = state.workspaceFocusedSlot;
+    if (action === 'terminalZoomPane') state.toggleWorkspaceZoom(slot);
+    else if (action === 'terminalEqualizePanes') setSplit(equalizeTerminalPanes(state.workspaceSplit));
+    else if (action === 'terminalSwapPane') setSplit(swapTerminalPane(state.workspaceSplit, slot));
+    if (state.activeSessionId) focusSession(state.activeSessionId);
+  }, [focusSession, setSplit]);
+
+  useEffect(() => {
+    const handleArrange = (event: Event): void => {
+      arrangePanes((event as CustomEvent<string>).detail);
+    };
+    document.addEventListener('shellspan:arrange-terminal-panes', handleArrange);
+    return () => document.removeEventListener('shellspan:arrange-terminal-panes', handleArrange);
+  }, [arrangePanes]);
 
   const activateTab = useCallback((slot: TerminalGroupSlot | null, sessionId: string): void => {
     if (slot !== null) {
@@ -520,6 +612,45 @@ const Terminal: React.FC = () => {
       : null;
     activateTab(group?.id ?? null, sessionId);
   }, [activateTab, split]);
+
+  const droppedPathText = (session: TerminalSession, paths: string[]): string | null =>
+    quoteTerminalDropPaths(paths, session.ptyInfo?.transportKind === 'windowsConPty');
+
+  const insertDroppedPaths = (sessionId: string, paths: string[]): void => {
+    const target = useTerminalStore.getState().sessions.find((session) => session.sessionId === sessionId);
+    const controller = terminalRegistry.get(sessionId);
+    const text = target && droppedPathText(target, paths);
+    if (!controller || !text || !target || target.readOnly || agentTerminalLeaseState.blocksUserInput(sessionId)) {
+      showError(t('terminal.drop.unavailable'));
+      return;
+    }
+    void controller.writeUserInput(text).then((written) => {
+      if (written) activateSwitcherTab(sessionId);
+      else showError(t('terminal.drop.unavailable'));
+    }).catch(() => showError(t('terminal.notice.writeFailedLabel')));
+  };
+
+  useTerminalFileDrop(terminalAreaRef, terminalVisible, (sessionId, paths) => {
+    const target = useTerminalStore.getState().sessions.find((session) => session.sessionId === sessionId);
+    if (!target || target.status !== 'connected' || target.readOnly
+      || !paths.length || paths.some((path) => !isAbsoluteTerminalPath({ host: 'local', port: 0 }, path))) {
+      showError(t('terminal.drop.unavailable'));
+      return;
+    }
+    if (target.host === 'local' && target.port === 0) insertDroppedPaths(sessionId, paths);
+    else setRemoteFileDrop({ sessionId, paths });
+  });
+
+  const uploadDroppedFiles = (sessionId: string, paths: string[]): void => {
+    setRemoteFileDrop(null);
+    void getTerminalMenuDirectory(sessionId).then((path) => {
+      const target = useTerminalStore.getState().sessions.find((session) => session.sessionId === sessionId);
+      if (!path || !target || target.status !== 'connected'
+        || !openTerminalSftpPath(target, path, { uploadPaths: paths })) {
+        showError(t('terminal.drop.uploadUnavailable'));
+      }
+    });
+  };
 
   // Leader-key pane navigation, dispatched from the xterm key handler in
   // TerminalPane (which already consumed the key, so nothing reaches the pty).
@@ -678,11 +809,11 @@ const Terminal: React.FC = () => {
       const focusedGroup = split ? findTerminalGroup(split, focusedGroupRef.current) : null;
       const sessionId = focusedGroup?.activeSessionId || activeSessionId;
       if (!sessionId) return;
-      createOrArrangeSplit(sessionId, detail.direction);
+      splitTab(sessionId, detail.direction);
     };
     document.addEventListener('shellspan:split-terminal-pane', handlePaneSplit);
     return () => document.removeEventListener('shellspan:split-terminal-pane', handlePaneSplit);
-  }, [activeSessionId, createOrArrangeSplit, split]);
+  }, [activeSessionId, splitTab, split]);
 
   const renderTerminalPane = (session: TerminalSession | null, isActive: boolean): React.ReactNode => (
     <TerminalPane
@@ -751,8 +882,13 @@ const Terminal: React.FC = () => {
             setNewSessionDialogOpen(true);
           }}
           onSwitchTab={() => setTabSwitcherOpen(true)}
-          canSplitTab={(direction) => canCreateSplitAt(direction, slot)}
-          onSplitTab={createOrArrangeSplit}
+          onConfigureBroadcast={configureBroadcast}
+          canSplitTab={(direction) => Boolean(groupActiveSession && canSplitTab(groupActiveSession.sessionId, direction))}
+          onSplitTab={splitTab}
+          onArrangePanes={(action) => {
+            if (!focused && groupActiveSession) activateTab(slot, groupActiveSession.sessionId);
+            arrangePanes(action);
+          }}
           onUnsplit={() => setSplit(null)}
           onTabContextMenu={(session, x, y) => setContextMenu({ session, x, y, slot })}
           onTabActivate={(sessionId) => activateTab(slot, sessionId)}
@@ -764,6 +900,14 @@ const Terminal: React.FC = () => {
             ? dropPreview.insertIndex
             : null}
         />
+        {zoomedSlot === slot && <div className="flex shrink-0 items-center justify-end border-b border-app-border/50 bg-app-surface px-2 py-0.5">
+          <Button variant="ghost" size="xs" onClick={() => arrangePanes('terminalZoomPane')}>
+            <Minimize2Icon data-icon="inline-start" />
+            {zoomLeader && zoomKey
+              ? t('terminal.tab.restoreZoomShortcut', { shortcut: getShortcutKeys(zoomLeader, platform).join('+') + ' ' + getShortcutKeys(zoomKey, platform).join('+') })
+              : t('terminal.tab.restoreZoom')}
+          </Button>
+        </div>}
         <div data-terminal-content className="relative min-h-0 flex-1">
           {renderTerminalPane(
             groupActiveSession,
@@ -823,12 +967,15 @@ const Terminal: React.FC = () => {
       className="flex h-full flex-col bg-app-bg"
     >
       <TerminalControllerLayer />
+      <TerminalCommandActivity />
+      <TerminalBroadcastControls visible={terminalVisible} />
       {sessions.length > 0 && !split && (
         <TerminalTabBar
           onNewTabClick={() => setNewSessionDialogOpen(true)}
           onSwitchTab={() => setTabSwitcherOpen(true)}
-          canSplitTab={canCreateSplitAt}
-          onSplitTab={createOrArrangeSplit}
+          onConfigureBroadcast={configureBroadcast}
+          canSplitTab={(direction) => Boolean(activeSession && canSplitTab(activeSession.sessionId, direction))}
+          onSplitTab={splitTab}
           onTabContextMenu={(session, x, y) => setContextMenu({ session, x, y, slot: null })}
           onTabActivate={(sessionId) => activateTab(null, sessionId)}
           onTabDragMove={(sessionId, x, y) => handleTabDragMove(sessionId, null, x, y)}
@@ -836,7 +983,7 @@ const Terminal: React.FC = () => {
           onTabDragCancel={() => setDropPreview(null)}
         />
       )}
-      <div key={workspace} ref={terminalAreaRef} className="relative min-h-0 flex-1">
+      <div key={workspace} ref={terminalAreaRef} data-terminal-workspace-area className="relative min-h-0 flex-1">
         {sessions.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <EmptyState
@@ -851,7 +998,7 @@ const Terminal: React.FC = () => {
             />
           </div>
         ) : split ? (
-          renderLayout(split)
+          zoomedSlot ? renderGroup(zoomedSlot) : renderLayout(split)
         ) : (
           <div data-terminal-content className="relative h-full w-full">
             {renderTerminalPane(activeSession, true)}
@@ -896,13 +1043,42 @@ const Terminal: React.FC = () => {
           ? findTerminalGroup(split, contextMenu.slot)?.sessionIds
           : undefined}
         onClose={() => setContextMenu(null)}
-        canSplit={contextMenu?.slot && split
-          ? (findTerminalGroup(split, contextMenu.slot)?.sessionIds.length ?? 0) > 1
-          : sessions.length > 1}
+        canSplit={Boolean(contextMenu)}
+        canSplitDirection={(direction) => Boolean(contextMenu && canSplitTab(contextMenu.session.sessionId, direction))}
         isSplit={Boolean(split)}
-        onSplit={createOrArrangeSplit}
+        onSplit={splitTab}
         onUnsplit={() => setSplit(null)}
       />
+      <Dialog open={remoteFileDrop !== null} onOpenChange={(open) => { if (!open) setRemoteFileDrop(null); }}>
+        {remoteFileDrop && <CompactDialogContent className="max-w-md">
+          <CompactDialogHeader title={t('terminal.drop.title')} description={t('terminal.drop.description', {
+            count: remoteFileDrop.paths.length,
+            target: sessions.find((session) => session.sessionId === remoteFileDrop.sessionId)?.title ?? '',
+          })} />
+          <CompactDialogBody>
+            <ul className="flex flex-col gap-1 rounded-md border border-app-border/60 bg-muted/50 px-3 py-2 text-xs text-app-text">
+              {remoteFileDrop.paths.slice(0, 5).map((path, index) => (
+                <li key={`${index}:${path}`} className="truncate font-mono" title={path}>
+                  {path.split(/[\\/]/).pop() || path}
+                </li>
+              ))}
+              {remoteFileDrop.paths.length > 5 && (
+                <li className="text-muted-foreground">+{remoteFileDrop.paths.length - 5}</li>
+              )}
+            </ul>
+          </CompactDialogBody>
+          <CompactDialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setRemoteFileDrop(null)}>{t('common.cancel')}</Button>
+            <Button variant="outline" size="sm" onClick={() => {
+              insertDroppedPaths(remoteFileDrop.sessionId, remoteFileDrop.paths);
+              setRemoteFileDrop(null);
+            }}>{t('terminal.drop.insert')}</Button>
+            <Button size="sm" onClick={() => uploadDroppedFiles(remoteFileDrop.sessionId, remoteFileDrop.paths)}>
+              {t('terminal.drop.upload')}
+            </Button>
+          </CompactDialogFooter>
+        </CompactDialogContent>}
+      </Dialog>
     </div>
   );
 };

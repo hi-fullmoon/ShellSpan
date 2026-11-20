@@ -213,6 +213,12 @@ $__shellspanNipModule = New-Module -Name ShellSpanTerminalIntegration -ArgumentL
       throw
     }
   }
+  function Start-DisplayCommand {
+    param([string]$Source)
+    if([string]::IsNullOrWhiteSpace($Source)){return}
+    $Sequence=$script:Context.DisplayCommand($false,0,(Get-Location).ProviderPath)
+    if($Sequence -gt 0){[Console]::Write("$([char]27)]133;C;ShellSpan=$Sequence$([char]7)")}
+  }
   function Invoke-NativeReadLine {
     param([bool]$PreviousSuccess)
     try{$Line=[Microsoft.PowerShell.PSConsoleReadLine]::ReadLine($Host.Runspace,$ExecutionContext,$PreviousSuccess)}catch{
@@ -231,7 +237,10 @@ $__shellspanNipModule = New-Module -Name ShellSpanTerminalIntegration -ArgumentL
     if($null -eq $Line){return $null}
     try{
       $Accepted=$script:Context.RequiresHandoff()
-      if(-not $Accepted){return $Line}
+      if(-not $Accepted){
+        Start-DisplayCommand $Line
+        return $Line
+      }
       $Plan=$script:Context.Plan($Line)
       if($Accepted -and $null -eq $Plan){throw 'TERMINAL_INPUT_PROOF_MISMATCH'}
     }catch{
@@ -242,6 +251,7 @@ $__shellspanNipModule = New-Module -Name ShellSpanTerminalIntegration -ArgumentL
       [Console]::Error.WriteLine('TERMINAL_INPUT_RECOVERY_REQUIRED')
       return ''
     }
+    Start-DisplayCommand $Line
     [Console]::Write("$([char]27)]1337;SetUserVar=ShellSpanNativeInput=MA==$([char]7)")
     [Console]::Write($script:Context.Marker($false))
     if($null -ne $Plan){return $Plan}
@@ -262,6 +272,9 @@ $__shellspanNipModule = New-Module -Name ShellSpanTerminalIntegration -ArgumentL
       $LastExit=$ExecutionContext.SessionState.PSVariable.GetValue('global:LASTEXITCODE',$null)
       $Status=if($Success){0}elseif($LastExit -is [int] -and $LastExit -ne 0){$LastExit}else{1}
       $null=$script:Context.Event(4,$Status,$null)
+      $Sequence=$script:Context.DisplayCommand($true,$Status,(Get-Location).ProviderPath)
+      if($Sequence -gt 0){[Console]::Write("$([char]27)]133;D;$Status;ShellSpan=$Sequence$([char]7)")}
+      [Console]::Write("$([char]27)]133;A$([char]7)")
       [Console]::Write("$([char]27)]1337;SetUserVar=ShellSpanNativeInput=MA==$([char]7)")
     }
     Restore-NativeStatus -PreviousSuccess $Success -ErrorAction Ignore

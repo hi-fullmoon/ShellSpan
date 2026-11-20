@@ -27,7 +27,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '@/components/ui/drawer';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { FieldGroup } from '@/components/ui/field';
+import { FieldDescription, FieldGroup } from '@/components/ui/field';
 import { FormRow } from './shared';
 import { ConnectionSudoPolicyDialog } from './connection-sudo-policy-dialog';
 import { ConnectionSandboxDialog } from './connection-sandbox-dialog';
@@ -595,6 +595,9 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
                   </FormRow>
                 </>
               )}
+              {(form.authMethod === 'agent' || form.authMethod === 'keyboardInteractive') && (
+                <FieldDescription>{t(`connection.form.auth.${form.authMethod}Hint`)}</FieldDescription>
+              )}
             </FormSection>
 
             {initial && <FormSection icon={KeyRound} title={t('connection.sudo.section')}>
@@ -701,6 +704,9 @@ export const ConnectionFormDrawer: React.FC<ConnectionFormDrawerProps> = ({ open
                           />
                         </FormRow>
                       </>
+                    )}
+                    {(form.jumpHost.authMethod === 'agent' || form.jumpHost.authMethod === 'keyboardInteractive') && (
+                      <FieldDescription>{t(`connection.form.auth.${form.jumpHost.authMethod}Hint`)}</FieldDescription>
                     )}
                   </div>
                 )}
@@ -831,15 +837,21 @@ const AuthMethodToggle: React.FC<AuthMethodToggleProps> = ({ value, onChange }) 
         const selected = next[0] as AuthMethod | undefined;
         if (selected) onChange(selected);
       }}
-      className="w-full"
+      className="grid w-full grid-cols-2 gap-1.5"
       variant="segmented"
       aria-label={t('common.authMethod')}
     >
-      <ToggleGroupItem value="password" className="flex-1">
+      <ToggleGroupItem value="password" className="w-full">
         {t('connection.form.auth.password')}
       </ToggleGroupItem>
-      <ToggleGroupItem value="key" className="flex-1">
+      <ToggleGroupItem value="key" className="w-full">
         {t('connection.form.auth.key')}
+      </ToggleGroupItem>
+      <ToggleGroupItem value="agent" className="w-full">
+        {t('connection.form.auth.agent')}
+      </ToggleGroupItem>
+      <ToggleGroupItem value="keyboardInteractive" className="w-full">
+        {t('connection.form.auth.keyboardInteractive')}
       </ToggleGroupItem>
     </ToggleGroup>
   );

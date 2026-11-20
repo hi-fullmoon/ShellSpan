@@ -235,6 +235,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
   verifyHostKey,
 }) => {
   const { t } = useI18n();
+  const sftpVisible = useAppStore((state) => state.activeSection === 'sftp');
   const leftSource = getSftpPaneSource(connection, 'local');
   const rightSource = getSftpPaneSource(connection, 'remote');
   const rightConnecting = connection.connectionAttemptIds?.remote !== undefined;
@@ -862,7 +863,30 @@ export const SftpContent: React.FC<SftpContentProps> = ({
     [error, t],
   );
 
+  useEffect(() => {
+    for (const side of ['local', 'remote'] as const) {
+      const current = useSftpStore.getState().connections.find(({ id }) => id === connection.id);
+      if (!current) return;
+      const pane = side === 'local' ? current.localPane : current.remotePane;
+      const upload = pane.terminalUpload;
+      if (!upload) continue;
+      setPaneState(connection.id, side, { terminalUpload: undefined });
+      if (getSftpPaneSource(current, side) !== 'remote' || getSftpPaneConnectionKey(current, side) !== upload.routeKey) continue;
+      enqueueUploadBatch({
+        paths: [...upload.paths],
+        destination: upload.destination,
+        side,
+        sourceLocal: true,
+        index: 0,
+        accepted: [],
+        policies: [],
+        remembered: undefined,
+      });
+    }
+  }, [connection.id, connection.localPane.terminalUpload, connection.remotePane.terminalUpload, enqueueUploadBatch, setPaneState]);
+
   const { dragActive: systemDragActive, hoveredSide: systemHoveredSide } = useSystemFileDrop({
+    enabled: sftpVisible,
     leftPaneRef,
     rightPaneRef,
     onDrop: handleSystemDrop,

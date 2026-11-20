@@ -69,6 +69,7 @@ impl NativeToolEngine {
                     .accept_native_readiness(transport, &message)
                     .and_then(|()| self.terminal_execute.retire_foreground_handoff(transport)),
                 ConnectionPayload::Directory { .. }
+                | ConnectionPayload::DisplayCommand { .. }
                 | ConnectionPayload::JobObservation { .. }
                 | ConnectionPayload::EditorOptions { .. } => self
                     .terminal_broker

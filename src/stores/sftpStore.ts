@@ -37,6 +37,7 @@ export interface SftpLocationRequest {
   path: string;
   entryName?: string;
   routeKey: string;
+  uploadPaths?: readonly string[];
 }
 
 export interface SftpPaneState {
@@ -45,6 +46,7 @@ export interface SftpPaneState {
   selectedPaths: string[];
   revealRequest?: { path: string };
   locationRequest?: SftpLocationRequest;
+  terminalUpload?: { paths: readonly string[]; destination: string; routeKey: string };
   hostKeyError?: boolean;
   batchMode: boolean;
 }

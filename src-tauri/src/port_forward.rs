@@ -22,6 +22,8 @@ use crate::models::{
 
 pub(crate) const PORT_FORWARD_EVENT: &str = "port-forward-event";
 
+mod socks5;
+
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum PortForwardStatus {
@@ -264,6 +266,13 @@ pub(crate) fn start_port_forward(
 ) {
     let operation_id = request.operation_id.clone();
     let profile_id = request.profile_id.clone();
+    let interactive = request.mode == PortForwardStartMode::Manual
+        && (request.connection.auth_method == AuthMethod::KeyboardInteractive
+            || request
+                .connection
+                .jump_host
+                .as_ref()
+                .is_some_and(|jump| jump.auth_method == AuthMethod::KeyboardInteractive));
     let connection = request.connection;
     let config = request.forward;
     let sent = Arc::new(AtomicU64::new(0));
@@ -285,10 +294,11 @@ pub(crate) fn start_port_forward(
         }
     };
 
-    let result = match config.kind {
-        PortForwardKind::Local => local_forward_loop(
+    let start = || match config.kind {
+        PortForwardKind::Local | PortForwardKind::Dynamic => local_forward_loop(
             &connection,
             local_listener.expect("local forward listener was pre-bound"),
+            config.kind,
             &config.remote_host,
             config.remote_port,
             cancel_flag.clone(),
@@ -334,6 +344,17 @@ pub(crate) fn start_port_forward(
                 });
             },
         ),
+    };
+    let result = if interactive {
+        let cancellation = cancel_flag.clone();
+        crate::connection::interactive_auth::with_prompt_scope(
+            app.clone(),
+            operation_id.clone(),
+            move || cancellation.load(Ordering::Relaxed),
+            start,
+        )
+    } else {
+        start()
     };
 
     let bytes_sent = sent.load(Ordering::Relaxed);
@@ -384,7 +405,13 @@ pub(crate) fn validate_start_request(request: &PortForwardStartRequest) -> Resul
     if name.is_empty() || name.len() > 100 || name.chars().any(char::is_control) {
         return Err("port forward name is invalid".to_string());
     }
-    if request.forward.local_port == 0 || request.forward.remote_port == 0 {
+    if request.forward.local_port == 0 {
+        return Err("port forward ports must be between 1 and 65535".to_string());
+    }
+    if request.forward.kind == PortForwardKind::Dynamic {
+        return Ok(());
+    }
+    if request.forward.remote_port == 0 {
         return Err("port forward ports must be between 1 and 65535".to_string());
     }
     let remote_host = request.forward.remote_host.trim();
@@ -650,10 +677,26 @@ pub(crate) fn open_scoped_loopback_connection(
 }
 
 fn bridge_scoped_connection(
-    mut channel: ssh2::Channel,
-    mut tcp: TcpStream,
+    channel: ssh2::Channel,
+    tcp: TcpStream,
     deadline: std::time::Instant,
     cancellation: &CancellationToken,
+) -> Result<(), String> {
+    bridge_nonblocking_connection(
+        channel,
+        tcp,
+        Some(deadline),
+        || cancellation.is_cancelled(),
+        None,
+    )
+}
+
+fn bridge_nonblocking_connection(
+    mut channel: ssh2::Channel,
+    mut tcp: TcpStream,
+    deadline: Option<std::time::Instant>,
+    cancelled: impl Fn() -> bool,
+    counters: Option<(&AtomicU64, &AtomicU64)>,
 ) -> Result<(), String> {
     tcp.set_nonblocking(true)
         .map_err(|error| format!("failed to configure scoped bridge: {error}"))?;
@@ -665,10 +708,10 @@ fn bridge_scoped_connection(
     let (mut sent_eof, mut sent_shutdown) = (false, false);
 
     loop {
-        if cancellation.is_cancelled() {
+        if cancelled() {
             return Ok(());
         }
-        let remaining = remaining_scoped_forward_time(deadline)?;
+        let remaining = deadline.map(remaining_scoped_forward_time).transpose()?;
         let mut progressed = false;
         if !tcp_eof && upload_start == upload_end {
             upload_start = 0;
@@ -688,6 +731,9 @@ fn bridge_scoped_connection(
                 Ok(0) => return Err("scoped bridge SSH write returned zero bytes".into()),
                 Ok(count) => {
                     upload_start += count;
+                    if let Some((sent, _)) = counters {
+                        sent.fetch_add(count as u64, Ordering::Relaxed);
+                    }
                     progressed = true;
                 }
                 Err(error) if scoped_bridge_retryable(&error) => {}
@@ -722,6 +768,9 @@ fn bridge_scoped_connection(
                 Ok(0) => return Err("scoped bridge TCP write returned zero bytes".into()),
                 Ok(count) => {
                     download_start += count;
+                    if let Some((_, received)) = counters {
+                        received.fetch_add(count as u64, Ordering::Relaxed);
+                    }
                     progressed = true;
                 }
                 Err(error) if scoped_bridge_retryable(&error) => {}
@@ -738,7 +787,8 @@ fn bridge_scoped_connection(
             return Ok(());
         }
         if !progressed {
-            thread::sleep(remaining.min(Duration::from_millis(2)));
+            let delay = Duration::from_millis(2);
+            thread::sleep(remaining.unwrap_or(delay).min(delay));
         }
     }
 }
@@ -848,6 +898,7 @@ fn open_forward_session(
 fn local_forward_loop(
     connection: &RemoteConnectionRequest,
     listener: TcpListener,
+    kind: PortForwardKind,
     remote_host: &str,
     remote_port: u16,
     cancel_flag: Arc<AtomicBool>,
@@ -874,6 +925,20 @@ fn local_forward_loop(
         .local_addr()
         .map_err(|error| format!("failed to inspect local listener: {error}"))?
         .port();
+
+    if kind == PortForwardKind::Dynamic {
+        info!("Dynamic SOCKS5 forward listening on 127.0.0.1:{local_port}");
+        session.target.set_blocking(false);
+        on_ready();
+        return socks5::serve(
+            listener,
+            &session.target,
+            cancel_flag,
+            bytes_sent,
+            bytes_received,
+            on_tick,
+        );
+    }
 
     info!("Local forward 127.0.0.1:{local_port} -> {remote_host}:{remote_port}");
     on_ready();

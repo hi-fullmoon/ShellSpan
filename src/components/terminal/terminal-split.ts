@@ -2,6 +2,18 @@ export type TerminalSplitDirection = 'left' | 'right' | 'top' | 'bottom';
 
 export type TerminalGroupSlot = string;
 
+export const TERMINAL_MIN_PANE_SIZE = 120;
+
+export function canSplitTerminalPane(
+  direction: TerminalSplitDirection,
+  content?: Element | null,
+): boolean {
+  const rect = content?.getBoundingClientRect();
+  if (!rect || (rect.width === 0 && rect.height === 0)) return true;
+  const size = direction === 'left' || direction === 'right' ? rect.width : rect.height;
+  return size >= TERMINAL_MIN_PANE_SIZE * 2;
+}
+
 export interface TerminalGroupState {
   kind: 'group';
   id: TerminalGroupSlot;
@@ -30,6 +42,34 @@ export type TerminalGroupRect = Pick<
 export function getTerminalGroups(node: TerminalLayoutNode): TerminalGroupState[] {
   if (node.kind === 'group') return [node];
   return [...getTerminalGroups(node.first), ...getTerminalGroups(node.second)];
+}
+
+export function equalizeTerminalPanes(layout: TerminalSplitState): TerminalSplitState {
+  const weight = (node: TerminalLayoutNode, orientation: TerminalSplitState['orientation']): number =>
+    node.kind === 'split' && node.orientation === orientation
+      ? weight(node.first, orientation) + weight(node.second, orientation)
+      : 1;
+  const firstWeight = weight(layout.first, layout.orientation);
+  const secondWeight = weight(layout.second, layout.orientation);
+  return {
+    ...layout,
+    split: firstWeight / (firstWeight + secondWeight),
+    first: layout.first.kind === 'split' ? equalizeTerminalPanes(layout.first) : layout.first,
+    second: layout.second.kind === 'split' ? equalizeTerminalPanes(layout.second) : layout.second,
+  };
+}
+
+export function swapTerminalPane(layout: TerminalSplitState, slot: TerminalGroupSlot): TerminalSplitState {
+  const groups = getTerminalGroups(layout);
+  const index = groups.findIndex((group) => group.id === slot);
+  if (index < 0) return layout;
+  const current = groups[index];
+  const next = groups[(index + 1) % groups.length];
+  const swap = (node: TerminalLayoutNode): TerminalLayoutNode => {
+    if (node.kind === 'split') return { ...node, first: swap(node.first), second: swap(node.second) };
+    return node === current ? next : node === next ? current : node;
+  };
+  return { ...layout, first: swap(layout.first), second: swap(layout.second) };
 }
 
 /** Repair layouts written by older versions that could persist duplicate ids. */

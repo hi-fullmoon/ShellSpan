@@ -1679,6 +1679,8 @@ pub(crate) fn connection_for_saved_profile(
     let auth_method = match profile.auth_method {
         ProfileAuthMethod::Password => AuthMethod::Password,
         ProfileAuthMethod::Key => AuthMethod::Key,
+        ProfileAuthMethod::Agent => AuthMethod::Agent,
+        ProfileAuthMethod::KeyboardInteractive => AuthMethod::KeyboardInteractive,
     };
     let jump_host =
         resolve_profile_jump_host(profile_id, profile.jump_host_config.as_deref(), credentials)?;
@@ -1733,6 +1735,7 @@ fn resolve_profile_jump_host(
             jump.passphrase = credentials
                 .retrieve_profile_secret(profile_id, ProfileSecretKind::JumpPassphrase)?;
         }
+        AuthMethod::Agent | AuthMethod::KeyboardInteractive => {}
     }
     Ok(Some(jump))
 }

@@ -4,7 +4,7 @@ import { DEFAULT_TAB_TITLE_TEMPLATE, normalizeTabTitleOverrides, validTabTitleTe
 import { subscribeWithSelector } from 'zustand/middleware';
 import { shallow } from 'zustand/shallow';
 import { changeLocale } from '@/locales';
-import type { AppSection, Locale, PetdexDiagnostic, SettingsSection, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, ThemeMode, WorkbenchTab } from '@/types';
+import type { AppSection, Locale, PetdexDiagnostic, SettingsSection, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, TerminalOsc52Policy, ThemeMode, WorkbenchTab } from '@/types';
 import {
   invokeLoadPreferences,
   invokeSavePreferences,
@@ -16,13 +16,16 @@ import { DEFAULT_PETDEX_MESSAGE_PREFERENCES, normalizePetdexMessagePreferences, 
 import { DEFAULT_PETDEX_CATEGORIES, normalizePetdexCategories, resolvePetdexSettings } from '@/lib/petdex/preferences';
 import type { PetdexConfigurationPatch } from '@/lib/petdex/preferences';
 import type { PetdexCategories } from '@/types';
+import { DEFAULT_TERMINAL_FONT_SIZE, normalizeTerminalFontName, normalizeTerminalFontSize } from '@/lib/terminal/terminal-font';
 
 const logger = createLogger('appStore');
 
 // These actions were added to an existing persisted shortcut map. An older
 // customization takes precedence when a newly introduced default overlaps it.
-const SFTP_SHORTCUT_MIGRATION_ACTIONS: readonly ShortcutAction[] = [
+const SHORTCUT_MIGRATION_ACTIONS: readonly ShortcutAction[] = [
   'findSftp', 'closeSftpTab', 'switchSftpTab', 'nextSftpTab', 'previousSftpTab',
+  'terminalZoomPane', 'terminalEqualizePanes', 'terminalSwapPane',
+  'terminalPreviousCommand', 'terminalNextCommand',
 ];
 
 export const DEFAULT_SHORTCUTS: ShortcutBindings = {
@@ -51,6 +54,11 @@ export const DEFAULT_SHORTCUTS: ShortcutBindings = {
   terminalFocusRight: 'l',
   terminalSplitRight: 'v',
   terminalSplitDown: 's',
+  terminalZoomPane: 'z',
+  terminalEqualizePanes: '=',
+  terminalSwapPane: '}',
+  terminalPreviousCommand: '[',
+  terminalNextCommand: ']',
   terminalClosePane: 'x',
 };
 
@@ -70,6 +78,11 @@ interface AppPreferences extends PetdexMessagePreferences {
   startupSection: AppSection;
   terminalFontSize: number;
   terminalFontFamily: TerminalFontFamily;
+  terminalCustomFontFamily: string;
+  terminalMacOptionIsMeta: boolean;
+  terminalAltClickMovesCursor: boolean;
+  terminalOsc52Policy: TerminalOsc52Policy;
+  terminalCommandNotificationThresholdSec: number;
   terminalCursorBlink: boolean;
   terminalCursorStyle: TerminalCursorStyle;
   terminalCopyOnSelect: boolean;
@@ -135,6 +148,11 @@ interface AppState extends AppPreferences {
   setStartupSection: (section: AppSection) => void;
   setTerminalFontSize: (fontSize: number) => void;
   setTerminalFontFamily: (fontFamily: TerminalFontFamily) => void;
+  setTerminalCustomFontFamily: (name: string) => void;
+  setTerminalMacOptionIsMeta: (enabled: boolean) => void;
+  setTerminalAltClickMovesCursor: (enabled: boolean) => void;
+  setTerminalOsc52Policy: (policy: TerminalOsc52Policy) => void;
+  setTerminalCommandNotificationThresholdSec: (seconds: number) => void;
   setTerminalCursorBlink: (enabled: boolean) => void;
   setTerminalCursorStyle: (cursorStyle: TerminalCursorStyle) => void;
   setTerminalCopyOnSelect: (enabled: boolean) => void;
@@ -168,6 +186,8 @@ const PREFERENCE_KEYS: readonly (keyof AppPreferences)[] = [
   'terminalTabTitleCustom', 'terminalTabTitleCustomOverrides',
   'theme', 'locale', 'profileName', 'profileAvatar', 'startupUpdateCheck', 'showFocusMode', 'startupSection',
   'terminalFontSize', 'terminalFontFamily', 'terminalCursorBlink',
+  'terminalCustomFontFamily', 'terminalMacOptionIsMeta', 'terminalAltClickMovesCursor', 'terminalOsc52Policy',
+  'terminalCommandNotificationThresholdSec',
   'terminalCursorStyle', 'terminalCopyOnSelect', 'terminalScrollback',
   'terminalColorScheme', 'terminalColorOverrides', 'terminalMultiLinePasteWarning',
   'terminalLargePasteWarning', 'terminalAutoReconnect',
@@ -195,8 +215,13 @@ function getDefaultPreferences(): AppPreferences {
     ...DEFAULT_PETDEX_MESSAGE_PREFERENCES,
     petdexCategories: { ...DEFAULT_PETDEX_CATEGORIES },
     startupSection: 'workbench',
-    terminalFontSize: 14,
+    terminalFontSize: DEFAULT_TERMINAL_FONT_SIZE,
     terminalFontFamily: 'system',
+    terminalCustomFontFamily: '',
+    terminalMacOptionIsMeta: false,
+    terminalAltClickMovesCursor: true,
+    terminalOsc52Policy: 'writeOnly',
+    terminalCommandNotificationThresholdSec: 10,
     terminalCursorBlink: true,
     terminalCursorStyle: 'block',
     terminalCopyOnSelect: true,
@@ -235,12 +260,12 @@ export function mergeShortcutBindings(value: unknown): ShortcutBindings {
       ([action, fallback]) => {
         const candidate = stored[action];
         const usable = typeof candidate === 'string'
-          && (candidate.length > 0 || SFTP_SHORTCUT_MIGRATION_ACTIONS.includes(action));
+          && (candidate.length > 0 || SHORTCUT_MIGRATION_ACTIONS.includes(action));
         return [action, usable ? candidate : fallback];
       },
     ),
   ) as ShortcutBindings;
-  for (const action of SFTP_SHORTCUT_MIGRATION_ACTIONS) {
+  for (const action of SHORTCUT_MIGRATION_ACTIONS) {
     if (stored[action] === undefined && findShortcutConflict(merged, action, merged[action])) {
       merged[action] = '';
     }
@@ -303,8 +328,15 @@ function entriesToPreferences(entries: [string, string][]): Partial<AppPreferenc
     petdexCategories: normalizePetdexCategories(prefs.petdexCategories),
     ...normalizePetdexMessagePreferences(prefs),
     startupSection: (prefs.startupSection as AppSection) ?? defaults.startupSection,
-    terminalFontSize: (prefs.terminalFontSize as number) ?? defaults.terminalFontSize,
+    terminalFontSize: normalizeTerminalFontSize(prefs.terminalFontSize),
     terminalFontFamily: (prefs.terminalFontFamily as TerminalFontFamily) ?? defaults.terminalFontFamily,
+    terminalCustomFontFamily: normalizeTerminalFontName(prefs.terminalCustomFontFamily),
+    terminalMacOptionIsMeta: prefs.terminalMacOptionIsMeta === true,
+    terminalAltClickMovesCursor: prefs.terminalAltClickMovesCursor !== false,
+    terminalOsc52Policy: prefs.terminalOsc52Policy === 'disabled' ? 'disabled' : 'writeOnly',
+    terminalCommandNotificationThresholdSec: typeof prefs.terminalCommandNotificationThresholdSec === 'number'
+      && [0, 5, 10, 30, 60].includes(prefs.terminalCommandNotificationThresholdSec)
+      ? prefs.terminalCommandNotificationThresholdSec : defaults.terminalCommandNotificationThresholdSec,
     terminalCursorBlink: (prefs.terminalCursorBlink as boolean) ?? defaults.terminalCursorBlink,
     terminalCursorStyle: (prefs.terminalCursorStyle as TerminalCursorStyle) ?? defaults.terminalCursorStyle,
     terminalCopyOnSelect: (prefs.terminalCopyOnSelect as boolean) ?? defaults.terminalCopyOnSelect,
@@ -516,8 +548,13 @@ export const useAppStore = create<AppState>()(
     setPetdexMessagePreference: (key, enabled) => updatePetdexConfiguration({ [key]: enabled }),
     receivePetdexMessageDiagnostic: (snapshot) => set((state) => ({ petdexMessageDiagnostic: newestMessageDiagnostic(state.petdexMessageDiagnostic, snapshot) })),
     setStartupSection: (startupSection) => set({ startupSection }),
-    setTerminalFontSize: (terminalFontSize) => set({ terminalFontSize }),
+    setTerminalFontSize: (fontSize) => set({ terminalFontSize: normalizeTerminalFontSize(fontSize) }),
     setTerminalFontFamily: (terminalFontFamily) => set({ terminalFontFamily }),
+    setTerminalCustomFontFamily: (name) => set({ terminalCustomFontFamily: normalizeTerminalFontName(name) }),
+    setTerminalMacOptionIsMeta: (terminalMacOptionIsMeta) => set({ terminalMacOptionIsMeta }),
+    setTerminalAltClickMovesCursor: (terminalAltClickMovesCursor) => set({ terminalAltClickMovesCursor }),
+    setTerminalOsc52Policy: (terminalOsc52Policy) => set({ terminalOsc52Policy }),
+    setTerminalCommandNotificationThresholdSec: (terminalCommandNotificationThresholdSec) => set({ terminalCommandNotificationThresholdSec }),
     setTerminalCursorBlink: (terminalCursorBlink) => set({ terminalCursorBlink }),
     setTerminalCursorStyle: (terminalCursorStyle) => set({ terminalCursorStyle }),
     setTerminalCopyOnSelect: (terminalCopyOnSelect) => set({ terminalCopyOnSelect }),
@@ -584,6 +621,11 @@ useAppStore.subscribe(
     startupSection: state.startupSection,
     terminalFontSize: state.terminalFontSize,
     terminalFontFamily: state.terminalFontFamily,
+    terminalCustomFontFamily: state.terminalCustomFontFamily,
+    terminalMacOptionIsMeta: state.terminalMacOptionIsMeta,
+    terminalAltClickMovesCursor: state.terminalAltClickMovesCursor,
+    terminalOsc52Policy: state.terminalOsc52Policy,
+    terminalCommandNotificationThresholdSec: state.terminalCommandNotificationThresholdSec,
     terminalCursorBlink: state.terminalCursorBlink,
     terminalCursorStyle: state.terminalCursorStyle,
     terminalCopyOnSelect: state.terminalCopyOnSelect,

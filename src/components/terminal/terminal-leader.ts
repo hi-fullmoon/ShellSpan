@@ -66,6 +66,14 @@ function dispatchLeaderCommand(action: ShortcutAction): void {
     }));
     return;
   }
+  if (action === 'terminalZoomPane' || action === 'terminalEqualizePanes' || action === 'terminalSwapPane') {
+    document.dispatchEvent(new CustomEvent('shellspan:arrange-terminal-panes', { detail: action }));
+    return;
+  }
+  if (action === 'terminalPreviousCommand' || action === 'terminalNextCommand') {
+    document.dispatchEvent(new CustomEvent('shellspan:jump-terminal-command', { detail: action === 'terminalPreviousCommand' }));
+    return;
+  }
   if (action === 'terminalClosePane') {
     document.dispatchEvent(new Event('shellspan:close-terminal-tab'));
   }

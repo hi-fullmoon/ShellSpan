@@ -9,6 +9,7 @@ use crate::sftp_pool::{connection_key, ConnectClaim, SftpPool, SFTP_POOL_GET_ABO
 use log::{debug, error, warn};
 use socket2::{SockRef, TcpKeepalive};
 use ssh2::Session;
+pub(crate) mod interactive_auth;
 pub(crate) mod terminal_deadline;
 use std::{
     io::{Read, Write},
@@ -505,6 +506,7 @@ pub(crate) fn open_authenticated_session(
 
     authenticate(
         &mut session,
+        host,
         username,
         auth_method,
         password,
@@ -904,6 +906,7 @@ fn is_bridge_retryable(error: &std::io::Error) -> bool {
 
 fn authenticate(
     session: &mut Session,
+    host: &str,
     username: &str,
     auth_method: AuthMethod,
     password: Option<&str>,
@@ -939,6 +942,30 @@ fn authenticate(
                     format!("private key auth failed: {error}")
                 })?;
         }
+        AuthMethod::Agent => {
+            let mut agent = session
+                .agent()
+                .map_err(|error| format!("SSH agent unavailable: {error}"))?;
+            agent
+                .connect()
+                .map_err(|error| format!("SSH agent connection failed: {error}"))?;
+            agent
+                .list_identities()
+                .map_err(|error| format!("SSH agent could not list identities: {error}"))?;
+            for identity in agent
+                .identities()
+                .map_err(|error| format!("SSH agent identities unavailable: {error}"))?
+            {
+                if let Some(reason) = terminal_deadline::failure_reason() {
+                    return Err(reason);
+                }
+                if agent.userauth(username, &identity).is_ok() && session.authenticated() {
+                    return Ok(());
+                }
+            }
+            return Err("SSH agent authentication failed: no accepted identities".into());
+        }
+        AuthMethod::KeyboardInteractive => interactive_auth::authenticate(session, host, username)?,
     }
 
     if session.authenticated() {
@@ -1258,12 +1285,16 @@ pub(crate) fn preflight_connection(
         let mut jump_session = endpoint_session;
         if let Err(message) = authenticate(
             &mut jump_session,
+            &jump.host,
             &jump.username,
             jump.auth_method,
             jump.password.as_deref(),
             jump.private_key_data.as_deref(),
             jump.passphrase.as_deref(),
         ) {
+            if cancel_flag.load(AtomicOrdering::SeqCst) || message == interactive_auth::CANCELLED {
+                return cancelled_preflight(recorder);
+            }
             recorder.push(
                 ConnectionPreflightStepId::JumpAuthentication,
                 ConnectionPreflightStepStatus::Failed,
@@ -1349,12 +1380,16 @@ pub(crate) fn preflight_connection(
         }
         if let Err(message) = authenticate(
             &mut target_session,
+            &request.host,
             &request.username,
             request.auth_method,
             request.password.as_deref(),
             request.private_key_data.as_deref(),
             request.passphrase.as_deref(),
         ) {
+            if cancel_flag.load(AtomicOrdering::SeqCst) || message == interactive_auth::CANCELLED {
+                return cancelled_preflight(recorder);
+            }
             recorder.push(
                 ConnectionPreflightStepId::Authentication,
                 ConnectionPreflightStepStatus::Failed,
@@ -1385,12 +1420,16 @@ pub(crate) fn preflight_connection(
         }
         if let Err(message) = authenticate(
             &mut target_session,
+            &request.host,
             &request.username,
             request.auth_method,
             request.password.as_deref(),
             request.private_key_data.as_deref(),
             request.passphrase.as_deref(),
         ) {
+            if cancel_flag.load(AtomicOrdering::SeqCst) || message == interactive_auth::CANCELLED {
+                return cancelled_preflight(recorder);
+            }
             recorder.push(
                 ConnectionPreflightStepId::Authentication,
                 ConnectionPreflightStepStatus::Failed,

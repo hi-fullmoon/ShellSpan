@@ -204,6 +204,25 @@ impl TerminalSessionBroker {
                 advance_integration_state_revision(record)?;
                 Ok(())
             }
+            nip::ConnectionPayload::DisplayCommand {
+                command_id,
+                cwd,
+                exit_code,
+            } => {
+                let display = &record.display_command_lifecycle;
+                // This observation never participates in admission, editor
+                // readiness, or the Agent command execution state machine.
+                if exit_code.is_some()
+                    && *command_id == display.sequence
+                    && display.running.is_some()
+                {
+                    record.report_display_command(cwd, *exit_code);
+                } else if exit_code.is_none() && *command_id > display.sequence {
+                    record.display_command_lifecycle.sequence = command_id - 1;
+                    record.report_display_command(cwd, None);
+                }
+                Ok(())
+            }
             nip::ConnectionPayload::JobObservation {
                 handle,
                 state: observed,

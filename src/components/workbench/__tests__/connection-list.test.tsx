@@ -704,4 +704,28 @@ describe('ConnectionList', () => {
     expect(screen.getByRole('menuitem', { name: 'common.delete' })).toHaveAttribute('data-variant', 'destructive');
     expect(screen.queryByRole('menuitem', { name: 'deployment.openForHost' })).not.toBeInTheDocument();
   });
+
+  it('renders distinct translated labels and SVG icons for agent and keyboardInteractive auth methods', () => {
+    render(
+      <ConnectionList
+        profiles={[
+          makeProfile({ id: 'p-agent', name: 'Agent Host', authMethod: 'agent' }),
+          makeProfile({ id: 'p-kbd', name: 'Interactive Host', authMethod: 'keyboardInteractive' }),
+        ]}
+        initialized
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onConnectTerminal={() => {}}
+        onConnectSftp={() => {}}
+        onDuplicate={() => {}}
+        onToggleFavorite={() => {}}
+        onImport={() => {}}
+        onExport={() => {}}
+      />,
+    );
+
+    expect(screen.getByLabelText('connection.form.auth.agent').querySelector('svg')).toBeInTheDocument();
+    expect(screen.getByLabelText('connection.form.auth.keyboardInteractive').querySelector('svg')).toBeInTheDocument();
+  });
 });

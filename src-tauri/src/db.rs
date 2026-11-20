@@ -2,7 +2,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-const CURRENT_SCHEMA_VERSION: i32 = 5;
+#[path = "terminal_snippets.rs"]
+pub(crate) mod terminal_snippets;
+
+const CURRENT_SCHEMA_VERSION: i32 = 6;
 pub(crate) const DATABASE_FILE_NAME: &str = "shellspan-main.db";
 const TERMINAL_WORKSPACE_VERSION: u64 = 1;
 const MAX_TERMINAL_WORKSPACE_BYTES: usize = 1024 * 1024;
@@ -166,6 +169,84 @@ END;
 INSERT INTO schema_version (version) VALUES (5);
 ";
 
+const SCHEMA_TERMINAL_CAPABILITIES: &str = "
+CREATE TABLE profiles_v6 (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    host TEXT NOT NULL,
+    port INTEGER NOT NULL DEFAULT 22,
+    username TEXT NOT NULL,
+    auth_method TEXT NOT NULL CHECK(auth_method IN ('password', 'key', 'agent', 'keyboardInteractive')),
+    keychain_key_id TEXT,
+    jump_host_config TEXT,
+    organization_json TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+INSERT INTO profiles_v6
+    SELECT id, name, host, port, username, auth_method, keychain_key_id,
+           jump_host_config, organization_json, created_at, updated_at FROM profiles;
+DROP TABLE profiles;
+ALTER TABLE profiles_v6 RENAME TO profiles;
+
+CREATE TRIGGER revoke_sudo_policy_on_profile_identity_change
+AFTER UPDATE OF host, port, username, auth_method, keychain_key_id, jump_host_config ON profiles
+WHEN OLD.host IS NOT NEW.host OR OLD.port IS NOT NEW.port
+  OR OLD.username IS NOT NEW.username OR OLD.auth_method IS NOT NEW.auth_method
+  OR OLD.keychain_key_id IS NOT NEW.keychain_key_id OR OLD.jump_host_config IS NOT NEW.jump_host_config
+BEGIN
+    DELETE FROM profile_sudo_policy WHERE profile_id = NEW.id;
+END;
+
+CREATE TRIGGER revise_sandbox_on_identity_change
+AFTER UPDATE OF host, port, username, auth_method, keychain_key_id, jump_host_config ON profiles
+WHEN OLD.host IS NOT NEW.host OR OLD.port IS NOT NEW.port OR OLD.username IS NOT NEW.username
+  OR OLD.auth_method IS NOT NEW.auth_method OR OLD.keychain_key_id IS NOT NEW.keychain_key_id
+  OR OLD.jump_host_config IS NOT NEW.jump_host_config
+BEGIN
+    INSERT INTO profile_sandbox (profile_id, revision, policy_json)
+    VALUES (NEW.id, lower(hex(randomblob(16))), 'null')
+    ON CONFLICT(profile_id) DO UPDATE SET revision=excluded.revision;
+END;
+
+CREATE TABLE command_snippets (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    group_name TEXT NOT NULL,
+    tags_json TEXT NOT NULL,
+    command_template TEXT NOT NULL,
+    description TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+INSERT INTO schema_version (version) VALUES (6);
+";
+
+fn upgrade_terminal_capabilities(conn: &mut Connection) -> Result<(), String> {
+    // SQLite requires disabling foreign-key actions before dropping a referenced
+    // table. The write lock and integrity check keep the replacement atomic.
+    conn.pragma_update(None, "foreign_keys", false)
+        .map_err(|error| error.to_string())?;
+    let migration = (|| -> Result<(), rusqlite::Error> {
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let version: i32 = tx.query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+            row.get(0)
+        })?;
+        if version == 5 {
+            tx.execute_batch(SCHEMA_TERMINAL_CAPABILITIES)?;
+        }
+        let has_violation = tx.prepare("PRAGMA foreign_key_check")?.exists([])?;
+        if has_violation {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+        tx.commit()
+    })();
+    let restored = conn.pragma_update(None, "foreign_keys", true);
+    migration
+        .and(restored)
+        .map_err(|error| format!("failed to migrate terminal capabilities: {error}"))
+}
+
 #[derive(Clone)]
 pub(crate) struct Database {
     conn: Arc<Mutex<Connection>>,
@@ -262,9 +343,9 @@ impl Database {
                 .and_then(|_| tx.execute_batch(SCHEMA_REMOTE_SANDBOX))
                 .and_then(|_| tx.execute_batch(SCHEMA_SANDBOX_HISTORY))
                 .map_err(|e| format!("failed to initialize database schema: {e}"))?;
-            return tx
-                .commit()
-                .map_err(|e| format!("failed to commit database initialization: {e}"));
+            tx.commit()
+                .map_err(|e| format!("failed to commit database initialization: {e}"))?;
+            return upgrade_terminal_capabilities(&mut conn);
         }
 
         let versions = conn
@@ -298,9 +379,13 @@ impl Database {
             }
             tx.execute_batch(SCHEMA_SANDBOX_HISTORY)
                 .map_err(|e| e.to_string())?;
-            return tx.commit().map_err(|e| e.to_string());
+            tx.commit().map_err(|e| e.to_string())?;
+            return upgrade_terminal_capabilities(&mut conn);
         }
-        if versions != [1, 2, 3, 4, CURRENT_SCHEMA_VERSION] {
+        if versions == [1, 2, 3, 4, 5] {
+            return upgrade_terminal_capabilities(&mut conn);
+        }
+        if versions != [1, 2, 3, 4, 5, CURRENT_SCHEMA_VERSION] {
             return Err(format!(
                 "invalid database schema version: expected version {CURRENT_SCHEMA_VERSION}"
             ));
@@ -589,6 +674,10 @@ impl Database {
                         match s.as_str() {
                             "password" => crate::models::ProfileAuthMethod::Password,
                             "key" => crate::models::ProfileAuthMethod::Key,
+                            "agent" => crate::models::ProfileAuthMethod::Agent,
+                            "keyboardInteractive" => {
+                                crate::models::ProfileAuthMethod::KeyboardInteractive
+                            }
                             other => {
                                 return Err(rusqlite::Error::FromSqlConversionFailure(
                                     5,
@@ -639,6 +728,10 @@ impl Database {
                             match s.as_str() {
                                 "password" => crate::models::ProfileAuthMethod::Password,
                                 "key" => crate::models::ProfileAuthMethod::Key,
+                                "agent" => crate::models::ProfileAuthMethod::Agent,
+                                "keyboardInteractive" => {
+                                    crate::models::ProfileAuthMethod::KeyboardInteractive
+                                }
                                 other => Err(rusqlite::Error::FromSqlConversionFailure(
                                     5,
                                     rusqlite::types::Type::Text,

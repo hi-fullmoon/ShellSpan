@@ -200,7 +200,7 @@ function sanitizeExportedJumpHost(value: unknown): ConnectionImportCandidate['ju
     || typeof jump.username !== 'string'
     || !jump.host.trim()
     || !jump.username.trim()
-    || (jump.authMethod !== 'password' && jump.authMethod !== 'key')
+    || !isAuthMethod(jump.authMethod)
   ) return undefined;
   return {
     host: jump.host,
@@ -208,6 +208,10 @@ function sanitizeExportedJumpHost(value: unknown): ConnectionImportCandidate['ju
     username: jump.username,
     authMethod: jump.authMethod,
   };
+}
+
+function isAuthMethod(value: unknown): value is AuthMethod {
+  return value === 'password' || value === 'key' || value === 'agent' || value === 'keyboardInteractive';
 }
 
 function sanitizePortForwardRules(value: unknown): PortForwardRule[] {
@@ -228,7 +232,7 @@ function sanitizePortForwardRules(value: unknown): PortForwardRule[] {
     if (!Object.keys(rule).every((key) => allowed.has(key))) return [];
     const id = cleanOptionalText(rule.id);
     const name = cleanOptionalText(rule.name);
-    const remoteHost = cleanOptionalText(rule.remoteHost);
+    const remoteHost = cleanOptionalText(rule.remoteHost) ?? '';
     const localPort = Number(rule.localPort);
     const remotePort = Number(rule.remotePort);
     if (
@@ -238,14 +242,11 @@ function sanitizePortForwardRules(value: unknown): PortForwardRule[] {
       || !name
       || name.length > 100
       || /[\u0000-\u001f\u007f]/.test(name)
-      || !remoteHost
-      || (rule.kind !== 'local' && rule.kind !== 'remote')
+      || (rule.kind !== 'local' && rule.kind !== 'remote' && rule.kind !== 'dynamic')
       || !Number.isInteger(localPort)
       || localPort < 1
       || localPort > 65_535
-      || !Number.isInteger(remotePort)
-      || remotePort < 1
-      || remotePort > 65_535
+      || (rule.kind !== 'dynamic' && (!remoteHost || !Number.isInteger(remotePort) || remotePort < 1 || remotePort > 65_535))
       || (rule.kind === 'remote' && !['127.0.0.1', 'localhost', '::1'].includes(remoteHost))
     ) return [];
     seen.add(id);
@@ -254,8 +255,8 @@ function sanitizePortForwardRules(value: unknown): PortForwardRule[] {
       name,
       kind: rule.kind,
       localPort,
-      remoteHost,
-      remotePort,
+      remoteHost: rule.kind === 'dynamic' ? '' : remoteHost,
+      remotePort: rule.kind === 'dynamic' ? 0 : remotePort,
       autoStart: rule.autoStart === true,
     }];
   });
@@ -316,7 +317,7 @@ export function parseConnectionExport(content: string): ConnectionImportCandidat
         || !candidate.name.trim()
         || !candidate.host.trim()
         || !candidate.username.trim()
-        || (candidate.authMethod !== 'password' && candidate.authMethod !== 'key')
+        || !isAuthMethod(candidate.authMethod)
       ) return [];
       return [{
         id: `shellspan:${index}:${candidate.name}`,
