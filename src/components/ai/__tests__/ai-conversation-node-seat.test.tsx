@@ -7,7 +7,7 @@ import {
   aiConversationNodeRenderers,
   type AiConversationNodeRendererMap,
 } from '@/components/ai/workspace/ai-conversation-node-seat';
-import { classifyAiTool } from '@/components/ai/workspace/ai-tool-presentation';
+import { AiToolRow, classifyAiTool } from '@/components/ai/workspace/ai-tool-presentation';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
@@ -814,5 +814,35 @@ describe('AiConversationNodeList', () => {
     const statsRow = footer.querySelector('.ai-turn-stats') as HTMLElement;
     expect(statsRow).toHaveClass('flex', 'flex-wrap', 'overflow-visible');
     await waitFor(() => expect(payload).toHaveTextContent('/very-long-segment'));
+  });
+
+  it('switches cleanly between ordinary tools and subagent tools without Rules of Hooks errors', () => {
+    const regularTool = toolNode({
+      key: 'tool:switch',
+      name: 'run_terminal_command',
+      nativeName: 'run_terminal_command',
+      state: 'succeeded',
+      input: { command: 'uptime' },
+      output: 'up 10 days',
+    });
+    const subagentTool = toolNode({
+      key: 'tool:switch',
+      name: 'spawn_one_shot_agent',
+      nativeName: 'spawn_one_shot_agent',
+      state: 'running',
+      input: { role: 'explorer', goal: 'Inspect logs' },
+      output: null,
+    });
+
+    const { rerender, container } = render(<AiToolRow node={regularTool} />);
+    expect(container.querySelector('.ai-tool-row')).toBeVisible();
+    expect(container.querySelector('[data-slot="ai-subagent-card"]')).toBeNull();
+
+    rerender(<AiToolRow node={subagentTool} />);
+    expect(container.querySelector('[data-slot="ai-subagent-card"]')).toBeVisible();
+    expect(container.querySelector('.ai-tool-row')).toBeNull();
+
+    rerender(<AiToolRow node={regularTool} />);
+    expect(container.querySelector('.ai-tool-row')).toBeVisible();
   });
 });

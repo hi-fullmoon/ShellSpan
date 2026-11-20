@@ -1,10 +1,13 @@
 import {
+  ArrowLeftIcon,
+  BotIcon,
   MessageCircleQuestionIcon,
   HistoryIcon,
   PanelRightCloseIcon,
   SquarePenIcon,
 } from 'lucide-react';
 
+import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
@@ -12,12 +15,23 @@ import type { AiSessionStatus } from '@/lib/ai/conversation-node';
 import { AiHeaderIconButton } from './ai-header-icon-button';
 import { ShellSpanGlyph } from '@/components/brand/shellspan-mark';
 
+export interface AiSessionHeaderSubagentNav {
+  readonly roleLabel: string;
+  readonly subtitle: string;
+  readonly subtitleTooltip: string;
+  readonly backLabel?: string;
+  readonly onBack?: () => void;
+  readonly switcher: React.ReactNode;
+  readonly hideSessionChrome?: boolean;
+}
+
 export interface AiSessionHeaderProps {
   readonly title: string;
   readonly context: string;
   readonly status: AiSessionStatus;
   readonly mode?: 'ask' | 'agent';
   readonly lineage?: React.ReactNode;
+  readonly subagentNav?: AiSessionHeaderSubagentNav;
   readonly extraActions?: React.ReactNode;
   readonly onClose?: () => void;
   readonly onHistory?: () => void;
@@ -33,6 +47,7 @@ export function AiSessionHeader({
   status,
   mode = 'agent',
   lineage,
+  subagentNav,
   extraActions,
   onClose,
   onHistory,
@@ -47,36 +62,79 @@ export function AiSessionHeader({
     : status === 'waiting'
       ? t('agent.session.status.waiting')
       : t(`agent.outcome.${status}`);
+  const showHistory = !(subagentNav?.hideSessionChrome) && (onHistory || historyOpen);
+  const showNewSession = !(subagentNav?.hideSessionChrome) && Boolean(onNewSession);
 
   return (
     <header
       data-slot="ai-workspace-header"
       data-session-status={status}
+      data-subagent-view={subagentNav ? 'true' : undefined}
       className="ai-session-header relative flex h-10 min-h-10 min-w-0 shrink-0 items-center gap-2 border-b border-app-border/50 px-[var(--ai-shell-clearance)]"
       data-ai-mode={mode}
     >
-      <div className="ai-session-title-cluster flex min-w-0 flex-1 items-center gap-2">
-        <span className="ai-session-mode-icon relative grid size-7 shrink-0 place-items-center rounded-[9px] bg-primary/10 text-primary [&>svg]:size-[15px]" aria-hidden="true">
-          {mode === 'ask' ? <MessageCircleQuestionIcon /> : <ShellSpanGlyph />}
-          <span className="ai-session-status-dot absolute -right-0.5 -bottom-0.5 size-[7px] shrink-0" data-state={status} />
-        </span>
-        <span className="ai-session-heading flex min-w-0 flex-1 flex-col">
-          <span className="flex min-w-0 items-center gap-1">
-            <h2 className="ai-session-title min-w-0 truncate text-sm font-medium leading-5 text-foreground">{title}</h2>
+      {subagentNav ? (
+        <div className="ai-session-title-cluster flex min-w-0 flex-1 items-center gap-2">
+          {subagentNav.onBack && subagentNav.backLabel ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={(
+                  <AiHeaderIconButton
+                    onClick={subagentNav.onBack}
+                    aria-label={subagentNav.backLabel}
+                  />
+                )}
+              >
+                <ArrowLeftIcon data-icon="inline-start" />
+              </TooltipTrigger>
+              <TooltipContent>{subagentNav.backLabel}</TooltipContent>
+            </Tooltip>
+          ) : (
+            <span className="ai-session-mode-icon relative grid size-7 shrink-0 place-items-center rounded-[9px] bg-primary/10 text-primary [&>svg]:size-[15px]" aria-hidden="true">
+              <BotIcon />
+              <span className="ai-session-status-dot absolute -right-0.5 -bottom-0.5 size-[7px] shrink-0" data-state={status} />
+            </span>
+          )}
+          <span className="ai-session-heading flex min-w-0 flex-1 flex-col">
+            <span className="flex min-w-0 items-center gap-1">
+              <h2 className="ai-session-title min-w-0 truncate text-sm font-medium leading-5 text-foreground">{title}</h2>
+              <Badge variant="outline" size="sm" className="shrink-0">
+                {subagentNav.roleLabel}
+              </Badge>
+            </span>
+            <Tooltip>
+              <TooltipTrigger render={<span tabIndex={0} className="ai-session-context w-fit max-w-full truncate text-[11px] leading-[15px] text-muted-foreground" />}>
+                {subagentNav.subtitle}
+              </TooltipTrigger>
+              <TooltipContent role="tooltip" align="start" className="max-w-[min(20rem,var(--available-width))]">{subagentNav.subtitleTooltip}</TooltipContent>
+            </Tooltip>
           </span>
-          <Tooltip>
-            <TooltipTrigger render={<span tabIndex={0} className="ai-session-context w-fit max-w-full truncate text-[11px] leading-[15px] text-muted-foreground" />}>
-              {context}
-            </TooltipTrigger>
-            <TooltipContent role="tooltip" align="start" className="max-w-[min(20rem,var(--available-width))]">{context}</TooltipContent>
-          </Tooltip>
-        </span>
-        <span className="sr-only">{statusLabel}</span>
-      </div>
+          <span className="sr-only">{statusLabel}</span>
+        </div>
+      ) : (
+        <div className="ai-session-title-cluster flex min-w-0 flex-1 items-center gap-2">
+          <span className="ai-session-mode-icon relative grid size-7 shrink-0 place-items-center rounded-[9px] bg-primary/10 text-primary [&>svg]:size-[15px]" aria-hidden="true">
+            {mode === 'ask' ? <MessageCircleQuestionIcon /> : <ShellSpanGlyph />}
+            <span className="ai-session-status-dot absolute -right-0.5 -bottom-0.5 size-[7px] shrink-0" data-state={status} />
+          </span>
+          <span className="ai-session-heading flex min-w-0 flex-1 flex-col">
+            <span className="flex min-w-0 items-center gap-1">
+              <h2 className="ai-session-title min-w-0 truncate text-sm font-medium leading-5 text-foreground">{title}</h2>
+            </span>
+            <Tooltip>
+              <TooltipTrigger render={<span tabIndex={0} className="ai-session-context w-fit max-w-full truncate text-[11px] leading-[15px] text-muted-foreground" />}>
+                {context}
+              </TooltipTrigger>
+              <TooltipContent role="tooltip" align="start" className="max-w-[min(20rem,var(--available-width))]">{context}</TooltipContent>
+            </Tooltip>
+          </span>
+          <span className="sr-only">{statusLabel}</span>
+        </div>
+      )}
 
       <div className="ai-session-actions flex min-w-0 shrink-0 items-center gap-1 @min-[400px]/ai-workspace:gap-2">
-        {lineage}
-        {(onHistory || historyOpen) && (
+        {subagentNav ? subagentNav.switcher : lineage}
+        {showHistory && (
           <Popover
             open={historyOpen}
             onOpenChange={(open) => {
@@ -108,7 +166,7 @@ export function AiSessionHeader({
           </Popover>
         )}
 
-        {onNewSession && (
+        {showNewSession && (
           <Tooltip>
             <TooltipTrigger
               render={(

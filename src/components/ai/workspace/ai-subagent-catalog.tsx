@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BotIcon, ChevronDownIcon, ChevronRightIcon, HouseIcon } from 'lucide-react';
+import { BotIcon, ChevronDownIcon, HouseIcon } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,118 +10,13 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiSessionSummary } from '@/lib/ai/session-adapter';
-import type { AgentActivityAgent, AgentSessionRuntimeStatus } from '@/types/agent-session';
+import type { AiSubagentEntry } from '@/lib/ai/subagent-lineage';
+import { AiSubagentTreeList } from './ai-subagent-tree';
 
-export interface AiSubagentCatalogEntry {
-  readonly summary: AiSessionSummary;
-  readonly role: AgentActivityAgent['role'];
-  readonly continuable: boolean;
-  readonly status: AgentSessionRuntimeStatus;
-  readonly depth: number;
-  readonly detail?: string;
-}
-
-function roleLabel(role: AgentActivityAgent['role'], t: ReturnType<typeof useI18n>['t']): string {
-  switch (role) {
-    case 'general': return t('ai.workspace.subagents.role.general');
-    case 'explorer': return t('ai.workspace.subagents.role.explorer');
-    case 'diagnostician': return t('ai.workspace.subagents.role.diagnostician');
-    case 'operator': return t('ai.workspace.subagents.role.operator');
-    case 'verifier': return t('ai.workspace.subagents.role.verifier');
-    case 'reviewer': return t('ai.workspace.subagents.role.reviewer');
-    default: return t('ai.workspace.subagents.role.subagent');
-  }
-}
-
-function statusLabel(status: AgentSessionRuntimeStatus, t: ReturnType<typeof useI18n>['t']): string {
-  if (status === 'idle') return t('agent.session.status.idle');
-  if (status === 'waiting') return t('agent.session.status.waiting');
-  return t(`agent.outcome.${status}`);
-}
-
-function CatalogRows({
-  entries,
-  currentSessionId,
-  currentBudgetExhausted,
-  close,
-  onOpen,
-}: {
-  readonly entries: readonly AiSubagentCatalogEntry[];
-  readonly currentSessionId: string;
-  readonly currentBudgetExhausted: boolean;
-  readonly close: () => void;
-  readonly onOpen: (summary: AiSessionSummary) => void;
-}): React.ReactNode {
-  const { t } = useI18n();
-  return (
-    <div className="flex min-w-0 flex-col gap-1" role="list">
-      {entries.map((entry) => {
-        const current = entry.summary.id === currentSessionId;
-        const role = roleLabel(entry.role, t);
-        const mode = t(current && currentBudgetExhausted
-          ? 'ai.workspace.subagents.mode.budgetExhausted' : entry.continuable
-          ? 'ai.workspace.subagents.mode.continuable'
-          : 'ai.workspace.subagents.mode.oneShot');
-        const status = statusLabel(entry.status, t);
-        return (
-          <div key={entry.summary.id} role="listitem">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-auto w-full min-w-0 items-start justify-start gap-1 px-2 py-2 text-left whitespace-normal"
-              aria-label={t('ai.workspace.subagents.open', {
-                title: entry.summary.title,
-                role,
-                mode,
-                status,
-              })}
-              onClick={() => {
-                close();
-                if (!current) onOpen(entry.summary);
-              }}
-              aria-current={current ? 'page' : undefined}
-            >
-              {Array.from({ length: Math.min(Math.max(entry.depth - 1, 0), 8) }, (_, index) => (
-                <span key={index} className="w-3 shrink-0" aria-hidden="true" />
-              ))}
-              <span className="relative grid size-4 shrink-0 place-items-center" aria-hidden="true">
-                <BotIcon data-icon="inline-start" />
-                <span
-                  className="ai-session-status-dot absolute right-0 bottom-0 size-2"
-                  data-state={entry.status}
-                />
-              </span>
-              <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-                <span className="flex w-full min-w-0 items-center gap-1.5">
-                  <span className="truncate font-medium leading-4">{entry.summary.title}</span>
-                  <Badge variant="outline" size="sm">{role}</Badge>
-                  {current && <Badge variant="secondary" size="sm">{t('ai.workspace.subagents.current')}</Badge>}
-                </span>
-                <span className="max-w-full truncate text-xs font-normal leading-4 text-muted-foreground">
-                  {mode} · {status}
-                </span>
-                {entry.detail && entry.detail !== entry.summary.title && (
-                  <span className="max-w-full truncate text-xs text-muted-foreground">
-                    {entry.detail}
-                  </span>
-                )}
-              </span>
-              {!current && (
-                <span className="grid size-4 shrink-0 place-items-center" aria-hidden="true">
-                  <ChevronRightIcon data-icon="inline-end" />
-                </span>
-              )}
-            </Button>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+export type AiSubagentCatalogEntry = AiSubagentEntry;
 
 export function AiSubagentCatalog({
   root,
@@ -146,16 +41,27 @@ export function AiSubagentCatalog({
   const presentedEntries: readonly AiSubagentCatalogEntry[] = root.id === current.id && root.subagent
     ? [{
         summary: root,
+        parentSessionId: root.parentSessionId,
         role: root.subagent.role,
         continuable: root.subagent.continuable,
         status: root.status,
-        depth: 0,
+        depth: 1,
       }, ...entries]
     : entries;
 
-  const runningCount = presentedEntries.filter((entry) => (
-    entry.status === 'running' || entry.status === 'waiting'
-  )).length;
+  const runningCount = presentedEntries.filter((entry) => entry.status === 'running').length;
+  const waitingCount = presentedEntries.filter((entry) => entry.status === 'waiting').length;
+  const activeCount = runningCount + waitingCount;
+  const otherWaiting = presentedEntries.some(
+    (entry) => entry.summary.id !== current.id && entry.status === 'waiting',
+  );
+  const otherRunning = presentedEntries.some(
+    (entry) => entry.summary.id !== current.id && entry.status === 'running',
+  );
+  const attentionState = inSubagent
+    ? (otherWaiting ? 'waiting' : otherRunning ? 'running' : null)
+    : (waitingCount > 0 ? 'waiting' : runningCount > 0 ? 'running' : null);
+
   const countKey = presentedEntries.length === 1
     ? 'ai.workspace.subagents.count.one'
     : 'ai.workspace.subagents.count.other';
@@ -165,19 +71,32 @@ export function AiSubagentCatalog({
   const shortCountKey = presentedEntries.length === 1
     ? 'ai.workspace.subagents.shortCount.one'
     : 'ai.workspace.subagents.shortCount.other';
-  const triggerLabel = runningCount > 0
-    ? t(countRunningKey, { count: presentedEntries.length, running: runningCount })
+  const triggerLabel = activeCount > 0
+    ? t(countRunningKey, { count: presentedEntries.length, running: activeCount })
     : t(countKey, { count: presentedEntries.length });
   const accessibleTriggerLabel = inSubagent
     ? t('ai.workspace.subagents.lineageAria', { title: current.title })
     : triggerLabel;
+
+  const currentIndex = presentedEntries.findIndex((entry) => entry.summary.id === current.id);
+  const compactPositionText = inSubagent && currentIndex >= 0 && presentedEntries.length > 1
+    ? `${currentIndex + 1}/${presentedEntries.length}`
+    : t(shortCountKey, { count: presentedEntries.length });
+  const headerBadgeText = waitingCount > 0
+    ? t('ai.workspace.subagents.status.waiting', { count: waitingCount })
+    : runningCount > 0
+      ? t('ai.workspace.subagents.status.running', { count: runningCount })
+      : t(shortCountKey, { count: presentedEntries.length });
+
   const rows = (
-    <CatalogRows
+    <AiSubagentTreeList
       entries={presentedEntries}
       currentSessionId={current.id}
       currentBudgetExhausted={currentBudgetExhausted}
-      close={() => setOpen(false)}
-      onOpen={onOpen}
+      onSelect={(summary) => {
+        setOpen(false);
+        if (summary.id !== current.id) onOpen(summary);
+      }}
     />
   );
 
@@ -195,48 +114,50 @@ export function AiSubagentCatalog({
             type="button"
             variant="ghost"
             size="xs"
-            className="max-w-32 shrink-0 px-1.5"
+            className="ai-subagent-switcher-trigger h-7 max-w-36 shrink-0 gap-1 px-1.5"
             aria-label={accessibleTriggerLabel}
           />
         )}
       >
         <BotIcon data-icon="inline-start" />
-        <span className="truncate">
-          {inSubagent
-            ? t('ai.workspace.subagents.lineage')
-            : t(shortCountKey, { count: presentedEntries.length })}
-        </span>
-        {runningCount > 0 && (
-          <span className="ai-session-status-dot size-1.5 shrink-0" data-state="running" aria-hidden="true" />
+        <span className="truncate">{compactPositionText}</span>
+        {attentionState && (
+          <span className="ai-subagent-switcher-dot size-1.5 shrink-0" data-state={attentionState} aria-hidden="true" />
         )}
         <ChevronDownIcon data-icon="inline-end" aria-hidden="true" />
       </PopoverTrigger>
-      <PopoverContent align="end" sideOffset={8} className="w-80 max-w-[calc(100vw-1rem)] gap-1 p-1">
-        <PopoverHeader className="px-2 py-1.5">
-          <PopoverTitle className="text-xs text-muted-foreground">{t('ai.workspace.subagents.title')}</PopoverTitle>
+      <PopoverContent align="end" sideOffset={8} className="ai-subagent-popover w-80 max-w-[calc(100vw-1rem)] max-h-[min(22rem,var(--available-height))] gap-1 overflow-hidden p-1.5">
+        <PopoverHeader className="flex shrink-0 flex-row items-center justify-between gap-2 px-2 py-1">
+          <PopoverTitle className="text-xs font-medium text-muted-foreground">
+            {t('ai.workspace.subagents.switcherTitle')}
+          </PopoverTitle>
+          <Badge variant="secondary" size="sm" className="shrink-0">{headerBadgeText}</Badge>
         </PopoverHeader>
         {root.id !== current.id && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-auto w-full min-w-0 items-start justify-start gap-1 px-2 py-2 text-left"
-            aria-label={t('ai.workspace.subagents.openRoot', { title: root.title })}
-            onClick={() => {
-              setOpen(false);
-              onOpen(root);
-            }}
-          >
-            <span className="grid size-4 shrink-0 place-items-center" aria-hidden="true">
-              <HouseIcon data-icon="inline-start" />
-            </span>
-            <span className="min-w-0 flex-1 truncate leading-4">{root.title}</span>
-            <Badge variant="secondary" size="sm">{t('ai.workspace.subagents.root')}</Badge>
-          </Button>
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="ai-subagent-tree-row h-auto w-full min-w-0 shrink-0 items-start justify-start gap-1 px-2 py-1.5 text-left"
+              aria-label={t('ai.workspace.subagents.openRoot', { title: root.title })}
+              onClick={() => {
+                setOpen(false);
+                onOpen(root);
+              }}
+            >
+              <span className="grid size-4 shrink-0 place-items-center text-muted-foreground" aria-hidden="true">
+                <HouseIcon data-icon="inline-start" />
+              </span>
+              <span className="min-w-0 flex-1 truncate font-medium leading-4">{root.title}</span>
+              <Badge variant="secondary" size="sm" className="shrink-0">{t('ai.workspace.subagents.root')}</Badge>
+            </Button>
+            <Separator className="my-0.5 shrink-0" />
+          </>
         )}
-        {presentedEntries.length > 4
-          ? <ScrollArea className="h-64" size="thin">{rows}</ScrollArea>
-          : rows}
+        <div className="min-h-0 flex-1 overflow-y-auto" tabIndex={0}>
+          {rows}
+        </div>
       </PopoverContent>
     </Popover>
   );

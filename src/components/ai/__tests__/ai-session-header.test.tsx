@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiSessionHeader } from '@/components/ai/workspace/ai-session-header';
+import { AiSubagentCatalog } from '@/components/ai/workspace/ai-subagent-catalog';
 import { AiRouteHeader } from '@/components/ai/workspace/ai-route-header';
 import { AiSessionBrowser } from '@/components/ai/workspace/ai-session-browser';
 import { AiToolDetails } from '@/components/ai/workspace/ai-tool-details';
@@ -210,5 +211,113 @@ describe('AiSessionHeader', () => {
       />,
     );
     expect(screen.getByText('Inspect implementation')).toBeVisible();
+  });
+
+  it('switches to subagent navigation mode with back action, role badge, breadcrumb tooltip, and switcher', async () => {
+    const user = userEvent.setup();
+    const onBack = vi.fn();
+    const onHistory = vi.fn();
+    const onNewSession = vi.fn();
+    const onClose = vi.fn();
+    const root: AiSessionSummary = {
+      id: 'root',
+      kind: 'agent',
+      title: 'Main task',
+      updatedAt: '2026-11-20T00:00:00.000Z',
+      status: 'running',
+      scopeKey: 'workbench-ai',
+      archived: false,
+    };
+    const child: AiSessionSummary = {
+      ...root,
+      id: 'child',
+      title: 'Inspect service logs',
+      parentSessionId: root.id,
+      subagent: {
+        descriptorId: 'd-child',
+        role: 'explorer',
+        continuable: true,
+        depth: 1,
+      },
+    };
+    const switcher = (
+      <AiSubagentCatalog
+        root={root}
+        current={child}
+        entries={[{
+          summary: child,
+          parentSessionId: root.id,
+          role: 'explorer',
+          continuable: true,
+          status: 'running',
+          depth: 1,
+        }]}
+        onOpen={vi.fn()}
+      />
+    );
+    const { container, rerender } = render(
+      <AiSessionHeader
+        title={child.title}
+        context="Agent"
+        status="running"
+        onHistory={onHistory}
+        onNewSession={onNewSession}
+        onClose={onClose}
+        subagentNav={{
+          roleLabel: 'Explorer',
+          subtitle: 'Main task · Continuable · Running',
+          subtitleTooltip: 'Main task / Inspect service logs · Continuable · Running',
+          backLabel: 'Back to main session: Main task',
+          onBack,
+          switcher,
+          hideSessionChrome: true,
+        }}
+      />,
+    );
+
+    const header = container.querySelector<HTMLElement>('.ai-session-header')!;
+    expect(header).toHaveAttribute('data-subagent-view', 'true');
+    expect(header).toHaveClass('h-10', 'min-h-10', 'border-b', 'border-app-border/50');
+    expect(header.querySelector('.ai-session-heading .ai-session-status-dot')).toBeNull();
+    const roleBadge = within(header).getByText('Explorer');
+    const heading = within(header).getByRole('heading', { name: 'Inspect service logs' });
+    expect(roleBadge).toBeVisible();
+    expect(roleBadge).toHaveAttribute('data-variant', 'outline');
+    expect(heading).toBeVisible();
+    expect(Boolean(heading.compareDocumentPosition(roleBadge) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Conversation history' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'New conversation' })).toBeNull();
+
+    const backButton = screen.getByRole('button', { name: 'Back to main session: Main task' });
+    await user.click(backButton);
+    expect(onBack).toHaveBeenCalledOnce();
+
+    await user.tab();
+    await user.tab();
+    const context = container.querySelector<HTMLElement>('.ai-session-context')!;
+    context.focus();
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      'Main task / Inspect service logs · Continuable · Running',
+    );
+
+    rerender(
+      <AiSessionHeader
+        title={child.title}
+        context="Agent"
+        status="running"
+        onHistory={onHistory}
+        onNewSession={onNewSession}
+        onClose={onClose}
+        subagentNav={{
+          roleLabel: 'Explorer',
+          subtitle: 'Continuable · Running',
+          subtitleTooltip: 'Inspect service logs · Continuable · Running',
+          switcher,
+          hideSessionChrome: false,
+        }}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Conversation history' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'New conversation' })).toBeVisible();
   });
 });

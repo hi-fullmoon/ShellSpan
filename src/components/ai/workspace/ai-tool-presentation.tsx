@@ -38,8 +38,10 @@ import { aiErrorMessage, httpProbeTimeoutKind } from '@/lib/ai/error-message';
 import { renderTerminalTranscript } from '@/lib/terminal/terminal-output-buffer';
 import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
+import { isSubagentTool } from '@/lib/ai/subagent-lineage';
 import { AiContentTitle } from './ai-content-title';
 import { AiNativeCodeFade } from './ai-native-code-fade';
+import { AiSubagentToolCard } from './ai-subagent-tool-card';
 import {
   AI_CONTENT_CODE_CLASS,
   AI_CONTENT_HEADER_CLASS,
@@ -221,7 +223,7 @@ function toolSummary(node: ToolNode, variant: AiToolVariant): string {
     edit: ['path', 'file_path', 'filePath'],
     code: ['description', 'language'],
     plan: ['explanation'],
-    generic: ['description', 'explanation', 'summary', 'intent'],
+    generic: ['description', 'explanation', 'summary', 'intent', 'goal'],
   };
   const inputSummary = firstString(input, keys[variant]);
   return inputSummary?.split('\n')[0]
@@ -970,6 +972,19 @@ export function AiToolExpandedContent({
 }
 
 export function AiToolRow({
+  node,
+  onInspect,
+}: {
+  readonly node: ToolNode;
+  readonly onInspect?: (node: ToolNode) => void;
+}) {
+  if (isSubagentTool(node.name, node.nativeName)) {
+    return <AiSubagentToolCard node={node} onInspect={onInspect} />;
+  }
+  return <StandardAiToolRow node={node} onInspect={onInspect} />;
+}
+
+function StandardAiToolRow({
   node,
   onInspect,
 }: {

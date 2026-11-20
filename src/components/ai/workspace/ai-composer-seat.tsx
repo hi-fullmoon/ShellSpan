@@ -89,6 +89,7 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly inbox?: readonly AiInboxItem[];
   readonly taskSteps?: readonly AgentSessionPlanStep[];
   readonly taskPlanActive?: boolean;
+  readonly subagentStrip?: React.ReactNode;
   readonly queueMutable?: boolean;
   readonly queueMutation?: AiQueueMutationState | null;
   readonly onRetryQueueMutation?: AiSessionController['retryQueueMutation'];
@@ -153,6 +154,7 @@ export function AiComposerSeat({
   inbox = [],
   taskSteps = [],
   taskPlanActive = false,
+  subagentStrip,
   queueMutation = null,
   onRetryQueueMutation,
   queueMutable = true,
@@ -532,6 +534,7 @@ export function AiComposerSeat({
         {mode === 'agent' && (
           <AiTaskStrip steps={taskSteps} active={taskPlanActive && (status === 'running' || status === 'waiting')} />
         )}
+        {mode === 'agent' && subagentStrip}
         {completion.dialog}
         <AiQuestionSeat key={currentSessionId} question={pendingQuestion} onAnswer={onAnswerQuestion} onRefresh={onRefreshQuestionAnswer} onOpenSettings={onOpenModel} />
         {mode === 'agent' && <AiApprovalSeat key={`approval:${currentSessionId ?? composerState?.sessionId ?? ''}`}

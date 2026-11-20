@@ -660,7 +660,7 @@ describe('AiWorkspaceRoot conversation structure', () => {
     expect(composer).toHaveTextContent('Unsent draft');
   });
 
-  it('shows live subagent information in the header and opens the child transcript', async () => {
+  it('exposes subagents via the docked strip and inline delegation cards without crowding the root header', async () => {
     const user = userEvent.setup();
     const base = agentView('running');
     const child = {
@@ -679,8 +679,41 @@ describe('AiWorkspaceRoot conversation structure', () => {
       },
       archived: false,
     };
+    const spawnTool = {
+      kind: 'tool' as const,
+      key: 'tool:spawn-child',
+      sourceKind: 'agent' as const,
+      sessionId: base.summary.id,
+      turnId: 'turn-01',
+      stepId: 'step-01',
+      firstSeq: 999,
+      lastSeq: 999,
+      timestamp: '2026-09-02T08:00:03.000Z',
+      callId: 'call-spawn-child',
+      name: 'spawn_one_shot_agent',
+      nativeName: 'spawn_one_shot_agent',
+      title: 'Agent orchestration',
+      summary: '',
+      state: 'running' as const,
+      effect: 'readOnly' as const,
+      durationMs: null,
+      detailRef: { kind: 'agentTool' as const, sessionId: base.summary.id, callId: 'call-spawn-child' },
+      evidenceRefs: [],
+      input: {
+        goal: 'Inspect the existing page\nCheck header layout',
+        role: 'explorer',
+        inheritanceMode: 'safePrefix',
+        targetIds: [base.summary.scopeKey],
+      },
+      output: { childSessionId: child.id },
+      error: null,
+      target: null,
+      idempotency: null,
+      approval: null,
+    };
     const view: AiSessionView = {
       ...base,
+      nodes: [...base.nodes, spawnTool],
       subagents: [{
         sessionId: child.id,
         parentSessionId: base.summary.id,
@@ -692,30 +725,257 @@ describe('AiWorkspaceRoot conversation structure', () => {
       }],
     };
     const onOpen = vi.fn();
-    render(
+    const { container } = render(
       <AiWorkspaceRoot
         view={view}
-        scope="workbench"
+        scope="terminal"
+        mode="agent"
         sessions={[base.summary, child]}
         onOpenSession={onOpen}
       />,
     );
 
-    const trigger = screen.getByRole('button', { name: '1 subagent, 1 running' });
-    expect(trigger).toBeVisible();
-    await user.click(trigger);
-    const catalog = await screen.findByRole('dialog', { name: 'Subagent sessions' });
-    expect(within(catalog).getByText('Inspect the existing page')).toBeVisible();
-    expect(within(catalog).getByText('Explorer')).toBeVisible();
-    expect(within(catalog).getByText('One-shot · In progress')).toBeVisible();
+    const header = container.querySelector('[data-slot="ai-workspace-header"]') as HTMLElement;
+    expect(within(header).queryByRole('button', { name: /subagent/i })).toBeNull();
 
-    await user.click(within(catalog).getByRole('button', {
+    const strip = container.querySelector('[data-slot="ai-subagent-strip"]') as HTMLElement;
+    expect(strip).toBeVisible();
+    const stripTrigger = within(strip).getByRole('button', { name: 'Toggle 1 subagents' });
+    expect(stripTrigger.querySelector('.ai-session-status-dot')).toBeNull();
+    expect(stripTrigger).toHaveTextContent('Subagents');
+    expect(stripTrigger).toHaveTextContent('1 running');
+    await user.click(stripTrigger);
+    expect(within(strip).getByText('Inspect the existing page')).toBeVisible();
+    expect(within(strip).getByText('Explorer')).toBeVisible();
+    expect(within(strip).getByText('One-shot · In progress')).toBeVisible();
+
+    await user.click(within(strip).getByRole('button', {
       name: 'Open subagent “Inspect the existing page”: Explorer, One-shot, In progress',
     }));
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: child.id }));
+
+    const card = container.querySelector('[data-slot="ai-subagent-card"]') as HTMLElement;
+    expect(card).toBeVisible();
+    expect(card).not.toHaveTextContent('Agent orchestration');
+    const cardTitle = card.querySelector('.ai-subagent-card-title') as HTMLElement;
+    const cardBadge = within(card).getByText('Explorer');
+    expect(cardBadge).toHaveAttribute('data-variant', 'outline');
+    expect(Boolean(cardTitle.compareDocumentPosition(cardBadge) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    await user.click(within(card).getByRole('button', { name: 'Expand summary' }));
+    expect(within(card).getByText(/Check header layout/)).toBeVisible();
+    await user.click(within(card).getByRole('button', {
+      name: 'Open subagent “Inspect the existing page”: Explorer, In progress',
+    }));
+    expect(onOpen).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      useAppStore.setState({ locale: 'zh-CN' });
+      await initI18n('zh-CN');
+    });
+    expect(strip).toHaveTextContent('1 运行中');
+    expect(strip).not.toHaveTextContent('1 个运行中');
   });
 
-  it('counts nested descendants and keeps lineage navigation on a leaf subagent', async () => {
+  it('handles uncertain subagent cards, interactive vs static card states, readable inspect labels, and strip collapse on session switch', async () => {
+    const user = userEvent.setup();
+    const base = agentView('running');
+    const child = {
+      ...base.summary,
+      id: 'session-child',
+      title: 'Inspect child logs',
+      parentSessionId: base.summary.id,
+      subagent: {
+        descriptorId: 'descriptor-child',
+        role: 'explorer' as const,
+        continuable: true,
+        depth: 1,
+      },
+    };
+    const grandchild = {
+      ...base.summary,
+      id: 'session-grandchild',
+      title: 'Check TLS cert',
+      parentSessionId: child.id,
+      subagent: {
+        descriptorId: 'descriptor-grandchild',
+        role: 'verifier' as const,
+        continuable: false,
+        depth: 2,
+      },
+    };
+    const uncertainCardNode = {
+      kind: 'tool' as const,
+      key: 'tool:uncertain-card',
+      sourceKind: 'agent' as const,
+      sessionId: base.summary.id,
+      turnId: 'turn-01',
+      stepId: 'step-01',
+      firstSeq: 998,
+      lastSeq: 998,
+      timestamp: '2026-09-02T08:00:03.000Z',
+      callId: 'call-uncertain',
+      name: 'spawn_one_shot_agent',
+      nativeName: 'spawn_one_shot_agent',
+      title: 'Agent orchestration',
+      summary: '',
+      state: 'uncertain' as const,
+      effect: 'readOnly' as const,
+      durationMs: null,
+      detailRef: { kind: 'agentTool' as const, sessionId: base.summary.id, callId: 'call-uncertain' },
+      evidenceRefs: [],
+      input: { role: 'diagnostician', goal: 'Probe remote service\nWith timeout details' },
+      output: null,
+      error: 'Outcome lost after disconnect',
+      target: null,
+      idempotency: null,
+      approval: null,
+    };
+    const staticCardNode = {
+      kind: 'tool' as const,
+      key: 'tool:static-card',
+      sourceKind: 'agent' as const,
+      sessionId: base.summary.id,
+      turnId: 'turn-01',
+      stepId: 'step-02',
+      firstSeq: 999,
+      lastSeq: 999,
+      timestamp: '2026-09-02T08:00:04.000Z',
+      callId: 'call-static',
+      name: 'spawn_one_shot_agent',
+      nativeName: 'spawn_one_shot_agent',
+      title: 'Agent orchestration',
+      summary: '',
+      state: 'preparing' as const,
+      effect: 'readOnly' as const,
+      durationMs: null,
+      detailRef: { kind: 'agentTool' as const, sessionId: base.summary.id, callId: 'call-static' },
+      evidenceRefs: [],
+      input: { role: 'operator', goal: 'Preparing target check' },
+      output: null,
+      error: null,
+      target: null,
+      idempotency: null,
+      approval: null,
+    };
+    const onOpenTool = vi.fn();
+    const { container, rerender } = render(
+      <AiWorkspaceRoot
+        view={{
+          ...base,
+          nodes: [...base.nodes, uncertainCardNode, staticCardNode],
+          subagents: [{
+            sessionId: child.id,
+            parentSessionId: base.summary.id,
+            descriptorId: child.subagent.descriptorId,
+            role: child.subagent.role,
+            continuable: child.subagent.continuable,
+            depth: child.subagent.depth,
+            status: 'running',
+          }],
+        }}
+        scope="terminal"
+        mode="agent"
+        sessions={[base.summary, child, grandchild]}
+        onOpenSession={vi.fn()}
+        onOpenTool={onOpenTool}
+      />,
+    );
+
+    const cards = container.querySelectorAll<HTMLElement>('[data-slot="ai-subagent-card"]');
+    expect(cards).toHaveLength(2);
+    const [uncertainCard, staticCard] = [cards[0]!, cards[1]!];
+
+    expect(uncertainCard).toHaveAttribute('data-state', 'uncertain');
+    expect(uncertainCard).toHaveAttribute('data-clickable', 'true');
+    expect(uncertainCard).not.toHaveAttribute('data-openable');
+    expect(uncertainCard.querySelector('[data-status="uncertain"]')).not.toBeNull();
+    expect(within(uncertainCard).getByText(/Execution outcome unknown/)).toBeVisible();
+
+    const mainExpandButton = uncertainCard.querySelector<HTMLButtonElement>('.ai-subagent-card-main')!;
+    expect(mainExpandButton.tagName).toBe('BUTTON');
+    await user.click(mainExpandButton);
+    expect(within(uncertainCard).getByText('Outcome lost after disconnect')).toBeVisible();
+    await user.click(within(uncertainCard).getByRole('button', { name: 'Open details for Probe remote service' }));
+    expect(onOpenTool).toHaveBeenCalledWith(uncertainCardNode);
+
+    expect(staticCard).toHaveAttribute('data-clickable', 'true');
+    expect(staticCard).not.toHaveAttribute('data-openable');
+
+    rerender(
+      <AiWorkspaceRoot
+        view={{
+          ...base,
+          nodes: [...base.nodes, staticCardNode],
+          subagents: [],
+        }}
+        scope="terminal"
+        mode="agent"
+        sessions={[base.summary]}
+        onOpenSession={vi.fn()}
+      />,
+    );
+    const nonInteractiveCard = container.querySelector<HTMLElement>('[data-slot="ai-subagent-card"]')!;
+    expect(nonInteractiveCard).not.toHaveAttribute('data-clickable');
+    expect(nonInteractiveCard).not.toHaveAttribute('data-openable');
+    expect(nonInteractiveCard.querySelector('.ai-subagent-card-main')?.tagName).toBe('DIV');
+
+    rerender(
+      <AiWorkspaceRoot
+        view={{
+          ...base,
+          nodes: [...base.nodes, uncertainCardNode, staticCardNode],
+          subagents: [{
+            sessionId: child.id,
+            parentSessionId: base.summary.id,
+            descriptorId: child.subagent.descriptorId,
+            role: child.subagent.role,
+            continuable: child.subagent.continuable,
+            depth: child.subagent.depth,
+            status: 'running',
+          }],
+        }}
+        scope="terminal"
+        mode="agent"
+        sessions={[base.summary, child, grandchild]}
+        onOpenSession={vi.fn()}
+        onOpenTool={onOpenTool}
+      />,
+    );
+
+    const rootStrip = container.querySelector('[data-slot="ai-subagent-strip"]') as HTMLElement;
+    const rootTrigger = rootStrip.querySelector('.ai-subagent-strip-trigger') as HTMLButtonElement;
+    expect(rootTrigger).toHaveAttribute('aria-expanded', 'false');
+    await user.click(rootTrigger);
+    expect(rootTrigger).toHaveAttribute('aria-expanded', 'true');
+
+    rerender(
+      <AiWorkspaceRoot
+        view={{
+          ...base,
+          summary: child,
+          subagents: [{
+            sessionId: grandchild.id,
+            parentSessionId: child.id,
+            descriptorId: grandchild.subagent.descriptorId,
+            role: grandchild.subagent.role,
+            continuable: grandchild.subagent.continuable,
+            depth: grandchild.subagent.depth,
+            status: 'waiting',
+          }],
+        }}
+        scope="terminal"
+        mode="agent"
+        sessions={[base.summary, child, grandchild]}
+        onOpenSession={vi.fn()}
+        onOpenTool={onOpenTool}
+      />,
+    );
+
+    const childStripTrigger = container.querySelector('.ai-subagent-strip-trigger') as HTMLButtonElement;
+    expect(childStripTrigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('counts nested descendants in the strip and provides back + switcher navigation on child and grandchild subagents', async () => {
     const user = userEvent.setup();
     const base = agentView('running');
     const child = {
@@ -743,7 +1003,7 @@ describe('AiWorkspaceRoot conversation structure', () => {
       },
     };
     const onOpen = vi.fn();
-    const { rerender } = render(
+    const { container, rerender } = render(
       <AiWorkspaceRoot
         view={{
           ...base,
@@ -757,35 +1017,74 @@ describe('AiWorkspaceRoot conversation structure', () => {
             status: 'running',
           }],
         }}
-        scope="workbench"
+        scope="terminal"
+        mode="agent"
         sessions={[base.summary, child, grandchild]}
         onOpenSession={onOpen}
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: '2 subagents, 2 running' }));
-    const catalog = await screen.findByRole('dialog', { name: 'Subagent sessions' });
-    expect(within(catalog).getByText('Inspect implementation')).toBeVisible();
-    expect(within(catalog).getByText('Verify the result')).toBeVisible();
-    await user.keyboard('{Escape}');
+    const strip = container.querySelector('[data-slot="ai-subagent-strip"]') as HTMLElement;
+    await user.click(within(strip).getByRole('button', { name: 'Toggle 2 subagents' }));
+    expect(within(strip).getByText('Inspect implementation')).toBeVisible();
+    expect(within(strip).getByText('Verify the result')).toBeVisible();
 
     rerender(
       <AiWorkspaceRoot
         view={{ ...base, summary: grandchild, subagents: [] }}
-        scope="workbench"
+        scope="terminal"
+        mode="agent"
         sessions={[base.summary, child, grandchild]}
         onOpenSession={onOpen}
       />,
     );
-    const lineage = screen.getByRole('button', { name: 'View the lineage of subagent “Verify the result”' });
-    expect(lineage).toBeVisible();
-    await user.click(lineage);
-    const leafCatalog = await screen.findByRole('dialog', { name: 'Subagent sessions' });
+
+    expect(container.querySelector('[data-slot="ai-subagent-strip"]')).toBeNull();
+    const header = container.querySelector('[data-slot="ai-workspace-header"]') as HTMLElement;
+    expect(header).toHaveAttribute('data-subagent-view', 'true');
+    expect(within(header).getByText('Verifier')).toBeVisible();
+    expect(within(header).getByText(/Check nginx and report evidence\. \/ Inspect implementation/)).toBeVisible();
+
+    await user.click(within(header).getByRole('button', {
+      name: 'Back to parent: Inspect implementation',
+    }));
+    expect(onOpen).toHaveBeenCalledWith(child);
+
+    const switcher = within(header).getByRole('button', {
+      name: 'Switch subagent, current: Verify the result',
+    });
+    expect(switcher).toBeVisible();
+    expect(switcher).toHaveTextContent('2/2');
+    await user.click(switcher);
+    const leafCatalog = await screen.findByRole('dialog', { name: 'Session & subagents' });
     expect(within(leafCatalog).getByText('Current')).toBeVisible();
     await user.click(within(leafCatalog).getByRole('button', {
-      name: 'Open root session “Check nginx and report evidence.”',
+      name: 'Return to main session “Check nginx and report evidence.”',
     }));
     expect(onOpen).toHaveBeenCalledWith(base.summary);
+
+    rerender(
+      <AiWorkspaceRoot
+        view={{
+          ...base,
+          summary: {
+            ...grandchild,
+            parentSessionId: 'missing-parent',
+          },
+          subagents: [],
+        }}
+        scope="terminal"
+        mode="agent"
+        sessions={[grandchild]}
+        onHistory={vi.fn()}
+        onNewSession={vi.fn()}
+        canStartAgent
+        onOpenSession={onOpen}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /^Back to / })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Conversation history' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'New conversation' })).toBeVisible();
   });
 
   it('keeps question submission visible briefly after a fast commit and preserves the composer draft', async () => {

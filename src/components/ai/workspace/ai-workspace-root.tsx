@@ -36,12 +36,13 @@ import { childBudgetExhausted } from '@/lib/ai/subagent-continuation';
 import { terminalExecutionRecovery } from '@/lib/ai/terminal-execution-recovery';
 import { AiTerminalRecoveryNotice } from './ai-terminal-recovery-notice';
 import { aiAskConversationNodeRenderers } from './ai-conversation-node-seat';
-import { AiSessionHeader } from './ai-session-header';
+import { AiSessionHeader, type AiSessionHeaderSubagentNav } from './ai-session-header';
 import { AiSessionBrowser } from './ai-session-browser';
-import {
-  AiSubagentCatalog,
-  type AiSubagentCatalogEntry,
-} from './ai-subagent-catalog';
+import { AiSubagentCatalog } from './ai-subagent-catalog';
+import { AiSubagentContext } from './ai-subagent-context';
+import { AiSubagentStrip } from './ai-subagent-strip';
+import { subagentModeLabel, subagentRoleLabel, subagentStatusLabel } from './ai-subagent-tree';
+import { buildSubagentLineage, correlateSubagentToolSessions } from '@/lib/ai/subagent-lineage';
 import { AiToolDetails } from './ai-tool-details';
 import { AiArtifactDetails } from './ai-artifact-details';
 import type { AiQueueMutationState } from './use-ai-session-controller';
@@ -127,105 +128,6 @@ function historicalOutput<Node extends AiConversationNode>(node: Node): Node {
     return { ...node, state: 'interrupted' };
   }
   return node;
-}
-
-interface AiSubagentLineage {
-  readonly root: AiSessionSummary;
-  readonly current: AiSessionSummary;
-  readonly entries: readonly AiSubagentCatalogEntry[];
-}
-
-function subagentLineage(
-  view: AiSessionView | null,
-  sessions: readonly AiSessionSummary[],
-): AiSubagentLineage | null {
-  if (!view) return null;
-  const byId = new Map(sessions.map((summary) => [summary.id, summary]));
-  byId.set(view.summary.id, { ...view.summary, status: view.status });
-  const projected = new Map(
-    (view.subagents ?? []).map((subagent) => [subagent.sessionId, subagent]),
-  );
-  for (const activity of projected.values()) {
-    const existing = byId.get(activity.sessionId);
-    byId.set(activity.sessionId, existing
-      ? {
-          ...existing,
-          status: activity.status,
-          parentSessionId: activity.parentSessionId ?? existing.parentSessionId,
-          subagent: {
-            descriptorId: activity.descriptorId ?? existing.subagent?.descriptorId ?? activity.sessionId,
-            role: activity.role,
-            continuable: activity.continuable,
-            depth: activity.depth,
-          },
-        }
-      : {
-          id: activity.sessionId,
-          kind: 'agent',
-          title: activity.sessionId,
-          updatedAt: view.summary.updatedAt,
-          status: activity.status,
-          scopeKey: view.summary.scopeKey,
-          targetId: view.summary.targetId,
-          parentSessionId: activity.parentSessionId ?? view.summary.id,
-          subagent: {
-            descriptorId: activity.descriptorId ?? activity.sessionId,
-            role: activity.role,
-            continuable: activity.continuable,
-            depth: activity.depth,
-          },
-          archived: false,
-        });
-  }
-
-  const current = byId.get(view.summary.id) ?? view.summary;
-  let root = current;
-  const ancestorIds = new Set([current.id]);
-  while (root.subagent && root.parentSessionId) {
-    const parent = byId.get(root.parentSessionId);
-    if (!parent || ancestorIds.has(parent.id)) break;
-    ancestorIds.add(parent.id);
-    root = parent;
-  }
-
-  const children = new Map<string, AiSessionSummary[]>();
-  for (const summary of byId.values()) {
-    if (!summary.subagent || !summary.parentSessionId) continue;
-    const siblings = children.get(summary.parentSessionId);
-    if (siblings) siblings.push(summary);
-    else children.set(summary.parentSessionId, [summary]);
-  }
-  for (const siblings of children.values()) {
-    siblings.sort((left, right) => (
-      left.updatedAt.localeCompare(right.updatedAt) || left.id.localeCompare(right.id)
-    ));
-  }
-
-  const entries: AiSubagentCatalogEntry[] = [];
-  const visited = new Set<string>();
-  const appendChildren = (parentSessionId: string, depth: number): void => {
-    for (const summary of children.get(parentSessionId) ?? []) {
-      if (visited.has(summary.id)) continue;
-      visited.add(summary.id);
-      const activity = projected.get(summary.id);
-      const status = summary.status === 'running' || summary.status === 'waiting'
-        ? summary.status
-        : activity?.status === 'running' || activity?.status === 'waiting'
-          ? activity.status
-          : summary.status;
-      entries.push({
-        summary,
-        role: activity?.role ?? summary.subagent!.role,
-        continuable: activity?.continuable ?? summary.subagent!.continuable,
-        status,
-        depth,
-        detail: activity?.summary,
-      });
-      appendChildren(summary.id, depth + 1);
-    }
-  };
-  appendChildren(root.id, 1);
-  return { root, current, entries };
 }
 
 export interface AiWorkspaceRootProps {
@@ -550,10 +452,64 @@ export function AiWorkspaceRoot({
   const artifactDetailsNode = route.kind === 'artifactDetails'
     ? conversationArtifacts(view?.nodes ?? []).find((node) => node.artifactId === route.artifactId)
     : undefined;
-  const lineage = useMemo(
-    () => subagentLineage(view, sessions),
-    [sessions, view],
+  const toolCorrelation = useMemo(
+    () => correlateSubagentToolSessions(
+      view?.nodes ?? [],
+      view?.activityNodes ?? [],
+      view?.subagents ?? [],
+      sessions,
+    ),
+    [sessions, view?.activityNodes, view?.nodes, view?.subagents],
   );
+  const lineageView = useMemo(
+    () => (view ? { summary: view.summary, status: view.status, subagents: view.subagents } : null),
+    [view?.status, view?.subagents, view?.summary],
+  );
+  const lineage = useMemo(
+    () => buildSubagentLineage(lineageView, sessions, toolCorrelation.goalByChildId),
+    [lineageView, sessions, toolCorrelation.goalByChildId],
+  );
+  const currentSubagentBudgetExhausted = childBudgetExhausted(view?.snapshot.value);
+  const subagentContextValue = useMemo(
+    () => ({
+      lineage,
+      toolChildSessionIds: toolCorrelation.toolChildSessionIds,
+      onOpenSession,
+    }),
+    [lineage, onOpenSession, toolCorrelation.toolChildSessionIds],
+  );
+  const subagentNav: AiSessionHeaderSubagentNav | undefined = useMemo(() => {
+    if (!subagent || !lineage || !onOpenSession) return undefined;
+    const parent = lineage.parent;
+    const roleLabel = subagentRoleLabel(subagent.role, t);
+    const modeStatus = `${subagentModeLabel(subagent.continuable, currentSubagentBudgetExhausted, t)} · ${subagentStatusLabel(status, t)}`;
+    const ancestors = lineage.trail.slice(0, -1).map((item) => item.title).join(' / ');
+    return {
+      roleLabel,
+      subtitle: ancestors ? `${ancestors} · ${modeStatus}` : modeStatus,
+      subtitleTooltip: [...lineage.trail.map((item) => item.title), modeStatus].join(' · '),
+      ...(parent ? {
+        backLabel: t(
+          parent.id === lineage.root.id
+            ? 'ai.workspace.subagents.backToMain'
+            : 'ai.workspace.subagents.backToParent',
+          { title: parent.title },
+        ),
+        onBack: () => onOpenSession(parent),
+      } : {}),
+      switcher: (
+        <AiSubagentCatalog
+          root={lineage.root}
+          current={lineage.current}
+          entries={lineage.entries}
+          currentBudgetExhausted={currentSubagentBudgetExhausted}
+          onOpen={onOpenSession}
+          onRefresh={onRefreshSessions}
+        />
+      ),
+      hideSessionChrome: Boolean(parent),
+    };
+  }, [currentSubagentBudgetExhausted, lineage, onOpenSession, onRefreshSessions, status, subagent, t]);
 
   useEffect(() => {
     const target = navigation.returnFocus;
@@ -623,16 +579,7 @@ export function AiWorkspaceRoot({
         context={headerContext}
         status={status}
         mode={surfaceMode}
-        lineage={onOpenSession && lineage
-          ? (
-              <AiSubagentCatalog
-                {...lineage}
-                currentBudgetExhausted={childBudgetExhausted(view?.snapshot.value)}
-                onOpen={onOpenSession}
-                onRefresh={onRefreshSessions}
-              />
-            )
-          : undefined}
+        subagentNav={subagentNav}
         onClose={onClose}
         onHistory={onHistory}
         historyOpen={route.kind === 'sessions'}
@@ -704,6 +651,7 @@ export function AiWorkspaceRoot({
               failedDraftRetryBlockedReason,
             }}>
             <AiMarkdownTargetContext.Provider value={sessionTarget}>
+            <AiSubagentContext.Provider value={subagentContextValue}>
             <AiConversation
               key={conversationIdentity.generation}
               nodes={conversationNodes}
@@ -725,6 +673,7 @@ export function AiWorkspaceRoot({
               loadingOlder={loadingOlder}
               onLoadOlder={onLoadOlder}
             />
+            </AiSubagentContext.Provider>
             </AiMarkdownTargetContext.Provider>
             </AiFailedDraftRecoveryContext.Provider>
             </AiFailureRecoveryContext.Provider>
@@ -841,6 +790,18 @@ export function AiWorkspaceRoot({
           inbox={surfaceMode === 'agent' && !readOnlySession ? view?.inbox : undefined}
           taskSteps={surfaceMode === 'agent' && (!readOnlySession || subagent) ? taskSteps : undefined}
           taskPlanActive={terminalRecovery ? false : view?.taskPlanActive}
+          subagentStrip={surfaceMode === 'agent' && onOpenSession && lineage && lineage.currentChildren.length > 0
+            ? (
+                <AiSubagentStrip
+                  key={`subagent:${lineage.current.id}`}
+                  entries={lineage.currentChildren}
+                  currentSessionId={lineage.current.id}
+                  currentBudgetExhausted={currentSubagentBudgetExhausted}
+                  onOpen={onOpenSession}
+                  onRefresh={onRefreshSessions}
+                />
+              )
+            : undefined}
           queueMutation={surfaceMode === 'agent' && !readOnlySession ? queueMutation : undefined}
           onRetryQueueMutation={surfaceMode === 'agent' && !readOnlySession ? onRetryQueueMutation : undefined}
           queueMutable={Boolean(view && !terminalRecovery && !readOnlySession && !view.summary.archived && (!view.snapshot.value.ended || view.status === 'failed'))}

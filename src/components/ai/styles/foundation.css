@@ -2,7 +2,8 @@
 .ai-model-menu,
 .ai-composer-add-menu,
 .ai-completion-popup,
-.ai-turn-stat-panel {
+.ai-turn-stat-panel,
+.ai-subagent-popover {
   --ai-font-family: var(--font-sans);
   --ai-font-family-code: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
   --ai-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
