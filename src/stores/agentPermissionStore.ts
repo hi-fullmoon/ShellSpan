@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
+import { remoteGlibcMismatch } from '@/lib/terminal/terminal-surface-semantics';
 import type { AgentExecutionSurface } from '@/types/agent-session';
 import {
   AGENT_PERMISSION_MODES,
@@ -13,10 +14,23 @@ export interface AgentPermissionBinding {
   readonly target: Readonly<AgentApprovalTarget>;
 }
 
+interface TerminalConversationSurface {
+  readonly agentSessionId: string;
+  readonly surface: AgentExecutionSurface;
+}
+
+interface TerminalAgentPreference {
+  mode: AgentPermissionMode;
+  surface: AgentExecutionSurface;
+  reconnectingSurface?: AgentExecutionSurface;
+}
+
 interface AgentPermissionState {
-  readonly preferences: Readonly<Record<string, { mode: AgentPermissionMode; surface: AgentExecutionSurface }>>;
+  readonly preferences: Readonly<Partial<Record<string, TerminalAgentPreference>>>;
   getExecutionSurface: (sessionId: string) => AgentExecutionSurface;
   setExecutionSurface: (sessionId: string, surface: AgentExecutionSurface) => void;
+  readonly conversationSurfaces: Readonly<Partial<Record<string, TerminalConversationSurface>>>;
+  setConversationSurface: (sessionId: string, selection?: TerminalConversationSurface) => void;
   readonly bindings: Readonly<Record<string, AgentPermissionBinding>>;
   getMode: (sessionId: string) => AgentPermissionMode;
   getBinding: (sessionId: string) => AgentPermissionBinding | undefined;
@@ -66,6 +80,18 @@ export const useAgentPermissionStore = create<AgentPermissionState>()((set, get)
     set((state) => ({ preferences: { ...state.preferences, [sessionId]: { ...preference, surface } } }));
     useAiSettingsStore.getState().setAgentExecutionSurface(surface);
   },
+  conversationSurfaces: {},
+  setConversationSurface: (sessionId, selection) => {
+    if (!findLiveSession(sessionId)) return;
+    set((state) => {
+      const previous = state.conversationSurfaces[sessionId];
+      if (previous?.agentSessionId === selection?.agentSessionId && previous?.surface === selection?.surface) return state;
+      const conversationSurfaces = { ...state.conversationSurfaces };
+      if (selection) conversationSurfaces[sessionId] = selection;
+      else delete conversationSurfaces[sessionId];
+      return { conversationSurfaces };
+    });
+  },
   bindings: {},
   getMode: (sessionId) => {
     if (findLiveSession(sessionId)?.status !== 'connected') return 'autoApproveReadOnly';
@@ -98,7 +124,7 @@ export const useAgentPermissionStore = create<AgentPermissionState>()((set, get)
     set((state) => ({
       preferences: {
         ...state.preferences,
-        [sessionId]: { mode: mode as AgentPermissionMode, surface: get().getExecutionSurface(sessionId) },
+        [sessionId]: { ...state.preferences[sessionId], mode: mode as AgentPermissionMode, surface: get().getExecutionSurface(sessionId) },
       },
       bindings: {
         ...state.bindings,
@@ -118,17 +144,31 @@ export const useAgentPermissionStore = create<AgentPermissionState>()((set, get)
 
 // Target bindings remain connection-scoped. New connected instances use the
 // remembered preference rather than reusing a previous target binding.
-useTerminalStore.subscribe((terminalState) => {
+useTerminalStore.subscribe((terminalState, previous) => {
+  if (terminalState.sessions === previous.sessions) return;
   const permissionState = useAgentPermissionStore.getState();
   const defaults = useAiSettingsStore.getState();
-  const preferences = Object.fromEntries(terminalState.sessions.map((session) => [
-    session.sessionId,
-    permissionState.preferences[session.sessionId] ?? {
+  const preferences = Object.fromEntries(terminalState.sessions.map((session): [string, TerminalAgentPreference] => {
+    const current = permissionState.preferences[session.sessionId];
+    if (current) return [session.sessionId, current];
+    const predecessorId = session.replacesSessionId;
+    const predecessor = predecessorId ? previous.sessions.find(item => item.sessionId === predecessorId) : undefined;
+    const previousPreference = predecessor ? permissionState.preferences[predecessor.sessionId] : undefined;
+    // Keep the last mode during reconnect. The replacement still needs its own
+    // validated conversation binding and capability state once connected.
+    const reconnectingSurface = session.reconnecting && predecessor
+      ? permissionState.conversationSurfaces[predecessor.sessionId]?.surface
+        ?? (remoteGlibcMismatch(predecessor.integrationReason) ? 'direct' : previousPreference?.reconnectingSurface)
+      : undefined;
+    return [session.sessionId, {
       mode: defaults.agentPermissionMode,
-      surface: defaults.agentExecutionSurface,
-    },
-  ]));
-  useAgentPermissionStore.setState({ preferences });
+      surface: previousPreference?.surface ?? defaults.agentExecutionSurface,
+      reconnectingSurface,
+    }];
+  }));
+  const conversationSurfaces = Object.fromEntries(Object.entries(permissionState.conversationSurfaces)
+    .filter(([sessionId]) => Object.prototype.hasOwnProperty.call(preferences, sessionId)));
+  useAgentPermissionStore.setState({ preferences, conversationSurfaces });
   for (const [sessionId, binding] of Object.entries(permissionState.bindings)) {
     const session = terminalState.sessions.find((item) => item.sessionId === sessionId);
     if (!sameTarget(binding.target, session)) permissionState.resetSession(sessionId);

@@ -64,16 +64,16 @@ import { generateId } from '@/lib/utils';
 import { t } from '@/locales';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
-import { usePlatform } from '@/hooks/usePlatform';
+import { useTerminalAgentExecution } from '@/hooks/useTerminalAgentExecution';
 import { useAiDraftStore } from '@/stores/aiDraftStore';
 import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
 import { documentMessageSummary } from '@/lib/ai/document-message';
 import { chatReferenceFile } from '@/lib/ai/chat-reference';
 import { routeProviderConfigs, useLlmRoutesStore } from '@/stores/llmRoutesStore';
-import { invokeGetProfileSandbox, isLocalAgentSandboxPreview, isTauriRuntime } from '@/lib/ipc/tauri';
+import { isTauriRuntime } from '@/lib/ipc/tauri';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { readTerminalCurrentDirectory } from '@/lib/terminal/terminal-current-directory';
-import { remoteGlibcMismatch, terminalConnectionPresentationState, type RealTerminalPresentationState, type RemoteGlibcMismatch } from '@/lib/terminal/terminal-surface-semantics';
+import { terminalConnectionPresentationState, type RealTerminalPresentationState, type RemoteGlibcMismatch } from '@/lib/terminal/terminal-surface-semantics';
 import { terminalLoginLabel, terminalLoginScopeKey } from '@/lib/ai/terminal-login-scope';
 import {
   canContinueHistoricalConversation,
@@ -279,49 +279,13 @@ export function useAiSessionController({
   const initialFocusSessionId = useRef(focusMode ? useFocusStore.getState().conversationSessionId : null).current;
   const focusRestored = useRef(false);
   const activeTerminal = useTerminalStore((state) => state.sessions.find(item => item.sessionId === (focusMode ? focusTargetId : state.activeSessionId)));
-  const localTarget = scope === 'terminal' && activeTerminal?.host === 'local' && activeTerminal.port === 0;
-  const [isSandboxPreview, setIsSandboxPreview] = useState<boolean | null>(() => isTauriRuntime() ? null : false);
-  useEffect(() => {
-    if (!localTarget || isSandboxPreview !== null) return;
-    let disposed = false;
-    void isLocalAgentSandboxPreview().then(
-      (preview) => { if (!disposed) setIsSandboxPreview(preview); },
-      () => { if (!disposed) setIsSandboxPreview(false); },
-    );
-    return () => { disposed = true; };
-  }, [isSandboxPreview, localTarget]);
-  const localSandboxPreview = localTarget && isSandboxPreview === true;
-  const platform = usePlatform();
-  const agentSandboxEnabled = useAiSettingsStore((state) => state.agentSandboxEnabled);
-  const newWindowsSandbox = localTarget && platform === 'windows' && isTauriRuntime() && agentSandboxEnabled;
-  const newLocalSandbox = localSandboxPreview || newWindowsSandbox;
+  const terminalExecution = useTerminalAgentExecution(scope === 'terminal' ? activeTerminal : undefined);
+  const {
+    localSandboxPreview, windowsSandbox: newWindowsSandbox, localSandbox: newLocalSandbox,
+    profileSandbox: sandboxConfigured, profileSandboxResolved, sandboxChecking, sandboxEnabled: agentSandboxEnabled,
+  } = terminalExecution;
   const activeTerminalId = useTerminalStore((state) => focusMode ? focusTargetId : state.activeSessionId);
-  const sandboxProfileId = scope === 'terminal' && isTauriRuntime() ? activeTerminal?.profileId : undefined;
-  const [sandboxProfile, setSandboxProfile] = useState<{ id: string; configured: boolean | null }>();
-  useEffect(() => {
-    if (!sandboxProfileId) return;
-    let generation = 0;
-    const refresh = (): void => {
-      const request = ++generation;
-      setSandboxProfile(undefined);
-      void invokeGetProfileSandbox(sandboxProfileId).then((profile) => {
-        if (generation === request) setSandboxProfile({ id: sandboxProfileId, configured: Boolean(profile.policy) });
-      }, () => {
-        if (generation === request) setSandboxProfile({ id: sandboxProfileId, configured: null });
-      });
-    };
-    const onChange = (event: Event) => {
-      if ((event as CustomEvent<string>).detail === sandboxProfileId) refresh();
-    };
-    refresh();
-    window.addEventListener('shellspan:connection-sandbox-changed', onChange);
-    return () => {
-      generation++;
-      window.removeEventListener('shellspan:connection-sandbox-changed', onChange);
-    };
-  }, [sandboxProfileId]);
-  const sandboxChecking = Boolean(sandboxProfileId) && sandboxProfile?.id !== sandboxProfileId;
-  const sandboxConfigured = sandboxProfile?.id === sandboxProfileId && sandboxProfile?.configured === true;
+  const retainedTerminalConversationId = scope === 'terminal' && !focusMode ? terminalExecution.conversationId : undefined;
   const browserProviders = useAiSettingsStore((state) => state.providers);
   const routeSnapshot = useLlmRoutesStore((state) => state.snapshot);
   const routeModels = useLlmRoutesStore((state) => state.modelsByRoute);
@@ -412,9 +376,6 @@ export function useAiSessionController({
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [retryingModelSession, setRetryingModelSession] = useState<string | null>(null);
   const modelRetryPending = useRef(false);
-  const [newExecutionSurface, setNewExecutionSurface] = useState<AgentExecutionSurface>(
-    () => focusMode ? 'boundTerminal' : useAgentPermissionStore.getState().getExecutionSurface(activeTerminalId ?? ''),
-  );
   const settingsPending = useRef(false);
   const currentProviderConfig = useCallback((): AiProviderConfig => {
     const selection = viewRef.current?.snapshot.value.header.modelSelection;
@@ -523,10 +484,10 @@ export function useAiSessionController({
   const terminalOccupancy = useSyncExternalStore(agentTerminalLeaseState.subscribe, () => agentTerminalLeaseState.get(activeTerminalId));
   // A tab selects its terminal before the corresponding Agent identity is restored.
   // Do not compare the new terminal's owner with the previous (or empty) composer.
+  const waitingForTerminalRestore = !view && completedRestore !== automaticRestore.current
+    && Boolean(retainedTerminalConversationId || (terminalOccupancy && automaticRestore.current.eligible));
   const terminalSessionRestoring = scope === 'terminal' && (workspaceChanging
-    || Boolean(openedSessionId && !view)
-    || (!view && Boolean(terminalOccupancy) && automaticRestore.current.eligible
-      && completedRestore !== automaticRestore.current));
+    || Boolean(openedSessionId && !view) || waitingForTerminalRestore);
   const currentAgentTarget = view?.snapshot.value.header.target;
   const sameSandboxTarget = currentAgentTarget?.sessionId === activeTerminalId;
   const sandboxRequired = sameSandboxTarget && currentAgentTarget?.remoteSandboxRequired === true;
@@ -534,14 +495,13 @@ export function useAiSessionController({
     || (sameSandboxTarget && currentAgentTarget?.windowsSandboxRequired === true)
     || (!view && newLocalSandbox);
   const sandboxDirectOnly = localSandbox ? 'local' : sandboxConfigured || sandboxRequired ? 'remote' : undefined;
-  const sandboxSessionChanged = sameSandboxTarget && sandboxProfile?.id === sandboxProfileId
-    && typeof sandboxProfile?.configured === 'boolean' && currentAgentTarget?.remoteSandboxRequired !== undefined
+  const sandboxSessionChanged = sameSandboxTarget && profileSandboxResolved && currentAgentTarget?.remoteSandboxRequired !== undefined
     && currentAgentTarget.remoteSandboxRequired !== sandboxConfigured;
   const sandboxNeedsDirect = !focusMode && (sandboxConfigured || localSandbox) && sameSandboxTarget
     && view?.snapshot.value.header.executionSurface === 'boundTerminal';
   const visibleExecutionRequired = focusMode && Boolean(view && view.snapshot.value.header.executionSurface !== 'boundTerminal');
   const sandboxUnavailableReason =
-    sandboxChecking || (localTarget && isSandboxPreview === null) ? t('connection.sandbox.loading')
+    sandboxChecking ? t('connection.sandbox.loading')
     : localSandbox && !agentSandboxEnabled ? t('ai.error.sandboxDisabled')
     : focusMode && sandboxDirectOnly
       ? t(localSandbox ? 'focus.localSandboxRequiresDirect' : 'focus.sandboxRequiresDirect')
@@ -554,10 +514,8 @@ export function useAiSessionController({
     : activeTerminal?.status === 'connected' && activeTerminal.integrationState === 'initializing'
       ? 'initializing'
       : terminalConnectionPresentationState(activeTerminal?.status);
-  const glibcMismatch = scope === 'terminal' && activeTerminal?.status === 'connected'
-    ? remoteGlibcMismatch(activeTerminal.integrationReason) : null;
-  const terminalCreationSurface = focusMode ? 'boundTerminal'
-    : newLocalSandbox || sandboxConfigured || glibcMismatch ? 'direct' : newExecutionSurface;
+  const glibcMismatch = activeTerminal?.status === 'connected' ? terminalExecution.glibcMismatch : null;
+  const terminalCreationSurface = focusMode ? 'boundTerminal' : terminalExecution.creationSurface;
   const needsDirectFallback = !focusMode && glibcMismatch !== null
     && view?.snapshot.value.header.executionSurface === 'boundTerminal'
     && view.snapshot.value.header.target?.sessionId === activeTerminal?.sessionId
@@ -1148,7 +1106,6 @@ export function useAiSessionController({
     setSessionsError(null);
     refreshRestoredHistory.current = visit?.navigation.route.kind === 'sessions';
     appliedSubmissionContext.current = submissionContextRef.current;
-    setNewExecutionSurface(useAgentPermissionStore.getState().getExecutionSurface(activeTerminal?.sessionId ?? ''));
     appliedWorkspaceRef.current = workspaceScopeKey;
     if (composerRef.current.draft || composerRef.current.pendingSubmissions.length || composerRef.current.failedDrafts.length) claimWorkspace();
     setOpenedSessionId(composerRef.current.sessionId);
@@ -1167,6 +1124,8 @@ export function useAiSessionController({
     let unsubscribe = (): void => undefined;
     const restore = automaticRestore.current;
     const context = submissionContextRef.current;
+    const retainedConversation = scope === 'terminal' && !focusMode && activeTerminalId && !openedSessionId
+      ? useAgentPermissionStore.getState().conversationSurfaces[activeTerminalId] : undefined;
     let established = false;
     const canPublish = (): boolean => alive && submissionContextRef.current === context && (Boolean(openedSessionId)
       || (automaticRestore.current === restore && (established || restore.eligible)));
@@ -1206,16 +1165,25 @@ export function useAiSessionController({
     void open().catch((error: unknown) => {
       if (canPublish()) dispatch({ type: 'stop.failed', error: normalizeAiSessionError(error) });
     }).finally(() => {
-      if (alive && automaticRestore.current === restore) setCompletedRestore(restore);
+      if (!alive || automaticRestore.current !== restore) return;
+      if (retainedConversation && activeTerminalId && submissionContextRef.current === context && !viewRef.current) {
+        const permissions = useAgentPermissionStore.getState();
+        if (permissions.conversationSurfaces[activeTerminalId] === retainedConversation) {
+          permissions.setConversationSurface(activeTerminalId);
+        }
+      }
+      setCompletedRestore(restore);
     });
     return () => {
       alive = false;
       unsubscribe();
     };
   }, [
+    activeTerminalId,
     adapter,
     canRestoreWorkbench,
     dispatch,
+    focusMode,
     openedSessionId,
     restoreTerminalKey,
     scope,
@@ -1405,8 +1373,24 @@ export function useAiSessionController({
     useFocusStore.getState().setConversation(openedSessionId);
   }, [focusMode, composer.phase, composer.pendingSubmissions.length, settingsBusy, imageDraft.busy, historicalContinuationBusy, openedSessionId, view, activeTerminal]);
   useEffect(() => () => { if (focusMode) useFocusStore.getState().setBusy(false); }, [focusMode]);
+  const sessionSurface = visibleView?.snapshot.value.header.executionSurface;
+  const visibleSessionId = visibleView?.summary.id;
+  const activeConversationId = !workspaceChanging && !readOnlySession && !isSubagent
+    && !visibleView?.summary.archived && !visibleView?.snapshot.value.archived
+    && visibleView?.snapshot.value.header.target?.sessionId === activeTerminalId
+    ? visibleSessionId : undefined;
+  useLayoutEffect(() => {
+    if (scope !== 'terminal' || focusMode || workspaceChanging || !activeTerminalId || !visibleSessionId) return;
+    const permissions = useAgentPermissionStore.getState();
+    if (activeConversationId && sessionSurface) {
+      permissions.setConversationSurface(activeTerminalId, { agentSessionId: activeConversationId, surface: sessionSurface });
+    } else if (permissions.conversationSurfaces[activeTerminalId]?.agentSessionId === visibleSessionId) {
+      permissions.setConversationSurface(activeTerminalId);
+    }
+  }, [scope, focusMode, workspaceChanging, activeTerminalId, activeConversationId, visibleSessionId, sessionSurface]);
+  const historicalSurface = activeConversationId ? undefined : sessionSurface;
   const selectedExecutionSurface = focusMode ? 'boundTerminal' : canContinueHistoricalView ? terminalCreationSurface
-    : visibleView?.snapshot.value.header.executionSurface ?? terminalCreationSurface;
+    : historicalSurface ?? terminalExecution.executionSurface;
   const terminalConflict = !terminalSessionRestoring && !isSubagent && scope === 'terminal' && selectedExecutionSurface === 'boundTerminal'
     && Boolean(terminalOccupancy && terminalOccupancy.agentSessionId !== (visibleView?.summary.id ?? composer.sessionId));
   const agentUnavailableReason = terminalSessionRestoring ? null
@@ -1552,7 +1536,9 @@ export function useAiSessionController({
     setSkillNavigation((generation) => generation + 1);
     setSkillRoot(null);
     resetComposer();
-    setNewExecutionSurface(useAgentPermissionStore.getState().getExecutionSurface(activeTerminal?.sessionId ?? ''));
+    if (scope === 'terminal' && !focusMode && activeTerminalId) {
+      useAgentPermissionStore.getState().setConversationSurface(activeTerminalId);
+    }
     setOpenedSessionId(null);
     setView(null);
     setQueueMutation(null);
@@ -1563,7 +1549,7 @@ export function useAiSessionController({
       route: { kind: 'conversation', sessionId: null },
       returnFocus: null,
     }));
-  }, [activeTerminal?.sessionId, claimWorkspace, resetComposer]);
+  }, [scope, focusMode, activeTerminalId, claimWorkspace, resetComposer]);
 
   const startHistoricalContinuation = useCallback((content: string): void => {
     const message = content.trim();
@@ -1623,6 +1609,10 @@ export function useAiSessionController({
 
   const forgetSessionVisits = useCallback((sessionId: string): void => {
     submissionMemory.forgetClosedSession(sessionId);
+    const permissions = useAgentPermissionStore.getState();
+    for (const [terminalId, conversation] of Object.entries(permissions.conversationSurfaces)) {
+      if (conversation?.agentSessionId === sessionId) permissions.setConversationSurface(terminalId);
+    }
     for (const [key, visit] of workspaceVisits.current) {
       const restoredSessionId = submissionMemory.stateFor(visit.context)?.sessionId ?? visit.summary?.id;
       if (restoredSessionId === sessionId) workspaceVisits.current.delete(key);
@@ -2046,27 +2036,25 @@ export function useAiSessionController({
       }
     }),
     selectExecutionSurface: (surface) => {
-      if (surface === 'boundTerminal' && sandboxDirectOnly) return;
-      if (canContinueHistoricalView) {
-        claimWorkspace();
-        setNewExecutionSurface(surface);
-        useAgentPermissionStore.getState().setExecutionSurface(activeTerminal?.sessionId ?? '', surface);
-        return;
-      }
-      if (viewRef.current) {
+      if (scope !== 'terminal' || focusMode || !activeTerminalId || (surface === 'boundTerminal' && sandboxDirectOnly)) return;
+      if (!canContinueHistoricalView && viewRef.current) {
+        if (viewRef.current.summary.id !== activeConversationId) return;
         void changeSettings(async (sessionId) => {
           if (!adapter.setExecutionSurface) throw new Error('Execution surface selection is unavailable');
           await adapter.setExecutionSurface(sessionId, surface);
-          if (viewRef.current?.summary.id === sessionId) {
-            useAgentPermissionStore.getState().setExecutionSurface(activeTerminal?.sessionId ?? '', surface);
+          const permissions = useAgentPermissionStore.getState();
+          if (permissions.conversationSurfaces[activeTerminalId]?.agentSessionId === sessionId) {
+            permissions.setConversationSurface(activeTerminalId, { agentSessionId: sessionId, surface });
+            if (viewRef.current?.summary.id === sessionId) permissions.setExecutionSurface(activeTerminalId, surface);
           }
         });
         return;
       }
-      if (composerRef.current.sessionId) return;
+      if (!canContinueHistoricalView && composerRef.current.sessionId) return;
       claimWorkspace();
-      setNewExecutionSurface(surface);
-      useAgentPermissionStore.getState().setExecutionSurface(activeTerminal?.sessionId ?? '', surface);
+      const permissions = useAgentPermissionStore.getState();
+      permissions.setExecutionSurface(activeTerminalId, surface);
+      if (canContinueHistoricalView) permissions.setConversationSurface(activeTerminalId);
     },
     providerLabel: routeSnapshot?.routes.find((route) => route.id === (
       (canContinueHistoricalView ? undefined : visibleView?.snapshot.value.header.modelSelection?.routeId) ?? provider?.id

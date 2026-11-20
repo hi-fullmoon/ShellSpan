@@ -411,13 +411,14 @@ async function verify() {
     useTerminalTaskNavigation.getState().setRequest({ workspace: 'focus', agentSessionId: ids[1], terminalSessionId: terminalId });
     await eventually(() => workspaceRoot(true)?.dataset.sessionId === ids[1], 'Focus task did not open in the production UI');
     await reportProgress('First real Agent owns the PTY; checking competing submission and task navigation.');
-    await eventually(() => !!document.querySelector('[data-slot="focus-terminal"] [data-testid="agent-terminal-lease-bar"]'), 'Terminal header must display terminal ownership');
+    const occupancyBar = '[data-testid="agent-terminal-lease-bar"][data-operation-id]';
+    await eventually(() => !!document.querySelector(`[data-slot="focus-terminal"] ${occupancyBar}`), 'Terminal header must display terminal ownership');
     for (const split of [0.3, 0.6]) {
       flushSync(() => useFocusStore.getState().setSplit(split));
       await new Promise(requestAnimationFrame);
       const panel = workspaceRoot(true);
       const terminal = document.querySelector<HTMLElement>('[data-slot="focus-terminal"]');
-      const notice = terminal?.querySelector<HTMLElement>('[data-testid="agent-terminal-lease-bar"]');
+      const notice = terminal?.querySelector<HTMLElement>(occupancyBar);
       assert(panel && notice && terminal, 'Production Focus panes are missing');
       assert(!document.querySelector('[data-slot="ai-workspace-root"] [data-slot="terminal-occupancy-notice"]'), 'Composers must not repeat terminal ownership');
       assert(!document.querySelector('[data-slot="ai-workspace-root"] [data-slot="terminal-occupancy-released"]'), 'Composers must not retain ownership release notices');

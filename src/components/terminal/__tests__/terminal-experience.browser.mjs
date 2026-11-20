@@ -21,7 +21,7 @@ const server = await createServer({
   logLevel: 'error',
   cacheDir: `${root}artifacts/tests/terminal-experience/vite-cache`,
   optimizeDeps: {
-    entries: ['src/components/terminal/index.tsx'],
+    entries: ['src/components/terminal/index.tsx', 'src/components/ai/ai-panel.tsx'],
     include: ['react', 'react-dom/client', '@xterm/xterm', '@xterm/addon-search', '@xterm/addon-fit'],
   },
   resolve: { alias: { '@': `${root}src` } },
@@ -42,9 +42,11 @@ const server = await createServer({
         export { TerminalPane } from '/src/components/terminal/terminal-pane.tsx';
         export { TerminalResizeIndicator } from '/src/components/terminal/terminal-resize-indicator.tsx';
         export { default as TerminalWorkspace } from '/src/components/terminal/index.tsx';
+        export { AiPanel } from '/src/components/ai/ai-panel.tsx';
         export { agentTerminalLeaseState } from '/src/components/terminal/agent-terminal-lease-state.ts';
         export { useTerminalTaskNavigation } from '/src/components/terminal/agent-terminal-task-navigation.ts';
         export { useAiPanelStore } from '/src/stores/aiPanelStore.ts';
+        export { useAgentPermissionStore } from '/src/stores/agentPermissionStore.ts';
         export { createAgentTerminalLeaseCoordinator } from '/src/components/terminal/terminal-controller-layer.tsx';
         export { FitAddon } from '@xterm/addon-fit';
         export { resolveTerminalTheme, terminalRegistry } from '/src/components/terminal/registry/terminal-registry.ts';
@@ -630,6 +632,50 @@ try {
   await page.getByRole('status', { name: '正在准备终端，暂时无法输入' }).waitFor();
   await page.evaluate(() => window.runtime.terminalInputReadiness.finish(window.identity.sessionId));
   await page.getByRole('status', { name: '正在准备终端，暂时无法输入' }).waitFor({ state: 'detached' });
+  const leaseBar = page.getByTestId('agent-terminal-lease-bar');
+  const terminalBounds = () => leaseBar.evaluate(element => element.nextElementSibling.getBoundingClientRect().toJSON());
+  await leaseBar.waitFor({ state: 'detached' });
+  const measureEntrance = () => page.evaluate(() => {
+    const { flushSync, useAgentPermissionStore } = window.runtime;
+    flushSync(() => useAgentPermissionStore.getState().setExecutionSurface(window.identity.sessionId, 'boundTerminal'));
+    const bar = document.querySelector('[data-testid="agent-terminal-lease-bar"]');
+    const row = bar.firstElementChild;
+    const animation = row.getAnimations()[0];
+    const opacity = () => Number(getComputedStyle(row).opacity);
+    if (!animation) return { animated: false, opacity: opacity() };
+    const terminalBounds = () => bar.nextElementSibling.getBoundingClientRect().toJSON();
+    const duration = animation.effect.getComputedTiming().duration;
+    animation.pause();
+    animation.currentTime = 0;
+    const start = { opacity: opacity(), bounds: terminalBounds() };
+    animation.currentTime = duration / 2;
+    const middle = { opacity: opacity(), bounds: terminalBounds() };
+    animation.finish();
+    const end = { opacity: opacity(), bounds: terminalBounds() };
+    return { animated: true, duration, start, middle, end };
+  });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  assert.deepEqual(await measureEntrance(), { animated: false, opacity: 1 });
+  await page.evaluate(() => window.runtime.useAgentPermissionStore.getState().setExecutionSurface(window.identity.sessionId, 'direct'));
+  await leaseBar.waitFor({ state: 'detached' });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  const entrance = await measureEntrance();
+  assert.equal(entrance.animated, true);
+  assert.equal(entrance.duration, 150);
+  assert.equal(entrance.start.opacity, 0);
+  assert.ok(entrance.middle.opacity > 0 && entrance.middle.opacity < 1);
+  assert.equal(entrance.end.opacity, 1);
+  assert.deepEqual(entrance.start.bounds, entrance.middle.bounds);
+  assert.deepEqual(entrance.middle.bounds, entrance.end.bounds);
+  const inputAvailable = leaseBar.getByText('输入可用', { exact: true });
+  const idleTerminalBounds = new Map();
+  for (const width of [1280, 420, 320]) {
+    await page.setViewportSize({ width, height: 800 });
+    await inputAvailable.waitFor();
+    await leaseBar.getByText('可视命令', { exact: true }).waitFor();
+    assert.equal(await leaseBar.getByRole('button').count(), 0);
+    idleTerminalBounds.set(width, await terminalBounds());
+  }
   // Render both command phases with the real lease store and production pane.
   // Phase changes must preserve the status bar and takeover button geometry.
   await page.evaluate(() => {
@@ -646,6 +692,9 @@ try {
     const bar = page.getByTestId('agent-terminal-lease-bar');
     await bar.locator('.agent-terminal-lease-description').filter({ hasText: '正在输入命令…' }).waitFor();
     await bar.getByText('输入锁定', { exact: true }).waitFor();
+    assert.deepEqual(await terminalBounds(), idleTerminalBounds.get(width), 'Starting an Agent command must preserve the terminal viewport');
+    assert.equal(await bar.evaluate(element => element.firstElementChild.getAnimations().some(animation => animation.playState === 'running')), false,
+      'Changing the state of an already visible status bar must not replay the entrance');
     const typingBar = await bar.boundingBox();
     const takeover = bar.getByRole('button', { name: '停止并接管', exact: true });
     const typingButton = await takeover.boundingBox();
@@ -781,8 +830,92 @@ try {
       await taskButton.waitFor();
     }
   }
-  await page.getByTestId('agent-terminal-lease-bar').getByRole('button', { name: '停止并接管', exact: true }).click();
-  await page.getByTestId('agent-terminal-lease-bar').waitFor({ state: 'detached' });
+  await leaseBar.getByRole('button', { name: '停止并接管', exact: true }).click();
+  await inputAvailable.waitFor();
+  assert.equal(await leaseBar.getByRole('button').count(), 0);
+  assert.deepEqual(await terminalBounds(), idleTerminalBounds.get(320), 'Releasing the terminal must preserve its viewport');
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.evaluate(() => {
+    const { React, AiPanel, TerminalPane, useTerminalStore, useAiPanelStore, useAgentPermissionStore } = window.runtime;
+    const terminalSessionId = window.identity.sessionId;
+    const prepareTerminal = (integrationState, integrationReason, promptReady) => useTerminalStore.setState(state => ({
+      sessions: state.sessions.map(session => session.sessionId === terminalSessionId
+        ? { ...session, status: 'connected', integrationState, integrationReason, promptReady }
+        : session),
+    }));
+    prepareTerminal('ready', undefined, true);
+    useTerminalStore.getState().setActiveSession(terminalSessionId);
+    useAgentPermissionStore.getState().setExecutionSurface(terminalSessionId, 'direct');
+    useAiPanelStore.getState().setOpen(true, 'terminal');
+    const Surface = () => {
+      const session = useTerminalStore(state => state.sessions.find(item => item.sessionId === terminalSessionId));
+      return React.createElement('div', { style: { display: 'flex', height: '100%' } },
+        React.createElement('div', { style: { flex: 1, minWidth: 0 } }, React.createElement(TerminalPane, { activeSession: session })),
+        React.createElement(AiPanel),
+      );
+    };
+    window.dialogRoot.render(React.createElement(Surface));
+    window.reportReadyTerminal = () => prepareTerminal('ready', undefined, true);
+    window.reportUnsupportedGlibc = () => prepareTerminal('unavailable', 'remoteGlibcTooOld:2.27:2.28', false);
+  });
+  const executionSelector = page.locator('.ai-execution-surface-trigger');
+  const closePanel = page.getByRole('button', { name: '关闭 AI 助手', exact: true });
+  const terminalHost = page.locator('#dialog [data-terminal-measure-session]');
+  const terminalTop = () => terminalHost.evaluate(element => element.getBoundingClientRect().top);
+  const openPanel = () => page.evaluate(() => window.runtime.useAiPanelStore.getState().setOpen(true, 'terminal'));
+  await executionSelector.click();
+  await page.getByRole('menuitemradio', { name: '可视命令', exact: true }).click();
+  await inputAvailable.waitFor();
+  const visibleTop = await terminalTop();
+  await closePanel.click();
+  await executionSelector.waitFor({ state: 'detached' });
+  await inputAvailable.waitFor();
+  assert.equal(await terminalTop(), visibleTop, 'Closing the Agent panel must preserve the selected visible command bar');
+  await page.evaluate(() => window.runtime.useTerminalStore.getState().setReconnecting(window.identity.sessionId, true));
+  await inputAvailable.waitFor({ state: 'detached' });
+  await leaseBar.locator('.agent-terminal-lease-status').getByText('可视命令', { exact: true }).waitFor();
+  assert.equal(await terminalTop(), visibleTop, 'Reconnecting must preserve the visible command bar height');
+  await page.evaluate(() => window.runtime.useTerminalStore.getState().setReconnecting(window.identity.sessionId, false));
+  await inputAvailable.waitFor();
+
+  await page.evaluate(() => window.reportUnsupportedGlibc());
+  await leaseBar.waitFor({ state: 'detached' });
+  const directTop = await terminalTop();
+  await openPanel();
+  await executionSelector.and(page.locator('[data-execution-surface="direct"]')).waitFor();
+  await leaseBar.waitFor({ state: 'detached' });
+  assert.equal(await terminalTop(), directTop, 'Opening the panel must preserve the Direct fallback');
+  await closePanel.click();
+  await executionSelector.waitFor({ state: 'detached' });
+  await leaseBar.waitFor({ state: 'detached' });
+  assert.equal(await terminalTop(), directTop, 'Closing the panel must preserve the Direct fallback');
+  const capture = JSON.parse(readFileSync(`${root}src/tests/fixtures/terminal-command-presentation-native.json`, 'utf8'));
+  const retainedLease = capture.leaseEvents.find(event => event.state === 'acquired');
+  const restoring = await page.evaluate(agentSessionId => {
+    const { flushSync, useAgentPermissionStore, useAiPanelStore } = window.runtime;
+    const terminalSessionId = window.identity.sessionId;
+    const permissions = useAgentPermissionStore.getState();
+    flushSync(() => {
+      window.reportReadyTerminal();
+      permissions.setExecutionSurface(terminalSessionId, 'direct');
+      permissions.setConversationSurface(terminalSessionId, { agentSessionId, surface: 'boundTerminal' });
+      useAiPanelStore.getState().setOpen(true, 'terminal');
+    });
+    const selector = document.querySelector('.ai-execution-surface-trigger');
+    return { surface: selector.getAttribute('data-execution-surface'), disabled: selector.disabled };
+  }, retainedLease.agentSessionId);
+  assert.deepEqual(restoring, { surface: 'boundTerminal', disabled: true },
+    'Reopening a retained conversation must lock the composer until the selected mode is verified');
+  // The browser has no Tauri session to load. Failure must release the retained
+  // selection and restore the new-conversation controls using the saved mode.
+  await executionSelector.and(page.locator('[data-execution-surface="direct"]:enabled')).waitFor();
+  await leaseBar.waitFor({ state: 'detached' });
+  await closePanel.click();
+  await page.evaluate(() => {
+    window.dialogRoot.render(null);
+    window.runtime.useAgentPermissionStore.getState().setExecutionSurface(window.identity.sessionId, 'direct');
+  });
   if (process.env.SHELLSPAN_TYPING_TRACE_PATH) {
     const trace = readFileSync(process.env.SHELLSPAN_TYPING_TRACE_PATH, 'utf8');
     const rendered = await page.evaluate(async (trace) => {
