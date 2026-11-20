@@ -9,11 +9,11 @@ import { useContextMenuNavigation } from '@/hooks/useContextMenuNavigation';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { CompactPromptDialog } from '@/components/ui/compact-dialog';
 import { Separator } from '@/components/ui/separator';
+import { writeClipboardText } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 import type { TerminalSession } from '@/stores/terminalStore';
 import type { TerminalSplitDirection } from './terminal-split';
 import { TerminalCloseDetails } from './terminal-close-details';
-import { CopyButton } from '@/components/ui/copy-button';
 import { useAppStore } from '@/stores/appStore';
 import { useFocusStore } from '@/stores/focusStore';
 import { useToast } from '@/hooks/useToast';
@@ -153,6 +153,12 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         color: target.color,
       });
     }
+    onClose();
+  };
+
+  const handleCopyInfo = (): void => {
+    void writeClipboardText(`${target.username}@${target.host}:${target.port}`)
+      .catch(() => showError(t('terminal.feedback.copyFailed')));
     onClose();
   };
 
@@ -300,9 +306,9 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         >
           {t('common.duplicate')}
         </MenuItem>
-        <CopyButton key={target.sessionId} role="menuitem" tabIndex={-1} size="sm"
-          className="h-auto w-full justify-start px-2.5 py-1.5 text-left text-xs focus:bg-accent focus:text-app-primary focus-visible:outline-hidden!"
-          text={`${target.username}@${target.host}:${target.port}`} label={t('terminal.tab.copyInfo')} errorLabel={t('terminal.feedback.copyFailed')} />
+        <MenuItem onClick={handleCopyInfo}>
+          {t('terminal.tab.copyInfo')}
+        </MenuItem>
         <MenuItem onClick={handleOpenSftp} disabled={!target.profileId}>
           {t('terminal.tab.openSftp')}
         </MenuItem>

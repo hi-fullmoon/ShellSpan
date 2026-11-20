@@ -12,7 +12,20 @@ await mkdir(output, { recursive: true });
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error', cacheDir: join(output, 'vite-cache'),
   resolve: { alias: { '@': `${root}src` } },
-  optimizeDeps: { entries: ['src/components/workbench/known-hosts-panel.tsx', 'src/components/workbench/keychain-panel.tsx', 'src/components/workbench/log-panel.tsx', 'src/components/sftp/sftp-file-context-menu.tsx', 'src/components/terminal/terminal-context-menu.tsx'], include: ['react', 'react-dom/client'] },
+  optimizeDeps: {
+    entries: [
+      'src/components/ai/__tests__/agent-content-surfaces.browser-runtime.ts',
+      'src/components/workbench/known-hosts-panel.tsx',
+      'src/components/workbench/keychain-panel.tsx',
+      'src/components/workbench/log-panel.tsx',
+      'src/components/sftp/sftp-file-context-menu.tsx',
+      'src/components/sftp/sftp-blank-context-menu.tsx',
+      'src/components/sftp/sftp-preview-dialog.tsx',
+      'src/components/terminal/terminal-context-menu.tsx',
+      'src/hooks/useSftpPaneActions.ts',
+    ],
+    include: ['react', 'react-dom/client'],
+  },
   server: { host: '127.0.0.1', port: 0, watch: null, hmr: false },
   plugins: [tailwindcss(), {
     name: 'shared-copy-feedback-review',
@@ -73,6 +86,10 @@ try {
         useSftpStore.getState().setPath(connectionId, 'local', 'C:/Users/example');
         const entry = { name: 'report.txt', path: '/home/example/report.txt', kind: 'file', size: 10 };
         const localEntry = { ...entry, path: 'C:/Users/example/report.txt' };
+        function TerminalMenu() {
+          const [open, setOpen] = React.useState(true);
+          return React.createElement(TerminalContextMenu, { open, session, x: 10, y: 10, onClose: () => setOpen(false) });
+        }
         function SftpMenu({ blank, local }) {
           const connection = useSftpStore(state => state.connections.find(item => item.id === connectionId));
           const actions = useSftpPaneActions(connection, local ? 'local' : 'remote');
@@ -91,14 +108,14 @@ try {
           if (scene === 'known') node = React.createElement(KnownHostsPanel);
           if (scene === 'key') node = React.createElement(KeychainPanel);
           if (scene === 'log') node = React.createElement(LogPanel);
-          if (scene === 'terminal') node = React.createElement(TerminalContextMenu, { open: true, session, x: 10, y: 10, onClose: () => {} });
+          if (scene === 'terminal') node = React.createElement(TerminalMenu);
           if (scene.startsWith('sftp')) node = React.createElement(SftpMenu, { blank: scene === 'sftp-blank', local: scene === 'sftp-local' });
           if (scene === 'preview') node = React.createElement(SftpPreviewDialog, { open: true, onClose: () => {}, content: { path: entry.path, name: entry.name, content: 'Complete preview\n第二行', size: 25, isText: true, contentEncoding: 'utf8', truncated: false } });
           view.render(React.createElement(TooltipProvider, null, React.createElement(React.Fragment, { key: ++mountCount }, node), React.createElement(Toaster)));
         };
         window.copyReview = { log, t, useSftpStore };
       }, { locale, theme, width });
-      const labels = await page.evaluate(() => Object.fromEntries(['common.copied', 'common.create', 'common.publicKey', 'workbench.knownHosts.copyFingerprint', 'workbench.keychain.copyPublicKey', 'workbench.logs.inspector.copy', 'terminal.tab.copyInfo', 'sftp.contextMenu.copy', 'sftp.contextMenu.copyName', 'sftp.contextMenu.copyPath', 'sftp.contextMenu.copyContainingDirectory', 'sftp.contextMenu.copyCurrentDirectoryPath', 'sftp.preview.copyContent'].map(key => [key, window.copyReview.t(key, { keyType: 'ED25519' })])));
+      const labels = await page.evaluate(() => Object.fromEntries(['common.copied', 'common.create', 'common.duplicate', 'common.publicKey', 'workbench.knownHosts.copyFingerprint', 'workbench.keychain.copyPublicKey', 'workbench.logs.inspector.copy', 'terminal.tab.copyInfo', 'sftp.contextMenu.copy', 'sftp.contextMenu.copyName', 'sftp.contextMenu.copyPath', 'sftp.contextMenu.copyContainingDirectory', 'sftp.contextMenu.copyCurrentDirectoryPath', 'sftp.preview.copyContent'].map(key => [key, window.copyReview.t(key, { keyType: 'ED25519' })])));
       for (const scene of ['known', 'key', 'log', 'terminal', 'sftp-remote', 'sftp-local', 'sftp-blank', 'preview']) {
         if (scene.startsWith('sftp')) {
           const local = scene === 'sftp-local';
@@ -137,7 +154,29 @@ try {
           continue;
         }
         await page.evaluate(scene => window.mountCopyScene(scene), scene);
-        const copied = page.getByRole(scene === 'terminal' ? 'menuitem' : 'button', { name: labels['common.copied'], exact: true });
+        if (scene === 'terminal') {
+          const menu = page.getByRole('menu');
+          await menu.locator(':focus').waitFor();
+          const copyLabel = labels['terminal.tab.copyInfo'];
+          const duplicateLabel = labels['common.duplicate'];
+          const copy = menu.getByRole('menuitem', { name: copyLabel, exact: true });
+          const duplicate = menu.getByRole('menuitem', { name: duplicateLabel, exact: true });
+          assert.equal(await copy.locator('svg').count(), 0);
+          assert.equal((await copy.getByText(copyLabel, { exact: true }).boundingBox()).x,
+            (await duplicate.getByText(duplicateLabel, { exact: true }).boundingBox()).x);
+          assert.equal((await copy.boundingBox()).height, (await duplicate.boundingBox()).height);
+          await menu.screenshot({ path: join(output, `${locale}-${width}-${scene}.png`) });
+          if (width === 320) {
+            await copy.press('Enter');
+          } else {
+            await copy.click();
+          }
+          await menu.waitFor({ state: 'hidden' });
+          await page.waitForFunction(async () => await navigator.clipboard.readText() === 'example@example.com:22');
+          checks++;
+          continue;
+        }
+        const copied = page.getByRole('button', { name: labels['common.copied'], exact: true });
         let item;
         let expected;
         if (scene === 'known') { item = page.getByRole('button', { name: labels['workbench.knownHosts.copyFingerprint'], exact: true }); expected = 'SHA256:PUBLIC_TEST_FINGERPRINT'; }
@@ -156,12 +195,6 @@ try {
             item = page.getByRole('button', { name: labels['workbench.logs.inspector.copy'], exact: true });
           }
           expected = await page.evaluate(() => window.copyReview.log);
-        }
-        if (scene === 'terminal') {
-          const menu = page.getByRole('menu');
-          await menu.locator(':focus').waitFor();
-          item = menu.getByRole('menuitem', { name: labels['terminal.tab.copyInfo'], exact: true });
-          expected = 'example@example.com:22';
         }
         if (scene === 'preview') { item = page.getByRole('button', { name: labels['sftp.preview.copyContent'], exact: true }); expected = 'Complete preview\n第二行'; }
         if (item) {
