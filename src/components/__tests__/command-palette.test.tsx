@@ -208,6 +208,25 @@ describe('CommandPalette', () => {
     const items = buildCommandPaletteItems(buildOptions({ terminalSessions: [] }));
     expect(items.find((item) => item.id === 'quick-action-profile-1-command-1')).toMatchObject({
       disabled: true,
+      disabledReason: 'hostQuickActions.noTerminal',
+    });
+
+    const readOnlyOnly = buildCommandPaletteItems(buildOptions({
+      terminalSessions: [{ ...terminalSession, readOnly: true }],
+    }));
+    expect(readOnlyOnly.find((item) => item.id === 'quick-action-profile-1-command-1')).toMatchObject({
+      disabled: true,
+      disabledReason: 'terminal.snippets.inputUnavailable',
+    });
+
+    const withWritableFallback = buildCommandPaletteItems(buildOptions({
+      terminalSessions: [
+        { ...terminalSession, readOnly: true },
+        { ...terminalSession, sessionId: 'session-2', readOnly: false },
+      ],
+    }));
+    expect(withWritableFallback.find((item) => item.id === 'quick-action-profile-1-command-1')).toMatchObject({
+      disabled: false,
     });
 
     const keyboardItems = [

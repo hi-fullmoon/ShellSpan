@@ -47,6 +47,7 @@ import type { CommandSnippet } from '@/lib/terminal/snippet-template';
 import type { LocaleKey } from '@/locales';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
+import { useFocusStore } from '@/stores/focusStore';
 import { isPortForwardActive, usePortForwardStore } from '@/stores/portForwardStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
@@ -211,13 +212,15 @@ export function buildCommandPaletteItems({
     icon: LockIcon,
     run: () => useTerminalStore.getState().toggleReadOnly(activeTerminal.sessionId),
   });
-  if (terminalSessions.filter((session) => session.status === 'connected').length >= 2) navigation.push({
+  if (terminalSessions.filter((session) => session.status === 'connected' && !session.pendingConnection).length >= 2) navigation.push({
     id: 'terminal-configure-broadcast',
     group: 'navigation',
     label: label('terminal.broadcast.configure'),
     keywords: 'terminal broadcast input synchronize panes',
     icon: RadioTowerIcon,
     run: () => {
+      const focus = useFocusStore.getState();
+      if (focus.enabled && !focus.terminalOpen) focus.setTerminalOpen(true);
       useAppStore.getState().setActiveSection('terminal');
       requestAnimationFrame(() => document.dispatchEvent(new Event('shellspan:configure-terminal-broadcast')));
     },
@@ -335,10 +338,13 @@ export function buildCommandPaletteItems({
 
   const quickActions = profiles.flatMap((profile) => (
     (profile.quickActions ?? []).map((action): CommandPaletteItem => {
-      const connectedTarget = terminalSessions.some((session) => (
+      const hasConnectedTarget = terminalSessions.some((session) => (
         session.profileId === profile.id && session.status === 'connected'
       ));
-      const commandDisabled = action.kind === 'command' && !connectedTarget;
+      const writableTarget = terminalSessions.some((session) => (
+        session.profileId === profile.id && session.status === 'connected' && !session.readOnly
+      ));
+      const commandDisabled = action.kind === 'command' && !writableTarget;
       const detail = action.kind === 'directory'
         ? `${profile.name} · ${action.path}`
         : action.kind === 'command'
@@ -356,7 +362,9 @@ export function buildCommandPaletteItems({
             ? SquareTerminalIcon
             : ZapIcon,
         disabled: commandDisabled,
-        disabledReason: commandDisabled ? label('hostQuickActions.noTerminal') : undefined,
+        disabledReason: commandDisabled
+          ? label(hasConnectedTarget ? 'terminal.snippets.inputUnavailable' : 'hostQuickActions.noTerminal')
+          : undefined,
         run: () => runQuickAction(profile, action),
       };
     })
