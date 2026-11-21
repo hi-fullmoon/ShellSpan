@@ -112,6 +112,9 @@ describe('TerminalCommandBlockOverlay', () => {
     });
 
     const copyButton = await screen.findByRole('button', { name: 'terminal.commandBlock.copy' });
+    const diagnoseButton = screen.getByRole('button', { name: 'terminal.commandBlock.diagnose' });
+    expect(copyButton).toHaveAttribute('data-variant', 'outline');
+    expect(diagnoseButton).toHaveAttribute('data-variant', 'default');
     await act(async () => {
       fireEvent.click(copyButton);
     });
@@ -119,8 +122,45 @@ describe('TerminalCommandBlockOverlay', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('No such file'));
     expect(screen.getByRole('button', { name: 'common.copied' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'terminal.commandBlock.diagnose' }));
+    fireEvent.click(diagnoseButton);
     expect(useAiPanelStore.getState().panelOpenBySection.terminal).toBe(true);
     expect(useAiDraftStore.getState().terminalInsertions['terminal:s1']).toContain('No such file');
+  });
+
+  it('uses consistent outline buttons and a status indicator for succeeded commands', async () => {
+    await new Promise<void>((resolve) => {
+      terminal.write('\u001b]133;A\u0007$ echo ok\r\n\u001b]133;C;ShellSpan=3\u0007ok\r\n\u001b]133;D;0;ShellSpan=3\u0007', resolve);
+    });
+    tracker.update({
+      sessionId: 's1',
+      terminalSessionId: 'ts1',
+      terminalGeneration: 1,
+      commandId: 3,
+      phase: 'completed',
+      startedAt: 1,
+      exitCode: 0,
+      durationMs: 200,
+      cwd: '/srv',
+    });
+
+    render(<TerminalCommandBlockOverlay terminal={terminal} sessionId="s1" />);
+
+    const trigger = await screen.findByRole('button', {
+      name: 'terminal.commandBlock.result:{"code":0,"seconds":"0.2"}',
+    });
+    await act(async () => {
+      fireEvent.click(trigger);
+    });
+
+    const copyButton = await screen.findByRole('button', { name: 'terminal.commandBlock.copy' });
+    const diagnoseButton = screen.getByRole('button', { name: 'terminal.commandBlock.diagnose' });
+    expect(copyButton).toHaveAttribute('data-variant', 'outline');
+    expect(diagnoseButton).toHaveAttribute('data-variant', 'outline');
+    expect(copyButton.querySelector('svg')).toBeNull();
+    expect(diagnoseButton.querySelector('svg')).toBeNull();
+
+    const title = screen.getByText('terminal.commandBlock.result:{"code":0,"seconds":"0.2"}').closest('[data-slot="popover-title"]');
+    expect(title).toHaveClass('tabular-nums', 'gap-1');
+    expect(title?.querySelector('span[aria-hidden="true"]')).toHaveClass('bg-app-success');
   });
 });

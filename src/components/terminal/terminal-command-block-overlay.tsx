@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { Terminal } from '@xterm/xterm';
-import { BotIcon, CheckIcon, CopyIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover';
 import { useI18n } from '@/hooks/useI18n';
@@ -78,7 +77,7 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
     return contents;
   };
 
-  return <div ref={bounds} className="pointer-events-none absolute inset-y-0 left-0 w-3" data-terminal-command-overlay>
+  return <div ref={bounds} className="pointer-events-none absolute inset-y-0 left-0 w-2.5" data-terminal-command-overlay>
     {visible.map(({ block, top }) => {
       const lifecycle = block.lifecycle!;
       const running = lifecycle.phase === 'running';
@@ -89,15 +88,25 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
       const copied = copiedBlockId === block.id;
       return <div key={block.id} className="pointer-events-auto absolute left-0 -translate-y-1/2" style={{ top }}>
         <Popover>
-          <PopoverTrigger openOnHover delay={300} aria-label={label} className="grid h-4 w-3 cursor-pointer place-items-center rounded-sm focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring">
+          <PopoverTrigger openOnHover delay={300} aria-label={label} className="grid h-4 w-2.5 cursor-pointer place-items-center rounded-sm focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring">
             <span aria-hidden="true"
               style={running ? { backgroundColor: runningDotColor } : undefined}
               className={cn('size-1.5 rounded-full ring-1 ring-black/15 dark:ring-white/20',
                 running ? 'motion-safe:animate-pulse' : failed ? 'bg-destructive' : 'bg-app-success')} />
           </PopoverTrigger>
-          <PopoverContent side="right" align="start" className="w-auto max-w-[min(22rem,calc(100vw-2rem))]">
-            <PopoverTitle className="text-xs">{label}</PopoverTitle>
-            {!running && <div className="flex flex-wrap items-center gap-1">
+          <PopoverContent side="right" align="start" sideOffset={6} className="w-auto max-w-[min(22rem,calc(100vw-2rem))] gap-2 p-2">
+            <PopoverTitle className={cn('flex items-center gap-1 px-0.5 text-xs leading-none tabular-nums', failed && 'text-destructive')}>
+              <span
+                aria-hidden="true"
+                style={running ? { backgroundColor: runningDotColor } : undefined}
+                className={cn(
+                  'size-1.5 shrink-0 rounded-full',
+                  running ? 'motion-safe:animate-pulse' : failed ? 'bg-destructive' : 'bg-app-success',
+                )}
+              />
+              <span>{label}</span>
+            </PopoverTitle>
+            {!running && <div className="flex flex-wrap items-center gap-1.5">
               <Button size="xs" variant="outline" disabled={!block.end} onClick={() => {
                 const output = read(block);
                 if (output === null) return;
@@ -110,10 +119,9 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
                   }, 1500);
                 }).catch(() => error(t('terminal.feedback.copyFailed')));
               }}>
-                {copied ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />}
                 {copied ? t('common.copied') : t('terminal.commandBlock.copy')}
               </Button>
-              <Button size="xs" variant={failed ? 'default' : 'ghost'} disabled={!block.end} onClick={() => {
+              <Button size="xs" variant={failed ? 'default' : 'outline'} disabled={!block.end} onClick={() => {
                 const output = read(block);
                 if (output === null) return;
                 const workspace = useFocusStore.getState().enabled ? 'focus' : 'terminal';
@@ -123,7 +131,7 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
                   ...(output.length > 16_000 ? [t('terminal.commandBlock.truncated')] : []),
                 ].join('\n\n'));
                 useAiPanelStore.getState().setOpen(true, 'terminal');
-              }}><BotIcon data-icon="inline-start" />{t('terminal.commandBlock.diagnose')}</Button>
+              }}>{t('terminal.commandBlock.diagnose')}</Button>
             </div>}
           </PopoverContent>
         </Popover>
