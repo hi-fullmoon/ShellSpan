@@ -568,9 +568,9 @@ impl Drop for PendingExecutionGuard<'_> {
     fn drop(&mut self) {
         self.pipeline.native.abandon(&self.token);
         if let Ok(mut pending) = self.pipeline.pending.lock() {
-            // A failed durable write must leave a pre-dispatch decision
-            // retryable. Never retain an approval after dispatch or a result.
-            let retryable = pending.get(&self.key).is_some_and(|record| {
+            // A failed durable write must leave a pre-dispatch decision or
+            // recovered authorization retryable. Never retain an approval after dispatch or a result.
+            let restore_status = pending.get(&self.key).and_then(|record| {
                 self.pipeline
                     .sessions
                     .read_events(&record.request.session_id, |events| {
@@ -586,19 +586,30 @@ impl Drop for PendingExecutionGuard<'_> {
                         | AgentSessionEventPayload::ToolResult { call_id, .. }
                         if call_id == &record.request.model_call.call_id)
                         });
-                        !terminal
-                            && scoped().rev().find_map(|event| match &event.payload {
-                                AgentSessionEventPayload::ToolApproval {
-                                    call_id, status, ..
-                                } if call_id == &record.request.model_call.call_id => Some(*status),
-                                _ => None,
-                            }) == Some(AgentToolApprovalStatus::Requested)
+                        if terminal {
+                            return None;
+                        }
+                        match scoped().rev().find_map(|event| match &event.payload {
+                            AgentSessionEventPayload::ToolApproval {
+                                call_id, status, ..
+                            } if call_id == &record.request.model_call.call_id => Some(*status),
+                            _ => None,
+                        }) {
+                            Some(AgentToolApprovalStatus::Requested) => {
+                                Some(PendingStatus::Requested)
+                            }
+                            Some(AgentToolApprovalStatus::Approved) => {
+                                Some(PendingStatus::Authorized)
+                            }
+                            _ => None,
+                        }
                     })
-                    .unwrap_or(false)
+                    .ok()
+                    .flatten()
             });
-            if retryable {
+            if let Some(status) = restore_status {
                 if let Some(record) = pending.get_mut(&self.key) {
-                    record.status = PendingStatus::Requested;
+                    record.status = status;
                 }
             } else {
                 pending.remove(&self.key);
@@ -1044,7 +1055,12 @@ impl AgentToolPipeline {
                                 committed += 1;
                                 continue;
                             }
-                            settlement => return Ok(settlement),
+                            ToolPipelineSettlement::Waiting => {
+                                return Ok(ToolPipelineSettlement::Waiting);
+                            }
+                            ToolPipelineSettlement::Cancelled => {
+                                continue;
+                            }
                         }
                     }
                     if is_session_tool(&call.name) || is_orchestration_tool(&call.name) {
@@ -2258,23 +2274,42 @@ impl AgentToolPipeline {
     }
 
     fn commit_not_started(&self, request: &NativeToolRequest, reason: &str) -> Result<(), String> {
-        self.sessions.append_batch(&request.session_id, vec![
+        self.commit_not_started_call(
+            &request.session_id,
+            &request.turn_id,
+            &request.step_id,
+            &request.model_call,
+            Some(request.target.clone()),
+            reason,
+        )
+    }
+
+    pub(super) fn commit_not_started_call(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        step_id: &str,
+        model_call: &ModelToolCall,
+        target: Option<AgentSessionTarget>,
+        reason: &str,
+    ) -> Result<(), String> {
+        self.sessions.append_batch(session_id, vec![
             AgentScopedPayload {
-                turn_id: Some(request.turn_id.clone()), step_id: Some(request.step_id.clone()),
+                turn_id: Some(turn_id.to_string()), step_id: Some(step_id.to_string()),
                 payload: AgentSessionEventPayload::ToolCall {
                     call: RecordedToolCall {
-                        call_id: request.model_call.call_id.clone(),
-                        provider_call_id: request.model_call.provider_call_id.clone(),
-                        name: request.model_call.name.clone(), native_name: None,
-                        arguments: request.model_call.arguments.clone(), title: None,
-                        effect: Some(AgentSessionEffect::Unknown), target: Some(request.target.clone()),
+                        call_id: model_call.call_id.clone(),
+                        provider_call_id: model_call.provider_call_id.clone(),
+                        name: model_call.name.clone(), native_name: None,
+                        arguments: model_call.arguments.clone(), title: None,
+                        effect: Some(AgentSessionEffect::Unknown), target,
                     },
                 },
             },
             AgentScopedPayload {
-                turn_id: Some(request.turn_id.clone()), step_id: Some(request.step_id.clone()),
+                turn_id: Some(turn_id.to_string()), step_id: Some(step_id.to_string()),
                 payload: AgentSessionEventPayload::ToolResult {
-                    call_id: request.model_call.call_id.clone(), name: request.model_call.name.clone(),
+                    call_id: model_call.call_id.clone(), name: model_call.name.clone(),
                     status: AgentToolResultStatus::Rejected,
                     summary: format!("Tool not started: {reason}"),
                     data: Some(serde_json::json!({"schedulerAdmission": "notStarted", "reason": reason})),

@@ -159,6 +159,8 @@ impl AgentToolPipeline {
                 if is_terminal_call_blocked(&error) {
                     self.commit_pending_not_started(&pending, "terminalExecutionBlocked")?;
                     self.settle_blocked_terminal_call(entry, &error)?;
+                } else {
+                    let _ = self.mark_scheduler_failure(entry, &error);
                 }
                 return Err(error);
             }

@@ -118,7 +118,14 @@ impl AgentToolPipeline {
     }
 
     pub(crate) async fn wait_for_expiry(&self, entry: &Arc<AgentEntry>) -> Result<bool, String> {
+        let cancellation = entry.cancellation();
         loop {
+            if cancellation.is_cancelled() {
+                return Ok(false);
+            }
+            let changed = self.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
             let candidate = self
                 .pending
                 .lock()
@@ -136,6 +143,7 @@ impl AgentToolPipeline {
             let now = current_unix_ms();
             let delay = candidate.preparation.expires_at_unix_ms.saturating_sub(now);
             tokio::select! {
+                _ = cancellation.cancelled() => return Ok(false),
                 _ = tokio::time::sleep(std::time::Duration::from_millis(delay)) => {
                     let expired = entry.with_input_admission(|| {
                         let mut records = self.pending.lock().map_err(|_| "Native approval registry is unavailable".to_string())?;
@@ -162,7 +170,7 @@ impl AgentToolPipeline {
                         ToolPipelineSettlement::Cancelled => return Ok(false),
                     }
                 }
-                _ = self.changed.notified() => continue,
+                _ = changed => continue,
             }
         }
     }

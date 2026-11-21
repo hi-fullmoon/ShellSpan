@@ -1194,6 +1194,7 @@ fn complete_compaction_boundaries(
 fn boundary_is_safe(events: &[&AgentSessionEvent]) -> bool {
     let mut calls = HashSet::new();
     let mut results = HashSet::new();
+    let mut dispatched = HashSet::new();
     let mut requested = HashSet::new();
     let mut terminal_approvals = HashSet::new();
     let mut recovery_pending = false;
@@ -1209,6 +1210,9 @@ fn boundary_is_safe(events: &[&AgentSessionEvent]) -> bool {
             AgentSessionEventPayload::ToolCall { call } => {
                 calls.insert((event.step_id.as_deref(), call.call_id.as_str()));
             }
+            AgentSessionEventPayload::ToolExecution { call_id, .. } => {
+                dispatched.insert((event.step_id.as_deref(), call_id.as_str()));
+            }
             AgentSessionEventPayload::ToolApproval {
                 call_id, status, ..
             } => match status {
@@ -1222,8 +1226,19 @@ fn boundary_is_safe(events: &[&AgentSessionEvent]) -> bool {
                     terminal_approvals.insert((event.step_id.as_deref(), call_id.as_str()));
                 }
             },
-            AgentSessionEventPayload::ToolResult { call_id, .. } => {
-                results.insert((event.step_id.as_deref(), call_id.as_str()));
+            AgentSessionEventPayload::ToolResult {
+                call_id, status, ..
+            } => {
+                if *status != super::AgentToolResultStatus::Uncertain {
+                    results.insert((event.step_id.as_deref(), call_id.as_str()));
+                }
+            }
+            AgentSessionEventPayload::TurnEnd { .. }
+            | AgentSessionEventPayload::SessionResumed {}
+            | AgentSessionEventPayload::SubagentRecoveryStarted { .. } => {
+                // Interrupted turns without a dispatched execution are closed synthetically
+                // by surface derivation; keep dispatched-but-unsettled calls blocking compaction.
+                calls.retain(|key| results.contains(key) || dispatched.contains(key));
             }
             AgentSessionEventPayload::TaskState {
                 recovery: Some(recovery),
@@ -1283,25 +1298,48 @@ pub(super) fn has_compaction_in_flight(events: &[AgentSessionEvent]) -> bool {
 }
 
 fn first_unresolved_recovery_seq(events: &[AgentSessionEvent]) -> Option<u64> {
-    let mut boundary = None;
+    let mut state_boundary = None;
+    let mut unresolved_executions =
+        std::collections::HashMap::<(Option<&str>, Option<&str>, &str), u64>::new();
     for event in events {
-        let AgentSessionEventPayload::TaskState {
-            recovery: Some(recovery),
-            ..
-        } = &event.payload
-        else {
-            continue;
-        };
-        match recovery.status {
-            AgentRecoveryStatus::Required | AgentRecoveryStatus::Reconciling => {
-                boundary.get_or_insert(event.seq);
+        match &event.payload {
+            AgentSessionEventPayload::ToolExecution { call_id, .. } => {
+                unresolved_executions
+                    .entry((
+                        event.turn_id.as_deref(),
+                        event.step_id.as_deref(),
+                        call_id.as_str(),
+                    ))
+                    .or_insert(event.seq);
             }
-            AgentRecoveryStatus::None
-            | AgentRecoveryStatus::Available
-            | AgentRecoveryStatus::Completed => boundary = None,
+            AgentSessionEventPayload::ToolResult {
+                call_id, status, ..
+            } if *status != super::AgentToolResultStatus::Uncertain => {
+                unresolved_executions.remove(&(
+                    event.turn_id.as_deref(),
+                    event.step_id.as_deref(),
+                    call_id.as_str(),
+                ));
+            }
+            AgentSessionEventPayload::TaskState {
+                recovery: Some(recovery),
+                ..
+            } => match recovery.status {
+                AgentRecoveryStatus::Required | AgentRecoveryStatus::Reconciling => {
+                    state_boundary.get_or_insert(event.seq);
+                }
+                AgentRecoveryStatus::None
+                | AgentRecoveryStatus::Available
+                | AgentRecoveryStatus::Completed => state_boundary = None,
+            },
+            _ => {}
         }
     }
-    boundary
+    let execution_boundary = unresolved_executions.values().copied().min();
+    match (state_boundary, execution_boundary) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    }
 }
 
 fn surface_tokens_between(
