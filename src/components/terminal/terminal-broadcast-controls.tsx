@@ -16,6 +16,8 @@ import { agentTerminalLeaseState } from './agent-terminal-lease-state';
 import { terminalInputReadiness } from './terminal-input-readiness';
 import { getTerminalGroups } from './terminal-split';
 
+const MAX_BANNER_TARGETS = 4;
+
 function currentEligibleBroadcastSelection(): Set<string> {
   const current = useTerminalBroadcastStore.getState();
   const eligibleIds = new Set(
@@ -42,8 +44,9 @@ export function TerminalBroadcastControls({ visible }: { visible: boolean }) {
     .join('|');
   useSyncExternalStore(terminalInputReadiness.subscribe, protectionSnapshot);
   useSyncExternalStore(agentTerminalLeaseState.subscribe, protectionSnapshot);
-  const admitted = sessions.filter((session) => sessionIds.has(session.sessionId)
-    && canReceiveTerminalBroadcast(session)).length;
+  const admittedSessions = sessions.filter((session) => sessionIds.has(session.sessionId)
+    && canReceiveTerminalBroadcast(session));
+  const admitted = admittedSessions.length;
   const eligibleSessions = connected.filter((session) => canReceiveTerminalBroadcast(session));
   const paneIds = split ? getTerminalGroups(split).map((group) => group.activeSessionId) : [];
   const eligiblePaneTargetCount = eligibleSessions.filter((session) => paneIds.includes(session.sessionId)).length;
@@ -65,22 +68,68 @@ export function TerminalBroadcastControls({ visible }: { visible: boolean }) {
   const skipped = Math.max(0, sessionIds.size - admitted);
 
   return <>
-    {mode !== 'off' && <Alert variant="warning" size="xs" className="shrink-0 rounded-none border-x-0 border-t-0">
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-1">
-        <AlertDescription className="flex min-w-0 items-start gap-1">
-          <RadioTowerIcon aria-hidden="true" className="h-lh w-3.5 shrink-0 text-app-warning" />
-          <span className="min-w-0">
-            {skipped > 0
-              ? t('terminal.broadcast.active', { count: admitted, skipped })
-              : t('terminal.broadcast.activeAll', { count: admitted })}
-          </span>
-        </AlertDescription>
-        <div className="flex shrink-0 items-center gap-1">
-          <Button variant="ghost" size="xs" onClick={() => {
-            setSelected(currentEligibleBroadcastSelection());
-            setOpen(true);
-          }}>{t('terminal.broadcast.configure')}</Button>
-          <Button variant="outline" size="xs" onClick={() => configure('off')}>{t('terminal.broadcast.stop')}</Button>
+    {mode !== 'off' && <Alert
+      variant="warning"
+      size="xs"
+      className="@container/broadcast shrink-0 rounded-none border-x-0 border-t-0 border-app-warning/25 bg-app-warning/[0.08] px-3 py-1.5 text-foreground shadow-[inset_2px_0_0_0_var(--app-warning)]"
+    >
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+          <AlertDescription className="flex min-w-0 items-start gap-1 font-medium text-foreground">
+            <RadioTowerIcon aria-hidden="true" className="h-lh w-3.5 shrink-0 text-app-warning" />
+            <span className="min-w-0">
+              {skipped > 0
+                ? t('terminal.broadcast.active', { count: admitted, skipped })
+                : t('terminal.broadcast.activeAll', { count: admitted })}
+            </span>
+          </AlertDescription>
+          {admittedSessions.length > 0 && (
+            <div className="hidden min-w-0 flex-wrap items-center gap-1 @min-[34rem]/broadcast:flex">
+              {admittedSessions.slice(0, MAX_BANNER_TARGETS).map((session) => (
+                <Badge
+                  key={session.sessionId}
+                  variant="outline"
+                  size="sm"
+                  title={session.title}
+                  className="h-5 max-w-36 rounded-md border-app-warning/25 bg-background/80 px-1.5 text-[11px] font-normal text-foreground/90"
+                >
+                  <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-app-warning" />
+                  <span className="min-w-0 truncate">{session.title}</span>
+                </Badge>
+              ))}
+              {admittedSessions.length > MAX_BANNER_TARGETS && (
+                <Badge
+                  variant="outline"
+                  size="sm"
+                  className="h-5 rounded-md border-app-warning/25 bg-background/80 px-1.5 text-[11px] font-normal text-muted-foreground tabular-nums"
+                >
+                  +{admittedSessions.length - MAX_BANNER_TARGETS}
+                </Badge>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            className="bg-background/80 hover:bg-background"
+            onClick={() => {
+              setSelected(currentEligibleBroadcastSelection());
+              setOpen(true);
+            }}
+          >
+            {t('terminal.broadcast.configure')}
+          </Button>
+          <Button
+            type="button"
+            variant="warning"
+            size="xs"
+            onClick={() => configure('off')}
+          >
+            {t('terminal.broadcast.stop')}
+          </Button>
         </div>
       </div>
     </Alert>}

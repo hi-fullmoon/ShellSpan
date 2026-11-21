@@ -53,11 +53,35 @@ describe('TerminalBroadcastControls', () => {
     expect(alert).toHaveAttribute('data-size', 'xs');
     expect(alert).toHaveClass('rounded-none', 'border-x-0', 'border-t-0');
     expect(alert).toHaveTextContent('terminal.broadcast.activeAll:{"count":2}');
+    expect(within(alert).getByText('Primary')).toBeInTheDocument();
+    expect(within(alert).getByText('Replica')).toBeInTheDocument();
 
     act(() => {
       useTerminalBroadcastStore.getState().configure('custom', ['s1', 's2', 's3']);
     });
     expect(screen.getByRole('alert')).toHaveTextContent('terminal.broadcast.active:{"count":2,"skipped":1}');
+    expect(within(screen.getByRole('alert')).queryByText('Locked')).toBeNull();
+  });
+
+  it('caps visible target badges in the banner and shows the overflow count', () => {
+    useTerminalStore.setState({
+      sessions: [
+        makeSession({ sessionId: 's1', title: 'Node 1' }),
+        makeSession({ sessionId: 's2', title: 'Node 2' }),
+        makeSession({ sessionId: 's3', title: 'Node 3' }),
+        makeSession({ sessionId: 's4', title: 'Node 4' }),
+        makeSession({ sessionId: 's5', title: 'Node 5' }),
+      ],
+      workspaceSplit: null,
+    });
+    useTerminalBroadcastStore.getState().configure('custom', ['s1', 's2', 's3', 's4', 's5']);
+    render(<TerminalBroadcastControls visible />);
+
+    const alert = screen.getByRole('alert');
+    expect(within(alert).getByText('Node 1')).toBeInTheDocument();
+    expect(within(alert).getByText('Node 4')).toBeInTheDocument();
+    expect(within(alert).queryByText('Node 5')).toBeNull();
+    expect(within(alert).getByText('+1')).toBeInTheDocument();
   });
 
   it('shows CompactDialogBody, protected badges, remote endpoints, select-all/clear, and empty state', () => {
