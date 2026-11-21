@@ -111,6 +111,7 @@ fn user_operation_journal_keeps_the_execution_barrier_across_restart() {
         identity: identity.clone(),
         client_operation_id: "select-access".into(),
         action: None,
+        action_note: None,
         answers: vec![QuestionAnswer {
             id: "access".into(),
             selected: vec!["Configure manually".into()],

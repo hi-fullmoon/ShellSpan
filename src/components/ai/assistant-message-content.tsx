@@ -10,7 +10,7 @@ import React, {
 import Markdown, { defaultUrlTransform, type Components, type ExtraProps, type UrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, Terminal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AiContentTitle } from './workspace/ai-content-title';
 import { AiNativeCodeFade } from './workspace/ai-native-code-fade';
@@ -116,16 +116,37 @@ function MarkdownCodeBlock({
   copiedLabel,
   copyLabel,
   showActions,
+  onInsertToTerminal,
+  insertLabel,
+  insertedLabel,
 }: {
   children: React.ReactNode;
   copiedLabel: string;
   copyLabel: string;
   showActions: boolean;
+  onInsertToTerminal?: (code: string) => boolean;
+  insertLabel?: string;
+  insertedLabel?: string;
 }) {
   const code = textFromNode(children).replace(/\n$/, '');
+  const canInsertCode = Boolean(onInsertToTerminal && code.trim() && !/[\r\n]/.test(code));
   const language = languageFromNode(children);
   const { copied, copy } = useCopyFeedback();
+  const [inserted, setInserted] = useState(false);
+  const insertTimerRef = useRef<number | null>(null);
   const viewportRef = useRef<HTMLPreElement>(null);
+  useEffect(() => () => {
+    if (insertTimerRef.current !== null) window.clearTimeout(insertTimerRef.current);
+  }, []);
+  const handleInsert = (): void => {
+    if (!onInsertToTerminal?.(code)) return;
+    setInserted(true);
+    if (insertTimerRef.current !== null) window.clearTimeout(insertTimerRef.current);
+    insertTimerRef.current = window.setTimeout(() => {
+      setInserted(false);
+      insertTimerRef.current = null;
+    }, 1500);
+  };
 
   return (
     <div className="ai-code-block ai-markdown-code-block relative my-3 min-w-0 max-w-full overflow-hidden" data-language={language || undefined}>
@@ -133,7 +154,32 @@ function MarkdownCodeBlock({
         <AiContentTitle className="ai-code-block-language flex-1">{language}</AiContentTitle>
       </div>}
       <div className="relative min-w-0" data-ai-copy-region>
-        {showActions && (
+        {showActions && (canInsertCode ? (
+          <div className="ai-markdown-code-actions absolute top-1 right-3.5 z-10 flex items-center gap-0.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="ai-markdown-code-insert ai-markdown-code-copy ai-content-copy"
+              aria-label={inserted ? (insertedLabel ?? insertLabel ?? '') : (insertLabel ?? '')}
+              title={inserted ? undefined : insertLabel}
+              onClick={handleInsert}
+            >
+              {inserted ? <Check data-icon="inline-start" /> : <Terminal data-icon="inline-start" />}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="ai-markdown-code-copy ai-content-copy"
+              aria-label={copied ? copiedLabel : copyLabel}
+              title={copied ? undefined : copyLabel}
+              onClick={() => { void copy(code); }}
+            >
+              {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+            </Button>
+          </div>
+        ) : (
           <Button
             type="button"
             variant="ghost"
@@ -145,7 +191,7 @@ function MarkdownCodeBlock({
           >
             {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
           </Button>
-        )}
+        ))}
         <pre ref={viewportRef} tabIndex={0} className={cn(AI_CONTENT_CODE_CLASS, 'ai-code-block-pre max-h-65 overflow-auto overscroll-x-contain whitespace-pre')}>{children}</pre>
         <AiNativeCodeFade viewportRef={viewportRef} text={code} />
       </div>
@@ -167,6 +213,9 @@ export const MarkdownContent = React.memo(function MarkdownContent({
   copyLabel,
   showCodeBlockActions,
   initialSource = '',
+  onInsertToTerminal,
+  insertLabel,
+  insertedLabel,
 }: {
   children: string;
   copiedLabel: string;
@@ -174,6 +223,9 @@ export const MarkdownContent = React.memo(function MarkdownContent({
   showCodeBlockActions: boolean;
   /** Previously displayed source moved here by a streaming chunk split. */
   initialSource?: string;
+  onInsertToTerminal?: (code: string) => boolean;
+  insertLabel?: string;
+  insertedLabel?: string;
 }): React.JSX.Element {
   const { t } = useI18n();
   const targetKind = useContext(AiMarkdownTargetContext)?.kind;
@@ -203,6 +255,9 @@ export const MarkdownContent = React.memo(function MarkdownContent({
         copiedLabel={copiedLabel}
         copyLabel={copyLabel}
         showActions={showCodeBlockActions}
+        onInsertToTerminal={onInsertToTerminal}
+        insertLabel={insertLabel}
+        insertedLabel={insertedLabel}
       >
         {codeChildren}
       </MarkdownCodeBlock>
@@ -212,7 +267,7 @@ export const MarkdownContent = React.memo(function MarkdownContent({
         <table>{tableChildren}</table>
       </div>
     ),
-  }), [copiedLabel, copyLabel, showCodeBlockActions, fallbackImageAlt]);
+  }), [copiedLabel, copyLabel, showCodeBlockActions, fallbackImageAlt, onInsertToTerminal, insertLabel, insertedLabel]);
   return (
     <div className="ai-assistant-markdown min-w-0 max-w-full [overflow-wrap:anywhere]">
       <StreamingTextBoundaryContext.Provider value={revealFrom}>

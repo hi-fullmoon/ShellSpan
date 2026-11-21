@@ -50,6 +50,13 @@ describe('user operation within the existing question card', () => {
     expect(toast.success).not.toHaveBeenCalled();
     await waitFor(() => expect(copyInstructions).toHaveAccessibleName(locale === 'en-US' ? 'Copy instructions' : '复制操作说明'), { timeout: 2_000 });
 
+    const verificationTrigger = screen.getByRole('button', {
+      name: new RegExp(locale === 'en-US' ? 'Auto-verifies after completion' : '完成后将自动验证'),
+    });
+    expect(verificationTrigger).toHaveAttribute('aria-expanded', 'false');
+    await user.click(verificationTrigger);
+    expect(verificationTrigger).toHaveAttribute('aria-expanded', 'true');
+
     const commands = container.querySelectorAll('pre');
     expect(commands).toHaveLength(2);
     for (const [index, expected] of [command, action.verification_command].entries()) {
@@ -138,15 +145,74 @@ describe('user operation within the existing question card', () => {
     await waitFor(() => expect(complete).toBeEnabled());
   });
 
-  it.each([['Cancel', 'cancelled'], ['Change plan', 'change_plan']] as const)('submits %s without changing the committed selection', async (label, response) => {
+  it('submits Cancel without changing the committed selection', async () => {
     const submissions: AnswerQuestionInput[] = [];
     render(<AiQuestionPanel question={question} onAnswer={async input => { submissions.push(input); }} />);
-    const button = screen.getByRole('button', { name: label });
+    const button = screen.getByRole('button', { name: 'Cancel' });
     fireEvent.click(button);
     expect(screen.getByRole('button', { name: 'Saving answers…' })).toBe(button);
     expect(button.querySelector('[data-slot="spinner"]')).toBeVisible();
-    expect(submissions[0]).toMatchObject({ action: response, answers: question.answers });
+    expect(submissions[0]).toMatchObject({ action: 'cancelled', answers: question.answers });
     await waitFor(() => expect(button).toBeEnabled());
+  });
+
+  it('expands an optional non-sensitive note input when changing plan and shows the note in history', async () => {
+    const user = userEvent.setup();
+    const submissions: AnswerQuestionInput[] = [];
+    const { rerender } = render(<AiQuestionPanel question={question} onAnswer={async input => { submissions.push(input); }} />);
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Change plan' }));
+    const textbox = screen.getByRole('textbox');
+    expect(textbox).toBeVisible();
+    await user.type(textbox, 'admin is not in the sudoers file');
+    const submit = screen.getByRole('button', { name: 'Submit and change plan' });
+    await user.click(submit);
+    expect(submissions).toHaveLength(1);
+    expect(submissions[0]).toMatchObject({
+      action: 'change_plan',
+      actionNote: 'admin is not in the sudoers file',
+      answers: question.answers,
+    });
+
+    await act(async () => rerender(
+      <AiQuestionHistory question={{ ...question, status: 'answered', actionResponse: 'change_plan', actionNote: 'admin is not in the sudoers file' }} />,
+    ));
+    await user.click(screen.getByRole('button', { name: 'Question 1/1 Answered' }));
+    expect(screen.getByText('admin is not in the sudoers file')).toBeVisible();
+  });
+
+  it('supports inserting shell commands into the bound terminal and focusing it', async () => {
+    const user = userEvent.setup();
+    const inserted: string[] = [];
+    const focusTerminal = vi.fn();
+    const command = 'sudo systemctl restart nginx';
+    const multiLine = 'echo first\necho second';
+    render(
+      <AiQuestionPanel
+        question={{
+          ...question,
+          questions: [{
+            id: 'manual',
+            question: 'Restart nginx',
+            multi_select: false,
+            user_action: { ...action, instructions: `\`\`\`sh\n${command}\n\`\`\`\n\n\`\`\`sh\n${multiLine}\n\`\`\`` },
+          }],
+          answers: [],
+        }}
+        onFocusTerminal={focusTerminal}
+        onInsertToTerminal={(code) => {
+          inserted.push(code);
+          return true;
+        }}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Focus terminal' }));
+    expect(focusTerminal).toHaveBeenCalledTimes(1);
+    const insertButtons = screen.getAllByRole('button', { name: 'Insert into terminal' });
+    expect(insertButtons).toHaveLength(1);
+    await user.click(insertButtons[0]);
+    expect(inserted).toEqual([command]);
+    expect(insertButtons[0]).toHaveAccessibleName('Inserted');
   });
 
   it.each([

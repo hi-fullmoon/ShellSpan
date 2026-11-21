@@ -16,8 +16,8 @@ pub(crate) const MODEL_INSTRUCTIONS: &str = concat!(
 pub(crate) const WORKFLOW_INSTRUCTIONS: &str = concat!(
     "Never solicit passwords, private keys, API keys, tokens or recovery codes in questions, options, free text or chat, or embed secrets in commands/scripts. For remote sudo select a configured sudoOperationId when supplied by run_terminal_command; ShellSpan handles credentials separately. Otherwise hand sensitive work to the user. Never ask the user to edit sudoers or grant passwordless sudo. ",
     "A selected option is a decision, not missing text or proof of completion. Reuse decision_key and decision_context while target/account/prerequisites remain unchanged. ",
-    "Options requiring user work must attach user_action with instructions and a non-interactive verification_command, in one single-select question. Use request_user_action for standalone work only when supplied. Selection pauses until explicit completion, cancellation or change of plan. For work on the bound terminal, ShellSpan hands input to the user during the pause; ask them to finish at the shell prompt before choosing Continue verification. Do not re-ask the plan for completion or poll while waiting. ",
-    "After completion, run the exact verification_command alone in foreground run_terminal_command; require confirmed exitCode=0 before dependent work. On failure, explain it and request fresh user action, keeping the chosen plan. Never request broader privileges or unrestricted passwordless sudo."
+    "Options requiring user work must attach user_action with instructions and a non-interactive verification_command, in one single-select question. Use request_user_action for standalone work only when supplied. Selection pauses until explicit completion, cancellation or change of plan. For work on the bound terminal, ShellSpan hands input to the user during the pause; ask them to finish at the shell prompt before choosing Continue verification. The manual action card does not collect pasted terminal output on completion; never ask the user to paste command output back in instructions. Do not re-ask the plan for completion or poll while waiting. ",
+    "After completion, run the exact verification_command alone in foreground run_terminal_command; require confirmed exitCode=0 before dependent work. On failure, explain it and request fresh user action, keeping the chosen plan. If the user chooses change_plan, use any optional non-sensitive userAction.note to switch to a viable alternative instead of repeating the blocked command. Never request broader privileges or unrestricted passwordless sudo."
 );
 pub(crate) const TOOL_INSTRUCTIONS: &str = "When clarification or a decision is necessary, you must call ask_user_question and wait for its answer. It displays a question card and pauses the task. Do not substitute a question in ordinary chat. Do not continue dependent actions. Ask only when necessary; do not ask again when the task supplies the answer. Answers never grant native tool permissions. Non-sensitive inputs only; never request credentials.";
 mod workflow;
@@ -112,6 +112,8 @@ pub(crate) struct AnswerQuestionInput {
     pub(crate) answers: Vec<QuestionAnswer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) action: Option<UserActionResponse>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) action_note: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -279,6 +281,12 @@ impl AnswerQuestionInput {
     pub(crate) fn validate(&self) -> Result<(), String> {
         self.identity.validate()?;
         text(&self.client_operation_id, 128)?;
+        if let Some(note) = &self.action_note {
+            if self.action != Some(UserActionResponse::ChangePlan) {
+                return Err("action_note is only allowed for change_plan responses".into());
+            }
+            text(note, 2048)?;
+        }
         bounded(self)
     }
 }
@@ -462,12 +470,16 @@ pub(super) fn result(record: &QuestionRecord) -> AgentSessionEventPayload {
             .map(|answer| {
                 let mut data = json!({"answers":answer.answers});
                 if let Some(action) = record.user_action() {
-                    data["userAction"] = json!({
+                    let mut user_action = json!({
                         "instructions":action.instructions,
                         "verificationCommand":action.verification_command,
                         "response":record.action_response(),
                         "verificationRequired":record.action_response() == Some(UserActionResponse::Completed)
                     });
+                    if let Some(note) = record.action_note() {
+                        user_action["note"] = json!(note);
+                    }
+                    data["userAction"] = user_action;
                 }
                 data
             }),
@@ -899,6 +911,7 @@ impl super::AgentToolPipeline {
                         client_operation_id: format!("reused-{}", identity.question_request_id),
                         answers,
                         action: None,
+                        action_note: None,
                     };
                     let fingerprint = hex::encode(Sha256::digest(
                         serde_json::to_vec(&submission).map_err(|e| e.to_string())?,
@@ -1125,6 +1138,7 @@ impl super::AgentToolPipeline {
                     client_operation_id: format!("reused-{}", pending.identity.question_request_id),
                     answers: workflow::reused_answers(previous, &pending.arguments)?,
                     action: None,
+                    action_note: None,
                 };
                 let fingerprint = hex::encode(Sha256::digest(
                     serde_json::to_vec(&submission).map_err(|e| e.to_string())?,

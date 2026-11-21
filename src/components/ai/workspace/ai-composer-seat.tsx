@@ -4,7 +4,7 @@ import { AiControlTooltip } from '../ai-control-tooltip';
 import { AiCompletionPopover } from './ai-completion-popover';
 import { useFileCompletion } from './use-file-completion';
 import { useSkillCompletion } from './use-skill-completion';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   ArrowUpIcon,
@@ -42,6 +42,11 @@ import { invokeListLocalDirectory, invokePickLocalFiles, isTauriRuntime } from '
 import { isLocalImagePath, readLocalImageFile } from '@/lib/ai/prepare-image-files';
 import { imageErrorKey } from '@/lib/ai/image-error';
 import { useToast } from '@/hooks/useToast';
+import { agentTerminalLeaseState } from '@/components/terminal/agent-terminal-lease-state';
+import { terminalInputReadiness } from '@/components/terminal/terminal-input-readiness';
+import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
+import { useAppStore } from '@/stores/appStore';
+import { useTerminalStore } from '@/stores/terminalStore';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
 import type { AiSessionStatus } from '@/lib/ai/conversation-node';
 import type { AiContextUsage, AiInboxItem, AiPendingApproval } from '@/lib/ai/session-adapter';
@@ -513,6 +518,45 @@ export function AiComposerSeat({
     else void onSubmit?.(rawDraft);
   };
 
+  const pendingQuestionSessionId = pendingQuestion?.identity.sessionId ?? null;
+  const handoffLease = useSyncExternalStore(
+    agentTerminalLeaseState.subscribe,
+    () => {
+      const lease = agentTerminalLeaseState.findByAgentSessionId(pendingQuestionSessionId);
+      return lease?.waitingForUserAction ? lease : undefined;
+    },
+  );
+  const handoffTerminalId = handoffLease?.sessionId ?? null;
+  const handleFocusHandoffTerminal = useCallback(() => {
+    if (!handoffTerminalId) return;
+    useTerminalStore.getState().setActiveSession(handoffTerminalId);
+    useAppStore.getState().setActiveSection('terminal');
+    terminalRegistry.get(handoffTerminalId)?.terminal.focus();
+  }, [handoffTerminalId]);
+  const handleInsertHandoffCommand = useCallback((code: string): boolean => {
+    if (!handoffTerminalId) return false;
+    const session = useTerminalStore.getState().sessions.find((item) => item.sessionId === handoffTerminalId);
+    const controller = terminalRegistry.get(handoffTerminalId);
+    const canInsert = Boolean(
+      session?.status === 'connected'
+      && !session.readOnly
+      && !terminalInputReadiness.isPreparing(handoffTerminalId)
+      && !agentTerminalLeaseState.blocksUserInput(handoffTerminalId, session.foregroundHandoffActive)
+      && controller?.terminal,
+    );
+    if (!canInsert || !controller?.terminal) {
+      toast.error(t('ai.workspace.question.actionInsertCommandFailed'));
+      return false;
+    }
+    const sanitized = code.replace(/[\r\n]+$/g, '');
+    if (!sanitized || /[\r\n]/.test(sanitized)) return false;
+    useTerminalStore.getState().setActiveSession(handoffTerminalId);
+    useAppStore.getState().setActiveSection('terminal');
+    controller.terminal.focus();
+    controller.terminal.paste(sanitized);
+    return true;
+  }, [handoffTerminalId, t, toast]);
+
   return (
     <div
       data-slot="ai-composer-seat"
@@ -545,7 +589,15 @@ export function AiComposerSeat({
             </AlertDescription>
           </Alert>
         )}
-        <AiQuestionSeat key={currentSessionId} question={pendingQuestion} onAnswer={onAnswerQuestion} onRefresh={onRefreshQuestionAnswer} onOpenSettings={onOpenModel} />
+        <AiQuestionSeat
+          key={currentSessionId}
+          question={pendingQuestion}
+          onAnswer={onAnswerQuestion}
+          onRefresh={onRefreshQuestionAnswer}
+          onOpenSettings={onOpenModel}
+          onFocusTerminal={handoffTerminalId ? handleFocusHandoffTerminal : undefined}
+          onInsertToTerminal={handoffTerminalId ? handleInsertHandoffCommand : undefined}
+        />
         {mode === 'agent' && <AiApprovalSeat key={`approval:${currentSessionId ?? composerState?.sessionId ?? ''}`}
           approval={!stopping && pendingApproval ? {
             ...pendingApproval, arguments: approvalArguments ?? pendingApproval.arguments,

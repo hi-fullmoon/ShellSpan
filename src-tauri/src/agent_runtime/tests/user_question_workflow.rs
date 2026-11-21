@@ -42,6 +42,7 @@ fn submission(action: Option<UserActionResponse>) -> AnswerQuestionInput {
             custom: None,
         }],
         action,
+        action_note: None,
     }
 }
 
@@ -489,4 +490,35 @@ fn fresh_human_instructions_invalidate_prior_decision_reuse() {
         },
     ));
     assert!(reusable(&records(&events), "turn", &args, None).is_none());
+}
+
+#[test]
+fn change_plan_accepts_optional_non_sensitive_note_and_rejects_other_actions() {
+    let mut change = submission(Some(UserActionResponse::ChangePlan));
+    change.action_note = Some("admin is not in the sudoers file".into());
+    change.validate().unwrap();
+
+    let mut completed = submission(Some(UserActionResponse::Completed));
+    completed.action_note = Some("should fail".into());
+    assert!(completed.validate().is_err());
+
+    let mut cancelled = submission(Some(UserActionResponse::Cancelled));
+    cancelled.action_note = Some("should fail".into());
+    assert!(cancelled.validate().is_err());
+
+    let mut blank = submission(Some(UserActionResponse::ChangePlan));
+    blank.action_note = Some("   ".into());
+    assert!(blank.validate().is_err());
+
+    let mut events = selected("test -r /etc/hosts");
+    events.push(answered(2, change, true));
+    let record = records(&events).pop().unwrap();
+    assert_eq!(record.action_note(), Some("admin is not in the sudoers file"));
+    let AgentSessionEventPayload::ToolResult { data: Some(data), .. } = result(&record) else {
+        panic!("expected tool result data");
+    };
+    assert_eq!(
+        data["userAction"]["note"],
+        json!("admin is not in the sudoers file")
+    );
 }

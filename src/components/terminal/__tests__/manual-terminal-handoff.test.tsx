@@ -1,8 +1,11 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
+import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { AiQuestionPanel } from '@/components/ai/workspace/ai-question-panel';
+import type { AnswerQuestionInput } from '@/types/agent-question';
 import type { AgentSessionEvent, LiveTerminalManualHandoff } from '@/types/agent-session';
 import capture from '@/tests/fixtures/manual-terminal-handoff.json';
 import displayCapture from '@/tests/fixtures/terminal-display-recovery.json';
@@ -34,6 +37,7 @@ beforeEach(async () => {
 afterEach(() => {
   cleanup();
   agentTerminalLeaseState.clearAll();
+  useAgentQuestionStore.setState({ drafts: {}, handoffControls: {} });
   useTerminalStore.setState(initialTerminals, true);
 });
 
@@ -97,4 +101,57 @@ it('clears the handoff on a live disconnect and keeps the tab disconnected', () 
   expect(useTerminalStore.getState().sessions.find((session) => session.sessionId === waiting.sessionId)?.status).toBe('disconnected');
   expect(agentTerminalLeaseState.get(waiting.sessionId)).toBeUndefined();
   refreshed.dispose();
+});
+
+it('links terminal lease bar actions to the active manual handoff card', async () => {
+  const refreshed = createAgentTerminalLeaseCoordinator();
+  refreshed.restoreLiveManualHandoffs(live);
+  const terminal = useTerminalStore.getState().sessions.find((session) => session.sessionId === waiting.sessionId) ?? null;
+  const submissions: AnswerQuestionInput[] = [];
+  render(
+    <>
+      <TerminalPane activeSession={terminal} />
+      <AiQuestionPanel
+        question={{
+          identity: {
+            sessionId: waiting.agentSessionId,
+            turnId: waiting.turnId,
+            stepId: 'step-1',
+            requestId: 'request-1',
+            callId: 'call-1',
+            questionRequestId: 'question-1',
+          },
+          questions: [{
+            id: 'manual',
+            question: 'Restart nginx',
+            multi_select: false,
+            user_action: {
+              instructions: 'Run `sudo systemctl restart nginx`.',
+              verification_command: 'systemctl is-active --quiet nginx',
+            },
+          }],
+          status: 'pending',
+          answers: [],
+          firstSeq: 0,
+          lastSeq: 1,
+          timestamp: '2026-10-31T00:00:00Z',
+        }}
+        onAnswer={async (input) => { submissions.push(input); }}
+      />
+    </>,
+  );
+
+  const leaseBar = screen.getByTestId('agent-terminal-lease-bar');
+  const issueButton = leaseBar.querySelector<HTMLButtonElement>('.agent-terminal-handoff-issue');
+  const completeButton = leaseBar.querySelector<HTMLButtonElement>('.agent-terminal-handoff-complete');
+  expect(issueButton).toHaveTextContent('遇到问题');
+  expect(completeButton).toHaveTextContent('继续验证');
+
+  fireEvent.click(issueButton!);
+  expect(screen.getByRole('textbox')).toBeVisible();
+
+  fireEvent.click(completeButton!);
+  await waitFor(() => expect(submissions).toHaveLength(1));
+  expect(submissions[0]).toMatchObject({ action: 'completed', answers: [] });
+  act(() => refreshed.dispose());
 });

@@ -35,6 +35,14 @@ export const agentTerminalLeaseState = {
     return sessionId === null ? undefined : leases.get(sessionId);
   },
 
+  findByAgentSessionId(agentSessionId: string | null): AgentTerminalLeaseView | undefined {
+    if (!agentSessionId) return undefined;
+    for (const lease of leases.values()) {
+      if (lease.agentSessionId === agentSessionId) return lease;
+    }
+    return undefined;
+  },
+
   blocksUserInput(sessionId: string, foregroundHandoffActive = false): boolean {
     const lease = leases.get(sessionId);
     return !!lease && !lease.waitingForUserAction && !foregroundHandoffActive;

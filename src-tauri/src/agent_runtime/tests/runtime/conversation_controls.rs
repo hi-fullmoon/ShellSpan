@@ -567,6 +567,7 @@ async fn a_declined_verification_cannot_request_approval_again() {
                 client_operation_id: "manual-work-complete".into(),
                 answers: Vec::new(),
                 action: Some(UserActionResponse::Completed),
+                action_note: None,
             },
         )
         .unwrap();

@@ -41,6 +41,7 @@ export interface AnswerQuestionInput {
   readonly clientOperationId: string;
   readonly answers: readonly QuestionAnswer[];
   readonly action?: UserActionResponse;
+  readonly actionNote?: string;
 }
 
 export interface AgentQuestionView {
@@ -52,6 +53,7 @@ export interface AgentQuestionView {
   readonly lastSeq: number;
   readonly timestamp: string;
   readonly actionResponse?: UserActionResponse;
+  readonly actionNote?: string;
 }
 
 /** A plan selection stays pending until its separate user operation is settled. */

@@ -49,6 +49,7 @@ export function createQuestionProjection() {
               ? event.data.submission.answers
               : previous.answers,
           actionResponse: event.type !== 'question/cancelled' ? event.data.submission.action : previous.actionResponse,
+          actionNote: event.type !== 'question/cancelled' ? event.data.submission.actionNote : previous.actionNote,
         };
         questions.set(key, next.status === 'cancelled' || pendingUserAction(next)
           ? next : { ...next, status: 'answered' });

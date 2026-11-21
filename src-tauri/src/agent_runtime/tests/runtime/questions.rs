@@ -27,6 +27,7 @@ fn answer(runtime: &AgentRuntime, session: &str) -> AnswerQuestionInput {
         identity: record.identity,
         client_operation_id: "operation-1".into(),
         action: None,
+        action_note: None,
         answers: vec![QuestionAnswer {
             id: "choice".into(),
             selected: vec!["B".into()],
@@ -90,6 +91,7 @@ fn question_completion_waits_until_the_restored_handle_is_registered() {
                 client_operation_id: "completion-during-startup".into(),
                 answers: pending.answer.unwrap().answers,
                 action: Some(UserActionResponse::Completed),
+                action_note: None,
             },
             None,
         )
@@ -387,6 +389,7 @@ async fn question_chain_every_prefix_preserves_unexecuted_queue_and_never_replay
                         identity: record.identity.clone(),
                         client_operation_id: format!("recovered-{}", record.identity.call_id),
                         action: None,
+                        action_note: None,
                         answers: first_answer.answers.clone(),
                     };
                     restored.answer_question(input, None).unwrap();
@@ -1041,6 +1044,7 @@ async fn question_answer_racing_wait_publication_cannot_be_overwritten_or_lost()
                 identity,
                 client_operation_id: "publication-answer".into(),
                 action: None,
+                action_note: None,
                 answers: vec![QuestionAnswer {
                     id: "choice".into(),
                     selected: vec!["B".into()],

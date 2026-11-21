@@ -114,6 +114,7 @@ try {
             assert.equal((await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n'), instructions.replace(/\r\n/g, '\n'));
           }
           const copyLabel = locale === 'zh-CN' ? '复制命令' : 'Copy command';
+          await page.locator('.ai-question-verification-trigger').click();
           const region = page.locator('.ai-question-panel-content [data-ai-copy-region]').filter({ has: page.locator('[data-ai-copy-anchor]') });
           const copy = region.locator('button');
           const command = region.locator('pre');

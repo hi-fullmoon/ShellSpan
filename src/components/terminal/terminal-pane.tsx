@@ -19,7 +19,8 @@ import { TerminalResizeIndicator } from './terminal-resize-indicator';
 import { TerminalPastePreview } from './terminal-paste-preview';
 import { clearTerminalScreen, TerminalContentMenu } from './terminal-content-menu';
 import { TerminalCommandBlockOverlay } from './terminal-command-block-overlay';
-import { terminalTaskWorkspace } from './agent-terminal-task-navigation';
+import { openTerminalTask, terminalTaskWorkspace } from './agent-terminal-task-navigation';
+import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
 import { useAiDraftStore } from '@/stores/aiDraftStore';
 import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useFocusStore } from '@/stores/focusStore';
@@ -57,6 +58,9 @@ const AgentTerminalStatusBar: React.FC<{
   const { t } = useI18n();
   const { error: showError } = useToast();
   const ownerWorkspace = terminalTaskWorkspace(lease);
+  const handoffControl = useAgentQuestionStore((state) => (
+    lease.waitingForUserAction ? state.handoffControls[lease.agentSessionId] : undefined
+  ));
   const { operationId, takeoverFailed } = lease;
   const shownFailureOperationRef = useRef<string | null>(null);
   useEffect(() => {
@@ -121,7 +125,34 @@ const AgentTerminalStatusBar: React.FC<{
             </div>
           </div>
         </div>
-        {!lease.waitingForUserAction && <div className="flex shrink-0 items-center gap-1">
+        {lease.waitingForUserAction && handoffControl ? (
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              className="agent-terminal-handoff-issue max-w-full truncate @max-[260px]/terminal-lease:hidden"
+              disabled={handoffControl.pending}
+              onClick={() => {
+                openTerminalTask(lease);
+                handoffControl.openFeedback();
+              }}
+            >
+              {t('ai.workspace.question.actionReportIssue')}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="xs"
+              className="agent-terminal-handoff-complete max-w-full truncate bg-secondary/65 text-secondary-foreground/85 hover:bg-secondary/85"
+              disabled={handoffControl.pending}
+              aria-busy={handoffControl.pending || undefined}
+              onClick={handoffControl.complete}
+            >
+              {t(handoffControl.pending ? 'ai.workspace.question.submitting' : 'ai.workspace.question.actionComplete')}
+            </Button>
+          </div>
+        ) : !lease.waitingForUserAction && <div className="flex shrink-0 items-center gap-1">
           <Button
             type="button"
             variant="secondary"

@@ -206,8 +206,17 @@
   pointer-events: auto;
 }
 
+.ai-question-panel-content .ai-markdown-code-actions {
+  top: var(--ai-copy-first-line-center, calc(var(--spacing) * 2 + var(--ai-code-line-height) / 2));
+  translate: 0 -50%;
+}
+
 .ai-question-panel-content .ai-markdown-code-block .ai-code-block-pre {
   padding-right: 3rem;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.ai-question-panel-content .ai-markdown-code-block:has(.ai-markdown-code-actions) .ai-code-block-pre {
+  padding-right: 4.5rem;
 }

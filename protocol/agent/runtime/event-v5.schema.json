@@ -5066,6 +5066,11 @@
             "change_plan",
             "cancelled"
           ]
+        },
+        "actionNote": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
         }
       }
     },

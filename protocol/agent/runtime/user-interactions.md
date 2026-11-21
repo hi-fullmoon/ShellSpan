@@ -101,8 +101,12 @@ An option may declare `user_action: { instructions, verification_command }`.
 Such a request contains exactly one single-select question. Selection is committed
 as `question/answered`, but the tool remains unresolved and the question remains
 pending until its manual operation is settled. This transition needs no additional
-model request. The existing card displays the instructions, verification command,
-and localized completion, change-plan and cancel controls. It has no text field.
+model request. The existing card displays the instructions, a collapsible verification command
+summary, and localized completion, change-plan and cancel controls. Shell code
+blocks in the instructions may be inserted into the bound terminal command line
+without sending Enter. Choosing change-plan may optionally include a short
+non-sensitive `actionNote` explaining what failed or what alternative is needed;
+completion and cancellation do not accept a text note.
 
 `request_user_action` requests standalone manual work with `id`, optional `title`, `instructions`
 and `verification_command`. It uses the same durable question barrier and

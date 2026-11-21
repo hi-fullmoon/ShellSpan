@@ -6,6 +6,7 @@ import {
   ChevronRightIcon,
   MessageCircleQuestionIcon,
   PenLineIcon,
+  TerminalIcon,
 } from 'lucide-react';
 import {
   Card,
@@ -69,6 +70,8 @@ export interface AiQuestionPanelProps {
   readonly onAnswer?: (input: AnswerQuestionInput) => Promise<void>;
   readonly onRefresh?: (input: AnswerQuestionInput) => Promise<void>;
   readonly onOpenSettings?: () => void;
+  readonly onInsertToTerminal?: (code: string) => boolean;
+  readonly onFocusTerminal?: () => void;
 }
 
 const recommendedSuffix = /\s+\(Recommended\)$/i;
@@ -135,6 +138,8 @@ export function AiQuestionPanel({
   onAnswer,
   onRefresh,
   onOpenSettings,
+  onInsertToTerminal,
+  onFocusTerminal,
 }: AiQuestionPanelProps): React.ReactNode {
   const { t } = useI18n();
   const userAction = pendingUserAction(question);
@@ -147,12 +152,17 @@ export function AiQuestionPanel({
   ) & { readonly issue: QuestionSubmissionIssue | null } | null>(null);
   const busy = useRef(false);
   const content = useRef<HTMLDivElement>(null);
+  const actionNoteInputRef = useRef<HTMLTextAreaElement>(null);
   const focusNextQuestion = useRef(false);
   const pending = operation !== null;
   const submitting = operation?.kind === 'submit' ? operation.action : null;
   const showRecovery = submitting === 'retry' || (draft?.submission && !submitting);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
+  const [verificationOpen, setVerificationOpen] = useState(false);
+  const [changePlanOpen, setChangePlanOpen] = useState(false);
+  const [actionNote, setActionNote] = useState('');
+  const actionNoteTooLong = new TextEncoder().encode(actionNote).length > 2048;
   useEffect(() => {
     if (!focusNextQuestion.current) return;
     focusNextQuestion.current = false;
@@ -210,16 +220,19 @@ export function AiQuestionPanel({
       setCurrentIndex((index) => index + 1);
     }
   };
-  const submit = async (trigger: SubmitAction, nextAnswers = answers): Promise<void> => {
+  const submit = async (trigger: SubmitAction, nextAnswers = answers, note?: string): Promise<void> => {
     const action = trigger === 'answer' || trigger === 'decline' || trigger === 'retry' ? undefined : trigger;
     const retained = useAgentQuestionStore.getState().drafts[key];
     if (busy.current || (!action && nextAnswers.some(isAnswerInvalid)) || !onAnswer
       || (retained?.issue && !retained.issue.retry)) return;
+    const trimmedNote = action === 'change_plan' ? note?.trim() : undefined;
+    if (trimmedNote && new TextEncoder().encode(trimmedNote).length > 2048) return;
     const input = retained?.submission ?? {
       identity: question.identity,
       clientOperationId: crypto.randomUUID(),
       answers: nextAnswers,
       ...(action ? { action } : {}),
+      ...(trimmedNote ? { actionNote: trimmedNote } : {}),
     };
     useAgentQuestionStore
       .getState()
@@ -238,6 +251,38 @@ export function AiQuestionPanel({
       setOperation(null);
     }
   };
+  const openChangePlanFeedback = (): void => {
+    setCollapsed(false);
+    setChangePlanOpen(true);
+    requestAnimationFrame(() => {
+      if (content.current) content.current.scrollTop = content.current.scrollHeight;
+      actionNoteInputRef.current?.focus({ preventScroll: true });
+    });
+  };
+  const handoffActionsRef = useRef({
+    complete: () => { void submit('completed', question.answers); },
+    openFeedback: openChangePlanFeedback,
+  });
+  handoffActionsRef.current = {
+    complete: () => { void submit('completed', question.answers); },
+    openFeedback: openChangePlanFeedback,
+  };
+  useEffect(() => {
+    const sessionId = question.identity.sessionId;
+    if (!userAction || showRecovery || !onAnswer) {
+      useAgentQuestionStore.getState().clearHandoffControl(sessionId, key);
+      return;
+    }
+    useAgentQuestionStore.getState().setHandoffControl(sessionId, {
+      questionKey: key,
+      pending,
+      complete: () => handoffActionsRef.current.complete(),
+      openFeedback: () => handoffActionsRef.current.openFeedback(),
+    });
+    return () => {
+      useAgentQuestionStore.getState().clearHandoffControl(sessionId, key);
+    };
+  }, [key, onAnswer, pending, question.identity.sessionId, showRecovery, userAction]);
   const refresh = async (): Promise<void> => {
     const input = useAgentQuestionStore.getState().drafts[key]?.submission;
     if (busy.current || !input || !onRefresh) return;
@@ -289,6 +334,18 @@ export function AiQuestionPanel({
           <AiContentTitle key={currentQuestion.id}>{userAction ? t('ai.workspace.question.actionWaiting') : currentQuestion.question}</AiContentTitle>
         </CardTitle>
         <CardAction className="ai-question-panel-actions flex items-center gap-0.5">
+          {userAction && onFocusTerminal && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t('ai.workspace.question.actionFocusTerminal')}
+              title={t('ai.workspace.question.actionFocusTerminal')}
+              onClick={onFocusTerminal}
+            >
+              <TerminalIcon aria-hidden="true" />
+            </Button>
+          )}
           {userAction && <AiToolCopyButton
             text={userAction.instructions}
             label={t('ai.workspace.question.actionCopyInstructions')}
@@ -315,26 +372,96 @@ export function AiQuestionPanel({
         <>
           <CardContent ref={content} className="ai-question-panel-content max-h-65 min-h-0 overflow-x-hidden overflow-y-auto px-4 pt-px pb-1.5 @max-[421px]/ai-workspace:px-2.5 @max-[421px]/ai-workspace:pt-0">
             {userAction ? <FieldGroup className="gap-2" aria-live="polite">
-              <MarkdownContent copiedLabel={t('common.copied')} copyLabel={t('ai.workspace.tool.copyCommand')} showCodeBlockActions>
+              <MarkdownContent
+                copiedLabel={t('common.copied')}
+                copyLabel={t('ai.workspace.tool.copyCommand')}
+                showCodeBlockActions
+                onInsertToTerminal={onInsertToTerminal}
+                insertLabel={t('ai.workspace.question.actionInsertCommand')}
+                insertedLabel={t('ai.workspace.question.actionInsertedCommand')}
+              >
                 {formatUserActionInstructions(userAction.instructions)}
               </MarkdownContent>
-              <Field>
-                <FieldDescription>{t('ai.workspace.question.actionVerification')}</FieldDescription>
-                <div className="ai-code-block flex min-w-0 items-baseline" data-ai-copy-region>
-                  <pre className={cn(AI_CONTENT_CODE_CLASS, 'flex-1 pr-12 whitespace-pre-wrap [overflow-wrap:anywhere]')}>
-                    <code>{userAction.verification_command}</code>
-                  </pre>
-                  {/* A zero-size box shares the first text baseline without taking space from the command. */}
-                  <span className="relative size-0 shrink-0" data-ai-copy-anchor>
-                    <AiToolCopyButton
-                      text={userAction.verification_command}
-                      label={copyCommandLabel}
-                      errorLabel={t('ai.workspace.question.actionCopyFailed')}
-                      className="-top-[0.5ex] -translate-y-1/2 [font:var(--ai-font-markdown-code-block)]"
+              <Collapsible open={verificationOpen} onOpenChange={setVerificationOpen}>
+                <CollapsibleTrigger
+                  render={(
+                    <Button
+                      type="button"
+                      variant="plain"
+                      size="sm"
+                      className={`${AI_DISCLOSURE_ROW_CLASS} ai-question-verification-trigger w-full`}
+                      aria-expanded={verificationOpen}
                     />
+                  )}
+                >
+                  <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
+                    <ChevronRightIcon className={cn('transition-transform duration-150', verificationOpen && 'rotate-90')} />
                   </span>
-                </div>
-              </Field>
+                  <span className={AI_DISCLOSURE_TITLE_CLASS}>
+                    {t('ai.workspace.question.actionVerificationSummary')}
+                  </span>
+                  <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
+                  <code className={`${AI_DISCLOSURE_SUMMARY_CLASS} font-mono text-[11px]`}>
+                    {userAction.verification_command}
+                  </code>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <Field className="mt-1.5">
+                    <FieldDescription>{t('ai.workspace.question.actionVerification')}</FieldDescription>
+                    <div className="ai-code-block flex min-w-0 items-baseline" data-ai-copy-region>
+                      <pre className={cn(AI_CONTENT_CODE_CLASS, 'flex-1 pr-12 whitespace-pre-wrap [overflow-wrap:anywhere]')}>
+                        <code>{userAction.verification_command}</code>
+                      </pre>
+                      {/* A zero-size box shares the first text baseline without taking space from the command. */}
+                      <span className="relative size-0 shrink-0" data-ai-copy-anchor>
+                        <AiToolCopyButton
+                          text={userAction.verification_command}
+                          label={copyCommandLabel}
+                          errorLabel={t('ai.workspace.question.actionCopyFailed')}
+                          className="-top-[0.5ex] -translate-y-1/2 [font:var(--ai-font-markdown-code-block)]"
+                        />
+                      </span>
+                    </div>
+                  </Field>
+                </CollapsibleContent>
+              </Collapsible>
+              {changePlanOpen && (
+                <Field className="gap-1.5 pt-1" data-invalid={actionNoteTooLong || undefined}>
+                  <FieldLabel htmlFor={`${question.identity.questionRequestId}-action-note`} className="text-xs text-muted-foreground">
+                    {t('ai.workspace.question.actionNoteLabel')}
+                  </FieldLabel>
+                  <InputGroup className="ai-question-custom-group min-h-[34px] items-start gap-0 px-0.5">
+                    <InputGroupTextarea
+                      ref={actionNoteInputRef}
+                      id={`${question.identity.questionRequestId}-action-note`}
+                      className="ai-question-custom-input min-h-[34px] max-h-24 resize-none py-[7px] pr-2.5 pl-0 text-xs leading-relaxed"
+                      rows={2}
+                      disabled={editingLocked}
+                      value={actionNote}
+                      aria-invalid={actionNoteTooLong || undefined}
+                      maxLength={2048}
+                      placeholder={t('ai.workspace.question.actionNotePlaceholder')}
+                      onChange={(event) => setActionNote(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                          event.preventDefault();
+                          if (!pending && onAnswer && !actionNoteTooLong) {
+                            void submit('change_plan', question.answers, actionNote);
+                          }
+                        }
+                      }}
+                    />
+                    <InputGroupAddon className="mt-1.5 mr-[7px] mb-1.5 ml-[5px] size-6 min-w-5 shrink-0 self-start p-0" align="inline-start">
+                      <PenLineIcon aria-hidden="true" />
+                    </InputGroupAddon>
+                  </InputGroup>
+                  {actionNoteTooLong && (
+                    <FieldError>
+                      {t('ai.workspace.question.actionNoteTooLong')}
+                    </FieldError>
+                  )}
+                </Field>
+              )}
             </FieldGroup> : <FieldGroup className="ai-question-list gap-0">
               <FieldSet
                 key={currentQuestion.id}
@@ -491,20 +618,29 @@ export function AiQuestionPanel({
                 </Button> : (!submissionIssue || submissionIssue.retry) && <Button type="button" size="sm" disabled={pending || !onAnswer} onClick={() => void submit('retry')}>
                   <SubmitButtonLabel label={t('ai.workspace.question.retry')} busy={submitting === 'retry'} />
                 </Button>}
-              </> : userAction ? <>
+              </> : userAction ? (changePlanOpen ? <>
+                <Button type="button" variant="outline" size="sm" disabled={pending}
+                  onClick={() => setChangePlanOpen(false)}>
+                  {t('ai.workspace.question.actionChangePlanBack')}
+                </Button>
+                <Button type="button" size="sm" disabled={pending || !onAnswer || actionNoteTooLong}
+                  onClick={() => void submit('change_plan', question.answers, actionNote)}>
+                  <SubmitButtonLabel label={t('ai.workspace.question.actionChangePlanSubmit')} busy={submitting === 'change_plan'} />
+                </Button>
+              </> : <>
                 <Button type="button" variant="outline" size="sm" disabled={pending || !onAnswer}
                   onClick={() => void submit('cancelled', question.answers)}>
                   <SubmitButtonLabel label={t('ai.workspace.question.actionCancel')} busy={submitting === 'cancelled'} />
                 </Button>
                 <Button type="button" variant="outline" size="sm" disabled={pending || !onAnswer}
-                  onClick={() => void submit('change_plan', question.answers)}>
+                  onClick={openChangePlanFeedback}>
                   <SubmitButtonLabel label={t('ai.workspace.question.actionChangePlan')} busy={submitting === 'change_plan'} />
                 </Button>
                 <Button type="button" size="sm" disabled={pending || !onAnswer}
                   onClick={() => void submit('completed', question.answers)}>
                   <SubmitButtonLabel label={t('ai.workspace.question.actionComplete')} busy={submitting === 'completed'} />
                 </Button>
-              </> : <>
+              </>) : <>
               <Button
                 className="min-w-[68px] @max-[421px]/ai-workspace:min-w-auto"
                 type="button"
@@ -608,6 +744,7 @@ export function AiQuestionHistory({
                         </FieldDescription>
                       )}
                       {question.actionResponse && <FieldDescription>{t(`ai.workspace.question.actionResult.${question.actionResponse}`)}</FieldDescription>}
+                      {question.actionNote && <FieldDescription className="ai-question-history-note">{question.actionNote}</FieldDescription>}
                     </FieldSet>
                   );
                 })}
