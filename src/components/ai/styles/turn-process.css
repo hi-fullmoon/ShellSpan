@@ -89,6 +89,7 @@
   width: 14px;
   height: 14px;
   margin: auto;
+  margin-inline-end: 0;
   opacity: 0;
   transform: rotate(0deg);
   transition: transform var(--ai-transition-duration) var(--ai-ease-in-out);
@@ -103,8 +104,8 @@
   transform: rotate(-90deg);
 }
 
-/* Keep the label at its existing column and align the SVG to the end of its 16px slot. */
-:is(.ai-transcript-notice, .ai-turn-process-trigger, .ai-turn-status[data-ai-processing]) > .ai-disclosure-leading > svg {
+/* Keep the label at its existing column and align every leading SVG to the end of its 16px slot. */
+.ai-disclosure-leading > svg {
   margin-inline-end: 0;
 }
 

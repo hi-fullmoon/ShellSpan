@@ -469,7 +469,41 @@ export function AiWorkspaceRoot({
     () => buildSubagentLineage(lineageView, sessions, toolCorrelation.goalByChildId),
     [lineageView, sessions, toolCorrelation.goalByChildId],
   );
-  const [expandedSubagentStrips, setExpandedSubagentStrips] = useState<ReadonlySet<string>>(() => new Set());
+  const [expandedDockStrips, setExpandedDockStrips] = useState<Readonly<Record<string, 'tasks' | 'subagents'>>>({});
+  const dockStripScopeId = lineage?.current.id ?? selectedSessionId ?? '__default__';
+  const expandedDockStrip = expandedDockStrips[dockStripScopeId] ?? null;
+  const setDockStripOpen = (strip: 'tasks' | 'subagents', open: boolean): void => {
+    setExpandedDockStrips((current) => {
+      if (open) {
+        if (current[dockStripScopeId] === strip) return current;
+        return { ...current, [dockStripScopeId]: strip };
+      }
+      if (current[dockStripScopeId] !== strip) return current;
+      const next = { ...current };
+      delete next[dockStripScopeId];
+      return next;
+    });
+  };
+  const activeBlockingApproval = canResolveApproval ? view.pendingApproval : undefined;
+  const activeBlockingQuestion = readOnlySession ? undefined : view?.pendingQuestion;
+  const blockingPromptKey = activeBlockingApproval
+    ? `approval:${activeBlockingApproval.approvalId}`
+    : activeBlockingQuestion
+      ? `question:${activeBlockingQuestion.identity.questionRequestId}`
+      : null;
+  const lastBlockingPromptByScopeRef = useRef<Map<string, string | null>>(new Map());
+  useEffect(() => {
+    const previous = lastBlockingPromptByScopeRef.current.get(dockStripScopeId) ?? null;
+    if (blockingPromptKey !== null && previous !== blockingPromptKey) {
+      setExpandedDockStrips((current) => {
+        if (!(dockStripScopeId in current)) return current;
+        const next = { ...current };
+        delete next[dockStripScopeId];
+        return next;
+      });
+    }
+    lastBlockingPromptByScopeRef.current.set(dockStripScopeId, blockingPromptKey);
+  }, [blockingPromptKey, dockStripScopeId]);
   const currentSubagentBudgetExhausted = childBudgetExhausted(view?.snapshot.value);
   const subagentContextValue = useMemo(
     () => ({
@@ -791,6 +825,8 @@ export function AiWorkspaceRoot({
           inbox={surfaceMode === 'agent' && !readOnlySession ? view?.inbox : undefined}
           taskSteps={surfaceMode === 'agent' && (!readOnlySession || subagent) ? taskSteps : undefined}
           taskPlanActive={terminalRecovery ? false : view?.taskPlanActive}
+          taskStripOpen={expandedDockStrip === 'tasks'}
+          onTaskStripOpenChange={(open) => setDockStripOpen('tasks', open)}
           subagentStrip={surfaceMode === 'agent' && onOpenSession && lineage && lineage.currentChildren.length > 0
             ? (
                 <AiSubagentStrip
@@ -798,15 +834,8 @@ export function AiWorkspaceRoot({
                   entries={lineage.currentChildren}
                   currentSessionId={lineage.current.id}
                   currentBudgetExhausted={currentSubagentBudgetExhausted}
-                  open={expandedSubagentStrips.has(lineage.current.id)}
-                  onOpenChange={(open) => {
-                    setExpandedSubagentStrips((current) => {
-                      const next = new Set(current);
-                      if (open) next.add(lineage.current.id);
-                      else next.delete(lineage.current.id);
-                      return next;
-                    });
-                  }}
+                  open={expandedDockStrip === 'subagents'}
+                  onOpenChange={(open) => setDockStripOpen('subagents', open)}
                   onOpen={onOpenSession}
                   onRefresh={onRefreshSessions}
                 />

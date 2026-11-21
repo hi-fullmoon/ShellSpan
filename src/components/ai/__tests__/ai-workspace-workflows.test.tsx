@@ -467,21 +467,21 @@ describe('AI workspace workflows', () => {
       summary: { ...agentView().summary, id: 'session-fixture' },
       nodes: projectAgentChatNodes(events),
     };
-    function Harness(): React.ReactNode {
-      const [navigation, setNavigation] = useState(createAiWorkspaceNavigationState(view.summary.id));
-      return <AiWorkspaceRoot
+    const failedTool = view.nodes
+      .flatMap((node) => (node.kind === 'turnProcess' ? node.children : []))
+      .find((node) => node.kind === 'tool' && node.state === 'failed');
+    expect(failedTool).toBeDefined();
+    const navigation = {
+      ...createAiWorkspaceNavigationState(view.summary.id),
+      route: { kind: 'toolDetails' as const, sessionId: view.summary.id, nodeKey: failedTool!.key },
+    };
+    const { container } = render(
+      <AiWorkspaceRoot
         view={view}
         scope="terminal"
         navigation={navigation}
-        onOpenTool={(node) => setNavigation((current) => ({
-          ...current,
-          route: { kind: 'toolDetails', sessionId: node.sessionId, nodeKey: node.key },
-        }))}
-      />;
-    }
-    const { container } = render(<Harness />);
-    await user.click(screen.getByRole('button', { name: 'Command: Call failed; expand for details' }));
-    await user.click(screen.getByRole('button', { name: 'Open details for exec_command' }));
+      />,
+    );
     const details = container.querySelector('[data-slot="ai-tool-details"]');
     expect(details).toHaveTextContent(command);
     expect(details).toHaveTextContent('/tmp');
@@ -625,7 +625,7 @@ describe('AI workspace workflows', () => {
     await user.click(screen.getByRole('button', {
       name: 'Command: Restart the web server to apply its new configuration.',
     }));
-    expect(screen.getByRole('button', { name: 'Open details for terminal.exec' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Open details for terminal.exec' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open artifact Deployment report' })).toBeVisible();
   });
 });

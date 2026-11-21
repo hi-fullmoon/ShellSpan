@@ -286,18 +286,20 @@ describe('AiWorkspaceRoot conversation structure', () => {
         children: [...node.children, { ...read, sessionId: base.summary.id }],
       } : node),
     };
+    const readKey = read.key;
+    let openReadDetails: (() => void) | undefined;
     function DetailsWorkspace() {
       const [navigation, setNavigation] = useState(createAiWorkspaceNavigationState(view.summary.id));
+      openReadDetails = () => setNavigation((current) => ({
+        ...current,
+        route: { kind: 'toolDetails', sessionId: view.summary.id, nodeKey: readKey },
+      }));
       return (
         <AiWorkspaceRoot
           view={view}
           scope="terminal"
           defaultDraft="Unsent draft"
           navigation={navigation}
-          onOpenTool={(node) => setNavigation({
-            ...navigation,
-            route: { kind: 'toolDetails', sessionId: node.sessionId, nodeKey: node.key },
-          })}
           onBack={() => setNavigation({ ...navigation, route: { kind: 'conversation', sessionId: view.summary.id } })}
         />
       );
@@ -310,7 +312,10 @@ describe('AiWorkspaceRoot conversation structure', () => {
     const command = screen.getByRole('button', { name: 'Show full command' });
     await user.click(command);
     await user.click(screen.getByRole('button', { name: /^Read:/u }));
-    await user.click(screen.getByRole('button', { name: `Open details for ${read.name}` }));
+    expect(screen.queryByRole('button', { name: `Open details for ${read.name}` })).not.toBeInTheDocument();
+    act(() => {
+      openReadDetails?.();
+    });
     const detail = container.querySelector('[data-slot="ai-tool-details"]');
     expect(detail).toBeVisible();
     expect(detail).toHaveTextContent(read.summary);
@@ -944,10 +949,10 @@ describe('AiWorkspaceRoot conversation structure', () => {
     expect(mainExpandButton.tagName).toBe('BUTTON');
     await user.click(mainExpandButton);
     expect(within(uncertainCard).getByText('Outcome lost after disconnect')).toBeVisible();
-    await user.click(within(uncertainCard).getByRole('button', { name: 'Open details for Probe remote service' }));
-    expect(onOpenTool).toHaveBeenCalledWith(uncertainCardNode);
+    expect(within(uncertainCard).queryByRole('button', { name: 'Open details for Probe remote service' })).not.toBeInTheDocument();
+    expect(onOpenTool).not.toHaveBeenCalled();
 
-    expect(staticCard).toHaveAttribute('data-clickable', 'true');
+    expect(staticCard).not.toHaveAttribute('data-clickable');
     expect(staticCard).not.toHaveAttribute('data-openable');
 
     rerender(
@@ -1590,5 +1595,149 @@ describe('AiWorkspaceRoot conversation structure', () => {
     expect(container.querySelector('.ai-composer-add')).toBeInTheDocument();
     expect(within(screen.getByRole('button', { name: 'Conversation history' })).queryByText(/./))
       .toBeNull();
+  });
+
+  it('keeps task and subagent strips mutually exclusive, collapses them on blocking prompts, and spans composer scroll full width', async () => {
+    const user = userEvent.setup();
+    const base = agentView();
+    const child = {
+      ...base.summary,
+      id: 'sub-dock-1',
+      title: 'Inspect disk usage',
+      status: 'idle' as const,
+      subagent: {
+        parentSessionId: base.summary.id,
+        descriptorId: 'operator',
+        role: 'operator' as const,
+        continuable: true,
+        depth: 1,
+      },
+    };
+    const mainView: AiSessionView = {
+      ...base,
+      status: 'running',
+      summary: { ...base.summary, status: 'running' },
+      snapshot: {
+        ...base.snapshot,
+        value: {
+          ...base.snapshot.value,
+          ended: false,
+          task: {
+            ...base.snapshot.value.task,
+            plan: {
+              version: 1,
+              steps: [
+                { id: 'step-1', title: 'Inspect system status', status: 'completed' },
+                { id: 'step-2', title: 'Clean temporary files', status: 'inProgress' },
+              ],
+            },
+          },
+        },
+      },
+      taskPlanActive: true,
+      subagents: [{
+        sessionId: child.id,
+        parentSessionId: base.summary.id,
+        descriptorId: child.subagent.descriptorId,
+        role: child.subagent.role,
+        continuable: child.subagent.continuable,
+        depth: child.subagent.depth,
+        status: 'idle',
+      }],
+    };
+    const props = {
+      scope: 'terminal',
+      mode: 'agent',
+      sessions: [base.summary, child],
+      onOpenSession: vi.fn(),
+      onApprove: vi.fn(),
+      onReject: vi.fn(),
+    } as const;
+
+    const { container, rerender } = render(<AiWorkspaceRoot {...props} view={mainView} />);
+
+    // Outer composer seat spans full width for edge-flush scrollbars; inner wrapper constrains max width.
+    const seat = container.querySelector('[data-slot="ai-composer-seat"]') as HTMLElement;
+    const seatInner = container.querySelector('[data-slot="ai-composer-seat-inner"]') as HTMLElement;
+    expect(seat).toHaveClass('w-full', 'overflow-y-auto');
+    expect(seat.className).not.toContain('max-w-');
+    expect(seatInner.className).toContain('max-w-');
+    expect(seatInner).toHaveClass('mx-auto');
+
+    const taskTrigger = screen.getByRole('button', { name: 'Toggle 2 tasks' });
+    const subagentTrigger = screen.getByRole('button', { name: 'Toggle 1 subagents' });
+    expect(taskTrigger).toHaveAttribute('aria-expanded', 'false');
+    expect(subagentTrigger).toHaveAttribute('aria-expanded', 'false');
+
+    // Expanding tasks and then subagents keeps only one open at a time.
+    await user.click(taskTrigger);
+    expect(taskTrigger).toHaveAttribute('aria-expanded', 'true');
+    expect(subagentTrigger).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(subagentTrigger);
+    expect(subagentTrigger).toHaveAttribute('aria-expanded', 'true');
+    expect(taskTrigger).toHaveAttribute('aria-expanded', 'false');
+
+    // A blocking approval automatically collapses the expanded strip.
+    const approvalView: AiSessionView = {
+      ...mainView,
+      status: 'waiting',
+      pendingApproval: {
+        sessionId: base.summary.id,
+        turnId: 'turn-1',
+        stepId: 'step-1',
+        requestId: 'req-1',
+        callId: 'call-1',
+        approvalId: 'approval-1',
+        risk: 'stateChange',
+        prompt: null,
+        reason: 'Inspect disk usage',
+        expiresAtUnixMs: null,
+        toolName: 'exec_command',
+        target: null,
+        arguments: { command: 'du -sh /tmp/*' },
+        commandSandbox: 'remote',
+        effect: 'stateChange',
+        evidenceRefs: [],
+      },
+    };
+    rerender(<AiWorkspaceRoot {...props} view={approvalView} />);
+    expect(screen.getByRole('button', { name: 'Toggle 1 subagents' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Toggle 2 tasks' })).toHaveAttribute('aria-expanded', 'false');
+
+    // User can still manually expand a strip while the approval is visible.
+    await user.click(screen.getByRole('button', { name: 'Toggle 2 tasks' }));
+    expect(screen.getByRole('button', { name: 'Toggle 2 tasks' })).toHaveAttribute('aria-expanded', 'true');
+
+    // A subsequent blocking question collapses it again.
+    const questionView: AiSessionView = {
+      ...mainView,
+      status: 'waiting',
+      pendingApproval: null,
+      pendingQuestion: {
+        identity: {
+          sessionId: base.summary.id,
+          turnId: 'turn-1',
+          stepId: 'step-2',
+          requestId: 'req-2',
+          callId: 'call-2',
+          questionRequestId: 'question-1',
+        },
+        questions: [{
+          id: 'q-1',
+          question: 'Proceed with cleanup?',
+          multi_select: false,
+          options: [{ label: 'Yes' }, { label: 'No' }],
+        }],
+        status: 'pending',
+        answers: [],
+        firstSeq: 10,
+        lastSeq: 10,
+        timestamp: '2026-11-21T02:00:00Z',
+      },
+    };
+    rerender(<AiWorkspaceRoot {...props} view={questionView} />);
+    expect(screen.getByRole('button', { name: 'Toggle 2 tasks' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Toggle 1 subagents' })).toHaveAttribute('aria-expanded', 'false');
   });
 });

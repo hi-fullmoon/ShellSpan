@@ -467,4 +467,84 @@ describe('AiComposerSeat interactions', () => {
     expect(screen.getAllByRole('button', { name: /edit|remove/i })).toHaveLength(2);
   });
 
+  it('places approval and question cards after status notices and above task and subagent strips', () => {
+    const statusNotice = <div data-testid="dock-status-notice">Status notice</div>;
+    const subagentStrip = <div data-slot="ai-subagent-strip">Subagents</div>;
+    const taskSteps = [{ id: 'step-1', title: 'Inspect host', status: 'inProgress' as const }];
+    const { container, rerender } = render(
+      <AiComposerSeat
+        phase="active"
+        status="waiting"
+        statusNotices={statusNotice}
+        taskSteps={taskSteps}
+        subagentStrip={subagentStrip}
+        pendingApproval={{
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          stepId: 'step-1',
+          requestId: 'req-1',
+          approvalId: 'appr-1',
+          callId: 'call-1',
+          toolName: 'inspect_service',
+          prompt: null,
+          reason: 'Needs approval',
+          expiresAtUnixMs: null,
+          risk: 'sensitiveRead',
+          effect: 'sensitiveRead',
+          arguments: {},
+          evidenceRefs: [],
+          target: { targetId: 'target-1', kind: 'remote', sessionId: 'term-1', host: '127.0.0.1', port: 22, username: 'root' },
+        }}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+      />,
+    );
+    const notice = screen.getByTestId('dock-status-notice');
+    const approval = container.querySelector('[data-slot="ai-approval-overlay"]')!;
+    const taskStrip = container.querySelector('[data-slot="ai-task-strip"]')!;
+    const subagents = container.querySelector('[data-slot="ai-subagent-strip"]')!;
+    expect(notice.compareDocumentPosition(approval) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(approval.compareDocumentPosition(taskStrip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(taskStrip.compareDocumentPosition(subagents) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    rerender(
+      <AiComposerSeat
+        phase="active"
+        status="waiting"
+        statusNotices={statusNotice}
+        taskSteps={taskSteps}
+        subagentStrip={subagentStrip}
+        pendingQuestion={{
+          identity: {
+            sessionId: 'session-1',
+            turnId: 'turn-1',
+            stepId: 'step-1',
+            callId: 'q-1',
+            requestId: 'req-1',
+            questionRequestId: 'qreq-1',
+          },
+          questions: [{
+            id: 'target',
+            header: 'Choose target',
+            question: 'Which host should be checked?',
+            options: [{ label: 'Host A', description: 'Primary host' }],
+            multi_select: false,
+          }],
+          status: 'pending',
+          answers: [],
+          firstSeq: 1,
+          lastSeq: 1,
+          timestamp: '2026-11-21T00:00:00Z',
+        }}
+        onAnswerQuestion={vi.fn()}
+      />,
+    );
+    const question = screen.getByText('Which host should be checked?');
+    const taskStripAfter = container.querySelector('[data-slot="ai-task-strip"]')!;
+    const subagentsAfter = container.querySelector('[data-slot="ai-subagent-strip"]')!;
+    expect(screen.getByTestId('dock-status-notice').compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(question.compareDocumentPosition(taskStripAfter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(taskStripAfter.compareDocumentPosition(subagentsAfter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
 });

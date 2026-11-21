@@ -89,6 +89,8 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly inbox?: readonly AiInboxItem[];
   readonly taskSteps?: readonly AgentSessionPlanStep[];
   readonly taskPlanActive?: boolean;
+  readonly taskStripOpen?: boolean;
+  readonly onTaskStripOpenChange?: (open: boolean) => void;
   readonly subagentStrip?: React.ReactNode;
   readonly queueMutable?: boolean;
   readonly queueMutation?: AiQueueMutationState | null;
@@ -154,6 +156,8 @@ export function AiComposerSeat({
   inbox = [],
   taskSteps = [],
   taskPlanActive = false,
+  taskStripOpen,
+  onTaskStripOpenChange,
   subagentStrip,
   queueMutation = null,
   onRetryQueueMutation,
@@ -216,6 +220,24 @@ export function AiComposerSeat({
   const queueSessionId = currentSessionId ?? composerState?.sessionId;
   const queueOwner = JSON.stringify([attachmentOwner, queueSessionId]);
   const [queueEdit, setQueueEdit] = useState<{ owner: string; item: AiInboxItem } | null>(null);
+  const [uncontrolledTaskStripOpen, setUncontrolledTaskStripOpen] = useState(false);
+  const blockingPromptKey = pendingApproval
+    ? `approval:${pendingApproval.approvalId}`
+    : pendingQuestion
+      ? `question:${pendingQuestion.identity.questionRequestId}`
+      : null;
+  const lastBlockingPromptKeyRef = useRef<string | null>(blockingPromptKey);
+  useEffect(() => {
+    if (blockingPromptKey !== null && lastBlockingPromptKeyRef.current !== blockingPromptKey) {
+      if (taskStripOpen === undefined) setUncontrolledTaskStripOpen(false);
+    }
+    lastBlockingPromptKeyRef.current = blockingPromptKey;
+  }, [blockingPromptKey, taskStripOpen]);
+  const resolvedTaskStripOpen = taskStripOpen ?? uncontrolledTaskStripOpen;
+  const handleTaskStripOpenChange = (next: boolean): void => {
+    if (taskStripOpen === undefined) setUncontrolledTaskStripOpen(next);
+    onTaskStripOpenChange?.(next);
+  };
   const editingItem = queueEdit?.owner === queueOwner && inputExpanded && onUpdateQueueItem ? queueEdit.item : undefined;
   useEffect(() => {
     setQueueEdit(edit => edit && edit.owner !== queueOwner ? null : edit);
@@ -509,8 +531,12 @@ export function AiComposerSeat({
       data-composer-seat=""
       data-phase={phase}
       data-ai-mode={mode}
-      className="ai-composer-seat relative mx-auto flex max-h-full min-h-0 w-full min-w-0 max-w-[calc(var(--ai-composer-card-max-width)+var(--ai-shell-clearance)+var(--ai-shell-clearance))] flex-col gap-[var(--ai-composer-stack-gap)] overflow-y-auto px-[var(--ai-shell-clearance)] py-2"
+      className="ai-composer-seat relative flex max-h-full min-h-0 w-full min-w-0 flex-col gap-[var(--ai-composer-stack-gap)] overflow-y-auto"
     >
+      <div
+        data-slot="ai-composer-seat-inner"
+        className="mx-auto flex min-h-0 w-full min-w-0 max-w-[calc(var(--ai-composer-card-max-width)+var(--ai-shell-clearance)+var(--ai-shell-clearance))] flex-col gap-[var(--ai-composer-stack-gap)] px-[var(--ai-shell-clearance)] py-2"
+      >
       {inputMode === 'supplement' && unavailableReason && (
         <Alert id={availabilityHintId} variant="info" size="sm" role="status">
           <InfoIcon aria-hidden="true" />
@@ -531,11 +557,6 @@ export function AiComposerSeat({
             </AlertDescription>
           </Alert>
         )}
-        {mode === 'agent' && (
-          <AiTaskStrip steps={taskSteps} active={taskPlanActive && (status === 'running' || status === 'waiting')} />
-        )}
-        {mode === 'agent' && subagentStrip}
-        {completion.dialog}
         <AiQuestionSeat key={currentSessionId} question={pendingQuestion} onAnswer={onAnswerQuestion} onRefresh={onRefreshQuestionAnswer} onOpenSettings={onOpenModel} />
         {mode === 'agent' && <AiApprovalSeat key={`approval:${currentSessionId ?? composerState?.sessionId ?? ''}`}
           approval={!stopping && pendingApproval ? {
@@ -549,6 +570,16 @@ export function AiComposerSeat({
           onReject={onReject}
           onOpenDetails={onOpenApprovalDetails}
         />}
+        {mode === 'agent' && (
+          <AiTaskStrip
+            steps={taskSteps}
+            active={taskPlanActive && (status === 'running' || status === 'waiting')}
+            open={resolvedTaskStripOpen}
+            onOpenChange={handleTaskStripOpenChange}
+          />
+        )}
+        {mode === 'agent' && subagentStrip}
+        {completion.dialog}
         {mode === 'agent' && <AiQueueDock key={queueOwner}
           items={queueItems}
           sessionId={queueSessionId}
@@ -834,6 +865,7 @@ export function AiComposerSeat({
       <span className="sr-only" aria-live="polite">
         {announcement ? t(`ai.workspace.announce.${announcement}` as LocaleKey) : null}
       </span>
+      </div>
     </div>
   );
 }
