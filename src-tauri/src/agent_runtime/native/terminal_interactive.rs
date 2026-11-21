@@ -111,8 +111,7 @@ impl TerminalInteractiveRegistry {
         revalidate(TerminalInteractiveValidationStage::BeforeLease)?;
         let registration =
             self.ensure_operation(sessions, session_id, agent_session_id, task_id)?;
-        let snapshot = self.broker.screen_snapshot(session_id)?;
-        if screen_looks_credential_like(&snapshot) {
+        let cleanup_registration = || {
             let _ = self.leases.release(
                 session_id,
                 &registration.agent_session_id,
@@ -120,71 +119,67 @@ impl TerminalInteractiveRegistry {
                 &registration.operation_id,
                 TerminalLeaseReleaseReason::Failed,
             );
-            self.state
-                .lock()
-                .map_err(|_| "TERMINAL_INTERACTIVE_REGISTRY_UNAVAILABLE".to_string())?
-                .active
-                .remove(session_id);
-            return Err("TERMINAL_CREDENTIAL_INPUT_FORBIDDEN".into());
-        }
-        let (data, broker_kind, wire_kind) = match input_kind {
-            TerminalInteractiveInputKindNative::Text => (
-                text.ok_or_else(|| "TERMINAL_INTERACTIVE_TEXT_REQUIRED".to_string())?
-                    .to_string(),
-                TerminalInputKind::Text,
-                "text",
-            ),
-            TerminalInteractiveInputKindNative::Key => (
-                key_sequence(key.ok_or_else(|| "TERMINAL_INTERACTIVE_KEY_REQUIRED".to_string())?)
-                    .to_string(),
-                TerminalInputKind::Key,
-                "key",
-            ),
-            TerminalInteractiveInputKindNative::Paste => {
-                let text = text.ok_or_else(|| "TERMINAL_INTERACTIVE_PASTE_REQUIRED".to_string())?;
-                let data = if self.broker.bracketed_paste_enabled(session_id)? {
-                    format!("\u{1b}[200~{text}\u{1b}[201~")
-                } else {
-                    text.to_string()
-                };
-                (data, TerminalInputKind::Paste, "paste")
+            if let Ok(mut state) = self.state.lock() {
+                state.active.remove(session_id);
             }
-            TerminalInteractiveInputKindNative::Interrupt => (
-                "\u{3}".to_string(),
-                TerminalInputKind::Interrupt,
-                "interrupt",
-            ),
         };
-        if let Err(error) = revalidate(TerminalInteractiveValidationStage::BeforeWrite) {
-            let _ = self.leases.release(
-                session_id,
-                &registration.agent_session_id,
-                &registration.task_id,
-                &registration.operation_id,
-                TerminalLeaseReleaseReason::Failed,
-            );
-            self.state
-                .lock()
-                .map_err(|_| "TERMINAL_INTERACTIVE_REGISTRY_UNAVAILABLE".to_string())?
-                .active
-                .remove(session_id);
-            return Err(error);
+        let result: Result<TerminalInteractiveWriteResult, String> = (|| {
+            let snapshot = self.broker.screen_snapshot(session_id)?;
+            if screen_looks_credential_like(&snapshot) {
+                return Err("TERMINAL_CREDENTIAL_INPUT_FORBIDDEN".into());
+            }
+            let (data, broker_kind, wire_kind) = match input_kind {
+                TerminalInteractiveInputKindNative::Text => (
+                    text.ok_or_else(|| "TERMINAL_INTERACTIVE_TEXT_REQUIRED".to_string())?
+                        .to_string(),
+                    TerminalInputKind::Text,
+                    "text",
+                ),
+                TerminalInteractiveInputKindNative::Key => (
+                    key_sequence(
+                        key.ok_or_else(|| "TERMINAL_INTERACTIVE_KEY_REQUIRED".to_string())?,
+                    )
+                    .to_string(),
+                    TerminalInputKind::Key,
+                    "key",
+                ),
+                TerminalInteractiveInputKindNative::Paste => {
+                    let text =
+                        text.ok_or_else(|| "TERMINAL_INTERACTIVE_PASTE_REQUIRED".to_string())?;
+                    let data = if self.broker.bracketed_paste_enabled(session_id)? {
+                        format!("\u{1b}[200~{text}\u{1b}[201~")
+                    } else {
+                        text.to_string()
+                    };
+                    (data, TerminalInputKind::Paste, "paste")
+                }
+                TerminalInteractiveInputKindNative::Interrupt => (
+                    "\u{3}".to_string(),
+                    TerminalInputKind::Interrupt,
+                    "interrupt",
+                ),
+            };
+            revalidate(TerminalInteractiveValidationStage::BeforeWrite)?;
+            let receipt = self
+                .leases
+                .write_with_kind(
+                    sessions,
+                    session_id,
+                    data,
+                    TerminalInputSource::Agent {
+                        agent_session_id,
+                        task_id,
+                        operation_id: &registration.operation_id,
+                    },
+                    broker_kind,
+                )?
+                .ok_or_else(|| "TERMINAL_INTERACTIVE_BROKER_REQUIRED".to_string())?;
+            Ok(write_result(&registration, receipt, wire_kind))
+        })();
+        if result.is_err() {
+            cleanup_registration();
         }
-        let receipt = self
-            .leases
-            .write_with_kind(
-                sessions,
-                session_id,
-                data,
-                TerminalInputSource::Agent {
-                    agent_session_id,
-                    task_id,
-                    operation_id: &registration.operation_id,
-                },
-                broker_kind,
-            )?
-            .ok_or_else(|| "TERMINAL_INTERACTIVE_BROKER_REQUIRED".to_string())?;
-        Ok(write_result(&registration, receipt, wire_kind))
+        result
     }
 
     pub(crate) fn read(&self, session_id: &str) -> Result<TerminalScreenSnapshot, String> {

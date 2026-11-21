@@ -28,7 +28,41 @@ pub(crate) const SUDO_POLICY_DENIED: &str =
 pub(crate) fn sudo_policy_reference(value: &str) -> bool {
     value
         .split(|c: char| !(c.is_alphanumeric() || matches!(c, '.' | '_' | '-')))
-        .any(|part| matches!(part, "sudoers" | "sudoers.d" | "visudo"))
+        .any(|part| {
+            part.eq_ignore_ascii_case("sudoers")
+                || part.eq_ignore_ascii_case("sudoers.d")
+                || part.eq_ignore_ascii_case("visudo")
+        })
+}
+
+fn subshell_script_argument<'a>(borrowed: &[&'a str], index: usize) -> Option<&'a str> {
+    if !borrowed.get(index).is_some_and(|word| {
+        matches!(
+            word.rsplit('/').next(),
+            Some("sh" | "bash" | "zsh" | "dash" | "ksh")
+        )
+    }) {
+        return None;
+    }
+    let args = &borrowed[index + 1..];
+    for (pos, arg) in args.iter().enumerate() {
+        if *arg == "--" {
+            break;
+        }
+        if arg.strip_prefix('-').is_some_and(|options| {
+            options.contains('c') && options.bytes().all(|byte| byte.is_ascii_alphabetic())
+        }) {
+            let mut script_pos = pos + 1;
+            if args.get(script_pos) == Some(&"--") {
+                script_pos += 1;
+            }
+            return args
+                .get(script_pos)
+                .copied()
+                .filter(|candidate| *candidate != "<dynamic>");
+        }
+    }
+    None
 }
 
 fn parse_shell(script: &str) -> Result<tree_sitter::Tree, String> {
@@ -106,22 +140,9 @@ pub(super) fn reject_remote_privilege_command(script: &str) -> Result<(), String
             {
                 return Err(REMOTE_PRIVILEGE_DENIED.into());
             }
-            if borrowed.get(index).is_some_and(|word| {
-                matches!(
-                    word.rsplit('/').next(),
-                    Some("sh" | "bash" | "zsh" | "dash" | "ksh")
-                )
-            }) {
-                for pair in borrowed[index + 1..].windows(2) {
-                    if pair[0].strip_prefix('-').is_some_and(|options| {
-                        options.contains('c')
-                            && options.bytes().all(|byte| byte.is_ascii_alphabetic())
-                    }) {
-                        let tree = parse_shell(pair[1])?;
-                        inspect(tree.root_node(), pair[1], depth + 1)?;
-                        break;
-                    }
-                }
+            if let Some(sub_script) = subshell_script_argument(&borrowed, index) {
+                let tree = parse_shell(sub_script)?;
+                inspect(tree.root_node(), sub_script, depth + 1)?;
             }
         }
         for child in node.named_children(&mut node.walk()) {
@@ -262,6 +283,13 @@ fn inspect(node: Node<'_>, script: &str, input: Cwds, depth: usize) -> Result<Fl
                 if executable == "mkfs" || executable.starts_with("mkfs.") || executable == "wipefs"
                 {
                     return Err("AGENT_CRITICAL_OPERATION_DENIED: disk formatting and filesystem wiping are not available to the Agent".into());
+                }
+                if let Some(sub_script) = subshell_script_argument(&borrowed, index) {
+                    if sudo_policy_reference(sub_script) {
+                        return Err(SUDO_POLICY_DENIED.into());
+                    }
+                    let tree = parse_shell(sub_script)?;
+                    inspect(tree.root_node(), sub_script, input.clone(), depth + 1)?;
                 }
                 if matches!(executable, "rm" | "rmdir" | "unlink") {
                     for path in words[index + 1..]
@@ -554,5 +582,27 @@ mod tests {
         assert!(reject_destructive(&script, Some("/workspace"))
             .unwrap_err()
             .contains("inspection depth"));
+    }
+
+    #[test]
+    fn subshell_scripts_and_case_variants_cannot_bypass_guards() {
+        for command in [
+            "sh -c 'rm -rf /'",
+            "bash -lc 'mkfs.ext4 /dev/sda'",
+            "zsh -c -- 'rm -rf /etc'",
+            "cat /etc/SUDOERS",
+            "sh -c 'cat /etc/sudoers'",
+        ] {
+            assert!(
+                reject_destructive(command, Some("/workspace")).is_err(),
+                "{command}"
+            );
+        }
+        for command in ["sh -c -- 'sudo id'", "bash -lc -- 'doas id'"] {
+            assert!(
+                reject_remote_privilege_command(command).is_err(),
+                "{command}"
+            );
+        }
     }
 }

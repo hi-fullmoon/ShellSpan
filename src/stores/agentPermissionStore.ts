@@ -76,8 +76,12 @@ export const useAgentPermissionStore = create<AgentPermissionState>()((set, get)
     ?? useAiSettingsStore.getState().agentExecutionSurface,
   setExecutionSurface: (sessionId, surface) => {
     const preference = get().preferences[sessionId];
-    if (!preference) return;
-    set((state) => ({ preferences: { ...state.preferences, [sessionId]: { ...preference, surface } } }));
+    if (!preference && !findLiveSession(sessionId)) return;
+    const base = preference ?? {
+      mode: useAiSettingsStore.getState().agentPermissionMode,
+      surface,
+    };
+    set((state) => ({ preferences: { ...state.preferences, [sessionId]: { ...base, surface } } }));
     useAiSettingsStore.getState().setAgentExecutionSurface(surface);
   },
   conversationSurfaces: {},

@@ -216,8 +216,42 @@ fn qualify_remote_path(root: Option<&str>, path: &str) -> String {
         )
     }
 }
+fn normalize_policy_path(path: &str) -> String {
+    let replaced = path.replace('\\', "/");
+    let is_abs = replaced.starts_with('/');
+    let mut parts: Vec<&str> = Vec::new();
+    for segment in replaced.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                if let Some(last) = parts.last() {
+                    if parts.len() == 1 && last.ends_with(':') {
+                        // Windows drive root: ".." stays at drive root.
+                    } else if *last != ".." {
+                        parts.pop();
+                    } else if !is_abs {
+                        parts.push("..");
+                    }
+                } else if !is_abs {
+                    parts.push("..");
+                }
+            }
+            other => parts.push(other),
+        }
+    }
+    if is_abs {
+        if parts.is_empty() {
+            "/".to_string()
+        } else {
+            format!("/{}", parts.join("/"))
+        }
+    } else {
+        parts.join("/")
+    }
+}
+
 pub(crate) fn path_is_sensitive_native(path: &str) -> bool {
-    let p = path.replace('\\', "/").to_ascii_lowercase();
+    let p = normalize_policy_path(path).to_ascii_lowercase();
     p.contains(".env")
         || p.contains(".ssh")
         || p.contains(".aws")
@@ -247,6 +281,7 @@ pub(crate) fn path_is_sensitive_native(path: &str) -> bool {
         || p.ends_with(".pfx")
         || p.ends_with(".p12")
         || p == "/etc/shadow"
+        || p == "/private/etc/shadow"
 }
 fn path_is_critical_native(path: &str) -> bool {
     protected_delete_path_native(path)
@@ -341,8 +376,9 @@ pub(crate) fn enforce_native_call_policy_native(
 /// Whole system trees and kernel interfaces remain unavailable in every mode.
 /// Concrete application resources below system directories use normal approval.
 pub(crate) fn hard_delete_path_native(path: &str) -> bool {
-    let path = path.replace('\\', "/");
-    let path = path.trim_end_matches('/');
+    let normalized = normalize_policy_path(path);
+    let lowered = normalized.to_ascii_lowercase();
+    let path = lowered.trim_end_matches('/');
     // macOS exposes /etc and /var through fixed /private aliases. Apply the
     // same tree policy to either spelling without resolving remote symlinks.
     let path = path
@@ -371,15 +407,15 @@ pub(crate) fn hard_delete_path_native(path: &str) -> bool {
             "/usr/local/share",
             "/etc/systemd",
             "/etc/systemd/system",
-            "/System",
-            "/System/Library",
+            "/system",
+            "/system/library",
             "/usr/libexec",
             "/usr/local/libexec",
             "/lib",
             "/lib64",
-            "/System/Volumes",
-            "/System/Volumes/Data",
-            "/Library",
+            "/system/volumes",
+            "/system/volumes/data",
+            "/library",
             "/var",
             "/var/lib",
             "/var/db",
@@ -392,19 +428,18 @@ pub(crate) fn hard_delete_path_native(path: &str) -> bool {
             "/private/var/db",
         ]
         .contains(&path)
-        || ["/dev", "/proc", "/sys", "/System"]
+        || ["/dev", "/proc", "/sys", "/system"]
             .iter()
             .any(|root| path == *root || path.starts_with(&format!("{root}/")))
-        || path.eq_ignore_ascii_case("C:")
+        || path == "c:"
         || [
-            "C:/Windows",
-            "C:/Windows/System32",
-            "C:/Windows/SysWOW64",
-            "C:/Program Files",
-            "C:/Program Files (x86)",
+            "c:/windows",
+            "c:/windows/system32",
+            "c:/windows/syswow64",
+            "c:/program files",
+            "c:/program files (x86)",
         ]
-        .iter()
-        .any(|root| path.eq_ignore_ascii_case(root))
+        .contains(&path)
 }
 
 #[cfg(test)]
@@ -413,8 +448,9 @@ fn reject_literal_destructive_command(script: &str) -> Result<(), String> {
 }
 
 pub(crate) fn protected_delete_path_native(path: &str) -> bool {
-    let path = path.replace('\\', "/");
-    let path = path.trim_end_matches('/');
+    let normalized = normalize_policy_path(path);
+    let lowered = normalized.to_ascii_lowercase();
+    let path = lowered.trim_end_matches('/');
     path.is_empty()
         || matches!(path, "/var" | "/private/var")
         || [
@@ -422,8 +458,8 @@ pub(crate) fn protected_delete_path_native(path: &str) -> bool {
             "/bin",
             "/sbin",
             "/usr",
-            "/System",
-            "/Library",
+            "/system",
+            "/library",
             "/dev",
             "/proc",
             "/sys",
@@ -435,9 +471,9 @@ pub(crate) fn protected_delete_path_native(path: &str) -> bool {
         ]
         .iter()
         .any(|root| path == *root || path.starts_with(&format!("{root}/")))
-        || path.eq_ignore_ascii_case("C:")
-        || path.eq_ignore_ascii_case("C:/Windows")
-        || path.to_ascii_lowercase().starts_with("c:/windows/")
+        || path == "c:"
+        || path == "c:/windows"
+        || path.starts_with("c:/windows/")
 }
 
 #[cfg(test)]
@@ -852,5 +888,32 @@ mod tests {
             &scope,
         )
         .is_ok());
+    }
+
+    #[test]
+    fn policy_path_checks_normalize_slashes_dots_and_case() {
+        for path in [
+            "//etc/hosts",
+            "/./etc/hosts",
+            "/ETC/hosts",
+            "/private//etc/./hosts",
+            "/tmp/../etc/hosts",
+            "C:/../Windows/System32",
+        ] {
+            assert!(protected_delete_path_native(path), "{path}");
+        }
+        for path in [
+            "//etc",
+            "/./etc",
+            "/ETC",
+            "/SYSTEM/Library",
+            "/private//var/./db",
+            "C:/../Windows",
+        ] {
+            assert!(hard_delete_path_native(path), "{path}");
+        }
+        for path in ["//etc/shadow", "/./etc/shadow", "/private//etc/SHADOW"] {
+            assert!(path_is_sensitive_native(path), "{path}");
+        }
     }
 }

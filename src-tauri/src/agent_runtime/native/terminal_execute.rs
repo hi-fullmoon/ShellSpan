@@ -816,11 +816,29 @@ impl TerminalExecuteRegistry {
                 return Err(error);
             }
         };
-        let native_coordinator = Arc::new(Mutex::new(
-            self.broker
-                .native_input_coordinator(session_id, operation_id)?,
-        ));
-        operation.require_complete_input_proof()?;
+        let native_coordinator = match self
+            .broker
+            .native_input_coordinator(session_id, operation_id)
+            .and_then(|coordinator| {
+                operation.require_complete_input_proof()?;
+                Ok(coordinator)
+            }) {
+            Ok(coordinator) => Arc::new(Mutex::new(coordinator)),
+            Err(error) => {
+                if let Ok(command_id) = operation.command_id() {
+                    let _ = self.broker.mark_command_uncertain(session_id, &command_id);
+                    let _ = self.broker.retire_command(session_id, &command_id);
+                }
+                let _ = self.leases.release(
+                    session_id,
+                    agent_session_id,
+                    task_id,
+                    operation_id,
+                    TerminalLeaseReleaseReason::Failed,
+                );
+                return Err(error);
+            }
+        };
         let registration = TerminalExecuteRegistration {
             native: native_coordinator.clone(),
             agent_session_id: agent_session_id.to_string(),
