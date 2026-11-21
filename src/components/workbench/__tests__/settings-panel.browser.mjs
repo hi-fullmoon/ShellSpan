@@ -366,6 +366,25 @@ try {
     await page.keyboard.press('Enter');
     await page.getByRole('heading', { name: '通用', exact: true }).waitFor();
     assert.equal(await page.locator('section [data-slot="scroll-area-viewport"]').evaluate(element => element.scrollTop), 0, 'category changes reset content scroll');
+    await page.evaluate(async () => {
+      const { useAppStore } = await import('/settings-runtime.js');
+      useAppStore.getState().openSettings('terminal', 'terminal-title-template');
+    });
+    await page.getByRole('heading', { name: '终端', exact: true }).waitFor();
+    await page.waitForFunction(async () => (await import('/settings-runtime.js')).useAppStore.getState().pendingSettingsTarget === null);
+    const titleVisibility = await page.evaluate(() => {
+      const viewportEl = document.querySelector('section [data-slot="scroll-area-viewport"]');
+      const targetEl = document.querySelector('[data-settings-target="terminal-title-template"]');
+      const viewportRect = viewportEl.getBoundingClientRect();
+      const targetRect = targetEl.getBoundingClientRect();
+      return {
+        scrollTop: viewportEl.scrollTop,
+        visibleTop: targetRect.top >= viewportRect.top - 1,
+        visibleBottom: targetRect.bottom <= viewportRect.bottom + 1,
+      };
+    });
+    assert.ok(titleVisibility.scrollTop > 0, `opening terminal title template target must scroll viewport at ${viewport.width}`);
+    assert.ok(titleVisibility.visibleTop && titleVisibility.visibleBottom, `terminal title template target must be visible inside viewport at ${viewport.width}`);
   }
 
   console.log('settings panel: responsive settings rows, readable controls, keyboard actions and no overflow at 640/1280px');

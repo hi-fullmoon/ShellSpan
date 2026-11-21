@@ -20,6 +20,7 @@ export type TerminalOsc52Policy = 'writeOnly' | 'disabled';
 export type SftpConflictPolicy = 'ask' | 'overwrite' | 'skip';
 export type WorkbenchTab = 'connections' | 'knownHosts' | 'keychain' | 'monitor' | 'logs';
 export type SettingsSection = 'appearance' | 'general' | 'terminal' | 'sftp' | 'ai' | 'shortcuts' | 'experimental' | 'feedback';
+export type SettingsTarget = 'terminal-title-template';
 export type PetdexConnectionStatus =
   | 'disabled'
   | 'checking'

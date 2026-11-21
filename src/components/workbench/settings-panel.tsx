@@ -325,6 +325,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const petdexManualBusyRef = useRef(false);
   const activeSection = useAppStore((state) => state.activeSettingsSection);
   const setActiveSection = useAppStore((state) => state.setActiveSettingsSection);
+  const pendingSettingsTarget = useAppStore((state) => state.pendingSettingsTarget);
+  const consumeSettingsTarget = useAppStore((state) => state.consumeSettingsTarget);
   const activeSectionMeta = SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0];
   const settingsViewportRef = useRef<HTMLDivElement>(null);
   const petdexMountedRef = useRef(true);
@@ -388,6 +390,32 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       unlisten?.();
     };
   }, []);
+
+  useEffect(() => {
+    if (!open || !pendingSettingsTarget) return;
+    let frame = 0;
+    let nestedFrame = 0;
+    const scrollToTarget = (): boolean => {
+      const target = settingsViewportRef.current?.querySelector<HTMLElement>(
+        `[data-settings-target="${pendingSettingsTarget}"]`,
+      );
+      if (!target) return false;
+      target.scrollIntoView?.({ block: 'center' });
+      consumeSettingsTarget(pendingSettingsTarget);
+      return true;
+    };
+    frame = window.requestAnimationFrame(() => {
+      if (!scrollToTarget()) {
+        nestedFrame = window.requestAnimationFrame(() => {
+          scrollToTarget();
+        });
+      }
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.cancelAnimationFrame(nestedFrame);
+    };
+  }, [open, activeSection, pendingSettingsTarget, consumeSettingsTarget]);
 
   const handleSectionChange = (value: string): void => {
     if (value === activeSection) return;
@@ -1032,7 +1060,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </div>
                 </SettingRow>
                 <SettingGroupLabel>{t('settings.terminal.groupSessions')}</SettingGroupLabel>
-                <Field className="min-w-0 gap-3 px-3.5 py-3" data-terminal-title-settings>
+                <Field className="min-w-0 gap-3 px-3.5 py-3" data-terminal-title-settings data-settings-target="terminal-title-template">
                   <div className="flex min-w-0 flex-col gap-0.5">
                     <FieldLabel className="text-sm font-medium text-foreground">{t('terminal.title.template')}</FieldLabel>
                     <FieldDescription>{t('terminal.title.description')}</FieldDescription>

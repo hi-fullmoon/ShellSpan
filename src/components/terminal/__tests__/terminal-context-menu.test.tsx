@@ -3,6 +3,7 @@ import { render, screen, fireEvent, cleanup, within, act } from '@testing-librar
 import { TerminalContextMenu } from '../terminal-context-menu';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
+import { useAppStore } from '@/stores/appStore';
 import type { TerminalSession } from '@/stores/terminalStore';
 
 const mockConnect = vi.fn();
@@ -809,6 +810,42 @@ describe('TerminalContextMenu', () => {
       rectSpy.mockRestore();
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth });
       Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalInnerHeight });
+    }
+  });
+
+  it('opens terminal settings targeting the tab title template section', () => {
+    const onClose = vi.fn();
+    const prev = useAppStore.getState();
+    try {
+      useAppStore.setState({
+        settingsDialogOpen: false,
+        activeSettingsSection: 'general',
+        pendingSettingsTarget: null,
+      });
+      render(
+        <TerminalContextMenu
+          open
+          x={10}
+          y={10}
+          session={makeSession('s1', 'A', 'p1')}
+          onClose={onClose}
+        />,
+      );
+
+      fireEvent.click(screen.getByText('terminal.title.template'));
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(useAppStore.getState()).toMatchObject({
+        settingsDialogOpen: true,
+        activeSettingsSection: 'terminal',
+        pendingSettingsTarget: 'terminal-title-template',
+      });
+    } finally {
+      useAppStore.setState({
+        settingsDialogOpen: prev.settingsDialogOpen,
+        activeSettingsSection: prev.activeSettingsSection,
+        pendingSettingsTarget: prev.pendingSettingsTarget,
+      });
     }
   });
 });

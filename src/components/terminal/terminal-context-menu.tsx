@@ -293,7 +293,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
           onClose();
         }}>{t('terminal.title.reset')}</MenuItem>
         <MenuItem onClick={() => {
-          useAppStore.getState().openSettings('terminal');
+          useAppStore.getState().openSettings('terminal', 'terminal-title-template');
           onClose();
         }}>{t('terminal.title.template')}</MenuItem>
         <MenuItem

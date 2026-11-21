@@ -4,7 +4,7 @@ import { DEFAULT_TAB_TITLE_TEMPLATE, normalizeTabTitleOverrides, validTabTitleTe
 import { subscribeWithSelector } from 'zustand/middleware';
 import { shallow } from 'zustand/shallow';
 import { changeLocale } from '@/locales';
-import type { AppSection, Locale, PetdexDiagnostic, SettingsSection, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, TerminalOsc52Policy, ThemeMode, WorkbenchTab } from '@/types';
+import type { AppSection, Locale, PetdexDiagnostic, SettingsSection, SettingsTarget, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, TerminalOsc52Policy, ThemeMode, WorkbenchTab } from '@/types';
 import {
   invokeLoadPreferences,
   invokeSavePreferences,
@@ -145,13 +145,15 @@ interface AppState extends AppPreferences {
   activeWorkbenchTab: WorkbenchTab;
   activeSettingsSection: SettingsSection;
   settingsDialogOpen: boolean;
+  pendingSettingsTarget: SettingsTarget | null;
   pendingWorkbenchAction: 'newConnection' | null;
   hydrateFromDb: () => Promise<void>;
   setActiveSection: (section: AppSection) => void;
   setActiveWorkbenchTab: (tab: WorkbenchTab) => void;
   setActiveSettingsSection: (section: SettingsSection) => void;
   setSettingsDialogOpen: (open: boolean) => void;
-  openSettings: (section?: SettingsSection) => void;
+  openSettings: (section?: SettingsSection, target?: SettingsTarget) => void;
+  consumeSettingsTarget: (target: SettingsTarget) => void;
   requestNewConnection: () => void;
   consumeWorkbenchAction: (action: 'newConnection') => void;
   setTheme: (theme: ThemeMode) => void;
@@ -476,6 +478,7 @@ export const useAppStore = create<AppState>()(
     activeWorkbenchTab: 'connections' as WorkbenchTab,
     activeSettingsSection: 'general' as SettingsSection,
     settingsDialogOpen: false,
+    pendingSettingsTarget: null,
     pendingWorkbenchAction: null,
 
     hydrateFromDb: async () => {
@@ -534,12 +537,21 @@ export const useAppStore = create<AppState>()(
 
     setActiveSection: (activeSection) => set({ activeSection }),
     setActiveWorkbenchTab: (activeWorkbenchTab) => set({ activeWorkbenchTab }),
-    setActiveSettingsSection: (activeSettingsSection) => set({ activeSettingsSection }),
-    setSettingsDialogOpen: (settingsDialogOpen) => set({ settingsDialogOpen }),
-    openSettings: (section) => set((state) => ({
+    setActiveSettingsSection: (activeSettingsSection) => set({ activeSettingsSection, pendingSettingsTarget: null }),
+    setSettingsDialogOpen: (settingsDialogOpen) => set((state) => ({
+      settingsDialogOpen,
+      pendingSettingsTarget: settingsDialogOpen ? state.pendingSettingsTarget : null,
+    })),
+    openSettings: (section, target) => set((state) => ({
       settingsDialogOpen: true,
       activeSettingsSection: section ?? state.activeSettingsSection,
+      pendingSettingsTarget: target ?? null,
     })),
+    consumeSettingsTarget: (target) => set((state) => (
+      state.pendingSettingsTarget === target
+        ? { pendingSettingsTarget: null }
+        : {}
+    )),
     requestNewConnection: () => set({
       activeSection: 'workbench',
       activeWorkbenchTab: 'connections',

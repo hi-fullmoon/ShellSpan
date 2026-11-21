@@ -734,4 +734,24 @@ describe('SettingsPanel', () => {
     expect(screen.queryByText('settings.shortcuts.conflict')).not.toBeInTheDocument();
     expect(useAppStore.getState().shortcuts.newSftpConnection).toBe('mod+k');
   });
+
+  it('scrolls to the pending terminal title template target when opened', async () => {
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    try {
+      useAppStore.getState().openSettings('terminal', 'terminal-title-template');
+      render(<SettingsPanel open onOpenChange={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+      });
+      const target = document.querySelector('[data-settings-target="terminal-title-template"]');
+      expect(target).not.toBeNull();
+      expect(scrollIntoView.mock.instances[0]).toBe(target);
+      expect(useAppStore.getState().pendingSettingsTarget).toBeNull();
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
 });
