@@ -372,6 +372,8 @@ export function useAiSessionController({
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [queueMutation, setQueueMutation] = useState<AiQueueMutationState | null>(null);
   const queueOperationRef = useRef<{ input: AiInboxMutationInput; pending: boolean } | null>(null);
+  const editQueuePendingRef = useRef(false);
+  const renamePendingRef = useRef(false);
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [renameError, setRenameError] = useState<string | null>(null);
   const composerRef = useRef(composer);
@@ -1016,6 +1018,9 @@ export function useAiSessionController({
           if (isCurrent()) terminalDirectory.current = null;
         }
         const normalized = normalizeAiSessionError(error);
+        if (!normalized.retryable) {
+          queue.discard(payload.clientOperationId);
+        }
         settle({ type: 'submit.failed', clientOperationId: payload.clientOperationId, error: normalized });
         if (!isCurrent()) return;
         updateOptimistic((current) => current.map((item) => (
@@ -1115,6 +1120,7 @@ export function useAiSessionController({
     const retained = composerRef.current.sessionId ? adapter.peek?.(composerRef.current.sessionId) ?? null : null;
     setView(retained);
     setQueueMutation(null);
+    setRenameError(null);
     queueOperationRef.current = null;
     viewRef.current = retained;
     setNavigation(visit?.navigation ?? createAiWorkspaceNavigationState());
@@ -1166,7 +1172,7 @@ export function useAiSessionController({
       publish(await adapter.open(sessionId));
     };
     void open().catch((error: unknown) => {
-      if (canPublish()) dispatch({ type: 'stop.failed', error: normalizeAiSessionError(error) });
+      if (canPublish()) dispatch({ type: 'error.reported', error: normalizeAiSessionError(error) });
     }).finally(() => {
       if (!alive || automaticRestore.current !== restore) return;
       if (retainedConversation && activeTerminalId && submissionContextRef.current === context && !viewRef.current) {
@@ -1687,7 +1693,11 @@ export function useAiSessionController({
     });
   }, [adapter, forgetSessionVisits, newSession, refreshSessions, t]);
 
-  const executeQueueMutation = useCallback(async (intent: AgentInboxMutation, retry = false): Promise<boolean> => {
+  const executeQueueMutation = useCallback(async (
+    intent: AgentInboxMutation,
+    retry = false,
+    onCommittedAway?: () => void,
+  ): Promise<boolean> => {
     // React state alone cannot guard two clicks within the same render.
     if (queueOperationRef.current?.pending) return false;
     if (!retry) queueOperationRef.current = null;
@@ -1729,7 +1739,10 @@ export function useAiSessionController({
       : { intent, status: 'pending', error: null, conflict: false });
     return adapter.mutateInbox(input).then(
       () => {
-        if (!isCurrent()) return false;
+        if (!isCurrent()) {
+          onCommittedAway?.();
+          return false;
+        }
         queueOperationRef.current = null;
         setQueueMutation(null);
         return true;
@@ -1761,11 +1774,13 @@ export function useAiSessionController({
   }, [adapter, operationId, t]);
 
   const renameSession = useCallback((summary: AiSessionSummary, rawTitle: string): void => {
+    if (renamePendingRef.current) return;
     const title = rawTitle.trim();
     if (!title) {
       setRenameError(t('ai.workspace.sessions.renameRequired'));
       return;
     }
+    renamePendingRef.current = true;
     setRenamingSessionId(summary.id);
     setRenameError(null);
     void (async () => {
@@ -1794,12 +1809,13 @@ export function useAiSessionController({
             // The committed list refresh can be retried from the rename dialog.
           }
         }
-        setRenameError(normalized.message);
+        if (mountedRef.current) setRenameError(normalized.message);
       } finally {
-        setRenamingSessionId(null);
+        renamePendingRef.current = false;
+        if (mountedRef.current) setRenamingSessionId(null);
       }
     })();
-  }, [adapter, operationId, refreshSessions]);
+  }, [adapter, operationId, refreshSessions, t]);
 
   const back = useCallback((): void => {
     setNavigation((current) => {
@@ -2157,6 +2173,7 @@ export function useAiSessionController({
         if (!creating && composer.sessionId === null && !cold) {
           creating = createInputWithFrozenTargetRoot(capturedText);
           creationInputs.current.set(context, creating);
+          void creating.catch(() => { if (creationInputs.current.get(context) === creating) creationInputs.current.delete(context); });
         }
         void imageDraft.detach(async () => {
           await loadResolvedModel(imageProvider);
@@ -2186,6 +2203,11 @@ export function useAiSessionController({
             const transition = reduceAiComposer(submissionLedger.current.get(context) ?? composer, event);
             submissionMemory.remember(context, transition.state);
             for (const effect of transition.effects) if (effect.type === 'submit') executeImageEffect(effect, context);
+            return;
+          }
+          const willSubmit = reduceAiComposer(composerRef.current, event).effects.some(effect => effect.type === 'submit');
+          if (!willSubmit) {
+            submissionInputs.current.delete(op.id);
             return;
           }
           if (composerRef.current.draft === capturedText) dispatch({ type: 'draft.changed', value: '' });
@@ -2277,31 +2299,40 @@ export function useAiSessionController({
     deleteSession,
     editQueueItem: async (item) => {
       const current = viewRef.current;
-      if (!current || imageDraft.busy || imageDraft.locked || queueOperationRef.current?.pending) return false;
+      if (!current || imageDraft.busy || imageDraft.locked || queueOperationRef.current?.pending || editQueuePendingRef.current) return false;
+      editQueuePendingRef.current = true;
       const sessionId = current.summary.id;
-      let recalledImages: AgentImageUpload[] = [];
-      if (item.images?.length) {
-        try {
-          recalledImages = await Promise.all(item.images.map(async (image: AgentImageRef) => {
-            const url = await invokeAgentImagePreview({ sessionId, sha256: image.sha256 });
-            const comma = url.indexOf(',');
-            if (comma < 0) throw new Error('IMAGE_DECODE_FAILED');
-            return { mediaType: image.mediaType, data: url.slice(comma + 1), name: image.name };
-          }));
-        } catch (error) {
-          if (mountedRef.current && viewRef.current?.summary.id === sessionId) {
-            toast.error(t(imageErrorKey(String(error))));
+      try {
+        let recalledImages: AgentImageUpload[] = [];
+        if (item.images?.length) {
+          try {
+            recalledImages = await Promise.all(item.images.map(async (image: AgentImageRef) => {
+              const url = await invokeAgentImagePreview({ sessionId, sha256: image.sha256 });
+              const comma = url.indexOf(',');
+              if (comma < 0) throw new Error('IMAGE_DECODE_FAILED');
+              return { mediaType: image.mediaType, data: url.slice(comma + 1), name: image.name };
+            }));
+          } catch (error) {
+            if (mountedRef.current && viewRef.current?.summary.id === sessionId) {
+              toast.error(t(imageErrorKey(String(error))));
+            }
+            return false;
           }
-          return false;
+          if (!mountedRef.current || viewRef.current?.summary.id !== sessionId) return false;
         }
-        if (!mountedRef.current || viewRef.current?.summary.id !== sessionId) return false;
+        const removed = await executeQueueMutation({ type: 'remove', itemId: item.id }, false, () => {
+          if (item.content && !useAiDraftStore.getState().drafts[navigationDraftKey(sessionId)]) {
+            useAiDraftStore.getState().saveDraft(navigationDraftKey(sessionId), item.content);
+          }
+        });
+        if (!removed || !mountedRef.current || viewRef.current?.summary.id !== sessionId) return false;
+        claimWorkspace();
+        dispatch({ type: 'draft.changed', value: item.content });
+        await imageDraft.replace(recalledImages, item.content);
+        return true;
+      } finally {
+        editQueuePendingRef.current = false;
       }
-      const removed = await executeQueueMutation({ type: 'remove', itemId: item.id });
-      if (!removed || !mountedRef.current || viewRef.current?.summary.id !== sessionId) return false;
-      claimWorkspace();
-      dispatch({ type: 'draft.changed', value: item.content });
-      await imageDraft.replace(recalledImages, item.content);
-      return true;
     },
     updateQueueItem: (item, content, images) => executeQueueMutation(images
       ? { type: 'updateWithImages', itemId: item.id, content, images }

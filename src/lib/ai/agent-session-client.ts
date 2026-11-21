@@ -172,7 +172,6 @@ export class AgentSessionCommittedClient {
   }
 
   async reconnect(): Promise<AgentSessionStreamState> {
-    if (this.connecting) return this.connecting;
     this.disconnect();
     return this.connect();
   }
@@ -304,6 +303,11 @@ export class AgentSessionCommittedClient {
     const storageFaultAtSeq = await this.fetchAfter(this.events.last?.seq, signal);
     signal.throwIfAborted();
     this.storageFaultAtSeq = storageFaultAtSeq;
+    if (storageFaultAtSeq !== undefined) {
+      for (const event of this.events.snapshot()) {
+        if (event.seq > storageFaultAtSeq) this.updateTerminalState(event);
+      }
+    }
   }
 
   private async fetchAfter(
@@ -347,8 +351,8 @@ export class AgentSessionCommittedClient {
     this.childSnapshotSeq = snapshot.eventCount - 1;
     this.events = events;
     this.hasTerminalEventValue = false;
-    for (const event of events.snapshot()) this.updateTerminalState(event);
     this.storageFaultAtSeq = storageFaultAtSeq;
+    for (const event of events.snapshot()) this.updateTerminalState(event);
   }
 
   private clearSyncError(): void {

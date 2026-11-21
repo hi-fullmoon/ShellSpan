@@ -329,12 +329,16 @@ export function projectAgentInbox(events: readonly AgentSessionEvent[]): readonl
         items.set(previous.id, { ...previous, lane: 'nextStep', startsTurn: false });
       }
     } else if (event.type === 'agent/inbox/reordered') {
+      const orderedIds = new Set(event.data.orderedItemIds);
       const ordered = event.data.orderedItemIds
         .map((itemId) => items.get(itemId))
         .filter((item): item is AiInboxItem => item !== undefined);
+      const remaining = [...items.values()].filter(
+        (item) => item.lane === event.data.lane && !orderedIds.has(item.id),
+      );
       const other = [...items.values()].filter((item) => item.lane !== event.data.lane);
       items.clear();
-      for (const item of [...other, ...ordered]) items.set(item.id, item);
+      for (const item of [...other, ...ordered, ...remaining]) items.set(item.id, item);
     }
   }
   return [...items.values()];
@@ -468,7 +472,10 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
     inbox: projectAgentInbox(events),
     pendingApproval: storageFault || state.snapshot.archived || status === 'completed'
       || status === 'failed' || status === 'cancelled' ? null : pendingApproval(nodes),
-    pendingQuestion: storageFault ? null : projectQuestions(events).find((q) => q.status === 'pending') ?? null,
+    pendingQuestion: storageFault || state.snapshot.archived || status === 'completed'
+      || status === 'failed' || status === 'cancelled'
+      ? null
+      : projectQuestions(events).find((q) => q.status === 'pending') ?? null,
     status,
     statusReason: storageFault ? 'journalWriteFailed' : activity.statusReason,
     recovery,
@@ -618,7 +625,12 @@ export function createAgentSessionAdapter(
 
   const openEntry = async (sessionId: string): Promise<AiSessionView> => {
     const entry = ensureEntry(sessionId);
-    entry.connecting ??= entry.client.connect().then((state) => {
+    entry.connecting ??= entry.client.connect().catch((error) => {
+      if (error instanceof Error && error.name === 'AbortError' && entries.get(sessionId) === entry) {
+        return entry.client.connect();
+      }
+      throw error;
+    }).then((state) => {
       const view = entry.project(state);
       entry.view = view;
       return view;
@@ -1158,6 +1170,8 @@ export function createAgentSessionAdapter(
     create: protect(adapter.create, input => input.request.sessionId),
     open: protect(adapter.open, id => id),
     submit: protect(adapter.submit, (id, input) => id ?? input.create?.request.sessionId ?? null),
+    approve: protect(adapter.approve, input => input.sessionId),
+    reject: protect(adapter.reject, input => input.sessionId),
     answerQuestion: protect(adapter.answerQuestion, input => input.identity.sessionId),
     selectModel: protect(adapter.selectModel, id => id),
     setPermission: protect(adapter.setPermission, id => id),

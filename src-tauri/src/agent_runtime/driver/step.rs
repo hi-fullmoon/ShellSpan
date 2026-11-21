@@ -341,12 +341,22 @@ async fn assemble_fresh_step_request(
             .messages
             .retain(|m| !matches!(m, AgentSurfaceMessage::Tool { name, .. } if name == SKILL_TOOL));
         for message in &mut inherited.messages {
-            if let AgentSurfaceMessage::Assistant { content, .. } = message {
+            if let AgentSurfaceMessage::Assistant {
+                content, replay, ..
+            } = message
+            {
+                let before = content.len();
                 content.retain(|b| {
                     !matches!(b, AgentAssistantContentBlock::ToolCall { call } if call.name == SKILL_TOOL)
                 });
+                if content.len() != before {
+                    *replay = None;
+                }
             }
         }
+        inherited.messages.retain(
+            |m| !matches!(m, AgentSurfaceMessage::Assistant { content, .. } if content.is_empty()),
+        );
         if request
             .tools
             .iter()

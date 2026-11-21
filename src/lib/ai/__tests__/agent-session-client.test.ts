@@ -226,6 +226,34 @@ describe('AgentSessionCommittedClient', () => {
     expect(state.hasTerminalEvent).toBe(true);
   });
 
+  it('starts a fresh connection when reconnect is called while connect is still in flight', async () => {
+    const ended = sessionEvent(1, {
+      type: 'session/ended',
+      data: { status: 'completed' },
+    });
+    const source = transport([created]);
+    let resolveFirstSnapshot!: () => void;
+    const firstSnapshotGate = new Promise<void>((resolve) => { resolveFirstSnapshot = resolve; });
+    const originalSnapshot = source.snapshot.bind(source);
+    let snapshotCalls = 0;
+    vi.spyOn(source, 'snapshot').mockImplementation(async (sessionId) => {
+      snapshotCalls += 1;
+      const callNumber = snapshotCalls;
+      if (callNumber === 1) await firstSnapshotGate;
+      return originalSnapshot(sessionId);
+    });
+    const client = createClient('session-fixture', source);
+    const initialConnect = client.connect().catch(() => undefined);
+    await expect.poll(() => snapshotCalls).toBe(1);
+    source.replace([created, ended]);
+    const reconnected = await client.reconnect();
+    resolveFirstSnapshot();
+    await initialConnect;
+    expect(snapshotCalls).toBe(2);
+    expect(reconnected.events.map((event) => event.seq)).toEqual([0, 1]);
+    expect(reconnected.hasTerminalEvent).toBe(true);
+  });
+
   it('does not invent a terminal event from an ended snapshot', async () => {
     const source = transport([created], true);
     const client = createClient('session-fixture', source);
