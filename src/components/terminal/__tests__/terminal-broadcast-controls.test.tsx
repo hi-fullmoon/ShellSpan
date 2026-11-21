@@ -84,6 +84,22 @@ describe('TerminalBroadcastControls', () => {
     expect(within(alert).getByText('+1')).toBeInTheDocument();
   });
 
+  it('locates a broadcast target session when its banner pill is clicked', () => {
+    const onSelectSession = vi.fn();
+    useTerminalStore.setState({ activeSessionId: 's1' });
+    useTerminalBroadcastStore.getState().configure('custom', ['s1', 's2']);
+    render(<TerminalBroadcastControls visible onSelectSession={onSelectSession} />);
+
+    const alert = screen.getByRole('alert');
+    const primaryButton = within(alert).getByRole('button', { name: 'Primary' });
+    const replicaButton = within(alert).getByRole('button', { name: 'Replica' });
+    expect(primaryButton).toHaveAttribute('aria-current', 'true');
+    expect(replicaButton).not.toHaveAttribute('aria-current');
+
+    fireEvent.click(replicaButton);
+    expect(onSelectSession).toHaveBeenCalledWith('s2');
+  });
+
   it('shows CompactDialogBody, protected badges, remote endpoints, select-all/clear, and empty state', () => {
     render(<TerminalBroadcastControls visible />);
 

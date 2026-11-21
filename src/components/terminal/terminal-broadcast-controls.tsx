@@ -28,13 +28,20 @@ function currentEligibleBroadcastSelection(): Set<string> {
   return new Set([...current.sessionIds].filter((id) => eligibleIds.has(id)));
 }
 
-export function TerminalBroadcastControls({ visible }: { visible: boolean }) {
+export function TerminalBroadcastControls({
+  visible,
+  onSelectSession,
+}: {
+  visible: boolean;
+  onSelectSession?: (sessionId: string) => void;
+}) {
   const { t } = useI18n();
   const id = useId();
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const { mode, sessionIds, configure } = useTerminalBroadcastStore();
   const sessions = useTerminalStore((state) => state.sessions);
+  const activeSessionId = useTerminalStore((state) => state.activeSessionId);
   const split = useTerminalStore((state) => state.workspaceSplit);
   const focusHidden = useFocusStore((state) => state.enabled && !state.terminalOpen);
   const effectiveVisible = visible && !focusHidden;
@@ -85,18 +92,32 @@ export function TerminalBroadcastControls({ visible }: { visible: boolean }) {
           </AlertDescription>
           {admittedSessions.length > 0 && (
             <div className="hidden min-w-0 flex-wrap items-center gap-1 @min-[34rem]/broadcast:flex">
-              {admittedSessions.slice(0, MAX_BANNER_TARGETS).map((session) => (
-                <Badge
-                  key={session.sessionId}
-                  variant="outline"
-                  size="sm"
-                  title={session.title}
-                  className="h-5 max-w-36 rounded-md border-app-warning/25 bg-background/80 px-1.5 text-[11px] font-normal text-foreground/90"
-                >
-                  <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-app-warning" />
-                  <span className="min-w-0 truncate">{session.title}</span>
-                </Badge>
-              ))}
+              {admittedSessions.slice(0, MAX_BANNER_TARGETS).map((session) => {
+                const isActive = session.sessionId === activeSessionId;
+                return (
+                  <Badge
+                    key={session.sessionId}
+                    render={<button type="button" />}
+                    variant="outline"
+                    size="sm"
+                    title={session.title}
+                    aria-current={isActive ? 'true' : undefined}
+                    onClick={() => {
+                      if (onSelectSession) onSelectSession(session.sessionId);
+                      else useTerminalStore.getState().setActiveSession(session.sessionId);
+                    }}
+                    className={cn(
+                      'h-5 max-w-36 rounded-md px-1.5 text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                      isActive
+                        ? 'border-app-warning/50 bg-background font-medium text-foreground'
+                        : 'border-app-warning/25 bg-background/80 font-normal text-foreground/90 hover:border-app-warning/45 hover:bg-background',
+                    )}
+                  >
+                    <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-app-warning" />
+                    <span className="min-w-0 truncate">{session.title}</span>
+                  </Badge>
+                );
+              })}
               {admittedSessions.length > MAX_BANNER_TARGETS && (
                 <Badge
                   variant="outline"
@@ -109,7 +130,7 @@ export function TerminalBroadcastControls({ visible }: { visible: boolean }) {
             </div>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div data-broadcast-actions className="flex shrink-0 items-center gap-1.5">
           <Button
             type="button"
             variant="outline"
