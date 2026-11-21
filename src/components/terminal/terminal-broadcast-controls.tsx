@@ -8,11 +8,23 @@ import { CompactDialogBody, CompactDialogContent, CompactDialogFooter, CompactDi
 import { Dialog } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useI18n } from '@/hooks/useI18n';
+import { cn } from '@/lib/utils';
+import { useFocusStore } from '@/stores/focusStore';
 import { canReceiveTerminalBroadcast, useTerminalBroadcastStore } from '@/stores/terminalBroadcastStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { agentTerminalLeaseState } from './agent-terminal-lease-state';
 import { terminalInputReadiness } from './terminal-input-readiness';
 import { getTerminalGroups } from './terminal-split';
+
+function currentEligibleBroadcastSelection(): Set<string> {
+  const current = useTerminalBroadcastStore.getState();
+  const eligibleIds = new Set(
+    useTerminalStore.getState().sessions
+      .filter((session) => session.status === 'connected' && !session.pendingConnection && canReceiveTerminalBroadcast(session))
+      .map((session) => session.sessionId),
+  );
+  return new Set([...current.sessionIds].filter((id) => eligibleIds.has(id)));
+}
 
 export function TerminalBroadcastControls({ visible }: { visible: boolean }) {
   const { t } = useI18n();
@@ -22,28 +34,33 @@ export function TerminalBroadcastControls({ visible }: { visible: boolean }) {
   const { mode, sessionIds, configure } = useTerminalBroadcastStore();
   const sessions = useTerminalStore((state) => state.sessions);
   const split = useTerminalStore((state) => state.workspaceSplit);
-  const connected = sessions.filter((session) => session.status === 'connected');
-  const paneIds = split ? getTerminalGroups(split).map((group) => group.activeSessionId) : [];
-  const paneTargetCount = connected.filter((session) => paneIds.includes(session.sessionId)).length;
-  const selectionCount = connected.filter((session) => selected.has(session.sessionId)).length;
-  const admittedCount = () => sessions.filter((session) => sessionIds.has(session.sessionId)
+  const focusHidden = useFocusStore((state) => state.enabled && !state.terminalOpen);
+  const effectiveVisible = visible && !focusHidden;
+  const connected = sessions.filter((session) => session.status === 'connected' && !session.pendingConnection);
+  const protectionSnapshot = () => connected
+    .map((session) => `${session.sessionId}:${terminalInputReadiness.isPreparing(session.sessionId) ? 1 : 0}:${agentTerminalLeaseState.get(session.sessionId) ? 1 : 0}`)
+    .join('|');
+  useSyncExternalStore(terminalInputReadiness.subscribe, protectionSnapshot);
+  useSyncExternalStore(agentTerminalLeaseState.subscribe, protectionSnapshot);
+  const admitted = sessions.filter((session) => sessionIds.has(session.sessionId)
     && canReceiveTerminalBroadcast(session)).length;
-  useSyncExternalStore(terminalInputReadiness.subscribe, admittedCount);
-  const admitted = useSyncExternalStore(agentTerminalLeaseState.subscribe, admittedCount);
+  const eligibleSessions = connected.filter((session) => canReceiveTerminalBroadcast(session));
+  const paneIds = split ? getTerminalGroups(split).map((group) => group.activeSessionId) : [];
+  const eligiblePaneTargetCount = eligibleSessions.filter((session) => paneIds.includes(session.sessionId)).length;
+  const eligibleSelectionCount = eligibleSessions.filter((session) => selected.has(session.sessionId)).length;
 
   useEffect(() => {
-    if (!visible) {
+    if (!effectiveVisible) {
       setOpen(false);
       return;
     }
     const request = () => {
-      const current = useTerminalBroadcastStore.getState();
-      setSelected(new Set(current.mode === 'custom' ? current.sessionIds : []));
+      setSelected(currentEligibleBroadcastSelection());
       setOpen(true);
     };
     document.addEventListener('shellspan:configure-terminal-broadcast', request);
     return () => document.removeEventListener('shellspan:configure-terminal-broadcast', request);
-  }, [visible]);
+  }, [effectiveVisible]);
 
   const skipped = Math.max(0, sessionIds.size - admitted);
 
@@ -60,7 +77,7 @@ export function TerminalBroadcastControls({ visible }: { visible: boolean }) {
         </AlertDescription>
         <div className="flex shrink-0 items-center gap-1">
           <Button variant="ghost" size="xs" onClick={() => {
-            setSelected(new Set(mode === 'custom' ? sessionIds : []));
+            setSelected(currentEligibleBroadcastSelection());
             setOpen(true);
           }}>{t('terminal.broadcast.configure')}</Button>
           <Button variant="outline" size="xs" onClick={() => configure('off')}>{t('terminal.broadcast.stop')}</Button>
@@ -75,15 +92,25 @@ export function TerminalBroadcastControls({ visible }: { visible: boolean }) {
             <EmptyState size="sm" icon={<RadioTowerIcon className="size-5" />} title={t('terminal.broadcast.empty')} />
           ) : (
             <>
-              <div className="flex items-center justify-end gap-1">
-                <Button type="button" variant="ghost" size="xs" disabled={selectionCount === connected.length}
-                  onClick={() => setSelected(new Set(connected.map((session) => session.sessionId)))}>
-                  {t('terminal.broadcast.selectAll')}
-                </Button>
-                <Button type="button" variant="ghost" size="xs" disabled={selectionCount === 0}
-                  onClick={() => setSelected(new Set())}>
-                  {t('terminal.broadcast.clearSelection')}
-                </Button>
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  {mode !== 'off' && (
+                    <Badge variant="secondary" size="sm">
+                      {t(mode === 'splitGroup' ? 'terminal.broadcast.mode.splitGroup' : 'terminal.broadcast.mode.custom')}
+                    </Badge>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button type="button" variant="ghost" size="xs"
+                    disabled={eligibleSessions.length === 0 || eligibleSelectionCount === eligibleSessions.length}
+                    onClick={() => setSelected(new Set(eligibleSessions.map((session) => session.sessionId)))}>
+                    {t('terminal.broadcast.selectAll')}
+                  </Button>
+                  <Button type="button" variant="ghost" size="xs" disabled={eligibleSelectionCount === 0}
+                    onClick={() => setSelected(new Set())}>
+                    {t('terminal.broadcast.clearSelection')}
+                  </Button>
+                </div>
               </div>
               <div className="flex flex-col gap-2">
                 {connected.map((session, index) => {
@@ -91,15 +118,22 @@ export function TerminalBroadcastControls({ visible }: { visible: boolean }) {
                   const eligible = canReceiveTerminalBroadcast(session);
                   return (
                     <label key={session.sessionId} htmlFor={`${id}-${index}`}
-                      className="flex cursor-default items-start gap-2.5 rounded-lg border border-border px-3 py-2 transition-colors hover:bg-accent">
+                      className={cn(
+                        'flex cursor-default items-start gap-2.5 rounded-lg border border-border px-3 py-2 transition-colors',
+                        eligible ? 'hover:bg-accent' : 'opacity-65',
+                      )}>
                       <Checkbox id={`${id}-${index}`} aria-label={session.title} className="mt-0.5"
-                        checked={selected.has(session.sessionId)}
-                        onCheckedChange={(checked) => setSelected((previous) => {
-                          const next = new Set(previous);
-                          if (checked) next.add(session.sessionId);
-                          else next.delete(session.sessionId);
-                          return next;
-                        })} />
+                        disabled={!eligible}
+                        checked={eligible && selected.has(session.sessionId)}
+                        onCheckedChange={(checked) => {
+                          if (!eligible) return;
+                          setSelected((previous) => {
+                            const next = new Set(previous);
+                            if (checked) next.add(session.sessionId);
+                            else next.delete(session.sessionId);
+                            return next;
+                          });
+                        }} />
                       <span className="min-w-0 flex-1">
                         <span className="flex flex-wrap items-center gap-1.5">
                           <span className="text-xs font-medium break-all text-foreground">{session.title}</span>
@@ -122,12 +156,17 @@ export function TerminalBroadcastControls({ visible }: { visible: boolean }) {
         </CompactDialogBody>
         <CompactDialogFooter>
           <Button variant="outline" size="sm" onClick={() => setOpen(false)}>{t('common.cancel')}</Button>
-          <Button variant="outline" size="sm" disabled={paneTargetCount < 2} onClick={() => {
+          <Button variant="outline" size="sm" disabled={eligiblePaneTargetCount < 2} onClick={() => {
             configure('splitGroup');
             setOpen(false);
           }}>{t('terminal.broadcast.usePanes')}</Button>
-          <Button size="sm" disabled={selectionCount < 2} onClick={() => {
-            configure('custom', [...selected]);
+          <Button size="sm" disabled={eligibleSelectionCount < 2} onClick={() => {
+            configure(
+              'custom',
+              eligibleSessions
+                .filter((session) => selected.has(session.sessionId))
+                .map((session) => session.sessionId),
+            );
             setOpen(false);
           }}>{t('terminal.broadcast.useSelected')}</Button>
         </CompactDialogFooter>

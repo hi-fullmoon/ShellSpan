@@ -9,7 +9,7 @@ import { TerminalSnippetDialog } from '../terminal-snippet-dialog';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
-    t: (key: string) => key,
+    t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key),
   }),
 }));
 
@@ -66,7 +66,10 @@ describe('TerminalSnippetDialog', () => {
     const dialog = screen.getByRole('dialog');
     expect(dialog.querySelector('.overflow-y-auto.overscroll-contain')).toBeInTheDocument();
     expect(dialog.querySelector('[data-slot="scroll-area"]')).toBeNull();
+    expect(screen.getByLabelText('user')).toHaveAttribute('placeholder', 'terminal.snippets.parameterPlaceholder:{"name":"user"}');
+    expect(screen.getByLabelText('host')).toHaveAttribute('placeholder', 'terminal.snippets.parameterPlaceholder:{"name":"host"}');
     expect(screen.getByLabelText('port')).toHaveValue('22');
+    expect(screen.getByLabelText('port')).toHaveAttribute('placeholder', '22');
     expect(dialog.querySelector('pre')).toHaveTextContent('ssh {{user}}@{{host}} -p {{port:22}}');
 
     const cancel = screen.getByRole('button', { name: 'common.cancel' });

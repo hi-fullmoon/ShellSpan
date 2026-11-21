@@ -63,9 +63,24 @@ export async function readTerminalCurrentDirectory(
   } catch {
     // Older or unintegrated remote sessions can still use the interactive probe.
   }
+  const liveSession = useTerminalStore.getState().sessions.find((item) => item.sessionId === session.sessionId);
+  const effectiveSession = liveSession ?? session;
   // PowerShell echoes the injected command before its response can be filtered.
   // Never write a background directory probe into a local interactive terminal.
-  if (local || !mayProbe() || controller.hasPendingUserInput() || controller.hasUnverifiedUserSubmission()) return null;
+  if (
+    local
+    || !mayProbe()
+    || controller.hasPendingUserInput()
+    || controller.hasUnverifiedUserSubmission()
+    || terminalRegistry.get(session.sessionId) !== controller
+    || effectiveSession.status !== 'connected'
+    || effectiveSession.readOnly === true
+    || effectiveSession.foregroundHandoffActive === true
+    || terminalInputReadiness.isPreparing(session.sessionId)
+    || Boolean(agentTerminalLeaseState.get(session.sessionId))
+    || (controller.terminal?.buffer.active.type !== undefined && controller.terminal.buffer.active.type !== 'normal')
+    || Boolean(controller.hasKnownCredentialPrompt?.())
+  ) return null;
 
   const token = crypto.randomUUID().replace(/-/g, '');
   const prefix = `${OSC}${token}:`;

@@ -34,7 +34,7 @@ export async function clearTerminalScreen(terminal: Terminal, sessionId: string)
   const session = useTerminalStore.getState().sessions.find(item => item.sessionId === sessionId);
   const controller = terminalRegistry.get(sessionId);
   if (terminal.buffer.active.type !== 'normal' || controller?.terminal !== terminal || session?.status !== 'connected'
-    || terminalInputReadiness.isPreparing(sessionId) || agentTerminalLeaseState.blocksUserInput(sessionId)) return 'blocked';
+    || session.readOnly || terminalInputReadiness.isPreparing(sessionId) || agentTerminalLeaseState.blocksUserInput(sessionId)) return 'blocked';
   // Terminal cells do not identify an editing region. Guessing from isWrapped
   // loses hard newlines; restoring CUP also destroys the pending-wrap state.
   // Leave the entire emulator untouched when a shell cannot redraw safely.

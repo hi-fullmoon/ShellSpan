@@ -3,8 +3,11 @@ import { describe, expect, it, beforeEach, beforeAll, vi } from 'vitest';
 import { enableRealCanvas } from '@/tests/real-canvas';
 import type { Event as TauriEvent } from '@tauri-apps/api/event';
 import type { SessionPtyInfo } from '@/types';
+import { useAppStore } from '@/stores/appStore';
+import { useTerminalBroadcastStore } from '@/stores/terminalBroadcastStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useToastStore } from '@/stores/toastStore';
+import { terminalInputReadiness } from '../terminal-input-readiness';
 import { t } from '@/locales';
 import {
   appendTerminalOutput,
@@ -60,8 +63,10 @@ function createController(sessionId: string, ptyInfo?: SessionPtyInfo) {
 describe('terminalRegistry', () => {
   beforeAll(enableRealCanvas);
   beforeEach(() => {
+    useTerminalBroadcastStore.getState().configure('off');
     useTerminalStore.setState({sessions: []});
     useToastStore.setState({toasts: []});
+    useAppStore.getState().setActiveSection('terminal');
     document.documentElement.dataset.theme = 'light';
     document.documentElement.style.setProperty('--app-surface', '#ffffff');
     document.documentElement.style.setProperty('--app-text', '#0f172a');
@@ -1127,6 +1132,220 @@ describe('terminalRegistry', () => {
       expect(requestReconnect).toHaveBeenLastCalledWith('s1');
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it('keeps readOnly enforcement across rebindSession and after unlocking/re-locking', async () => {
+    const ipc = await import('@/lib/ipc/tauri');
+    const store = useTerminalStore.getState();
+    store.addSession({ sessionId: 's1', title: 'Locked', host: 'h', port: 22, username: 'u' });
+    store.setStatus('s1', { sessionId: 's1', status: 'connected' });
+    store.toggleReadOnly('s1');
+
+    const controller = createController('s1');
+    controller.attach(document.createElement('div'));
+
+    await expect(controller.writeUserInput('ls\r')).resolves.toBe(false);
+    await expect(controller.writeUserBinaryInput(new Uint8Array([0x03]))).resolves.toBe(false);
+    expect(ipc.invokeWriteSession).not.toHaveBeenCalled();
+    expect(ipc.invokeWriteSessionBytes).not.toHaveBeenCalled();
+
+    terminalRegistry.rebindSession('s1', 's2');
+    store.reconnectSession('s1', { sessionId: 's2', title: 'Locked', host: 'h', port: 22, username: 'u' });
+    store.setStatus('s2', { sessionId: 's2', status: 'connected' });
+    await controller.whenOutputReady();
+    terminalInputReadiness.finish('s2');
+
+    await expect(controller.writeUserInput('rm -rf /\r')).resolves.toBe(false);
+    await expect(controller.writeUserBinaryInput(new Uint8Array([0x03]))).resolves.toBe(false);
+    expect(ipc.invokeWriteSession).not.toHaveBeenCalled();
+    expect(ipc.invokeWriteSessionBytes).not.toHaveBeenCalled();
+
+    store.toggleReadOnly('s2');
+    await expect(controller.writeUserInput('pwd\r')).resolves.toBe(true);
+    expect(ipc.invokeWriteSession).toHaveBeenCalledWith('s2', 'pwd\r');
+
+    store.toggleReadOnly('s2');
+    await expect(controller.writeUserInput('id\r')).resolves.toBe(false);
+    expect(ipc.invokeWriteSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps readOnly enforcement when locked for the first time after rebindSession', async () => {
+    const ipc = await import('@/lib/ipc/tauri');
+    const store = useTerminalStore.getState();
+    store.addSession({ sessionId: 's1', title: 'Writable', host: 'h', port: 22, username: 'u' });
+    store.setStatus('s1', { sessionId: 's1', status: 'connected' });
+
+    const controller = createController('s1');
+    controller.attach(document.createElement('div'));
+
+    terminalRegistry.rebindSession('s1', 's2');
+    store.reconnectSession('s1', { sessionId: 's2', title: 'Writable', host: 'h', port: 22, username: 'u' });
+    store.setStatus('s2', { sessionId: 's2', status: 'connected' });
+    await controller.whenOutputReady();
+    terminalInputReadiness.finish('s2');
+
+    await expect(controller.writeUserInput('echo ok\r')).resolves.toBe(true);
+    expect(ipc.invokeWriteSession).toHaveBeenCalledWith('s2', 'echo ok\r');
+
+    store.toggleReadOnly('s2');
+    await expect(controller.writeUserInput('whoami\r')).resolves.toBe(false);
+    expect(ipc.invokeWriteSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-arms suppressUserInput feedback across consecutive leases and ignores keys while readOnly', async () => {
+    const { invokeWriteSession } = await import('@/lib/ipc/tauri');
+    const store = useTerminalStore.getState();
+    store.addSession({ sessionId: 's1', title: 'Test', host: 'h', port: 22, username: 'u' });
+    store.setStatus('s1', { sessionId: 's1', status: 'connected' });
+
+    const controller = createController('s1');
+    controller.attach(document.createElement('div'));
+
+    const firstLeaseBlocked = vi.fn();
+    const releaseFirst = controller.suppressUserInput(firstLeaseBlocked);
+    await expect(controller.writeUserInput('a')).resolves.toBe(false);
+    expect(firstLeaseBlocked).toHaveBeenCalledTimes(1);
+    releaseFirst();
+
+    const secondLeaseBlocked = vi.fn();
+    const releaseSecond = controller.suppressUserInput(secondLeaseBlocked);
+    await expect(controller.writeUserInput('b')).resolves.toBe(false);
+    expect(secondLeaseBlocked).toHaveBeenCalledTimes(1);
+    releaseSecond();
+
+    store.toggleReadOnly('s1');
+    const thirdLeaseBlocked = vi.fn();
+    const releaseThird = controller.suppressUserInput(thirdLeaseBlocked);
+    await expect(controller.writeUserInput('c')).resolves.toBe(false);
+    expect(thirdLeaseBlocked).not.toHaveBeenCalled();
+
+    store.toggleReadOnly('s1');
+    await expect(controller.writeUserInput('d')).resolves.toBe(false);
+    expect(thirdLeaseBlocked).toHaveBeenCalledTimes(1);
+    releaseThird();
+
+    await expect(controller.writeUserInput('ok')).resolves.toBe(true);
+    expect(invokeWriteSession).toHaveBeenCalledWith('s1', 'ok');
+  });
+
+  it('omits reconnect-by-Enter hints for readOnly disconnected or failed sessions', async () => {
+    const { listenToSshClosed } = await import('@/lib/ipc/tauri');
+    let closedHandler: ((event: any) => void) | undefined;
+    vi.mocked(listenToSshClosed).mockImplementation(async (_sessionId, callback) => {
+      closedHandler = callback;
+      return () => {};
+    });
+
+    const store = useTerminalStore.getState();
+    store.addSession({ sessionId: 's1', title: 'Locked', host: 'h', port: 22, username: 'u' });
+    store.toggleReadOnly('s1');
+
+    const requestReconnect = vi.fn();
+    const controller = terminalRegistry.create('s1', vi.fn(), vi.fn(), () => 'disconnected', requestReconnect);
+    await controller.whenOutputReady();
+
+    controller.writeDisconnectedHint();
+    controller.writeConnectionFailure('boom');
+    closedHandler!({ payload: { sessionId: 's1', reasonKind: 'transport_disconnect', retryable: true } });
+    await act(async () => { await Promise.resolve(); });
+    await new Promise<void>((resolve) => controller.terminal.write('', resolve));
+
+    const buffer = controller.terminal.buffer.active;
+    const content = Array.from(
+      { length: buffer.length },
+      (_, index) => buffer.getLine(index)?.translateToString(true) ?? '',
+    ).join('\n');
+    expect(content).toContain(t('terminal.notice.closedLabel'));
+    expect(content).not.toContain(t('terminal.notice.disconnectedHint'));
+    expect(content).not.toContain(t('terminal.notice.connectionFailedHint'));
+    expect(content).not.toContain(t('terminal.notice.pressEnterReconnect'));
+
+    controller.simulateInput('\r');
+    expect(requestReconnect).not.toHaveBeenCalled();
+  });
+
+  it('broadcasts user input without forwarding protocol auto-replies and delivers paste to unopened targets', async () => {
+    const { invokeWriteSession } = await import('@/lib/ipc/tauri');
+    const store = useTerminalStore.getState();
+    for (const id of ['s1', 's2', 's3']) {
+      store.addSession({ sessionId: id, title: id, host: 'h', port: 22, username: 'u' });
+      store.setStatus(id, { sessionId: id, status: 'connected' });
+    }
+    const c1 = createController('s1');
+    const c2 = createController('s2');
+    const c3 = createController('s3');
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    try {
+      c1.attach(host);
+      await Promise.all([c1.whenOutputReady(), c2.whenOutputReady(), c3.whenOutputReady()]);
+      useTerminalBroadcastStore.getState().configure('custom', ['s1', 's2', 's3']);
+
+      await expect(c1.writeUserInput('ls\r', true)).resolves.toBe(true);
+      await act(async () => { await Promise.resolve(); });
+      expect(invokeWriteSession).toHaveBeenCalledWith('s1', 'ls\r');
+      expect(invokeWriteSession).toHaveBeenCalledWith('s2', 'ls\r');
+      expect(invokeWriteSession).toHaveBeenCalledWith('s3', 'ls\r');
+
+      vi.mocked(invokeWriteSession).mockClear();
+      await new Promise<void>((resolve) => c1.terminal.write('\u001b[6n', resolve));
+      await act(async () => { await Promise.resolve(); });
+      expect(invokeWriteSession).toHaveBeenCalledTimes(1);
+      expect(invokeWriteSession).toHaveBeenCalledWith('s1', '\u001b[1;1R');
+
+      vi.mocked(invokeWriteSession).mockClear();
+      await new Promise<void>((resolve) => c2.terminal.write('\u001b[?2004h', resolve));
+      c1.pasteUserText('echo 1\necho 2', true);
+      await act(async () => { await Promise.resolve(); });
+
+      expect(invokeWriteSession).toHaveBeenCalledTimes(3);
+      expect(invokeWriteSession).toHaveBeenCalledWith('s1', 'echo 1\recho 2');
+      expect(invokeWriteSession).toHaveBeenCalledWith('s2', '\u001b[200~echo 1\recho 2\u001b[201~');
+      expect(invokeWriteSession).toHaveBeenCalledWith('s3', 'echo 1\recho 2');
+    } finally {
+      useTerminalBroadcastStore.getState().configure('off');
+      host.remove();
+    }
+  });
+
+  it('deduplicates broadcast write failure toasts and alerts when a target rejects input', async () => {
+    const { invokeWriteSession } = await import('@/lib/ipc/tauri');
+    const store = useTerminalStore.getState();
+    for (const id of ['s1', 's2']) {
+      store.addSession({ sessionId: id, title: id, host: 'h', port: 22, username: 'u' });
+      store.setStatus(id, { sessionId: id, status: 'connected' });
+    }
+    const c1 = createController('s1');
+    const c2 = createController('s2');
+    try {
+      await Promise.all([c1.whenOutputReady(), c2.whenOutputReady()]);
+      useTerminalBroadcastStore.getState().configure('custom', ['s1', 's2']);
+
+      vi.mocked(invokeWriteSession).mockImplementation((sessionId) => (
+        sessionId === 's2' ? Promise.reject(new Error('channel closed')) : Promise.resolve()
+      ));
+      await c1.writeUserInput('a', true);
+      await c1.writeUserInput('b', true);
+      await act(async () => { await Promise.resolve(); });
+
+      const broadcastErrors = () => useToastStore.getState().toasts.filter(
+        (toast) => toast.variant === 'error' && toast.message === t('terminal.broadcast.writeFailed'),
+      );
+      expect(broadcastErrors()).toHaveLength(1);
+
+      useToastStore.setState({ toasts: [] });
+      vi.mocked(invokeWriteSession).mockResolvedValue(undefined);
+      const release = c2.suppressUserInput();
+      try {
+        await c1.writeUserInput('c', true);
+        await act(async () => { await Promise.resolve(); });
+        expect(broadcastErrors()).toHaveLength(1);
+      } finally {
+        release();
+      }
+    } finally {
+      useTerminalBroadcastStore.getState().configure('off');
     }
   });
 });

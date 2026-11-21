@@ -1,9 +1,13 @@
 import { Terminal } from '@xterm/xterm';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { hostname, userInfo } from 'node:os';
+import { clearTerminalScreen } from '@/components/terminal/terminal-content-menu';
+import { agentTerminalLeaseState } from '@/components/terminal/agent-terminal-lease-state';
+import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { getTerminalGroups, equalizeTerminalPanes, swapTerminalPane, type TerminalSplitState } from '@/components/terminal/terminal-split';
 import { terminalInputReadiness } from '@/components/terminal/terminal-input-readiness';
 import { useAppStore } from '@/stores/appStore';
+import { useFocusStore } from '@/stores/focusStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { getTerminalBroadcastTargets, useTerminalBroadcastStore } from '@/stores/terminalBroadcastStore';
 import { cleanTerminalTitle, formatTabTitle, resolveTabTitleValues } from '../tab-title';
@@ -17,9 +21,12 @@ import { serializeTerminalWorkspace } from '../terminal-workspace';
 
 const originalTerminal = useTerminalStore.getState();
 const originalSection = useAppStore.getState().activeSection;
+const originalFocus = useFocusStore.getState();
 
 afterEach(() => {
   useTerminalBroadcastStore.getState().configure('off');
+  agentTerminalLeaseState.clearAll();
+  useFocusStore.setState(originalFocus, true);
   useTerminalStore.setState(originalTerminal, true);
   useAppStore.getState().setActiveSection(originalSection);
 });
@@ -124,6 +131,153 @@ describe('terminal capabilities', () => {
     store.removeSession(third);
     store.removeSession(second);
     expect(useTerminalBroadcastStore.getState().mode).toBe('off');
+  });
+
+  it('removes a session from active broadcast when unlocked in custom or splitGroup mode', () => {
+    const ids = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+    const store = useTerminalStore.getState();
+    for (const sessionId of ids) {
+      store.addSession({ sessionId, title: hostname(), host: hostname(), port: 22, username: userInfo().username });
+      store.setStatus(sessionId, { sessionId, status: 'connected' });
+    }
+    useAppStore.getState().setActiveSection('terminal');
+    const [first, second, third] = ids;
+
+    store.toggleReadOnly(second);
+    useTerminalBroadcastStore.getState().configure('custom', ids);
+    expect(useTerminalBroadcastStore.getState().sessionIds).toEqual(new Set(ids));
+
+    store.toggleReadOnly(second);
+    expect(useTerminalBroadcastStore.getState().mode).toBe('custom');
+    expect(useTerminalBroadcastStore.getState().sessionIds).toEqual(new Set([first, third]));
+    expect(getTerminalBroadcastTargets(first)).toEqual([third]);
+
+    store.toggleReadOnly(second);
+    store.setWorkspaceSplit({
+      kind: 'split',
+      orientation: 'horizontal',
+      first: { kind: 'group', id: 'first', sessionIds: [first], activeSessionId: first },
+      second: {
+        kind: 'split',
+        orientation: 'horizontal',
+        first: { kind: 'group', id: 'second', sessionIds: [second], activeSessionId: second },
+        second: { kind: 'group', id: 'third', sessionIds: [third], activeSessionId: third },
+      },
+    });
+    useTerminalBroadcastStore.getState().configure('splitGroup');
+    expect(useTerminalBroadcastStore.getState().sessionIds).toEqual(new Set(ids));
+
+    store.toggleReadOnly(second);
+    expect(useTerminalBroadcastStore.getState().mode).toBe('custom');
+    expect(useTerminalBroadcastStore.getState().sessionIds).toEqual(new Set([first, third]));
+  });
+
+  it('evicts sessions when an Agent lease or foreground handoff ends and blocks hidden Focus mode', () => {
+    const ids = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+    const store = useTerminalStore.getState();
+    for (const sessionId of ids) {
+      store.addSession({ sessionId, title: hostname(), host: hostname(), port: 22, username: userInfo().username });
+      store.setStatus(sessionId, { sessionId, status: 'connected' });
+    }
+    useAppStore.getState().setActiveSection('terminal');
+    const [first, second, third] = ids;
+
+    const leaseFor = (sessionId: string) => ({
+      sessionId,
+      agentSessionId: 'agent-1',
+      taskId: 'task-1',
+      operationId: `op-${sessionId}`,
+      acquiredAtUnixMs: 1_000,
+      state: 'acquired' as const,
+      commandDisplay: 'ls',
+      terminalOwned: true,
+      inputBlocked: false,
+      takeoverRequested: false,
+      takeoverFailed: false,
+      requestTakeover: vi.fn(),
+    });
+
+    agentTerminalLeaseState.set(leaseFor(second));
+    useTerminalBroadcastStore.getState().configure('custom', ids);
+    expect(getTerminalBroadcastTargets(first)).toEqual([third]);
+
+    agentTerminalLeaseState.clear(second, `op-${second}`);
+    expect(useTerminalBroadcastStore.getState().mode).toBe('custom');
+    expect(useTerminalBroadcastStore.getState().sessionIds).toEqual(new Set([first, third]));
+
+    store.setWorkspaceSplit({
+      kind: 'split',
+      orientation: 'horizontal',
+      first: { kind: 'group', id: 'first', sessionIds: [first], activeSessionId: first },
+      second: {
+        kind: 'split',
+        orientation: 'horizontal',
+        first: { kind: 'group', id: 'second', sessionIds: [second], activeSessionId: second },
+        second: { kind: 'group', id: 'third', sessionIds: [third], activeSessionId: third },
+      },
+    });
+    agentTerminalLeaseState.set(leaseFor(second));
+    useTerminalBroadcastStore.getState().configure('splitGroup');
+    expect(useTerminalBroadcastStore.getState().sessionIds).toEqual(new Set(ids));
+
+    agentTerminalLeaseState.clear(second, `op-${second}`);
+    expect(useTerminalBroadcastStore.getState().mode).toBe('custom');
+    expect(useTerminalBroadcastStore.getState().sessionIds).toEqual(new Set([first, third]));
+
+    useTerminalStore.setState((state) => ({
+      sessions: state.sessions.map((session) => (
+        session.sessionId === first ? { ...session, foregroundHandoffActive: true } : session
+      )),
+    }));
+    useTerminalBroadcastStore.getState().configure('custom', [first, second, third]);
+    expect(getTerminalBroadcastTargets(second)).toEqual([third]);
+
+    useTerminalStore.setState((state) => ({
+      sessions: state.sessions.map((session) => (
+        session.sessionId === first ? { ...session, foregroundHandoffActive: false } : session
+      )),
+    }));
+    expect(useTerminalBroadcastStore.getState().sessionIds).toEqual(new Set([second, third]));
+
+    useTerminalStore.setState((state) => ({
+      sessions: state.sessions.map((session) => (
+        session.sessionId === first ? { ...session, pendingConnection: true } : session
+      )),
+    }));
+    useTerminalBroadcastStore.getState().configure('custom', [first, second]);
+    expect(useTerminalBroadcastStore.getState().mode).toBe('off');
+
+    useTerminalStore.setState((state) => ({
+      sessions: state.sessions.map((session) => (
+        session.sessionId === first ? { ...session, pendingConnection: false } : session
+      )),
+    }));
+    useTerminalBroadcastStore.getState().configure('custom', [first, second]);
+    useFocusStore.setState({ enabled: true, terminalOpen: false });
+    expect(getTerminalBroadcastTargets(first)).toEqual([]);
+  });
+
+  it('blocks clearTerminalScreen when the session is readOnly', async () => {
+    const terminal = new Terminal({ cols: 32, rows: 6, allowProposedApi: true });
+    const sessionId = crypto.randomUUID();
+    const store = useTerminalStore.getState();
+    store.addSession({ sessionId, title: hostname(), host: hostname(), port: 22, username: userInfo().username });
+    store.setStatus(sessionId, { sessionId, status: 'connected' });
+    store.toggleReadOnly(sessionId);
+    const writeUserInput = vi.fn().mockResolvedValue(true);
+    const spy = vi.spyOn(terminalRegistry, 'get').mockReturnValue({
+      terminal,
+      hasUnconfirmedLineBreak: () => false,
+      hasUnverifiedUserSubmission: () => false,
+      writeUserInput,
+    } as never);
+    try {
+      await expect(clearTerminalScreen(terminal, sessionId)).resolves.toBe('blocked');
+      expect(writeUserInput).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+      terminal.dispose();
+    }
   });
 
   it('fills snippet defaults without interpreting parameter contents or accepting control characters', () => {

@@ -122,7 +122,7 @@ const Terminal: React.FC = () => {
   );
   const splitEnabled = split !== null;
   const terminalVisible = activeSection === 'terminal';
-  const configureBroadcast = sessions.filter((session) => session.status === 'connected').length >= 2
+  const configureBroadcast = sessions.filter((session) => session.status === 'connected' && !session.pendingConnection).length >= 2
     ? () => document.dispatchEvent(new Event('shellspan:configure-terminal-broadcast')) : undefined;
 
   const focusGroup = useCallback((slot: TerminalGroupSlot): void => {
@@ -252,18 +252,23 @@ const Terminal: React.FC = () => {
 
   // Keep terminal groups in sync when sessions are opened or closed elsewhere.
   useEffect(() => {
-    if (!split) return;
-    let nextLayout: TerminalLayoutNode = split;
+    // The restore effect can populate the split during this same commit.
+    const {
+      workspaceSplit: currentSplit, sessions: currentSessions,
+      activeSessionId: currentActiveId, workspaceFocusedSlot, setActiveSession,
+    } = useTerminalStore.getState();
+    if (!currentSplit) return;
+    let nextLayout: TerminalLayoutNode = currentSplit;
 
     // Connection replacements carry their predecessor id while replacing sessionId.
     // Apply those replacements before filtering unavailable ids so the tab
     // stays in the same terminal group, including during automatic reconnect.
-    for (const session of sessions) {
+    for (const session of currentSessions) {
       if (!session.replacesSessionId) continue;
       nextLayout = replaceTerminalSessionId(nextLayout, session.replacesSessionId, session.sessionId);
     }
 
-    const availableIds = new Set(sessions.map((session) => session.sessionId));
+    const availableIds = new Set(currentSessions.map((session) => session.sessionId));
     const syncNode = (node: TerminalLayoutNode): TerminalLayoutNode => {
       if (node.kind === 'split') {
         const first = syncNode(node.first);
@@ -272,8 +277,8 @@ const Terminal: React.FC = () => {
       }
       const ids = node.sessionIds.filter((id) => availableIds.has(id));
       const nextActiveSessionId =
-        node.id === focusedGroupRef.current && activeSessionId && ids.includes(activeSessionId)
-          ? activeSessionId
+        node.id === workspaceFocusedSlot && currentActiveId && ids.includes(currentActiveId)
+          ? currentActiveId
           : ids.includes(node.activeSessionId)
             ? node.activeSessionId
             : ids[ids.length - 1] ?? '';
@@ -289,12 +294,12 @@ const Terminal: React.FC = () => {
     };
     nextLayout = syncNode(nextLayout);
     const assignedIds = new Set(getTerminalGroups(nextLayout).flatMap((group) => group.sessionIds));
-    const missingIds = sessions
+    const missingIds = currentSessions
       .map((session) => session.sessionId)
       .filter((id) => !assignedIds.has(id));
 
     if (missingIds.length > 0) {
-      const focusedGroup = findTerminalGroup(nextLayout, focusedGroupRef.current)
+      const focusedGroup = findTerminalGroup(nextLayout, workspaceFocusedSlot)
         ?? getTerminalGroups(nextLayout)[0];
       if (focusedGroup) {
         nextLayout = updateTerminalGroup(nextLayout, focusedGroup.id, (group) => ({
@@ -308,13 +313,13 @@ const Terminal: React.FC = () => {
     const pruned = pruneEmptyTerminalGroups(nextLayout);
     if (!pruned || pruned.kind === 'group') {
       setSplit(null);
-      const nextActiveId = pruned?.activeSessionId || sessions[0]?.sessionId;
-      if (nextActiveId) useTerminalStore.getState().setActiveSession(nextActiveId);
+      const nextActiveId = pruned?.activeSessionId || currentSessions[0]?.sessionId;
+      if (nextActiveId) setActiveSession(nextActiveId);
       return;
     }
     // Skip the state update (and the re-renders, pin repartition and workspace
     // save it would trigger) when the layout is referentially unchanged.
-    if (pruned !== split) setSplit(pruned);
+    if (pruned !== currentSplit) setSplit(pruned);
   }, [sessions]);
 
   // The layout's sessionIds are the source of truth for tab order while split,
@@ -964,6 +969,7 @@ const Terminal: React.FC = () => {
 
   return (
     <div
+      data-terminal-workspace
       className="flex h-full flex-col bg-app-bg"
     >
       <TerminalControllerLayer />

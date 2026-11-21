@@ -70,6 +70,7 @@ describe('terminal workspace serialization', () => {
       username: 'alice',
       status: 'connected',
       profileId: 'profile-1',
+      readOnly: true,
     }];
     const layout: TerminalSplitState = {
       kind: 'split',
@@ -96,8 +97,26 @@ describe('terminal workspace serialization', () => {
       sessionId: 'session-1',
       title: 'Production',
       profileId: 'profile-1',
+      readOnly: true,
     });
     expect(parsed.layout).toEqual(layout);
+  });
+
+  it('rejects non-boolean readOnly fields in persisted workspace entries', () => {
+    const parsed = parseTerminalWorkspace(JSON.stringify({
+      version: 1,
+      sessions: [{
+        sessionId: 's1',
+        title: 'Invalid readOnly',
+        host: 'example.com',
+        port: 22,
+        username: 'alice',
+        profileId: 'profile-1',
+        readOnly: 'yes',
+      }],
+      layout: null,
+    }));
+    expect(parsed.sessions).toEqual([]);
   });
 
   it('ignores corrupt and invalid workspace entries', () => {

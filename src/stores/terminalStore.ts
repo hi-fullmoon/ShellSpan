@@ -71,7 +71,7 @@ export interface PendingTerminalConnection {
 
 export type TerminalWorkspaceSession = Pick<
   TerminalSession,
-  'sessionId' | 'title' | 'baseTitle' | 'manualTitle' | 'titleIndex' | 'host' | 'port' | 'username' | 'profileId' | 'pinned' | 'color'
+  'sessionId' | 'title' | 'baseTitle' | 'manualTitle' | 'titleIndex' | 'host' | 'port' | 'username' | 'profileId' | 'pinned' | 'color' | 'readOnly'
 >;
 
 const sortSessions = (sessions: TerminalSession[]): TerminalSession[] => {
@@ -385,6 +385,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
         profileId: session.profileId,
         pinned: session.pinned,
         color: session.color,
+        readOnly: session.readOnly,
         status: 'disconnected' as const,
         closed: {
           sessionId: session.sessionId,

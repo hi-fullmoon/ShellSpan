@@ -171,6 +171,12 @@ const AgentTerminalStatusBar: React.FC<{
 // to the clipboard on its way to the final selection.
 export const COPY_ON_SELECT_DEBOUNCE_MS = 250;
 
+function formatPasteTargetLabel(session: TerminalSessionState): string {
+  return session.host === 'local' && session.port === 0
+    ? session.title
+    : `${session.title} (${session.username}@${session.host}:${session.port})`;
+}
+
 const TerminalPromptIndicator: React.FC<{
   label: string;
   animatedDots?: boolean;
@@ -225,7 +231,13 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   };
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchInitialQuery, setSearchInitialQuery] = useState('');
-  const [pendingPaste, setPendingPaste] = useState<{ sessionId: string; text: string; target: string; targets: string[] } | null>(null);
+  const [pendingPaste, setPendingPaste] = useState<{
+    sessionId: string;
+    text: string;
+    target: string;
+    targets: string[];
+    targetLabels: string[];
+  } | null>(null);
   const activeSessionId = activeSession?.sessionId ?? null;
   const focusUsesVisibleCommands = useFocusStore(state => state.enabled && state.targetSessionId === activeSessionId);
   const { executionSurface } = useTerminalAgentExecution(activeSession ?? undefined);
@@ -321,6 +333,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     const session = useTerminalStore.getState().sessions.find(item => item.sessionId === activeSessionId);
     const controller = terminalRegistry.get(activeSessionId);
     if (currentSessionIdRef.current !== activeSessionId || session?.status !== 'connected'
+      || session.pendingConnection
       || session.readOnly
       || !controller || controller.terminal !== terminal
       || terminalInputReadiness.isPreparing(activeSessionId)
@@ -333,8 +346,25 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     const large = new Blob([text]).size > 5 * 1024;
     if (((multiLinePasteWarning || targets.length > 0) && multiline)
       || ((largePasteWarning || targets.length > 0) && large)) {
-      setPendingPaste({ sessionId: activeSessionId, text, targets,
-        target: `${session.title} (${session.username}@${session.host}:${session.port})` });
+      const sessionsById = new Map(
+        useTerminalStore.getState().sessions.map((item) => [item.sessionId, item]),
+      );
+      const targetLabels = targets.length > 0
+        ? [
+            formatPasteTargetLabel(session),
+            ...targets
+              .map((id) => sessionsById.get(id))
+              .filter((item): item is TerminalSessionState => Boolean(item))
+              .map(formatPasteTargetLabel),
+          ]
+        : [];
+      setPendingPaste({
+        sessionId: activeSessionId,
+        text,
+        targets,
+        target: formatPasteTargetLabel(session),
+        targetLabels,
+      });
       return;
     }
     if (targets.length) controller.pasteUserText(text, true);
@@ -542,22 +572,23 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         media={pendingPaste?.targets.length ? <RadioTowerIcon /> : undefined}
         mediaVariant={pendingPaste?.targets.length ? 'warning' : 'default'}
         onConfirm={() => {
-          if (pendingPaste) {
-            const target = terminalRegistry.get(pendingPaste.sessionId);
-            const targetSession = useTerminalStore.getState().sessions.find((session) => session.sessionId === pendingPaste.sessionId);
-            if (!target || targetSession?.status !== 'connected'
-              || targetSession.readOnly
-              || terminalInputReadiness.isPreparing(pendingPaste.sessionId)
-              || agentTerminalLeaseState.blocksUserInput(pendingPaste.sessionId, targetSession.foregroundHandoffActive)) {
-              showError(t('terminal.feedback.pasteUnavailable'));
-            } else if (pendingPaste.targets.length) {
-              const current = getTerminalBroadcastTargets(pendingPaste.sessionId);
-              if (current.length !== pendingPaste.targets.length || current.some((id) => !pendingPaste.targets.includes(id))) {
-                showError(t('terminal.broadcast.targetsChanged'));
-              } else target.pasteUserText(pendingPaste.text, true);
-            } else target.terminal.paste(pendingPaste.text);
-          }
+          const pending = pendingPaste;
           setPendingPaste(null);
+          if (!pending) return;
+          const target = terminalRegistry.get(pending.sessionId);
+          const targetSession = useTerminalStore.getState().sessions.find((session) => session.sessionId === pending.sessionId);
+          if (!target || targetSession?.status !== 'connected'
+            || targetSession.pendingConnection
+            || targetSession.readOnly
+            || terminalInputReadiness.isPreparing(pending.sessionId)
+            || agentTerminalLeaseState.blocksUserInput(pending.sessionId, targetSession.foregroundHandoffActive)) {
+            showError(t('terminal.feedback.pasteUnavailable'));
+          } else if (pending.targets.length) {
+            const current = getTerminalBroadcastTargets(pending.sessionId);
+            if (current.length !== pending.targets.length || current.some((id) => !pending.targets.includes(id))) {
+              showError(t('terminal.broadcast.targetsChanged'));
+            } else target.pasteUserText(pending.text, true);
+          } else target.terminal.paste(pending.text);
         }}
       >
         {Boolean(pendingPaste?.targets.length) && (
@@ -568,7 +599,13 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
             </AlertDescription>
           </Alert>
         )}
-        {pendingPaste && <TerminalPastePreview text={pendingPaste.text} target={pendingPaste.target} />}
+        {pendingPaste && (
+          <TerminalPastePreview
+            text={pendingPaste.text}
+            target={pendingPaste.target}
+            broadcastTargets={pendingPaste.targets.length ? pendingPaste.targetLabels : undefined}
+          />
+        )}
       </ConfirmationDialog>
     </div>
   );

@@ -71,6 +71,14 @@ function resolveWindowsPty(ptyInfo?: SessionPtyInfo): { backend: 'conpty'; build
     : { backend: 'conpty' };
 }
 
+function formatTerminalPasteData(terminal: Terminal, text: string): string {
+  const normalized = text.replace(/\r?\n/g, '\r');
+  if (terminal.modes?.bracketedPasteMode && !terminal.options?.ignoreBracketedPasteMode) {
+    return `\u001b[200~${normalized}\u001b[201~`;
+  }
+  return normalized;
+}
+
 export type StatusCallback = (sessionId: string, payload: StatusEvent) => void;
 export type ClosedCallback = (sessionId: string, payload: ClosedEvent) => void;
 export type GetStatusCallback = (sessionId: string) => SessionStatus;
@@ -359,7 +367,7 @@ export interface TerminalController {
   hasUnverifiedUserSubmission(): boolean;
   hasKnownCredentialPrompt(): boolean;
   suppressUserInput(onBlocked?: () => void, shouldBlock?: () => boolean): () => void;
-  writeUserInput(data: string): Promise<boolean>;
+  writeUserInput(data: string, broadcast?: boolean): Promise<boolean>;
   writeUserBinaryInput(data: Uint8Array): Promise<boolean>;
   pasteUserText(text: string, broadcast?: boolean): void;
   writeInput(data: string): Promise<void>;
@@ -383,7 +391,10 @@ export interface TerminalController {
 
 class TerminalControllerImpl implements TerminalController {
   private keyboardBroadcastData?: string;
+  private compositionActive = false;
+  private compositionDraft = '';
   private compositionBroadcastText?: { data: string; until: number };
+  private imeKey229Until = 0;
   inputMode: TerminalController['inputMode'] = 'raw';
   private nativeDisplay?: NativeInputDisplayController;
   private rawDisplay?: IDisposable;
@@ -494,14 +505,44 @@ class TerminalControllerImpl implements TerminalController {
     this.container.className = TERMINAL_CONTAINER_CLASS;
     this.container.addEventListener('input', (event) => {
       const input = event as InputEvent;
-      if (input.isTrusted && input.target === this.terminal.textarea && input.data && input.inputType === 'insertText') {
-        this.keyboardBroadcastData = input.data;
-        queueMicrotask(() => { this.keyboardBroadcastData = undefined; });
+      if (input.isTrusted && input.target === this.terminal.textarea && input.data
+        && (input.inputType === 'insertText' || input.inputType === 'insertReplacementText')) {
+        const value = input.data;
+        this.keyboardBroadcastData = value;
+        queueMicrotask(() => {
+          if (this.keyboardBroadcastData === value) this.keyboardBroadcastData = undefined;
+        });
+      }
+    }, true);
+    this.container.addEventListener('compositionstart', (event) => {
+      if (event.isTrusted && event.target === this.terminal.textarea) {
+        this.compositionActive = true;
+        this.compositionDraft = '';
+      }
+    }, true);
+    this.container.addEventListener('compositionupdate', (event) => {
+      if (event.isTrusted && event.target === this.terminal.textarea) {
+        this.compositionDraft = event.data ?? '';
+      }
+    }, true);
+    this.container.addEventListener('keydown', (event) => {
+      if (!event.isTrusted || event.target !== this.terminal.textarea) return;
+      if (event.keyCode === 229) {
+        this.imeKey229Until = performance.now() + 500;
+      } else if (this.compositionActive && event.keyCode !== 20 && event.keyCode !== 16
+        && event.keyCode !== 17 && event.keyCode !== 18) {
+        if (this.compositionDraft && !/[\u0000-\u001f\u007f]/.test(this.compositionDraft)) {
+          this.compositionBroadcastText = { data: this.compositionDraft, until: performance.now() + 500 };
+        }
       }
     }, true);
     this.container.addEventListener('compositionend', (event) => {
-      if (event.isTrusted && event.target === this.terminal.textarea && event.data && !/[\u0000-\u001f\u007f]/.test(event.data)) {
-        this.compositionBroadcastText = { data: event.data, until: performance.now() + 100 };
+      if (event.isTrusted && event.target === this.terminal.textarea) {
+        this.compositionActive = false;
+        this.compositionDraft = '';
+        if (event.data && !/[\u0000-\u001f\u007f]/.test(event.data)) {
+          this.compositionBroadcastText = { data: event.data, until: performance.now() + 500 };
+        }
       }
     }, true);
 
@@ -514,15 +555,16 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal.onKey(({ key, domEvent }) => {
       if (!domEvent.isTrusted) return;
       this.keyboardBroadcastData = key;
-      queueMicrotask(() => { this.keyboardBroadcastData = undefined; });
+      queueMicrotask(() => {
+        if (this.keyboardBroadcastData === key) this.keyboardBroadcastData = undefined;
+      });
     });
     this.terminal.onData((data) => this.handleInput(data, this.takeBroadcastOrigin(data)));
-    this.terminal.onBinary((data) => this.handleBinaryInput(data, this.takeBroadcastOrigin(data)));
+    this.terminal.onBinary((data) => this.handleBinaryInput(data, false));
     this.terminal.onBell(() => {
       if (this.preferences.bellStyle === 'sound') playBellSound();
     });
     this.terminal.onTitleChange((title) => useTerminalStore.getState().setOscTitle(this.sessionId, title));
-    this.suppressUserInput(undefined, () => this.isReadOnly());
     this.terminal.parser.registerOscHandler(52, (payload) => {
       if (this.restoringDisplay || this.getStatus(this.sessionId) !== 'connected') return true;
       const text = decodeTerminalClipboardWrite(payload, useAppStore.getState().terminalOsc52Policy);
@@ -629,13 +671,42 @@ class TerminalControllerImpl implements TerminalController {
     }
   }
 
-  private takeBroadcastOrigin(data: string): boolean {
-    const composition = this.compositionBroadcastText;
-    const composed = composition?.data === data && composition.until >= performance.now();
-    const broadcast = composed || this.keyboardBroadcastData === data;
-    if (composed) this.compositionBroadcastText = undefined;
+  private clearBroadcastOrigin(): void {
     this.keyboardBroadcastData = undefined;
-    return broadcast;
+    this.compositionBroadcastText = undefined;
+    this.imeKey229Until = 0;
+  }
+
+  private takeBroadcastOrigin(data: string): boolean {
+    if (this.keyboardBroadcastData === data) {
+      this.keyboardBroadcastData = undefined;
+      return true;
+    }
+    this.keyboardBroadcastData = undefined;
+
+    const now = performance.now();
+    const isSafeText = data.length > 0 && !/[\u0000-\u001f\u007f]/.test(data);
+    const composition = this.compositionBroadcastText;
+    if (composition) {
+      if (composition.until < now) {
+        this.compositionBroadcastText = undefined;
+      } else if (composition.data === data || (isSafeText && composition.data.endsWith(data))) {
+        this.compositionBroadcastText = undefined;
+        this.imeKey229Until = 0;
+        return true;
+      }
+    }
+
+    if (this.imeKey229Until > 0) {
+      if (this.imeKey229Until < now) {
+        this.imeKey229Until = 0;
+      } else if (isSafeText || data === '\u007f') {
+        this.imeKey229Until = 0;
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private handleBinaryInput(data: string, broadcast: boolean): void {
@@ -694,6 +765,14 @@ class TerminalControllerImpl implements TerminalController {
     const message = t('terminal.notice.writeFailedMessage');
     const store = useToastStore.getState();
     if (!store.toasts.some(toast => toast.variant === 'error' && toast.message === message)) {
+      store.addToast(message, 'error');
+    }
+  }
+
+  private showBroadcastWriteFailure(): void {
+    const message = t('terminal.broadcast.writeFailed');
+    const store = useToastStore.getState();
+    if (!store.toasts.some((toast) => toast.variant === 'error' && toast.message === message)) {
       store.addToast(message, 'error');
     }
   }
@@ -848,7 +927,9 @@ class TerminalControllerImpl implements TerminalController {
         this.writeSystemLine(
         formatTerminalNoticeLine(t('terminal.notice.closedLabel'), event.payload.reason ? `: ${event.payload.reason}` : undefined, '31'),
         );
-        this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.hintLabel'), t('terminal.notice.pressEnterReconnect')));
+        if (!this.isReadOnly()) {
+          this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.hintLabel'), t('terminal.notice.pressEnterReconnect')));
+        }
       };
       {
         this.clearListeners();
@@ -1387,6 +1468,7 @@ class TerminalControllerImpl implements TerminalController {
   }
 
   private canWriteUserInput(): boolean {
+    if (this.isReadOnly()) return false;
     const blockers = [...this.userInputSuppressions].filter(({ shouldBlock }) => !shouldBlock || shouldBlock());
     if (blockers.length > 0) {
       if (!this.agentInputBlockedFeedbackRef) {
@@ -1446,11 +1528,17 @@ class TerminalControllerImpl implements TerminalController {
 
   pasteUserText(text: string, broadcast = false): void {
     if (this.disposed || this.getStatus(this.sessionId) !== 'connected' || !this.canWriteUserInput()) return;
-    this.terminal.paste(text);
-    if (!broadcast) return;
-    for (const sessionId of getTerminalBroadcastTargets(this.sessionId)) {
-      terminalRegistry.get(sessionId)?.pasteUserText(text);
+    this.clearBroadcastOrigin();
+    if (this.opened && this.terminal.textarea) {
+      this.terminal.paste(text);
+    } else {
+      void this.writeUserInput(formatTerminalPasteData(this.terminal, text), false).catch((error) => {
+        logger.error(`Failed to write paste input to session ${this.sessionId}`, error);
+        this.showWriteFailure();
+      });
     }
+    if (!broadcast) return;
+    this.broadcastInput((target) => target.writeUserInput(formatTerminalPasteData(target.terminal, text)));
   }
 
   writeUserInput(data: string, broadcast = false): Promise<boolean> {
@@ -1487,8 +1575,19 @@ class TerminalControllerImpl implements TerminalController {
   private broadcastInput(write: (controller: TerminalController) => Promise<boolean>): void {
     for (const sessionId of getTerminalBroadcastTargets(this.sessionId)) {
       const target = terminalRegistry.get(sessionId);
-      if (target) void write(target).catch(() => {
-        useToastStore.getState().addToast(t('terminal.broadcast.writeFailed'), 'error');
+      if (!target) {
+        logger.warn(`Broadcast target terminal controller missing for session ${sessionId}`);
+        this.showBroadcastWriteFailure();
+        continue;
+      }
+      void write(target).then((written) => {
+        if (!written) {
+          logger.warn(`Broadcast input rejected for target session ${sessionId}`);
+          this.showBroadcastWriteFailure();
+        }
+      }).catch((error) => {
+        logger.error(`Failed to broadcast input to session ${sessionId}`, error);
+        this.showBroadcastWriteFailure();
       });
     }
   }
@@ -1566,7 +1665,9 @@ class TerminalControllerImpl implements TerminalController {
     this.emitDisplayOutput('\r\n\u001b[?25l', 'local');
     this.terminal.write('\r\n\u001b[?25l', this.displayOutputParsedCallback('\r\n\u001b[?25l', 'local'));
     this.writeSystemLine(formatTerminalStatusLine('error', message));
-    this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.hintLabel'), t('terminal.notice.connectionFailedHint')));
+    if (!this.isReadOnly()) {
+      this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.hintLabel'), t('terminal.notice.connectionFailedHint')));
+    }
     this.inputBlockedNoticeRef = true;
   }
 
@@ -1575,7 +1676,9 @@ class TerminalControllerImpl implements TerminalController {
   }
 
   writeDisconnectedHint(): void {
-    this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.hintLabel'), t('terminal.notice.disconnectedHint')));
+    this.writeSystemLine(this.isReadOnly()
+      ? formatTerminalNoticeLine(t('terminal.notice.closedLabel'), undefined, '31')
+      : formatTerminalNoticeLine(t('terminal.notice.hintLabel'), t('terminal.notice.disconnectedHint')));
     this.inputBlockedNoticeRef = true;
   }
 

@@ -70,6 +70,7 @@ export function TerminalSnippetDialog({ snippet, sessionId, close }: {
                 <FieldLabel htmlFor={id + '-' + index}>{name}</FieldLabel>
                 <Input id={id + '-' + index} value={Object.prototype.hasOwnProperty.call(values, name) ? values[name] : ''} autoFocus={index === 0}
                   required={defaultValue === undefined} maxLength={4096}
+                  placeholder={defaultValue || t('terminal.snippets.parameterPlaceholder', { name })}
                   onChange={(event) => setValues((previous) => ({ ...previous, [name]: event.target.value }))} />
               </Field>)}
             </FieldGroup>

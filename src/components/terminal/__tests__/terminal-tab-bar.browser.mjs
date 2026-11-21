@@ -126,7 +126,7 @@ try {
         margins: ['0px', '0px'], barPadding: ['0px', '0px'],
         slotPadding: ['0px', '0px'], inset: 0,
         leadingInset: 0, tabPaddingX: ['6px', '6px'],
-        borderTop: '0px',
+        borderTop: selector === '[data-terminal-tab-bar]' ? '1px' : '0px',
         borderLeft: '1px',
         borderBottom: '0px',
       });
@@ -173,6 +173,7 @@ try {
         return { top: style.borderTopWidth, bottom: style.borderBottomWidth,
           left: style.borderLeftWidth, right: style.borderRightWidth,
           color: style.borderRightColor, line: getComputedStyle(bar, '::after').borderBottomColor,
+          shadow: style.boxShadow,
           height: tab.getBoundingClientRect().height };
       });
       assert.equal(borders.height, 32);
@@ -181,6 +182,7 @@ try {
       assert.equal(borders.left, '1px');
       assert.equal(borders.right, '1px');
       assert.equal(borders.color, borders.line);
+      assert.equal(borders.shadow, 'none');
       const before = await sftpTabs.nth(index).locator('span').first().boundingBox();
       await sftpTabs.nth((index + 1) % 3).hover();
       const after = await sftpTabs.nth(index).locator('span').first().boundingBox();
@@ -199,13 +201,16 @@ try {
       await assertTabSeparators(tabs);
       const geometry = await tabs.evaluateAll((elements) => elements.map((element) => {
         const rect = element.getBoundingClientRect();
+        const title = element.querySelector('span.truncate').getBoundingClientRect();
         const style = getComputedStyle(element);
-        return { left: rect.left, right: rect.right, topBorder: style.borderTopWidth, bottomBorder: style.borderBottomWidth };
+        return { left: rect.left, right: rect.right, topBorder: style.borderTopWidth, bottomBorder: style.borderBottomWidth,
+          titleCenter: title.top + title.height / 2 - rect.top };
       }));
       assert.equal(geometry[0].right, geometry[1].left);
       assert.equal(geometry[1].right, geometry[2].left);
-      assert.equal(geometry[index].topBorder, '0px');
+      assert.equal(geometry[index].topBorder, theme === 'light' ? '1px' : '0px');
       assert.equal(geometry[index].bottomBorder, '0px');
+      assert.ok(geometry.every(tab => tab.titleCenter === 16), 'Tab titles stay vertically centered');
       await page.waitForFunction(() => {
         const bar = document.querySelector('[data-terminal-tab-bar]');
         const surface = getComputedStyle(document.documentElement).getPropertyValue('--app-surface').trim();
@@ -218,56 +223,66 @@ try {
       });
       const boundary = await page.evaluate(() => {
         const bar = document.querySelector('[data-terminal-tab-bar]');
+        const topLine = getComputedStyle(bar, '::before');
         const line = getComputedStyle(bar, '::after');
         const active = getComputedStyle(bar.querySelector('[role="tab"][aria-selected="true"]'));
         return { lineColor: line.borderBottomColor, sideColor: active.borderRightColor,
-          topColor: active.borderTopColor, leftColor: active.borderLeftColor,
-          leftWidth: active.borderLeftWidth, rightWidth: active.borderRightWidth,
-          lineBackground: line.backgroundColor, tabBackground: active.backgroundColor };
+          topColor: topLine.borderTopColor, topWidth: topLine.borderTopWidth, leftColor: active.borderLeftColor,
+          leftWidth: active.borderLeftWidth, rightWidth: active.borderRightWidth, lineWidth: line.borderBottomWidth };
       });
-      assert.equal(boundary.lineColor, boundary.sideColor);
-      assert.equal(boundary.topColor, boundary.sideColor);
+      assert.equal(boundary.topColor, boundary.lineColor);
+      assert.equal(boundary.topWidth, '1px');
       assert.equal(boundary.leftColor, boundary.sideColor);
       assert.equal(boundary.leftWidth, '1px');
       assert.equal(boundary.rightWidth, '1px');
+      assert.equal(boundary.lineWidth, '1px');
       await page.mouse.move(width / 2, 400);
       await page.waitForTimeout(250);
       const strip = page.locator('[data-terminal-tab-bar]');
       const samples = await strip.evaluate(bar => {
         const bounds = bar.getBoundingClientRect();
+        const visibleBounds = bar.querySelector('[data-slot="scroll-area-viewport"]').getBoundingClientRect();
         const tabs = [...bar.querySelectorAll('[role="tab"]')].map(tab => ({
           active: tab.getAttribute('aria-selected') === 'true', bounds: tab.getBoundingClientRect(),
-        })).map(tab => ({ active: tab.active,
-          left: Math.max(bounds.left, tab.bounds.left), right: Math.min(bounds.right, tab.bounds.right) }));
+        })).map(tab => ({ ...tab,
+          left: Math.max(visibleBounds.left, tab.bounds.left), right: Math.min(visibleBounds.right, tab.bounds.right) }));
         const active = tabs.find(tab => tab.active);
-        const inactive = tabs.find(tab => !tab.active && tab.right - tab.left > 8);
+        const inactive = tabs.find(tab => !tab.active && tab.right - tab.left > 12);
         return { active: Math.floor((active.left + active.right) / 2 - bounds.left),
-          inactive: inactive ? Math.floor((inactive.left + inactive.right) / 2 - bounds.left) : null };
+          inactive: inactive ? Math.floor((inactive.left + inactive.right) / 2 - bounds.left) : null,
+        };
       });
       const image = await loadImage(await strip.screenshot({ animations: 'disabled' }));
       const canvas = createCanvas(image.width, image.height);
       const context = canvas.getContext('2d');
       context.drawImage(image, 0, 0);
       const pixel = (x, y) => [...context.getImageData(x, y, 1, 1).data];
-      assert.deepEqual(pixel(samples.active, image.height - 1), pixel(samples.active, image.height - 5),
-        `The active tab must cover the bottom separator (${theme}, ${width}px, tab ${index})`);
-      if (samples.inactive !== null) assert.notDeepEqual(pixel(samples.inactive, image.height - 1), pixel(samples.inactive, image.height - 5),
-        `The separator remains visible below inactive tabs (${theme}, ${width}px)`);
+      const top = pixel(samples.active, 0);
+      const fill = pixel(samples.active, 4);
+      assert.notDeepEqual(top, fill, `The top border crosses the active tab (${theme}, ${width}px, tab ${index})`);
+      assert.deepEqual(pixel(samples.active, 1), fill, `The top border occupies one pixel (${theme}, ${width}px)`);
+      assert.deepEqual(pixel(samples.active, image.height - 2), fill,
+        `The bottom border occupies one pixel (${theme}, ${width}px)`);
+      for (const x of [samples.active, samples.inactive, image.width - 2].filter(x => x !== null)) {
+        assert.deepEqual(pixel(x, 0), top, `The top border is continuous (${theme}, ${width}px, x=${x})`);
+        assert.deepEqual(pixel(x, image.height - 1), top,
+          `The bottom border matches the top across the bar (${theme}, ${width}px, x=${x})`);
+      }
       if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tabs-${theme}-${width}-selected-${index}.png` });
     }
-    const appearance = await page.evaluate(() => {
-      const properties = ['height', 'width', 'backgroundColor', 'borderTopWidth', 'borderBottomWidth',
-        'borderLeftWidth', 'borderRightWidth', 'borderLeftColor', 'borderRightColor',
-        'borderTopLeftRadius', 'borderTopRightRadius', 'boxShadow', 'paddingLeft', 'paddingRight'];
+    const appearance = await page.evaluate((theme) => {
+      const properties = ['height', 'width', 'backgroundColor', 'borderBottomWidth', 'borderLeftWidth', 'borderRightWidth',
+        'borderTopLeftRadius', 'borderTopRightRadius', 'paddingLeft', 'paddingRight'];
+      if (theme === 'dark') properties.push('borderTopWidth', 'borderLeftColor', 'borderRightColor');
       return ['[data-terminal-tab-bar]', '[data-sftp-tab-bar]'].map((selector) => {
         const bar = document.querySelector(selector);
         const tab = bar.querySelector('[role="tab"][aria-selected="true"]');
         const style = getComputedStyle(tab);
-        const line = getComputedStyle(bar, '::after');
         return { tab: properties.map((property) => style[property]),
-          strip: getComputedStyle(bar).backgroundColor, line: line.borderBottomColor };
+          strip: getComputedStyle(bar).backgroundColor,
+          line: theme === 'dark' ? getComputedStyle(bar, '::after').borderBottomColor : undefined };
       });
-    });
+    }, theme);
     assert.deepEqual(appearance[0], appearance[1], `${theme} ${width}px terminal/SFTP appearance differs`);
     if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tabs-multiple-${width}.png` });
   }

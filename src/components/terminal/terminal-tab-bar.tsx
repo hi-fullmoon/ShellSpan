@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, type WheelEvent as ReactWheelEvent } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore, type WheelEvent as ReactWheelEvent } from 'react';
 import {
   DndContext,
   type DragEndEvent,
@@ -33,9 +33,11 @@ import { useCloseTerminal } from '@/hooks/useCloseTerminal';
 import { cancelSshConnection } from '@/lib/terminal/ssh-connection-attempt';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
-import { useTerminalBroadcastStore } from '@/stores/terminalBroadcastStore';
+import { canReceiveTerminalBroadcast, useTerminalBroadcastStore } from '@/stores/terminalBroadcastStore';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { TerminalCloseDetails } from './terminal-close-details';
+import { agentTerminalLeaseState } from './agent-terminal-lease-state';
+import { terminalInputReadiness } from './terminal-input-readiness';
 import type { TerminalSplitDirection } from './terminal-split';
 import type { SessionStatus } from '@/types';
 import '@/components/ui/session-tab-bar.css';
@@ -113,7 +115,16 @@ const SessionTab: React.FC<SessionTabProps> = ({
   const colorScheme = useAppStore((state) => state.terminalColorScheme);
   const colorOverrides = useAppStore((state) => state.terminalColorOverrides);
   const agentTarget = useFocusStore(state => state.enabled && state.targetSessionId === session.sessionId);
-  const broadcastTarget = useTerminalBroadcastStore((state) => state.sessionIds.has(session.sessionId));
+  const inBroadcast = useTerminalBroadcastStore((state) => state.sessionIds.has(session.sessionId));
+  const broadcastPreparing = useSyncExternalStore(
+    terminalInputReadiness.subscribe,
+    () => inBroadcast && terminalInputReadiness.isPreparing(session.sessionId),
+  );
+  const broadcastLeased = useSyncExternalStore(
+    agentTerminalLeaseState.subscribe,
+    () => inBroadcast && Boolean(agentTerminalLeaseState.get(session.sessionId)),
+  );
+  const broadcastTarget = inBroadcast && !broadcastPreparing && !broadcastLeased && canReceiveTerminalBroadcast(session);
   const terminalTheme = colorScheme === 'app' ? colorOverrides : resolveTerminalTheme(colorScheme, colorOverrides);
   const tab = (
     <div
@@ -153,7 +164,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
         'session-tab relative flex h-8 w-42 shrink-0 cursor-default items-center gap-1 rounded-t-md border-x border-transparent px-1.5 text-left text-xs outline-none transition-[background-color,color,opacity] select-none',
         dragPreview && 'session-tab-drag-preview',
         !dragPreview && (active
-          ? 'border-app-border/50 bg-app-surface text-app-text'
+          ? 'border-(--terminal-tab-border) bg-app-surface text-app-text'
           : 'border-transparent bg-transparent text-app-text-soft hover:bg-accent hover:text-app-text'),
         dragging && !dragPreview && 'opacity-80',
       )}
@@ -678,7 +689,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
         onNewTabClick();
       }}
       className={cn(
-        'group/tabbar relative my-0 flex h-8 items-start bg-app-surface-muted py-0 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-app-border/50 after:bg-app-bg',
+        'group/tabbar relative my-0 flex h-8 items-start bg-app-surface-muted py-0',
         shouldHide && 'h-0 overflow-hidden',
       )}
     >

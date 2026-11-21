@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { terminalRegistry, type TerminalOutputFilter } from '@/components/terminal/registry/terminal-registry';
 import { invokeGetTerminalBrokerSnapshot } from '@/lib/ipc/tauri';
 import { readTerminalCurrentDirectory } from '@/lib/terminal/terminal-current-directory';
-import type { TerminalSession } from '@/stores/terminalStore';
+import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 
 const session: TerminalSession = {
   sessionId: 'terminal-current-directory',
@@ -18,7 +18,10 @@ vi.mock('@/lib/ipc/tauri', () => ({
   invokeGetTerminalBrokerSnapshot: vi.fn().mockResolvedValue({ session: null }),
 }));
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  useTerminalStore.setState({ sessions: [], activeSessionId: null });
+  vi.restoreAllMocks();
+});
 
 describe('readTerminalCurrentDirectory', () => {
   it('uses the integrated prompt directory without injecting input into local PowerShell', async () => {
@@ -89,5 +92,28 @@ describe('readTerminalCurrentDirectory', () => {
 
     await expect(readTerminalCurrentDirectory(session)).resolves.toBeNull();
     expect(controller.hasPendingUserInput).toHaveBeenCalledOnce();
+  });
+
+  it('does not inject a probe into a read-only remote terminal while still using broker state', async () => {
+    const controller = {
+      hasPendingUserInput: vi.fn(() => false),
+      hasUnverifiedUserSubmission: vi.fn(() => false),
+      whenOutputReady: vi.fn(async () => undefined),
+      writeInput: vi.fn(),
+    };
+    vi.spyOn(terminalRegistry, 'get').mockReturnValue(controller as never);
+
+    await expect(readTerminalCurrentDirectory({ ...session, readOnly: true })).resolves.toBeNull();
+    expect(controller.writeInput).not.toHaveBeenCalled();
+
+    useTerminalStore.setState({ sessions: [{ ...session, readOnly: true }] });
+    await expect(readTerminalCurrentDirectory(session)).resolves.toBeNull();
+    expect(controller.writeInput).not.toHaveBeenCalled();
+
+    vi.mocked(invokeGetTerminalBrokerSnapshot).mockResolvedValueOnce({
+      session: { promptReady: true, currentDirectory: '/srv/readonly' },
+    } as Awaited<ReturnType<typeof invokeGetTerminalBrokerSnapshot>>);
+    await expect(readTerminalCurrentDirectory({ ...session, readOnly: true })).resolves.toBe('/srv/readonly');
+    expect(controller.writeInput).not.toHaveBeenCalled();
   });
 });

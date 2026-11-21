@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import { webkit } from 'playwright';
+import { createCanvas, loadImage } from 'canvas';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const text = readFileSync(`${root}src/components/ui/split-pane.tsx`, 'utf8');
@@ -42,12 +43,16 @@ const server = await createServer({
       vite.middlewares.use((request, response, next) => {
         if (request.url !== '/divider') return next();
         response.setHeader('Content-Type', 'text/html');
-        response.end('<html data-theme="dark"><body style="background:var(--app-surface)"><div id="root" style="height:600px"></div><script type="module">window.runtime = await import("/divider-runtime.js");</script></body></html>');
+        response.end('<html data-theme="dark"><body style="background:var(--app-surface)"><div id="root" style="height:600px"></div></body></html>');
       });
     },
   }],
   server: { host: '127.0.0.1', port: 0, hmr: false, watch: null },
 });
+
+async function loadDividerRuntime(page) {
+  await page.evaluate(async () => { window.runtime = await import('/divider-runtime.js'); });
+}
 
 async function checkAiDividerFocus(page, width) {
   await page.evaluate(async () => {
@@ -116,8 +121,22 @@ async function checkTerminalDrag(page, width) {
   const handle = page.locator('[data-slot="ai-panel-resize-handle"]');
   const screen = page.locator('#terminal .xterm-screen');
   await handle.waitFor();
-  const initial = await page.evaluate(() => window.dragTerminal.measure());
   const { x, y, width: handleWidth, height } = await handle.boundingBox();
+  assert.equal(handleWidth, 8, `${width}px: the divider retains its drag target`);
+  for (const theme of ['dark', 'light']) {
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    const image = await loadImage(await page.screenshot({
+      clip: { x: Math.round(x) - 60, y: Math.round(y + height / 2) - 40, width: 120, height: 80 },
+      path: `${root}artifacts/tests/terminal-divider/terminal-ai-divider-${theme}-${width}.png`,
+    }));
+    const context = createCanvas(image.width, image.height).getContext('2d');
+    context.drawImage(image, 0, 0);
+    const pixel = column => context.getImageData(column, 40, 1, 1).data;
+    assert.notDeepEqual(pixel(60), pixel(61), `${width}px/${theme}: the divider is visible at the panel edge`);
+    assert.deepEqual(pixel(61), pixel(62), `${width}px/${theme}: the divider is only one pixel wide`);
+  }
+
+  const initial = await page.evaluate(() => window.dragTerminal.measure());
   await page.mouse.move(x + handleWidth / 2, y + height / 2);
   await page.mouse.down();
   await page.mouse.move(x - 80, y + height / 2, { steps: 8 });
@@ -148,7 +167,7 @@ try {
   for (const width of [1400, 640]) {
     const page = await browser.newPage({ viewport: { width, height: 700 } });
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/divider`);
-    await page.waitForFunction(() => window.runtime);
+    await loadDividerRuntime(page);
     await page.evaluate(async () => {
       const { React, createRoot, SplitPane, FocusDivider, initI18n } = window.runtime;
       await initI18n('zh-CN');
@@ -215,10 +234,10 @@ try {
     const page = await browser.newPage({ viewport: { width, height: 700 } });
     try {
       await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/divider`);
-      await page.waitForFunction(() => window.runtime);
+      await loadDividerRuntime(page);
       await checkAiDividerFocus(page, width);
       await page.reload();
-      await page.waitForFunction(() => window.runtime);
+      await loadDividerRuntime(page);
       await checkTerminalDrag(page, width);
     } finally {
       await page.close();

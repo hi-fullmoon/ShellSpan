@@ -12,8 +12,72 @@
   border-top-left-radius: 0;
 }
 
+/* Let the split divider draw the left edge. Keep the border width so the tab contents stay in place. */
+[data-direction='horizontal'] > [data-slot='split-pane-divider'] + [data-slot='resizable-panel']
+  [data-terminal-tab-bar] .session-tab-slot:first-child > .session-tab {
+  border-left-color: transparent;
+}
+
 .session-tab[aria-selected='true'] {
   z-index: 1;
+}
+
+:is([data-terminal-workspace], [data-terminal-tab-bar]) {
+  /* Match the title bar's border over its surface, regardless of the terminal theme. */
+  --terminal-tab-edge-surface: color-mix(in srgb, var(--app-surface) 90%, var(--background));
+  --terminal-tab-edge-color: color-mix(in oklab, var(--app-border) 50%, transparent);
+  --terminal-tab-border: var(--terminal-tab-edge-color);
+}
+
+[data-slot='focus-layout'][data-focus] :is([data-terminal-workspace], [data-terminal-tab-bar]) {
+  --terminal-tab-edge-surface: var(--card);
+}
+
+/* Paint both edges above the tabs and the inactive pane shading. */
+[data-terminal-tab-bar]::before,
+[data-terminal-tab-bar]::after {
+  @apply pointer-events-none absolute inset-x-0 z-20;
+  content: '';
+  background-color: var(--terminal-tab-edge-surface);
+}
+
+[data-terminal-tab-bar]::before {
+  top: 0;
+  border-top: 1px solid var(--terminal-tab-edge-color);
+}
+
+[data-terminal-tab-bar]::after {
+  bottom: 0;
+  border-bottom: 1px solid var(--terminal-tab-edge-color);
+}
+
+/* In the workspace, the header, broadcast banner, or divider supplies the top edge. */
+[data-terminal-workspace] [data-terminal-tab-bar]::before {
+  content: none;
+}
+
+/* A horizontal divider also forms the lower tab bar's top edge. */
+[data-terminal-workspace-area] [data-direction='vertical'] > [data-slot='split-pane-divider'] {
+  background-color: var(--terminal-tab-edge-surface);
+  box-shadow: inset 0 1px var(--terminal-tab-edge-color);
+}
+
+:root:not([data-theme='dark']) :is([data-terminal-workspace], [data-terminal-tab-bar]) {
+  --terminal-tab-border: color-mix(in srgb, var(--app-surface) 75%, var(--app-text-soft));
+}
+
+:root:not([data-theme='dark']) [data-terminal-tab-bar] .session-tab {
+  /* Balance the reserved top border to keep the tab contents centered. */
+  border-top: 1px solid transparent;
+  padding-bottom: 1px;
+}
+
+/* Use the tab outline color on the part of the divider alongside the tab bars. */
+:root:not([data-theme='dark']) [data-terminal-workspace-area] [data-direction='horizontal']
+  > [data-slot='split-pane-divider'] {
+  background-image: linear-gradient(var(--terminal-tab-border), var(--terminal-tab-border));
+  background-size: 100% calc(var(--spacing) * 8);
+  background-repeat: no-repeat;
 }
 
 /* Absolute offsets start inside the tab's 1px border. Align the leading

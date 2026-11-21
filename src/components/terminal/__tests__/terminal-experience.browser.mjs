@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import { chromium, webkit } from 'playwright';
+import { createCanvas, loadImage } from 'canvas';
 
 // Exercise real xterm parsing, searching, scrolling, browser clipboard failures
 // and the production React components. Terminal text comes from the repository.
@@ -42,6 +43,7 @@ const server = await createServer({
         export { TerminalPane } from '/src/components/terminal/terminal-pane.tsx';
         export { TerminalResizeIndicator } from '/src/components/terminal/terminal-resize-indicator.tsx';
         export { default as TerminalWorkspace } from '/src/components/terminal/index.tsx';
+        export { AppShell } from '/src/components/layout/app-shell.tsx';
         export { AiPanel } from '/src/components/ai/ai-panel.tsx';
         export { agentTerminalLeaseState } from '/src/components/terminal/agent-terminal-lease-state.ts';
         export { useTerminalTaskNavigation } from '/src/components/terminal/agent-terminal-task-navigation.ts';
@@ -1169,13 +1171,17 @@ try {
         useTerminalStore, useFocusStore, useAppStore, createAgentTerminalLeaseCoordinator } = window.runtime;
       const previousSessions = useTerminalStore.getState().sessions;
       const ids = [crypto.randomUUID(), crypto.randomUUID()];
+      const unavailableSessionId = crypto.randomUUID();
       useTerminalStore.setState({ sessions: [], activeSessionId: null, restoredLayout: null });
-      useTerminalStore.getState().addRestoredSessions(ids.map((sessionId) => ({ ...window.identity, sessionId })));
-      useTerminalStore.setState({ activeSessionId: ids[0], restoredLayout: {
-        kind: 'split', orientation: 'horizontal', split: 0.5,
-        first: { kind: 'group', id: 'first', sessionIds: [ids[0]], activeSessionId: ids[0] },
-        second: { kind: 'group', id: 'second', sessionIds: [ids[1]], activeSessionId: ids[1] },
-      } });
+      useTerminalStore.getState().addRestoredSessions(ids.map((sessionId) => ({ ...window.identity, sessionId })), {
+        kind: 'split', orientation: 'horizontal',
+        first: {
+          kind: 'split', orientation: 'horizontal', split: 0.5,
+          first: { kind: 'group', id: 'first', sessionIds: [ids[0]], activeSessionId: ids[0] },
+          second: { kind: 'group', id: 'second', sessionIds: [ids[1]], activeSessionId: ids[1] },
+        },
+        second: { kind: 'group', id: 'unavailable', sessionIds: [unavailableSessionId], activeSessionId: unavailableSessionId },
+      });
       useAppStore.setState({ activeSection: 'terminal', restoreWorkspace: false });
       const host = document.createElement('div');
       host.style.cssText = 'position:fixed;inset:0;background:white';
@@ -1195,6 +1201,7 @@ try {
         flushSync(() => root.render(React.createElement(TerminalWorkspace)));
         await new Promise(requestAnimationFrame);
         await new Promise(requestAnimationFrame);
+        const restoredPanes = Array.from(surface.querySelectorAll('[data-terminal-group]'), group => group.dataset.terminalGroup);
         const first = terminalRegistry.get(ids[0]);
         const second = terminalRegistry.get(ids[1]);
         const store = useTerminalStore.getState();
@@ -1266,6 +1273,7 @@ try {
         await new Promise(requestAnimationFrame);
         await new Promise(requestAnimationFrame);
         return {
+          restoredPanes,
           workspaceIsolation: Boolean(focusStartsUnsplit && terminalRestored && focusRestored && controllersRetained && activePaneAligned),
           commandWorkspaceRouting: focusCommandRouted && focusSelectionPreserved
             && !useFocusStore.getState().enabled && useTerminalStore.getState().workspace === 'terminal'
@@ -1289,6 +1297,7 @@ try {
       }
     });
     assert.deepEqual(splitFocus, {
+      restoredPanes: ['first', 'second'],
       workspaceIsolation: true,
       commandWorkspaceRouting: true,
       sourceInitiallyFocused: true, revealPreservedFocus: true, focusedOtherTerminal: false,
@@ -1297,7 +1306,7 @@ try {
     });
   }
   const workspaceResize = await page.evaluate(async ({ output, identity }) => {
-    const { React, createRoot, flushSync, TerminalWorkspace, terminalRegistry, useAppStore, useTerminalStore } = window.runtime;
+    const { React, createRoot, flushSync, AppShell, TerminalWorkspace, terminalRegistry, useAppStore, useTerminalStore } = window.runtime;
     const store = useTerminalStore.getState();
     const { sessions, activeSessionId, restoredLayout } = store;
     useTerminalStore.setState({ sessions: [], activeSessionId: null, restoredLayout: null });
@@ -1309,7 +1318,7 @@ try {
     });
     useAppStore.setState({ activeSection: 'terminal', restoreWorkspace: false });
     const host = document.createElement('div');
-    host.style.cssText = 'position:fixed;left:0;top:0;width:700px;height:500px;background:white';
+    host.style.cssText = 'position:fixed;left:0;top:0;width:700px;height:500px;background:var(--background)';
     host.dataset.terminalWheelCheck = '';
     document.body.appendChild(host);
     const root = createRoot(host);
@@ -1319,7 +1328,9 @@ try {
       useTerminalStore.setState({ sessions, activeSessionId, restoredLayout });
       host.remove();
     };
-    flushSync(() => root.render(React.createElement(TerminalWorkspace)));
+    flushSync(() => root.render(React.createElement(AppShell, null,
+      React.createElement('div', { className: 'min-h-0 flex-1' }, React.createElement(TerminalWorkspace)),
+    )));
     const frame = () => new Promise(requestAnimationFrame);
     for (let i = 0; i < 10; i++) await frame();
     await new Promise((resolve) => terminalRegistry.get(ids[1]).terminal.write(output.replace(/\n/g, '\r\n'), resolve));
@@ -1408,7 +1419,7 @@ try {
     for (const theme of ['light', 'dark']) {
       await page.evaluate(theme => document.documentElement.setAttribute('data-theme', theme), theme);
       await actions.blur();
-      await page.mouse.move(0, 50);
+      await page.mouse.move(0, barBox.y + 50);
       await tabBar.screenshot({ animations: 'disabled',
         path: `${root}artifacts/tests/terminal-tab-actions/icon-${theme}.png` });
       const iconColor = await actions.locator('svg').evaluate(icon => getComputedStyle(icon).color);
@@ -1433,7 +1444,7 @@ try {
 
       await actions.click();
       await actionsMenu.waitFor();
-      await page.mouse.move(0, 50);
+      await page.mouse.move(0, barBox.y + 50);
       await page.screenshot({ animations: 'disabled', clip: { x: 0, y: 0, width: 320, height: 224 },
         path: `${root}artifacts/tests/terminal-tab-actions/menu-${theme}.png` });
       const openStyle = await actions.evaluate(element => ({
@@ -1481,6 +1492,44 @@ try {
     await splitRight.click();
     const groups = host.locator('[data-terminal-group]');
     await groups.nth(1).waitFor();
+    const rightTab = groups.nth(1).getByRole('tab', { selected: true });
+    const divider = host.locator('[data-slot="split-pane-divider"]');
+    for (const width of [401, 901]) {
+      await page.setViewportSize({ width, height: 700 });
+      await host.evaluate((element, width) => { element.style.width = `${width}px`; }, width);
+      const tabBox = await rightTab.boundingBox();
+      const dividerBox = await divider.boundingBox();
+      const contentBox = await groups.nth(1).locator('[data-terminal-content]').boundingBox();
+      assert.equal(tabBox.x, dividerBox.x + dividerBox.width, 'The right tab starts at the split divider');
+      assert.equal(tabBox.x, contentBox.x, 'The right tab and its content share the same left edge');
+      const leftContextWidth = 40;
+      const clip = { x: Math.round(tabBox.x) - leftContextWidth, y: Math.round(tabBox.y),
+        width: leftContextWidth + tabBox.width + 8, height: tabBox.height + 20 };
+      for (const theme of ['dark', 'light']) {
+        await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+        const image = await loadImage(await page.screenshot({
+          animations: 'disabled',
+          clip,
+          path: `${root}artifacts/tests/terminal-tab-actions/split-edge-${theme}-${width}.png`,
+        }));
+        const context = createCanvas(image.width, image.height).getContext('2d');
+        context.drawImage(image, 0, 0);
+        // Compare the leading edge with the adjacent fill, below the top stroke.
+        const column = (x) => context.getImageData(x, 1, 1, tabBox.height - 1).data;
+        assert.deepEqual(column(leftContextWidth), column(leftContextWidth + 3),
+          `${width}px/${theme}: the tab must not paint a second line next to the split divider`);
+        if (theme === 'light') {
+          const pixel = (x, y) => context.getImageData(x, y, 1, 1).data;
+          const dividerEdge = pixel(leftContextWidth - 1, 8);
+          assert.deepEqual(dividerEdge, pixel(leftContextWidth + tabBox.width - 1, 8),
+            `${width}px: the divider shares the selected tab's border color`);
+          assert.notDeepEqual(dividerEdge, pixel(leftContextWidth - 1, tabBox.height + 8),
+            `${width}px: the stronger edge follows the height of the tab strip`);
+        }
+      }
+    }
+    await page.setViewportSize({ width: 400, height: 700 });
+    await host.evaluate(element => { element.style.width = '400px'; });
     const splitActions = groups.nth(1).getByRole('button', { name: '终端页签操作', exact: true });
     await splitActions.click();
     assert.equal(await splitRight.isDisabled(), true, 'A pane narrower than 240 px cannot split horizontally');
@@ -1490,6 +1539,56 @@ try {
     assert.equal(await groups.count(), 1);
     await restore.click();
     await groups.nth(1).waitFor();
+    await splitActions.click();
+    await actionsMenu.getByRole('menuitem', { name: '退出分屏', exact: true }).click();
+    await groups.first().waitFor({ state: 'detached' });
+
+    const assertMatchingTabBorders = async (bar, separator, name, colorTolerance = 0) => {
+      const [barBox, separatorBox] = await Promise.all([bar.boundingBox(), separator.boundingBox()]);
+      assert.equal(barBox.y, separatorBox.y + separatorBox.height, `${name}: the tab bar touches the separator`);
+      assert.equal(barBox.height, 32, `${name}: the border fits within the tab bar height`);
+      const image = await loadImage(await page.screenshot({
+        animations: 'disabled',
+        clip: { x: Math.round(barBox.x), y: Math.round(barBox.y) - 2, width: Math.round(barBox.width), height: barBox.height + 4 },
+        path: `${root}artifacts/tests/terminal-tab-actions/${name}.png`,
+      }));
+      const context = createCanvas(image.width, image.height).getContext('2d');
+      context.drawImage(image, 0, 0);
+      const pixel = (x, y) => context.getImageData(x, y, 1, 1).data;
+      for (const x of [80, image.width - 2]) {
+        const top = pixel(x, 1);
+        const bottom = pixel(x, barBox.height + 1);
+        assert.notDeepEqual(pixel(x, 0), top, `${name}: the separator is one pixel high at x=${x}`);
+        assert.deepEqual(pixel(x, 2), pixel(x, 5), `${name}: the tab bar starts directly below the separator at x=${x}`);
+        assert.ok(bottom.every((channel, index) => Math.abs(channel - top[index]) <= colorTolerance),
+          `${name}: the bottom border (${bottom}) matches the top (${top}) at x=${x}`);
+      }
+      assert.deepEqual(pixel(80, barBox.height), pixel(80, barBox.height - 3), `${name}: the bottom border is one pixel high`);
+    };
+    const titleBar = host.locator('[data-tauri-drag-region]');
+    // The translucent title bar is composited separately and can round a color channel by one unit.
+    const titleBarColorTolerance = 1;
+    await page.evaluate(() => window.runtime.useAppStore.getState().setTerminalColorScheme('app'));
+    await tabBar.getByRole('tab').first().click();
+    for (const theme of ['dark', 'light']) {
+      await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+      await assertMatchingTabBorders(tabBar, titleBar, `titlebar-tab-borders-${theme}`, titleBarColorTolerance);
+    }
+    await actions.click();
+    await actionsMenu.getByRole('menuitem', { name: '向下分屏', exact: true }).click();
+    const upperBar = groups.nth(0).locator('[data-terminal-tab-bar]');
+    const lowerBar = groups.nth(1).locator('[data-terminal-tab-bar]');
+    await lowerBar.getByRole('tab', { selected: true }).waitFor();
+    await upperBar.getByRole('tab', { selected: true }).click();
+    for (const width of [400, 900]) {
+      await page.setViewportSize({ width, height: 700 });
+      await host.evaluate((element, width) => { element.style.width = `${width}px`; }, width);
+      for (const theme of ['dark', 'light']) {
+        await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+        await assertMatchingTabBorders(upperBar, titleBar, `vertical-split-upper-tab-borders-${theme}-${width}`, titleBarColorTolerance);
+        await assertMatchingTabBorders(lowerBar, divider, `vertical-split-tab-borders-${theme}-${width}`);
+      }
+    }
     await splitActions.click();
     await actionsMenu.getByRole('menuitem', { name: '退出分屏', exact: true }).click();
     await groups.first().waitFor({ state: 'detached' });

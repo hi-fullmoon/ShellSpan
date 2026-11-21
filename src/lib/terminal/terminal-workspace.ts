@@ -34,6 +34,7 @@ export function serializeTerminalWorkspace(
       profileId,
       pinned,
       color,
+      readOnly,
     }) => ({
       sessionId,
       title: manualTitle ?? ((currentDirectory || oscTitle) ? baseTitle ?? title : title),
@@ -46,6 +47,7 @@ export function serializeTerminalWorkspace(
       profileId,
       pinned,
       color,
+      readOnly,
     }));
   return JSON.stringify({
     version: TERMINAL_WORKSPACE_VERSION,
@@ -99,7 +101,8 @@ function isTerminalWorkspaceSession(value: unknown): value is TerminalWorkspaceS
     && session.profileId.length > 0
     && session.profileId.length <= MAX_STRING_LENGTH
     && (session.pinned === undefined || typeof session.pinned === 'boolean')
-    && (session.color === undefined || (typeof session.color === 'string' && session.color.length <= MAX_STRING_LENGTH));
+    && (session.color === undefined || (typeof session.color === 'string' && session.color.length <= MAX_STRING_LENGTH))
+    && (session.readOnly === undefined || typeof session.readOnly === 'boolean');
 }
 
 function isTerminalLayoutNode(value: unknown, depth: number): value is TerminalLayoutNode {

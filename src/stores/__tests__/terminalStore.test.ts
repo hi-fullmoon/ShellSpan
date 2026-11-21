@@ -467,6 +467,7 @@ describe('terminalStore', () => {
       port: 22,
       username: 'tester',
       profileId: 'profile-1',
+      readOnly: true,
     }]);
 
     expect(useTerminalStore.getState().sessions[0]).toMatchObject({
@@ -474,6 +475,7 @@ describe('terminalStore', () => {
       title: 'Saved',
       status: 'disconnected',
       profileId: 'profile-1',
+      readOnly: true,
       closed: { retryable: true },
     });
   });

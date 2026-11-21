@@ -2,8 +2,10 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TerminalTabBar } from '../terminal-tab-bar';
+import { useTerminalBroadcastStore } from '@/stores/terminalBroadcastStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useAppStore } from '@/stores/appStore';
+import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
 import { resolveTerminalTheme } from '../registry/terminal-registry';
 import { beginSshConnection } from '@/lib/terminal/ssh-connection-attempt';
 
@@ -351,17 +353,15 @@ describe('TerminalTabBar', () => {
 
     const tabBar = container.querySelector('[data-terminal-tab-bar]');
     expect(tabBar).toHaveClass('h-8', 'my-0', 'py-0', 'bg-app-surface-muted');
-    expect(tabBar).toHaveClass('after:border-b', 'after:border-app-border/50', 'after:bg-app-bg');
     expect(tabBar?.querySelector('[data-slot="scroll-area"]')).toHaveClass('h-8');
     expect(screen.getByRole('tablist')).toHaveClass('p-0', 'gap-0');
     for (const tab of screen.getAllByRole('tab')) {
       expect(tab.parentElement).toHaveClass('h-8');
       expect(tab.parentElement).not.toHaveClass('py-1');
       expect(tab).toHaveClass('h-8', 'w-42', 'px-1.5', 'gap-1', 'border-x');
-      expect(tab).not.toHaveClass('border-t');
       expect(tab).not.toHaveClass('border', 'shadow-xs');
     }
-    expect(screen.getAllByRole('tab')[0]).toHaveClass('rounded-t-md', 'border-app-border/50', 'bg-app-surface', 'text-app-text');
+    expect(screen.getAllByRole('tab')[0]).toHaveClass('rounded-t-md', 'border-(--terminal-tab-border)', 'bg-app-surface', 'text-app-text');
     expect(screen.getAllByRole('tab')[1]).toHaveClass('border-transparent', 'bg-transparent', 'hover:bg-accent');
 
     expect(screen.queryByRole('button', { name: 'terminal.tab.moreActions' })).not.toBeInTheDocument();
@@ -754,7 +754,7 @@ describe('TerminalTabBar', () => {
     render(<TerminalTabBar />);
 
     const tab = screen.getByRole('tab');
-    expect(tab).toHaveClass('rounded-t-md', 'border-x', 'border-app-border/50');
+    expect(tab).toHaveClass('rounded-t-md', 'border-x', 'border-(--terminal-tab-border)');
     expect(tab.querySelector('[data-active-tab-indicator]')).toBeNull();
     expect(tab.style.borderColor).toBe('');
   });
@@ -773,7 +773,7 @@ describe('TerminalTabBar', () => {
     expect(first.style.backgroundColor).toContain('25%');
     act(() => useTerminalStore.getState().setTabColor('s1', undefined));
     expect(first.style.backgroundColor).toBe('');
-    expect(first).toHaveClass('bg-app-surface', 'border-app-border/50');
+    expect(first).toHaveClass('bg-app-surface', 'border-(--terminal-tab-border)');
     expect(first.querySelector('[data-tab-color]')).toBeNull();
   });
 
@@ -797,5 +797,74 @@ describe('TerminalTabBar', () => {
     const inactiveTab = screen.getAllByRole('tab')[0];
     expect(inactiveTab).toHaveClass('border-transparent');
     expect(inactiveTab.querySelector('[data-active-tab-indicator]')).toBeNull();
+  });
+
+  it('hides the active broadcast badge on readOnly tabs while keeping the input lock badge', () => {
+    addSession('s1', 'Primary');
+    addSession('s2', 'Locked');
+    const store = useTerminalStore.getState();
+    store.setStatus('s1', { sessionId: 's1', status: 'connected' });
+    store.setStatus('s2', { sessionId: 's2', status: 'connected' });
+    store.toggleReadOnly('s2');
+    useTerminalBroadcastStore.getState().configure('custom', ['s1', 's2']);
+
+    try {
+      render(<TerminalTabBar />);
+      const primaryTab = screen.getByRole('tab', { name: 'Primary' });
+      const lockedTab = screen.getByRole('tab', { name: /Locked/ });
+      expect(within(primaryTab).getByRole('img', { name: 'terminal.broadcast.target' })).toBeInTheDocument();
+      expect(lockedTab.querySelector('[data-terminal-input-lock]')).toBeInTheDocument();
+      expect(within(lockedTab).queryByRole('img', { name: 'terminal.broadcast.target' })).toBeNull();
+    } finally {
+      useTerminalBroadcastStore.getState().configure('off');
+    }
+  });
+
+  it('hides the active broadcast badge on tabs blocked by an Agent lease or foreground handoff', () => {
+    addSession('s1', 'Primary');
+    addSession('s2', 'AgentTab');
+    addSession('s3', 'HandoffTab');
+    const store = useTerminalStore.getState();
+    store.setStatus('s1', { sessionId: 's1', status: 'connected' });
+    store.setStatus('s2', { sessionId: 's2', status: 'connected' });
+    store.setStatus('s3', { sessionId: 's3', status: 'connected' });
+    useTerminalStore.setState((state) => ({
+      sessions: state.sessions.map((session) => (
+        session.sessionId === 's3' ? { ...session, foregroundHandoffActive: true } : session
+      )),
+    }));
+    useTerminalBroadcastStore.getState().configure('custom', ['s1', 's2', 's3']);
+
+    try {
+      render(<TerminalTabBar />);
+      const primaryTab = screen.getByRole('tab', { name: 'Primary' });
+      const agentTab = screen.getByRole('tab', { name: 'AgentTab' });
+      const handoffTab = screen.getByRole('tab', { name: 'HandoffTab' });
+      expect(within(primaryTab).getByRole('img', { name: 'terminal.broadcast.target' })).toBeInTheDocument();
+      expect(within(agentTab).getByRole('img', { name: 'terminal.broadcast.target' })).toBeInTheDocument();
+      expect(within(handoffTab).queryByRole('img', { name: 'terminal.broadcast.target' })).toBeNull();
+
+      act(() => {
+        agentTerminalLeaseState.set({
+          sessionId: 's2',
+          agentSessionId: 'agent-1',
+          taskId: 'task-1',
+          operationId: 'op-1',
+          acquiredAtUnixMs: 1_000,
+          state: 'acquired',
+          commandDisplay: 'ls',
+          terminalOwned: true,
+          inputBlocked: false,
+          takeoverRequested: false,
+          takeoverFailed: false,
+          requestTakeover: vi.fn(),
+        });
+      });
+
+      expect(within(agentTab).queryByRole('img', { name: 'terminal.broadcast.target' })).toBeNull();
+    } finally {
+      agentTerminalLeaseState.clearAll();
+      useTerminalBroadcastStore.getState().configure('off');
+    }
   });
 });

@@ -9,6 +9,7 @@ import { COPY_ON_SELECT_DEBOUNCE_MS, TerminalPane } from '../terminal-pane';
 import { resetTerminalLeader } from '../terminal-leader';
 import { terminalRegistry, type TerminalController } from '@/components/terminal/registry/terminal-registry';
 import { useTerminalStore, type TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
+import { useTerminalBroadcastStore } from '@/stores/terminalBroadcastStore';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
 
@@ -16,6 +17,7 @@ const toastMocks = vi.hoisted(() => ({ error: vi.fn() }));
 const backingTerminals: Terminal[] = [];
 beforeAll(enableRealCanvas);
 afterEach(() => {
+  useTerminalBroadcastStore.getState().configure('off');
   for (const terminal of backingTerminals.splice(0)) terminal.dispose();
 });
 
@@ -63,8 +65,10 @@ function makeSession(
 beforeEach(() => {
   vi.clearAllMocks();
   resetTerminalLeader();
+  useTerminalBroadcastStore.getState().configure('off');
   useTerminalStore.setState({ sessions: [makeSession()] });
   useAppStore.setState({
+    activeSection: 'terminal',
     terminalCopyOnSelect: true,
     terminalMultiLinePasteWarning: true,
     terminalLargePasteWarning: true,
@@ -152,7 +156,8 @@ function makeMockTerminal(selection = '') {
     detach: vi.fn(() => element.remove()),
     fit: vi.fn(() => fitAddon.fit()),
     focus: vi.fn(() => backingTerminal.focus()),
-  } satisfies Pick<TerminalController, 'terminal' | 'searchAddon' | 'attach' | 'detach' | 'fit' | 'focus'>;
+    pasteUserText: vi.fn(),
+  } satisfies Pick<TerminalController, 'terminal' | 'searchAddon' | 'attach' | 'detach' | 'fit' | 'focus' | 'pasteUserText'>;
 
   Object.assign(terminal, { __controller: controller });
   (terminalRegistry.get as ReturnType<typeof vi.fn>).mockReturnValue(controller);
@@ -950,5 +955,58 @@ describe('TerminalPane', () => {
     expect(listener).toHaveBeenCalledOnce();
 
     document.removeEventListener('shellspan:switch-terminal-tab', listener);
+  });
+
+  it('lists all broadcast paste recipients, formats local titles without @local:0, and confirms broadcast paste', async () => {
+    const localSession = makeSession({ sessionId: 's1', title: 'Local Shell', host: 'local', port: 0, username: 'me' });
+    const remoteSession = makeSession({ sessionId: 's2', title: 'Prod', host: 'prod.example.com', port: 2222, username: 'ops' });
+    useTerminalStore.setState({ sessions: [localSession, remoteSession] });
+    useTerminalBroadcastStore.getState().configure('custom', ['s1', 's2']);
+
+    const terminal = makeMockTerminal();
+    const controller = (terminal as typeof terminal & {
+      __controller: { pasteUserText: ReturnType<typeof vi.fn> };
+    }).__controller;
+    render(<TerminalPane activeSession={localSession} />);
+
+    terminal.element?.querySelector('textarea')?.focus();
+    await userEvent.paste('echo one\necho two');
+
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent('terminal.broadcast.confirmPaste');
+    expect(dialog).toHaveTextContent('terminal.broadcast.pasteTargetList');
+    expect(dialog).toHaveTextContent('Local Shell');
+    expect(dialog).not.toHaveTextContent('@local:0');
+    expect(dialog).toHaveTextContent('Prod (ops@prod.example.com:2222)');
+    expect(controller.pasteUserText).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'terminal.pasteWarning.confirm' }));
+    expect(controller.pasteUserText).toHaveBeenCalledWith('echo one\necho two', true);
+  });
+
+  it('blocks broadcast paste confirmation when participants change while the dialog is open', async () => {
+    const s1 = makeSession({ sessionId: 's1', title: 'Primary' });
+    const s2 = makeSession({ sessionId: 's2', title: 'Replica' });
+    const s3 = makeSession({ sessionId: 's3', title: 'Staging' });
+    useTerminalStore.setState({ sessions: [s1, s2, s3] });
+    useTerminalBroadcastStore.getState().configure('custom', ['s1', 's2']);
+
+    const terminal = makeMockTerminal();
+    const controller = (terminal as typeof terminal & {
+      __controller: { pasteUserText: ReturnType<typeof vi.fn> };
+    }).__controller;
+    render(<TerminalPane activeSession={s1} />);
+
+    terminal.element?.querySelector('textarea')?.focus();
+    await userEvent.paste('echo one\necho two');
+    await screen.findByRole('alertdialog');
+
+    act(() => {
+      useTerminalBroadcastStore.getState().configure('custom', ['s1', 's3']);
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'terminal.pasteWarning.confirm' }));
+    expect(controller.pasteUserText).not.toHaveBeenCalled();
+    expect(toastMocks.error).toHaveBeenCalledWith('terminal.broadcast.targetsChanged');
   });
 });
