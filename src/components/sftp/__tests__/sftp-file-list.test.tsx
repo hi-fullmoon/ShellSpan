@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SftpFileList } from '../sftp-file-list';
 import type { FileEntry } from '../utils';
@@ -588,5 +588,126 @@ describe('SftpFileList', () => {
     });
     expect(onSelect).not.toHaveBeenCalled();
     expect(onDoubleClick).not.toHaveBeenCalled();
+  });
+
+  it('hides the vertical scrollbar when navigating into a shorter directory', async () => {
+    const observers = new Map<Element, ResizeObserverCallback>();
+    const OriginalResizeObserver = globalThis.ResizeObserver;
+    const originalGetAnimations = HTMLElement.prototype.getAnimations;
+
+    class MockResizeObserver implements ResizeObserver {
+      private readonly callback: ResizeObserverCallback;
+      private targets: Element[] = [];
+
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+
+      observe(target: Element): void {
+        this.targets.push(target);
+        observers.set(target, this.callback);
+      }
+
+      unobserve(target: Element): void {
+        this.targets = this.targets.filter((item) => item !== target);
+        observers.delete(target);
+      }
+
+      disconnect(): void {
+        this.targets.forEach((target) => observers.delete(target));
+        this.targets = [];
+      }
+    }
+
+    globalThis.ResizeObserver = MockResizeObserver;
+    HTMLElement.prototype.getAnimations = () => [];
+
+    try {
+      const longEntries: FileEntry[] = Array.from({ length: 30 }, (_, index) => ({
+        path: `/home/user/dir/file-${index}.txt`,
+        name: `file-${index}.txt`,
+        kind: 'file',
+        size: 100,
+        modifiedAt: 1000,
+      }));
+      const shortEntries: FileEntry[] = [
+        { path: '/home/user/dir/sub/only.txt', name: 'only.txt', kind: 'file', size: 10, modifiedAt: 1000 },
+      ];
+
+      let viewportScrollHeight = 1116;
+      const { container, rerender, unmount } = render(
+        <SftpFileList
+          entries={longEntries}
+          side="local"
+          selectedPaths={new Set()}
+          filterQuery=""
+          batchMode={false}
+          currentPath="/home/user/dir"
+          onSelect={vi.fn()}
+          onDoubleClick={vi.fn()}
+          onContextMenu={vi.fn()}
+          onBlankContextMenu={vi.fn()}
+          onParentDirectory={vi.fn()}
+        />,
+      );
+
+      const viewport = container.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+      const content = container.querySelector<HTMLElement>('[data-slot="scroll-area-content"]');
+      expect(viewport).not.toBeNull();
+      expect(content).not.toBeNull();
+
+      Object.defineProperties(viewport!, {
+        clientHeight: { configurable: true, get: () => 400 },
+        clientWidth: { configurable: true, get: () => 500 },
+        scrollHeight: { configurable: true, get: () => viewportScrollHeight },
+        scrollWidth: { configurable: true, get: () => 500 },
+      });
+
+      const contentCallback = observers.get(content!);
+      expect(contentCallback).toBeDefined();
+
+      // First ResizeObserver notification is skipped by ScrollAreaContent on initial mount;
+      // trigger initial + layout measurement so Base UI observes the tall directory.
+      await act(async () => {
+        contentCallback!([], {} as ResizeObserver);
+        contentCallback!([], {} as ResizeObserver);
+      });
+      expect(
+        container.querySelector('[data-slot="scroll-area-scrollbar"][data-orientation="vertical"]'),
+      ).not.toBeNull();
+
+      // Navigate into a shorter subdirectory: content height shrinks below the viewport height.
+      viewport!.scrollTop = 180;
+      viewportScrollHeight = 400;
+      rerender(
+        <SftpFileList
+          entries={shortEntries}
+          side="local"
+          selectedPaths={new Set()}
+          filterQuery=""
+          batchMode={false}
+          currentPath="/home/user/dir/sub"
+          onSelect={vi.fn()}
+          onDoubleClick={vi.fn()}
+          onContextMenu={vi.fn()}
+          onBlankContextMenu={vi.fn()}
+          onParentDirectory={vi.fn()}
+        />,
+      );
+
+      expect(viewport!.scrollTop).toBe(0);
+      expect(content!.style.height).toBe('72px');
+
+      await vi.waitFor(() => {
+        expect(
+          container.querySelector('[data-slot="scroll-area-scrollbar"][data-orientation="vertical"]'),
+        ).toBeNull();
+      });
+
+      unmount();
+    } finally {
+      globalThis.ResizeObserver = OriginalResizeObserver;
+      HTMLElement.prototype.getAnimations = originalGetAnimations;
+    }
   });
 });

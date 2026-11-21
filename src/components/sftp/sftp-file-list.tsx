@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import type { SftpSide } from '@/stores/sftpStore';
 import type { FileEntry } from './utils';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import {
   SftpFileListHeader,
   type SftpFileListSortColumn,
@@ -136,6 +136,30 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
     estimateSize: () => 36,
     overscan: 8,
   });
+
+  const contentHeight = displayCount === 0 ? 0 : virtualizer.getTotalSize() + (batchMode ? 56 : 0);
+
+  // Reset vertical scroll position when entering another directory so the new
+  // listing starts at the top (before any revealRequest scrolls to a target).
+  useEffect(() => {
+    const viewport = parentRef.current;
+    if (!viewport) return;
+    if (viewport.scrollTop !== 0) {
+      viewport.scrollTop = 0;
+    }
+  }, [currentPath]);
+
+  // Re-sync Base UI ScrollArea thumb/hidden state on the next animation frame
+  // after content height changes, covering WKWebView cases where ResizeObserver
+  // fires before overflow scrollHeight settles.
+  useEffect(() => {
+    const viewport = parentRef.current;
+    if (!viewport) return;
+    const frameId = requestAnimationFrame(() => {
+      viewport.dispatchEvent(new Event('scroll'));
+    });
+    return () => cancelAnimationFrame(frameId);
+  }, [contentHeight, currentPath]);
 
   useEffect(() => {
     const contentViewport = parentRef.current;
@@ -386,20 +410,25 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
           onBlankContextMenu?.(e);
         }}
       >
-        {displayCount === 0 ? (
-          <div className="flex h-full items-center justify-center text-xs text-app-text-soft">
-            {filterQuery.trim()
+        <ScrollAreaContent
+          className={cn(
+            'relative w-full',
+            displayCount === 0 && 'flex h-full items-center justify-center text-xs text-app-text-soft',
+          )}
+          style={
+            displayCount === 0
+              ? { minWidth: 0 }
+              : {
+                  height: `${contentHeight}px`,
+                }
+          }
+        >
+          {displayCount === 0 ? (
+            filterQuery.trim()
               ? t('sftp.filteredEmpty')
-              : t('sftp.emptyFolder')}
-          </div>
-        ) : (
-          <div
-            className="relative w-full"
-            style={{
-              height: `${virtualizer.getTotalSize() + (batchMode ? 56 : 0)}px`,
-            }}
-          >
-            {virtualItems.map((virtualItem) => {
+              : t('sftp.emptyFolder')
+          ) : (
+            virtualItems.map((virtualItem) => {
               const isParent = showParent && virtualItem.index === 0;
               const entry = isParent
                 ? null
@@ -448,9 +477,9 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
                   )}
                 </div>
               );
-            })}
-          </div>
-        )}
+            })
+          )}
+        </ScrollAreaContent>
       </ScrollArea>
     </div>
   );
