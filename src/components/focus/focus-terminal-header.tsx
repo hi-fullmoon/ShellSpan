@@ -1,4 +1,4 @@
-import { SquareTerminalIcon, TargetIcon } from 'lucide-react';
+import { Link2Icon, SquareTerminalIcon } from 'lucide-react';
 import { useFocusStore } from '@/stores/focusStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useI18n } from '@/hooks/useI18n';
@@ -21,13 +21,22 @@ export function FocusTerminalHeader(): React.ReactNode {
     <div className="min-w-0 flex-1">
       <div className="flex min-w-0 items-center gap-1">
         <h2 className="truncate text-sm font-medium leading-5 text-foreground" title={viewing?.title}>{viewing?.title ?? t('section.terminal')}</h2>
-        {currentTarget && <Badge variant="secondary" size="sm" className="shrink-0" title={busy ? t('focus.targetLocked') : undefined}>{t('focus.agentTarget')}</Badge>}
+        {viewing && (
+          <Badge
+            variant="secondary"
+            size="sm"
+            className={currentTarget ? 'shrink-0 bg-app-success/10 text-app-success dark:bg-app-success/20' : 'shrink-0 text-muted-foreground'}
+            title={currentTarget && busy ? t('focus.targetLocked') : undefined}
+          >
+            {t(currentTarget ? 'focus.agentTarget' : 'focus.notAgentTarget')}
+          </Badge>
+        )}
       </div>
       <p className="truncate text-[11px] leading-[15px] text-muted-foreground" title={context}>{context}</p>
     </div>
     {!currentTarget && viewing && <Tooltip>
         <TooltipTrigger render={<AiHeaderIconButton type="button" aria-label={t('focus.setTarget')}
-          disabled={busy || viewing.status !== 'connected'} onClick={() => setTarget(viewing.sessionId)} />}><TargetIcon /></TooltipTrigger>
+          disabled={busy || viewing.status !== 'connected'} onClick={() => setTarget(viewing.sessionId)} />}><Link2Icon /></TooltipTrigger>
         <TooltipContent>{t(busy ? 'focus.targetLocked' : 'focus.setTarget')}</TooltipContent>
       </Tooltip>}
     <FocusControls />
