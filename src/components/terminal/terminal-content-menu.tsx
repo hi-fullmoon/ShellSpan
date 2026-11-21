@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { Terminal } from '@xterm/xterm';
-import { Copy } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuGroup, ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { useI18n } from '@/hooks/useI18n';
@@ -230,7 +229,7 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
         {(url || path) && <><ContextMenuSeparator /><ContextMenuGroup>
           {url && <>
             <ContextMenuItem onClick={() => { void invokeOpenUrl(url).catch(() => showError(t('ai.link.openFailed'))); }}>{t('ai.link.open')}</ContextMenuItem>
-            <ContextMenuItem onClick={() => copyText(url)}><Copy />{t('ai.link.copyAddress')}</ContextMenuItem>
+            <ContextMenuItem onClick={() => copyText(url)}>{t('ai.link.copyAddress')}</ContextMenuItem>
           </>}
           {path && <>
             <ContextMenuItem onClick={() => run(() => {
@@ -239,7 +238,7 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
                 if (!opened) showError(t('ai.path.revealFailed'));
               }).catch(() => showError(t('ai.path.revealFailed')));
             })} disabled={!(session?.host === 'local' && session.port === 0) && !session?.profileId}>{t('terminal.menu.revealPath')}</ContextMenuItem>
-            <ContextMenuItem onClick={() => copyText(parseTerminalFileLink(path)?.path ?? path)}><Copy />{t('ai.path.copy')}</ContextMenuItem>
+            <ContextMenuItem onClick={() => copyText(parseTerminalFileLink(path)?.path ?? path)}>{t('ai.path.copy')}</ContextMenuItem>
           </>}
         </ContextMenuGroup></>}
         <ContextMenuSeparator />

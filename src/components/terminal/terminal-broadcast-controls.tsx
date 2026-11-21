@@ -65,7 +65,7 @@ export function TerminalBroadcastControls({ visible }: { visible: boolean }) {
   const skipped = Math.max(0, sessionIds.size - admitted);
 
   return <>
-    {mode !== 'off' && <Alert variant="warning" size="sm" className="shrink-0 rounded-none border-x-0 border-t-0">
+    {mode !== 'off' && <Alert variant="warning" size="xs" className="shrink-0 rounded-none border-x-0 border-t-0">
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-1">
         <AlertDescription className="flex min-w-0 items-start gap-1">
           <RadioTowerIcon aria-hidden="true" className="h-lh w-3.5 shrink-0 text-app-warning" />
@@ -119,10 +119,10 @@ export function TerminalBroadcastControls({ visible }: { visible: boolean }) {
                   return (
                     <label key={session.sessionId} htmlFor={`${id}-${index}`}
                       className={cn(
-                        'flex cursor-default items-start gap-2.5 rounded-lg border border-border px-3 py-2 transition-colors',
+                        'flex cursor-default items-center gap-2.5 rounded-lg border border-border px-3 py-2 transition-colors',
                         eligible ? 'hover:bg-accent' : 'opacity-65',
                       )}>
-                      <Checkbox id={`${id}-${index}`} aria-label={session.title} className="mt-0.5"
+                      <Checkbox id={`${id}-${index}`} aria-label={session.title} className="shrink-0"
                         disabled={!eligible}
                         checked={eligible && selected.has(session.sessionId)}
                         onCheckedChange={(checked) => {
@@ -134,17 +134,17 @@ export function TerminalBroadcastControls({ visible }: { visible: boolean }) {
                             return next;
                           });
                         }} />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-xs font-medium break-all text-foreground">{session.title}</span>
-                          {!eligible && (
-                            <Badge variant="outline" size="sm">{t('terminal.broadcast.protectedBadge')}</Badge>
-                          )}
+                      <span className="flex min-w-0 flex-1 items-center gap-2">
+                        <span className="min-w-0 truncate text-xs font-medium text-foreground" title={session.title}>
+                          {session.title}
                         </span>
                         {isRemote && (
-                          <span className="block truncate text-[11px] text-muted-foreground">
+                          <span className="min-w-0 truncate text-[11px] text-muted-foreground" title={`${session.username}@${session.host}`}>
                             {session.username}@{session.host}
                           </span>
+                        )}
+                        {!eligible && (
+                          <Badge variant="outline" size="sm" className="ml-auto shrink-0">{t('terminal.broadcast.protectedBadge')}</Badge>
                         )}
                       </span>
                     </label>

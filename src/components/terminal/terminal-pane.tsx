@@ -17,9 +17,10 @@ import { agentTerminalCommandFeedback } from './agent-terminal-command-feedback'
 import { TerminalSearch } from './terminal-search';
 import { TerminalResizeIndicator } from './terminal-resize-indicator';
 import { TerminalPastePreview } from './terminal-paste-preview';
-import { TerminalContentMenu } from './terminal-content-menu';
+import { clearTerminalScreen, TerminalContentMenu } from './terminal-content-menu';
 import { TerminalCommandBlockOverlay } from './terminal-command-block-overlay';
 import { openTerminalTask, terminalTaskWorkspace, useTerminalTaskNavigation } from './agent-terminal-task-navigation';
+import { useAiDraftStore } from '@/stores/aiDraftStore';
 import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useTerminalAgentExecution } from '@/hooks/useTerminalAgentExecution';
 import { useFocusStore } from '@/stores/focusStore';
@@ -374,9 +375,41 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   useEffect(() => {
     if (!isActive) return;
     const handleOpenSearchRequest = (): void => handleOpenSearch();
+    const handleClearScreen = (): void => {
+      if (!terminal || !activeSessionId) return;
+      void clearTerminalScreen(terminal, activeSessionId).then((result) => {
+        if (result !== 'requested') {
+          showError(t(result === 'unavailable' ? 'terminal.menu.clearUnavailable' : 'terminal.menu.clearBlocked'));
+        }
+      }).catch(() => {
+        showError(t('terminal.notice.writeFailedLabel'));
+      });
+    };
+    const handleScrollBottom = (): void => {
+      terminal?.scrollToBottom();
+    };
+    const handleSendToAi = (): void => {
+      if (!terminal || !activeSessionId) return;
+      const selection = terminal.getSelection();
+      if (!selection) return;
+      const session = useTerminalStore.getState().sessions.find((item) => item.sessionId === activeSessionId);
+      const focus = useFocusStore.getState().enabled;
+      const text = `${t('terminal.menu.source', { target: session?.title ?? '' })}\n${selection}`;
+      useAiDraftStore.getState().insertTerminalText(`${focus ? 'focus' : 'terminal'}:${activeSessionId}`, text);
+      if (!focus) useTerminalStore.getState().setActiveSession(activeSessionId);
+      useAiPanelStore.getState().setOpen(true, 'terminal');
+    };
     document.addEventListener('shellspan:find-terminal', handleOpenSearchRequest);
-    return () => document.removeEventListener('shellspan:find-terminal', handleOpenSearchRequest);
-  }, [handleOpenSearch, isActive]);
+    document.addEventListener('shellspan:clear-terminal-screen', handleClearScreen);
+    document.addEventListener('shellspan:scroll-terminal-bottom', handleScrollBottom);
+    document.addEventListener('shellspan:send-terminal-to-ai', handleSendToAi);
+    return () => {
+      document.removeEventListener('shellspan:find-terminal', handleOpenSearchRequest);
+      document.removeEventListener('shellspan:clear-terminal-screen', handleClearScreen);
+      document.removeEventListener('shellspan:scroll-terminal-bottom', handleScrollBottom);
+      document.removeEventListener('shellspan:send-terminal-to-ai', handleSendToAi);
+    };
+  }, [activeSessionId, handleOpenSearch, isActive, showError, t, terminal]);
 
   // Bind xterm custom key handler for app shortcuts, find/escape, and copy.
   useEffect(() => {
@@ -409,10 +442,11 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       // Find follows the configurable binding so it cannot diverge from the
       // app-level shortcut map. Copy stays hardcoded: it mirrors the OS
       // clipboard convention whose default differs per platform.
-      const isFindShortcut = eventMatchesShortcut(event, effectiveShortcuts().findTerminal);
+      const shortcuts = effectiveShortcuts();
+      const isFindShortcut = eventMatchesShortcut(event, shortcuts.findTerminal);
       const isTabSwitcherShortcut = eventMatchesShortcut(
         event,
-        effectiveShortcuts().switchTerminalTab,
+        shortcuts.switchTerminalTab,
       );
 
       // Document-level handlers run after xterm's textarea handler. Consume
@@ -429,6 +463,15 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         event.preventDefault();
         event.stopPropagation();
         document.dispatchEvent(new Event('shellspan:find-terminal'));
+        return false;
+      }
+
+      if (
+        eventMatchesShortcut(event, shortcuts.terminalClearScreen)
+        || eventMatchesShortcut(event, shortcuts.terminalSendToAi)
+        || eventMatchesShortcut(event, shortcuts.openShortcuts)
+        || eventMatchesShortcut(event, shortcuts.toggleFocusMode)
+      ) {
         return false;
       }
 

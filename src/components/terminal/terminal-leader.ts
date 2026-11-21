@@ -74,6 +74,14 @@ function dispatchLeaderCommand(action: ShortcutAction): void {
     document.dispatchEvent(new CustomEvent('shellspan:jump-terminal-command', { detail: action === 'terminalPreviousCommand' }));
     return;
   }
+  if (action === 'terminalToggleBroadcast') {
+    document.dispatchEvent(new Event('shellspan:configure-terminal-broadcast'));
+    return;
+  }
+  if (action === 'terminalScrollToBottom') {
+    document.dispatchEvent(new Event('shellspan:scroll-terminal-bottom'));
+    return;
+  }
   if (action === 'terminalClosePane') {
     document.dispatchEvent(new Event('shellspan:close-terminal-tab'));
   }

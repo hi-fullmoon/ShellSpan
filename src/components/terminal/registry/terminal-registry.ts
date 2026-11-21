@@ -5,7 +5,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { terminalFontStack } from '@/lib/terminal/terminal-font';
 import { decodeTerminalClipboardWrite } from '@/lib/terminal/terminal-osc52';
-import { findFileLinksInLine, findHttpLinksInLine, findLinksInTerminalBuffer, openTerminalFileLink, terminalHttpUrl } from '@/lib/terminal/terminal-links';
+import { findFileLinksInLine, findHttpLinksInLine, findLinksInTerminalBuffer, openTerminalFileLink, shouldActivateTerminalLink, terminalHttpUrl } from '@/lib/terminal/terminal-links';
 import { writeClipboardText } from '@/lib/clipboard';
 import { useAppStore } from '@/stores/appStore';
 import { getTerminalBroadcastTargets } from '@/stores/terminalBroadcastStore';
@@ -482,7 +482,9 @@ class TerminalControllerImpl implements TerminalController {
       altClickMovesCursor: preferences.altClickMovesCursor ?? true,
       linkHandler: {
         allowNonHttpProtocols: false,
-        activate: (_event, text) => this.activateUrl(text),
+        activate: (event, text) => {
+          if (shouldActivateTerminalLink(event)) this.activateUrl(text);
+        },
       },
       fontSize: preferences.fontSize,
       theme: resolveTerminalTheme(preferences.colorScheme, preferences.colorOverrides),
@@ -799,7 +801,8 @@ class TerminalControllerImpl implements TerminalController {
             text: detected.text,
             range: detected.range,
             decorations: { pointerCursor: true, underline: true },
-            activate: (_event, text) => {
+            activate: (event, text) => {
+              if (!shouldActivateTerminalLink(event)) return;
               if (terminalHttpUrl(text)) {
                 this.activateUrl(text);
                 return;

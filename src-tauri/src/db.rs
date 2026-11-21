@@ -2,9 +2,6 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-#[path = "terminal_snippets.rs"]
-pub(crate) mod terminal_snippets;
-
 const CURRENT_SCHEMA_VERSION: i32 = 6;
 pub(crate) const DATABASE_FILE_NAME: &str = "shellspan-main.db";
 const TERMINAL_WORKSPACE_VERSION: u64 = 1;
@@ -209,16 +206,6 @@ BEGIN
     ON CONFLICT(profile_id) DO UPDATE SET revision=excluded.revision;
 END;
 
-CREATE TABLE command_snippets (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    group_name TEXT NOT NULL,
-    tags_json TEXT NOT NULL,
-    command_template TEXT NOT NULL,
-    description TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-);
 INSERT INTO schema_version (version) VALUES (6);
 ";
 

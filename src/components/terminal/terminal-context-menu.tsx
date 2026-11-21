@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useI18n } from '@/hooks/useI18n';
 import { useTerminalStore } from '@/stores/terminalStore';
@@ -6,6 +6,7 @@ import { useProfileStore } from '@/stores/profileStore';
 import { useConnectSession } from '@/hooks/useConnectSession';
 import { useCloseTerminal } from '@/hooks/useCloseTerminal';
 import { useContextMenuNavigation } from '@/hooks/useContextMenuNavigation';
+import { useViewportConstrainedPosition } from '@/hooks/useViewportConstrainedPosition';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { CompactPromptDialog } from '@/components/ui/compact-dialog';
 import { Separator } from '@/components/ui/separator';
@@ -18,9 +19,6 @@ import { useAppStore } from '@/stores/appStore';
 import { useFocusStore } from '@/stores/focusStore';
 import { useToast } from '@/hooks/useToast';
 import { getTerminalMenuDirectory, openTerminalSftpPath, revealTerminalCurrentDirectory } from '@/lib/terminal/terminal-current-directory';
-
-const MENU_WIDTH = 256;
-const MENU_HEIGHT = 480;
 
 const TAB_COLORS = [
   '#ef4444',
@@ -104,8 +102,9 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const [confirmationOrder, setConfirmationOrder] = useState<string[] | null>(null);
   const [closeOthersConfirm, setCloseOthersConfirm] = useState(false);
   const [closeToRightConfirm, setCloseToRightConfirm] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const navigation = useContextMenuNavigation(menuRef, open && session !== null, session?.sessionId);
+  const isMenuVisible = open && session !== null;
+  const { menuRef, position } = useViewportConstrainedPosition<HTMLDivElement>(isMenuVisible, x, y);
+  const navigation = useContextMenuNavigation(menuRef, isMenuVisible, session?.sessionId);
 
   useEffect(() => {
     if (!open) return;
@@ -122,9 +121,6 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
 
   const target = session ?? renameTarget ?? confirmationTarget;
   if (!target) return null;
-
-  const left = Math.max(0, Math.min(x, window.innerWidth - MENU_WIDTH));
-  const top = Math.max(0, Math.min(y, window.innerHeight - MENU_HEIGHT));
 
   const orderedIds = confirmationOrder ?? orderedSessionIds ?? sessions.map((s) => s.sessionId);
   const isUnpinned = (sessionId: string): boolean =>
@@ -267,8 +263,8 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
             ref={menuRef}
             role="menu"
             aria-label={target.title}
-            className="fixed z-[1700] w-fit min-w-52 overflow-y-auto rounded-lg border border-app-border bg-app-surface p-1 shadow-[var(--shadow-dialog)]"
-            style={{ left, top, maxHeight: Math.max(120, window.innerHeight - top - 8) }}
+            className="fixed z-[1700] max-h-[calc(100vh-1rem)] w-fit min-w-52 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-lg border border-app-border bg-app-surface p-1 shadow-[var(--shadow-dialog)]"
+            style={position}
             {...navigation}
           >
         {focus.enabled && <>

@@ -47,7 +47,6 @@ fn initializes_empty_database_to_current_version() {
     assert_eq!(
         tables,
         [
-            "command_snippets",
             "key_credentials",
             "preferences",
             "profile_sandbox",

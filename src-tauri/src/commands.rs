@@ -4649,39 +4649,6 @@ pub(crate) fn list_profiles(db: State<'_, Database>) -> Result<Vec<ProfileRow>, 
 }
 
 #[tauri::command]
-pub(crate) async fn list_command_snippets(
-    db: State<'_, Database>,
-) -> Result<Vec<crate::db::terminal_snippets::CommandSnippet>, String> {
-    let db = db.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || db.list_command_snippets())
-        .await
-        .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-pub(crate) async fn save_command_snippet(
-    db: State<'_, Database>,
-    id: Option<String>,
-    input: crate::db::terminal_snippets::SnippetInput,
-) -> Result<crate::db::terminal_snippets::CommandSnippet, String> {
-    let db = db.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || db.save_command_snippet(id, input))
-        .await
-        .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-pub(crate) async fn delete_command_snippet(
-    db: State<'_, Database>,
-    id: String,
-) -> Result<(), String> {
-    let db = db.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || db.delete_command_snippet(&id))
-        .await
-        .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
 pub(crate) fn add_profile(db: State<'_, Database>, profile: ProfileRow) -> Result<(), String> {
     db.insert_profile(&profile)
 }

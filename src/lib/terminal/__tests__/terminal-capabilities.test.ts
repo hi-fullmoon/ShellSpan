@@ -13,9 +13,8 @@ import { getTerminalBroadcastTargets, useTerminalBroadcastStore } from '@/stores
 import { cleanTerminalTitle, formatTabTitle, resolveTabTitleValues } from '../tab-title';
 import { decodeTerminalClipboardWrite, OSC52_MAX_BYTES } from '../terminal-osc52';
 import { terminalFontSizeAfterKey, terminalFontStack } from '../terminal-font';
-import { findFileLinksInLine, findHttpLinksInBuffer, parseTerminalFileLink, terminalHttpUrl } from '../terminal-links';
+import { findFileLinksInLine, findHttpLinksInBuffer, parseTerminalFileLink, shouldActivateTerminalLink, terminalHttpUrl } from '../terminal-links';
 import { quoteTerminalDropPaths } from '../terminal-file-drop';
-import { fillSnippetTemplate, parseSnippetTemplate } from '../snippet-template';
 import { createTerminalCommandBlocks, readTerminalCommandOutput, shouldNotifyTerminalCommand } from '../terminal-command-blocks';
 import { serializeTerminalWorkspace } from '../terminal-workspace';
 
@@ -98,6 +97,13 @@ describe('terminal capabilities', () => {
       expect(parseTerminalFileLink('C:\\src\\main.rs:12:8')).toEqual({ path: 'C:\\src\\main.rs', line: 12, column: 8 });
       expect(terminalHttpUrl('javascript:alert(1)')).toBeNull();
       expect(terminalHttpUrl('file:///etc/hosts')).toBeNull();
+      expect(shouldActivateTerminalLink({ metaKey: false, ctrlKey: false }, 'macos')).toBe(false);
+      expect(shouldActivateTerminalLink({ metaKey: true, ctrlKey: false }, 'macos')).toBe(true);
+      expect(shouldActivateTerminalLink({ metaKey: false, ctrlKey: true }, 'macos')).toBe(false);
+      expect(shouldActivateTerminalLink({ metaKey: true, ctrlKey: true }, 'macos')).toBe(false);
+      expect(shouldActivateTerminalLink({ metaKey: false, ctrlKey: false }, 'windows')).toBe(false);
+      expect(shouldActivateTerminalLink({ metaKey: false, ctrlKey: true }, 'windows')).toBe(true);
+      expect(shouldActivateTerminalLink({ metaKey: true, ctrlKey: false }, 'linux')).toBe(false);
     } finally {
       terminal.dispose();
     }
@@ -278,15 +284,6 @@ describe('terminal capabilities', () => {
       spy.mockRestore();
       terminal.dispose();
     }
-  });
-
-  it('fills snippet defaults without interpreting parameter contents or accepting control characters', () => {
-    expect(parseSnippetTemplate('curl {{url:https://example.org}} -o {{output}}')).toEqual([
-      { name: 'url', defaultValue: 'https://example.org' }, { name: 'output', defaultValue: undefined },
-    ]);
-    expect(fillSnippetTemplate('printf %s {{text}}', { text: '{{literal}}' })).toBe('printf %s {{literal}}');
-    expect(fillSnippetTemplate('printf %s {{text}}', { text: 'first\rsecond' })).toBeNull();
-    expect(parseSnippetTemplate('ls {{dir:{{nested}}}}')).toBeNull();
   });
 
   it('reads output between command boundaries and discards coordinates on reflow', async () => {

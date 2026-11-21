@@ -8,22 +8,9 @@ import { sshRouteKey } from '@/lib/connections/ssh-route';
 import { createOperationId, findOperationId } from '@/lib/operation-id';
 import { listen, type EventCallback, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow, type DragDropEvent } from '@tauri-apps/api/window';
-import type { CommandSnippet, SnippetInput } from '@/lib/terminal/snippet-template';
 
 export function listenToWindowDragDrop(callback: (payload: DragDropEvent) => void): Promise<UnlistenFn> {
   return getCurrentWindow().onDragDropEvent(({ payload }) => callback(payload));
-}
-
-export function invokeListCommandSnippets(): Promise<CommandSnippet[]> {
-  return invoke('list_command_snippets');
-}
-
-export function invokeSaveCommandSnippet(id: string | undefined, input: SnippetInput): Promise<CommandSnippet> {
-  return invoke('save_command_snippet', { id, input });
-}
-
-export function invokeDeleteCommandSnippet(id: string): Promise<void> {
-  return invoke('delete_command_snippet', { id });
 }
 
 export type TerminalRecordingFormat = 'plain-log' | 'asciinema-v2';

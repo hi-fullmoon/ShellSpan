@@ -2,7 +2,6 @@ import React from 'react';
 import {
   BotIcon,
   CableIcon,
-  CodeIcon,
   FolderIcon,
   FolderOpenIcon,
   FolderSyncIcon,
@@ -40,10 +39,7 @@ import {
   openHostPath,
   runHostConnectionAction,
 } from '@/lib/host/host-quick-actions';
-import { invokeListSftpBookmarks, isTauriRuntime } from '@/lib/ipc/tauri';
-import { TerminalSnippetDialog } from '@/components/terminal/terminal-snippet-dialog';
-import { useSnippetStore } from '@/stores/snippetStore';
-import type { CommandSnippet } from '@/lib/terminal/snippet-template';
+import { invokeListSftpBookmarks } from '@/lib/ipc/tauri';
 import type { LocaleKey } from '@/locales';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
@@ -108,8 +104,6 @@ interface BuildCommandPaletteItemsOptions {
   runQuickAction: (profile: ConnectionProfile, action: HostQuickAction) => void | Promise<void>;
   splitTerminal: (direction: 'right' | 'bottom') => void;
   canSplitTerminal?: (direction: 'right' | 'bottom') => boolean;
-  snippets?: CommandSnippet[];
-  openSnippet?: (snippet: CommandSnippet, sessionId: string) => void;
   startForward: (profile: ConnectionProfile, ruleId: string) => void | Promise<void>;
 }
 
@@ -167,8 +161,6 @@ export function buildCommandPaletteItems({
   runQuickAction,
   splitTerminal,
   canSplitTerminal,
-  snippets = [],
-  openSnippet,
   startForward,
 }: BuildCommandPaletteItemsOptions): CommandPaletteItem[] {
   const navigation: CommandPaletteItem[] = [
@@ -196,14 +188,6 @@ export function buildCommandPaletteItems({
   });
 
   const activeTerminal = terminalSessions.find((session) => session.sessionId === activeTerminalSessionId);
-  navigation.push({
-    id: 'navigation-snippets',
-    group: 'navigation',
-    label: label('terminal.snippets.title'),
-    keywords: 'manage reusable global command snippets',
-    icon: CodeIcon,
-    run: () => navigate('workbench', 'snippets'),
-  });
   if (activeTerminal && !activeTerminal.pendingConnection) navigation.push({
     id: 'terminal-toggle-read-only',
     group: 'navigation',
@@ -363,7 +347,7 @@ export function buildCommandPaletteItems({
             : ZapIcon,
         disabled: commandDisabled,
         disabledReason: commandDisabled
-          ? label(hasConnectedTarget ? 'terminal.snippets.inputUnavailable' : 'hostQuickActions.noTerminal')
+          ? label(hasConnectedTarget ? 'hostQuickActions.inputUnavailable' : 'hostQuickActions.noTerminal')
           : undefined,
         run: () => runQuickAction(profile, action),
       };
@@ -392,19 +376,6 @@ export function buildCommandPaletteItems({
     })
   ));
 
-  const availableTerminal = activeTerminal?.status === 'connected' && !activeTerminal.readOnly;
-  const snippetItems = openSnippet ? snippets.map((snippet): CommandPaletteItem => ({
-    id: `snippet-${snippet.id}`,
-    group: 'quickAction',
-    label: snippet.name,
-    detail: [snippet.groupName, snippet.description].filter(Boolean).join(' · ') || snippet.commandTemplate,
-    keywords: [snippet.name, snippet.groupName, snippet.commandTemplate, 'snippet', ...snippet.tags].join(' '),
-    icon: CodeIcon,
-    disabled: !availableTerminal,
-    disabledReason: availableTerminal ? undefined : label('terminal.snippets.inputUnavailable'),
-    run: () => { if (activeTerminal && availableTerminal) openSnippet(snippet, activeTerminal.sessionId); },
-  })) : [];
-
   const settings = SETTINGS.map(({ id, icon }): CommandPaletteItem => ({
     id: `settings-${id}`,
     group: 'settings',
@@ -422,7 +393,6 @@ export function buildCommandPaletteItems({
     ...openSftpSessions,
     ...bookmarkItems,
     ...quickActions,
-    ...snippetItems,
     ...forwards,
     ...settings,
   ];
@@ -455,8 +425,6 @@ export const CommandPalette: React.FC = () => {
   const terminalSessions = useTerminalStore((state) => state.sessions);
   const activeTerminalSessionId = useTerminalStore((state) => state.activeSessionId);
   const terminalSplit = useTerminalStore((state) => state.workspaceSplit);
-  const snippets = useSnippetStore((state) => state.snippets);
-  const [activeSnippet, setActiveSnippet] = React.useState<{ snippet: CommandSnippet; sessionId: string }>();
   const sftpConnections = useSftpStore((state) => state.connections);
   const portForwardRuntimes = usePortForwardStore((state) => state.runtimes);
   const [open, setOpen] = React.useState(false);
@@ -479,18 +447,11 @@ export const CommandPalette: React.FC = () => {
     return () => { cancelled = true; };
   }, [open, profiles]);
 
-  React.useEffect(() => {
-    if (open && isTauriRuntime()) void useSnippetStore.getState().load().catch(() => showError(t('terminal.snippets.loadFailed')));
-  }, [open, showError, t]);
-
-
   const items = React.useMemo(
     () => buildCommandPaletteItems({
       profiles,
       terminalSessions,
       activeTerminalSessionId,
-      snippets,
-      openSnippet: (snippet, sessionId) => setActiveSnippet({ snippet, sessionId }),
       sftpConnections,
       bookmarks,
       portForwardRuntimes,
@@ -577,7 +538,6 @@ export const CommandPalette: React.FC = () => {
       terminalSessions,
       activeTerminalSessionId,
       terminalSplit,
-      snippets,
       open,
     ],
   );
@@ -690,6 +650,5 @@ export const CommandPalette: React.FC = () => {
         </div>
       </DialogContent>
     </Dialog>
-    {activeSnippet && <TerminalSnippetDialog {...activeSnippet} close={() => setActiveSnippet(undefined)} />}
   </>);
 };

@@ -216,7 +216,7 @@ describe('CommandPalette', () => {
     }));
     expect(readOnlyOnly.find((item) => item.id === 'quick-action-profile-1-command-1')).toMatchObject({
       disabled: true,
-      disabledReason: 'terminal.snippets.inputUnavailable',
+      disabledReason: 'hostQuickActions.inputUnavailable',
     });
 
     const withWritableFallback = buildCommandPaletteItems(buildOptions({
