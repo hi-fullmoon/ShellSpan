@@ -527,12 +527,6 @@ export function AiComposerSeat({
     },
   );
   const handoffTerminalId = handoffLease?.sessionId ?? null;
-  const handleFocusHandoffTerminal = useCallback(() => {
-    if (!handoffTerminalId) return;
-    useTerminalStore.getState().setActiveSession(handoffTerminalId);
-    useAppStore.getState().setActiveSection('terminal');
-    terminalRegistry.get(handoffTerminalId)?.terminal.focus();
-  }, [handoffTerminalId]);
   const handleInsertHandoffCommand = useCallback((code: string): boolean => {
     if (!handoffTerminalId) return false;
     const session = useTerminalStore.getState().sessions.find((item) => item.sessionId === handoffTerminalId);
@@ -595,7 +589,6 @@ export function AiComposerSeat({
           onAnswer={onAnswerQuestion}
           onRefresh={onRefreshQuestionAnswer}
           onOpenSettings={onOpenModel}
-          onFocusTerminal={handoffTerminalId ? handleFocusHandoffTerminal : undefined}
           onInsertToTerminal={handoffTerminalId ? handleInsertHandoffCommand : undefined}
         />
         {mode === 'agent' && <AiApprovalSeat key={`approval:${currentSessionId ?? composerState?.sessionId ?? ''}`}

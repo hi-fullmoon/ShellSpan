@@ -267,7 +267,6 @@ export default {
   'ai.workspace.question.title': 'Your input is needed',
   'ai.workspace.question.actionTitle': 'Your action is needed',
   'ai.workspace.question.actionWaiting': 'Complete the following steps before continuing',
-  'ai.workspace.question.actionFocusTerminal': 'Focus terminal',
   'ai.workspace.question.actionInsertCommand': 'Insert into terminal',
   'ai.workspace.question.actionInsertedCommand': 'Inserted',
   'ai.workspace.question.actionInsertCommandFailed': 'Terminal is not ready for input',

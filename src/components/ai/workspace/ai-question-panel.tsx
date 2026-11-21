@@ -6,7 +6,6 @@ import {
   ChevronRightIcon,
   MessageCircleQuestionIcon,
   PenLineIcon,
-  TerminalIcon,
 } from 'lucide-react';
 import {
   Card,
@@ -71,7 +70,6 @@ export interface AiQuestionPanelProps {
   readonly onRefresh?: (input: AnswerQuestionInput) => Promise<void>;
   readonly onOpenSettings?: () => void;
   readonly onInsertToTerminal?: (code: string) => boolean;
-  readonly onFocusTerminal?: () => void;
 }
 
 const recommendedSuffix = /\s+\(Recommended\)$/i;
@@ -139,7 +137,6 @@ export function AiQuestionPanel({
   onRefresh,
   onOpenSettings,
   onInsertToTerminal,
-  onFocusTerminal,
 }: AiQuestionPanelProps): React.ReactNode {
   const { t } = useI18n();
   const userAction = pendingUserAction(question);
@@ -333,18 +330,6 @@ export function AiQuestionPanel({
           <AiContentTitle key={currentQuestion.id}>{userAction ? t('ai.workspace.question.actionWaiting') : currentQuestion.question}</AiContentTitle>
         </CardTitle>
         <CardAction className="ai-question-panel-actions flex items-center gap-0.5">
-          {userAction && onFocusTerminal && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t('ai.workspace.question.actionFocusTerminal')}
-              title={t('ai.workspace.question.actionFocusTerminal')}
-              onClick={onFocusTerminal}
-            >
-              <TerminalIcon aria-hidden="true" />
-            </Button>
-          )}
           {userAction && <AiToolCopyButton
             text={userAction.instructions}
             label={t('ai.workspace.question.actionCopyInstructions')}

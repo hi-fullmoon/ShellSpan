@@ -174,10 +174,9 @@ describe('user operation within the existing question card', () => {
     expect(screen.getByText('admin is not in the sudoers file')).toBeVisible();
   });
 
-  it('supports inserting shell commands into the bound terminal and focusing it', async () => {
+  it('supports inserting single-line shell commands into the bound terminal', async () => {
     const user = userEvent.setup();
     const inserted: string[] = [];
-    const focusTerminal = vi.fn();
     const command = 'sudo systemctl restart nginx';
     const multiLine = 'echo first\necho second';
     render(
@@ -192,15 +191,12 @@ describe('user operation within the existing question card', () => {
           }],
           answers: [],
         }}
-        onFocusTerminal={focusTerminal}
         onInsertToTerminal={(code) => {
           inserted.push(code);
           return true;
         }}
       />,
     );
-    await user.click(screen.getByRole('button', { name: 'Focus terminal' }));
-    expect(focusTerminal).toHaveBeenCalledTimes(1);
     const insertButtons = screen.getAllByRole('button', { name: 'Insert into terminal' });
     expect(insertButtons).toHaveLength(1);
     await user.click(insertButtons[0]);

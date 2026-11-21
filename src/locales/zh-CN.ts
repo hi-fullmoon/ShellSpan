@@ -267,7 +267,6 @@ export default {
   'ai.workspace.question.title': '需要你的回答',
   'ai.workspace.question.actionTitle': '需要你完成操作',
   'ai.workspace.question.actionWaiting': '请完成以下操作后再继续',
-  'ai.workspace.question.actionFocusTerminal': '聚焦终端',
   'ai.workspace.question.actionInsertCommand': '填入终端',
   'ai.workspace.question.actionInsertedCommand': '已填入终端',
   'ai.workspace.question.actionInsertCommandFailed': '当前终端不可输入，无法填入命令',
