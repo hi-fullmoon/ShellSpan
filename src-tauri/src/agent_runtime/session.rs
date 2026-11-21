@@ -3221,7 +3221,7 @@ fn create_session_events(
     now: u64,
 ) -> Result<Vec<AgentSessionEvent>, String> {
     let events = vec![
-        AgentSessionEvent::new(
+        sanitize_event(AgentSessionEvent::new(
             request.session_id.clone(),
             0,
             now,
@@ -3239,8 +3239,8 @@ fn create_session_events(
                 capability_scope: request.capability_scope.clone(),
                 subagent: request.subagent.clone(),
             },
-        ),
-        AgentSessionEvent::new(
+        ))?,
+        sanitize_event(AgentSessionEvent::new(
             request.session_id.clone(),
             1,
             now,
@@ -3250,7 +3250,7 @@ fn create_session_events(
                 agent_id: request.session_id.clone(),
                 parent_agent_id: request.parent_session_id.clone(),
             },
-        ),
+        ))?,
     ];
     AgentSessionRecord::from_events(events.clone())?;
     encoded_events(&events)?;

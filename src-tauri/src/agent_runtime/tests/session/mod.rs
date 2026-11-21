@@ -1638,6 +1638,42 @@ fn append_is_durable_sequential_redacted_and_published_after_commit() {
 }
 
 #[test]
+fn create_redacts_sensitive_goal_and_remains_idempotent_across_reopen() {
+    let (root, store) = configured();
+    let request = CreateAgentSessionRequest {
+        session_id: "session-1".into(),
+        task_id: "task-1".into(),
+        goal: "Set TEST_API_KEY=sk-test-1234567890abcdef1234567890 and print env".into(),
+        parent_session_id: None,
+        continued_from_session_id: None,
+        target: None,
+        permission_mode: None,
+        execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,
+        success_criteria: vec!["Confirm TEST_API_KEY=sk-test-1234567890abcdef1234567890".into()],
+        capability_scope: None,
+        subagent: None,
+    };
+
+    let created = store.create(request.clone()).unwrap();
+    assert_eq!(
+        created.header.goal,
+        "Set TEST_API_KEY=[REDACTED] and print env"
+    );
+    assert_eq!(
+        created.header.success_criteria,
+        vec!["Confirm TEST_API_KEY=[REDACTED]"]
+    );
+    assert_eq!(store.create(request).unwrap(), created);
+
+    let encoded = fs::read_to_string(log_path(&root)).unwrap();
+    assert!(!encoded.contains("sk-test-1234567890abcdef1234567890"));
+
+    let recovered = AgentSessionStore::default();
+    recovered.configure(root.path().to_path_buf()).unwrap();
+    assert_eq!(recovered.snapshot("session-1").unwrap(), created);
+}
+
+#[test]
 fn committed_event_backfill_uses_exclusive_after_seq() {
     let (_root, store) = configured();
     create(&store);
