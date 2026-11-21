@@ -118,7 +118,15 @@ describe('SnippetsPanel', () => {
     expect(dialog.querySelector('[data-slot="scroll-area"]')).toBeNull();
 
     const nameInput = within(dialog).getByLabelText('terminal.snippets.name');
+    const groupInput = within(dialog).getByLabelText('terminal.snippets.group');
+    const tagsInput = within(dialog).getByLabelText('terminal.snippets.tags');
+    const descriptionInput = within(dialog).getByLabelText('terminal.snippets.description');
     const commandInput = within(dialog).getByLabelText('terminal.snippets.template');
+    expect(nameInput).toHaveAttribute('placeholder', 'terminal.snippets.namePlaceholder');
+    expect(groupInput).toHaveAttribute('placeholder', 'terminal.snippets.groupPlaceholder');
+    expect(tagsInput).toHaveAttribute('placeholder', 'terminal.snippets.tagsPlaceholder');
+    expect(descriptionInput).toHaveAttribute('placeholder', 'terminal.snippets.descriptionPlaceholder');
+    expect(commandInput).toHaveAttribute('placeholder', 'kubectl logs -f {{pod}} -n {{namespace:default}}');
     await userEvent.type(nameInput, 'Disk Usage');
     fireEvent.change(commandInput, { target: { value: 'df {{broken' } });
 

@@ -162,6 +162,60 @@ describe('host quick actions', () => {
 
     await expect(insertHostCommandSnippet(profile.id, 'uptime')).resolves.toBe('no-target');
     expect(writeUserInput).toHaveBeenCalledWith('uptime');
+    expect(useTerminalStore.getState().activeSessionId).toBeNull();
+    expect(useAppStore.getState().activeSection).toBe('workbench');
+  });
+
+  it('skips read-only sessions and fails without switching section when all matching terminals are read-only', async () => {
+    useTerminalStore.setState({
+      sessions: [
+        {
+          sessionId: 'ro-host',
+          profileId: profile.id,
+          title: 'Locked',
+          status: 'connected',
+          host: profile.host,
+          port: profile.port,
+          username: profile.username,
+          readOnly: true,
+        },
+        {
+          sessionId: 'rw-host',
+          profileId: profile.id,
+          title: 'Writable',
+          status: 'connected',
+          host: profile.host,
+          port: profile.port,
+          username: profile.username,
+        },
+      ],
+      activeSessionId: 'ro-host',
+    });
+
+    expect(findConnectedTerminalSession(profile.id)).toBe('rw-host');
+    await expect(insertHostCommandSnippet(profile.id, 'uptime')).resolves.toBe('inserted');
+    expect(writeUserInput).toHaveBeenCalledWith('uptime');
+    expect(useTerminalStore.getState().activeSessionId).toBe('rw-host');
+    expect(useAppStore.getState().activeSection).toBe('terminal');
+
+    useAppStore.setState({ activeSection: 'workbench' });
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: 'ro-host',
+        profileId: profile.id,
+        title: 'Locked',
+        status: 'connected',
+        host: profile.host,
+        port: profile.port,
+        username: profile.username,
+        readOnly: true,
+      }],
+      activeSessionId: 'ro-host',
+    });
+
+    expect(findConnectedTerminalSession(profile.id)).toBeUndefined();
+    await expect(insertHostCommandSnippet(profile.id, 'uptime')).resolves.toBe('no-target');
+    expect(useAppStore.getState().activeSection).toBe('workbench');
   });
 
   it('opens a path in the already open pane bound to the profile', () => {

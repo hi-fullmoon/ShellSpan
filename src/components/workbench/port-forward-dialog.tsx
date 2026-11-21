@@ -171,6 +171,7 @@ export function PortForwardDialog({ profile: requestedProfile, onClose }: PortFo
                     <Input
                       id="port-forward-name"
                       autoFocus
+                      placeholder={draft.kind === 'dynamic' ? t('portForward.form.namePlaceholderDynamic') : t('portForward.form.namePlaceholder')}
                       value={draft.name}
                       onChange={(event) => setDraft({ ...draft, name: event.target.value })}
                     />
@@ -207,6 +208,7 @@ export function PortForwardDialog({ profile: requestedProfile, onClose }: PortFo
                       <Input
                         id="port-forward-local-port"
                         inputMode="numeric"
+                        placeholder={draft.kind === 'dynamic' ? '1080' : draft.kind === 'remote' ? '3000' : '8080'}
                         value={draft.localPort}
                         onChange={(event) => setDraft({ ...draft, localPort: event.target.value })}
                       />
@@ -218,6 +220,7 @@ export function PortForwardDialog({ profile: requestedProfile, onClose }: PortFo
                       <Input
                         id="port-forward-remote-host"
                         disabled={draft.kind === 'remote'}
+                        placeholder="127.0.0.1"
                         value={draft.remoteHost}
                         onChange={(event) => setDraft({ ...draft, remoteHost: event.target.value })}
                       />
@@ -229,6 +232,7 @@ export function PortForwardDialog({ profile: requestedProfile, onClose }: PortFo
                       <Input
                         id="port-forward-remote-port"
                         inputMode="numeric"
+                        placeholder={draft.kind === 'remote' ? '8080' : '5432'}
                         value={draft.remotePort}
                         onChange={(event) => setDraft({ ...draft, remotePort: event.target.value })}
                       />

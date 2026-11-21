@@ -125,11 +125,22 @@ describe('PortForwardDialog', () => {
     render(<PortForwardDialog profile={profile} onClose={vi.fn()} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'portForward.create' }));
+    expect(screen.getByLabelText('portForward.form.name')).toHaveAttribute('placeholder', 'portForward.form.namePlaceholder');
+    expect(screen.getByLabelText('portForward.form.listenPort')).toHaveAttribute('placeholder', '8080');
+    expect(screen.getByLabelText('portForward.form.remoteTargetHost')).toHaveAttribute('placeholder', '127.0.0.1');
+    expect(screen.getByLabelText('portForward.form.remoteTargetPort')).toHaveAttribute('placeholder', '5432');
     const localPortField = screen.getByLabelText('portForward.form.listenPort').closest('[data-slot="field"]')!;
     const portGrid = localPortField.parentElement!;
     expect(portGrid).toHaveClass('@min-[30rem]:grid-cols-3');
 
+    fireEvent.click(screen.getByRole('button', { name: 'portForward.kind.remote' }));
+    expect(screen.getByLabelText('portForward.form.localTargetPort')).toHaveAttribute('placeholder', '3000');
+    expect(screen.getByLabelText('portForward.form.remoteListenHost')).toHaveAttribute('placeholder', '127.0.0.1');
+    expect(screen.getByLabelText('portForward.form.remoteListenPort')).toHaveAttribute('placeholder', '8080');
+
     fireEvent.click(screen.getByRole('button', { name: 'portForward.kind.dynamic' }));
+    expect(screen.getByLabelText('portForward.form.name')).toHaveAttribute('placeholder', 'portForward.form.namePlaceholderDynamic');
+    expect(screen.getByLabelText('portForward.form.listenPort')).toHaveAttribute('placeholder', '1080');
     expect(portGrid).not.toHaveClass('@min-[30rem]:grid-cols-3');
     expect(screen.queryByLabelText('portForward.form.remoteTargetHost')).toBeNull();
     expect(screen.queryByLabelText('portForward.form.remoteListenHost')).toBeNull();

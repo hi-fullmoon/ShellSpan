@@ -106,4 +106,33 @@ describe('HostQuickActionsDialog', () => {
     const actionCard = screen.getByText('Check status').closest('[data-slot="card"]');
     expect(actionCard?.parentElement).toHaveClass('flex-col', 'gap-3');
   });
+
+  it('disables command insertion when connected terminals for this host are read-only', () => {
+    const withCommand: ConnectionProfile = {
+      ...profile,
+      quickActions: [{
+        id: 'command-1',
+        kind: 'command',
+        label: 'Check status',
+        command: 'systemctl status api',
+      }],
+    };
+    useProfileStore.setState({ profiles: [withCommand], updateProfile });
+    useTerminalStore.setState({
+      sessions: [{
+        sessionId: 's-ro',
+        profileId: withCommand.id,
+        title: withCommand.name,
+        host: withCommand.host,
+        port: withCommand.port,
+        username: withCommand.username,
+        status: 'connected',
+        readOnly: true,
+      }],
+      activeSessionId: 's-ro',
+    });
+    render(<HostQuickActionsDialog profile={withCommand} onClose={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Insert only' })).toBeDisabled();
+  });
 });

@@ -61,13 +61,17 @@ function EditSnippet({ snippet, close }: { snippet?: CommandSnippet; close: () =
         }}>
           <FieldGroup className="gap-3">
             <Field><FieldLabel htmlFor={id + '-name'}>{t('terminal.snippets.name')}</FieldLabel>
-              <Input id={id + '-name'} autoFocus maxLength={128} value={name} onChange={(event) => setName(event.target.value)} /></Field>
+              <Input id={id + '-name'} autoFocus maxLength={128} placeholder={t('terminal.snippets.namePlaceholder')}
+                value={name} onChange={(event) => setName(event.target.value)} /></Field>
             <Field><FieldLabel htmlFor={id + '-group'}>{t('terminal.snippets.group')}</FieldLabel>
-              <Input id={id + '-group'} maxLength={128} value={group} onChange={(event) => setGroup(event.target.value)} /></Field>
+              <Input id={id + '-group'} maxLength={128} placeholder={t('terminal.snippets.groupPlaceholder')}
+                value={group} onChange={(event) => setGroup(event.target.value)} /></Field>
             <Field><FieldLabel htmlFor={id + '-tags'}>{t('terminal.snippets.tags')}</FieldLabel>
-              <Input id={id + '-tags'} maxLength={512} value={tags} onChange={(event) => setTags(event.target.value)} /></Field>
+              <Input id={id + '-tags'} maxLength={512} placeholder={t('terminal.snippets.tagsPlaceholder')}
+                value={tags} onChange={(event) => setTags(event.target.value)} /></Field>
             <Field><FieldLabel htmlFor={id + '-description'}>{t('terminal.snippets.description')}</FieldLabel>
-              <Input id={id + '-description'} maxLength={512} value={description} onChange={(event) => setDescription(event.target.value)} /></Field>
+              <Input id={id + '-description'} maxLength={512} placeholder={t('terminal.snippets.descriptionPlaceholder')}
+                value={description} onChange={(event) => setDescription(event.target.value)} /></Field>
             <Field data-invalid={templateInvalid || undefined}>
               <FieldLabel htmlFor={id + '-command'}>{t('terminal.snippets.template')}</FieldLabel>
               <Input id={id + '-command'} className="font-mono text-xs" maxLength={4096}

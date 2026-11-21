@@ -47,7 +47,6 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import {
-  findConnectedTerminalSession,
   insertHostCommandSnippet,
   openHostPath,
   runHostConnectionAction,
@@ -56,6 +55,7 @@ import {
 } from '@/lib/host/host-quick-actions';
 import { generateId } from '@/lib/utils';
 import { useProfileStore } from '@/stores/profileStore';
+import { useTerminalStore } from '@/stores/terminalStore';
 import type {
   ConnectionProfile,
   HostConnectionAction,
@@ -135,9 +135,11 @@ export function HostQuickActionsDialog({
   const [validationError, setValidationError] = useState<HostQuickActionValidationError>();
   const [saving, setSaving] = useState(false);
   const actions = currentProfile?.quickActions ?? [];
-  const hasConnectedTarget = Boolean(
-    currentProfile && findConnectedTerminalSession(currentProfile.id),
-  );
+  const hasConnectedTarget = useTerminalStore((state) => Boolean(
+    currentProfile && state.sessions.some((session) => (
+      session.profileId === currentProfile.id && session.status === 'connected' && !session.readOnly
+    )),
+  ));
 
   useEffect(() => {
     setDraft(undefined);

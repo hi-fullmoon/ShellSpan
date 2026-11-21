@@ -19,9 +19,10 @@ export function findConnectedTerminalSession(profileId: string): string | undefi
     session.sessionId === activeSessionId
     && session.profileId === profileId
     && session.status === 'connected'
+    && !session.readOnly
   ));
   return active?.sessionId ?? sessions.find((session) => (
-    session.profileId === profileId && session.status === 'connected'
+    session.profileId === profileId && session.status === 'connected' && !session.readOnly
   ))?.sessionId;
 }
 
@@ -48,9 +49,10 @@ export async function insertHostCommandSnippet(
   if (!sessionId) return 'no-target';
   const controller = terminalRegistry.get(sessionId);
   if (!controller) return 'no-target';
+  if (!await controller.writeUserInput(command)) return 'no-target';
   useTerminalStore.getState().setActiveSession(sessionId);
   useAppStore.getState().setActiveSection('terminal');
-  return await controller.writeUserInput(command) ? 'inserted' : 'no-target';
+  return 'inserted';
 }
 
 export function findSftpPaneForLocation(
