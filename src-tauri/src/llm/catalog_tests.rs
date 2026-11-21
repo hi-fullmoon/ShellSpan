@@ -172,6 +172,7 @@ fn request_output_budget_preserves_user_context_and_model_capacity() {
             content: include_str!("../../../protocol/agent/runtime/context-budget.md").into(),
         }],
         tools: vec![],
+        tool_choice: Default::default(),
     };
     let automatic = crate::agent_runtime::estimate_model_surface_budget(&config, &request).unwrap();
     assert_eq!(automatic.output_reserve_tokens, 16_384);
@@ -322,6 +323,7 @@ fn request_budgets_follow_each_user_capacity_and_output_allowance() {
         system_prompt: include_str!("../../../AGENTS.md").into(),
         messages: vec![],
         tools: vec![],
+        tool_choice: Default::default(),
     };
     for (context, output, safety, usable, threshold, target) in [
         (16_000, 8_192, 1_024, 6_784, 5_766, 4_070),
@@ -391,6 +393,7 @@ fn minimax_capacity_override_must_leave_a_usable_input_budget() {
         system_prompt: include_str!("../../../AGENTS.md").into(),
         messages: vec![],
         tools: vec![],
+        tool_choice: Default::default(),
     };
     for output in [128_000, 121_600, 121_599] {
         definition.max_output_tokens = output;
@@ -426,6 +429,7 @@ fn smaller_context_requires_a_fitting_request_budget_without_changing_model_capa
         system_prompt: include_str!("../../../AGENTS.md").into(),
         messages: vec![],
         tools: vec![],
+        tool_choice: Default::default(),
     };
     for output in [Some(131_072), Some(60_800)] {
         definition.request_output_tokens = output;
@@ -534,6 +538,7 @@ fn budgets_use_exact_same_output_context_and_per_model_image_estimate() {
             }],
             data_urls: vec![],
         }],
+        tool_choice: Default::default(),
     };
     let budget = crate::agent_runtime::estimate_model_surface_budget(&p, &request).unwrap();
     assert_eq!(budget.context_window, 128000);
@@ -566,6 +571,7 @@ async fn unsupported_tool_capability_is_rejected_before_connecting() {
         system_prompt: String::new(),
         messages: vec![],
         tools: crate::agent_runtime::default_model_tools(),
+        tool_choice: Default::default(),
     };
     let error = adapter
         .stream(
@@ -601,6 +607,7 @@ fn unknown_tool_capability_passes_transport_validation() {
         system_prompt: String::new(),
         messages: vec![],
         tools: crate::agent_runtime::default_model_tools(),
+        tool_choice: Default::default(),
     };
     assert!(!request.tools.is_empty());
     assert_eq!(

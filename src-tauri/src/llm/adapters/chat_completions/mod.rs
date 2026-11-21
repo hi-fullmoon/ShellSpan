@@ -162,8 +162,11 @@ impl ModelAdapter for ChatCompletionsAdapter {
                     })
                     .collect(),
             );
-            body["tool_choice"] = json!("auto");
-            if capabilities.parallel_tool_calls {
+            body["tool_choice"] = match request.tool_choice {
+                ModelToolChoice::Auto => json!("auto"),
+                ModelToolChoice::None => json!("none"),
+            };
+            if request.tool_choice == ModelToolChoice::Auto && capabilities.parallel_tool_calls {
                 body["parallel_tool_calls"] = json!(true);
             }
         }

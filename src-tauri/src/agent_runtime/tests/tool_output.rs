@@ -402,6 +402,7 @@ fn real_repository_output_is_bounded_and_fully_retrievable_without_duplicate_art
             name: "read_file".into(),
             content: original.to_string(),
         }],
+        tool_choice: Default::default(),
     };
     let original_request = request.clone();
     bound_request_results(
@@ -694,6 +695,7 @@ fn terminal_observations_and_complete_skill_bodies_are_never_offloaded() {
                 content: include_str!("../../../../AGENTS.md").into(),
             })
             .collect(),
+        tool_choice: Default::default(),
     };
     let original = request.clone();
     bound_request_results(
@@ -741,6 +743,7 @@ fn flat_human_answers_stay_complete_without_artifact_or_payload_changes() {
             name: "ask_user_question".into(),
             content,
         }],
+        tool_choice: Default::default(),
     };
     let original = request.clone();
     for _ in 0..2 {

@@ -111,6 +111,7 @@ impl ModelRequest {
             system_prompt,
             messages,
             tools,
+            tool_choice: ModelToolChoice::Auto,
         }
     }
 }

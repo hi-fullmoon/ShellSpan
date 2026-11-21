@@ -3000,6 +3000,7 @@ mod ephemeral_terminal_result_tests {
                 content: durable,
             }],
             tools: Vec::new(),
+            tool_choice: Default::default(),
         };
         store.apply("session-1", "turn-1", &mut request);
         let ModelMessage::Tool { content, .. } = &request.messages[0] else {

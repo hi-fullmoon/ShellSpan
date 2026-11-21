@@ -69,6 +69,20 @@ pub(crate) enum ModelMessage {
     },
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ModelToolChoice {
+    #[default]
+    Auto,
+    None,
+}
+
+impl ModelToolChoice {
+    pub(crate) fn is_auto(&self) -> bool {
+        matches!(self, Self::Auto)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ModelRequest {
@@ -77,6 +91,8 @@ pub(crate) struct ModelRequest {
     pub(crate) system_prompt: String,
     pub(crate) messages: Vec<ModelMessage>,
     pub(crate) tools: Vec<ModelToolDefinition>,
+    #[serde(default, skip_serializing_if = "ModelToolChoice::is_auto")]
+    pub(crate) tool_choice: ModelToolChoice,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]

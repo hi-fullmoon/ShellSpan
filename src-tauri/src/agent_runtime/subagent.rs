@@ -24,7 +24,7 @@ use super::{
     OrchestrationToolRequest, OrchestrationToolResult, OrchestrationToolRuntime,
 };
 
-pub(super) const DEFAULT_ONE_SHOT_MAX_STEPS_PER_TURN: u16 = 6;
+pub(super) const DEFAULT_ONE_SHOT_MAX_STEPS_PER_TURN: u16 = 16;
 pub(super) const DEFAULT_CONTINUABLE_MAX_STEPS_PER_TURN: u16 = 50;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

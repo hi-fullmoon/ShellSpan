@@ -373,6 +373,7 @@ mod tests {
                 content: "hello".into(),
             }],
             tools: vec![],
+            tool_choice: Default::default(),
         };
         let call = model
             .prepare_request(request, "step", &CancellationToken::new())

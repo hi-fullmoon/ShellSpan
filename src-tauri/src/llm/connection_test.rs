@@ -154,6 +154,7 @@ async fn run(
                     content: "Reply with OK.".into(),
                 }],
                 tools: vec![],
+                tool_choice: Default::default(),
             },
             token,
             Arc::new(DiscardOutput),

@@ -532,6 +532,7 @@ mod tests {
             system_prompt: String::new(),
             messages: vec![],
             tools: vec![],
+            tool_choice: Default::default(),
         }
     }
 

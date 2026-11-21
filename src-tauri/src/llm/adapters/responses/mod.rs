@@ -235,8 +235,13 @@ impl ModelAdapter for ResponsesAdapter {
                     })
                     .collect(),
             );
-            body["tool_choice"] = json!("auto");
-            body["parallel_tool_calls"] = json!(resolved.compat.parallel_tool_calls);
+            body["tool_choice"] = match request.tool_choice {
+                ModelToolChoice::Auto => json!("auto"),
+                ModelToolChoice::None => json!("none"),
+            };
+            if request.tool_choice == ModelToolChoice::Auto {
+                body["parallel_tool_calls"] = json!(resolved.compat.parallel_tool_calls);
+            }
         }
         let endpoint = resolved.endpoint.clone();
         let api_key = self.http.api_key.as_deref().ok_or_else(|| {

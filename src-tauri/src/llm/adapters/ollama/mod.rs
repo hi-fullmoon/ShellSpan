@@ -109,7 +109,7 @@ impl ModelAdapter for OllamaAdapter {
             self.http.provider.kind,
             resolved.output_token_budget(),
         );
-        if !request.tools.is_empty() {
+        if !request.tools.is_empty() && request.tool_choice != ModelToolChoice::None {
             body["tools"] = Value::Array(
                 request
                     .tools

@@ -86,6 +86,7 @@
                 content: "hello".into(),
             }],
             tools: Vec::new(),
+            tool_choice: Default::default(),
         }
     }
 
@@ -226,6 +227,7 @@
                     input_schema: json!({"type":"object"}),
                 },
             ],
+            tool_choice: Default::default(),
         };
         let sink = Arc::new(Sink::default());
         let response = adapter
@@ -513,4 +515,48 @@
         assert!(response.content.iter().any(
             |block| matches!(block, ModelContentBlock::Text { text } if !text.trim().is_empty())
         ));
+    }
+
+    #[tokio::test]
+    async fn tool_choice_none_retains_tools_and_sets_anthropic_none() {
+        let events = vec![
+            json!({"type":"message_start","message":{"id":"msg_none","type":"message","role":"assistant","content":[],"model":"claude-sonnet-5","stop_reason":null,"usage":{"input_tokens":5,"output_tokens":1}}}),
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"final summary"}}),
+            json!({"type":"content_block_stop","index":0}),
+            json!({"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":4}}),
+            json!({"type":"message_stop"}),
+        ];
+        let (base_url, server) = serve(sse(&events));
+        let adapter = AnthropicMessagesAdapter {
+            http: HttpConfig {
+                client: build_streaming_client().unwrap(),
+                provider: anthropic_provider(base_url),
+                api_key: Some("stage-e-secret".into()),
+                timeouts: ModelTimeoutPolicy::default(),
+                limiter: None,
+            },
+        };
+        let mut request = basic_request();
+        request.tools = vec![ModelToolDefinition {
+            name: "read_file".into(),
+            description: "Read one file".into(),
+            input_schema: json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}),
+        }];
+        request.tool_choice = ModelToolChoice::None;
+        let response = adapter
+            .stream(request, CancellationToken::new(), Arc::new(Sink::default()))
+            .await
+            .unwrap();
+        let wire = String::from_utf8(server.join().unwrap()).unwrap();
+        let (_, body) = wire.split_once("\r\n\r\n").unwrap();
+        let body: Value = serde_json::from_str(body).unwrap();
+        assert_eq!(body["tools"].as_array().map(Vec::len), Some(1));
+        assert_eq!(body["tool_choice"], json!({"type": "none"}));
+        assert_eq!(
+            response.content,
+            vec![ModelContentBlock::Text {
+                text: "final summary".into()
+            }]
+        );
     }

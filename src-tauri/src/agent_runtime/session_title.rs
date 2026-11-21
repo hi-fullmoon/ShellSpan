@@ -58,6 +58,7 @@ pub(super) fn spawn(sessions: AgentSessionStore, entry: Arc<AgentEntry>, submiss
                     content: content.chars().take(4_000).collect(),
                 }],
                 tools: vec![],
+                tool_choice: Default::default(),
             };
             preparation_entry
                 .prepare_model()

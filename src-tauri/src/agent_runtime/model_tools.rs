@@ -315,7 +315,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "spawn_one_shot_agent".into(),
-            description: "Create a least-privilege child Agent for a small task that must settle in exactly one Turn. Its step budget is a hard limit. For implementation, debugging, or work that may need continuation, use spawn_continuable_agent instead.".into(),
+            description: "Create a least-privilege child Agent for a small task that must settle in one Turn. Defaults to 16 model steps per turn unless budget.maxStepsPerTurn overrides it (1-64); when the effective limit is at least 2, the final step disables tool calls for a wrap-up summary. Its step budget is a hard limit. For multi-stage inspection, implementation, or debugging, use spawn_continuable_agent instead.".into(),
             input_schema: subagent_spawn_schema(),
         },
         ModelToolDefinition {
@@ -559,7 +559,7 @@ fn subagent_budget_schema() -> Value {
     object_schema(
         &["maxTurns", "timeoutMs"],
         json!({
-            "maxStepsPerTurn": { "type": "integer", "minimum": 1, "maximum": 64, "description": "Optional per-turn model-step limit (1-64). Omitted defaults to 50 for continuable children; one-shot and Fleet children retain a default limit of 6. Existing explicit limits remain enforced across continuation and reload." },
+            "maxStepsPerTurn": { "type": "integer", "minimum": 1, "maximum": 64, "description": "Optional per-turn model-step limit (1-64). Omitted defaults to 50 for continuable children; one-shot and Fleet children retain a default limit of 16. When the effective limit is at least 2, the final step disables tool calls for an evidence-based wrap-up. Existing explicit limits remain enforced across continuation and reload." },
             "maxTurns": { "type": "integer", "minimum": 1, "maximum": 256 },
             "maxToolCalls": { "type": "integer", "minimum": 1, "maximum": 4096, "description": "Optional cumulative tool-call limit per child, including Fleet children. Omit unless the parent explicitly intends to limit tool calls; omitted means unlimited." },
             "maxTokens": { "type": "integer", "minimum": 1024, "maximum": 16000000, "description": "Optional cumulative provider-reported total-token limit. Omit unless an explicit token budget is requested; omitted means unlimited." },
@@ -703,6 +703,7 @@ mod tests {
                 system_prompt: String::new(),
                 messages: Vec::new(),
                 tools: original.clone(),
+                tool_choice: Default::default(),
             };
             apply_file_edit_budget(&mut request, tokens, continuations);
             for (tool, before) in request.tools.iter().zip(&original) {
@@ -735,6 +736,7 @@ mod tests {
                 .into_iter()
                 .filter(|tool| tool.name == "read_file")
                 .collect(),
+            tool_choice: Default::default(),
         };
         apply_file_edit_budget(&mut request, 4096, 2);
         assert!(request.system_prompt.contains("read_file"));

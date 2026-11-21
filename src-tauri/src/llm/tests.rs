@@ -1080,6 +1080,7 @@ async fn cross_domain_responses_wire_never_contains_old_native_state() {
                     },
                 ],
                 tools: Vec::new(),
+                tool_choice: Default::default(),
             },
             "step",
             &CancellationToken::new(),
@@ -1218,6 +1219,7 @@ async fn chat_usage_after_finish_reason_in_a_separate_http_chunk_is_retained() {
                 system_prompt: "system".into(),
                 messages: Vec::new(),
                 tools: Vec::new(),
+                tool_choice: Default::default(),
             },
             CancellationToken::new(),
             sink.clone(),
@@ -1400,6 +1402,7 @@ async fn actual_chat_request_body_matches_the_assembled_prompt_and_canonical_too
             content: "Say READY".into(),
         }],
         tools: vec![tool.clone()],
+        tool_choice: Default::default(),
     };
     let adapter = HttpModelAdapterFactory.create(provider, None).unwrap();
     let response = adapter
@@ -1473,6 +1476,7 @@ async fn generic_compatible_request_omits_unsupported_stream_usage_options() {
                 system_prompt: "system".into(),
                 messages: Vec::new(),
                 tools: Vec::new(),
+                tool_choice: Default::default(),
             },
             CancellationToken::new(),
             Arc::new(RecordingSink::default()),
@@ -1816,7 +1820,8 @@ async fn every_profile_proxy_request_stream_usage_and_history_fixture() {
             .unwrap();
         let response = adapter.stream(ModelRequest { request_id: "profile-fixture".into(), surface_generation: 0,
                 system_prompt: "system".into(), messages: vec![ModelMessage::User { content: "inspect".into() }],
-                tools: vec![ModelToolDefinition { name: "read_file".into(), description: "read".into(), input_schema: json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}) }] },
+                tools: vec![ModelToolDefinition { name: "read_file".into(), description: "read".into(), input_schema: json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}) }],
+                tool_choice: Default::default() },
                 CancellationToken::new(), Arc::new(RecordingSink::default())).await.unwrap();
         let body = receiver.recv().unwrap();
         assert_eq!(body["model"], provider.model);
@@ -1921,6 +1926,7 @@ async fn qwen_thinking_only_sse_is_not_classified_as_empty() {
                 system_prompt: "system".into(),
                 messages: vec![],
                 tools: vec![],
+                tool_choice: Default::default(),
             },
             CancellationToken::new(),
             Arc::new(RecordingSink::default()),
@@ -2127,6 +2133,7 @@ async fn rate_limit_header_cooldown_paces_next_request_through_throttled_adapter
                     system_prompt: "system".into(),
                     messages: vec![],
                     tools: vec![],
+                    tool_choice: Default::default(),
                 },
                 CancellationToken::new(),
                 Arc::new(RecordingSink::default()),
@@ -2142,5 +2149,170 @@ async fn rate_limit_header_cooldown_paces_next_request_through_throttled_adapter
         second_at.duration_since(first_at) >= Duration::from_millis(100),
         "second request arrived too early: {:?}",
         second_at.duration_since(first_at)
+    );
+}
+
+#[tokio::test]
+async fn tool_choice_none_wire_encoding_disables_tools_across_adapters() {
+    let tool = ModelToolDefinition {
+        name: "read_file".into(),
+        description: "Read a bounded file.".into(),
+        input_schema: json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path"],
+            "properties": { "path": { "type": "string" } }
+        }),
+    };
+
+    // 1. Chat Completions keeps tools, sets tool_choice = "none", omits parallel_tool_calls
+    let chat_sse = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"SUMMARY\"},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let (chat_url, chat_receiver, chat_server) = serve_recording_sse(chat_sse);
+    let mut chat_def =
+        crate::llm::catalog::fixture_definition(AiProviderKind::OpenAiCompatible, 32768);
+    chat_def.compat.parallel_tool_calls = true;
+    let chat_provider = AiProviderConfig {
+        model_definition: Some(chat_def),
+        profile: "generic".into(),
+        retry_policy: None,
+        id: "wire-chat-none".into(),
+        kind: AiProviderKind::OpenAiCompatible,
+        base_url: chat_url,
+        model: "generic-chat-model".into(),
+        reasoning_effort: None,
+        requires_api_key: false,
+        api_key: None,
+    };
+    let chat_adapter = HttpModelAdapterFactory.create(chat_provider, None).unwrap();
+    let chat_response = chat_adapter
+        .stream(
+            ModelRequest {
+                request_id: "wire-chat-none".into(),
+                surface_generation: 0,
+                system_prompt: "system".into(),
+                messages: vec![ModelMessage::User {
+                    content: "wrap up".into(),
+                }],
+                tools: vec![tool.clone()],
+                tool_choice: ModelToolChoice::None,
+            },
+            CancellationToken::new(),
+            Arc::new(RecordingSink::default()),
+        )
+        .await
+        .unwrap();
+    let chat_body = chat_receiver.recv().unwrap();
+    chat_server.join().unwrap();
+    assert_eq!(chat_body["tools"].as_array().map(Vec::len), Some(1));
+    assert_eq!(chat_body["tool_choice"], json!("none"));
+    assert!(chat_body.get("parallel_tool_calls").is_none());
+    assert_eq!(
+        chat_response.content,
+        vec![ModelContentBlock::Text {
+            text: "SUMMARY".into()
+        }]
+    );
+
+    // 2. Responses keeps tools, sets tool_choice = "none", omits parallel_tool_calls
+    let responses_sse = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_none\",\"model\":\"model-a\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"SUMMARY\"}]}]}}\n\n".to_string();
+    let (resp_url, resp_receiver, resp_server) = serve_recording_sse(responses_sse);
+    let mut resp_def = crate::llm::catalog::fixture_definition(AiProviderKind::OpenAi, 32768);
+    resp_def.compat.parallel_tool_calls = true;
+    let resp_provider = AiProviderConfig {
+        model_definition: Some(resp_def),
+        profile: "openai".into(),
+        retry_policy: None,
+        id: "wire-resp-none".into(),
+        kind: AiProviderKind::OpenAi,
+        base_url: resp_url,
+        model: "model-a".into(),
+        reasoning_effort: None,
+        requires_api_key: true,
+        api_key: None,
+    };
+    let resp_adapter = HttpModelAdapterFactory
+        .create(resp_provider, Some("test-key".into()))
+        .unwrap();
+    let resp_response = resp_adapter
+        .stream(
+            ModelRequest {
+                request_id: "wire-resp-none".into(),
+                surface_generation: 0,
+                system_prompt: "system".into(),
+                messages: vec![ModelMessage::User {
+                    content: "wrap up".into(),
+                }],
+                tools: vec![tool.clone()],
+                tool_choice: ModelToolChoice::None,
+            },
+            CancellationToken::new(),
+            Arc::new(RecordingSink::default()),
+        )
+        .await
+        .unwrap();
+    let resp_body = resp_receiver.recv().unwrap();
+    resp_server.join().unwrap();
+    assert_eq!(resp_body["tools"].as_array().map(Vec::len), Some(1));
+    assert_eq!(resp_body["tool_choice"], json!("none"));
+    assert!(resp_body.get("parallel_tool_calls").is_none());
+    assert_eq!(
+        resp_response.content,
+        vec![ModelContentBlock::Text {
+            text: "SUMMARY".into()
+        }]
+    );
+
+    // 3. Ollama has no tool_choice field, so tools are omitted when tool_choice = None
+    let ollama_ndjson =
+        "{\"message\":{\"role\":\"assistant\",\"content\":\"SUMMARY\"},\"done\":true}\n"
+            .to_string();
+    let (ollama_url, ollama_receiver, ollama_server) = serve_recording_sse(ollama_ndjson);
+    let ollama_provider = AiProviderConfig {
+        model_definition: Some(crate::llm::catalog::fixture_definition(
+            AiProviderKind::Ollama,
+            32768,
+        )),
+        profile: "ollama".into(),
+        retry_policy: None,
+        id: "wire-ollama-none".into(),
+        kind: AiProviderKind::Ollama,
+        base_url: ollama_url,
+        model: "qwen3".into(),
+        reasoning_effort: None,
+        requires_api_key: false,
+        api_key: None,
+    };
+    let ollama_adapter = HttpModelAdapterFactory
+        .create(ollama_provider, None)
+        .unwrap();
+    let ollama_response = ollama_adapter
+        .stream(
+            ModelRequest {
+                request_id: "wire-ollama-none".into(),
+                surface_generation: 0,
+                system_prompt: "system".into(),
+                messages: vec![ModelMessage::User {
+                    content: "wrap up".into(),
+                }],
+                tools: vec![tool],
+                tool_choice: ModelToolChoice::None,
+            },
+            CancellationToken::new(),
+            Arc::new(RecordingSink::default()),
+        )
+        .await
+        .unwrap();
+    let ollama_body = ollama_receiver.recv().unwrap();
+    ollama_server.join().unwrap();
+    assert!(ollama_body.get("tools").is_none());
+    assert_eq!(
+        ollama_response.content,
+        vec![ModelContentBlock::Text {
+            text: "SUMMARY".into()
+        }]
     );
 }

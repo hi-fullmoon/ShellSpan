@@ -221,7 +221,10 @@ impl ModelAdapter for AnthropicMessagesAdapter {
                     })
                     .collect(),
             );
-            body["tool_choice"] = json!({"type":"auto"});
+            body["tool_choice"] = match request.tool_choice {
+                ModelToolChoice::Auto => json!({"type":"auto"}),
+                ModelToolChoice::None => json!({"type":"none"}),
+            };
         }
         let response = send_request(
             self.http

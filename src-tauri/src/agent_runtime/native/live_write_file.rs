@@ -108,7 +108,7 @@ async fn real_minimax_write_file_creates_and_replaces_verified_files() {
         let cancellation = CancellationToken::new();
         let prepared = model.prepare_request(ModelRequest {
             request_id: format!("live-write-{index}-{step}"), surface_generation: 0,
-            system_prompt: assembly.system_prompt.clone(), messages: messages.clone(), tools: assembly.tools.clone(),
+            system_prompt: assembly.system_prompt.clone(), messages: messages.clone(), tools: assembly.tools.clone(), tool_choice: Default::default(),
         }, "live-write-verification", &cancellation).unwrap();
         let response = tokio::time::timeout(std::time::Duration::from_secs(180),
             prepared.stream(format!("live-write-{index}-{step}"), cancellation.clone(), Arc::new(LiveSink)),

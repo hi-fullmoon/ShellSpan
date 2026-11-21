@@ -249,6 +249,7 @@ mod tests {
             system_prompt: String::new(),
             messages: vec![message],
             tools: vec![],
+            tool_choice: Default::default(),
         };
         let budget = estimate_model_surface_budget(&provider(16384), &request).unwrap();
         let diagnostic = request_budget_breakdown(&request, &budget).to_string();
@@ -307,6 +308,7 @@ mod tests {
                 description: "read".into(),
                 input_schema: json!({"type": "object"}),
             }],
+            tool_choice: Default::default(),
         };
         let budget = estimate_model_surface_budget(&provider(16384), &request).unwrap();
         assert_eq!(budget.context_window, 16_384);
@@ -328,6 +330,7 @@ mod tests {
             system_prompt: source.into(),
             messages: vec![],
             tools: vec![],
+            tool_choice: Default::default(),
         };
         assert!(estimate_model_surface_budget(&provider(8192), &request)
             .unwrap_err()
@@ -351,6 +354,7 @@ mod tests {
                 content: "x".repeat(64 * 1024),
             }],
             tools: Vec::new(),
+            tool_choice: Default::default(),
         };
         let budget = estimate_model_surface_budget(&provider(8192), &request).unwrap();
         assert!(budget.compaction_target_tokens < budget.compaction_threshold_tokens);
