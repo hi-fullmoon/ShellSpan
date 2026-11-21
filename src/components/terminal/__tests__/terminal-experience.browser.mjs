@@ -670,30 +670,45 @@ try {
   await page.evaluate(() => window.runtime.terminalInputReadiness.finish(window.identity.sessionId));
   await page.getByRole('status', { name: '正在准备终端，暂时无法输入' }).waitFor({ state: 'detached' });
   const leaseBar = page.getByTestId('agent-terminal-lease-bar');
-  const terminalBounds = () => leaseBar.evaluate(element => element.nextElementSibling.getBoundingClientRect().toJSON());
+  const terminalHost = page.locator('#dialog [data-terminal-measure-session]');
+  const terminalBounds = () => terminalHost.evaluate(element => element.getBoundingClientRect().toJSON());
   await leaseBar.waitFor({ state: 'detached' });
+  await page.evaluate(() => window.runtime.useAgentPermissionStore.getState().setExecutionSurface(window.identity.sessionId, 'boundTerminal'));
+  await leaseBar.waitFor({ state: 'detached' });
+  const idleTerminalBounds = new Map();
+  for (const width of [1280, 420, 320]) {
+    await page.setViewportSize({ width, height: 800 });
+    await leaseBar.waitFor({ state: 'detached' });
+    idleTerminalBounds.set(width, await terminalBounds());
+  }
+  await page.setViewportSize({ width: 1280, height: 800 });
   const measureEntrance = () => page.evaluate(() => {
-    const { flushSync, useAgentPermissionStore } = window.runtime;
-    flushSync(() => useAgentPermissionStore.getState().setExecutionSurface(window.identity.sessionId, 'boundTerminal'));
+    const { flushSync, agentTerminalLeaseState } = window.runtime;
+    flushSync(() => agentTerminalLeaseState.set({
+      sessionId: window.identity.sessionId, agentSessionId: crypto.randomUUID(), taskId: crypto.randomUUID(),
+      operationId: crypto.randomUUID(), acquiredAtUnixMs: Date.now(), state: 'acquired', commandPhase: 'typing',
+      terminalOwned: true, inputBlocked: false, takeoverRequested: false, takeoverFailed: false,
+      requestTakeover: () => agentTerminalLeaseState.clearAll(),
+    }));
     const bar = document.querySelector('[data-testid="agent-terminal-lease-bar"]');
-    const row = bar.firstElementChild;
-    const animation = row.getAnimations()[0];
-    const opacity = () => Number(getComputedStyle(row).opacity);
+    const pill = bar.firstElementChild;
+    const animation = pill.getAnimations()[0];
+    const opacity = () => Number(getComputedStyle(pill).opacity);
     if (!animation) return { animated: false, opacity: opacity() };
-    const terminalBounds = () => bar.nextElementSibling.getBoundingClientRect().toJSON();
+    const hostBounds = () => document.querySelector('#dialog [data-terminal-measure-session]').getBoundingClientRect().toJSON();
     const duration = animation.effect.getComputedTiming().duration;
     animation.pause();
     animation.currentTime = 0;
-    const start = { opacity: opacity(), bounds: terminalBounds() };
+    const start = { opacity: opacity(), bounds: hostBounds() };
     animation.currentTime = duration / 2;
-    const middle = { opacity: opacity(), bounds: terminalBounds() };
+    const middle = { opacity: opacity(), bounds: hostBounds() };
     animation.finish();
-    const end = { opacity: opacity(), bounds: terminalBounds() };
+    const end = { opacity: opacity(), bounds: hostBounds() };
     return { animated: true, duration, start, middle, end };
   });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   assert.deepEqual(await measureEntrance(), { animated: false, opacity: 1 });
-  await page.evaluate(() => window.runtime.useAgentPermissionStore.getState().setExecutionSurface(window.identity.sessionId, 'direct'));
+  await page.evaluate(() => window.runtime.agentTerminalLeaseState.clearAll());
   await leaseBar.waitFor({ state: 'detached' });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   const entrance = await measureEntrance();
@@ -704,26 +719,8 @@ try {
   assert.equal(entrance.end.opacity, 1);
   assert.deepEqual(entrance.start.bounds, entrance.middle.bounds);
   assert.deepEqual(entrance.middle.bounds, entrance.end.bounds);
-  const inputAvailable = leaseBar.getByText('输入可用', { exact: true });
-  const idleTerminalBounds = new Map();
-  for (const width of [1280, 420, 320]) {
-    await page.setViewportSize({ width, height: 800 });
-    await inputAvailable.waitFor();
-    await leaseBar.getByText('可视命令', { exact: true }).waitFor();
-    assert.equal(await leaseBar.getByRole('button').count(), 0);
-    idleTerminalBounds.set(width, await terminalBounds());
-  }
   // Render both command phases with the real lease store and production pane.
-  // Phase changes must preserve the status bar and takeover button geometry.
-  await page.evaluate(() => {
-    const { agentTerminalLeaseState } = window.runtime;
-    agentTerminalLeaseState.set({
-      sessionId: window.identity.sessionId, agentSessionId: crypto.randomUUID(), taskId: crypto.randomUUID(),
-      operationId: crypto.randomUUID(), acquiredAtUnixMs: Date.now(), state: 'acquired', commandPhase: 'typing',
-      terminalOwned: true, inputBlocked: false, takeoverRequested: false, takeoverFailed: false,
-      requestTakeover: () => agentTerminalLeaseState.clearAll(),
-    });
-  });
+  // Phase changes must preserve the terminal viewport and keep the pill within bounds.
   for (const width of [1280, 420]) {
     await page.setViewportSize({ width, height: 800 });
     const bar = page.getByTestId('agent-terminal-lease-bar');
@@ -732,10 +729,11 @@ try {
     assert.deepEqual(await terminalBounds(), idleTerminalBounds.get(width), 'Starting an Agent command must preserve the terminal viewport');
     assert.equal(await bar.evaluate(element => element.firstElementChild.getAnimations().some(animation => animation.playState === 'running')), false,
       'Changing the state of an already visible status bar must not replay the entrance');
-    const typingBar = await bar.boundingBox();
+    const pill = bar.locator('> div').first();
+    const typingPill = await pill.boundingBox();
     const takeover = bar.getByRole('button', { name: '停止并接管', exact: true });
     const typingButton = await takeover.boundingBox();
-    assert.ok(typingButton.x >= typingBar.x && typingButton.x + typingButton.width <= typingBar.x + typingBar.width);
+    assert.ok(typingButton.x >= typingPill.x && typingButton.x + typingButton.width <= typingPill.x + typingPill.width);
     await page.evaluate(async () => {
       const store = window.runtime.agentTerminalLeaseState;
       const lease = store.get(window.identity.sessionId);
@@ -746,8 +744,11 @@ try {
       coordinator.dispose();
     });
     await bar.locator('.agent-terminal-lease-description').filter({ hasText: 'Agent 正在执行命令' }).waitFor();
-    assert.deepEqual(await bar.boundingBox(), typingBar);
-    assert.deepEqual(await takeover.boundingBox(), typingButton);
+    const runningPill = await pill.boundingBox();
+    const runningButton = await takeover.boundingBox();
+    assert.equal(runningPill.height, typingPill.height);
+    assert.equal(runningButton.height, typingButton.height);
+    assert.ok(runningButton.x >= runningPill.x && runningButton.x + runningButton.width <= runningPill.x + runningPill.width);
     await page.evaluate(async () => {
       const store = window.runtime.agentTerminalLeaseState;
       const lease = store.get(window.identity.sessionId);
@@ -769,37 +770,40 @@ try {
       const bar = page.getByTestId('agent-terminal-lease-bar');
       const activity = locale === 'zh-CN' ? 'Agent 正在处理' : 'Agent is working';
       const lock = locale === 'zh-CN' ? '输入锁定' : 'Input locked';
-      const taskButton = bar.getByRole('button', { name: locale === 'zh-CN' ? '查看任务' : 'View task', exact: true });
       const takeover = bar.getByRole('button', { name: locale === 'zh-CN' ? '停止并接管' : 'Stop & take over', exact: true });
       const description = bar.getByText(activity, { exact: true });
       const lockLabel = bar.getByText(lock, { exact: true });
       await description.waitFor();
       await lockLabel.waitFor();
-      await taskButton.waitFor();
+      await takeover.waitFor();
+      assert.equal(await bar.getByRole('button').count(), 1, 'The floating lease pill should only show takeover');
       const identityBadge = bar.getByTestId('agent-terminal-lease-identity');
       const badgeBounds = await identityBadge.boundingBox();
       const iconBounds = await identityBadge.locator('svg').boundingBox();
-      assert.deepEqual([badgeBounds.width, badgeBounds.height], [24, 24], 'The status icon background must stay compact');
+      assert.deepEqual([badgeBounds.width, badgeBounds.height], [20, 20], 'The status icon background must stay compact');
       assert.deepEqual([iconBounds.width, iconBounds.height], [12, 12], 'The terminal glyph must fit the compact background');
       assert.equal(await takeover.locator('svg').count(), 0, 'The takeover button should contain text only');
       const geometry = await bar.evaluate(element => {
-        const bounds = element.getBoundingClientRect();
-        const status = element.querySelector('.agent-terminal-lease-status');
-        const items = [status, ...element.querySelectorAll('button')].map(item => item.getBoundingClientRect().toJSON());
-        return { left: bounds.left, right: bounds.right, height: bounds.height, items,
-          overflow: element.scrollWidth > element.clientWidth,
-          terminalTop: element.nextElementSibling.getBoundingClientRect().top, bottom: bounds.bottom };
+        const pill = element.firstElementChild;
+        const bounds = pill.getBoundingClientRect();
+        const hostBounds = element.parentElement.getBoundingClientRect();
+        const status = pill.querySelector('.agent-terminal-lease-status');
+        const items = [status, ...pill.querySelectorAll('button')].map(item => item.getBoundingClientRect().toJSON());
+        return {
+          left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom, height: bounds.height, items,
+          overflow: pill.scrollWidth > pill.clientWidth,
+          hostLeft: hostBounds.left, hostRight: hostBounds.right, hostTop: hostBounds.top,
+        };
       });
       assert.equal(geometry.overflow, false, `Lease bar must fit ${locale} at ${width}px`);
-      const [status, task, action] = geometry.items;
-      assert.equal(status.left - geometry.left, 4, `Status inset at ${locale} ${width}px`);
-      assert.equal(geometry.right - action.right, 4, `Action inset at ${locale} ${width}px`);
-      assert.ok(task.left >= status.right && action.left >= task.right, 'Status and actions must not overlap');
-      assert.equal(task.height, action.height, 'Actions must have equal heights');
+      const [status, action] = geometry.items;
+      assert.ok(geometry.left >= geometry.hostLeft && geometry.right <= geometry.hostRight,
+        `Floating lease pill must stay within terminal bounds at ${locale} ${width}px`);
+      assert.ok(action.left >= status.right, 'Status and action must not overlap');
       assert.ok(Math.abs(status.y + status.height / 2 - action.y - action.height / 2) < 1,
-        'Status and actions must stay vertically centered');
-      assert.ok(geometry.height <= 36 && Math.abs(geometry.terminalTop - geometry.bottom) < 1,
-        'The compact bar must sit directly above the terminal');
+        'Status and action must stay vertically centered');
+      assert.ok(geometry.height <= 38 && geometry.top >= geometry.hostTop && geometry.top - geometry.hostTop <= 12,
+        'The floating lease pill must stay compact near the top of the terminal');
       assert.equal(await description.evaluate(element => element.scrollWidth <= element.clientWidth + 1), true,
         `Activity text must be legible at ${locale} ${width}px`);
       const caption = lockLabel.locator('..');
@@ -809,72 +813,55 @@ try {
         assert.equal((await caption.innerText()).replace(/\s+/g, ' ').trim(), `${mode} · ${lock}`);
       }
       if (width === 320) {
-        await taskButton.focus();
-        await page.keyboard.press('Tab');
+        await takeover.focus();
         assert.equal(await takeover.evaluate(element => element === document.activeElement), true);
         await takeover.blur();
         await bar.screenshot({ path: `${root}artifacts/tests/terminal-lease/${locale}-compact.png` });
       }
-      await page.evaluate(() => {
-        const { useTerminalTaskNavigation, useAiPanelStore, useFocusStore, useAppStore, agentTerminalLeaseState } = window.runtime;
-        useAppStore.setState({ activeSection: 'terminal' });
-        useFocusStore.setState({ enabled: false });
-        useAiPanelStore.getState().setOpen(true, 'terminal');
-        useTerminalTaskNavigation.getState().setDisplayedSession('terminal', agentTerminalLeaseState.get(window.identity.sessionId).agentSessionId);
-      });
-      await taskButton.waitFor({ state: 'detached' });
-      assert.equal(await bar.getByRole('button').count(), 1, 'The displayed task must only retain takeover');
-      if (locale === 'zh-CN' && width === 760) {
-        const readBarStyle = () => bar.evaluate(element => {
-          const { backgroundColor, borderBottomWidth } = getComputedStyle(element);
-          return { backgroundColor, borderBottomWidth };
+      if (locale === 'zh-CN' && width === 320) {
+        await page.setViewportSize({ width: 140, height: 800 });
+        const ultraNarrow = await bar.evaluate(element => {
+          const pill = element.firstElementChild;
+          const bounds = pill.getBoundingClientRect();
+          const hostBounds = element.parentElement.getBoundingClientRect();
+          const button = pill.querySelector('button').getBoundingClientRect();
+          return {
+            overflow: pill.scrollWidth > pill.clientWidth,
+            fitsHost: bounds.left >= hostBounds.left && bounds.right <= hostBounds.right,
+            buttonFitsPill: button.left >= bounds.left && button.right <= bounds.right,
+          };
         });
-        assert.deepEqual(await readBarStyle(), { backgroundColor: 'rgb(255, 255, 255)', borderBottomWidth: '0px' });
+        assert.deepEqual(ultraNarrow, { overflow: false, fitsHost: true, buttonFitsPill: true });
+        await page.setViewportSize({ width: 320, height: 800 });
+      }
+      if (locale === 'zh-CN' && width === 760) {
+        const readPillStyle = () => bar.evaluate(element => {
+          const { borderTopWidth, borderRadius, boxShadow } = getComputedStyle(element.firstElementChild);
+          const aura = element.parentElement.querySelector('[data-testid="agent-visible-terminal-aura"]');
+          const auraShadow = aura ? getComputedStyle(aura).boxShadow : 'none';
+          return {
+            borderTopWidth,
+            hasRadius: Number.parseFloat(borderRadius) >= 6,
+            hasShadow: boxShadow !== 'none',
+            hasInsetAura: auraShadow.includes('inset'),
+          };
+        });
+        assert.deepEqual(await readPillStyle(), { borderTopWidth: '1px', hasRadius: true, hasShadow: true, hasInsetAura: true });
         await bar.screenshot({ animations: 'disabled', path: `${root}artifacts/tests/terminal-lease/zh-CN-wide.png` });
         await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
-        assert.deepEqual(await readBarStyle(), { backgroundColor: 'rgb(32, 33, 34)', borderBottomWidth: '0px' });
+        assert.deepEqual(await readPillStyle(), { borderTopWidth: '1px', hasRadius: true, hasShadow: true, hasInsetAura: true });
         await bar.screenshot({ animations: 'disabled', path: `${root}artifacts/tests/terminal-lease/zh-CN-dark.png` });
         await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
       }
-      await page.evaluate(() => window.runtime.useAiPanelStore.getState().setOpen(false, 'terminal'));
-      await taskButton.waitFor();
-      await page.evaluate(() => {
-        window.runtime.useAiPanelStore.getState().setOpen(true, 'terminal');
-        window.runtime.useTerminalTaskNavigation.getState().setDisplayedSession('terminal', null);
-      });
-      await taskButton.waitFor();
-      await page.evaluate(() => {
-        window.runtime.useFocusStore.setState({ enabled: true });
-        window.runtime.useTerminalTaskNavigation.getState().setDisplayedSession('focus',
-          window.runtime.agentTerminalLeaseState.get(window.identity.sessionId).agentSessionId);
-      });
-      await page.evaluate(() => new Promise(requestAnimationFrame));
-      assert.equal(await taskButton.count(), 1, 'A task in another workspace must retain its navigation entry');
-      await page.evaluate(() => {
-        const { agentTerminalLeaseState, useAiPanelStore } = window.runtime;
-        const lease = agentTerminalLeaseState.get(window.identity.sessionId);
-        agentTerminalLeaseState.update(lease.sessionId, lease.operationId, current => ({ ...current, workspace: 'focus' }));
-        useAiPanelStore.getState().setOpen(false, 'terminal');
-      });
-      await taskButton.waitFor({ state: 'detached' });
-      await page.evaluate(() => {
-        const { agentTerminalLeaseState, useFocusStore, useTerminalTaskNavigation } = window.runtime;
-        const lease = agentTerminalLeaseState.get(window.identity.sessionId);
-        agentTerminalLeaseState.update(lease.sessionId, lease.operationId, current => ({ ...current, workspace: 'terminal' }));
-        useFocusStore.setState({ enabled: false });
-        useTerminalTaskNavigation.getState().setDisplayedSession('focus', null);
-      });
-      await taskButton.waitFor();
     }
   }
   await leaseBar.getByRole('button', { name: '停止并接管', exact: true }).click();
-  await inputAvailable.waitFor();
-  assert.equal(await leaseBar.getByRole('button').count(), 0);
+  await leaseBar.waitFor({ state: 'detached' });
   assert.deepEqual(await terminalBounds(), idleTerminalBounds.get(320), 'Releasing the terminal must preserve its viewport');
 
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.evaluate(() => {
-    const { React, AiPanel, TerminalPane, useTerminalStore, useAiPanelStore, useAgentPermissionStore } = window.runtime;
+    const { React, AiPanel, TerminalPane, useAppStore, useFocusStore, useTerminalStore, useAiPanelStore, useAgentPermissionStore } = window.runtime;
     const terminalSessionId = window.identity.sessionId;
     const prepareTerminal = (integrationState, integrationReason, promptReady) => useTerminalStore.setState(state => ({
       sessions: state.sessions.map(session => session.sessionId === terminalSessionId
@@ -882,6 +869,8 @@ try {
         : session),
     }));
     prepareTerminal('ready', undefined, true);
+    useAppStore.setState({ activeSection: 'terminal' });
+    useFocusStore.setState({ enabled: false });
     useTerminalStore.getState().setActiveSession(terminalSessionId);
     useAgentPermissionStore.getState().setExecutionSurface(terminalSessionId, 'direct');
     useAiPanelStore.getState().setOpen(true, 'terminal');
@@ -898,23 +887,23 @@ try {
   });
   const executionSelector = page.locator('.ai-execution-surface-trigger');
   const closePanel = page.getByRole('button', { name: '关闭 AI 助手', exact: true });
-  const terminalHost = page.locator('#dialog [data-terminal-measure-session]');
   const terminalTop = () => terminalHost.evaluate(element => element.getBoundingClientRect().top);
   const openPanel = () => page.evaluate(() => window.runtime.useAiPanelStore.getState().setOpen(true, 'terminal'));
+  const directTopBefore = await terminalTop();
   await executionSelector.click();
   await page.getByRole('menuitemradio', { name: '可视命令', exact: true }).click();
-  await inputAvailable.waitFor();
+  await executionSelector.and(page.locator('[data-execution-surface="boundTerminal"]')).waitFor();
+  await leaseBar.waitFor({ state: 'detached' });
   const visibleTop = await terminalTop();
+  assert.equal(visibleTop, directTopBefore, 'Selecting visible commands must not shift the terminal viewport');
   await closePanel.click();
   await executionSelector.waitFor({ state: 'detached' });
-  await inputAvailable.waitFor();
-  assert.equal(await terminalTop(), visibleTop, 'Closing the Agent panel must preserve the selected visible command bar');
+  await leaseBar.waitFor({ state: 'detached' });
+  assert.equal(await terminalTop(), visibleTop, 'Closing the Agent panel must preserve the terminal viewport');
   await page.evaluate(() => window.runtime.useTerminalStore.getState().setReconnecting(window.identity.sessionId, true));
-  await inputAvailable.waitFor({ state: 'detached' });
-  await leaseBar.locator('.agent-terminal-lease-status').getByText('可视命令', { exact: true }).waitFor();
-  assert.equal(await terminalTop(), visibleTop, 'Reconnecting must preserve the visible command bar height');
+  await leaseBar.waitFor({ state: 'detached' });
+  assert.equal(await terminalTop(), visibleTop, 'Reconnecting must preserve the terminal viewport');
   await page.evaluate(() => window.runtime.useTerminalStore.getState().setReconnecting(window.identity.sessionId, false));
-  await inputAvailable.waitFor();
 
   await page.evaluate(() => window.reportUnsupportedGlibc());
   await leaseBar.waitFor({ state: 'detached' });
@@ -1744,7 +1733,7 @@ try {
         const lines = range.getClientRects();
         const lineHeight = parseFloat(getComputedStyle(message.parentElement).lineHeight);
         const textCenter = message.parentElement.getBoundingClientRect().top + lineHeight / 2;
-        const buttonHeights = [...element.querySelectorAll('button')].map((button) => button.getBoundingClientRect().height);
+        const buttonHeights = [...element.querySelectorAll('[data-broadcast-actions] button')].map((button) => button.getBoundingClientRect().height);
         return {
           centerOffset: icon.top + icon.height / 2 - textCenter,
           gap: lines[0].left - icon.right,

@@ -10,6 +10,7 @@ import { resetTerminalLeader } from '../terminal-leader';
 import { terminalRegistry, type TerminalController } from '@/components/terminal/registry/terminal-registry';
 import { useTerminalStore, type TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
 import { useTerminalBroadcastStore } from '@/stores/terminalBroadcastStore';
+import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
 
@@ -218,7 +219,7 @@ describe('TerminalPane', () => {
     expect(screen.queryByTestId('agent-visible-terminal-aura')).not.toBeInTheDocument();
   });
 
-  it('shows a non-overlaying Agent lease bar without a timer', () => {
+  it('shows a floating Agent lease bar and perimeter aura while active', () => {
     setAgentLease();
     const { container } = render(<TerminalPane activeSession={makeSession()} />);
     const bar = screen.getByTestId('agent-terminal-lease-bar');
@@ -228,22 +229,34 @@ describe('TerminalPane', () => {
     expect(bar).toHaveTextContent('terminal.agentLease.inputLockedLabel');
     expect(bar).not.toHaveTextContent('terminal.agentLease.runtime');
     expect(bar.querySelector('[aria-label="terminal.agentLease.runtime"]')).toBeNull();
-    expect(bar).not.toHaveClass('absolute');
-    expect(bar).toHaveClass('@container/terminal-lease');
-    expect(bar).not.toHaveClass('min-h-10');
+    expect(bar).toHaveClass('@container/terminal-lease', 'pointer-events-none', 'absolute');
     expect(screen.getByTestId('agent-visible-terminal-aura'))
-      .toHaveClass('pointer-events-none', 'absolute', 'inset-0');
+      .toHaveClass('agent-visible-terminal-aura', 'pointer-events-none', 'absolute', 'inset-0');
     expect(bar).not.toHaveTextContent('[Agent] $ echo [REDACTED]');
     expect(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }))
       .toHaveAttribute('data-slot', 'button');
     expect(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }))
       .toHaveClass('gap-1');
+    expect(container.querySelector('.min-h-0.flex-1')).toContainElement(bar);
     expect(container.querySelector('.min-h-0.flex-1')).toContainElement(
       container.querySelector('div.h-full.w-full.p-0'),
     );
 
     act(() => agentTerminalLeaseState.clear('s1', 'operation-1'));
     expect(screen.queryByTestId('agent-terminal-lease-bar')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('agent-visible-terminal-aura')).not.toBeInTheDocument();
+  });
+
+  it('hides the lease bar and aura when visible commands are idle', () => {
+    useAgentPermissionStore.getState().setExecutionSurface('s1', 'boundTerminal');
+    try {
+      const { unmount } = render(<TerminalPane activeSession={makeSession()} />);
+      expect(screen.queryByTestId('agent-terminal-lease-bar')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('agent-visible-terminal-aura')).not.toBeInTheDocument();
+      unmount();
+    } finally {
+      useAgentPermissionStore.getState().setExecutionSurface('s1', 'direct');
+    }
   });
 
   it('routes the takeover button and Escape through the lease action', async () => {

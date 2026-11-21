@@ -53,7 +53,7 @@ it('restores the terminal handoff after refresh without replaying the turn', () 
   render(<TerminalPane activeSession={terminal ?? null} />);
   expect(screen.getByTestId('agent-terminal-lease-bar')).toHaveTextContent('等待你在终端操作');
   expect(screen.getByTestId('agent-terminal-lease-bar')).not.toHaveTextContent('输入锁定');
-  expect(screen.getByRole('button', { name: '查看任务' })).toBeVisible();
+  expect(screen.queryByRole('button', { name: '查看任务' })).toBeNull();
   expect(screen.queryByRole('button', { name: '停止并接管' })).toBeNull();
   expect(agentTerminalLeaseState.blocksUserInput(waiting.sessionId)).toBe(false);
   expect(agentTerminalLeaseState.get(waiting.sessionId)).toMatchObject({
