@@ -170,10 +170,17 @@ const EMPTY_CORRELATION = {
   goalByChildId: EMPTY_STRING_MAP,
 } as const;
 
+function isTerminalSubagentStatus(status: AgentSessionRuntimeStatus): boolean {
+  return status === 'completed' || status === 'failed' || status === 'cancelled';
+}
+
 function mergeSubagentStatus(
   existing: AiSessionSummary,
   activity: AgentActivityAgent,
 ): AgentSessionRuntimeStatus {
+  if (isTerminalSubagentStatus(existing.status)) {
+    return existing.status;
+  }
   if (activity.status === 'running' || activity.status === 'waiting') {
     return activity.status;
   }
@@ -181,6 +188,27 @@ function mergeSubagentStatus(
     return existing.status;
   }
   return activity.status;
+}
+
+export function isActiveSubagentEntry(entry: AiSubagentEntry): boolean {
+  if (entry.status === 'running' || entry.status === 'waiting') {
+    return true;
+  }
+  return entry.continuable && entry.status === 'idle';
+}
+
+export function filterActiveSubagentEntries(
+  entries: readonly AiSubagentEntry[],
+): readonly AiSubagentEntry[] {
+  const active = entries.filter(isActiveSubagentEntry);
+  if (active.length === 0) return [];
+  const activeDepthById = new Map<string, number>();
+  return active.map((entry) => {
+    const parentDepth = entry.parentSessionId ? activeDepthById.get(entry.parentSessionId) : undefined;
+    const depth = parentDepth !== undefined ? parentDepth + 1 : 1;
+    activeDepthById.set(entry.summary.id, depth);
+    return depth === entry.depth ? entry : { ...entry, depth };
+  });
 }
 
 export function correlateSubagentToolSessions(

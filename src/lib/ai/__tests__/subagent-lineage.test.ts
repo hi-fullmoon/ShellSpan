@@ -6,6 +6,8 @@ import {
   buildSubagentLineage,
   correlateSubagentToolSessions,
   extractSubagentToolSummary,
+  filterActiveSubagentEntries,
+  isActiveSubagentEntry,
   isSubagentDelegationTool,
   isSubagentTool,
   subagentToolAction,
@@ -444,5 +446,114 @@ describe('subagent-lineage', () => {
     expect(first).toBe(second);
     expect(first.toolChildSessionIds.size).toBe(0);
     expect(first.goalByChildId.size).toBe(0);
+  });
+
+  it('preserves terminal child session status over stale idle or running parent activity', () => {
+    const root = makeSummary('root', { status: 'idle' });
+    const cancelledChild = makeSummary('child-cancelled', {
+      status: 'cancelled',
+      parentSessionId: 'root',
+      subagent: { descriptorId: 'd-cancelled', role: 'operator', continuable: true, depth: 1 },
+    });
+    const completedChild = makeSummary('child-completed', {
+      status: 'completed',
+      parentSessionId: 'root',
+      subagent: { descriptorId: 'd-completed', role: 'explorer', continuable: false, depth: 1 },
+    });
+    const failedChild = makeSummary('child-failed', {
+      status: 'failed',
+      parentSessionId: 'root',
+      subagent: { descriptorId: 'd-failed', role: 'verifier', continuable: true, depth: 1 },
+    });
+
+    const lineage = buildSubagentLineage(
+      makeView(root, {
+        subagents: [
+          {
+            sessionId: 'child-cancelled',
+            parentSessionId: 'root',
+            descriptorId: 'd-cancelled',
+            role: 'operator',
+            continuable: true,
+            depth: 1,
+            status: 'idle',
+          },
+          {
+            sessionId: 'child-completed',
+            parentSessionId: 'root',
+            descriptorId: 'd-completed',
+            role: 'explorer',
+            continuable: false,
+            depth: 1,
+            status: 'running',
+          },
+          {
+            sessionId: 'child-failed',
+            parentSessionId: 'root',
+            descriptorId: 'd-failed',
+            role: 'verifier',
+            continuable: true,
+            depth: 1,
+            status: 'idle',
+          },
+        ],
+      }),
+      [root, cancelledChild, completedChild, failedChild],
+    );
+
+    expect(lineage?.entryById.get('child-cancelled')?.status).toBe('cancelled');
+    expect(lineage?.entryById.get('child-completed')?.status).toBe('completed');
+    expect(lineage?.entryById.get('child-failed')?.status).toBe('failed');
+  });
+
+  it('filters active subagent entries and re-anchors nested depth when parents end', () => {
+    const root = makeSummary('root', { status: 'running' });
+    const endedParent = makeSummary('child-ended', {
+      status: 'completed',
+      parentSessionId: 'root',
+      updatedAt: '2026-11-20T00:00:01.000Z',
+      subagent: { descriptorId: 'd-ended', role: 'explorer', continuable: false, depth: 1 },
+    });
+    const runningGrandchild = makeSummary('grandchild-running', {
+      status: 'running',
+      parentSessionId: 'child-ended',
+      updatedAt: '2026-11-20T00:00:02.000Z',
+      subagent: { descriptorId: 'd-grandchild', role: 'verifier', continuable: false, depth: 2 },
+    });
+    const idleContinuable = makeSummary('child-continuable-idle', {
+      status: 'idle',
+      parentSessionId: 'root',
+      updatedAt: '2026-11-20T00:00:03.000Z',
+      subagent: { descriptorId: 'd-continuable', role: 'operator', continuable: true, depth: 1 },
+    });
+    const idleOneShot = makeSummary('child-oneshot-idle', {
+      status: 'idle',
+      parentSessionId: 'root',
+      updatedAt: '2026-11-20T00:00:04.000Z',
+      subagent: { descriptorId: 'd-oneshot', role: 'general', continuable: false, depth: 1 },
+    });
+    const cancelledChild = makeSummary('child-cancelled', {
+      status: 'cancelled',
+      parentSessionId: 'root',
+      updatedAt: '2026-11-20T00:00:05.000Z',
+      subagent: { descriptorId: 'd-cancelled', role: 'operator', continuable: true, depth: 1 },
+    });
+
+    const lineage = buildSubagentLineage(
+      makeView(root),
+      [root, endedParent, runningGrandchild, idleContinuable, idleOneShot, cancelledChild],
+    );
+    expect(lineage).not.toBeNull();
+    expect(isActiveSubagentEntry(lineage!.entryById.get('grandchild-running')!)).toBe(true);
+    expect(isActiveSubagentEntry(lineage!.entryById.get('child-continuable-idle')!)).toBe(true);
+    expect(isActiveSubagentEntry(lineage!.entryById.get('child-ended')!)).toBe(false);
+    expect(isActiveSubagentEntry(lineage!.entryById.get('child-oneshot-idle')!)).toBe(false);
+    expect(isActiveSubagentEntry(lineage!.entryById.get('child-cancelled')!)).toBe(false);
+
+    const active = filterActiveSubagentEntries(lineage!.currentChildren);
+    expect(active.map((entry) => [entry.summary.id, entry.depth])).toEqual([
+      ['grandchild-running', 1],
+      ['child-continuable-idle', 1],
+    ]);
   });
 });
