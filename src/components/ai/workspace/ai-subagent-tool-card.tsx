@@ -1,7 +1,6 @@
 import { use, useState } from 'react';
-import { ChevronDownIcon, ChevronRightIcon, PanelRightOpenIcon } from 'lucide-react';
+import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { useI18n } from '@/hooks/useI18n';
@@ -63,7 +62,6 @@ function subagentRowTitle(
 
 export function AiSubagentToolCard({
   node,
-  onInspect,
 }: {
   readonly node: AiConversationNodeOf<'tool'>;
   readonly onInspect?: (node: AiConversationNodeOf<'tool'>) => void;
@@ -133,9 +131,8 @@ export function AiSubagentToolCard({
     ? detailMetaParts.join(' · ')
     : null;
 
-  const hasExpandableContent = Boolean(hasBodyDetails || onInspect);
+  const hasExpandableContent = hasBodyDetails;
   const canExpand = !canOpen && hasExpandableContent;
-  const hasBodyActions = Boolean(onInspect);
   const isInteractive = canOpen || canExpand;
 
   const openAria = t('ai.workspace.subagents.card.openAria', {
@@ -221,10 +218,7 @@ export function AiSubagentToolCard({
                   )}
                 >
                   <ScrollAreaContent
-                    className={cn(
-                      'flex min-w-0 flex-col gap-2 px-3 pt-2',
-                      hasBodyActions ? 'pb-1.5' : 'pb-2.5',
-                    )}
+                    className="flex min-w-0 flex-col gap-2 px-3 pt-2 pb-2.5"
                     style={{ minWidth: 0 }}
                   >
                     {detailMetaLine && (
@@ -289,27 +283,6 @@ export function AiSubagentToolCard({
                     )}
                   </ScrollAreaContent>
                 </ScrollArea>
-              )}
-              {hasBodyActions && (
-                <div
-                  className={cn(
-                    'flex min-w-0 shrink-0 flex-wrap items-center gap-1.5 px-3 pb-2.5',
-                    hasBodyDetails ? 'pt-1.5' : 'pt-2',
-                  )}
-                >
-                  {onInspect && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="xs"
-                      onClick={() => onInspect(node)}
-                      aria-label={t('ai.workspace.details.openTool', { tool: summary.title })}
-                    >
-                      <PanelRightOpenIcon data-icon="inline-start" />
-                      {t('ai.workspace.tool.inspect')}
-                    </Button>
-                  )}
-                </div>
               )}
             </div>
           </CollapsibleContent>

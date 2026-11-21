@@ -108,16 +108,6 @@
   --ai-copy-first-line-center: calc(var(--spacing) * 2.5 + 8px);
 }
 
-.ai-tool-content-region:has(> .ai-tool-copy-button) > :is(pre, .ai-search-results) {
-  padding-right: 48px;
-}
-
-.ai-tool-content-region:has(> .ai-tool-copy-button) :is(.ai-content-code, .ai-web-answer, .ai-web-source),
-.ai-markdown-code-block [data-ai-copy-region]:has(> .ai-markdown-code-copy) > .ai-content-code,
-.ai-detail-code-wrap:has(> .ai-detail-copy) > .ai-content-code {
-  padding-right: 48px;
-}
-
 .ai-terminal-command {
   color: inherit;
   overflow-wrap: anywhere;

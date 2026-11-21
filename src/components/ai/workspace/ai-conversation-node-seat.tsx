@@ -173,15 +173,19 @@ function ContextInjectionRow({ node }: { readonly node: AiConversationNodeOf<'co
     ? `${node.loadedSkill.instructions}\n\n${t('ai.workspace.skills.source')}\n${JSON.stringify(node.loadedSkill.provenance, null, 2)}\nrenderedHash: ${node.loadedSkill.renderedHash}`
     : node.content;
   const body = node.loadedSkill ? `${t('ai.workspace.skills.instructions')}\n${skillBody}` : node.content;
+  const content = node.provenance.kind === 'skill-invocation' ? (
+    <div className="ai-io-card my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col gap-3">
+      <AiToolTextSection title={t(node.loadedSkill ? 'ai.workspace.skills.instructions' : 'ai.workspace.skills.loadFailed')} text={skillBody} copyText={body} />
+    </div>
+  ) : node.provenance.kind === 'session-reference' ? (
+    <div className="ai-io-card my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col gap-3">
+      <AiToolTextSection title={t('ai.workspace.context.sessionReference')} text={node.content} copyText={node.content} showHeader={false} />
+    </div>
+  ) : undefined;
   return (
     <SemanticNoteDisclosure
       body={body}
-      bodyClassName={node.provenance.kind === 'session-reference' ? 'ml-1 w-auto' : undefined}
-      content={node.provenance.kind === 'skill-invocation' ? (
-        <div className="ai-io-card my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col gap-3">
-          <AiToolTextSection title={t(node.loadedSkill ? 'ai.workspace.skills.instructions' : 'ai.workspace.skills.loadFailed')} text={skillBody} copyText={body} />
-        </div>
-      ) : undefined}
+      content={content}
       icon={<FileInputIcon />}
       label={t(contextLabelKey(node.provenance.kind))}
       summary={node.provenance.label}

@@ -163,7 +163,7 @@ describe('AiSubagentToolCard', () => {
   );
 
   it.each(['en-US', 'zh-CN'] as const)(
-    'caps expanded details height with ScrollArea and keeps View details pinned when no child session is openable in %s',
+    'caps expanded details height with ScrollArea without rendering View details when no child session is openable in %s',
     async (locale) => {
       await initI18n(locale);
       useAppStore.setState({ locale });
@@ -216,21 +216,16 @@ describe('AiSubagentToolCard', () => {
 
       const scrollContent = scrollArea.querySelector('[data-slot="scroll-area-content"]') as HTMLElement;
       expect(scrollContent).toHaveStyle({ minWidth: '0' });
-      expect(scrollContent).toHaveClass('flex', 'min-w-0', 'flex-col', 'gap-2', 'px-3', 'pt-2', 'pb-1.5');
+      expect(scrollContent).toHaveClass('flex', 'min-w-0', 'flex-col', 'gap-2', 'px-3', 'pt-2', 'pb-2.5');
       expect(within(scrollContent).getByText(locale === 'zh-CN' ? /可继续/ : /Continuable/)).toBeVisible();
       expect(within(scrollContent).getByText(goalLabel)).toBeVisible();
       expect(within(scrollContent).getByText(inputLabel)).toBeVisible();
       expect(within(scrollContent).getByText(planLabel)).toBeVisible();
       expect(within(scrollContent).getByText(resultLabel)).toBeVisible();
 
-      const inspectButton = within(body).getByRole('button', { name: /Check remote terminal/ });
-      expect(inspectButton).toHaveTextContent(inspectLabel);
-      expect(scrollArea).not.toContainElement(inspectButton);
-      expect(inspectButton.parentElement).toHaveClass('shrink-0', 'px-3', 'pb-2.5', 'pt-1.5');
-      expect(inspectButton.parentElement).not.toHaveClass('border-t');
-
-      await user.click(inspectButton);
-      expect(onInspect).toHaveBeenCalledWith(node);
+      expect(within(body).queryByText(inspectLabel)).not.toBeInTheDocument();
+      expect(within(body).queryByRole('button')).toBeNull();
+      expect(onInspect).not.toHaveBeenCalled();
 
       await user.click(rowTrigger);
       expect(rowTrigger).toHaveAttribute('aria-expanded', 'false');
@@ -257,11 +252,10 @@ describe('AiSubagentToolCard', () => {
     expect(within(body).queryByRole('button')).toBeNull();
   });
 
-  it('omits ScrollArea when expanding a row that has actions without body details', async () => {
+  it('renders a non-expandable row when there are no body details even if onInspect is provided', async () => {
     await initI18n('en-US');
     useAppStore.setState({ locale: 'en-US' });
 
-    const user = userEvent.setup();
     const onInspect = vi.fn();
     const node = makeSubagentNode({
       summary: '',
@@ -273,17 +267,11 @@ describe('AiSubagentToolCard', () => {
     });
 
     const { container } = render(<AiSubagentToolCard node={node} onInspect={onInspect} />);
-    await user.click(container.querySelector('.ai-subagent-row-trigger') as HTMLButtonElement);
-
-    const body = container.querySelector('.ai-subagent-card-body') as HTMLElement;
-    expect(body.querySelector('[data-slot="scroll-area"]')).toBeNull();
-
-    const inspectButton = within(body).getByRole('button', { name: 'Open details for Single line goal' });
-    expect(inspectButton).toHaveTextContent('View details');
-    expect(inspectButton.parentElement).toHaveClass('shrink-0', 'px-3', 'pb-2.5', 'pt-2');
-
-    await user.click(inspectButton);
-    expect(onInspect).toHaveBeenCalledWith(node);
+    const card = container.querySelector('[data-slot="ai-subagent-card"]') as HTMLElement;
+    expect(card).not.toHaveAttribute('data-clickable');
+    expect(container.querySelector('.ai-subagent-row-trigger')?.tagName).toBe('DIV');
+    expect(container.querySelector('.ai-subagent-card-body')).toBeNull();
+    expect(screen.queryByText('View details')).not.toBeInTheDocument();
   });
 });
 

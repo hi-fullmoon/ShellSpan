@@ -665,18 +665,24 @@ describe('AI tool presentation', () => {
     expect(output.querySelector('.ai-diff-content')).not.toHaveAttribute('data-slot', 'scroll-area');
   });
 
-  it('keeps the details action and its leading icon for an error-only card', async () => {
+  it('omits the details action for an error-only card and stored tool outputs', async () => {
     const user = userEvent.setup();
     const onInspect = vi.fn();
     const read = capturedRead(true);
-    render(<AiToolRow node={read} onInspect={onInspect} />);
+    const { rerender } = render(<AiToolRow node={read} onInspect={onInspect} />);
 
     await user.click(screen.getByRole('button'));
-    const inspect = screen.getByRole('button', { name: `Open details for ${read.name}` });
-    expect(inspect.querySelector('svg[data-icon="inline-start"]')).toBeInTheDocument();
-    expect(inspect).toHaveClass('gap-1');
+    expect(screen.queryByRole('button', { name: `Open details for ${read.name}` })).not.toBeInTheDocument();
+    expect(screen.queryByText('View details')).not.toBeInTheDocument();
 
-    await user.click(inspect);
-    expect(onInspect).toHaveBeenCalledExactlyOnceWith(read);
+    const storedNode: AiConversationNodeOf<'tool'> = {
+      ...node,
+      name: 'http_probe',
+      output: { artifactRef: 'artifact-123', readWith: 'read_tool_result', status: 200, truncated: true },
+    };
+    rerender(<AiToolRow node={storedNode} onInspect={onInspect} />);
+    expect(screen.queryByRole('button', { name: `Open details for ${storedNode.name}` })).not.toBeInTheDocument();
+    expect(screen.queryByText('View details')).not.toBeInTheDocument();
+    expect(onInspect).not.toHaveBeenCalled();
   });
 });

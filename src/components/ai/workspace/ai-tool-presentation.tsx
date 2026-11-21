@@ -15,7 +15,6 @@ import {
   FileTextIcon,
   GlobeIcon,
   ListTodoIcon,
-  PanelRightOpenIcon,
   SearchIcon,
   ShieldAlertIcon,
   SparklesIcon,
@@ -34,7 +33,6 @@ import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
-import { storedToolOutputId } from '@/lib/ai/conversation-tool';
 import { aiErrorMessage, httpProbeTimeoutKind } from '@/lib/ai/error-message';
 import { renderTerminalTranscript } from '@/lib/terminal/terminal-output-buffer';
 import { cn } from '@/lib/utils';
@@ -445,9 +443,16 @@ function TerminalSurface({ node, showCopyActions, scrollable, showInput }: { nod
   const footerLabel = succeeded ? 'ai.workspace.tool.execution.succeeded' : executionLabel ?? `ai.workspace.tool.${node.state}`;
   const commandTitle = <>
     <AiToolContentRegion text={showCopyActions ? command : undefined} label={t('ai.workspace.tool.copyCommand')} showCopiedTooltip={false}>
-      <div className="ai-terminal-command-row flex min-w-0 items-start gap-1 py-1 pl-3.5">
-        <span className="ai-terminal-prompt shrink-0 select-none" aria-hidden="true">$</span>
-        <AiContentTitle className="flex-1" buttonClassName="ai-terminal-command pr-3.5" collapsible customScrollbar expandLabel={t('ai.workspace.tool.expandCommand')} collapseLabel={t('ai.workspace.tool.collapseCommand')}>
+      <div className="ai-terminal-command-row flex min-w-0 items-start py-1 pl-3.5">
+        <AiContentTitle
+          className="flex-1"
+          buttonClassName="ai-terminal-command pr-3.5"
+          leading={<span className="ai-terminal-prompt shrink-0 select-none" aria-hidden="true">$</span>}
+          collapsible
+          customScrollbar
+          expandLabel={t('ai.workspace.tool.expandCommand')}
+          collapseLabel={t('ai.workspace.tool.collapseCommand')}
+        >
           {displayCommand}
         </AiContentTitle>
       </div>
@@ -879,16 +884,17 @@ function CodeSurface({ node, showCopyActions, scrollable, showInput }: { node: T
   );
 }
 
-export function AiToolTextSection({ title, text, copyText, copyLabel, scrollable = true }: {
+export function AiToolTextSection({ title, text, copyText, copyLabel, scrollable = true, showHeader = true }: {
   readonly title: string;
   readonly text: string;
   readonly copyText?: string;
   readonly copyLabel?: string;
   readonly scrollable?: boolean;
+  readonly showHeader?: boolean;
 }) {
   return (
     <div className="ai-io-section min-w-0 shrink-0 overflow-hidden">
-      <ToolSurfaceHeader title={title} titleClassName="ai-io-label" />
+      {showHeader && <ToolSurfaceHeader title={title} titleClassName="ai-io-label" />}
       <AiToolContentRegion text={copyText} label={copyLabel}>
         <ToolScrollArea className="ai-io-input max-h-65 min-w-0 max-w-full" scrollable={scrollable} label={title}>
           <pre className={cn(AI_CONTENT_CODE_CLASS, 'ai-io-text whitespace-pre-wrap [overflow-wrap:anywhere]')}>{text}</pre>
@@ -992,15 +998,13 @@ export function AiToolRow({
   if (isSubagentDelegationTool(node.name, node.nativeName)) {
     return <AiSubagentToolCard node={node} onInspect={onInspect} />;
   }
-  return <StandardAiToolRow node={node} onInspect={onInspect} />;
+  return <StandardAiToolRow node={node} />;
 }
 
 function StandardAiToolRow({
   node,
-  onInspect,
 }: {
   readonly node: ToolNode;
-  readonly onInspect?: (node: ToolNode) => void;
 }) {
   const { t } = useI18n();
   const [disclosure, setDisclosure] = useState<{ open: boolean; recoveryKey?: string }>({ open: false });
@@ -1037,19 +1041,6 @@ function StandardAiToolRow({
   const title = toolTitle(node, variant, t);
   const model = useMemo(() => variant === 'write' || variant === 'edit' ? diffModel(node) : null, [node, variant]);
   const changeStat = model ? diffStat(model) : null;
-  const uncertaintyOnly = node.state === 'uncertain' && typeof node.output === 'string'
-    && node.output.trim() === node.error?.trim();
-  const hasOutput = node.output !== null && (node.output !== '' || variant === 'terminal');
-  const hasPendingCommand = variant === 'terminal' && (node.state === 'preparing' || node.state === 'running');
-  const hasSuccessPreview = node.state === 'succeeded' && (node.name === 'trash_file' || Boolean(model?.hunks.length));
-  const approvalStatus = node.approval?.status;
-  const approvalStopped = node.state === 'rejected' || approvalStatus === 'expired' || approvalStatus === 'cancelled';
-  const hasDetails = node.input != null || node.approval != null || node.target != null
-    || node.idempotency != null || node.effect !== 'unknown';
-  const hasInlinePreview = node.state !== 'approval' && !uncertaintyOnly
-    && (failureOnly(node)
-      ? !node.evidenceRefs?.length && (approvalStopped || !hasDetails)
-      : hasPendingCommand || hasOutput || hasSuccessPreview);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div
@@ -1098,26 +1089,6 @@ function StandardAiToolRow({
         <CollapsibleContent>
           <div className="ai-tool-body flex min-w-0 max-w-full flex-col">
             <AiToolExpandedContent node={node} compact diffModel={model ?? undefined} />
-            {onInspect && (!hasInlinePreview || storedToolOutputId(node)) && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={(
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="xs"
-                      className="ai-tool-inspect mt-1 mr-1 mb-0.5 ml-1 w-fit min-h-5 self-start px-2 py-0.5"
-                      onClick={() => onInspect(node)}
-                      aria-label={t('ai.workspace.details.openTool', { tool: node.name })}
-                    />
-                  )}
-                >
-                  <PanelRightOpenIcon data-icon="inline-start" />
-                  {t('ai.workspace.tool.inspect')}
-                </TooltipTrigger>
-                <TooltipContent>{t('ai.workspace.details.toolTitle')}</TooltipContent>
-              </Tooltip>
-            )}
           </div>
         </CollapsibleContent>
       </div>

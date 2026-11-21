@@ -56,9 +56,8 @@ it.each([
   expect(container.querySelector('.ai-state-dot[data-state="failed"]')).toBeNull();
   expect(screen.queryByRole('dialog')).toBeNull();
   await userEvent.setup().click(row);
-  const details = screen.getByRole('button', { name: locale === 'zh-CN' ? /^打开 .* 的详情$/u : /^Open details for /u });
-  await userEvent.setup().click(details);
-  expect(inspected).toEqual([tool]);
+  expect(screen.queryByRole('button', { name: locale === 'zh-CN' ? /^打开 .* 的详情$/u : /^Open details for /u })).not.toBeInTheDocument();
+  expect(inspected).toEqual([]);
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 

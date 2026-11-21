@@ -427,6 +427,8 @@ describe('AiConversationNodeList', () => {
     expect(disclosure.querySelector('.ai-disclosure-summary')).toHaveClass('truncate');
     expect(disclosure.querySelector('.ai-disclosure-summary')).not.toHaveClass('line-clamp-2');
     expect(getComputedStyle(disclosure.querySelector('.ai-disclosure-leading > svg:first-child')!).translate).toBe('0 -1px');
+    expect(getComputedStyle(disclosure.querySelector('.ai-disclosure-leading > svg:first-child')!).marginInlineEnd).toBe('0px');
+    expect(getComputedStyle(disclosure.querySelector('.ai-disclosure-leading > .ai-disclosure-chevron')!).marginInlineEnd).toBe('0px');
     expect(container.querySelector('.ai-reasoning-body')).toBeNull();
     await user.click(disclosure);
     expect(container.querySelector('.ai-reasoning-body'))
@@ -895,5 +897,52 @@ describe('AiConversationNodeList', () => {
 
     rerender(<AiToolRow node={regularTool} />);
     expect(container.querySelector('.ai-tool-row-root')).toBeVisible();
+  });
+
+  it.each(['zh-CN', 'en-US'] as const)('renders session reference with the unified tool text surface in %s', async (locale) => {
+    await initI18n(locale);
+    useAppStore.setState({ locale });
+    const user = userEvent.setup();
+    const label = locale === 'zh-CN' ? '会话引用' : 'Session reference';
+    const referenceNode: AiConversationNodeOf<'contextInjection'> = {
+      kind: 'contextInjection',
+      key: 'context:session-ref',
+      sourceKind: 'agent',
+      sessionId: 'child-session-1',
+      turnId: 'turn-1',
+      stepId: null,
+      firstSeq: 1,
+      lastSeq: 1,
+      timestamp: '2026-11-21T00:00:00.000Z',
+      messageId: 'msg-session-ref',
+      content: 'You are an Operator child Agent.\nGoal: check disk usage.',
+      provenance: { kind: 'session-reference', producerId: 'subagent-session', label: 'Subagent session' },
+    };
+    const { container } = render(
+      <div className="ai-panel-shell">
+        <AiConversationNodeList nodes={[referenceNode]} />
+      </div>,
+    );
+
+    const trigger = screen.getByRole('button', { name: label });
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    await user.click(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+
+    const card = container.querySelector('.ai-io-card') as HTMLElement;
+    expect(card).toBeInTheDocument();
+    expect(card).toHaveClass('ml-1', 'max-w-[calc(100%-4px)]');
+    expect(card.querySelector('.ai-tool-surface-header')).toBeNull();
+    const viewport = card.querySelector('[data-slot="scroll-area-viewport"]') as HTMLElement;
+    expect(viewport).toBeInTheDocument();
+    expect(viewport).toHaveAttribute('aria-label', label);
+    expect(viewport.closest('.ai-tool-scroll-area')).toHaveClass('max-h-65');
+    const pre = viewport.querySelector('pre') as HTMLElement;
+    expect(pre).toHaveClass('ai-content-code', 'whitespace-pre-wrap');
+    expect(getComputedStyle(pre).paddingRight).toBe(getComputedStyle(pre).paddingLeft);
+    expect(pre.textContent).toBe(referenceNode.content);
+    expect(container.querySelector('.ai-semantic-note-body')).toBeNull();
+    const copy = within(card).getByRole('button', { name: locale === 'zh-CN' ? '复制' : 'Copy' });
+    expect(copy.closest('[data-ai-copy-region]')).toContainElement(viewport);
   });
 });
