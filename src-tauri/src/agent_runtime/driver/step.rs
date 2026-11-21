@@ -170,6 +170,11 @@ pub(super) async fn run_step(
             execute_model_stream(&ctx, &state, call, &attempt_data.request_id).await?;
         match response {
             Ok(response) => {
+                let final_wrap_up = is_final_child_step(
+                    ctx.entry.subagent.as_ref(),
+                    ctx.config.max_steps_per_turn,
+                    ctx.step_index,
+                );
                 return commit_response(
                     ctx.sessions,
                     ctx.entry,
@@ -177,6 +182,7 @@ pub(super) async fn run_step(
                     ctx.turn_id,
                     ctx.step_id,
                     &attempt_data.request_id,
+                    final_wrap_up,
                     response,
                 )
                 .await;
@@ -378,18 +384,24 @@ async fn assemble_fresh_step_request(
             })?,
     );
     if let Some(child) = &ctx.entry.subagent {
-        if let Some(limit) = ctx.config.max_steps_per_turn {
-            request
-                .system_prompt
-                .push_str(&step_budget_notice(limit, ctx.step_index));
+        let final_wrap_up =
+            is_final_child_step(Some(child), ctx.config.max_steps_per_turn, ctx.step_index);
+        if final_wrap_up {
+            request.tool_choice = crate::llm::types::ModelToolChoice::None;
         }
         let now = current_unix_ms()?;
         let usage = ctx.sessions.read_events(&ctx.entry.session_id, |events| {
             child_budget_usage(events, now)
         })?;
-        request
-            .system_prompt
-            .push_str(&child_cumulative_budget_notice(&child.budget, &usage));
+        request.messages.push(ModelMessage::User {
+            content: child_budget_reminder_message(
+                ctx.config.max_steps_per_turn,
+                ctx.step_index,
+                final_wrap_up,
+                &child.budget,
+                &usage,
+            ),
+        });
     }
     Ok(request)
 }

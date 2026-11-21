@@ -2,7 +2,7 @@
 fn optional_child_step_budgets_survive_creation_and_reload() {
     let (root, manager, _entry) = setup();
     assert_eq!(default_subagent_budget().max_steps_per_turn, None);
-    assert_eq!(fleet_role_budget().max_steps_per_turn, Some(6));
+    assert_eq!(fleet_role_budget().max_steps_per_turn, Some(16));
 
     for explicit_limit in [None, Some(1), Some(64)] {
         let mut wire = serde_json::to_value(default_subagent_budget()).unwrap();

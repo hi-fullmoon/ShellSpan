@@ -211,7 +211,7 @@
             None
         );
         child.continuable = false;
-        assert_eq!(config.step_limit_for(Some(&child)), Some(6));
+        assert_eq!(config.step_limit_for(Some(&child)), Some(16));
         child.budget.max_steps_per_turn = Some(8);
         assert_eq!(config.step_limit_for(Some(&child)), Some(8));
         assert!(!step_budget_recoverable(Some(&child)));
@@ -267,10 +267,32 @@
 
     #[test]
     fn child_budget_notice_counts_the_current_request_and_reserves_handoff() {
-        let notice = step_budget_notice(8, 6);
+        let notice = step_budget_notice(8, 6, false);
         assert!(notice.contains("step 6 of 8; 2 further model steps"));
         assert!(notice.contains("Do not claim unfinished work is complete"));
-        assert!(step_budget_notice(8, 8).contains("0 further model steps"));
+        assert!(!notice.contains("Tool calls are disabled for this final step"));
+
+        let final_notice = step_budget_notice(8, 8, true);
+        assert!(final_notice.contains("0 further model steps"));
+        assert!(final_notice.contains("Tool calls are disabled for this final step"));
+
+        let budget = super::super::AgentSubagentBudget {
+            max_steps_per_turn: Some(8),
+            max_turns: 1,
+            max_tool_calls: None,
+            max_tokens: None,
+            timeout_ms: 300_000,
+        };
+        let usage = super::super::subagent::ChildBudgetUsage {
+            reported_tokens: 120,
+            tool_calls: 2,
+            turns: 1,
+            elapsed_ms: 500,
+        };
+        let reminder = child_budget_reminder_message(Some(8), 8, true, &budget, &usage);
+        assert!(reminder.starts_with("[Runtime budget reminder"));
+        assert!(reminder.contains("Tool calls are disabled for this final step"));
+        assert!(reminder.contains("120 / unlimited provider-reported total tokens"));
     }
 
     #[test]

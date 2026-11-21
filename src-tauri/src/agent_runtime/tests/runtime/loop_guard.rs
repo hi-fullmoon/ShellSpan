@@ -2,6 +2,7 @@ use super::*;
 use crate::agent_runtime::{
     AgentChildInputRequest, AgentInboxMutation, AgentInboxMutationInput, AgentSubagentBudget,
 };
+use crate::llm::types::ModelToolChoice;
 
 fn repeated_read_call(index: usize) -> ModelToolCall {
     ModelToolCall {
@@ -652,9 +653,19 @@ async fn continuable_subagent_defaults_to_fifty_steps_and_hands_back_recoverably
     runtime.await_idle(parent_id).await.unwrap();
 
     assert_eq!(model.request_count(), 52);
-    assert!(model.requests.lock().unwrap()[50]
-        .system_prompt
-        .contains("step 50 of 50; 0 further model steps remain in this turn"));
+    {
+        let requests = model.requests.lock().unwrap();
+        assert_eq!(requests[1].tool_choice, ModelToolChoice::Auto);
+        assert_eq!(requests[50].tool_choice, ModelToolChoice::None);
+        assert_eq!(requests[1].system_prompt, requests[50].system_prompt);
+        assert!(!requests[50].system_prompt.contains("step 50 of 50"));
+        assert!(matches!(
+            requests[50].messages.last(),
+            Some(ModelMessage::User { content })
+                if content.contains("step 50 of 50; 0 further model steps remain in this turn")
+                    && content.contains("Tool calls are disabled for this final step")
+        ));
+    }
 
     let parent_events = all_events(&runtime, parent_id);
     let handoff = parent_events
@@ -703,6 +714,11 @@ async fn continuable_subagent_defaults_to_fifty_steps_and_hands_back_recoverably
         &event.payload,
         AgentSessionEventPayload::TurnEnd { reason }
             if reason == "stepBudgetReached: maximum 50 Steps per Turn"
+    )));
+    assert!(!child_events.iter().any(|event| matches!(
+        &event.payload,
+        AgentSessionEventPayload::UserMessage { message }
+            if message.content.contains("[Runtime budget reminder")
     )));
     assert!(!child_events
         .iter()
@@ -798,4 +814,226 @@ async fn continuable_subagent_respects_explicit_step_budget_overrides() {
             AgentSessionEventPayload::TurnEnd { reason } if reason == expected_reason
         )));
     }
+}
+
+#[tokio::test]
+async fn one_shot_subagent_wraps_up_on_final_step_with_tools_disabled_and_static_system_prompt() {
+    let mut read_0 = repeated_read_call(0);
+    read_0.arguments = json!({ "path": "./entry-0" });
+    let mut read_1 = repeated_read_call(1);
+    read_1.arguments = json!({ "path": "./entry-1" });
+    let model = FakeAdapter::new(vec![
+        tool_response(vec![ModelToolCall {
+            call_id: "spawn-oneshot".into(),
+            provider_call_id: None,
+            name: "spawn_one_shot_agent".into(),
+            arguments: json!({
+                "goal": "Inspect entries in 3 steps",
+                "role": "explorer",
+                "inheritanceMode": "blank",
+                "targetIds": ["target-local"],
+                "budget": {
+                    "maxStepsPerTurn": 3,
+                    "maxTurns": 1,
+                    "timeoutMs": 60_000,
+                },
+            }),
+        }]),
+        tool_response(vec![read_0]),
+        tool_response(vec![read_1]),
+        reply("Final synthesized one-shot report.", &[]),
+        reply("Parent received wrapped-up child report.", &[]),
+    ]);
+    let (_root, runtime) = configured_with_native(
+        model.clone(),
+        AgentDriverConfig::default(),
+        RecordingNativeRuntime::new(false),
+    );
+    let parent_id = "oneshot-wrapup-parent";
+    create(&runtime, parent_id);
+    runtime
+        .followup(
+            parent_id,
+            "initial".into(),
+            "run one-shot inspection".into(),
+        )
+        .unwrap();
+    runtime.start(parent_id, provider(), None).unwrap();
+    runtime.await_idle(parent_id).await.unwrap();
+
+    assert_eq!(model.request_count(), 5);
+    {
+        let requests = model.requests.lock().unwrap();
+        assert_eq!(requests[1].tool_choice, ModelToolChoice::Auto);
+        assert_eq!(requests[2].tool_choice, ModelToolChoice::Auto);
+        assert_eq!(requests[3].tool_choice, ModelToolChoice::None);
+        assert_eq!(requests[1].system_prompt, requests[2].system_prompt);
+        assert_eq!(requests[2].system_prompt, requests[3].system_prompt);
+        assert!(!requests[3]
+            .system_prompt
+            .contains("Delegated execution budget:"));
+        assert!(matches!(
+            requests[3].messages.last(),
+            Some(ModelMessage::User { content })
+                if content.contains("step 3 of 3; 0 further model steps remain in this turn")
+                    && content.contains("Tool calls are disabled for this final step")
+        ));
+    }
+
+    let parent_events = all_events(&runtime, parent_id);
+    let child_id = parent_events
+        .iter()
+        .find_map(|event| match &event.payload {
+            AgentSessionEventPayload::SubagentSettled {
+                child_session_id,
+                status: AgentSessionStatus::Completed,
+                summary,
+                ..
+            } => {
+                assert_eq!(summary, "Final synthesized one-shot report.");
+                Some(child_session_id.clone())
+            }
+            _ => None,
+        })
+        .expect("completed one-shot child settlement");
+    assert!(parent_events.iter().any(|event| matches!(
+        &event.payload,
+        AgentSessionEventPayload::ToolResult {
+            call_id,
+            status: AgentToolResultStatus::Completed,
+            summary,
+            ..
+        } if call_id == "spawn-oneshot" && summary == "Final synthesized one-shot report."
+    )));
+    let child_events = all_events(&runtime, &child_id);
+    assert!(child_events.iter().any(|event| matches!(
+        &event.payload,
+        AgentSessionEventPayload::SessionEnded {
+            reason: Some(reason),
+            ..
+        } if reason == "oneShotTurnCompleted"
+    )));
+    assert!(!child_events.iter().any(|event| matches!(
+        &event.payload,
+        AgentSessionEventPayload::SessionEnded {
+            reason: Some(reason),
+            ..
+        } if reason.starts_with("stepLimitExceeded:")
+    )));
+}
+
+#[tokio::test]
+async fn one_shot_subagent_final_wrap_up_with_unfinished_plan_preserves_report_without_step_limit_error(
+) {
+    let model = FakeAdapter::new(vec![
+        tool_response(vec![ModelToolCall {
+            call_id: "spawn-oneshot-plan".into(),
+            provider_call_id: None,
+            name: "spawn_one_shot_agent".into(),
+            arguments: json!({
+                "goal": "Track work and wrap up within 2 steps",
+                "role": "explorer",
+                "inheritanceMode": "blank",
+                "targetIds": ["target-local"],
+                "budget": {
+                    "maxStepsPerTurn": 2,
+                    "maxTurns": 1,
+                    "timeoutMs": 60_000,
+                },
+            }),
+        }]),
+        tool_response(vec![plan_call(1, "inProgress")]),
+        reply("Partial findings before limit.", &[]),
+        reply("Parent handled incomplete wrap-up.", &[]),
+    ]);
+    let (_root, runtime) = configured_with_native(
+        model.clone(),
+        AgentDriverConfig::default(),
+        RecordingNativeRuntime::new(false),
+    );
+    let parent_id = "oneshot-plan-wrapup-parent";
+    create(&runtime, parent_id);
+    runtime
+        .followup(parent_id, "initial".into(), "run planned one-shot".into())
+        .unwrap();
+    runtime.start(parent_id, provider(), None).unwrap();
+    runtime.await_idle(parent_id).await.unwrap();
+
+    assert_eq!(model.request_count(), 4);
+    assert_eq!(
+        model.requests.lock().unwrap()[2].tool_choice,
+        ModelToolChoice::None
+    );
+
+    let parent_events = all_events(&runtime, parent_id);
+    let child_id = parent_events
+        .iter()
+        .find_map(|event| match &event.payload {
+            AgentSessionEventPayload::SubagentDescriptor {
+                child_session_id, ..
+            } => Some(child_session_id.clone()),
+            _ => None,
+        })
+        .expect("one-shot child descriptor");
+    assert_eq!(
+        runtime.session(&child_id).unwrap().status,
+        AgentSessionStatus::Failed
+    );
+    assert!(all_events(&runtime, &child_id).iter().any(|event| matches!(
+        &event.payload,
+        AgentSessionEventPayload::SessionEnded {
+            reason: Some(reason),
+            ..
+        } if reason == "oneShotPlanIncomplete"
+    )));
+    assert!(parent_events.iter().any(|event| matches!(
+        &event.payload,
+        AgentSessionEventPayload::ToolResult {
+            call_id,
+            status: AgentToolResultStatus::Failed,
+            summary,
+            ..
+        } if call_id == "spawn-oneshot-plan"
+            && summary.starts_with("Partial child result: oneShotPlanIncomplete.")
+            && summary.contains("Latest report: Partial findings before limit.")
+    )));
+}
+
+#[tokio::test]
+async fn one_shot_subagent_defaults_to_sixteen_steps() {
+    let model = FakeAdapter::new(vec![reply("done", &[])]);
+    let (_root, runtime) = configured_with_native(
+        model,
+        AgentDriverConfig::default(),
+        RecordingNativeRuntime::new(false),
+    );
+    let parent_id = "oneshot-default-step-parent";
+    create(&runtime, parent_id);
+    runtime.start(parent_id, provider(), None).unwrap();
+    runtime.await_idle(parent_id).await.unwrap();
+
+    let child = runtime
+        .spawn_subagent(AgentSubagentSpawnRequest {
+            parent_session_id: parent_id.into(),
+            goal: "Inspect with default one-shot step limit".into(),
+            role: AgentSubagentRole::Explorer,
+            inheritance_mode: "blank".into(),
+            target_ids: vec!["target-local".into()],
+            budget: None,
+            continuable: false,
+        })
+        .await
+        .unwrap();
+    let child_id = child.header.session_id.clone();
+    runtime.await_idle(&child_id).await.unwrap();
+    assert_eq!(
+        child
+            .header
+            .subagent
+            .as_ref()
+            .unwrap()
+            .budget
+            .max_steps_per_turn,
+        Some(16)
+    );
 }

@@ -753,15 +753,29 @@ async fn drive_agent_inner(
     }
 }
 
+fn is_final_child_step(
+    subagent: Option<&super::AgentSubagentSession>,
+    max_steps_per_turn: Option<usize>,
+    step_index: usize,
+) -> bool {
+    subagent.is_some() && max_steps_per_turn.is_some_and(|limit| limit >= 2 && step_index >= limit)
+}
+
 fn step_budget_recoverable(subagent: Option<&super::AgentSubagentSession>) -> bool {
     subagent.is_none_or(|child| child.continuable)
 }
 
-fn step_budget_notice(limit: usize, step_index: usize) -> String {
+fn step_budget_notice(limit: usize, step_index: usize, final_wrap_up: bool) -> String {
     let remaining = limit.saturating_sub(step_index);
-    format!(
-        "\nDelegated execution budget: this is step {step_index} of {limit}; {remaining} further model steps remain in this turn. When at most two further steps remain, prioritize verification and report completed work, evidence, remaining work, and blockers to the parent. Do not claim unfinished work is complete. A step-budget pause preserves executed actions; the parent may continue an eligible child using send_child_input in the same Session. Never restart completed commands or spawn replacement children to bypass cumulative budgets."
-    )
+    if final_wrap_up {
+        format!(
+            "Delegated execution budget: this is step {step_index} of {limit}; {remaining} further model steps remain in this turn. Tool calls are disabled for this final step. Synthesize all completed work, collected evidence, remaining work, and blockers directly in your final response. Do not claim unfinished work is complete. A step-budget pause preserves executed actions; the parent may continue an eligible child using send_child_input in the same Session. Never restart completed commands or spawn replacement children to bypass cumulative budgets."
+        )
+    } else {
+        format!(
+            "Delegated execution budget: this is step {step_index} of {limit}; {remaining} further model steps remain in this turn. When at most two further steps remain, prioritize verification and report completed work, evidence, remaining work, and blockers to the parent. Do not claim unfinished work is complete. A step-budget pause preserves executed actions; the parent may continue an eligible child using send_child_input in the same Session. Never restart completed commands or spawn replacement children to bypass cumulative budgets."
+        )
+    }
 }
 
 fn step_budget_reason(limit: usize, recoverable: bool) -> String {
@@ -783,7 +797,7 @@ fn child_cumulative_budget_notice(
         .max_tool_calls
         .map_or_else(|| "unlimited".into(), |limit| limit.to_string());
     let mut notice = format!(
-        "\nCumulative child budget: {} / {} provider-reported total tokens, {} / {} admitted tool calls, {} / {} turns, {} / {} ms elapsed. Tokens include repeated model inputs, not just the final answer; missing provider usage is unknown, not free. These counters never reset on continuation. Keep tool output bounded and reserve budget for a concise handoff.",
+        "Cumulative child budget: {} / {} provider-reported total tokens, {} / {} admitted tool calls, {} / {} turns, {} / {} ms elapsed. Tokens include repeated model inputs, not just the final answer; missing provider usage is unknown, not free. These counters never reset on continuation. Keep tool output bounded and reserve budget for a concise handoff.",
         usage.reported_tokens, token_limit, usage.tool_calls, tool_limit,
         usage.turns, budget.max_turns, usage.elapsed_ms, budget.timeout_ms,
     );
@@ -791,6 +805,21 @@ fn child_cumulative_budget_notice(
         notice.push_str(" A cumulative limit is near. Finish with the evidence already collected, completed checks, remaining work and blockers now; avoid starting new exploratory work. Never claim unchecked work is complete. Unless the current turn has an explicitly completed task plan, this handoff is recorded as incomplete even when no plan exists.");
     }
     notice
+}
+
+fn child_budget_reminder_message(
+    limit: Option<usize>,
+    step_index: usize,
+    final_wrap_up: bool,
+    budget: &super::AgentSubagentBudget,
+    usage: &super::subagent::ChildBudgetUsage,
+) -> String {
+    let mut sections = vec!["[Runtime budget reminder — not a new user request]".to_string()];
+    if let Some(limit) = limit {
+        sections.push(step_budget_notice(limit, step_index, final_wrap_up));
+    }
+    sections.push(child_cumulative_budget_notice(budget, usage));
+    sections.join("\n")
 }
 
 fn child_budget_near_limit(
@@ -1670,6 +1699,7 @@ async fn commit_response(
     turn_id: &str,
     step_id: &str,
     request_id: &str,
+    final_step_wrap_up: bool,
     response: ModelResponse,
 ) -> Result<StepSettlement, String> {
     if entry.cancellation().is_cancelled() {
@@ -1820,7 +1850,7 @@ async fn commit_response(
             child_budget_requires_handoff(entry.subagent.as_ref(), events, turn_id, now)
         })?;
         let completion = sessions.read_turn_events(&entry.session_id, |events| {
-            text_response_completion(events, turn_id, budget_handoff)
+            text_response_completion_for_step(events, turn_id, budget_handoff, final_step_wrap_up)
         })?;
         if completion == TextResponseCompletion::CheckPlan {
             payloads.push(AgentScopedPayload {
@@ -1880,18 +1910,29 @@ pub(super) enum TextResponseCompletion {
     Completed,
 }
 
+#[cfg(test)]
 pub(super) fn text_response_completion(
     events: &[super::AgentSessionEvent],
     turn_id: &str,
     budget_handoff: bool,
 ) -> TextResponseCompletion {
+    text_response_completion_for_step(events, turn_id, budget_handoff, false)
+}
+
+pub(super) fn text_response_completion_for_step(
+    events: &[super::AgentSessionEvent],
+    turn_id: &str,
+    budget_handoff: bool,
+    final_step_wrap_up: bool,
+) -> TextResponseCompletion {
     if budget_handoff {
         return TextResponseCompletion::Incomplete;
     }
-    let checked = events.iter().any(|event| {
-        event.turn_id.as_deref() == Some(turn_id)
-            && matches!(&event.payload, AgentSessionEventPayload::StepEnd { reason } if reason == "completionCheck")
-    });
+    let checked = final_step_wrap_up
+        || events.iter().any(|event| {
+            event.turn_id.as_deref() == Some(turn_id)
+                && matches!(&event.payload, AgentSessionEventPayload::StepEnd { reason } if reason == "completionCheck")
+        });
     if !checked && plan_needs_completion_check(events, turn_id) {
         TextResponseCompletion::CheckPlan
     } else if incomplete_plan_for_turn(events, turn_id)
