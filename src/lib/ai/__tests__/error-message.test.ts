@@ -30,6 +30,16 @@ it.each([
   expect(aiErrorMessage('Error: subagentTokenBudgetExceeded: maximum 80000 tokens', t)).toBe(expected);
 });
 
+it.each([
+  ['zh-CN', '本轮执行已达到步骤上限（最多 6 步），已完成的操作和结果已保留。', '本轮执行已达到步骤上限，已完成的操作和结果已保留。'],
+  ['en-US', 'This turn reached its step limit of 6 steps. Completed operations and results are preserved.', 'This turn reached its step limit. Completed operations and results are preserved.'],
+] as const)('localizes stepLimitExceeded and preserves its limit in %s', async (locale, exactExpected, genericExpected) => {
+  await initI18n(locale);
+  expect(aiErrorMessage('stepLimitExceeded: maximum 6 Steps per Turn', t)).toBe(exactExpected);
+  expect(aiErrorMessage('Error: stepLimitExceeded: maximum 6 Steps per Turn', t)).toBe(exactExpected);
+  expect(aiErrorMessage('stepLimitExceeded: custom reason', t)).toBe(genericExpected);
+});
+
 describe.each([['zh-CN', zhCN], ['en-US', enUS]] as const)('AI error messages in %s', (_locale, messages) => {
   it.each([
     ['retryable model failure: kind=RateLimited code=HTTP_429', 'ai.error.rateLimited'],

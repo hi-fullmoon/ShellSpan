@@ -33,6 +33,9 @@ export function aiErrorMessage(message: string, t: (key: LocaleKey, values?: Rec
   if (activeTime) return t('ai.error.taskActiveTimeExceeded', { seconds: Math.ceil(Number(activeTime[1]) / 1000) });
   const tokenBudget = /^subagentTokenBudgetExceeded: maximum (\d+) tokens$/.exec(diagnostic);
   if (tokenBudget) return t('ai.error.subagentTokenBudgetExceeded', { maximum: tokenBudget[1] });
+  const stepLimit = /^stepLimitExceeded: maximum (\d+) Steps per Turn$/.exec(diagnostic);
+  if (stepLimit) return t('ai.error.stepLimitExceeded', { maximum: stepLimit[1] });
+  if (diagnostic.startsWith('stepLimitExceeded:')) return t('ai.error.stepLimitExceededGeneric');
   if (diagnostic.startsWith('ephemeralInputUnavailable:')) return t('ai.error.ephemeralInputUnavailable');
   if (diagnostic.startsWith('ephemeralInputRecoveryRequired:')) return t('ai.error.ephemeralInputRecoveryRequired');
   if (diagnostic.startsWith('childRecoveryReplayBlocked:')) return t('ai.error.childRecoveryReplayBlocked');

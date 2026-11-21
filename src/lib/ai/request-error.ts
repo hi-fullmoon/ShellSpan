@@ -13,6 +13,7 @@ export function requestErrorMessageKey(message: string): LocaleKey {
   if (/timeout|timed out/.test(text)) return 'ai.error.timeout';
   if (/network|connection|unreachable/.test(text)) return 'ai.error.connection';
   if (/\b404\b|http_404/.test(text)) return 'ai.error.notFound';
+  if (text.startsWith('steplimitexceeded:')) return 'ai.error.stepLimitExceededGeneric';
   return 'ai.error.generic';
 }
 

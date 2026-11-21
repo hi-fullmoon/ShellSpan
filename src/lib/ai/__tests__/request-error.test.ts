@@ -13,6 +13,7 @@ describe('requestErrorMessageKey', () => {
     ['HTTP 429', 'ai.error.rateLimited'],
     ['connection refused', 'ai.error.connection'],
     ['request timed out', 'ai.error.timeout'],
+    ['stepLimitExceeded: maximum 6 Steps per Turn', 'ai.error.stepLimitExceededGeneric'],
     ['unexpected runtime failure', 'ai.error.generic'],
   ] as const)('provides a readable summary for %s', (message, key) => {
     expect(requestErrorMessageKey(message)).toBe(key);
