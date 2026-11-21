@@ -279,6 +279,17 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
   // drag.
   const handleListKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>): void => {
+      if (e.key === 'Tab' && e.target === e.currentTarget && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const currentPane = e.currentTarget.closest('[data-sftp-pane]');
+        const panes = Array.from(document.querySelectorAll<HTMLElement>('[data-sftp-pane]'));
+        const otherPane = panes.find((pane) => pane !== currentPane);
+        const otherListbox = otherPane?.querySelector<HTMLElement>('[role="listbox"]');
+        if (otherListbox) {
+          e.preventDefault();
+          otherListbox.focus();
+        }
+        return;
+      }
       if (displayCount === 0) return;
       const parentOffset = showParent ? 1 : 0;
       switch (e.key) {

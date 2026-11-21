@@ -106,7 +106,7 @@ const Sftp: React.FC = () => {
 
   if (!connection) {
     return (
-      <div className="flex h-full flex-col bg-app-bg">
+      <div data-sftp-workspace className="flex h-full flex-col bg-app-bg">
         <SftpTabSwitcher />
         <SftpTabBar
           onNewTabClick={() => setNewConnectionMenuOpen(true)}
@@ -896,7 +896,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
 
   return (
     <SftpDndContext onDragEnd={handleDragEnd}>
-      <div className="flex h-full flex-col bg-app-bg">
+      <div data-sftp-workspace className="flex h-full flex-col bg-app-bg">
         <SftpTabBar
           onNewTabClick={() => {
             setSourceTargetSide(null);

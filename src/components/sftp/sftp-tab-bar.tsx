@@ -95,7 +95,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         'session-tab relative flex h-8 w-42 shrink-0 cursor-default items-center gap-1 rounded-t-md border-x border-transparent px-1.5 text-left text-xs outline-none transition-[background-color,color,opacity] select-none',
         dragPreview && 'session-tab-drag-preview',
         !dragPreview && (active
-          ? 'border-app-border/50 bg-app-surface text-app-text'
+          ? 'border-(--terminal-tab-border) bg-app-surface text-app-text'
           : 'border-transparent bg-transparent text-app-text-soft hover:bg-accent hover:text-app-text'),
         dragging && !dragPreview && 'opacity-80',
       )}
@@ -113,8 +113,8 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         />
       )}
       <div className={cn('flex min-w-0 flex-1 items-center gap-1', !connection.pendingConnection && 'mr-6')}>
-        {connection.pendingConnection && <Spinner className="size-3 text-app-warning" />}
-        <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{connection.title}</span>
+        {connection.pendingConnection && <Spinner className="size-3 shrink-0 text-app-warning" />}
+        <span className="block flex-1 truncate text-left text-xs leading-none font-normal">{connection.title}</span>
       </div>
     </div>
   );
@@ -479,7 +479,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
         if ((e.target as HTMLElement).closest('[data-sftp-tab]')) return;
         onNewTabClick();
       }}
-      className="group/tabbar relative my-0 flex h-8 items-start bg-app-surface-muted py-0 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-app-border/50 after:bg-app-bg"
+      className="group/tabbar relative my-0 flex h-8 items-start bg-app-surface-muted py-0"
     >
       <DndContext
         sensors={sensors}
@@ -495,9 +495,9 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
             horizontal
             vertical={false}
             size="thin"
-            className="h-8 min-w-0 flex-1 [&>[data-slot=scroll-area-scrollbar]]:top-0 [&>[data-slot=scroll-area-scrollbar]]:z-20"
+            className="h-8 min-w-0 flex-1 [&>[data-slot=scroll-area-scrollbar]]:top-0 [&>[data-slot=scroll-area-scrollbar]]:z-30"
           >
-            <div role="tablist" className="flex min-w-0 items-center gap-0 p-0">
+            <div role="tablist" className="flex h-8 min-w-full items-center gap-0 p-0">
               {connections.map((connection, index) => {
                 const isDragging = draggingConnectionId === connection.id;
                 const draggedIndex = draggingConnectionId ? connections.findIndex((c) => c.id === draggingConnectionId) : -1;

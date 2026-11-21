@@ -112,15 +112,15 @@ describe('SFTP shortcuts', () => {
     document.addEventListener('shellspan:find-sftp', onSearch);
     try {
       render(<Workspace />);
-      act(() => useAppStore.getState().setShortcut('findSftp', 'mod+shift+f'));
+      act(() => useAppStore.getState().setShortcut('findSftp', 'mod+shift+e'));
       press('f');
       expect(requests).toBe(0);
-      press('f', true);
+      press('e', true);
       expect(requests).toBe(1);
-      fireEvent.keyDown(document, { key: 'f', ctrlKey: true, shiftKey: true, isComposing: true });
+      fireEvent.keyDown(document, { key: 'e', ctrlKey: true, shiftKey: true, isComposing: true });
       expect(requests).toBe(1);
       press('o', true);
-      fireEvent.keyDown(screen.getByRole('dialog'), { key: 'f', ctrlKey: true, shiftKey: true });
+      fireEvent.keyDown(screen.getByRole('dialog'), { key: 'e', ctrlKey: true, shiftKey: true });
       expect(requests).toBe(1);
     } finally {
       document.removeEventListener('shellspan:find-sftp', onSearch);
@@ -179,5 +179,22 @@ describe('SFTP shortcuts', () => {
     expect(useSftpStore.getState().connections).toHaveLength(2);
     fireEvent.click(within(alert).getByRole('button', { name: t('common.close') }));
     expect(useSftpStore.getState().connections.map((connection) => connection.id)).toEqual([first]);
+  });
+
+  it('switches focus between SFTP panes with Tab and focuses the path editor with mod+l', () => {
+    render(<DualPaneWorkspace />);
+    const listboxes = screen.getAllByRole('listbox');
+    expect(listboxes).toHaveLength(2);
+
+    act(() => listboxes[0].focus());
+    expect(listboxes[0]).toHaveFocus();
+
+    fireEvent.keyDown(listboxes[0], { key: 'Tab' });
+    expect(listboxes[1]).toHaveFocus();
+
+    press('l');
+    const rightPane = listboxes[1].closest('[data-sftp-pane]') as HTMLElement;
+    const pathBar = rightPane.querySelector('[data-slot="sftp-path-bar"]') as HTMLElement;
+    expect(within(pathBar).getByRole('textbox')).toHaveFocus();
   });
 });

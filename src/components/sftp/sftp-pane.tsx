@@ -6,7 +6,7 @@ import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
-import { PathBreadcrumb } from './path-breadcrumb';
+import { PathBreadcrumb, type PathBreadcrumbHandle } from './path-breadcrumb';
 import { SftpFileList } from './sftp-file-list';
 import { SftpFileContextMenu, type SftpFileContextMenuAction } from './sftp-file-context-menu';
 import { SftpBlankContextMenu, type SftpBlankContextMenuAction } from './sftp-blank-context-menu';
@@ -152,6 +152,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     const [showSearch, setShowSearch] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const searchInputRef = useRef<HTMLInputElement>(null);
+    const breadcrumbRef = useRef<PathBreadcrumbHandle>(null);
 
     useEffect(() => {
       if (showSearch && searchInputRef.current) {
@@ -284,6 +285,45 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     const handleParentDirectory = useCallback((): void => {
       navigateTo(isLocal ? parentPortablePath(path) : parentPosixPath(path));
     }, [isLocal, path, navigateTo]);
+
+    useEffect(() => {
+      const isTargetPane = (fallbackSide: SftpSide = 'local'): boolean => {
+        const focusedPane = document.activeElement?.closest('[data-sftp-pane]');
+        return focusedPane ? focusedPane === paneRef.current : side === fallbackSide;
+      };
+      const handleRefresh = (): void => {
+        if (!isTargetPane() || connecting || restorePending) return;
+        void actions.onRefresh();
+      };
+      const handleNewFolder = (): void => {
+        if (!isTargetPane() || connecting || restorePending) return;
+        actions.onNewFolder();
+      };
+      const handleFocusPath = (): void => {
+        if (!isTargetPane()) return;
+        breadcrumbRef.current?.startEditing();
+      };
+      const handleParent = (): void => {
+        if (!isTargetPane() || connecting || restorePending || !path) return;
+        handleParentDirectory();
+      };
+      const handleOpenTerminal = (): void => {
+        if (!isTargetPane('remote') || isLocal || !onOpenTerminal) return;
+        onOpenTerminal();
+      };
+      document.addEventListener('shellspan:sftp-refresh', handleRefresh);
+      document.addEventListener('shellspan:sftp-new-folder', handleNewFolder);
+      document.addEventListener('shellspan:sftp-focus-path', handleFocusPath);
+      document.addEventListener('shellspan:sftp-parent-directory', handleParent);
+      document.addEventListener('shellspan:sftp-open-terminal-here', handleOpenTerminal);
+      return () => {
+        document.removeEventListener('shellspan:sftp-refresh', handleRefresh);
+        document.removeEventListener('shellspan:sftp-new-folder', handleNewFolder);
+        document.removeEventListener('shellspan:sftp-focus-path', handleFocusPath);
+        document.removeEventListener('shellspan:sftp-parent-directory', handleParent);
+        document.removeEventListener('shellspan:sftp-open-terminal-here', handleOpenTerminal);
+      };
+    }, [actions, connecting, handleParentDirectory, isLocal, onOpenTerminal, path, restorePending, side]);
 
     const handleDoubleClick = useCallback(
       (entry: FileEntry): void => {
@@ -621,7 +661,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
             </Button>
           </div>
 
-          <PathBreadcrumb path={path} pathKind={isLocal ? 'local' : 'remote'} onNavigate={navigateTo} className="flex-1" />
+          <PathBreadcrumb ref={breadcrumbRef} path={path} pathKind={isLocal ? 'local' : 'remote'} onNavigate={navigateTo} className="flex-1" />
         </div>
 
         {/* File list */}

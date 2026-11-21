@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FolderIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -27,6 +27,10 @@ import {
 
 const SHOW_HIDDEN_SEGMENTS_KEY: LocaleKey = 'sftp.breadcrumb.showHiddenSegments';
 const HIDDEN_SEGMENTS_KEY: LocaleKey = 'sftp.breadcrumb.hiddenSegments';
+
+export interface PathBreadcrumbHandle {
+  startEditing: () => void;
+}
 
 export interface PathBreadcrumbProps {
   path: string;
@@ -92,7 +96,8 @@ const BreadcrumbSegment: React.FC<BreadcrumbSegmentProps> = ({ name, path, isRoo
   );
 };
 
-export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate, pathKind = 'remote', className }) => {
+export const PathBreadcrumb = React.forwardRef<PathBreadcrumbHandle, PathBreadcrumbProps>(
+  ({ path, onNavigate, pathKind = 'remote', className }, ref) => {
   const { t } = useI18n();
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(path);
@@ -148,10 +153,12 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate
     setVisibleLeadingCount((currentCount) => (currentCount === nextVisibleCount ? currentCount : nextVisibleCount));
   }, [containerWidth, measurementWidth, segments]);
 
-  const startEditing = (): void => {
+  const startEditing = useCallback((): void => {
     setEditValue(path);
     setIsEditing(true);
-  };
+  }, [path]);
+
+  useImperativeHandle(ref, () => ({ startEditing }), [startEditing]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
     if (e.key === 'Enter') {
@@ -264,4 +271,7 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({ path, onNavigate
       )}
     </div>
   );
-};
+  },
+);
+
+PathBreadcrumb.displayName = 'PathBreadcrumb';

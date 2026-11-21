@@ -385,15 +385,16 @@ describe('SftpTabBar', () => {
 
     const tabs = screen.getAllByRole('tab');
     expect(container.firstChild).toHaveClass('h-8', 'my-0', 'py-0', 'bg-app-surface-muted');
-    expect(container.firstChild).toHaveClass('after:border-b', 'after:border-app-border/50', 'after:bg-app-bg');
-    expect(container.querySelector('[data-slot="scroll-area"]')).toHaveClass('h-8');
-    expect(screen.getByRole('tablist')).toHaveClass('p-0', 'gap-0');
+    expect(container.firstChild).not.toHaveClass('after:border-b', 'after:border-app-border/50', 'after:bg-app-bg');
+    expect(container.querySelector('[data-slot="scroll-area"]')).toHaveClass('h-8', '[&>[data-slot=scroll-area-scrollbar]]:z-30');
+    expect(screen.getByRole('tablist')).toHaveClass('h-8', 'min-w-full', 'p-0', 'gap-0');
     for (const tab of tabs) {
       expect(tab.parentElement).toHaveClass('h-8', 'session-tab-slot');
       expect(tab.parentElement).not.toHaveClass('py-1');
       expect(tab).toHaveClass('h-8', 'w-42', 'px-1.5', 'gap-1');
+      expect(tab.querySelector('span.truncate')).toHaveClass('font-normal');
     }
-    expect(tabs[0]).toHaveClass('h-8', 'rounded-t-md', 'border-x', 'border-app-border/50', 'bg-app-surface', 'text-app-text');
+    expect(tabs[0]).toHaveClass('h-8', 'rounded-t-md', 'border-x', 'border-(--terminal-tab-border)', 'bg-app-surface', 'text-app-text');
     expect(tabs[0]).not.toHaveClass('border', 'border-t', 'shadow-xs');
     const close = tabs[1].nextElementSibling;
     expect(close).toHaveAttribute('aria-label', 'sessionTab.close');
@@ -412,7 +413,7 @@ describe('SftpTabBar', () => {
     render(<SftpTabBar />);
 
     const tabs = screen.getAllByRole('tab');
-    expect(tabs[0]).toHaveClass('rounded-t-md', 'border-x', 'border-app-border/50');
+    expect(tabs[0]).toHaveClass('rounded-t-md', 'border-x', 'border-(--terminal-tab-border)');
     expect(tabs[0].querySelector('[data-active-tab-indicator]')).toBeNull();
   });
 
