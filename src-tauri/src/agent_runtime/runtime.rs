@@ -2977,7 +2977,8 @@ impl AgentRuntime {
         &self,
         input: super::AgentRecoveryReconcileInput,
     ) -> Result<AgentSessionSnapshot, String> {
-        let checkpoint = self.sessions.snapshot(&input.session_id)?.recovery;
+        let snapshot = self.sessions.snapshot(&input.session_id)?;
+        let checkpoint = snapshot.recovery;
         if checkpoint.kind != super::AgentRecoveryCheckpointKind::ExecutionInFlight {
             return Err("manual reconciliation requires an uncertain native execution".into());
         }
@@ -3014,41 +3015,39 @@ impl AgentRuntime {
             super::AgentRecoveryReconcileOutcome::Probe
                 | super::AgentRecoveryReconcileOutcome::Unknown
         ) {
-            self.sessions.append_batch(
-                &input.session_id,
-                vec![
-                    super::AgentScopedPayload {
-                        turn_id: None,
-                        step_id: None,
-                        payload: super::AgentSessionEventPayload::TaskEvidence {
-                            evidence_id,
-                            kind: "recovery-reconciliation".into(),
-                            summary: input.evidence,
-                        },
-                    },
-                    super::AgentScopedPayload {
-                        turn_id: None,
-                        step_id: None,
-                        payload: super::AgentSessionEventPayload::TaskState {
-                            status: "waiting".into(),
-                            phase: Some("reconciliation".into()),
-                            progress: None,
-                            recovery: Some(super::AgentRecoveryState {
-                                status: super::AgentRecoveryStatus::Required,
-                                summary: Some(if input.outcome
-                                    == super::AgentRecoveryReconcileOutcome::Probe
-                                {
-                                    "No authoritative native probe is available for this tool; manual evidence is still required."
-                                        .into()
-                                } else {
-                                    "The native outcome remains unknown; it was not replayed.".into()
-                                }),
+            let mut payloads = vec![super::AgentScopedPayload {
+                turn_id: turn_id.clone(),
+                step_id: step_id.clone(),
+                payload: super::AgentSessionEventPayload::TaskEvidence {
+                    evidence_id,
+                    kind: "recovery-reconciliation".into(),
+                    summary: input.evidence,
+                },
+            }];
+            if !snapshot.ended {
+                payloads.push(super::AgentScopedPayload {
+                    turn_id: None,
+                    step_id: None,
+                    payload: super::AgentSessionEventPayload::TaskState {
+                        status: "waiting".into(),
+                        phase: Some("reconciliation".into()),
+                        progress: None,
+                        recovery: Some(super::AgentRecoveryState {
+                            status: super::AgentRecoveryStatus::Required,
+                            summary: Some(if input.outcome
+                                == super::AgentRecoveryReconcileOutcome::Probe
+                            {
+                                "No authoritative native probe is available for this tool; manual evidence is still required."
+                                    .into()
+                            } else {
+                                "The native outcome remains unknown; it was not replayed.".into()
                             }),
-                            fleet: None,
-                        },
+                        }),
+                        fleet: None,
                     },
-                ],
-            )?;
+                });
+            }
+            self.sessions.append_batch(&input.session_id, payloads)?;
             return self.sessions.snapshot(&input.session_id);
         }
         let (result_status, summary) = match input.outcome {
@@ -3066,6 +3065,15 @@ impl AgentRuntime {
             super::AgentScopedPayload {
                 turn_id: turn_id.clone(),
                 step_id: step_id.clone(),
+                payload: super::AgentSessionEventPayload::TaskEvidence {
+                    evidence_id: evidence_id.clone(),
+                    kind: "recovery-reconciliation".into(),
+                    summary: input.evidence,
+                },
+            },
+            super::AgentScopedPayload {
+                turn_id: turn_id.clone(),
+                step_id: step_id.clone(),
                 payload: super::AgentSessionEventPayload::ToolResult {
                     call_id,
                     name,
@@ -3073,41 +3081,14 @@ impl AgentRuntime {
                     summary: summary.into(),
                     data: None,
                     duration_ms: None,
-                    evidence_refs: vec![evidence_id.clone()],
-                },
-            },
-            super::AgentScopedPayload {
-                turn_id: None,
-                step_id: None,
-                payload: super::AgentSessionEventPayload::TaskEvidence {
-                    evidence_id,
-                    kind: "recovery-reconciliation".into(),
-                    summary: input.evidence,
-                },
-            },
-            super::AgentScopedPayload {
-                turn_id: None,
-                step_id: None,
-                payload: super::AgentSessionEventPayload::TaskState {
-                    status: "running".into(),
-                    phase: Some("recovered".into()),
-                    progress: None,
-                    recovery: Some(super::AgentRecoveryState {
-                        status: super::AgentRecoveryStatus::Completed,
-                        summary: Some(summary.into()),
-                    }),
-                    fleet: None,
-                },
-            },
-            super::AgentScopedPayload {
-                turn_id: None,
-                step_id: None,
-                payload: super::AgentSessionEventPayload::AgentStatus {
-                    status: super::AgentSessionStatus::Running,
-                    reason: Some("reconciliationCompleted".into()),
+                    evidence_refs: vec![evidence_id],
                 },
             },
         ];
+        if snapshot.ended {
+            self.sessions.append_batch(&input.session_id, payloads)?;
+            return self.sessions.snapshot(&input.session_id);
+        }
         if !events.iter().any(|event| {
             event.turn_id == turn_id
                 && event.step_id == step_id
@@ -3116,20 +3097,48 @@ impl AgentRuntime {
                     super::AgentSessionEventPayload::StepEnd { .. }
                 )
         }) {
-            payloads.insert(
-                1,
-                super::AgentScopedPayload {
-                    turn_id: turn_id.clone(),
-                    step_id: step_id.clone(),
-                    payload: super::AgentSessionEventPayload::StepEnd {
-                        reason: "reconciled".into(),
-                    },
+            payloads.push(super::AgentScopedPayload {
+                turn_id: turn_id.clone(),
+                step_id: step_id.clone(),
+                payload: super::AgentSessionEventPayload::StepEnd {
+                    reason: "reconciled".into(),
                 },
-            );
+            });
         }
+        payloads.push(super::AgentScopedPayload {
+            turn_id: None,
+            step_id: None,
+            payload: super::AgentSessionEventPayload::TaskState {
+                status: "running".into(),
+                phase: Some("recovered".into()),
+                progress: None,
+                recovery: Some(super::AgentRecoveryState {
+                    status: super::AgentRecoveryStatus::Completed,
+                    summary: Some(summary.into()),
+                }),
+                fleet: None,
+            },
+        });
+        payloads.push(super::AgentScopedPayload {
+            turn_id: None,
+            step_id: None,
+            payload: super::AgentSessionEventPayload::AgentStatus {
+                status: super::AgentSessionStatus::Running,
+                reason: Some("reconciliationCompleted".into()),
+            },
+        });
         self.sessions.append_batch(&input.session_id, payloads)?;
         if let Some(entry) = self.agents.get(&input.session_id)? {
-            if let Some(turn_id) = turn_id {
+            let turn_already_ended = events.iter().any(|event| {
+                event.turn_id == turn_id
+                    && matches!(
+                        event.payload,
+                        super::AgentSessionEventPayload::TurnEnd { .. }
+                    )
+            });
+            if turn_already_ended {
+                entry.set_scope(None)?;
+            } else if let Some(turn_id) = turn_id {
                 entry.set_scope(Some(super::AgentActiveScope {
                     turn_id,
                     step_id: None,
@@ -3241,10 +3250,13 @@ impl AgentRuntime {
                         }
                         Ok(_) => {}
                         Err(error) => {
+                            let reason = format!("approvalExpiryFailure: {error}");
+                            let _ = entry.set_phase(AgentLifecyclePhase::Stopping);
+                            let _ = super::driver::close_open_scope(&sessions, &entry, &reason);
                             let _ = sessions.terminate(
                                 &entry.session_id,
                                 super::AgentSessionStatus::Failed,
-                                format!("approvalExpiryFailure: {error}"),
+                                reason,
                             );
                         }
                     }

@@ -1532,8 +1532,7 @@ impl SubAgentManager {
                     && (snapshot.ended
                         || snapshot.status.is_terminal()
                         || (snapshot.status == AgentSessionStatus::Idle
-                            && snapshot.inbox.next_turn.is_empty()
-                            && snapshot.inbox.next_step.is_empty()))
+                            && !self.sessions.has_ready_input(child_session_id)?))
                 {
                     return Ok::<_, String>(snapshot);
                 }
@@ -1636,10 +1635,13 @@ impl SubAgentManager {
                         }
                         Ok(_) => {}
                         Err(error) => {
+                            let reason = format!("approvalExpiryFailure: {error}");
+                            let _ = entry.set_phase(AgentLifecyclePhase::Stopping);
+                            let _ = super::driver::close_open_scope(&sessions, &entry, &reason);
                             let _ = sessions.terminate(
                                 &entry.session_id,
                                 AgentSessionStatus::Failed,
-                                format!("approvalExpiryFailure: {error}"),
+                                reason,
                             );
                         }
                     }
@@ -1649,12 +1651,7 @@ impl SubAgentManager {
                 {
                     break;
                 }
-                let has_work = sessions
-                    .snapshot(&entry.session_id)
-                    .map(|snapshot| {
-                        !snapshot.inbox.next_turn.is_empty() || !snapshot.inbox.next_step.is_empty()
-                    })
-                    .unwrap_or(false);
+                let has_work = sessions.has_ready_input(&entry.session_id).unwrap_or(false);
                 if !has_work || !entry.try_acquire_driver().unwrap_or(false) {
                     break;
                 }

@@ -648,7 +648,10 @@ async fn drive_agent_inner(
             match settlement {
                 ToolPipelineSettlement::Completed => continue,
                 ToolPipelineSettlement::Waiting => return Ok(AgentDriverSettlement::Waiting),
-                ToolPipelineSettlement::Cancelled => return Ok(AgentDriverSettlement::Cancelled),
+                ToolPipelineSettlement::Cancelled => {
+                    close_open_scope(sessions, entry, "cancelled")?;
+                    return Ok(AgentDriverSettlement::Cancelled);
+                }
             }
         }
         if let Some(reason) = sessions.read_events(&entry.session_id, |events| {
@@ -690,7 +693,7 @@ async fn drive_agent_inner(
         // A waiting tool/question can resume inside the already admitted Turn.
         if existing_scope.is_none()
             && started_turns >= config.max_turns_per_session
-            && (!inbox.next_turn.is_empty() || !inbox.next_step.is_empty())
+            && sessions.has_ready_input(&entry.session_id)?
         {
             let reason = format!(
                 "turnLimitExceeded: maximum {} Turns per Session",

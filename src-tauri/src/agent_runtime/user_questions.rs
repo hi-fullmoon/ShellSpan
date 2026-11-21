@@ -1043,7 +1043,8 @@ impl super::AgentToolPipeline {
 
     // Caller holds question_gate. Cancellation and answer acceptance have one commit order.
     pub(crate) fn cancel_questions(&self, session_id: &str) -> Result<(), String> {
-        for mut record in records(&self.sessions.all_events(session_id)?) {
+        let events = self.sessions.all_events(session_id)?;
+        for mut record in records(&events) {
             if record.has_result {
                 continue;
             }
@@ -1059,6 +1060,20 @@ impl super::AgentToolPipeline {
             }
             payloads.push(scoped(&record.identity, result(&record)));
             self.sessions.append_batch(session_id, payloads)?;
+            let remaining = remaining_step_calls_after_question(
+                &self.sessions.all_events(session_id)?,
+                &record.identity,
+            );
+            for call in remaining {
+                self.commit_not_started_call(
+                    session_id,
+                    &record.identity.turn_id,
+                    &record.identity.step_id,
+                    &call,
+                    None,
+                    "cancelled",
+                )?;
+            }
         }
         Ok(())
     }
@@ -1237,4 +1252,47 @@ impl super::AgentToolPipeline {
             .await
             .map(Some)
     }
+}
+
+fn remaining_step_calls_after_question(
+    events: &[AgentSessionEvent],
+    identity: &QuestionIdentity,
+) -> Vec<super::ModelToolCall> {
+    let Some(calls) = events
+        .iter()
+        .filter(|event| {
+            event.turn_id.as_deref() == Some(&identity.turn_id)
+                && event.step_id.as_deref() == Some(&identity.step_id)
+        })
+        .find_map(|event| match &event.payload {
+            AgentSessionEventPayload::AssistantMessage { content, .. } => {
+                Some(super::assistant_tool_calls(content))
+            }
+            _ => None,
+        })
+    else {
+        return Vec::new();
+    };
+    calls
+        .into_iter()
+        .skip_while(|call| call.call_id != identity.call_id)
+        .skip(1)
+        .filter(|call| {
+            !events.iter().any(|event| {
+                event.turn_id.as_deref() == Some(&identity.turn_id)
+                    && event.step_id.as_deref() == Some(&identity.step_id)
+                    && matches!(
+                        &event.payload,
+                        AgentSessionEventPayload::ToolResult { call_id, .. }
+                            if call_id == &call.call_id
+                    )
+            })
+        })
+        .map(|call| super::ModelToolCall {
+            call_id: call.call_id,
+            provider_call_id: call.provider_call_id,
+            name: call.name,
+            arguments: call.arguments,
+        })
+        .collect()
 }
