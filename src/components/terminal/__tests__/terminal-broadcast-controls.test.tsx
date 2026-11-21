@@ -50,6 +50,7 @@ describe('TerminalBroadcastControls', () => {
     render(<TerminalBroadcastControls visible />);
 
     const alert = screen.getByRole('alert');
+    expect(alert).toHaveAttribute('data-size', 'xs');
     expect(alert).toHaveClass('rounded-none', 'border-x-0', 'border-t-0');
     expect(alert).toHaveTextContent('terminal.broadcast.activeAll:{"count":2}');
 
@@ -71,6 +72,10 @@ describe('TerminalBroadcastControls', () => {
     expect(dialog.querySelector('[data-slot="scroll-area"]')).toBeNull();
     expect(within(dialog).getByText('terminal.broadcast.protectedBadge')).toBeInTheDocument();
     expect(within(dialog).getAllByText('deploy@prod.example.com')).toHaveLength(3);
+    const primaryRow = within(dialog).getByText('Primary').closest('label');
+    expect(primaryRow).toHaveClass('items-center');
+    expect(within(dialog).getByText('Primary')).toHaveClass('truncate');
+    expect(within(dialog).getAllByText('deploy@prod.example.com')[0]).toHaveClass('truncate');
 
     const confirm = within(dialog).getByRole('button', { name: 'terminal.broadcast.useSelected' });
     expect(confirm).toBeDisabled();

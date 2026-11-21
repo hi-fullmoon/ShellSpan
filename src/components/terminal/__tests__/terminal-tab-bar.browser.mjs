@@ -170,11 +170,24 @@ try {
         const bar = document.querySelector('[data-sftp-tab-bar]');
         const tab = bar.querySelector('[role="tab"][aria-selected="true"]');
         const style = getComputedStyle(tab);
+        const slots = [...bar.querySelectorAll('.session-tab-slot')].map((slot) => {
+          const after = getComputedStyle(slot, '::after');
+          return {
+            active: slot.querySelector('[role="tab"]').getAttribute('aria-selected') === 'true',
+            content: after.content,
+            bottomColor: after.borderBottomColor,
+            bottomWidth: after.borderBottomWidth,
+          };
+        });
         return { top: style.borderTopWidth, bottom: style.borderBottomWidth,
           left: style.borderLeftWidth, right: style.borderRightWidth,
-          color: style.borderRightColor, line: getComputedStyle(bar, '::after').borderBottomColor,
+          color: style.borderRightColor,
+          line: getComputedStyle(bar.querySelector('[role="tablist"]'), '::after').borderBottomColor,
+          topLine: getComputedStyle(bar, '::before').borderTopColor,
+          topLineWidth: getComputedStyle(bar, '::before').borderTopWidth,
           shadow: style.boxShadow,
-          height: tab.getBoundingClientRect().height };
+          height: tab.getBoundingClientRect().height,
+          slots };
       });
       assert.equal(borders.height, 32);
       assert.equal(borders.top, '0px');
@@ -182,7 +195,18 @@ try {
       assert.equal(borders.left, '1px');
       assert.equal(borders.right, '1px');
       assert.equal(borders.color, borders.line);
+      assert.equal(borders.topLine, borders.line);
+      assert.equal(borders.topLineWidth, '1px');
       assert.equal(borders.shadow, 'none');
+      for (const slot of borders.slots) {
+        if (slot.active) {
+          assert.equal(slot.content, 'none');
+        } else {
+          assert.notEqual(slot.content, 'none');
+          assert.equal(slot.bottomWidth, '1px');
+          assert.equal(slot.bottomColor, borders.line);
+        }
+      }
       const before = await sftpTabs.nth(index).locator('span').first().boundingBox();
       await sftpTabs.nth((index + 1) % 3).hover();
       const after = await sftpTabs.nth(index).locator('span').first().boundingBox();
@@ -328,8 +352,11 @@ try {
         const bar = document.querySelector(selector);
         const tab = bar.querySelector('[role="tab"][aria-selected="true"]');
         const style = getComputedStyle(tab);
-        const lineTarget = selector === '[data-terminal-tab-bar]' ? bar.querySelector('[role="tablist"]') : bar;
+        const titleStyle = getComputedStyle(tab.querySelector('span.truncate'));
+        const lineTarget = bar.querySelector('[role="tablist"]');
         return { tab: properties.map((property) => style[property]),
+          titleFontWeight: titleStyle.fontWeight,
+          titleFontSize: titleStyle.fontSize,
           strip: getComputedStyle(bar).backgroundColor,
           line: getComputedStyle(lineTarget, '::after').borderBottomColor };
       });

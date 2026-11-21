@@ -86,6 +86,24 @@ describe('terminal-leader', () => {
     document.removeEventListener('shellspan:close-terminal-tab', close);
   });
 
+  it('dispatches broadcast and scroll-to-bottom leader commands', () => {
+    const broadcast = vi.fn();
+    const scrollBottom = vi.fn();
+    document.addEventListener('shellspan:configure-terminal-broadcast', broadcast);
+    document.addEventListener('shellspan:scroll-terminal-bottom', scrollBottom);
+
+    handleTerminalLeaderKeydown(keydown({ key: 'b', ctrlKey: true }));
+    expect(handleTerminalLeaderKeydown(keydown({ key: 'b' }))).toBe(true);
+    expect(broadcast).toHaveBeenCalledTimes(1);
+
+    handleTerminalLeaderKeydown(keydown({ key: 'b', ctrlKey: true }));
+    expect(handleTerminalLeaderKeydown(keydown({ key: 'g' }))).toBe(true);
+    expect(scrollBottom).toHaveBeenCalledTimes(1);
+
+    document.removeEventListener('shellspan:configure-terminal-broadcast', broadcast);
+    document.removeEventListener('shellspan:scroll-terminal-bottom', scrollBottom);
+  });
+
   it('swallows unknown command keys and disarms', () => {
     handleTerminalLeaderKeydown(keydown({ key: 'b', ctrlKey: true }));
     expect(handleTerminalLeaderKeydown(keydown({ key: 'q' }))).toBe(true);

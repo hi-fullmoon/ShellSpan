@@ -764,4 +764,51 @@ describe('TerminalContextMenu', () => {
 
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('positions using measured menu height instead of clamping to a hardcoded maxHeight', () => {
+    const originalInnerWidth = window.innerWidth;
+    const originalInnerHeight = window.innerHeight;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 760 });
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 240,
+      height: 520,
+      top: 0,
+      left: 0,
+      right: 240,
+      bottom: 520,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    try {
+      const session: TerminalSession = {
+        ...makeSession('s1', 'zsh'),
+        host: 'local',
+        port: 0,
+      };
+      render(
+        <TerminalContextMenu
+          open
+          x={40}
+          y={640}
+          session={session}
+          isSplit
+          onClose={vi.fn()}
+        />,
+      );
+
+      const menu = screen.getByRole('menu');
+      expect(menu.style.left).toBe('40px');
+      expect(menu.style.top).toBe('232px');
+      expect(menu.style.maxHeight).toBe('');
+      expect(menu.className).toContain('max-h-[calc(100vh-1rem)]');
+      expect(menu.className).toContain('max-w-[calc(100vw-1rem)]');
+    } finally {
+      rectSpy.mockRestore();
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalInnerHeight });
+    }
+  });
 });

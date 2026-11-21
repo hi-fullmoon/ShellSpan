@@ -254,7 +254,9 @@ try {
       assert.equal(hit.target.url, hit.text);
       await screen.click({ button: 'right', position: { x: 2, y: 2 } });
       await page.getByRole('menuitem', { name: '在浏览器中打开', exact: true }).waitFor();
-      await menu.getByRole('menuitem', { name: '复制链接地址', exact: true }).click();
+      const copyUrlItem = menu.getByRole('menuitem', { name: '复制链接地址', exact: true });
+      assert.equal(await copyUrlItem.locator('svg').count(), 0);
+      await copyUrlItem.click();
       await menu.waitFor({ state: 'hidden' });
       if (name === 'chromium') {
         await page.waitForFunction(async text => await navigator.clipboard.readText() === text, hit.text);
@@ -269,7 +271,9 @@ try {
       }, path);
       assert.equal(detectedPath, path, 'A selected absolute path may span wrapped terminal rows');
       await screen.click({ button: 'right', position: { x: 2, y: 2 } });
-      await menu.getByRole('menuitem', { name: '复制路径', exact: true }).click();
+      const copyPathItem = menu.getByRole('menuitem', { name: '复制路径', exact: true });
+      assert.equal(await copyPathItem.locator('svg').count(), 0);
+      await copyPathItem.click();
       await menu.waitFor({ state: 'hidden' });
       if (name === 'chromium') {
         await page.waitForFunction(async text => await navigator.clipboard.readText() === text, path);

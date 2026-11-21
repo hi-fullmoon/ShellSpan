@@ -1,4 +1,5 @@
 import { act } from '@testing-library/react';
+import { Terminal, type ILink } from '@xterm/xterm';
 import { describe, expect, it, beforeEach, beforeAll, vi } from 'vitest';
 import { enableRealCanvas } from '@/tests/real-canvas';
 import type { Event as TauriEvent } from '@tauri-apps/api/event';
@@ -42,6 +43,8 @@ vi.mock('@/lib/ipc/tauri', () => ({
   invokeWriteSession: vi.fn().mockResolvedValue(undefined),
   invokeWriteSessionBytes: vi.fn().mockResolvedValue(undefined),
   invokeResizeSession: vi.fn().mockResolvedValue(undefined),
+  invokeOpenUrl: vi.fn().mockResolvedValue(undefined),
+  invokeRevealPath: vi.fn().mockResolvedValue(undefined),
   listenToSshData: vi.fn().mockResolvedValue(() => {}),
   listenToSshStatus: vi.fn().mockResolvedValue(() => {}),
   listenToSshClosed: vi.fn().mockResolvedValue(() => {}),
@@ -1392,5 +1395,55 @@ describe('findHttpLinksInLine', () => {
         end: { x: 7, y: 2 },
       },
     }]);
+  });
+
+  it('requires a modifier key before activating terminal links', async () => {
+    const { invokeOpenUrl, invokeRevealPath } = await import('@/lib/ipc/tauri');
+    const platformSpy = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    const registerSpy = vi.spyOn(Terminal.prototype, 'registerLinkProvider');
+    try {
+      const controller = createController('modifier-link');
+      useTerminalStore.getState().addSession({
+        sessionId: 'modifier-link',
+        title: 'Local',
+        host: 'local',
+        port: 0,
+        username: 'dev',
+      });
+      const provider = registerSpy.mock.calls[registerSpy.mock.calls.length - 1]?.[0];
+      expect(provider).toBeDefined();
+
+      controller.terminal.resize(60, 4);
+      await new Promise<void>((resolve) => {
+        controller.terminal.write('/var/log/test.log https://example.com', resolve);
+      });
+
+      const links = await new Promise<ILink[] | undefined>((resolve) => {
+        provider!.provideLinks(1, (found: ILink[] | undefined) => resolve(found));
+      });
+      const fileLink = links?.find((link) => link.text === '/var/log/test.log');
+      const urlLink = links?.find((link) => link.text === 'https://example.com');
+      expect(fileLink).toBeDefined();
+      expect(urlLink).toBeDefined();
+
+      // Plain click must not trigger link navigation.
+      fileLink!.activate(new MouseEvent('click'), fileLink!.text);
+      urlLink!.activate(new MouseEvent('click'), urlLink!.text);
+      controller.terminal.options.linkHandler?.activate(new MouseEvent('click'), 'https://example.com', {
+        start: { x: 1, y: 1 },
+        end: { x: 19, y: 1 },
+      });
+      expect(invokeRevealPath).not.toHaveBeenCalled();
+      expect(invokeOpenUrl).not.toHaveBeenCalled();
+
+      // Cmd+Click on macOS activates file and URL links.
+      fileLink!.activate(new MouseEvent('click', { metaKey: true }), fileLink!.text);
+      urlLink!.activate(new MouseEvent('click', { metaKey: true }), urlLink!.text);
+      expect(invokeRevealPath).toHaveBeenCalledWith('/var/log/test.log');
+      expect(invokeOpenUrl).toHaveBeenCalledWith('https://example.com');
+    } finally {
+      registerSpy.mockRestore();
+      platformSpy.mockRestore();
+    }
   });
 });
