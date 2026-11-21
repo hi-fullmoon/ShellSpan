@@ -968,6 +968,8 @@ export default {
   'settings.terminal.macOptionIsMetaDescription': 'Send Meta shortcuts to the shell when the Option key is held.',
   'settings.terminal.altClickMovesCursor': 'Move the cursor with Alt-click',
   'settings.terminal.altClickMovesCursorDescription': 'Move the terminal cursor to the clicked position when supported by the shell.',
+  'settings.terminal.webglRenderer': 'WebGL hardware-accelerated renderer',
+  'settings.terminal.webglRendererDescription': 'Use WebGL to accelerate high-throughput terminal rendering, falling back to DOM if WebGL is unavailable or lost.',
   'settings.terminal.osc52': 'Allow terminal applications to write to the clipboard',
   'settings.terminal.osc52Description': 'Allows OSC 52 clipboard writes up to 1 MB. Remote applications cannot read the clipboard.',
   'terminal.menu.revealCurrentDirectory': 'Show Current Folder in File Manager',

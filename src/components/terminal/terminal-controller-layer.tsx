@@ -40,6 +40,7 @@ export const TerminalControllerLayer: React.FC = () => {
   const terminalCustomFontFamily = useAppStore((s) => s.terminalCustomFontFamily);
   const terminalMacOptionIsMeta = useAppStore((s) => s.terminalMacOptionIsMeta);
   const terminalAltClickMovesCursor = useAppStore((s) => s.terminalAltClickMovesCursor);
+  const terminalWebglRenderer = useAppStore((s) => s.terminalWebglRenderer);
   const terminalCursorBlink = useAppStore((s) => s.terminalCursorBlink);
   const terminalCursorStyle = useAppStore((s) => s.terminalCursorStyle);
   const terminalScrollback = useAppStore((s) => s.terminalScrollback);
@@ -60,6 +61,7 @@ export const TerminalControllerLayer: React.FC = () => {
       customFontFamily: terminalCustomFontFamily,
       macOptionIsMeta: terminalMacOptionIsMeta,
       altClickMovesCursor: terminalAltClickMovesCursor,
+      webglRenderer: terminalWebglRenderer,
       cursorBlink: terminalCursorBlink,
       cursorStyle: terminalCursorStyle,
       scrollback: terminalScrollback,
@@ -71,7 +73,7 @@ export const TerminalControllerLayer: React.FC = () => {
       urlDetection: terminalUrlDetection,
       bellStyle: terminalBellStyle,
     });
-  }, [terminalAltClickMovesCursor, terminalAutoReconnect, terminalBellStyle, terminalColorScheme, terminalColorOverrides, terminalCursorBlink, terminalCursorStyle, terminalCustomFontFamily, terminalFontFamily, terminalFontSize, terminalLetterSpacing, terminalLineHeight, terminalMacOptionIsMeta, terminalScrollback, terminalUrlDetection]);
+  }, [terminalAltClickMovesCursor, terminalAutoReconnect, terminalBellStyle, terminalColorScheme, terminalColorOverrides, terminalCursorBlink, terminalCursorStyle, terminalCustomFontFamily, terminalFontFamily, terminalFontSize, terminalLetterSpacing, terminalLineHeight, terminalMacOptionIsMeta, terminalScrollback, terminalUrlDetection, terminalWebglRenderer]);
 
   useEffect(() => {
     const root = document.documentElement;

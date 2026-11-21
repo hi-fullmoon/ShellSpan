@@ -98,6 +98,7 @@ interface AppPreferences extends PetdexMessagePreferences {
   terminalCustomFontFamily: string;
   terminalMacOptionIsMeta: boolean;
   terminalAltClickMovesCursor: boolean;
+  terminalWebglRenderer: boolean;
   terminalOsc52Policy: TerminalOsc52Policy;
   terminalCommandNotificationThresholdSec: number;
   terminalCursorBlink: boolean;
@@ -170,6 +171,7 @@ interface AppState extends AppPreferences {
   setTerminalCustomFontFamily: (name: string) => void;
   setTerminalMacOptionIsMeta: (enabled: boolean) => void;
   setTerminalAltClickMovesCursor: (enabled: boolean) => void;
+  setTerminalWebglRenderer: (enabled: boolean) => void;
   setTerminalOsc52Policy: (policy: TerminalOsc52Policy) => void;
   setTerminalCommandNotificationThresholdSec: (seconds: number) => void;
   setTerminalCursorBlink: (enabled: boolean) => void;
@@ -205,7 +207,7 @@ const PREFERENCE_KEYS: readonly (keyof AppPreferences)[] = [
   'terminalTabTitleCustom', 'terminalTabTitleCustomOverrides',
   'theme', 'locale', 'profileName', 'profileAvatar', 'startupUpdateCheck', 'showFocusMode', 'startupSection',
   'terminalFontSize', 'terminalFontFamily', 'terminalCursorBlink',
-  'terminalCustomFontFamily', 'terminalMacOptionIsMeta', 'terminalAltClickMovesCursor', 'terminalOsc52Policy',
+  'terminalCustomFontFamily', 'terminalMacOptionIsMeta', 'terminalAltClickMovesCursor', 'terminalWebglRenderer', 'terminalOsc52Policy',
   'terminalCommandNotificationThresholdSec',
   'terminalCursorStyle', 'terminalCopyOnSelect', 'terminalScrollback',
   'terminalColorScheme', 'terminalColorOverrides', 'terminalMultiLinePasteWarning',
@@ -239,6 +241,7 @@ function getDefaultPreferences(): AppPreferences {
     terminalCustomFontFamily: '',
     terminalMacOptionIsMeta: false,
     terminalAltClickMovesCursor: true,
+    terminalWebglRenderer: false,
     terminalOsc52Policy: 'writeOnly',
     terminalCommandNotificationThresholdSec: 10,
     terminalCursorBlink: true,
@@ -352,6 +355,7 @@ function entriesToPreferences(entries: [string, string][]): Partial<AppPreferenc
     terminalCustomFontFamily: normalizeTerminalFontName(prefs.terminalCustomFontFamily),
     terminalMacOptionIsMeta: prefs.terminalMacOptionIsMeta === true,
     terminalAltClickMovesCursor: prefs.terminalAltClickMovesCursor !== false,
+    terminalWebglRenderer: prefs.terminalWebglRenderer === true,
     terminalOsc52Policy: prefs.terminalOsc52Policy === 'disabled' ? 'disabled' : 'writeOnly',
     terminalCommandNotificationThresholdSec: typeof prefs.terminalCommandNotificationThresholdSec === 'number'
       && [0, 5, 10, 30, 60].includes(prefs.terminalCommandNotificationThresholdSec)
@@ -582,6 +586,7 @@ export const useAppStore = create<AppState>()(
     setTerminalCustomFontFamily: (name) => set({ terminalCustomFontFamily: normalizeTerminalFontName(name) }),
     setTerminalMacOptionIsMeta: (terminalMacOptionIsMeta) => set({ terminalMacOptionIsMeta }),
     setTerminalAltClickMovesCursor: (terminalAltClickMovesCursor) => set({ terminalAltClickMovesCursor }),
+    setTerminalWebglRenderer: (terminalWebglRenderer) => set({ terminalWebglRenderer }),
     setTerminalOsc52Policy: (terminalOsc52Policy) => set({ terminalOsc52Policy }),
     setTerminalCommandNotificationThresholdSec: (terminalCommandNotificationThresholdSec) => set({ terminalCommandNotificationThresholdSec }),
     setTerminalCursorBlink: (terminalCursorBlink) => set({ terminalCursorBlink }),
@@ -653,6 +658,7 @@ useAppStore.subscribe(
     terminalCustomFontFamily: state.terminalCustomFontFamily,
     terminalMacOptionIsMeta: state.terminalMacOptionIsMeta,
     terminalAltClickMovesCursor: state.terminalAltClickMovesCursor,
+    terminalWebglRenderer: state.terminalWebglRenderer,
     terminalOsc52Policy: state.terminalOsc52Policy,
     terminalCommandNotificationThresholdSec: state.terminalCommandNotificationThresholdSec,
     terminalCursorBlink: state.terminalCursorBlink,

@@ -251,6 +251,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const setTerminalMacOptionIsMeta = useAppStore((state) => state.setTerminalMacOptionIsMeta);
   const terminalAltClickMovesCursor = useAppStore((state) => state.terminalAltClickMovesCursor);
   const setTerminalAltClickMovesCursor = useAppStore((state) => state.setTerminalAltClickMovesCursor);
+  const terminalWebglRenderer = useAppStore((state) => state.terminalWebglRenderer);
+  const setTerminalWebglRenderer = useAppStore((state) => state.setTerminalWebglRenderer);
   const terminalOsc52Policy = useAppStore((state) => state.terminalOsc52Policy);
   const setTerminalOsc52Policy = useAppStore((state) => state.setTerminalOsc52Policy);
   const commandNotificationThreshold = useAppStore((state) => state.terminalCommandNotificationThresholdSec);
@@ -990,6 +992,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <SettingRow label={t('settings.terminal.altClickMovesCursor')} description={t('settings.terminal.altClickMovesCursorDescription')}>
                   <div className="flex justify-end">
                     <Switch aria-label={t('settings.terminal.altClickMovesCursor')} checked={terminalAltClickMovesCursor} onCheckedChange={setTerminalAltClickMovesCursor} />
+                  </div>
+                </SettingRow>
+                <SettingRow label={t('settings.terminal.webglRenderer')} description={t('settings.terminal.webglRendererDescription')}>
+                  <div className="flex justify-end">
+                    <Switch aria-label={t('settings.terminal.webglRenderer')} checked={terminalWebglRenderer} onCheckedChange={setTerminalWebglRenderer} />
                   </div>
                 </SettingRow>
                 <SettingRow label={t('settings.terminal.osc52')} description={t('settings.terminal.osc52Description')}>

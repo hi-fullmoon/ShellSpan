@@ -968,6 +968,8 @@ export default {
   'settings.terminal.macOptionIsMetaDescription': '按住 Option 时向 Shell 发送 Meta 组合键。',
   'settings.terminal.altClickMovesCursor': '按住 Alt 并点击可移动光标',
   'settings.terminal.altClickMovesCursorDescription': 'Shell 支持时，将光标移到点击位置。',
+  'settings.terminal.webglRenderer': 'WebGL 硬件加速渲染',
+  'settings.terminal.webglRendererDescription': '使用 WebGL 加速高吞吐输出渲染；上下文丢失或不支持时自动回退到 DOM 渲染。',
   'settings.terminal.osc52': '允许终端应用写入剪贴板',
   'settings.terminal.osc52Description': '允许 OSC 52 写入最多 1 MB 的内容。远端应用无法读取剪贴板。',
   'terminal.menu.revealCurrentDirectory': '在系统文件管理器中显示当前目录',

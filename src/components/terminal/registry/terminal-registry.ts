@@ -108,6 +108,7 @@ export interface TerminalDisplayPreferences {
   customFontFamily?: string;
   macOptionIsMeta?: boolean;
   altClickMovesCursor?: boolean;
+  webglRenderer?: boolean;
   cursorBlink: boolean;
   cursorStyle: TerminalCursorStyle;
   scrollback: number;
@@ -211,6 +212,8 @@ class TerminalControllerImpl implements TerminalController {
   unlisten: TerminalController['unlisten'];
   private opened = false;
   private disposed = false;
+  private webglAddon?: IDisposable;
+  private webglLoadToken = 0;
   private readonly setStatus: StatusCallback;
   private readonly setClosed: ClosedCallback;
   private readonly getStatus: GetStatusCallback;
@@ -976,6 +979,7 @@ class TerminalControllerImpl implements TerminalController {
     if (this.opened) {
       this.edgeBackground ??= installTerminalEdgeBackground(this.terminal);
       this.scrollbarVisibility ??= installTerminalScrollbarVisibility(this.terminal);
+      this.syncWebglRenderer(Boolean(this.preferences.webglRenderer));
     }
 
     this.updateElementStyles();
@@ -1529,6 +1533,9 @@ class TerminalControllerImpl implements TerminalController {
     if (previous.urlDetection !== preferences.urlDetection) {
       this.updateLinkProvider();
     }
+    if (Boolean(previous.webglRenderer) !== Boolean(preferences.webglRenderer)) {
+      this.syncWebglRenderer(Boolean(preferences.webglRenderer));
+    }
     if (geometryChanged && this.host) {
       const previousCols = this.terminal.cols;
       const previousRows = this.terminal.rows;
@@ -1541,6 +1548,42 @@ class TerminalControllerImpl implements TerminalController {
         this.sendResize(this.terminal.cols, this.terminal.rows);
       }
     }
+  }
+
+  private syncWebglRenderer(enabled: boolean): void {
+    this.webglLoadToken += 1;
+    const token = this.webglLoadToken;
+    if (!enabled || !this.opened || this.disposed) {
+      this.webglAddon?.dispose();
+      this.webglAddon = undefined;
+      return;
+    }
+    if (this.webglAddon) return;
+    void import('@xterm/addon-webgl').then(({ WebglAddon }) => {
+      if (this.disposed || !this.opened || token !== this.webglLoadToken || !this.preferences.webglRenderer || this.webglAddon) {
+        return;
+      }
+      try {
+        const addon = new WebglAddon();
+        addon.onContextLoss(() => {
+          if (this.webglAddon === addon) {
+            this.webglAddon = undefined;
+          }
+          try {
+            addon.dispose();
+          } catch {
+            // Context already lost; DOM renderer takes over automatically.
+          }
+          logger.warn(`WebGL context lost for session ${this.sessionId}; fell back to DOM renderer`);
+        });
+        this.terminal.loadAddon(addon);
+        this.webglAddon = addon;
+      } catch (error) {
+        logger.warn(`WebGL renderer unavailable for session ${this.sessionId}; using DOM renderer`, error);
+      }
+    }).catch((error) => {
+      logger.warn(`Failed to load WebGL renderer addon for session ${this.sessionId}`, error);
+    });
   }
 
   refreshTheme(): void {
@@ -1571,6 +1614,9 @@ class TerminalControllerImpl implements TerminalController {
     this.rawDisplay?.dispose();
     this.rawDisplay = undefined;
     this.scrollbarVisibility?.dispose();
+    this.webglLoadToken += 1;
+    this.webglAddon?.dispose();
+    this.webglAddon = undefined;
     this.terminal.dispose();
     clearTerminalOutput(this.sessionId);
     this.outputListeners.clear();
