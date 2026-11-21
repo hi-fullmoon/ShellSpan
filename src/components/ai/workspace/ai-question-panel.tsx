@@ -159,7 +159,6 @@ export function AiQuestionPanel({
   const showRecovery = submitting === 'retry' || (draft?.submission && !submitting);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
-  const [verificationOpen, setVerificationOpen] = useState(false);
   const [changePlanOpen, setChangePlanOpen] = useState(false);
   const [actionNote, setActionNote] = useState('');
   const actionNoteTooLong = new TextEncoder().encode(actionNote).length > 2048;
@@ -382,59 +381,33 @@ export function AiQuestionPanel({
               >
                 {formatUserActionInstructions(userAction.instructions)}
               </MarkdownContent>
-              <Collapsible open={verificationOpen} onOpenChange={setVerificationOpen}>
-                <CollapsibleTrigger
-                  render={(
-                    <Button
-                      type="button"
-                      variant="plain"
-                      size="sm"
-                      className={`${AI_DISCLOSURE_ROW_CLASS} ai-question-verification-trigger w-full`}
-                      aria-expanded={verificationOpen}
+              <Field>
+                <FieldDescription>{t('ai.workspace.question.actionVerification')}</FieldDescription>
+                <div className="ai-code-block flex min-w-0 items-baseline" data-ai-copy-region>
+                  <pre className={cn(AI_CONTENT_CODE_CLASS, 'flex-1 pr-12 whitespace-pre-wrap [overflow-wrap:anywhere]')}>
+                    <code>{userAction.verification_command}</code>
+                  </pre>
+                  {/* A zero-size box shares the first text baseline without taking space from the command. */}
+                  <span className="relative size-0 shrink-0" data-ai-copy-anchor>
+                    <AiToolCopyButton
+                      text={userAction.verification_command}
+                      label={copyCommandLabel}
+                      errorLabel={t('ai.workspace.question.actionCopyFailed')}
+                      className="-top-[0.5ex] -translate-y-1/2 [font:var(--ai-font-markdown-code-block)]"
                     />
-                  )}
-                >
-                  <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
-                    <ChevronRightIcon className={cn('transition-transform duration-150', verificationOpen && 'rotate-90')} />
                   </span>
-                  <span className={AI_DISCLOSURE_TITLE_CLASS}>
-                    {t('ai.workspace.question.actionVerificationSummary')}
-                  </span>
-                  <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
-                  <code className={`${AI_DISCLOSURE_SUMMARY_CLASS} font-mono text-[11px]`}>
-                    {userAction.verification_command}
-                  </code>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <Field className="mt-1.5">
-                    <FieldDescription>{t('ai.workspace.question.actionVerification')}</FieldDescription>
-                    <div className="ai-code-block flex min-w-0 items-baseline" data-ai-copy-region>
-                      <pre className={cn(AI_CONTENT_CODE_CLASS, 'flex-1 pr-12 whitespace-pre-wrap [overflow-wrap:anywhere]')}>
-                        <code>{userAction.verification_command}</code>
-                      </pre>
-                      {/* A zero-size box shares the first text baseline without taking space from the command. */}
-                      <span className="relative size-0 shrink-0" data-ai-copy-anchor>
-                        <AiToolCopyButton
-                          text={userAction.verification_command}
-                          label={copyCommandLabel}
-                          errorLabel={t('ai.workspace.question.actionCopyFailed')}
-                          className="-top-[0.5ex] -translate-y-1/2 [font:var(--ai-font-markdown-code-block)]"
-                        />
-                      </span>
-                    </div>
-                  </Field>
-                </CollapsibleContent>
-              </Collapsible>
+                </div>
+              </Field>
               {changePlanOpen && (
                 <Field className="gap-1.5 pt-1" data-invalid={actionNoteTooLong || undefined}>
                   <FieldLabel htmlFor={`${question.identity.questionRequestId}-action-note`} className="text-xs text-muted-foreground">
                     {t('ai.workspace.question.actionNoteLabel')}
                   </FieldLabel>
-                  <InputGroup className="ai-question-custom-group min-h-[34px] items-start gap-0 px-0.5">
+                  <InputGroup className="ai-question-custom-group min-h-[34px] items-start">
                     <InputGroupTextarea
                       ref={actionNoteInputRef}
                       id={`${question.identity.questionRequestId}-action-note`}
-                      className="ai-question-custom-input min-h-[34px] max-h-24 resize-none py-[7px] pr-2.5 pl-0 text-xs leading-relaxed"
+                      className="ai-question-custom-input min-h-[34px] max-h-24 resize-none px-2.5 py-[7px] text-xs leading-relaxed"
                       rows={2}
                       disabled={editingLocked}
                       value={actionNote}
@@ -451,9 +424,6 @@ export function AiQuestionPanel({
                         }
                       }}
                     />
-                    <InputGroupAddon className="mt-1.5 mr-[7px] mb-1.5 ml-[5px] size-6 min-w-5 shrink-0 self-start p-0" align="inline-start">
-                      <PenLineIcon aria-hidden="true" />
-                    </InputGroupAddon>
                   </InputGroup>
                   {actionNoteTooLong && (
                     <FieldError>

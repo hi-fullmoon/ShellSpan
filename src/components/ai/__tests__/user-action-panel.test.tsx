@@ -50,13 +50,6 @@ describe('user operation within the existing question card', () => {
     expect(toast.success).not.toHaveBeenCalled();
     await waitFor(() => expect(copyInstructions).toHaveAccessibleName(locale === 'en-US' ? 'Copy instructions' : '复制操作说明'), { timeout: 2_000 });
 
-    const verificationTrigger = screen.getByRole('button', {
-      name: new RegExp(locale === 'en-US' ? 'Auto-verifies after completion' : '完成后将自动验证'),
-    });
-    expect(verificationTrigger).toHaveAttribute('aria-expanded', 'false');
-    await user.click(verificationTrigger);
-    expect(verificationTrigger).toHaveAttribute('aria-expanded', 'true');
-
     const commands = container.querySelectorAll('pre');
     expect(commands).toHaveLength(2);
     for (const [index, expected] of [command, action.verification_command].entries()) {

@@ -271,7 +271,6 @@ export default {
   'ai.workspace.question.actionInsertCommand': '填入终端',
   'ai.workspace.question.actionInsertedCommand': '已填入终端',
   'ai.workspace.question.actionInsertCommandFailed': '当前终端不可输入，无法填入命令',
-  'ai.workspace.question.actionVerificationSummary': '完成后将自动验证',
   'ai.workspace.question.actionVerification': '确认完成后，以下验证命令必须成功，才能继续后续操作：',
   'ai.workspace.question.actionCopyFailed': '无法复制命令',
   'ai.workspace.question.actionCopyInstructions': '复制操作说明',

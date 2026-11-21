@@ -271,7 +271,6 @@ export default {
   'ai.workspace.question.actionInsertCommand': 'Insert into terminal',
   'ai.workspace.question.actionInsertedCommand': 'Inserted',
   'ai.workspace.question.actionInsertCommandFailed': 'Terminal is not ready for input',
-  'ai.workspace.question.actionVerificationSummary': 'Auto-verifies after completion',
   'ai.workspace.question.actionVerification': 'After you confirm completion, this command must succeed before dependent work continues:',
   'ai.workspace.question.actionCopyFailed': 'Could not copy the command',
   'ai.workspace.question.actionCopyInstructions': 'Copy instructions',
