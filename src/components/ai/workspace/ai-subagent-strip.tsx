@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId } from 'react';
 import { BotIcon, ChevronDownIcon, ChevronUpIcon } from 'lucide-react';
 
 import {
@@ -17,6 +17,8 @@ export interface AiSubagentStripProps {
   readonly entries: readonly AiSubagentEntry[];
   readonly currentSessionId: string;
   readonly currentBudgetExhausted?: boolean;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
   readonly onOpen: (summary: AiSessionSummary) => void;
   readonly onRefresh?: () => void;
 }
@@ -26,11 +28,12 @@ export function AiSubagentStrip({
   entries,
   currentSessionId,
   currentBudgetExhausted = false,
+  open,
+  onOpenChange,
   onOpen,
   onRefresh,
 }: AiSubagentStripProps): React.ReactNode {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
   const summaryId = useId();
   if (entries.length === 0) return null;
 
@@ -43,7 +46,7 @@ export function AiSubagentStrip({
     <Collapsible
       open={open}
       onOpenChange={(next) => {
-        setOpen(next);
+        onOpenChange(next);
         if (next) onRefresh?.();
       }}
       className="ai-subagent-strip w-full min-w-0 shrink-0 overflow-hidden box-border"
@@ -70,7 +73,6 @@ export function AiSubagentStrip({
             currentSessionId={currentSessionId}
             currentBudgetExhausted={currentBudgetExhausted}
             onSelect={(summary) => {
-              setOpen(false);
               if (summary.id !== currentSessionId) onOpen(summary);
             }}
           />

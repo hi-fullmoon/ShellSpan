@@ -1,8 +1,9 @@
-import { useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react';
+import { use, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { diffLines, parsePatch } from 'diff';
 import hljs from 'highlight.js/lib/common';
 import {
+  BotIcon,
   BracesIcon,
   CheckIcon,
   ChevronDownIcon,
@@ -38,10 +39,16 @@ import { aiErrorMessage, httpProbeTimeoutKind } from '@/lib/ai/error-message';
 import { renderTerminalTranscript } from '@/lib/terminal/terminal-output-buffer';
 import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
-import { isSubagentTool } from '@/lib/ai/subagent-lineage';
+import {
+  extractSubagentToolSummary,
+  isSubagentDelegationTool,
+  subagentToolAction,
+} from '@/lib/ai/subagent-lineage';
 import { AiContentTitle } from './ai-content-title';
 import { AiNativeCodeFade } from './ai-native-code-fade';
+import { AiSubagentContext } from './ai-subagent-context';
 import { AiSubagentToolCard } from './ai-subagent-tool-card';
+import { subagentRoleLabel } from './ai-subagent-tree';
 import {
   AI_CONTENT_CODE_CLASS,
   AI_CONTENT_HEADER_CLASS,
@@ -70,6 +77,7 @@ type UnknownRecord = Record<string, unknown>;
 const DETAIL_LIMIT = 64 * 1024;
 const INLINE_DIFF_LIMIT = 32 * 1024;
 const INLINE_DIFF_TIMEOUT_MS = 50;
+const EMPTY_SUBAGENT_ID_MAP = new Map<string, string>();
 
 function asRecord(value: unknown): UnknownRecord | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -282,6 +290,9 @@ function toolTitle(
   if (node.name === 'skill' || node.nativeName === 'skill') return t('ai.workspace.tool.title.skill');
   if (node.name === 'trash_file') return t('ai.workspace.approval.action.trashFile');
   if (node.name === 'probe_http' || node.nativeName === 'probe_http') return t('ai.workspace.tool.title.httpProbe');
+  const subagentAction = subagentToolAction(node.name, node.nativeName);
+  if (subagentAction === 'inspect') return t('ai.workspace.tool.title.inspectSubagent');
+  if (subagentAction === 'cancel') return t('ai.workspace.tool.title.cancelSubagent');
   if (node.title === 'Agent orchestration') return t('ai.workspace.tool.title.orchestration');
   if (variant !== 'generic' || !node.title || node.title === node.name || node.title === node.nativeName) {
     return t(titleKey(variant));
@@ -978,7 +989,7 @@ export function AiToolRow({
   readonly node: ToolNode;
   readonly onInspect?: (node: ToolNode) => void;
 }) {
-  if (isSubagentTool(node.name, node.nativeName)) {
+  if (isSubagentDelegationTool(node.name, node.nativeName)) {
     return <AiSubagentToolCard node={node} onInspect={onInspect} />;
   }
   return <StandardAiToolRow node={node} onInspect={onInspect} />;
@@ -995,10 +1006,33 @@ function StandardAiToolRow({
   const [disclosure, setDisclosure] = useState<{ open: boolean; recoveryKey?: string }>({ open: false });
   const open = disclosure.open && disclosure.recoveryKey === node.recoveredByToolKey;
   const setOpen = (next: boolean) => setDisclosure({ open: next, recoveryKey: node.recoveredByToolKey });
+  const subagentContext = use(AiSubagentContext);
+  const subagentAction = subagentToolAction(node.name, node.nativeName);
   const variant = classifyAiTool(node.name, node.nativeName);
-  const Icon = node.name === 'trash_file' ? Trash2Icon : iconFor(variant);
+  const Icon = subagentAction ? BotIcon : node.name === 'trash_file' ? Trash2Icon : iconFor(variant);
   const stateKey = `ai.workspace.tool.${node.state}` as LocaleKey;
-  const summary = toolDisplaySummary(node, t);
+  const subagentSummary = (subagentAction === 'inspect' || subagentAction === 'cancel')
+    && !node.recoveredByToolKey
+    && node.state !== 'uncertain'
+    && node.state !== 'failed'
+    && node.state !== 'rejected'
+    ? extractSubagentToolSummary(
+        node,
+        subagentContext?.lineage ?? null,
+        subagentContext?.toolChildSessionIds ?? EMPTY_SUBAGENT_ID_MAP,
+      )
+    : null;
+  const readableSubagentTitle = subagentSummary
+    && subagentSummary.title.trim() !== ''
+    && subagentSummary.title !== subagentSummary.childSessionId
+    && subagentSummary.title !== node.name
+    && subagentSummary.title !== node.nativeName
+    && subagentSummary.title !== 'Agent orchestration'
+    ? subagentSummary.title
+    : null;
+  const summary = subagentSummary
+    ? readableSubagentTitle ?? subagentRoleLabel(subagentSummary.role, t)
+    : toolDisplaySummary(node, t);
   const hasError = !node.recoveredByToolKey && (node.state === 'failed' || node.state === 'rejected');
   const title = toolTitle(node, variant, t);
   const model = useMemo(() => variant === 'write' || variant === 'edit' ? diffModel(node) : null, [node, variant]);

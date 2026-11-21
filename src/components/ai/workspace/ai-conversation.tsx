@@ -91,7 +91,7 @@ const ConversationRow = memo(function ConversationRow({
   panelId,
   ...props
 }: ComponentProps<typeof AiConversationNodeSeat> & Omit<AiConversationRow, 'node'> & { indicator?: ReactNode; panelId: string }) {
-  const { open } = useProcessDisclosure(process);
+  const { open } = useProcessDisclosure(processMember ? process : undefined);
   const ref = useRef<HTMLDivElement>(null);
   const processKey = process && processDisclosureKey(process);
   useLayoutEffect(() => {

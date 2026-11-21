@@ -26,7 +26,7 @@ try {
     const { AiSubagentContext } = await import('/src/components/ai/workspace/ai-subagent-context.ts');
     const { AiSubagentStrip } = await import('/src/components/ai/workspace/ai-subagent-strip.tsx');
     const { AiToolRow } = await import('/src/components/ai/workspace/ai-tool-presentation.tsx');
-    const { buildSubagentLineage, correlateSubagentToolSessions, isSubagentTool } = await import('/src/lib/ai/subagent-lineage.ts');
+    const { buildSubagentLineage, correlateSubagentToolSessions, isSubagentDelegationTool } = await import('/src/lib/ai/subagent-lineage.ts');
     const { projectAgentChatNodes } = await import('/src/lib/ai/conversation-projection.ts');
     const { projectAgentActivity } = await import('/src/lib/ai/agent-session-projection.ts');
     const { agentSessionView } = await import('/src/lib/ai/agent-session-adapter.ts');
@@ -72,7 +72,7 @@ try {
     const correlation = correlateSubagentToolSessions(nodes, activity.nodes, activity.agents, [root, ...childSummaries]);
     const lineage = buildSubagentLineage(currentView, [root, ...childSummaries], correlation.goalByChildId);
     const flatten = list => list.flatMap(node => node.kind === 'turnProcess' ? flatten(node.children) : [node]);
-    const tools = flatten(nodes).filter(node => node.kind === 'tool' && isSubagentTool(node.name, node.nativeName));
+    const tools = flatten(nodes).filter(node => node.kind === 'tool' && isSubagentDelegationTool(node.name, node.nativeName));
     if (!tools.length) throw new Error('Session must contain subagent orchestration tools');
     const host = document.createElement('main');
     host.id = 'subagent-layout-check';
@@ -81,8 +81,23 @@ try {
     document.body.append(host);
     const current = lineage.current;
     const h = React.createElement;
+    window.__openedSubagentSessions = [];
+    function LayoutStrip() {
+      const [open, setOpen] = React.useState(false);
+      return h(AiSubagentStrip, {
+        entries: lineage.entries,
+        currentSessionId: root.id,
+        open,
+        onOpenChange: setOpen,
+        onOpen: summary => window.__openedSubagentSessions.push(summary.id),
+      });
+    }
     ReactDOM.createRoot(host).render(h(AiSubagentContext.Provider, {
-      value: { lineage, toolChildSessionIds: correlation.toolChildSessionIds, onOpenSession: () => {} },
+      value: {
+        lineage,
+        toolChildSessionIds: correlation.toolChildSessionIds,
+        onOpenSession: summary => window.__openedSubagentSessions.push(summary.id),
+      },
     },
       h(AiSessionHeader, {
         title: current.title,
@@ -100,7 +115,7 @@ try {
       }),
       h('div', { style: 'padding:12px;display:flex;flex-direction:column;gap:8px;' },
         ...tools.map(node => h(AiToolRow, { key: node.key, node })),
-        h(AiSubagentStrip, { entries: lineage.entries, currentSessionId: root.id, onOpen: () => {} }),
+        h(LayoutStrip),
       ),
     ));
   }, { events, children });
@@ -168,11 +183,30 @@ try {
     await popup.waitFor({ state: 'hidden' });
     const card = host.locator('[data-slot="ai-subagent-card"]').first();
     await card.waitFor();
-    assert.equal(await card.evaluate(el => getComputedStyle(el).borderRadius), '12px');
-    assert.equal(await card.evaluate(el => getComputedStyle(el).borderTopWidth), '1px');
-    const cardMain = card.locator('.ai-subagent-card-main');
-    assert.equal(await cardMain.evaluate(el => getComputedStyle(el).borderRadius), '8px');
-    assert.equal(await cardMain.evaluate(el => getComputedStyle(el).columnGap), '4px');
+    assert.equal(await card.evaluate(el => getComputedStyle(el).borderTopWidth), '0px');
+    const rowTrigger = card.locator('.ai-subagent-row-trigger');
+    const rowBox = await rowTrigger.boundingBox();
+    assert.ok(rowBox.height <= 28, `Compact subagent row height (${rowBox.height}) should match a single tool row`);
+    const leadingBox = await rowTrigger.locator('.ai-disclosure-leading').boundingBox();
+    const rowTitleBox = await rowTrigger.locator('.ai-disclosure-title').boundingBox();
+    assert.ok(
+      Math.abs((rowTitleBox.x - (leadingBox.x + leadingBox.width)) - 4) < 0.5,
+      'Leading status icon and title must have a 4px gap',
+    );
+    await page.mouse.move(width - 1, 790);
+    const leadingStatus = rowTrigger.locator('.ai-disclosure-leading > :not(.ai-disclosure-chevron)');
+    const enterChevron = rowTrigger.locator('.ai-disclosure-leading > .ai-subagent-row-enter');
+    assert.equal(await leadingStatus.evaluate(el => getComputedStyle(el).opacity), '1');
+    assert.equal(await enterChevron.evaluate(el => getComputedStyle(el).opacity), '0');
+    await rowTrigger.hover();
+    assert.equal(await leadingStatus.evaluate(el => getComputedStyle(el).opacity), '0');
+    assert.equal(await enterChevron.evaluate(el => getComputedStyle(el).opacity), '1');
+    const openedBefore = await page.evaluate(() => window.__openedSubagentSessions.length);
+    await rowTrigger.click();
+    await page.mouse.move(width - 1, 790);
+    const openedAfter = await page.evaluate(() => window.__openedSubagentSessions.length);
+    assert.equal(openedAfter, openedBefore + 1, 'Clicking openable subagent row must navigate directly');
+    assert.equal(await card.locator('.ai-subagent-card-body').count(), 0, 'Openable subagent row must not mount inline body');
 
     const stripTrigger = host.locator('.ai-subagent-strip-trigger');
     await stripTrigger.click();

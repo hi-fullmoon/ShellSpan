@@ -115,7 +115,7 @@ describe('AI Turn Process renderer', () => {
     expect(getComputedStyle(processPanel!).transitionProperty).toBe('height');
     expect(getComputedStyle(processPanel!).overflow).toBe('hidden');
     expect(getComputedStyle(processPanel!).transitionDuration).toBe(
-      'var(--ai-transition-duration-slow)',
+      'var(--ai-transition-duration)',
     );
     const reasoning = screen.getByRole('button', {
       name: 'Reasoning Read the frozen context. Answer directly.',

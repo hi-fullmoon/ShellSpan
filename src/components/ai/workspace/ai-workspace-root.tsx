@@ -469,6 +469,7 @@ export function AiWorkspaceRoot({
     () => buildSubagentLineage(lineageView, sessions, toolCorrelation.goalByChildId),
     [lineageView, sessions, toolCorrelation.goalByChildId],
   );
+  const [expandedSubagentStrips, setExpandedSubagentStrips] = useState<ReadonlySet<string>>(() => new Set());
   const currentSubagentBudgetExhausted = childBudgetExhausted(view?.snapshot.value);
   const subagentContextValue = useMemo(
     () => ({
@@ -797,6 +798,15 @@ export function AiWorkspaceRoot({
                   entries={lineage.currentChildren}
                   currentSessionId={lineage.current.id}
                   currentBudgetExhausted={currentSubagentBudgetExhausted}
+                  open={expandedSubagentStrips.has(lineage.current.id)}
+                  onOpenChange={(open) => {
+                    setExpandedSubagentStrips((current) => {
+                      const next = new Set(current);
+                      if (open) next.add(lineage.current.id);
+                      else next.delete(lineage.current.id);
+                      return next;
+                    });
+                  }}
                   onOpen={onOpenSession}
                   onRefresh={onRefreshSessions}
                 />

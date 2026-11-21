@@ -45,7 +45,7 @@
 }
 
 /* Content icons retain their optical offset; spinners and hover chevrons stay centered. */
-.ai-disclosure-leading > svg:not(.ai-disclosure-chevron):not([data-slot='spinner']),
+.ai-disclosure-leading > svg:not(.ai-disclosure-chevron):not([data-slot='spinner']):not([data-status='running']),
 .ai-produced-files-label svg {
   translate: 0 -1px;
 }
@@ -162,7 +162,7 @@
   height: var(--collapsible-panel-height);
   overflow: hidden;
   transition-property: height;
-  transition-duration: var(--ai-transition-duration-slow);
+  transition-duration: var(--ai-transition-duration);
   transition-timing-function: var(--ai-ease-in-out);
 }
 
@@ -171,7 +171,7 @@
 }
 
 .ai-conversation-row[data-ai-process-owner] > [data-slot='collapsible-content'] {
-  transition-timing-function: linear(0, 0 var(--ai-process-height-start, 0%), 1 var(--ai-process-height-end, 100%), 1);
+  transition-timing-function: var(--ai-process-height-timing, var(--ai-ease-in-out));
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -711,9 +711,45 @@ describe('AiWorkspaceRoot conversation structure', () => {
       idempotency: null,
       approval: null,
     };
+    const inspectTool = {
+      kind: 'tool' as const,
+      key: 'tool:inspect-child',
+      sourceKind: 'agent' as const,
+      sessionId: base.summary.id,
+      turnId: 'turn-01',
+      stepId: 'step-02',
+      firstSeq: 1000,
+      lastSeq: 1000,
+      timestamp: '2026-09-02T08:00:04.000Z',
+      callId: 'call-inspect-child',
+      name: 'inspect_child_agent',
+      nativeName: 'inspect_child_agent',
+      title: 'Agent orchestration',
+      summary: `Child ${child.id} is Failed`,
+      state: 'succeeded' as const,
+      effect: 'readOnly' as const,
+      durationMs: 12,
+      detailRef: { kind: 'agentTool' as const, sessionId: base.summary.id, callId: 'call-inspect-child' },
+      evidenceRefs: [],
+      input: { childSessionId: child.id },
+      output: {
+        snapshot: {
+          status: 'failed',
+          header: {
+            sessionId: child.id,
+            goal: 'Inspect the existing page\nCheck header layout',
+            subagent: { role: 'explorer' },
+          },
+        },
+      },
+      error: null,
+      target: null,
+      idempotency: null,
+      approval: null,
+    };
     const view: AiSessionView = {
       ...base,
-      nodes: [...base.nodes, spawnTool],
+      nodes: [...base.nodes, spawnTool, inspectTool],
       subagents: [{
         sessionId: child.id,
         parentSessionId: base.summary.id,
@@ -754,19 +790,30 @@ describe('AiWorkspaceRoot conversation structure', () => {
     }));
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: child.id }));
 
-    const card = container.querySelector('[data-slot="ai-subagent-card"]') as HTMLElement;
+    const cards = container.querySelectorAll('[data-slot="ai-subagent-card"]');
+    expect(cards).toHaveLength(1);
+    const card = cards[0] as HTMLElement;
     expect(card).toBeVisible();
     expect(card).not.toHaveTextContent('Agent orchestration');
-    const cardTitle = card.querySelector('.ai-subagent-card-title') as HTMLElement;
-    const cardBadge = within(card).getByText('Explorer');
-    expect(cardBadge).toHaveAttribute('data-variant', 'outline');
-    expect(Boolean(cardTitle.compareDocumentPosition(cardBadge) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-    await user.click(within(card).getByRole('button', { name: 'Expand summary' }));
-    expect(within(card).getByText(/Check header layout/)).toBeVisible();
-    await user.click(within(card).getByRole('button', {
-      name: 'Open subagent “Inspect the existing page”: Explorer, In progress',
-    }));
+    expect(card.querySelector('.ai-disclosure-title')).toHaveTextContent('Explorer subagent');
+    expect(card.querySelector('.ai-disclosure-summary')).toHaveTextContent('Inspect the existing page');
+    const rowTrigger = card.querySelector('.ai-subagent-row-trigger') as HTMLButtonElement;
+    expect(rowTrigger).not.toHaveAttribute('aria-expanded');
+    expect(rowTrigger).toHaveAttribute(
+      'aria-label',
+      'Open subagent “Inspect the existing page”: Explorer, In progress',
+    );
+    expect(card.querySelector('.ai-subagent-card-body')).toBeNull();
+    await user.click(rowTrigger);
     expect(onOpen).toHaveBeenCalledTimes(2);
+    expect(onOpen).toHaveBeenLastCalledWith(expect.objectContaining({ id: child.id }));
+    expect(card.querySelector('.ai-subagent-card-body')).toBeNull();
+
+    const inspectRow = Array.from(container.querySelectorAll<HTMLElement>('.ai-tool-row-root'))
+      .find((row) => row.querySelector('.ai-disclosure-title')?.textContent === 'Inspect subagent');
+    expect(inspectRow).toBeDefined();
+    expect(inspectRow).toHaveAttribute('data-tool-state', 'succeeded');
+    expect(inspectRow?.querySelector('.ai-disclosure-summary')).toHaveTextContent('Inspect the existing page');
 
     await act(async () => {
       useAppStore.setState({ locale: 'zh-CN' });
@@ -774,6 +821,8 @@ describe('AiWorkspaceRoot conversation structure', () => {
     });
     expect(strip).toHaveTextContent('1 运行中');
     expect(strip).not.toHaveTextContent('1 个运行中');
+    expect(card.querySelector('.ai-disclosure-title')).toHaveTextContent('探索子代理');
+    expect(inspectRow?.querySelector('.ai-disclosure-title')).toHaveTextContent('检查子代理');
   });
 
   it('handles uncertain subagent cards, interactive vs static card states, readable inspect labels, and strip collapse on session switch', async () => {
@@ -891,7 +940,7 @@ describe('AiWorkspaceRoot conversation structure', () => {
     expect(uncertainCard.querySelector('[data-status="uncertain"]')).not.toBeNull();
     expect(within(uncertainCard).getByText(/Execution outcome unknown/)).toBeVisible();
 
-    const mainExpandButton = uncertainCard.querySelector<HTMLButtonElement>('.ai-subagent-card-main')!;
+    const mainExpandButton = uncertainCard.querySelector<HTMLButtonElement>('.ai-subagent-row-trigger')!;
     expect(mainExpandButton.tagName).toBe('BUTTON');
     await user.click(mainExpandButton);
     expect(within(uncertainCard).getByText('Outcome lost after disconnect')).toBeVisible();
@@ -917,7 +966,7 @@ describe('AiWorkspaceRoot conversation structure', () => {
     const nonInteractiveCard = container.querySelector<HTMLElement>('[data-slot="ai-subagent-card"]')!;
     expect(nonInteractiveCard).not.toHaveAttribute('data-clickable');
     expect(nonInteractiveCard).not.toHaveAttribute('data-openable');
-    expect(nonInteractiveCard.querySelector('.ai-subagent-card-main')?.tagName).toBe('DIV');
+    expect(nonInteractiveCard.querySelector('.ai-subagent-row-trigger')?.tagName).toBe('DIV');
 
     rerender(
       <AiWorkspaceRoot
@@ -975,7 +1024,7 @@ describe('AiWorkspaceRoot conversation structure', () => {
     expect(childStripTrigger).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it('counts nested descendants in the strip and provides back + switcher navigation on child and grandchild subagents', async () => {
+  it('restores the expanded strip on return and provides back and switcher navigation for nested subagents', async () => {
     const user = userEvent.setup();
     const base = agentView('running');
     const child = {
@@ -1003,41 +1052,42 @@ describe('AiWorkspaceRoot conversation structure', () => {
       },
     };
     const onOpen = vi.fn();
-    const { container, rerender } = render(
-      <AiWorkspaceRoot
-        view={{
-          ...base,
-          subagents: [{
-            sessionId: child.id,
-            parentSessionId: base.summary.id,
-            descriptorId: child.subagent.descriptorId,
-            role: child.subagent.role,
-            continuable: child.subagent.continuable,
-            depth: child.subagent.depth,
-            status: 'running',
-          }],
-        }}
-        scope="terminal"
-        mode="agent"
-        sessions={[base.summary, child, grandchild]}
-        onOpenSession={onOpen}
-      />,
-    );
+    const props = {
+      scope: 'terminal',
+      mode: 'agent',
+      sessions: [base.summary, child, grandchild],
+      onOpenSession: onOpen,
+    } as const;
+    const mainView: AiSessionView = {
+      ...base,
+      subagents: [{
+        sessionId: child.id,
+        parentSessionId: base.summary.id,
+        descriptorId: child.subagent.descriptorId,
+        role: child.subagent.role,
+        continuable: child.subagent.continuable,
+        depth: child.subagent.depth,
+        status: 'running',
+      }],
+    };
+    const { container, rerender } = render(<AiWorkspaceRoot {...props} view={mainView} />);
 
-    const strip = container.querySelector('[data-slot="ai-subagent-strip"]') as HTMLElement;
-    await user.click(within(strip).getByRole('button', { name: 'Toggle 2 subagents' }));
-    expect(within(strip).getByText('Inspect implementation')).toBeVisible();
-    expect(within(strip).getByText('Verify the result')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Toggle 2 subagents', expanded: false }));
+    await user.click(screen.getByRole('button', { name: /^Open subagent “Inspect implementation”/ }));
+    expect(onOpen).toHaveBeenLastCalledWith(child);
 
-    rerender(
-      <AiWorkspaceRoot
-        view={{ ...base, summary: grandchild, subagents: [] }}
-        scope="terminal"
-        mode="agent"
-        sessions={[base.summary, child, grandchild]}
-        onOpenSession={onOpen}
-      />,
-    );
+    rerender(<AiWorkspaceRoot {...props} view={{ ...base, summary: child, subagents: [] }} />);
+    expect(screen.getByRole('button', { name: 'Toggle 1 subagents', expanded: false })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Back to main session: Check nginx and report evidence.' }));
+    expect(onOpen).toHaveBeenLastCalledWith(base.summary);
+
+    rerender(<AiWorkspaceRoot {...props} view={mainView} />);
+    expect(screen.getByRole('button', { name: 'Toggle 2 subagents' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: /^Open subagent “Inspect implementation”/ })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: /^Open subagent “Verify the result”/ }));
+    expect(onOpen).toHaveBeenLastCalledWith(grandchild);
+
+    rerender(<AiWorkspaceRoot {...props} view={{ ...base, summary: grandchild, subagents: [] }} />);
 
     expect(container.querySelector('[data-slot="ai-subagent-strip"]')).toBeNull();
     const header = container.querySelector('[data-slot="ai-workspace-header"]') as HTMLElement;

@@ -1,15 +1,22 @@
 import { use, useState } from 'react';
 import { ChevronDownIcon, ChevronRightIcon, PanelRightOpenIcon } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { aiErrorMessage } from '@/lib/ai/error-message';
-import { extractSubagentToolSummary } from '@/lib/ai/subagent-lineage';
-import type { AgentSessionPlanStep, AgentSessionRuntimeStatus } from '@/types/agent-session';
+import { extractSubagentToolSummary, type SubagentToolAction } from '@/lib/ai/subagent-lineage';
+import { cn } from '@/lib/utils';
+import type { AgentActivityAgent, AgentSessionPlanStep, AgentSessionRuntimeStatus } from '@/types/agent-session';
+import {
+  AI_DISCLOSURE_LEADING_CLASS,
+  AI_DISCLOSURE_SEPARATOR_CLASS,
+  AI_DISCLOSURE_SUMMARY_CLASS,
+  AI_DISCLOSURE_TITLE_CLASS,
+  AI_TOOL_ROW_CLASS,
+} from './ai-style-classes';
 import { AiSubagentContext } from './ai-subagent-context';
 import {
   formatSubagentDuration,
@@ -28,6 +35,29 @@ function planStepIconStatus(status: AgentSessionPlanStep['status']): AgentSessio
     case 'completed': return 'completed';
     case 'failed': return 'failed';
     case 'pending': return 'idle';
+  }
+}
+
+function subagentRowTitle(
+  action: SubagentToolAction,
+  role: AgentActivityAgent['role'],
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  switch (action) {
+    case 'spawn': {
+      const roleLabel = subagentRoleLabel(role, t);
+      return role === 'subagent' || roleLabel === t('ai.workspace.subagents.role.subagent')
+        ? t('ai.workspace.subagents.role.subagent')
+        : t('ai.workspace.subagents.card.title.spawnRole', { role: roleLabel });
+    }
+    case 'input':
+      return t('ai.workspace.subagents.card.title.input');
+    case 'retry':
+      return t('ai.workspace.subagents.card.title.retry');
+    case 'inspect':
+      return t('ai.workspace.tool.title.inspectSubagent');
+    case 'cancel':
+      return t('ai.workspace.tool.title.cancelSubagent');
   }
 }
 
@@ -52,25 +82,24 @@ export function AiSubagentToolCard({
   const canOpen = Boolean(targetSummary && context?.onOpenSession);
 
   const roleText = subagentRoleLabel(summary.role, t);
-  const badgeLabel = summary.action === 'spawn'
-    ? roleText
-    : `${t(`ai.workspace.subagents.card.action.${summary.action}`)} · ${roleText}`;
+  const rowTitle = subagentRowTitle(summary.action, summary.role, t);
   const statusText = summary.partial && summary.status === 'completed'
     ? t('ai.workspace.subagents.card.partial')
     : subagentStatusLabel(summary.status, t);
   const durationText = formatSubagentDuration(summary.durationMs, t);
 
-  const metaParts: string[] = [statusText];
-  if (summary.action === 'spawn' && summary.continuable !== undefined) {
-    metaParts.push(subagentModeLabel(summary.continuable, false, t));
-  }
-  if (summary.toolCallCount !== null && summary.toolCallCount > 0) {
-    metaParts.push(t('ai.workspace.subagents.card.toolCalls', { count: summary.toolCallCount }));
-  }
-  if (durationText) {
-    metaParts.push(durationText);
-  }
-  const metaLine = metaParts.join(' · ');
+  const showInlineStatus = summary.status !== 'completed' || summary.partial || !durationText;
+  const inlineMetaParts = [
+    ...(showInlineStatus ? [statusText] : []),
+    ...(durationText ? [durationText] : []),
+  ];
+  const inlineMeta = inlineMetaParts.join(' · ');
+  const inlineMetaState = summary.status === 'failed'
+    || summary.status === 'waiting'
+    || summary.status === 'approval'
+    || summary.status === 'uncertain'
+    ? summary.status
+    : undefined;
 
   const translatedError = summary.errorMessage
     ? aiErrorMessage(summary.errorMessage, t)
@@ -81,52 +110,58 @@ export function AiSubagentToolCard({
   const showGoalInBody = Boolean(
     summary.goal && (summary.goal.trim() !== summary.title.trim() || summary.goal.includes('\n')),
   );
-  const hasExpandableContent = Boolean(
-    showGoalInBody
+  const hasBodyDetails = Boolean(
+    (showGoalInBody && summary.goal)
     || summary.inputContent
     || summary.plan.length > 0
     || translatedResult
-    || translatedError
-    || onInspect,
+    || translatedError,
   );
+  const hasSecondaryDetailMeta = (summary.action === 'spawn' && summary.continuable !== undefined)
+    || (summary.toolCallCount !== null && summary.toolCallCount > 0);
+  const detailMetaParts: string[] = [statusText];
+  if (summary.action === 'spawn' && summary.continuable !== undefined) {
+    detailMetaParts.push(subagentModeLabel(summary.continuable, false, t));
+  }
+  if (summary.toolCallCount !== null && summary.toolCallCount > 0) {
+    detailMetaParts.push(t('ai.workspace.subagents.card.toolCalls', { count: summary.toolCallCount }));
+  }
+  if (durationText) {
+    detailMetaParts.push(durationText);
+  }
+  const detailMetaLine = hasBodyDetails && hasSecondaryDetailMeta
+    ? detailMetaParts.join(' · ')
+    : null;
 
-  const isInteractive = canOpen || hasExpandableContent;
+  const hasExpandableContent = Boolean(hasBodyDetails || onInspect);
+  const canExpand = !canOpen && hasExpandableContent;
+  const hasBodyActions = Boolean(onInspect);
+  const isInteractive = canOpen || canExpand;
 
-  const handlePrimaryClick = (): void => {
-    if (canOpen && targetSummary && context?.onOpenSession) {
-      context.onOpenSession(targetSummary);
-      return;
-    }
-    if (hasExpandableContent) setOpen((previous) => !previous);
-  };
+  const openAria = t('ai.workspace.subagents.card.openAria', {
+    title: summary.title,
+    role: roleText,
+    status: statusText,
+  });
 
-  const mainContent = (
+  const rowContent = (
     <>
       <span
-        className="ai-subagent-status-icon grid size-4 shrink-0 place-items-center"
+        className={cn(AI_DISCLOSURE_LEADING_CLASS, 'ai-subagent-status-icon')}
         aria-hidden="true"
       >
         <SubagentStatusIcon status={summary.status} />
+        {canOpen && <ChevronRightIcon className="ai-disclosure-chevron ai-subagent-row-enter" />}
+        {canExpand && <ChevronDownIcon className="ai-disclosure-chevron" />}
       </span>
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="flex min-w-0 items-center gap-1">
-          <span className="ai-subagent-card-title min-w-0 truncate">
-            {summary.title}
+      <span className={AI_DISCLOSURE_TITLE_CLASS}>{rowTitle}</span>
+      <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
+      <span className={AI_DISCLOSURE_SUMMARY_CLASS}>{summary.title}</span>
+      {inlineMeta && (
+        <span className="ai-tool-meta ml-2 inline-flex shrink-0 items-baseline gap-2 whitespace-nowrap">
+          <span className="ai-subagent-row-meta" data-state={inlineMetaState}>
+            {inlineMeta}
           </span>
-          <Badge variant="outline" size="sm" className="shrink-0">
-            {badgeLabel}
-          </Badge>
-        </span>
-        <span className="min-w-0 truncate text-[11px] leading-4 text-muted-foreground">
-          {metaLine}
-        </span>
-      </span>
-      {canOpen && (
-        <span
-          className="ai-subagent-card-enter grid size-4 shrink-0 self-center place-items-center text-muted-foreground"
-          aria-hidden="true"
-        >
-          <ChevronRightIcon className="size-3.5" />
         </span>
       )}
     </>
@@ -135,136 +170,133 @@ export function AiSubagentToolCard({
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div
-        className="ai-subagent-card relative my-0.5 min-w-0 max-w-full overflow-hidden"
+        className="ai-subagent-card flex min-w-0 max-w-full flex-col"
         data-slot="ai-subagent-card"
         data-state={summary.status}
         data-action={summary.action}
         data-clickable={isInteractive || undefined}
         data-openable={canOpen || undefined}
       >
-        <div className="flex min-w-0 items-center gap-1 p-1.5">
-          {isInteractive ? (
+        <div className="flex min-h-6 w-full min-w-0 items-center">
+          {canOpen && targetSummary && context?.onOpenSession ? (
             <button
               type="button"
-              className="ai-subagent-card-main flex min-w-0 flex-1 cursor-default items-start gap-1 rounded-[8px] px-1.5 py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              className={cn(AI_TOOL_ROW_CLASS, 'ai-subagent-row-trigger flex-1')}
               data-ai-node-action=""
-              aria-label={canOpen
-                ? t('ai.workspace.subagents.card.openAria', {
-                    title: summary.title,
-                    role: roleText,
-                    status: statusText,
-                  })
-                : `${badgeLabel}: ${summary.title} · ${statusText}`}
-              aria-expanded={!canOpen && hasExpandableContent ? open : undefined}
-              onClick={handlePrimaryClick}
+              aria-label={openAria}
+              onClick={() => context.onOpenSession!(targetSummary)}
             >
-              {mainContent}
+              {rowContent}
             </button>
+          ) : canExpand ? (
+            <CollapsibleTrigger
+              render={(
+                <button
+                  type="button"
+                  className={cn(AI_TOOL_ROW_CLASS, 'ai-subagent-row-trigger flex-1')}
+                  data-ai-node-action=""
+                  aria-label={`${rowTitle}: ${summary.title}${inlineMeta ? ` · ${inlineMeta}` : ''}`}
+                />
+              )}
+            >
+              {rowContent}
+            </CollapsibleTrigger>
           ) : (
-            <div className="ai-subagent-card-main flex min-w-0 flex-1 items-start gap-1 rounded-[8px] px-1.5 py-1 text-left">
-              {mainContent}
+            <div className={cn(AI_TOOL_ROW_CLASS, 'ai-subagent-row-trigger flex-1')}>
+              {rowContent}
             </div>
           )}
-          {hasExpandableContent && (
-            <Tooltip>
-              <TooltipTrigger
-                render={(
-                  <CollapsibleTrigger
-                    render={(
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        className="ai-subagent-card-toggle shrink-0 text-muted-foreground"
-                        aria-label={t(open
-                          ? 'ai.workspace.subagents.card.collapseSummary'
-                          : 'ai.workspace.subagents.card.expandSummary')}
-                      />
-                    )}
-                  />
-                )}
-              >
-                <ChevronDownIcon className="ai-subagent-card-chevron" />
-              </TooltipTrigger>
-              <TooltipContent>
-                {t(open
-                  ? 'ai.workspace.subagents.card.collapseSummary'
-                  : 'ai.workspace.subagents.card.expandSummary')}
-              </TooltipContent>
-            </Tooltip>
-          )}
         </div>
-        {hasExpandableContent && (
+        {canExpand && (
           <CollapsibleContent>
-            <div className="ai-subagent-card-body flex min-w-0 flex-col gap-2 px-3 pt-2 pb-2.5 text-xs">
-              {showGoalInBody && summary.goal && (
-                <div className="flex min-w-0 flex-col gap-0.5">
-                  <span className="text-[11px] font-medium text-muted-foreground">
-                    {t('ai.workspace.subagents.card.goal')}
-                  </span>
-                  <p className="m-0 whitespace-pre-wrap [overflow-wrap:anywhere] leading-4 text-foreground/90">
-                    {summary.goal}
-                  </p>
-                </div>
-              )}
-              {summary.inputContent && (
-                <div className="flex min-w-0 flex-col gap-0.5">
-                  <span className="text-[11px] font-medium text-muted-foreground">
-                    {t('ai.workspace.subagents.card.input')}
-                  </span>
-                  <p className="m-0 whitespace-pre-wrap [overflow-wrap:anywhere] leading-4 text-foreground/90">
-                    {summary.inputContent}
-                  </p>
-                </div>
-              )}
-              {summary.plan.length > 0 && (
-                <div className="flex min-w-0 flex-col gap-1">
-                  <span className="text-[11px] font-medium text-muted-foreground">
-                    {t('ai.workspace.subagents.card.plan')}
-                  </span>
-                  <ul className="m-0 flex list-none flex-col gap-1 p-0">
-                    {summary.plan.map((step) => (
-                      <li key={step.id} className="flex min-w-0 items-start gap-1">
-                        <span
-                          className="ai-subagent-status-icon grid size-4 shrink-0 place-items-center"
-                          aria-hidden="true"
-                        >
-                          <SubagentStatusIcon status={planStepIconStatus(step.status)} />
-                        </span>
-                        <span className="min-w-0 flex-1 [overflow-wrap:anywhere] leading-4">
-                          {step.title}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {(translatedError || translatedResult) && (
-                <div className="flex min-w-0 flex-col gap-0.5">
-                  <span className="text-[11px] font-medium text-muted-foreground">
-                    {t('ai.workspace.subagents.card.result')}
-                  </span>
-                  <p
-                    className="ai-subagent-card-result m-0 whitespace-pre-wrap [overflow-wrap:anywhere] leading-4"
-                    data-error={Boolean(translatedError) || undefined}
-                  >
-                    {translatedError ?? translatedResult}
-                  </p>
-                </div>
-              )}
-              {(canOpen || onInspect) && (
-                <div className="flex min-w-0 flex-wrap items-center gap-1.5 pt-0.5">
-                  {canOpen && targetSummary && context?.onOpenSession && (
-                    <Button
-                      type="button"
-                      variant="default"
-                      size="xs"
-                      onClick={() => context.onOpenSession!(targetSummary)}
-                    >
-                      {t('ai.workspace.subagents.card.open')}
-                      <ChevronRightIcon data-icon="inline-end" />
-                    </Button>
+            <div className="ai-subagent-card-body my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col overflow-hidden text-xs">
+              {hasBodyDetails && (
+                <ScrollArea
+                  className="ai-subagent-card-scroll flex max-h-65 min-h-0 min-w-0 flex-col overflow-hidden"
+                  viewportRender={(
+                    <div
+                      className="h-auto min-h-0 min-w-0 flex-1"
+                      style={{ overflowX: 'hidden' }}
+                    />
                   )}
+                >
+                  <ScrollAreaContent
+                    className={cn(
+                      'flex min-w-0 flex-col gap-2 px-3 pt-2',
+                      hasBodyActions ? 'pb-1.5' : 'pb-2.5',
+                    )}
+                    style={{ minWidth: 0 }}
+                  >
+                    {detailMetaLine && (
+                      <div className="text-[11px] leading-4 text-muted-foreground">
+                        {detailMetaLine}
+                      </div>
+                    )}
+                    {showGoalInBody && summary.goal && (
+                      <div className="flex min-w-0 flex-col gap-0.5">
+                        <span className="text-[11px] font-medium text-muted-foreground">
+                          {t('ai.workspace.subagents.card.goal')}
+                        </span>
+                        <p className="m-0 whitespace-pre-wrap [overflow-wrap:anywhere] leading-4 text-foreground/90">
+                          {summary.goal}
+                        </p>
+                      </div>
+                    )}
+                    {summary.inputContent && (
+                      <div className="flex min-w-0 flex-col gap-0.5">
+                        <span className="text-[11px] font-medium text-muted-foreground">
+                          {t('ai.workspace.subagents.card.input')}
+                        </span>
+                        <p className="m-0 whitespace-pre-wrap [overflow-wrap:anywhere] leading-4 text-foreground/90">
+                          {summary.inputContent}
+                        </p>
+                      </div>
+                    )}
+                    {summary.plan.length > 0 && (
+                      <div className="flex min-w-0 flex-col gap-1">
+                        <span className="text-[11px] font-medium text-muted-foreground">
+                          {t('ai.workspace.subagents.card.plan')}
+                        </span>
+                        <ul className="m-0 flex list-none flex-col gap-1 p-0">
+                          {summary.plan.map((step) => (
+                            <li key={step.id} className="flex min-w-0 items-start gap-1">
+                              <span
+                                className="ai-subagent-status-icon grid size-4 shrink-0 place-items-center"
+                                aria-hidden="true"
+                              >
+                                <SubagentStatusIcon status={planStepIconStatus(step.status)} />
+                              </span>
+                              <span className="min-w-0 flex-1 [overflow-wrap:anywhere] leading-4">
+                                {step.title}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {(translatedError || translatedResult) && (
+                      <div className="flex min-w-0 flex-col gap-0.5">
+                        <span className="text-[11px] font-medium text-muted-foreground">
+                          {t('ai.workspace.subagents.card.result')}
+                        </span>
+                        <p
+                          className="ai-subagent-card-result m-0 whitespace-pre-wrap [overflow-wrap:anywhere] leading-4"
+                          data-error={Boolean(translatedError) || undefined}
+                        >
+                          {translatedError ?? translatedResult}
+                        </p>
+                      </div>
+                    )}
+                  </ScrollAreaContent>
+                </ScrollArea>
+              )}
+              {hasBodyActions && (
+                <div
+                  className={cn(
+                    'flex min-w-0 shrink-0 flex-wrap items-center gap-1.5 px-3 pb-2.5',
+                    hasBodyDetails ? 'pt-1.5' : 'pt-2',
+                  )}
+                >
                   {onInspect && (
                     <Button
                       type="button"

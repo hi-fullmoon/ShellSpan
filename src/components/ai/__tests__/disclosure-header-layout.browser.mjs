@@ -14,6 +14,11 @@ await mkdir(artifacts, { recursive: true });
 const source = await readFile(join(root, 'AGENTS.md'), 'utf8');
 const summary = source.split('\n').sort((left, right) => right.length - left.length)[0];
 const output = execFileSync('git', ['log', '-1', '--format=fuller'], { cwd: root, encoding: 'utf8' });
+// Pass a recorded child session to check the layout of a delegated session reference.
+const recordingPath = process.argv[2];
+const referenceEvent = recordingPath && (await readFile(recordingPath, 'utf8')).trim().split('\n').map(JSON.parse)
+  .find(event => event.type === 'user/message' && event.data.message.source.kind === 'session-reference');
+if (recordingPath) assert.ok(referenceEvent, 'The recording must contain a session reference');
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
   cacheDir: join(artifacts, 'vite-cache'),
@@ -35,11 +40,12 @@ try {
           const errors = [];
           page.on('pageerror', error => errors.push(error.message));
           await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__disclosures`);
-          await page.evaluate(async ({ source, summary, output, locale }) => {
+          await page.evaluate(async ({ source, summary, output, locale, referenceEvent }) => {
             const { React, createRoot } = await import('/src/components/ai/__tests__/agent-content-surfaces.browser-runtime.ts');
             await import('/src/styles/base.css');
             await import('/src/components/ai/styles/styles.css');
             const { AiConversationNodeList, aiAskConversationNodeRenderers } = await import('/src/components/ai/workspace/ai-conversation-node-seat.tsx');
+            const { projectAgentChatNodes } = await import('/src/lib/ai/conversation-projection.ts');
             const { initI18n } = await import('/src/locales/index.ts');
             const { useAppStore } = await import('/src/stores/appStore.ts');
             useAppStore.setState({ locale });
@@ -51,12 +57,30 @@ try {
                 input: { command: 'git log -1 --format=fuller', explanation: summary },
                 output, summary, durationMs: null, error: null, target: null },
             ];
+            const references = referenceEvent ? projectAgentChatNodes([referenceEvent])
+              .flatMap(node => node.kind === 'turnProcess' ? node.children : [node]) : [];
             createRoot(document.getElementById('root')).render(React.createElement(React.Fragment, null,
               React.createElement('div', { id: 'agent-disclosures' }, React.createElement(AiConversationNodeList, { nodes })),
               React.createElement('div', { id: 'ask-disclosures' },
                 React.createElement(AiConversationNodeList, { nodes: [nodes[0]], renderers: aiAskConversationNodeRenderers })),
+              referenceEvent && React.createElement('div', { id: 'session-reference-disclosure' },
+                React.createElement(AiConversationNodeList, { nodes: references })),
             ));
-          }, { source, summary, output, locale });
+          }, { source, summary, output, locale, referenceEvent });
+          if (referenceEvent) {
+            const reference = page.locator('#session-reference-disclosure');
+            const trigger = reference.getByRole('button', { name: locale === 'zh-CN' ? '会话引用' : 'Session reference' });
+            const body = reference.locator('.ai-semantic-note-body');
+            await trigger.press('Enter');
+            const insets = await body.evaluate(element => {
+              const body = element.getBoundingClientRect();
+              const panel = element.parentElement.getBoundingClientRect();
+              return [body.left - panel.left, panel.right - body.right];
+            });
+            assert.deepEqual(insets, [4, 0], `${engine.name()}/${locale}/${width}: the session reference fills the panel from a 4px left inset`);
+            await trigger.press('Space');
+            await body.waitFor({ state: 'hidden' });
+          }
           const triggers = page.locator('#agent-disclosures :is(.ai-disclosure-row, .ai-tool-row)');
           await triggers.last().waitFor();
           assert.equal(await triggers.count(), 3);

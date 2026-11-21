@@ -118,21 +118,7 @@
   background: color-mix(in srgb, var(--foreground) 10%, transparent);
 }
 
-.ai-subagent-card {
-  border: 1px solid var(--ai-border-soft);
-  border-radius: var(--ai-content-radius);
-  background: var(--ai-code-block);
-  color: var(--ai-text-secondary);
-  transition:
-    border-color var(--ai-transition-duration-fast) var(--ai-ease-in-out),
-    background-color var(--ai-transition-duration-fast) var(--ai-ease-in-out);
-}
-
-.ai-subagent-card[data-clickable]:hover {
-  border-color: var(--ai-border-strong);
-}
-
-.ai-subagent-card[data-state='running']::after {
+.ai-subagent-card[data-state='running'] .ai-subagent-row-trigger::after {
   position: absolute;
   inset-block: 0;
   left: -300px;
@@ -143,51 +129,45 @@
   animation: ai-tool-row-sweep 2.6s ease-out infinite;
 }
 
-.ai-subagent-card-main {
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  transition: background-color var(--ai-transition-duration-fast) var(--ai-ease-in-out);
+.ai-subagent-card[data-state='failed'] .ai-subagent-row-trigger > .ai-disclosure-leading > .ai-disclosure-chevron {
+  color: var(--ai-error);
 }
 
-.ai-subagent-card[data-clickable] .ai-subagent-card-main:hover {
-  background: color-mix(in srgb, var(--ai-action-hover) 55%, transparent);
+.ai-subagent-card[data-openable] .ai-subagent-row-trigger:is(:hover, :focus-visible) > .ai-disclosure-leading > :not(.ai-disclosure-chevron) {
+  opacity: 0;
 }
 
-.ai-subagent-card-enter {
-  transition:
-    transform var(--ai-transition-duration-fast) var(--ai-ease-in-out),
-    color var(--ai-transition-duration-fast) var(--ai-ease-in-out);
+.ai-subagent-card[data-openable] .ai-subagent-row-trigger:is(:hover, :focus-visible) > .ai-disclosure-leading > .ai-disclosure-chevron {
+  opacity: 1;
 }
 
-.ai-subagent-card[data-openable]:hover .ai-subagent-card-enter {
+.ai-subagent-card[data-openable] .ai-subagent-row-trigger:is(:hover, :focus-visible) .ai-disclosure-title {
   color: var(--ai-text);
-  transform: translateX(2px);
 }
 
-.ai-subagent-card-title {
-  color: var(--ai-text);
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 16px;
+.ai-subagent-row-meta {
+  color: var(--ai-text-caption);
+  font-size: 11px;
+  line-height: 20px;
+}
+
+.ai-subagent-row-meta[data-state='failed'] {
+  color: var(--ai-error);
+}
+
+.ai-subagent-row-meta:is([data-state='waiting'], [data-state='approval'], [data-state='uncertain']) {
+  color: var(--ai-warning);
 }
 
 .ai-subagent-card-body {
-  border-top: 1px solid var(--ai-border-subtle);
+  border: 1px solid var(--ai-border-soft);
+  border-radius: var(--ai-content-radius);
+  background: var(--ai-code-block);
   color: var(--ai-text-secondary);
 }
 
 .ai-subagent-card-result[data-error] {
   color: var(--ai-error);
-}
-
-.ai-subagent-card-chevron {
-  transition: transform var(--ai-transition-duration) var(--ai-ease-in-out);
-}
-
-.ai-subagent-card-toggle[aria-expanded='true'] .ai-subagent-card-chevron {
-  transform: rotate(180deg);
 }
 
 :is(.ai-subagent-strip, .ai-subagent-card) > [data-slot='collapsible-content'] {
@@ -208,14 +188,10 @@
 
 @media (prefers-reduced-motion: reduce) {
   .ai-subagent-status-icon [data-status='running'],
-  .ai-subagent-card[data-state='running']::after {
+  .ai-subagent-card[data-state='running'] .ai-subagent-row-trigger::after {
     animation: none;
   }
 
-  .ai-subagent-card,
-  .ai-subagent-card-main,
-  .ai-subagent-card-enter,
-  .ai-subagent-card-chevron,
   :is(.ai-subagent-strip, .ai-subagent-card) > [data-slot='collapsible-content'] {
     transition: none;
   }

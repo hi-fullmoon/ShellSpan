@@ -6,6 +6,7 @@ import {
   buildSubagentLineage,
   correlateSubagentToolSessions,
   extractSubagentToolSummary,
+  isSubagentDelegationTool,
   isSubagentTool,
   subagentToolAction,
 } from '@/lib/ai/subagent-lineage';
@@ -142,6 +143,14 @@ describe('subagent-lineage', () => {
     expect(subagentToolAction('retry_child_agent')).toBe('retry');
     expect(subagentToolAction('inspect_child_agent')).toBe('inspect');
     expect(subagentToolAction('cancel_child_agent')).toBe('cancel');
+
+    expect(isSubagentDelegationTool('spawn_one_shot_agent')).toBe(true);
+    expect(isSubagentDelegationTool('spawn_continuable_agent')).toBe(true);
+    expect(isSubagentDelegationTool('send_child_input')).toBe(true);
+    expect(isSubagentDelegationTool('retry_child_agent')).toBe(true);
+    expect(isSubagentDelegationTool('inspect_child_agent')).toBe(false);
+    expect(isSubagentDelegationTool('cancel_child_agent')).toBe(false);
+    expect(isSubagentDelegationTool('fleet_start')).toBe(false);
   });
 
   it('builds root, parent, trail, entries, currentChildren, and goal-based fallback titles', () => {
@@ -393,6 +402,35 @@ describe('subagent-lineage', () => {
 
     expect(lineage?.entryById.get('child-continuable')?.status).toBe('waiting');
     expect(lineage?.entryById.get('child-oneshot')?.status).toBe('completed');
+  });
+
+  it('marks succeeded inspect_child_agent as completed even when snapshot reports a failed child', () => {
+    const inspectTool = makeSubagentTool({
+      key: 'tool:inspect',
+      name: 'inspect_child_agent',
+      nativeName: 'inspect_child_agent',
+      state: 'succeeded',
+      summary: 'Child child-failed is Failed',
+      input: { childSessionId: 'child-failed' },
+      output: {
+        snapshot: {
+          status: 'failed',
+          header: {
+            sessionId: 'child-failed',
+            goal: 'Verify nginx upstream status\nAdditional details',
+            subagent: {
+              role: 'operator',
+              continuable: false,
+            },
+          },
+        },
+      },
+    });
+    const summary = extractSubagentToolSummary(inspectTool, null, new Map());
+    expect(summary.action).toBe('inspect');
+    expect(summary.status).toBe('completed');
+    expect(summary.role).toBe('operator');
+    expect(summary.title).toBe('Verify nginx upstream status');
   });
 
   it('returns stable empty correlation references when no subagent tools are present', () => {

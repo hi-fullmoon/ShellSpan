@@ -120,6 +120,11 @@ export function isSubagentTool(name: string, nativeName?: string | null): boolea
   return resolveCanonicalSubagentName(name, nativeName) !== null;
 }
 
+export function isSubagentDelegationTool(name: string, nativeName?: string | null): boolean {
+  const action = subagentToolAction(name, nativeName);
+  return action === 'spawn' || action === 'input' || action === 'retry';
+}
+
 export function subagentToolAction(name: string, nativeName?: string | null): SubagentToolAction | null {
   const canonical = resolveCanonicalSubagentName(name, nativeName);
   switch (canonical) {
@@ -450,7 +455,10 @@ export function extractSubagentToolSummary(
   const linkedSummary = childSessionId ? lineage?.byId.get(childSessionId) : undefined;
 
   const canonical = resolveCanonicalSubagentName(node.name, node.nativeName);
-  const role = linkedEntry?.role ?? firstNonEmptyString(input, ['role']) ?? 'subagent';
+  const snapshot = asRecord(output?.snapshot);
+  const snapshotHeader = asRecord(snapshot?.header);
+  const snapshotRole = firstNonEmptyString(asRecord(snapshotHeader?.subagent), ['role']);
+  const role = linkedEntry?.role ?? firstNonEmptyString(input, ['role']) ?? snapshotRole ?? 'subagent';
   const continuable = linkedEntry?.continuable
     ?? (typeof output?.continuable === 'boolean'
       ? output.continuable
@@ -464,6 +472,11 @@ export function extractSubagentToolSummary(
   const inputContent = firstNonEmptyString(input, ['content']);
   const goalFirstLine = goal?.split('\n')[0]?.trim();
   const inputFirstLine = inputContent?.split('\n')[0]?.trim();
+  const snapshotGoalFirstLine = firstNonEmptyString(snapshotHeader, ['goal'])?.split('\n')[0]?.trim();
+  const snapshotTitle = firstNonEmptyString(snapshotHeader, ['title'])
+    ?? (snapshotGoalFirstLine && snapshotGoalFirstLine.length > 0
+      ? fallbackSessionTitle(snapshotGoalFirstLine)
+      : undefined);
 
   const title = action === 'spawn'
     ? (goalFirstLine && goalFirstLine.length > 0 ? fallbackSessionTitle(goalFirstLine) : undefined)
@@ -471,6 +484,7 @@ export function extractSubagentToolSummary(
       ?? childSessionId
       ?? node.name
     : linkedSummary?.title
+      ?? snapshotTitle
       ?? (inputFirstLine && inputFirstLine.length > 0 ? fallbackSessionTitle(inputFirstLine) : undefined)
       ?? childSessionId
       ?? (node.summary && node.summary !== 'Agent orchestration' ? node.summary : undefined)
@@ -483,13 +497,14 @@ export function extractSubagentToolSummary(
   if (node.state === 'approval') {
     status = 'approval';
   } else if (node.state === 'preparing' || node.state === 'running') {
-    status = linkedEntry?.status === 'waiting' ? 'waiting' : 'running';
+    status = action !== 'inspect' && linkedEntry?.status === 'waiting' ? 'waiting' : 'running';
   } else if (node.state === 'failed' || node.state === 'rejected') {
     status = outputStatus === 'cancelled' ? 'cancelled' : 'failed';
   } else if (node.state === 'uncertain') {
     status = 'uncertain';
   } else {
-    if (outputStatus === 'failed') status = 'failed';
+    if (action === 'inspect') status = 'completed';
+    else if (outputStatus === 'failed') status = 'failed';
     else if (outputStatus === 'cancelled') status = 'cancelled';
     else if (outputStatus === 'running' || outputStatus === 'waiting') status = outputStatus;
     else if (outputStatus === 'idle' || outputStatus === 'completed') status = 'completed';

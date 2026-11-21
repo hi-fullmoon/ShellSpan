@@ -116,20 +116,29 @@ try {
             await new Promise(resolve => requestAnimationFrame(resolve));
           }
           const transitions = panels.flatMap(panel => panel.getAnimations());
+          const duration = Number(transitions[0].effect.getTiming().duration);
           for (const transition of transitions) transition.pause();
-          const frames = [50, 100, 150, 200, 250].map(time => {
+          const frames = [0.2, 0.35, 0.5, 0.6, 0.7].map(fraction => {
+            const time = duration * fraction;
             for (const transition of transitions) transition.currentTime = time;
             return sample();
           });
           for (const transition of transitions) transition.finish();
-          return { before, frames };
+          return { before, duration, frames };
         }, direction);
-        const { before: expandedRows, frames: closing } = await sampleMotion('close');
+        const { before: expandedRows, duration: closeDuration, frames: closing } = await sampleMotion('close');
+        assert.equal(closeDuration, 200, 'Process collapse duration must match standard 200ms AI disclosure duration');
         assert.ok(expandedRows.length > 1, 'The recording must exercise multiple process rows');
         await prose.waitFor({ state: 'hidden' });
-        const { frames: opening } = await sampleMotion('open');
+        const { duration: openDuration, frames: opening } = await sampleMotion('open');
+        assert.equal(openDuration, 200, 'Process expand duration must match standard 200ms AI disclosure duration');
         await prose.waitFor();
         const expandedHeight = expandedRows.reduce((total, row) => total + row.height, 0);
+        const totalHeight = frame => frame.reduce((total, row) => total + row.height, 0);
+        assert.ok(totalHeight(closing[2]) < expandedHeight * 0.35,
+          `Closing midpoint must follow eased acceleration (>65% collapsed at 50% duration): ${totalHeight(closing[2])}/${expandedHeight}`);
+        assert.ok(totalHeight(opening[2]) > expandedHeight * 0.65,
+          `Opening midpoint must follow eased acceleration (>65% expanded at 50% duration): ${totalHeight(opening[2])}/${expandedHeight}`);
         for (const frame of [...closing, ...opening]) {
           let remaining = frame.reduce((total, row) => total + row.height, 0);
           assert.ok(remaining > 0 && remaining < expandedHeight, 'The process boundary must move between its endpoints');

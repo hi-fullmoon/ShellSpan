@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { AiConversation } from '../workspace/ai-conversation';
+import { setProcessPanelHeightTiming } from '../workspace/ai-process-disclosure';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { conversationFoldRecording } from '@/tests/fixtures/conversation-fold-runtime';
 import { childFailureEvents } from '@/tests/fixtures/child-recovery-recording';
@@ -168,5 +169,59 @@ it.each(inspectableRecordings.flatMap(([name, events]) =>
     expect(processRows(history.container, trigger)[0]).toBeVisible();
     await user.keyboard(' ');
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  }
+});
+
+function mountTestPanels(heights: readonly number[]) {
+  const container = document.createElement('div');
+  const panels = heights.map((height, index) => {
+    const panel = document.createElement('div');
+    panel.id = `timing-panel-${index}`;
+    const body = document.createElement('div');
+    body.getBoundingClientRect = () => ({ height } as DOMRect);
+    panel.appendChild(body);
+    container.appendChild(panel);
+    return panel;
+  });
+  document.body.appendChild(container);
+  return {
+    panels,
+    ids: panels.map(panel => panel.id),
+    cleanup: () => container.remove(),
+  };
+}
+
+it('clears custom height timing for single-panel processes and ignores empty or missing panels', () => {
+  const mounted = mountTestPanels([0, 48]);
+  try {
+    mounted.panels[1].style.setProperty('--ai-process-height-timing', 'linear(0 0%, 1 100%)');
+    setProcessPanelHeightTiming(['missing-panel', ...mounted.ids].join(' '), true);
+    expect(mounted.panels[0].style.getPropertyValue('--ai-process-height-timing')).toBe('');
+    expect(mounted.panels[1].style.getPropertyValue('--ai-process-height-timing')).toBe('');
+  } finally {
+    mounted.cleanup();
+  }
+});
+
+it('computes eased single-boundary linear() timings in open and close directions', () => {
+  const mounted = mountTestPanels([50, 0, 50]);
+  try {
+    const ids = [...mounted.ids, 'missing-panel'].join(' ');
+    setProcessPanelHeightTiming(ids, true);
+    const openFirst = mounted.panels[0].style.getPropertyValue('--ai-process-height-timing');
+    const openSecond = mounted.panels[2].style.getPropertyValue('--ai-process-height-timing');
+    expect(mounted.panels[1].style.getPropertyValue('--ai-process-height-timing')).toBe('');
+    expect(openFirst).toMatch(/^linear\(0 0%, .*, 1 35%, 1 100%\)$/);
+    expect(openSecond).toMatch(/^linear\(0 0%, 0 35%, .*, 1 100%\)$/);
+    expect(openFirst).not.toContain('NaN');
+    expect(openSecond).not.toContain('NaN');
+
+    setProcessPanelHeightTiming(ids, false);
+    const closeFirst = mounted.panels[0].style.getPropertyValue('--ai-process-height-timing');
+    const closeSecond = mounted.panels[2].style.getPropertyValue('--ai-process-height-timing');
+    expect(closeSecond).toMatch(/^linear\(0 0%, .*, 1 35%, 1 100%\)$/);
+    expect(closeFirst).toMatch(/^linear\(0 0%, 0 35%, .*, 1 100%\)$/);
+  } finally {
+    mounted.cleanup();
   }
 });
