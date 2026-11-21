@@ -816,6 +816,21 @@ impl TerminalSessionBroker {
         Ok(state.sessions.get(terminal_session_id).cloned())
     }
 
+    #[cfg(unix)]
+    pub(crate) fn attach_local_echo_probe(
+        &self,
+        transport_session_id: &str,
+        probe: crate::local_terminal_input::PtyEchoProbe,
+    ) -> Result<(), String> {
+        let Some((attachment, slot)) = self.lookup_enabled_session_slot(transport_session_id)?
+        else {
+            return Ok(());
+        };
+        let mut record = slot.lock_current(transport_session_id, &attachment)?;
+        record.echo_probe = Some(probe);
+        Ok(())
+    }
+
     pub(crate) fn observe_raw_output(
         &self,
         transport_session_id: &str,

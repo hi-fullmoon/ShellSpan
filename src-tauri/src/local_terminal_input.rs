@@ -8,10 +8,6 @@ mod pump;
 pub(crate) use pump::LocalInputPump;
 
 #[cfg(unix)]
-#[allow(
-    dead_code,
-    reason = "Kernel-verified hidden-input (termios ICANON && !ECHO) probe for credential prompt detection"
-)]
 pub(crate) fn pty_echo_disabled(fd: std::os::fd::RawFd) -> bool {
     let mut termios = std::mem::MaybeUninit::<libc::termios>::uninit();
     if unsafe { libc::tcgetattr(fd, termios.as_mut_ptr()) } != 0 {
@@ -19,6 +15,28 @@ pub(crate) fn pty_echo_disabled(fd: std::os::fd::RawFd) -> bool {
     }
     let termios = unsafe { termios.assume_init() };
     (termios.c_lflag & libc::ICANON) != 0 && (termios.c_lflag & libc::ECHO) == 0
+}
+
+#[cfg(unix)]
+#[derive(Debug)]
+pub(crate) struct PtyEchoProbe(std::fs::File);
+
+#[cfg(unix)]
+impl PtyEchoProbe {
+    pub(crate) fn from_master(master: &dyn MasterPty) -> Option<Self> {
+        use std::os::fd::FromRawFd;
+        let fd = master.as_raw_fd()?;
+        let dup = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 3) };
+        if dup < 0 {
+            return None;
+        }
+        Some(Self(unsafe { std::fs::File::from_raw_fd(dup) }))
+    }
+
+    pub(crate) fn is_echo_disabled(&self) -> bool {
+        use std::os::fd::AsRawFd;
+        pty_echo_disabled(self.0.as_raw_fd())
+    }
 }
 
 pub(crate) fn take_writer(
@@ -371,6 +389,7 @@ mod tests {
             })
             .unwrap();
         let fd = pair.master.as_raw_fd().unwrap();
+        let probe = PtyEchoProbe::from_master(pair.master.as_ref()).unwrap();
         let mut termios = std::mem::MaybeUninit::<libc::termios>::uninit();
         assert_eq!(unsafe { libc::tcgetattr(fd, termios.as_mut_ptr()) }, 0);
         let mut attrs = unsafe { termios.assume_init() };
@@ -379,16 +398,19 @@ mod tests {
         attrs.c_lflag |= libc::ICANON | libc::ECHO;
         assert_eq!(unsafe { libc::tcsetattr(fd, libc::TCSANOW, &attrs) }, 0);
         assert!(!pty_echo_disabled(fd));
+        assert!(!probe.is_echo_disabled());
 
         // Canonical hidden-input mode (sudo/ssh/passwd/read -s) -> credential prompt.
         attrs.c_lflag |= libc::ICANON;
         attrs.c_lflag &= !libc::ECHO;
         assert_eq!(unsafe { libc::tcsetattr(fd, libc::TCSANOW, &attrs) }, 0);
         assert!(pty_echo_disabled(fd));
+        assert!(probe.is_echo_disabled());
 
         // Raw non-canonical mode (Readline/ZLE/vim) -> not a credential prompt.
         attrs.c_lflag &= !(libc::ICANON | libc::ECHO);
         assert_eq!(unsafe { libc::tcsetattr(fd, libc::TCSANOW, &attrs) }, 0);
         assert!(!pty_echo_disabled(fd));
+        assert!(!probe.is_echo_disabled());
     }
 }

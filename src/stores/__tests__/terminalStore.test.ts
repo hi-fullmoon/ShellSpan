@@ -608,10 +608,12 @@ describe('terminalStore', () => {
         nativeClearPending: false,
         commandObservationUnavailable: false,
         foregroundHandoffActive: true,
+        credentialPromptActive: true,
       },
     });
 
     expect(useTerminalStore.getState().sessions[0]?.foregroundHandoffActive).toBe(true);
+    expect(useTerminalStore.getState().sessions[0]?.credentialPromptActive).toBe(true);
     expect(agentTerminalLeaseState.blocksUserInput('s1')).toBe(false);
 
     store.setIntegrationState({
@@ -629,10 +631,12 @@ describe('terminalStore', () => {
         nativeClearPending: false,
         commandObservationUnavailable: false,
         foregroundHandoffActive: false,
+        credentialPromptActive: false,
       },
     });
 
     expect(useTerminalStore.getState().sessions[0]?.foregroundHandoffActive).toBe(false);
+    expect(useTerminalStore.getState().sessions[0]?.credentialPromptActive).toBe(false);
     expect(agentTerminalLeaseState.blocksUserInput('s1')).toBe(true);
     agentTerminalLeaseState.clearAll();
   });

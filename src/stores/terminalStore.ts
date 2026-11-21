@@ -30,6 +30,7 @@ export interface TerminalSession {
   promptReady?: boolean;
   promptReadyRevision?: number;
   foregroundHandoffActive?: boolean;
+  credentialPromptActive?: boolean;
   currentDirectory?: string;
   oscTitle?: string;
   readOnly?: boolean;
@@ -542,6 +543,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
           && session.promptReadyRevision === event.promptReadyRevision
           && session.currentDirectory === event.currentDirectory
           && session.foregroundHandoffActive === event.inputObservation?.foregroundHandoffActive
+          && session.credentialPromptActive === event.inputObservation?.credentialPromptActive
         ) return session;
         changed = true;
         return {
@@ -555,6 +557,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
           promptReadyRevision: event.promptReadyRevision,
           currentDirectory: event.currentDirectory,
           foregroundHandoffActive: event.inputObservation?.foregroundHandoffActive,
+          credentialPromptActive: event.inputObservation?.credentialPromptActive,
         };
       });
       return changed ? { sessions } : state;

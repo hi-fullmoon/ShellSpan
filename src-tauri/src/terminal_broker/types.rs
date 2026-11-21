@@ -556,6 +556,8 @@ pub(crate) struct TerminalInputObservation {
     pub(crate) native_clear_pending: bool,
     pub(crate) command_observation_unavailable: bool,
     pub(crate) foreground_handoff_active: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) credential_prompt_active: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) active_command: Option<TerminalCommandObservation>,
 }

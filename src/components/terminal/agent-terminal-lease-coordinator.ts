@@ -642,9 +642,10 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
           || controller.sessionId !== lease.sessionId
           || terminalRegistry.get(lease.sessionId) !== controller) return;
       }
-      const terminalConnected = useTerminalStore.getState().sessions.some(
-        (session) => session.sessionId === lease.sessionId && session.status === 'connected',
+      const currentSession = useTerminalStore.getState().sessions.find(
+        (session) => session.sessionId === lease.sessionId,
       );
+      const terminalConnected = currentSession?.status === 'connected';
       try {
         await invokeAgentTerminalLeaseReady({
           sessionId: lease.sessionId,
@@ -654,7 +655,8 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
           outputListenerReady,
           hasPendingUserInput: controller?.hasPendingUserInput() ?? false,
           hasUnverifiedUserSubmission: controller?.hasUnverifiedUserSubmission() ?? false,
-          hasCredentialPrompt: controller?.hasKnownCredentialPrompt() ?? false,
+          hasCredentialPrompt: Boolean(currentSession?.credentialPromptActive)
+            || (controller?.hasKnownCredentialPrompt() ?? false),
           reducedMotion: typeof window.matchMedia !== 'function'
             || window.matchMedia('(prefers-reduced-motion: reduce)').matches,
         });

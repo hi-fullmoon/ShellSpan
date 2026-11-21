@@ -1154,6 +1154,16 @@ fn create_local_session_blocking(
         Ok(Some(attachment)) => {
             summary.terminal_session_id = Some(attachment.terminal_session_id);
             summary.terminal_generation = Some(attachment.terminal_generation);
+            #[cfg(unix)]
+            if let Some(runtime) = app.try_state::<crate::agent_runtime::AgentRuntime>() {
+                if let Some(probe) =
+                    crate::local_terminal_input::PtyEchoProbe::from_master(master.as_ref())
+                {
+                    let _ = runtime
+                        .terminal_broker()
+                        .attach_local_echo_probe(&session_id, probe);
+                }
+            }
         }
         Ok(None) if !terminal_broker_enabled => {}
         Ok(None) => {

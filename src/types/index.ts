@@ -341,6 +341,7 @@ export interface TerminalInputObservation {
   nativeClearPending: boolean;
   commandObservationUnavailable: boolean;
   foregroundHandoffActive?: boolean;
+  credentialPromptActive?: boolean;
   activeCommand?: TerminalCommandObservation;
 }
 

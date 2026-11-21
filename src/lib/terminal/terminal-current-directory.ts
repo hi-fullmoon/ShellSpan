@@ -76,6 +76,7 @@ export async function readTerminalCurrentDirectory(
     || effectiveSession.status !== 'connected'
     || effectiveSession.readOnly === true
     || effectiveSession.foregroundHandoffActive === true
+    || effectiveSession.credentialPromptActive === true
     || terminalInputReadiness.isPreparing(session.sessionId)
     || Boolean(agentTerminalLeaseState.get(session.sessionId))
     || (controller.terminal?.buffer.active.type !== undefined && controller.terminal.buffer.active.type !== 'normal')
@@ -157,7 +158,8 @@ export async function getTerminalMenuDirectory(sessionId: string, allowProbe = t
     const current = getSession();
     const controller = terminalRegistry.get(sessionId);
     return allowProbe && current?.status === 'connected' && !current.readOnly
-      && !current.foregroundHandoffActive && !terminalInputReadiness.isPreparing(sessionId)
+      && !current.foregroundHandoffActive && !current.credentialPromptActive
+      && !terminalInputReadiness.isPreparing(sessionId)
       && !agentTerminalLeaseState.get(sessionId)
       && controller?.terminal.buffer.active.type === 'normal'
       && !controller.hasKnownCredentialPrompt();

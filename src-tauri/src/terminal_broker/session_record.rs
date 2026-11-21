@@ -234,6 +234,8 @@ pub(super) struct SessionRecord {
     pub(super) capture: Vec<u8>,
     pub(super) capture_truncated: bool,
     pub(super) subscribers: SubscriberSet,
+    #[cfg(unix)]
+    pub(super) echo_probe: Option<crate::local_terminal_input::PtyEchoProbe>,
 }
 
 /// Only an exact shell command start followed by its end can acknowledge
@@ -290,6 +292,19 @@ impl SessionRecord {
                 data.handed_off && !(data.lifecycle.ended() && data.native_editor_ready_confirmed)
             })
         })
+    }
+
+    pub(super) fn credential_prompt_active(&self) -> bool {
+        #[cfg(unix)]
+        {
+            self.echo_probe
+                .as_ref()
+                .is_some_and(crate::local_terminal_input::PtyEchoProbe::is_echo_disabled)
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
     }
 
     pub(super) fn user_controls_foreground(&self) -> bool {
@@ -367,6 +382,8 @@ impl SessionRecord {
             capture: Vec::new(),
             capture_truncated: false,
             subscribers: SubscriberSet::default(),
+            #[cfg(unix)]
+            echo_probe: None,
         }
     }
 
@@ -491,6 +508,7 @@ impl SessionRecord {
                 native_clear_pending: self.native_clear_pending.is_some(),
                 command_observation_unavailable,
                 foreground_handoff_active: self.user_controls_foreground(),
+                credential_prompt_active: self.credential_prompt_active(),
                 active_command: command_observation.ok().flatten(),
             },
             screen_version: self
