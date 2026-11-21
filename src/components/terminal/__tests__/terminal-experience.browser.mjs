@@ -1487,6 +1487,93 @@ try {
     await page.keyboard.press('Escape');
     await actionsMenu.waitFor({ state: 'hidden' });
 
+    const titleBar = host.locator('[data-tauri-drag-region]');
+    // The translucent title bar is composited separately and can round a color channel by one unit.
+    const titleBarColorTolerance = 1;
+    const assertMatchingTabBorders = async (bar, separator, name, colorTolerance = 0) => {
+      const [barBox, separatorBox, samples] = await Promise.all([
+        bar.boundingBox(),
+        separator.boundingBox(),
+        bar.evaluate(element => {
+          const bounds = element.getBoundingClientRect();
+          const viewport = element.querySelector('[data-slot="scroll-area-viewport"]').getBoundingClientRect();
+          const actions = element.querySelector('[data-terminal-tab-actions]')?.getBoundingClientRect();
+          const tabs = [...element.querySelectorAll('[role="tab"]')].map(tab => {
+            const rect = tab.getBoundingClientRect();
+            return {
+              active: tab.getAttribute('aria-selected') === 'true',
+              left: Math.max(viewport.left, rect.left),
+              right: Math.min(viewport.right, rect.right),
+              rawRight: rect.right,
+            };
+          });
+          const active = tabs.find(tab => tab.active && tab.right - tab.left > 6);
+          const lastTab = tabs[tabs.length - 1];
+          const tailLeft = lastTab ? Math.max(viewport.left, lastTab.rawRight) : viewport.left;
+          return {
+            activeCenter: active ? Math.floor((active.left + active.right) / 2 - bounds.left) : null,
+            activeInnerLeft: active && active.right - active.left > 12
+              ? Math.floor(active.left + 2 - bounds.left)
+              : null,
+            activeInnerRight: active && active.right - active.left > 12
+              ? Math.floor(active.right - 3 - bounds.left)
+              : null,
+            inactives: tabs
+              .filter(tab => !tab.active && tab.right - tab.left > 6)
+              .map(tab => Math.floor((tab.left + tab.right) / 2 - bounds.left)),
+            tail: viewport.right - tailLeft > 12
+              ? Math.floor((tailLeft + viewport.right) / 2 - bounds.left)
+              : null,
+            actionsLeading: actions ? Math.floor(actions.left + 1 - bounds.left) : null,
+          };
+        }),
+      ]);
+      assert.equal(barBox.y, separatorBox.y + separatorBox.height, `${name}: the tab bar touches the separator`);
+      assert.equal(barBox.height, 32, `${name}: the border fits within the tab bar height`);
+      const image = await loadImage(await page.screenshot({
+        animations: 'disabled',
+        clip: { x: Math.round(barBox.x), y: Math.round(barBox.y) - 2, width: Math.round(barBox.width), height: barBox.height + 4 },
+        path: `${root}artifacts/tests/terminal-tab-actions/${name}.png`,
+      }));
+      const context = createCanvas(image.width, image.height).getContext('2d');
+      context.drawImage(image, 0, 0);
+      const pixel = (x, y) => [...context.getImageData(x, y, 1, 1).data];
+      const topSamples = [
+        samples.activeCenter,
+        ...samples.inactives,
+        samples.tail,
+        samples.actionsLeading,
+        image.width - 2,
+      ].filter(x => x !== null);
+      for (const x of topSamples) {
+        const top = pixel(x, 1);
+        assert.notDeepEqual(pixel(x, 0), top, `${name}: the separator is one pixel high at x=${x}`);
+        assert.deepEqual(pixel(x, 2), pixel(x, 5), `${name}: the tab bar starts directly below the separator at x=${x}`);
+      }
+      for (const x of [samples.activeInnerLeft, samples.activeCenter, samples.activeInnerRight].filter(x => x !== null)) {
+        const top = pixel(x, 1);
+        const fill = pixel(x, barBox.height - 3);
+        assert.notDeepEqual(fill, top, `${name}: active fill differs from top separator at x=${x}`);
+        assert.deepEqual(pixel(x, barBox.height + 1), fill,
+          `${name}: the bottom border breaks cleanly under the selected tab at x=${x}`);
+      }
+      const nonSelectedSamples = [
+        ...samples.inactives,
+        samples.tail,
+        samples.actionsLeading,
+        image.width - 2,
+      ].filter(x => x !== null);
+      assert.ok(nonSelectedSamples.length > 0, `${name}: expected non-selected samples`);
+      for (const x of nonSelectedSamples) {
+        const top = pixel(x, 1);
+        const bottom = pixel(x, barBox.height + 1);
+        assert.ok(bottom.every((channel, index) => Math.abs(channel - top[index]) <= colorTolerance),
+          `${name}: the bottom border (${bottom}) matches the top (${top}) at x=${x}`);
+        assert.deepEqual(pixel(x, barBox.height), pixel(x, barBox.height - 3),
+          `${name}: the bottom border is one pixel high at x=${x}`);
+      }
+    };
+
     await host.evaluate(element => { element.style.width = '400px'; });
     await actions.click();
     await splitRight.click();
@@ -1494,6 +1581,8 @@ try {
     await groups.nth(1).waitFor();
     const rightTab = groups.nth(1).getByRole('tab', { selected: true });
     const divider = host.locator('[data-slot="split-pane-divider"]');
+    const leftSplitBar = groups.nth(0).locator('[data-terminal-tab-bar]');
+    const rightSplitBar = groups.nth(1).locator('[data-terminal-tab-bar]');
     for (const width of [401, 901]) {
       await page.setViewportSize({ width, height: 700 });
       await host.evaluate((element, width) => { element.style.width = `${width}px`; }, width);
@@ -1518,14 +1607,8 @@ try {
         const column = (x) => context.getImageData(x, 1, 1, tabBox.height - 1).data;
         assert.deepEqual(column(leftContextWidth), column(leftContextWidth + 3),
           `${width}px/${theme}: the tab must not paint a second line next to the split divider`);
-        if (theme === 'light') {
-          const pixel = (x, y) => context.getImageData(x, y, 1, 1).data;
-          const dividerEdge = pixel(leftContextWidth - 1, 8);
-          assert.deepEqual(dividerEdge, pixel(leftContextWidth + tabBox.width - 1, 8),
-            `${width}px: the divider shares the selected tab's border color`);
-          assert.notDeepEqual(dividerEdge, pixel(leftContextWidth - 1, tabBox.height + 8),
-            `${width}px: the stronger edge follows the height of the tab strip`);
-        }
+        await assertMatchingTabBorders(leftSplitBar, titleBar, `horizontal-split-left-${theme}-${width}`, titleBarColorTolerance);
+        await assertMatchingTabBorders(rightSplitBar, titleBar, `horizontal-split-right-${theme}-${width}`, titleBarColorTolerance);
       }
     }
     await page.setViewportSize({ width: 400, height: 700 });
@@ -1533,46 +1616,32 @@ try {
     const splitActions = groups.nth(1).getByRole('button', { name: '终端页签操作', exact: true });
     await splitActions.click();
     assert.equal(await splitRight.isDisabled(), true, 'A pane narrower than 240 px cannot split horizontally');
-    await actionsMenu.getByRole('menuitem', { name: '最大化或还原窗格', exact: true }).click();
-    const restore = host.getByRole('button', { name: /窗格已最大化/ });
+    await actionsMenu.getByRole('menuitem', { name: /最大化窗格/ }).click();
+    const restore = host.getByRole('button', { name: '还原窗格', exact: true });
     await restore.waitFor();
     assert.equal(await groups.count(), 1);
+    const zoomedBar = groups.first().locator('[data-terminal-tab-bar]');
+    const [zoomedBarBox, restoreBox, zoomedActionsBox] = await Promise.all([
+      zoomedBar.boundingBox(),
+      restore.boundingBox(),
+      groups.first().getByRole('button', { name: '终端页签操作', exact: true }).boundingBox(),
+    ]);
+    assert.equal(zoomedBarBox.height, 32, 'Zooming a pane must not increase tab bar height');
+    assert.equal(restoreBox.height, zoomedActionsBox.height, 'Restore control matches tab actions button height');
     await restore.click();
     await groups.nth(1).waitFor();
     await splitActions.click();
     await actionsMenu.getByRole('menuitem', { name: '退出分屏', exact: true }).click();
     await groups.first().waitFor({ state: 'detached' });
 
-    const assertMatchingTabBorders = async (bar, separator, name, colorTolerance = 0) => {
-      const [barBox, separatorBox] = await Promise.all([bar.boundingBox(), separator.boundingBox()]);
-      assert.equal(barBox.y, separatorBox.y + separatorBox.height, `${name}: the tab bar touches the separator`);
-      assert.equal(barBox.height, 32, `${name}: the border fits within the tab bar height`);
-      const image = await loadImage(await page.screenshot({
-        animations: 'disabled',
-        clip: { x: Math.round(barBox.x), y: Math.round(barBox.y) - 2, width: Math.round(barBox.width), height: barBox.height + 4 },
-        path: `${root}artifacts/tests/terminal-tab-actions/${name}.png`,
-      }));
-      const context = createCanvas(image.width, image.height).getContext('2d');
-      context.drawImage(image, 0, 0);
-      const pixel = (x, y) => context.getImageData(x, y, 1, 1).data;
-      for (const x of [80, image.width - 2]) {
-        const top = pixel(x, 1);
-        const bottom = pixel(x, barBox.height + 1);
-        assert.notDeepEqual(pixel(x, 0), top, `${name}: the separator is one pixel high at x=${x}`);
-        assert.deepEqual(pixel(x, 2), pixel(x, 5), `${name}: the tab bar starts directly below the separator at x=${x}`);
-        assert.ok(bottom.every((channel, index) => Math.abs(channel - top[index]) <= colorTolerance),
-          `${name}: the bottom border (${bottom}) matches the top (${top}) at x=${x}`);
-      }
-      assert.deepEqual(pixel(80, barBox.height), pixel(80, barBox.height - 3), `${name}: the bottom border is one pixel high`);
-    };
-    const titleBar = host.locator('[data-tauri-drag-region]');
-    // The translucent title bar is composited separately and can round a color channel by one unit.
-    const titleBarColorTolerance = 1;
     await page.evaluate(() => window.runtime.useAppStore.getState().setTerminalColorScheme('app'));
-    await tabBar.getByRole('tab').first().click();
-    for (const theme of ['dark', 'light']) {
-      await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
-      await assertMatchingTabBorders(tabBar, titleBar, `titlebar-tab-borders-${theme}`, titleBarColorTolerance);
+    for (const [tabIndex, tabId] of [neighbor, active].entries()) {
+      await host.locator(`[data-session-tab="${tabId}"]`).click();
+      await tabBar.locator(`[data-session-tab="${tabId}"][aria-selected="true"]`).waitFor();
+      for (const theme of ['dark', 'light']) {
+        await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+        await assertMatchingTabBorders(tabBar, titleBar, `titlebar-tab-borders-${theme}-tab-${tabIndex}`, titleBarColorTolerance);
+      }
     }
     await actions.click();
     await actionsMenu.getByRole('menuitem', { name: '向下分屏', exact: true }).click();
@@ -1588,6 +1657,42 @@ try {
         await assertMatchingTabBorders(upperBar, titleBar, `vertical-split-upper-tab-borders-${theme}-${width}`, titleBarColorTolerance);
         await assertMatchingTabBorders(lowerBar, divider, `vertical-split-tab-borders-${theme}-${width}`);
       }
+    }
+    await lowerBar.getByRole('tab', { selected: true }).click();
+    await page.waitForFunction(() => document.querySelector('[data-terminal-group="second"], [data-terminal-group]:nth-of-type(2)'));
+    for (const theme of ['dark', 'light']) {
+      await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+      await assertMatchingTabBorders(upperBar, titleBar, `vertical-split-upper-unfocused-${theme}`, titleBarColorTolerance);
+      await assertMatchingTabBorders(lowerBar, divider, `vertical-split-lower-focused-${theme}`);
+    }
+    await upperBar.getByRole('tab', { selected: true }).click();
+    const extraSessionId = await page.evaluate(() => {
+      const store = window.runtime.useTerminalStore.getState();
+      const sessionId = crypto.randomUUID();
+      store.addSession({ ...window.identity, sessionId });
+      store.setStatus(sessionId, { sessionId, status: 'disconnected' });
+      return sessionId;
+    });
+    try {
+      await upperBar.getByRole('tab').nth(1).waitFor();
+      for (const tabIndex of [0, 1, 0]) {
+        await upperBar.getByRole('tab').nth(tabIndex).click();
+        await page.waitForFunction((idx) => {
+          const tabs = document.querySelectorAll('[data-terminal-group]')[0]?.querySelectorAll('[role="tab"]');
+          return tabs?.[idx]?.getAttribute('aria-selected') === 'true';
+        }, tabIndex);
+        for (const theme of ['dark', 'light']) {
+          await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+          await assertMatchingTabBorders(upperBar, titleBar, `vertical-split-upper-switch-${tabIndex}-${theme}`, titleBarColorTolerance);
+          await assertMatchingTabBorders(lowerBar, divider, `vertical-split-lower-during-switch-${tabIndex}-${theme}`);
+        }
+      }
+    } finally {
+      await page.evaluate((id) => {
+        window.runtime.terminalRegistry.dispose(id);
+        window.runtime.useTerminalStore.getState().removeSession(id);
+      }, extraSessionId);
+      await page.waitForFunction(() => document.querySelectorAll('[data-terminal-group]')[0]?.querySelectorAll('[role="tab"]').length === 1);
     }
     await splitActions.click();
     await actionsMenu.getByRole('menuitem', { name: '退出分屏', exact: true }).click();

@@ -126,7 +126,7 @@ try {
         margins: ['0px', '0px'], barPadding: ['0px', '0px'],
         slotPadding: ['0px', '0px'], inset: 0,
         leadingInset: 0, tabPaddingX: ['6px', '6px'],
-        borderTop: selector === '[data-terminal-tab-bar]' ? '1px' : '0px',
+        borderTop: '0px',
         borderLeft: '1px',
         borderBottom: '0px',
       });
@@ -208,7 +208,7 @@ try {
       }));
       assert.equal(geometry[0].right, geometry[1].left);
       assert.equal(geometry[1].right, geometry[2].left);
-      assert.equal(geometry[index].topBorder, theme === 'light' ? '1px' : '0px');
+      assert.equal(geometry[index].topBorder, '0px');
       assert.equal(geometry[index].bottomBorder, '0px');
       assert.ok(geometry.every(tab => tab.titleCenter === 16), 'Tab titles stay vertically centered');
       await page.waitForFunction(() => {
@@ -224,32 +224,74 @@ try {
       const boundary = await page.evaluate(() => {
         const bar = document.querySelector('[data-terminal-tab-bar]');
         const topLine = getComputedStyle(bar, '::before');
-        const line = getComputedStyle(bar, '::after');
+        const tablistLine = getComputedStyle(bar.querySelector('[role="tablist"]'), '::after');
+        const actionsLine = getComputedStyle(bar.querySelector('[data-terminal-tab-actions]'), '::after');
         const active = getComputedStyle(bar.querySelector('[role="tab"][aria-selected="true"]'));
-        return { lineColor: line.borderBottomColor, sideColor: active.borderRightColor,
-          topColor: topLine.borderTopColor, topWidth: topLine.borderTopWidth, leftColor: active.borderLeftColor,
-          leftWidth: active.borderLeftWidth, rightWidth: active.borderRightWidth, lineWidth: line.borderBottomWidth };
+        const slots = [...bar.querySelectorAll('.session-tab-slot')].map((slot) => {
+          const after = getComputedStyle(slot, '::after');
+          return {
+            active: slot.querySelector('[role="tab"]').getAttribute('aria-selected') === 'true',
+            content: after.content,
+            bottomColor: after.borderBottomColor,
+            bottomWidth: after.borderBottomWidth,
+          };
+        });
+        return {
+          lineColor: tablistLine.borderBottomColor,
+          actionsLineColor: actionsLine.borderBottomColor,
+          actionsLineWidth: actionsLine.borderBottomWidth,
+          sideColor: active.borderRightColor,
+          topColor: topLine.borderTopColor,
+          topWidth: topLine.borderTopWidth,
+          leftColor: active.borderLeftColor,
+          leftWidth: active.borderLeftWidth,
+          rightWidth: active.borderRightWidth,
+          lineWidth: tablistLine.borderBottomWidth,
+          slots,
+        };
       });
       assert.equal(boundary.topColor, boundary.lineColor);
+      assert.equal(boundary.actionsLineColor, boundary.topColor);
+      assert.equal(boundary.actionsLineWidth, '1px');
       assert.equal(boundary.topWidth, '1px');
+      assert.equal(boundary.sideColor, boundary.lineColor);
       assert.equal(boundary.leftColor, boundary.sideColor);
       assert.equal(boundary.leftWidth, '1px');
       assert.equal(boundary.rightWidth, '1px');
       assert.equal(boundary.lineWidth, '1px');
+      for (const slot of boundary.slots) {
+        if (slot.active) {
+          assert.equal(slot.content, 'none');
+        } else {
+          assert.notEqual(slot.content, 'none');
+          assert.equal(slot.bottomWidth, '1px');
+          assert.equal(slot.bottomColor, boundary.topColor);
+        }
+      }
       await page.mouse.move(width / 2, 400);
       await page.waitForTimeout(250);
       const strip = page.locator('[data-terminal-tab-bar]');
       const samples = await strip.evaluate(bar => {
         const bounds = bar.getBoundingClientRect();
         const visibleBounds = bar.querySelector('[data-slot="scroll-area-viewport"]').getBoundingClientRect();
+        const actionsBounds = bar.querySelector('[data-terminal-tab-actions]').getBoundingClientRect();
         const tabs = [...bar.querySelectorAll('[role="tab"]')].map(tab => ({
           active: tab.getAttribute('aria-selected') === 'true', bounds: tab.getBoundingClientRect(),
         })).map(tab => ({ ...tab,
           left: Math.max(visibleBounds.left, tab.bounds.left), right: Math.min(visibleBounds.right, tab.bounds.right) }));
         const active = tabs.find(tab => tab.active);
-        const inactive = tabs.find(tab => !tab.active && tab.right - tab.left > 12);
-        return { active: Math.floor((active.left + active.right) / 2 - bounds.left),
-          inactive: inactive ? Math.floor((inactive.left + inactive.right) / 2 - bounds.left) : null,
+        const activeWidth = active.right - active.left;
+        const lastTab = tabs[tabs.length - 1];
+        const tailLeft = Math.max(visibleBounds.left, lastTab.bounds.right);
+        return {
+          activeCenter: Math.floor((active.left + active.right) / 2 - bounds.left),
+          activeInnerLeft: activeWidth > 12 ? Math.floor(active.left + 2 - bounds.left) : null,
+          activeInnerRight: activeWidth > 12 ? Math.floor(active.right - 3 - bounds.left) : null,
+          inactives: tabs
+            .filter(tab => !tab.active && tab.right - tab.left > 6)
+            .map(tab => Math.floor((tab.left + tab.right) / 2 - bounds.left)),
+          tail: visibleBounds.right - tailLeft > 12 ? Math.floor((tailLeft + visibleBounds.right) / 2 - bounds.left) : null,
+          actionsLeading: Math.floor(actionsBounds.left + 1 - bounds.left),
         };
       });
       const image = await loadImage(await strip.screenshot({ animations: 'disabled' }));
@@ -257,34 +299,109 @@ try {
       const context = canvas.getContext('2d');
       context.drawImage(image, 0, 0);
       const pixel = (x, y) => [...context.getImageData(x, y, 1, 1).data];
-      const top = pixel(samples.active, 0);
-      const fill = pixel(samples.active, 4);
+      const top = pixel(samples.activeCenter, 0);
+      const fill = pixel(samples.activeCenter, 4);
       assert.notDeepEqual(top, fill, `The top border crosses the active tab (${theme}, ${width}px, tab ${index})`);
-      assert.deepEqual(pixel(samples.active, 1), fill, `The top border occupies one pixel (${theme}, ${width}px)`);
-      assert.deepEqual(pixel(samples.active, image.height - 2), fill,
-        `The bottom border occupies one pixel (${theme}, ${width}px)`);
-      for (const x of [samples.active, samples.inactive, image.width - 2].filter(x => x !== null)) {
+      assert.deepEqual(pixel(samples.activeCenter, 1), fill, `The top border occupies one pixel (${theme}, ${width}px)`);
+      for (const x of [samples.activeInnerLeft, samples.activeCenter, samples.activeInnerRight].filter(x => x !== null)) {
+        assert.deepEqual(pixel(x, image.height - 2), fill,
+          `The active tab fill extends to 1px above bottom (${theme}, ${width}px, x=${x})`);
+        assert.deepEqual(pixel(x, image.height - 1), fill,
+          `The bottom border is broken under the active tab (${theme}, ${width}px, tab ${index}, x=${x})`);
+      }
+      for (const x of [samples.activeCenter, ...samples.inactives, samples.tail, samples.actionsLeading, image.width - 2].filter(x => x !== null)) {
         assert.deepEqual(pixel(x, 0), top, `The top border is continuous (${theme}, ${width}px, x=${x})`);
+      }
+      for (const x of [...samples.inactives, samples.tail, samples.actionsLeading, image.width - 2].filter(x => x !== null)) {
         assert.deepEqual(pixel(x, image.height - 1), top,
-          `The bottom border matches the top across the bar (${theme}, ${width}px, x=${x})`);
+          `The bottom border matches the top outside the active tab (${theme}, ${width}px, tab ${index}, x=${x})`);
+        assert.notDeepEqual(pixel(x, image.height - 2), top,
+          `The bottom border occupies one pixel outside the active tab (${theme}, ${width}px, x=${x})`);
       }
       if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tabs-${theme}-${width}-selected-${index}.png` });
     }
-    const appearance = await page.evaluate((theme) => {
-      const properties = ['height', 'width', 'backgroundColor', 'borderBottomWidth', 'borderLeftWidth', 'borderRightWidth',
+    const appearance = await page.evaluate(() => {
+      const properties = ['height', 'width', 'backgroundColor', 'borderTopWidth', 'borderBottomWidth',
+        'borderLeftWidth', 'borderRightWidth', 'borderLeftColor', 'borderRightColor',
         'borderTopLeftRadius', 'borderTopRightRadius', 'paddingLeft', 'paddingRight'];
-      if (theme === 'dark') properties.push('borderTopWidth', 'borderLeftColor', 'borderRightColor');
       return ['[data-terminal-tab-bar]', '[data-sftp-tab-bar]'].map((selector) => {
         const bar = document.querySelector(selector);
         const tab = bar.querySelector('[role="tab"][aria-selected="true"]');
         const style = getComputedStyle(tab);
+        const lineTarget = selector === '[data-terminal-tab-bar]' ? bar.querySelector('[role="tablist"]') : bar;
         return { tab: properties.map((property) => style[property]),
           strip: getComputedStyle(bar).backgroundColor,
-          line: theme === 'dark' ? getComputedStyle(bar, '::after').borderBottomColor : undefined };
+          line: getComputedStyle(lineTarget, '::after').borderBottomColor };
       });
-    }, theme);
+    });
     assert.deepEqual(appearance[0], appearance[1], `${theme} ${width}px terminal/SFTP appearance differs`);
     if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tabs-multiple-${width}.png` });
+  }
+  await page.setViewportSize({ width: 400, height: 720 });
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((theme) => document.documentElement.setAttribute('data-theme', theme), theme);
+    const strip = page.locator('[data-terminal-tab-bar]');
+    await strip.evaluate(bar => { bar.style.maxWidth = '320px'; });
+    try {
+      const scrollScenarios = [
+        { activeIndex: 0, scrollLeft: 100, expectOpen: true },
+        { activeIndex: 0, scrollLeft: 216, expectOpen: false },
+        { activeIndex: 2, scrollLeft: 0, expectOpen: false },
+        { activeIndex: 2, scrollLeft: 80, expectOpen: true },
+      ];
+      for (const scenario of scrollScenarios) {
+        await page.evaluate(async ({ activeIndex, scrollLeft }) => {
+          const { useTerminalStore } = await import('/tab-runtime.js');
+          const sessionId = useTerminalStore.getState().sessions[activeIndex].sessionId;
+          useTerminalStore.getState().setActiveSession(sessionId);
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          const viewport = document.querySelector('[data-terminal-tab-bar] [data-slot="scroll-area-viewport"]');
+          viewport.scrollTo({ left: scrollLeft, behavior: 'instant' });
+          viewport.scrollLeft = scrollLeft;
+        }, scenario);
+        await page.waitForTimeout(100);
+        const samples = await strip.evaluate(bar => {
+          const bounds = bar.getBoundingClientRect();
+          const viewportBounds = bar.querySelector('[data-slot="scroll-area-viewport"]').getBoundingClientRect();
+          const actionsBounds = bar.querySelector('[data-terminal-tab-actions]').getBoundingClientRect();
+          const tabs = [...bar.querySelectorAll('[role="tab"]')].map(tab => {
+            const rect = tab.getBoundingClientRect();
+            return {
+              active: tab.getAttribute('aria-selected') === 'true',
+              left: Math.max(viewportBounds.left, rect.left),
+              right: Math.min(viewportBounds.right, rect.right),
+            };
+          });
+          const active = tabs.find(tab => tab.active && tab.right - tab.left > 12);
+          return {
+            activeCenter: active ? Math.floor((active.left + active.right) / 2 - bounds.left) : null,
+            inactives: tabs
+              .filter(tab => !tab.active && tab.right - tab.left > 12)
+              .map(tab => Math.floor((tab.left + tab.right) / 2 - bounds.left)),
+            actionsLeading: Math.floor(actionsBounds.left + 1 - bounds.left),
+          };
+        });
+        assert.equal(samples.activeCenter !== null, scenario.expectOpen,
+          `${theme} scroll=${scenario.scrollLeft} active visibility`);
+        const image = await loadImage(await strip.screenshot({ animations: 'disabled' }));
+        const canvas = createCanvas(image.width, image.height);
+        const context = canvas.getContext('2d');
+        context.drawImage(image, 0, 0);
+        const pixel = (x, y) => [...context.getImageData(x, y, 1, 1).data];
+        const top = pixel(samples.inactives[0], 0);
+        if (samples.activeCenter !== null) {
+          const fill = pixel(samples.activeCenter, 4);
+          assert.deepEqual(pixel(samples.activeCenter, image.height - 1), fill,
+            `${theme} scroll=${scenario.scrollLeft}: clipped active tab stays open at bottom`);
+        }
+        for (const x of [...samples.inactives, samples.actionsLeading, image.width - 2]) {
+          assert.deepEqual(pixel(x, image.height - 1), top,
+            `${theme} scroll=${scenario.scrollLeft}: non-selected bottom border stays intact at x=${x}`);
+        }
+      }
+    } finally {
+      await strip.evaluate(bar => { bar.style.maxWidth = ''; });
+    }
   }
   for (const { theme, width } of appearances) {
     await page.setViewportSize({ width, height: 720 });
@@ -392,6 +509,7 @@ try {
       useTerminalStore.getState().setActiveSession(first);
     }, theme);
     const colored = page.locator('[data-terminal-tab-bar] [role="tab"]').first();
+    const secondTab = page.locator('[data-terminal-tab-bar] [role="tab"]').nth(1);
     await page.waitForFunction(() => document.querySelector('[data-terminal-tab-bar] [role="tab"]').style.backgroundColor.includes('25%'));
     const activeFill = await colored.evaluate((tab) => tab.style.backgroundColor);
     assert.ok(activeFill.includes('var(--app-bg)'));
@@ -400,6 +518,19 @@ try {
     await colored.evaluate(async (tab) => { await Promise.all(tab.getAnimations().map((animation) => animation.finished)); });
     const selectedBackground = await colored.evaluate((tab) => getComputedStyle(tab).backgroundColor);
     assert.notEqual(selectedBackground, 'rgba(0, 0, 0, 0)');
+    {
+      const strip = page.locator('[data-terminal-tab-bar]');
+      const image = await loadImage(await strip.screenshot({ animations: 'disabled' }));
+      const canvas = createCanvas(image.width, image.height);
+      const context = canvas.getContext('2d');
+      context.drawImage(image, 0, 0);
+      const pixel = (x, y) => [...context.getImageData(x, y, 1, 1).data];
+      const tabBox = await colored.boundingBox();
+      const barBox = await strip.boundingBox();
+      const coloredCenter = Math.floor(tabBox.x + tabBox.width / 2 - barBox.x);
+      assert.deepEqual(pixel(coloredCenter, image.height - 1), pixel(coloredCenter, 4),
+        `Colored active tab keeps the bottom border open (${theme}, ${width}px)`);
+    }
     if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tab-color-${theme}-${width}.png` });
     await page.evaluate(async () => {
       const { useTerminalStore } = await import('/tab-runtime.js');
@@ -413,6 +544,27 @@ try {
     await colored.hover();
     await colored.evaluate(async (tab) => { await Promise.all(tab.getAnimations().map((animation) => animation.finished)); });
     assert.equal(await colored.evaluate((tab) => getComputedStyle(tab).backgroundColor), inactiveBackground);
+    await page.mouse.move(width / 2, 400);
+    await page.waitForTimeout(250);
+    {
+      const strip = page.locator('[data-terminal-tab-bar]');
+      const image = await loadImage(await strip.screenshot({ animations: 'disabled' }));
+      const canvas = createCanvas(image.width, image.height);
+      const context = canvas.getContext('2d');
+      context.drawImage(image, 0, 0);
+      const pixel = (x, y) => [...context.getImageData(x, y, 1, 1).data];
+      const barBox = await strip.boundingBox();
+      const coloredBox = await colored.boundingBox();
+      const secondBox = await secondTab.boundingBox();
+      const coloredCenter = Math.floor(coloredBox.x + coloredBox.width / 2 - barBox.x);
+      const secondCenter = Math.floor(secondBox.x + secondBox.width / 2 - barBox.x);
+      assert.deepEqual(pixel(coloredCenter, image.height - 1), pixel(coloredCenter, 0),
+        `Colored inactive tab paints the bottom border above its opaque fill (${theme}, ${width}px)`);
+      assert.notDeepEqual(pixel(coloredCenter, image.height - 1), pixel(coloredCenter, 4),
+        `Colored inactive tab bottom border contrasts with its fill (${theme}, ${width}px)`);
+      assert.deepEqual(pixel(secondCenter, image.height - 1), pixel(secondCenter, 4),
+        `Switching to tab 2 moves the bottom opening cleanly (${theme}, ${width}px)`);
+    }
     if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tab-color-inactive-${theme}-${width}.png` });
     await page.evaluate(async () => {
       const { useTerminalStore } = await import('/tab-runtime.js');

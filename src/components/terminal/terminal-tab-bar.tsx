@@ -24,11 +24,14 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Kbd } from '@/components/ui/kbd';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
-import { CircleDotIcon, EllipsisIcon, Link2Icon, LockIcon, PinIcon, RadioTowerIcon, XIcon } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { CircleDotIcon, EllipsisIcon, Link2Icon, LockIcon, Minimize2Icon, PinIcon, RadioTowerIcon, XIcon } from 'lucide-react';
 import { useCloseTerminal } from '@/hooks/useCloseTerminal';
 import { cancelSshConnection } from '@/lib/terminal/ssh-connection-attempt';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
@@ -46,11 +49,20 @@ import { useFocusStore } from '@/stores/focusStore';
 
 const DRAG_OVERLAY_CURSOR_GAP = 2;
 
+export interface TerminalPaneZoomState {
+  zoomed: boolean;
+  paneIndex: number;
+  paneCount: number;
+  hiddenActivity?: 'error' | 'unread' | null;
+  shortcut?: string;
+}
+
 export interface TerminalTabBarProps {
   sessions?: TerminalSession[];
   activeSessionId?: string | null;
   forceVisible?: boolean;
   activeGroup?: boolean;
+  paneZoom?: TerminalPaneZoomState;
   onNewTabClick?: () => void;
   onSwitchTab?: () => void;
   onConfigureBroadcast?: () => void;
@@ -314,6 +326,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   activeSessionId: controlledActiveSessionId,
   forceVisible = false,
   activeGroup = true,
+  paneZoom,
   onNewTabClick,
   onSwitchTab,
   onConfigureBroadcast,
@@ -709,9 +722,9 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
             vertical={false}
             size="thin"
             onWheel={handleWheel}
-            className="isolate z-10 h-8 min-w-0 flex-1 [&>[data-slot=scroll-area-scrollbar]]:top-0 [&>[data-slot=scroll-area-scrollbar]]:z-30"
+            className="h-8 min-w-0 flex-1 [&>[data-slot=scroll-area-scrollbar]]:top-0 [&>[data-slot=scroll-area-scrollbar]]:z-30"
           >
-            <div role="tablist" className="flex min-w-0 items-center gap-0 p-0">
+            <div role="tablist" className="flex h-8 min-w-full items-center gap-0 p-0">
               {sessions.map((session, index) => {
                 const isDragging = draggingSessionId === session.sessionId;
                 const draggedIndex = draggingSessionId ? sessions.findIndex((s) => s.sessionId === draggingSessionId) : -1;
@@ -757,75 +770,139 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
               document.body,
             )}
       </DndContext>
-      {!shouldHide && onNewTabClick && (
-        <DropdownMenu onOpenChange={setActionsOpen}>
-          <DropdownMenuTrigger
-            render={(
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                className="mx-1 shrink-0 self-center aria-expanded:bg-accent"
-              />
-            )}
-            aria-label={actionsLabel}
-            onPointerDown={(event) => event.stopPropagation()}
-            onDoubleClick={(event) => event.stopPropagation()}
-          >
-            <EllipsisIcon aria-hidden="true" className="text-app-text-soft" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="w-max max-w-[calc(100vw-16px)]"
-            onPointerDown={(event) => event.stopPropagation()}
-            onDoubleClick={(event) => event.stopPropagation()}
-          >
-            <DropdownMenuGroup>
-              <DropdownMenuItem size="sm" onClick={onNewTabClick}>{t('terminal.newSession.title')}</DropdownMenuItem>
-              {onSwitchTab && <DropdownMenuItem size="sm" onClick={onSwitchTab}>{t('terminal.tabSwitcher.title')}</DropdownMenuItem>}
-              {onConfigureBroadcast && <DropdownMenuItem size="sm" onClick={onConfigureBroadcast}>
-                {t('terminal.broadcast.configure')}
-              </DropdownMenuItem>}
-            </DropdownMenuGroup>
-            {onSplitTab && (
-              <>
+      {!shouldHide && ((paneZoom?.zoomed && onArrangePanes) || onNewTabClick) && (
+        <div data-terminal-tab-actions className="relative flex h-8 shrink-0 items-center gap-1 px-1">
+          {paneZoom?.zoomed && onArrangePanes && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger
+                  render={(
+                    <Button
+                      type="button"
+                      variant="plain"
+                      size="xs"
+                      data-slot="terminal-pane-zoom"
+                      data-zoomed="true"
+                      aria-pressed
+                      aria-label={t('terminal.tab.restoreZoom')}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                      onClick={() => onArrangePanes('terminalZoomPane')}
+                      className="shrink-0 bg-app-primary/12 text-app-primary hover:bg-app-primary/20 @max-[280px]/tabbar:w-6 @max-[280px]/tabbar:px-0"
+                    />
+                  )}
+                >
+                  <Minimize2Icon aria-hidden="true" />
+                  <span className="hidden @min-[420px]/tabbar:inline">{t('terminal.tab.paneMaximized')}</span>
+                  <span aria-hidden="true" className="hidden text-app-primary/60 @min-[420px]/tabbar:inline">·</span>
+                  <span className="hidden tabular-nums @min-[280px]/tabbar:inline">{paneZoom.paneIndex}/{paneZoom.paneCount}</span>
+                  {paneZoom.hiddenActivity && (
+                    <span
+                      data-slot="terminal-pane-zoom-activity"
+                      aria-hidden="true"
+                      className={cn(
+                        'size-1.5 shrink-0 rounded-full',
+                        paneZoom.hiddenActivity === 'error' ? 'bg-destructive' : 'bg-app-success',
+                      )}
+                    />
+                  )}
+                </TooltipTrigger>
+                <TooltipContent align="end">
+                  <span>
+                    {t('terminal.tab.restoreZoomTooltip', { count: Math.max(1, paneZoom.paneCount - 1) })}
+                  </span>
+                  {paneZoom.hiddenActivity && (
+                    <span className="text-muted-foreground">
+                      · {t(paneZoom.hiddenActivity === 'error' ? 'terminal.tab.hiddenPaneError' : 'terminal.tab.hiddenPaneUnread')}
+                    </span>
+                  )}
+                  {paneZoom.shortcut && (
+                    <Kbd className="in-data-[slot=tooltip-content]:bg-muted in-data-[slot=tooltip-content]:text-muted-foreground">
+                      {paneZoom.shortcut}
+                    </Kbd>
+                  )}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          {onNewTabClick && (
+            <DropdownMenu onOpenChange={setActionsOpen}>
+              <DropdownMenuTrigger
+                render={(
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="shrink-0 aria-expanded:bg-accent"
+                  />
+                )}
+                aria-label={actionsLabel}
+                onPointerDown={(event) => event.stopPropagation()}
+                onDoubleClick={(event) => event.stopPropagation()}
+              >
+                <EllipsisIcon aria-hidden="true" className="text-app-text-soft" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="w-max max-w-[calc(100vw-16px)]"
+                onPointerDown={(event) => event.stopPropagation()}
+                onDoubleClick={(event) => event.stopPropagation()}
+              >
+                <DropdownMenuGroup>
+                  <DropdownMenuItem size="sm" onClick={onNewTabClick}>{t('terminal.newSession.title')}</DropdownMenuItem>
+                  {onSwitchTab && <DropdownMenuItem size="sm" onClick={onSwitchTab}>{t('terminal.tabSwitcher.title')}</DropdownMenuItem>}
+                  {onConfigureBroadcast && <DropdownMenuItem size="sm" onClick={onConfigureBroadcast}>
+                    {t('terminal.broadcast.configure')}
+                  </DropdownMenuItem>}
+                </DropdownMenuGroup>
+                {onSplitTab && (
+                  <>
+                    <DropdownMenuSeparator inset />
+                    <DropdownMenuGroup>
+                      <DropdownMenuItem
+                        size="sm"
+                        disabled={!splitTarget || (actionsOpen && !canSplitTab?.('right'))}
+                        onClick={() => { if (splitTarget) onSplitTab(splitTarget, 'right'); }}
+                      >
+                        {t('terminal.tab.splitRight')}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        size="sm"
+                        disabled={!splitTarget || (actionsOpen && !canSplitTab?.('bottom'))}
+                        onClick={() => { if (splitTarget) onSplitTab(splitTarget, 'bottom'); }}
+                      >
+                        {t('terminal.tab.splitDown')}
+                      </DropdownMenuItem>
+                      {onArrangePanes && <>
+                        <DropdownMenuItem size="sm" onClick={() => onArrangePanes('terminalZoomPane')}>
+                          {t(paneZoom?.zoomed ? 'terminal.tab.restoreZoom' : 'terminal.tab.maximizePane')}
+                          {paneZoom?.shortcut && <DropdownMenuShortcut>{paneZoom.shortcut}</DropdownMenuShortcut>}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem size="sm" disabled={paneZoom?.zoomed} onClick={() => onArrangePanes('terminalEqualizePanes')}>
+                          {t('settings.shortcuts.terminalEqualizePanes')}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem size="sm" disabled={paneZoom?.zoomed} onClick={() => onArrangePanes('terminalSwapPane')}>
+                          {t('settings.shortcuts.terminalSwapPane')}
+                        </DropdownMenuItem>
+                      </>}
+                      {onUnsplit && <DropdownMenuItem size="sm" onClick={onUnsplit}>{t('terminal.tab.unsplit')}</DropdownMenuItem>}
+                    </DropdownMenuGroup>
+                  </>
+                )}
                 <DropdownMenuSeparator inset />
                 <DropdownMenuGroup>
                   <DropdownMenuItem
                     size="sm"
-                    disabled={!splitTarget || (actionsOpen && !canSplitTab?.('right'))}
-                    onClick={() => { if (splitTarget) onSplitTab(splitTarget, 'right'); }}
+                    disabled={!canCloseCurrent}
+                    onClick={() => { if (canCloseCurrent) handleCloseSession(activeTab.sessionId); }}
                   >
-                    {t('terminal.tab.splitRight')}
+                    {t('terminal.tab.closeCurrent')}
                   </DropdownMenuItem>
-                  <DropdownMenuItem
-                    size="sm"
-                    disabled={!splitTarget || (actionsOpen && !canSplitTab?.('bottom'))}
-                    onClick={() => { if (splitTarget) onSplitTab(splitTarget, 'bottom'); }}
-                  >
-                    {t('terminal.tab.splitDown')}
-                  </DropdownMenuItem>
-                  {onArrangePanes && <>
-                    <DropdownMenuItem size="sm" onClick={() => onArrangePanes('terminalZoomPane')}>{t('settings.shortcuts.terminalZoomPane')}</DropdownMenuItem>
-                    <DropdownMenuItem size="sm" onClick={() => onArrangePanes('terminalEqualizePanes')}>{t('settings.shortcuts.terminalEqualizePanes')}</DropdownMenuItem>
-                    <DropdownMenuItem size="sm" onClick={() => onArrangePanes('terminalSwapPane')}>{t('settings.shortcuts.terminalSwapPane')}</DropdownMenuItem>
-                  </>}
-                  {onUnsplit && <DropdownMenuItem size="sm" onClick={onUnsplit}>{t('terminal.tab.unsplit')}</DropdownMenuItem>}
                 </DropdownMenuGroup>
-              </>
-            )}
-            <DropdownMenuSeparator inset />
-            <DropdownMenuGroup>
-              <DropdownMenuItem
-                size="sm"
-                disabled={!canCloseCurrent}
-                onClick={() => { if (canCloseCurrent) handleCloseSession(activeTab.sessionId); }}
-              >
-                {t('terminal.tab.closeCurrent')}
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
       )}
       <ConfirmationDialog
         open={!!closingSessionId}

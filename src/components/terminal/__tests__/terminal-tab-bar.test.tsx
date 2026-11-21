@@ -353,8 +353,10 @@ describe('TerminalTabBar', () => {
 
     const tabBar = container.querySelector('[data-terminal-tab-bar]');
     expect(tabBar).toHaveClass('h-8', 'my-0', 'py-0', 'bg-app-surface-muted');
-    expect(tabBar?.querySelector('[data-slot="scroll-area"]')).toHaveClass('h-8');
-    expect(screen.getByRole('tablist')).toHaveClass('p-0', 'gap-0');
+    const scrollArea = tabBar?.querySelector('[data-slot="scroll-area"]');
+    expect(scrollArea).toHaveClass('h-8');
+    expect(scrollArea).not.toHaveClass('isolate', 'z-10');
+    expect(screen.getByRole('tablist')).toHaveClass('h-8', 'min-w-full', 'p-0', 'gap-0');
     for (const tab of screen.getAllByRole('tab')) {
       expect(tab.parentElement).toHaveClass('h-8');
       expect(tab.parentElement).not.toHaveClass('py-1');
@@ -365,6 +367,16 @@ describe('TerminalTabBar', () => {
     expect(screen.getAllByRole('tab')[1]).toHaveClass('border-transparent', 'bg-transparent', 'hover:bg-accent');
 
     expect(screen.queryByRole('button', { name: 'terminal.tab.moreActions' })).not.toBeInTheDocument();
+  });
+
+  it('wraps tab bar actions in a full-height [data-terminal-tab-actions] region', () => {
+    addSession('s1', 'A');
+    const { container } = render(<TerminalTabBar onNewTabClick={vi.fn()} />);
+
+    const actions = container.querySelector('[data-terminal-tab-actions]');
+    expect(actions).toBeInTheDocument();
+    expect(actions).toHaveClass('relative', 'h-8', 'px-1');
+    expect(within(actions as HTMLElement).getByRole('button', { name: 'terminal.tab.moreActions' })).toBeInTheDocument();
   });
 
   it('does not fire onNewTabClick when a tab itself is double-clicked', () => {
@@ -866,5 +878,69 @@ describe('TerminalTabBar', () => {
       agentTerminalLeaseState.clearAll();
       useTerminalBroadcastStore.getState().configure('off');
     }
+  });
+
+  it('shows the inline restore control only while zoomed without triggering double-click new tab', () => {
+    addSession('s1', 'Primary');
+    const onNewTabClick = vi.fn();
+    const onArrangePanes = vi.fn();
+
+    const { rerender } = render(
+      <TerminalTabBar
+        forceVisible
+        activeGroup
+        paneZoom={{ zoomed: false, paneIndex: 1, paneCount: 2, shortcut: 'Ctrl+B Z' }}
+        onNewTabClick={onNewTabClick}
+        onArrangePanes={onArrangePanes}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'terminal.tab.maximizePane' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'terminal.tab.restoreZoom' })).toBeNull();
+
+    rerender(
+      <TerminalTabBar
+        forceVisible
+        activeGroup
+        paneZoom={{ zoomed: true, paneIndex: 1, paneCount: 3, hiddenActivity: 'error', shortcut: 'Ctrl+B Z' }}
+        onNewTabClick={onNewTabClick}
+        onArrangePanes={onArrangePanes}
+      />,
+    );
+
+    const restoreButton = screen.getByRole('button', { name: 'terminal.tab.restoreZoom' });
+    expect(restoreButton).toHaveAttribute('aria-pressed', 'true');
+    expect(restoreButton).toHaveAttribute('data-zoomed', 'true');
+    expect(restoreButton).toHaveTextContent('terminal.tab.paneMaximized');
+    expect(restoreButton).toHaveTextContent('1/3');
+    expect(restoreButton.querySelector('[data-slot="terminal-pane-zoom-activity"]')).toHaveClass('bg-destructive');
+    fireEvent.doubleClick(restoreButton);
+    expect(onNewTabClick).not.toHaveBeenCalled();
+    fireEvent.click(restoreButton);
+    expect(onArrangePanes).toHaveBeenCalledWith('terminalZoomPane');
+  });
+
+  it('updates pane menu items and disables equalize/swap while zoomed', () => {
+    addSession('s1', 'Primary');
+    const onArrangePanes = vi.fn();
+
+    render(
+      <TerminalTabBar
+        forceVisible
+        activeGroup
+        paneZoom={{ zoomed: true, paneIndex: 2, paneCount: 2, shortcut: 'Ctrl+B Z' }}
+        onNewTabClick={vi.fn()}
+        onSplitTab={vi.fn()}
+        onArrangePanes={onArrangePanes}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'terminal.tab.moreActions' }));
+    const restoreItem = screen.getByRole('menuitem', { name: /terminal\.tab\.restoreZoom/ });
+    expect(restoreItem).toHaveTextContent('Ctrl+B Z');
+    expect(screen.getByRole('menuitem', { name: 'settings.shortcuts.terminalEqualizePanes' })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('menuitem', { name: 'settings.shortcuts.terminalSwapPane' })).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(restoreItem);
+    expect(onArrangePanes).toHaveBeenCalledWith('terminalZoomPane');
   });
 });

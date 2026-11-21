@@ -10,7 +10,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { CompactDialogBody, CompactDialogContent, CompactDialogFooter, CompactDialogHeader } from '@/components/ui/compact-dialog';
-import { Minimize2Icon, SquareTerminalIcon } from 'lucide-react';
+import { SquareTerminalIcon } from 'lucide-react';
 import { SplitPane } from '@/components/ui/split-pane';
 import { useConnectSession } from '@/hooks/useConnectSession';
 import { serializeTerminalWorkspace } from '@/lib/terminal/terminal-workspace';
@@ -839,13 +839,31 @@ const Terminal: React.FC = () => {
     const groupActiveSession = groupSessions.find(
       (session) => session.sessionId === group.activeSessionId,
     ) ?? groupSessions[0] ?? null;
+    const groups = getTerminalGroups(split);
+    const paneIndex = Math.max(1, groups.findIndex((item) => item.id === slot) + 1);
+    const isZoomed = zoomedSlot === slot;
+    const zoomShortcut = zoomLeader && zoomKey
+      ? `${getShortcutKeys(zoomLeader, platform).join('+')} ${getShortcutKeys(zoomKey, platform).join('+')}`
+      : undefined;
+    let hiddenActivity: 'error' | 'unread' | null = null;
+    if (isZoomed) {
+      const hiddenIds = new Set(groups.filter((item) => item.id !== slot).flatMap((item) => item.sessionIds));
+      for (const session of sessions) {
+        if (!hiddenIds.has(session.sessionId)) continue;
+        if (session.unreadCommand === 'failed' || session.status === 'error') {
+          hiddenActivity = 'error';
+          break;
+        }
+        if (session.unreadCommand === 'completed') hiddenActivity = 'unread';
+      }
+    }
     const focused = focusedSlot === slot;
     return (
       <div
         data-terminal-group={slot}
         className={cn(
-          'relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-app-bg',
-          focused && 'ring-1 ring-inset ring-app-primary/70',
+          '@container/tabbar isolate relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-app-bg',
+          focused && !isZoomed && 'ring-1 ring-inset ring-app-primary/70',
         )}
         onPointerDownCapture={(e) => {
           // macOS tap-to-click: the tap that focuses an inactive group would
@@ -882,6 +900,13 @@ const Terminal: React.FC = () => {
           activeSessionId={groupActiveSession?.sessionId ?? null}
           forceVisible
           activeGroup={focused}
+          paneZoom={{
+            zoomed: isZoomed,
+            paneIndex,
+            paneCount: groups.length,
+            hiddenActivity,
+            shortcut: zoomShortcut,
+          }}
           onNewTabClick={() => {
             focusGroup(slot);
             setNewSessionDialogOpen(true);
@@ -905,14 +930,6 @@ const Terminal: React.FC = () => {
             ? dropPreview.insertIndex
             : null}
         />
-        {zoomedSlot === slot && <div className="flex shrink-0 items-center justify-end border-b border-app-border/50 bg-app-surface px-2 py-0.5">
-          <Button variant="ghost" size="xs" onClick={() => arrangePanes('terminalZoomPane')}>
-            <Minimize2Icon data-icon="inline-start" />
-            {zoomLeader && zoomKey
-              ? t('terminal.tab.restoreZoomShortcut', { shortcut: getShortcutKeys(zoomLeader, platform).join('+') + ' ' + getShortcutKeys(zoomKey, platform).join('+') })
-              : t('terminal.tab.restoreZoom')}
-          </Button>
-        </div>}
         <div data-terminal-content className="relative min-h-0 flex-1">
           {renderTerminalPane(
             groupActiveSession,
@@ -970,7 +987,7 @@ const Terminal: React.FC = () => {
   return (
     <div
       data-terminal-workspace
-      className="flex h-full flex-col bg-app-bg"
+      className="isolate flex h-full flex-col bg-app-bg"
     >
       <TerminalControllerLayer />
       <TerminalCommandActivity />
