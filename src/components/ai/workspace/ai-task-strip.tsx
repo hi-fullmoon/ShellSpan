@@ -24,6 +24,8 @@ import { AI_EXPANDED_TITLE_CLASS } from './ai-style-classes';
 export interface AiTaskStripProps {
   readonly steps: readonly AgentSessionPlanStep[];
   readonly active?: boolean;
+  readonly open?: boolean;
+  readonly onOpenChange?: (open: boolean) => void;
 }
 
 type TaskDisplayStatus = AgentSessionPlanStep['status'] | 'paused';
@@ -47,9 +49,19 @@ function TaskStatusIcon({ status }: { readonly status: TaskDisplayStatus }): Rea
 }
 
 /** Collapsible projection of real Agent Runtime plan steps. */
-export function AiTaskStrip({ steps, active = true }: AiTaskStripProps): React.ReactNode {
+export function AiTaskStrip({
+  steps,
+  active = true,
+  open: controlledOpen,
+  onOpenChange,
+}: AiTaskStripProps): React.ReactNode {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const handleOpenChange = (next: boolean): void => {
+    if (controlledOpen === undefined) setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  };
   const progressId = useId();
   if (steps.length === 0) return null;
   const displayStatus = (step: AgentSessionPlanStep): TaskDisplayStatus => (
@@ -63,7 +75,7 @@ export function AiTaskStrip({ steps, active = true }: AiTaskStripProps): React.R
   return (
     <Collapsible
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={handleOpenChange}
       className="ai-task-strip w-full min-w-0 shrink-0 overflow-hidden box-border"
       data-slot="ai-task-strip"
     >

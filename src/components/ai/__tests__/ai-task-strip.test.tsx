@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { AiTaskStrip } from '@/components/ai/workspace/ai-task-strip';
+import '@/components/ai/styles/styles.css';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import type { Locale } from '@/types';
@@ -114,5 +115,21 @@ describe('AI task strip', () => {
     expect(within(pausedRow).getByText('已暂停:')).toBeInTheDocument();
     expect(pausedRow.querySelector('[data-status="paused"]')).toBeInTheDocument();
     expect(pausedRow.querySelector('[data-status="inProgress"]')).toBeNull();
+  });
+
+  it('animates collapsible panel height and opacity when toggling tasks', async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <div className="ai-panel-shell">
+        <AiTaskStrip steps={referenceSteps} />
+      </div>,
+    );
+
+    await user.click(screen.getByRole('button', { name: '展开或折叠 5 个任务' }));
+    const panel = container.querySelector<HTMLElement>('.ai-task-strip > [data-slot="collapsible-content"]');
+    expect(panel).toBeInTheDocument();
+    expect(getComputedStyle(panel!).height).toBe('var(--collapsible-panel-height)');
+    expect(getComputedStyle(panel!).overflow).toBe('hidden');
+    expect(getComputedStyle(panel!).transitionProperty).toBe('height, opacity');
   });
 });
