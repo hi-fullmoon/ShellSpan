@@ -598,8 +598,9 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       if (controller) {
         try {
           await controller.whenOutputReady();
-          // A prompt can reach the broker before its state event reaches this view.
-          if (controller.hasPendingUserInput()) await integrationRefresh;
+          // Always await the live broker snapshot so prompt state and kernel
+          // termios ECHO credential detection are fresh before ready-gate ack.
+          await integrationRefresh;
           const current = activeLeases.get(lease.sessionId);
           outputListenerReady = !disposed
             && current?.lease.operationId === lease.operationId

@@ -422,6 +422,10 @@ impl SessionRecord {
         self.capture.clear();
         self.screen_model = None;
         self.display_screen = None;
+        #[cfg(unix)]
+        {
+            self.echo_probe = None;
+        }
         advance_integration_state_revision(self)?;
         Ok(())
     }

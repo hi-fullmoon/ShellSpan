@@ -270,8 +270,8 @@ impl RemoteNativeBash {
         } else {
             None
         };
-        let parent = resolve_staging_parent(session);
-        cleanup_stale_staging_dirs(&sftp, &parent);
+        let (parent, remote_now) = resolve_staging_parent(session);
+        cleanup_stale_staging_dirs(&sftp, &parent, remote_now);
         let root = format!("{parent}/.ss-nip-{}", Uuid::new_v4().simple());
         sftp.mkdir(Path::new(&root), 0o700)
             .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
@@ -478,8 +478,8 @@ impl RemoteNativeBash {
             &artifact.module_sha256,
         )?
         .bind_scoped_zle_core(&core)?;
-        let parent = resolve_staging_parent(session);
-        cleanup_stale_staging_dirs(&sftp, &parent);
+        let (parent, remote_now) = resolve_staging_parent(session);
+        cleanup_stale_staging_dirs(&sftp, &parent, remote_now);
         let root = format!("{parent}/.ss-nip-{}", Uuid::new_v4().simple());
         sftp.mkdir(Path::new(&root), 0o700)
             .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
@@ -785,20 +785,24 @@ fn is_valid_staging_parent(path: &str) -> bool {
         && !trimmed.split('/').any(|segment| segment == "..")
 }
 
-fn parse_staging_parent(tag: &str, output: &[u8]) -> Option<String> {
+fn parse_staging_parent(tag: &str, output: &[u8]) -> Option<(String, Option<u64>)> {
     let prefix = format!("{tag}\t");
     let mut records = output
         .split(|byte| *byte == b'\n')
         .filter_map(|line| line.strip_prefix(prefix.as_bytes()));
-    let candidate = std::str::from_utf8(records.next()?).ok()?.trim();
+    let record = std::str::from_utf8(records.next()?).ok()?.trim();
     if records.next().is_some() {
         return None;
     }
+    let (candidate, epoch) = match record.split_once('\t') {
+        Some((path, secs)) => (path.trim(), secs.trim().parse::<u64>().ok()),
+        None => (record, None),
+    };
     let normalized = candidate.trim_end_matches('/');
-    is_valid_staging_parent(normalized).then(|| normalized.to_string())
+    is_valid_staging_parent(normalized).then(|| (normalized.to_string(), epoch))
 }
 
-fn resolve_staging_parent(session: &Session) -> String {
+fn resolve_staging_parent(session: &Session) -> (String, Option<u64>) {
     let tag = format!("shellspan-stage-{}", Uuid::new_v4().simple());
     let probe = format!(
         r#"ss_try_dir() {{
@@ -812,11 +816,12 @@ fn resolve_staging_parent(session: &Session) -> String {
   fi
   [ -d "$dir" ] && [ -w "$dir" ] || return 1
   p="$dir/.ss-probe-$$"
-  (umask 077 && builtin printf '#!/bin/sh\nexit 0\n' > "$p" && command chmod 700 "$p" && "$p") 2>/dev/null
+  (umask 077 && printf '#!/bin/sh\nexit 0\n' > "$p" && command chmod 700 "$p" && "$p") 2>/dev/null
   rc=$?
   command rm -f "$p" 2>/dev/null || true
   [ "$rc" -eq 0 ] || return 1
-  builtin printf '\n%s\t%s\n' '{tag}' "$dir"
+  now=$(command date +%s 2>/dev/null || true)
+  printf '\n%s\t%s\t%s\n' '{tag}' "$dir" "$now"
   return 0
 }}
 ss_try_dir "${{XDG_RUNTIME_DIR:-}}" 0 && exit 0
@@ -831,7 +836,7 @@ exit 1"#,
     read_ssh_setup_command(session, &probe)
         .ok()
         .and_then(|output| parse_staging_parent(&tag, &output))
-        .unwrap_or_else(|| "/tmp".to_string())
+        .unwrap_or_else(|| ("/tmp".to_string(), None))
 }
 
 fn is_staging_dir_name(name: &str) -> bool {
@@ -839,16 +844,18 @@ fn is_staging_dir_name(name: &str) -> bool {
         .is_some_and(|hex| hex.len() == 32 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
-fn cleanup_stale_staging_dirs(sftp: &ssh2::Sftp, parent: &str) {
-    let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) else {
+fn cleanup_stale_staging_dirs(sftp: &ssh2::Sftp, parent: &str, remote_now_secs: Option<u64>) {
+    // Only compare remote mtimes against the remote host's own clock so clock
+    // skew between local and remote machines can never evict live sessions.
+    let Some(now) = remote_now_secs else {
         return;
     };
-    let cutoff = now.as_secs().saturating_sub(STALE_STAGING_MAX_AGE_SECS);
+    let cutoff = now.saturating_sub(STALE_STAGING_MAX_AGE_SECS);
     let Ok(entries) = sftp.readdir(Path::new(parent)) else {
         return;
     };
     let mut cleaned = 0usize;
-    for (path, stat) in entries {
+    for (path, _) in entries {
         if cleaned >= MAX_STALE_STAGING_CLEANUPS {
             break;
         }
@@ -858,7 +865,15 @@ fn cleanup_stale_staging_dirs(sftp: &ssh2::Sftp, parent: &str) {
         if !is_staging_dir_name(name) {
             continue;
         }
-        if stat.mtime.is_some_and(|mtime| mtime <= cutoff) {
+        // Use lstat and require S_IFDIR so a planted symlink in /tmp is never followed.
+        let Ok(lstat) = sftp.lstat(&path) else {
+            continue;
+        };
+        let is_real_dir = lstat.perm.is_some_and(|mode| (mode & 0o170000) == 0o040000);
+        if !is_real_dir {
+            continue;
+        }
+        if lstat.mtime.is_some_and(|mtime| mtime <= cutoff) {
             if let Some(dir) = path.to_str() {
                 cleanup(sftp, dir);
                 cleaned += 1;
@@ -874,17 +889,26 @@ mod staging_tests {
     #[test]
     fn parse_staging_parent_validates_bounds_and_safety() {
         assert_eq!(
-            parse_staging_parent("tag", b"banner\ntag\t/run/user/1000/\n"),
-            Some("/run/user/1000".into())
+            parse_staging_parent("tag", b"banner\ntag\t/run/user/1000/\t1700000000\n"),
+            Some(("/run/user/1000".into(), Some(1_700_000_000)))
         );
         assert_eq!(
-            parse_staging_parent("tag", b"tag\t/home/u/.cache/shellspan\n"),
-            Some("/home/u/.cache/shellspan".into())
+            parse_staging_parent("tag", b"tag\t/home/u/.cache/shellspan\t\n"),
+            Some(("/home/u/.cache/shellspan".into(), None))
         );
-        assert_eq!(parse_staging_parent("tag", b"tag\t/\n"), None);
-        assert_eq!(parse_staging_parent("tag", b"tag\trelative/path\n"), None);
-        assert_eq!(parse_staging_parent("tag", b"tag\t/tmp/../etc\n"), None);
-        let too_long = format!("tag\t/{}\n", "a".repeat(MAX_STAGING_PARENT_BYTES + 1));
+        assert_eq!(parse_staging_parent("tag", b"tag\t/\t1700000000\n"), None);
+        assert_eq!(
+            parse_staging_parent("tag", b"tag\trelative/path\t1700000000\n"),
+            None
+        );
+        assert_eq!(
+            parse_staging_parent("tag", b"tag\t/tmp/../etc\t1700000000\n"),
+            None
+        );
+        let too_long = format!(
+            "tag\t/{}\t1700000000\n",
+            "a".repeat(MAX_STAGING_PARENT_BYTES + 1)
+        );
         assert_eq!(parse_staging_parent("tag", too_long.as_bytes()), None);
         assert_eq!(
             parse_staging_parent("tag", b"tag\t/tmp\ntag\t/run/user/1000\n"),

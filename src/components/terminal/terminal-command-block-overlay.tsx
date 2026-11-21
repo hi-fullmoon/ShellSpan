@@ -38,13 +38,22 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
   useEffect(() => {
     let frame: number | undefined;
     let cachedScreen: HTMLElement | null = null;
+    let observedScreen: HTMLElement | null = null;
     let geometryDirty = true;
     let cachedGeometry: { offset: number; rowHeight: number } | null = null;
-    let lastRenderKey = '';
+
+    const invalidateGeometry = () => {
+      geometryDirty = true;
+      schedule();
+    };
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(invalidateGeometry) : null;
 
     const measureGeometry = (overlay: HTMLElement): { offset: number; rowHeight: number } | null => {
       if (!cachedScreen || !cachedScreen.isConnected) {
+        if (observedScreen && observer) observer.unobserve(observedScreen);
         cachedScreen = terminal.element?.querySelector<HTMLElement>('.xterm-screen') ?? null;
+        observedScreen = cachedScreen;
+        if (observedScreen && observer) observer.observe(observedScreen);
       }
       if (!cachedScreen || !cachedScreen.clientHeight || terminal.rows <= 0) return null;
       return {
@@ -58,7 +67,6 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
       const overlay = bounds.current;
       const buffer = terminal.buffer.active;
       if (!overlay || buffer.type !== 'normal' || !tracker) {
-        lastRenderKey = '';
         setVisible((current) => current.length ? [] : current);
         return;
       }
@@ -67,15 +75,11 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
         geometryDirty = false;
       }
       if (!cachedGeometry) {
-        lastRenderKey = '';
         setVisible((current) => current.length ? [] : current);
         return;
       }
       const { viewportY } = buffer;
       const { offset, rowHeight } = cachedGeometry;
-      const renderKey = `${viewportY}|${terminal.rows}|${revision}|${offset}|${rowHeight}`;
-      if (renderKey === lastRenderKey) return;
-      lastRenderKey = renderKey;
       const rows = new Map<number, TerminalCommandBlock>();
       for (const block of tracker.list()) {
         const line = block.prompt?.line;
@@ -89,14 +93,9 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
       ) ? current : visibleBlocks);
     };
     const schedule = () => { if (frame === undefined) frame = requestAnimationFrame(update); };
-    const invalidateGeometry = () => {
-      geometryDirty = true;
-      schedule();
-    };
     schedule();
     const disposables = [terminal.onScroll(schedule), terminal.onResize(invalidateGeometry),
       terminal.onRender(schedule), terminal.buffer.onBufferChange(invalidateGeometry)];
-    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(invalidateGeometry) : null;
     if (observer && bounds.current) observer.observe(bounds.current);
     return () => {
       if (frame !== undefined) cancelAnimationFrame(frame);

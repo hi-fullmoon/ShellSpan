@@ -153,6 +153,7 @@ export function installTerminalEdgeBackground(terminal: Terminal): IDisposable {
   ];
   const observer = new ResizeObserver(invalidateLayout);
   observer.observe(element);
+  observer.observe(screen);
   schedule();
   return {
     dispose() {
