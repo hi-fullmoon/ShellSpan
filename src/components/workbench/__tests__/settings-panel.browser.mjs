@@ -267,7 +267,8 @@ try {
     })), 'every pet switch must retain its clickable text label');
     assert.equal(await panel.locator('[data-slot="setting-control"] [role="switch"]').count(), 6);
     assert.equal(await panel.locator('#feedback-description').count(), 0);
-    const taskGroup = panel.locator('[data-slot="integration-group"]').nth(1);
+    assert.equal(await panel.locator('[data-slot="petdex-preferences"]').getAttribute('data-inactive'), 'true');
+    const taskGroup = panel.locator('[data-slot="integration-group"]').first();
     assert.equal(await taskGroup.locator('[data-slot="separator"]').count(), 2);
     const taskRows = await taskGroup.locator('[data-slot="field"]').evaluateAll(rows => rows.map(row => {
       const label = row.querySelector('label').getBoundingClientRect();
@@ -283,17 +284,17 @@ try {
     }), 'task description must be a subtitle above the settings card');
     await page.screenshot({ path: `/tmp/shellspan-pet-subtitle-${viewport.width}.png` });
     const geometry = await panel.evaluate((element) => {
-      const cards = [...element.querySelectorAll('[data-slot="integration-group"]')];
+      const sections = [...element.querySelectorAll('[data-slot="settings-group"], [data-slot="integration-group"], [data-slot="petdex-diagnostics"]')];
       return {
         overflow: element.scrollWidth - element.clientWidth,
-        gaps: cards.slice(1).map((card, index) => card.getBoundingClientRect().top - cards[index].getBoundingClientRect().bottom),
+        gaps: sections.slice(1).map((section, index) => Math.round(section.getBoundingClientRect().top - sections[index].getBoundingClientRect().bottom)),
         switchesFit: [...element.querySelectorAll('[role="switch"]')].every((control) => control.getBoundingClientRect().right <= element.getBoundingClientRect().right),
       };
     });
     assert.ok(geometry.overflow <= 0, `integration overflow at ${viewport.width}`);
     assert.deepEqual(geometry.gaps, [12, 12, 12]);
-    assert.deepEqual(await panel.getByRole('heading', { level: 3 }).allTextContents(), ['桌宠联动', '任务提醒', '消息气泡', '连接与诊断']);
-    assert.ok(await panel.locator('[data-slot="integration-group"]').evaluateAll((groups) => groups.every((group) => {
+    assert.deepEqual(await panel.getByRole('heading', { level: 3 }).allTextContents(), ['桌宠联动', '任务提醒', '消息气泡']);
+    assert.ok(await panel.locator('[data-slot="settings-group"], [data-slot="integration-group"]').evaluateAll((groups) => groups.every((group) => {
       const title = group.querySelector('h3');
       const card = group.querySelector('[data-slot="card"]');
       return title.id === group.getAttribute('aria-labelledby')
@@ -301,21 +302,21 @@ try {
         && getComputedStyle(title).fontSize === '14px';
     })), 'group titles should match other settings sections and sit above each card');
     assert.ok(geometry.switchesFit, `switches clipped at ${viewport.width}`);
+    assert.equal(await panel.locator('[data-slot="collapsible-trigger"]').count(), 1);
     assert.equal(await panel.locator('[data-slot="collapsible-content"]:visible').count(), 0);
-    await panel.locator('[data-slot="collapsible-trigger"]').first().click();
-    assert.ok(await panel.locator('[data-slot="collapsible-content"]').first().isVisible());
-    const connectionDetails = panel.locator('[data-slot="collapsible-trigger"]').last();
-    await connectionDetails.scrollIntoViewIfNeeded();
-    await connectionDetails.focus();
+    const diagnosticsTrigger = panel.locator('[data-slot="collapsible-trigger"]').first();
+    await diagnosticsTrigger.scrollIntoViewIfNeeded();
+    await diagnosticsTrigger.focus();
     await page.keyboard.press('Enter');
-    assert.equal(await connectionDetails.getAttribute('aria-expanded'), 'true');
-    assert.ok(await connectionDetails.evaluate((element) => {
+    assert.equal(await diagnosticsTrigger.getAttribute('aria-expanded'), 'true');
+    assert.ok(await panel.locator('[data-slot="collapsible-content"]').first().isVisible());
+    assert.ok(await diagnosticsTrigger.evaluate((element) => {
       const rect = element.getBoundingClientRect();
       const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
       return hit === element || element.contains(hit);
-    }), 'connection diagnostics must remain reachable below the message settings');
+    }), 'unified diagnostics must remain reachable below the message settings');
     await page.keyboard.press('Space');
-    assert.equal(await connectionDetails.getAttribute('aria-expanded'), 'false');
+    assert.equal(await diagnosticsTrigger.getAttribute('aria-expanded'), 'false');
     await page.screenshot({ path: `/tmp/shellspan-integrations-${viewport.width}.png` });
 
     await openSection('feedback');

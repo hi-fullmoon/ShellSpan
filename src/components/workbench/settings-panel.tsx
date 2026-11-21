@@ -61,6 +61,7 @@ import { SettingRow, SettingsGroup } from './settings-layout';
 import { TerminalTitleSettings } from '@/components/terminal/terminal-title-settings';
 import { TerminalColorSchemeControl } from '@/components/terminal/terminal-color-settings';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
+import { cn } from '@/lib/utils';
 
 interface ShortcutGroup {
   id: 'app' | 'terminal' | 'sftp';
@@ -442,7 +443,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           && operationRevision === petdexOperationRevisionRef.current
         ) {
           setPetdexStatus(status);
-          toast(t('settings.experimental.petdex.messages.saved'));
+          toast.success(t('settings.experimental.petdex.messages.saved'), { id: 'petdex-preferences-saved' });
         }
       })
       .catch(() => {
@@ -468,7 +469,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         if (petdexMountedRef.current && operationRevision === petdexOperationRevisionRef.current) {
           setPetdexStatus(result.diagnostic);
           setPetdexHealth(result.health);
-          toast(t('settings.experimental.petdex.checkComplete'));
+          toast.info(t('settings.experimental.petdex.checkComplete'));
         }
         return;
       }
@@ -480,7 +481,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         setPetdexStatus(result.diagnostic);
         const message = t(PETDEX_PREVIEW_LABEL_KEYS[result.preview]);
         if (result.preview === 'failed') toast.error(message);
-        else toast(message);
+        else if (result.preview === 'requested') toast.success(message);
+        else toast.info(message);
       }
     } catch {
       if (
@@ -686,69 +688,60 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
             <TabsContent value="experimental" className="w-full">
               <div className="flex min-w-0 flex-col gap-3">
-                <IntegrationGroup title={t('settings.experimental.group.integration')}>
-                  <SettingRow controlId="petdex-enabled" labelId="petdex-integration-label" label={t('settings.experimental.petdex.title')}
-                    descriptionId="petdex-integration-description" description={t('settings.experimental.petdex.description')}>
-                      <Switch
-                        id="petdex-enabled"
-                        aria-label={t('settings.experimental.petdex.enabled')}
-                        aria-describedby="petdex-integration-description petdex-privacy-description"
-                        aria-busy={petdexConfiguring}
-                        checked={displayedPetdexEnabled}
-                        onCheckedChange={(enabled) => handlePetdexEnabledChange(enabled)}
-                      />
-                  </SettingRow>
-                </IntegrationGroup>
-                <IntegrationGroup title={t('settings.experimental.group.tasks')}
-                  description={t('settings.experimental.petdex.categoriesDescription')} descriptionId="petdex-categories-description">
-                  <div className="flex flex-col">
-                    {(['ssh', 'sftp', 'ai'] as const).map((category, index) => (
-                      <React.Fragment key={category}>
-                      {index > 0 && <Separator />}
-                      <SettingRow className="min-h-10 flex-row items-center gap-3 py-1 [&>[data-slot=setting-control]]:w-auto" controlId={`petdex-category-${category}`} label={t(`settings.experimental.petdex.category.${category}`)} description={null}>
-                        <Switch
-                          id={`petdex-category-${category}`}
-                          aria-label={t(`settings.experimental.petdex.category.${category}`)}
-                          aria-describedby="petdex-categories-description"
-                          aria-busy={petdexConfiguring}
-                          checked={petdexCategories[category]}
-                          onCheckedChange={(enabled) => handlePetdexEnabledChange(enabled, category)}
-                        />
-                      </SettingRow>
-                      </React.Fragment>
-                    ))}
-                  </div>
-                </IntegrationGroup>
-                <IntegrationGroup title={t('settings.experimental.petdex.messages.title')}>
-                  <PetdexMessageSettings />
-                </IntegrationGroup>
-                <IntegrationGroup title={t('settings.experimental.group.diagnostics')}>
-                  <SettingRow labelId="petdex-status-label" label={t('settings.experimental.petdex.status')} description={t('settings.experimental.petdex.communicationNote')}>
-                      <div
-                        role="status"
-                        aria-label={t('settings.experimental.petdex.statusAnnouncement', {
-                          status: t(PETDEX_STATUS_LABEL_KEYS[petdexStatus]),
-                        })}
-                        aria-live="polite"
-                        aria-atomic="true"
-                        aria-busy={testingPetdex || checkingPetdex || petdexConfiguring}
+                <SettingsGroup
+                  title={t('settings.experimental.group.integration')}
+                  titleId="petdex-integration-group-title"
+                  action={(
+                    <div
+                      role="status"
+                      aria-label={t('settings.experimental.petdex.statusAnnouncement', {
+                        status: t(PETDEX_STATUS_LABEL_KEYS[petdexStatus]),
+                      })}
+                      aria-live="polite"
+                      aria-atomic="true"
+                      aria-busy={testingPetdex || checkingPetdex || petdexConfiguring}
+                    >
+                      <Badge
+                        variant={petdexStatus === 'connected'
+                          ? 'default'
+                          : petdexStatus === 'connectionError'
+                            ? 'destructive'
+                            : 'outline'}
                       >
-                        <Badge
-                          variant={petdexStatus === 'connected'
-                            ? 'default'
-                            : petdexStatus === 'connectionError'
-                              ? 'destructive'
-                              : 'outline'}
-                        >
-                          {t(PETDEX_STATUS_LABEL_KEYS[petdexStatus])}
-                        </Badge>
-                      </div>
+                        {t(PETDEX_STATUS_LABEL_KEYS[petdexStatus])}
+                      </Badge>
+                    </div>
+                  )}
+                >
+                  <SettingRow
+                    controlId="petdex-enabled"
+                    labelId="petdex-integration-label"
+                    label={t('settings.experimental.petdex.title')}
+                    descriptionId="petdex-integration-description"
+                    description={t('settings.experimental.petdex.description')}
+                  >
+                    <Switch
+                      id="petdex-enabled"
+                      aria-label={t('settings.experimental.petdex.enabled')}
+                      aria-describedby="petdex-integration-description petdex-privacy-description"
+                      aria-busy={petdexConfiguring}
+                      checked={displayedPetdexEnabled}
+                      onCheckedChange={(enabled) => handlePetdexEnabledChange(enabled)}
+                    />
                   </SettingRow>
-                  <CardContent className="flex min-w-0 flex-col gap-3 px-3.5 pb-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button size="sm" variant="outline" type="button"
+                  <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 bg-muted/25 px-4 py-2.5">
+                    <p id="petdex-privacy-description" className="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground">
+                      {t('settings.experimental.petdex.privacy')}
+                      {petdexView.subscriptionFailed && ` ${t('settings.experimental.petdex.subscriptionError')}`}
+                    </p>
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        type="button"
                         disabled={!petdexEnabled || testingPetdex || checkingPetdex || petdexConfiguring}
-                        onClick={() => void handleTestPetdex(true)}>
+                        onClick={() => void handleTestPetdex(true)}
+                      >
                         <RotateCcwIcon data-icon="inline-start" />
                         {t(checkingPetdex ? 'settings.experimental.petdex.status.checking' : 'settings.experimental.petdex.recheck')}
                       </Button>
@@ -766,13 +759,49 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                           : t('settings.experimental.petdex.testAction')}
                       </Button>
                     </div>
-                    <p id="petdex-privacy-description" className="text-xs leading-relaxed text-muted-foreground">
-                      {t('settings.experimental.petdex.privacy')}
-                      {petdexView.subscriptionFailed && ` ${t('settings.experimental.petdex.subscriptionError')}`}
-                    </p>
-                    <PetdexDiagnostics snapshot={petdexView.snapshot} status={petdexStatus} health={petdexHealth} />
-                  </CardContent>
-                </IntegrationGroup>
+                  </div>
+                </SettingsGroup>
+
+                <div
+                  data-slot="petdex-preferences"
+                  data-inactive={!displayedPetdexEnabled ? 'true' : undefined}
+                  className={cn(
+                    'flex min-w-0 flex-col gap-3 transition-opacity duration-200',
+                    !displayedPetdexEnabled && 'opacity-65 hover:opacity-100 focus-within:opacity-100',
+                  )}
+                >
+                  <IntegrationGroup
+                    title={t('settings.experimental.group.tasks')}
+                    description={t('settings.experimental.petdex.categoriesDescription')}
+                    descriptionId="petdex-categories-description"
+                  >
+                    <div className="flex flex-col">
+                      {(['ssh', 'sftp', 'ai'] as const).map((category, index) => (
+                        <React.Fragment key={category}>
+                          {index > 0 && <Separator className="mx-4 data-horizontal:w-auto" />}
+                          <SettingRow
+                            className="min-h-10 flex-row items-center gap-3 py-1 [&>[data-slot=setting-control]]:w-auto"
+                            controlId={`petdex-category-${category}`}
+                            label={t(`settings.experimental.petdex.category.${category}`)}
+                            description={null}
+                          >
+                            <Switch
+                              id={`petdex-category-${category}`}
+                              aria-label={t(`settings.experimental.petdex.category.${category}`)}
+                              aria-describedby="petdex-categories-description"
+                              aria-busy={petdexConfiguring}
+                              checked={petdexCategories[category]}
+                              onCheckedChange={(enabled) => handlePetdexEnabledChange(enabled, category)}
+                            />
+                          </SettingRow>
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  </IntegrationGroup>
+                  <PetdexMessageSettings />
+                </div>
+
+                <PetdexDiagnostics snapshot={petdexView.snapshot} status={petdexStatus} health={petdexHealth} />
               </div>
             </TabsContent>
 

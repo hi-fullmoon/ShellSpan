@@ -4,7 +4,6 @@ import { StrictMode } from 'react';
 import { toast } from 'sonner';
 import { afterEach, expect, it } from 'vitest';
 import { PetdexMessageSettings } from '../petdex-message-settings';
-import { Card } from '@/components/ui/card';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import zhCN from '@/locales/zh-CN';
@@ -28,17 +27,18 @@ it.each([
   const strings = locale === 'zh-CN' ? zhCN : enUS;
   expect(screen.getByText(strings['settings.experimental.description'])).toBeVisible();
   expect(screen.getByRole('switch', { name: strings['settings.experimental.petdex.messages.enabled'] })).toBeVisible();
+  expect(document.querySelector('[data-slot="petdex-preferences"]')).toHaveAttribute('data-inactive', 'true');
 });
 
-it.each(['zh-CN', 'en-US'] as const)('renders default gates, readable labels, keyboard focus and accepted wording in %s', async (locale) => {
+it.each(['zh-CN', 'en-US'] as const)('renders default gates, readable labels, keyboard focus and header action in %s', async (locale) => {
   useAppStore.setState({ locale, petdexEnabled: false, petdexMessagesEnabled: false, petdexMessageDetailsEnabled: false, petdexRequestedMessages: null });
   await initI18n(locale);
   const strings = locale === 'zh-CN' ? zhCN : enUS;
   const history = toast.getHistory().length;
-  render(<StrictMode><Card><PetdexMessageSettings /></Card></StrictMode>);
+  render(<StrictMode><PetdexMessageSettings /></StrictMode>);
   const test = screen.getByRole('button', { name: strings['settings.experimental.petdex.messages.test'] });
   expect(test).toBeDisabled();
-  expect(test.closest('[data-slot="card"]')).not.toBeNull();
+  expect(test.closest('[data-slot="settings-group-header"]')).not.toBeNull();
   const message = screen.getByRole('switch', { name: strings['settings.experimental.petdex.messages.enabled'] });
   const details = screen.getByRole('switch', { name: strings['settings.experimental.petdex.messages.details'] });
   expect(message).not.toBeChecked();
@@ -50,8 +50,5 @@ it.each(['zh-CN', 'en-US'] as const)('renders default gates, readable labels, ke
   message.focus();
   await userEvent.tab();
   expect(details).toHaveFocus();
-  expect(screen.queryAllByRole('definition')).toHaveLength(0);
-  await userEvent.click(screen.getByRole('button', { name: strings['settings.experimental.petdex.messages.diagnostic'] }));
-  expect(screen.getAllByRole('definition')).toHaveLength(4);
   expect(toast.getHistory()).toHaveLength(history);
 });
