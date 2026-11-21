@@ -67,7 +67,7 @@ export function AiSubagentStrip({
           : <ChevronUpIcon aria-hidden="true" data-icon="inline-end" />}
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="ai-subagent-strip-list max-h-56 overflow-y-auto px-1 pt-0.5 pb-1.5" tabIndex={0}>
+        <div className="ai-subagent-strip-list max-h-56 overflow-y-auto px-1 pt-0.5 pb-1" tabIndex={0}>
           <AiSubagentTreeList
             entries={entries}
             currentSessionId={currentSessionId}
