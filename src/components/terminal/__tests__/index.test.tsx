@@ -838,4 +838,21 @@ describe('Terminal', () => {
     expect(screen.getAllByTestId('terminal-pane')).toHaveLength(1);
     expect(container.querySelector('[data-terminal-group]')).toBeNull();
   });
+
+  it('renders the split divider with the standard app resize divider color', () => {
+    ['s1', 's2'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+
+    const { container } = render(<Terminal />);
+    fireEvent.contextMenu(screen.getAllByRole('tab')[0], { clientX: 10, clientY: 20 });
+    fireEvent.click(screen.getByRole('button', { name: 'split-right' }));
+
+    const divider = container.querySelector('[data-slot="split-pane-divider"]');
+    expect(divider).toBeInTheDocument();
+    expect(divider).toHaveClass('bg-app-resize-divider');
+    expect(divider).not.toHaveClass('bg-app-border/15');
+  });
 });

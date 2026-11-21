@@ -1014,7 +1014,6 @@ const Terminal: React.FC = () => {
             ? updateTerminalSplitAtPath(current, path, nextSplit) as TerminalSplitState
             : current);
         }}
-        dividerStyle="subtle"
       />
     );
   };
@@ -1026,7 +1025,7 @@ const Terminal: React.FC = () => {
     >
       <TerminalControllerLayer />
       <TerminalCommandActivity />
-      <TerminalBroadcastControls visible={terminalVisible} />
+      <TerminalBroadcastControls visible={terminalVisible} onSelectSession={activateSwitcherTab} />
       {sessions.length > 0 && !split && (
         <TerminalTabBar
           onNewTabClick={() => setNewSessionDialogOpen(true)}
