@@ -1459,12 +1459,36 @@ impl SubAgentManager {
         Ok(child)
     }
 
+    fn ensure_owned_descendant(
+        &self,
+        ancestor_session_id: &str,
+        child_session_id: &str,
+    ) -> Result<AgentSessionSnapshot, String> {
+        let child = self.sessions.snapshot(child_session_id)?;
+        let mut cursor = child.header.parent_session_id.clone();
+        let mut visited = HashSet::from([child_session_id.to_owned()]);
+        while let Some(parent_id) = cursor {
+            if parent_id == ancestor_session_id {
+                return Ok(child);
+            }
+            if !visited.insert(parent_id.clone()) {
+                break;
+            }
+            cursor = self
+                .sessions
+                .snapshot(&parent_id)
+                .ok()
+                .and_then(|snapshot| snapshot.header.parent_session_id);
+        }
+        Err("parent Session does not own the requested child".into())
+    }
+
     fn inspect_child(
         &self,
         parent_session_id: &str,
         child_session_id: &str,
     ) -> Result<AgentChildInspection, String> {
-        let snapshot = self.ensure_owned_child(parent_session_id, child_session_id)?;
+        let snapshot = self.ensure_owned_descendant(parent_session_id, child_session_id)?;
         let events = self.sessions.all_events(child_session_id)?;
         let tool_calls = super::tool_pipeline::admitted_tool_calls(&events);
         let total_tokens = events

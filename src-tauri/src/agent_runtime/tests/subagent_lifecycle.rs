@@ -945,6 +945,71 @@ fn fleet_tool_budget_is_optional_validated_and_restored_from_the_log() {
     }
 }
 
+#[test]
+fn ancestor_can_inspect_descendant_but_cannot_mutate_it() {
+    let (_root, manager, _entry) = setup();
+    let parent_id = "lifecycle-parent";
+    let parent = manager.sessions.snapshot(parent_id).unwrap();
+    let target = parent.header.target.unwrap();
+
+    let child_id = manager
+        .create_child(
+            parent_id,
+            "Coordinate inspection".into(),
+            AgentSubagentRole::General,
+            "blank",
+            vec![target.target_id.clone()],
+            default_subagent_budget(),
+            true,
+        )
+        .unwrap();
+    let grandchild_id = manager
+        .create_child(
+            &child_id,
+            "Collect disk info".into(),
+            AgentSubagentRole::Operator,
+            "blank",
+            vec![target.target_id.clone()],
+            default_subagent_budget(),
+            false,
+        )
+        .unwrap();
+
+    let inspection = manager.inspect_child(parent_id, &grandchild_id).unwrap();
+    assert_eq!(inspection.snapshot.header.session_id, grandchild_id);
+    assert_eq!(
+        inspection.snapshot.header.parent_session_id.as_deref(),
+        Some(child_id.as_str())
+    );
+
+    assert_eq!(
+        manager.ensure_owned_child(parent_id, &grandchild_id).unwrap_err(),
+        "parent Session does not own the requested child"
+    );
+
+    let unrelated_id = "lifecycle-unrelated-parent";
+    manager
+        .sessions
+        .create(CreateAgentSessionRequest {
+            session_id: unrelated_id.into(),
+            task_id: "lifecycle-unrelated-task".into(),
+            goal: "Unrelated session".into(),
+            parent_session_id: None,
+            continued_from_session_id: None,
+            target: Some(target),
+            permission_mode: parent.header.permission_mode,
+            execution_surface: parent.header.execution_surface,
+            success_criteria: Vec::new(),
+            capability_scope: None,
+            subagent: None,
+        })
+        .unwrap();
+    assert_eq!(
+        manager.inspect_child(unrelated_id, &grandchild_id).unwrap_err(),
+        "parent Session does not own the requested child"
+    );
+}
+
 mod fleet_tool_budget_tests {
     use super::*;
     include!("fleet_tool_budget.rs");
