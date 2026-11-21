@@ -9,8 +9,8 @@ import {
 import { DEFAULT_SHORTCUTS } from '@/stores/appStore';
 
 describe('shortcuts', () => {
-  it('records and matches shifted brackets consistently', () => {
-    for (const [key, base] of [['{', '['], ['}', ']']]) {
+  it('records and matches shifted brackets and punctuation consistently', () => {
+    for (const [key, base] of [['{', '['], ['}', ']'], ['>', '.'], ['<', ',']]) {
       const event = new KeyboardEvent('keydown', { key, metaKey: true, shiftKey: true });
       expect(shortcutFromKeyboardEvent(event)).toBe(`mod+shift+${base}`);
       expect(eventMatchesShortcut(event, `mod+shift+${base}`)).toBe(true);
@@ -60,6 +60,8 @@ describe('shortcuts', () => {
   it('formats platform-specific key labels', () => {
     expect(getShortcutKeys('mod+shift+k', 'macos')).toEqual(['⌘', '⇧', 'K']);
     expect(getShortcutKeys('mod+shift+k', 'windows')).toEqual(['Ctrl', 'Shift', 'K']);
+    expect(getShortcutKeys('mod+arrowup', 'macos')).toEqual(['⌘', '↑']);
+    expect(getShortcutKeys('mod+arrowup', 'windows')).toEqual(['Ctrl', '↑']);
   });
 
   it('safely ignores missing persisted bindings', () => {
@@ -117,5 +119,14 @@ describe('findShortcutConflict', () => {
   it('ignores the action being edited itself', () => {
     expect(findShortcutConflict(bindings, 'terminalFocusLeft', 'h')).toBeNull();
     expect(findShortcutConflict(bindings, 'newTerminalTab', 'mod+k')).toBeNull();
+  });
+
+  it('has zero conflicts across all default shortcuts', () => {
+    for (const [action, binding] of Object.entries(bindings)) {
+      expect(
+        findShortcutConflict(bindings, action as keyof typeof bindings, binding),
+        `conflict for default shortcut ${action}=${binding}`,
+      ).toBeNull();
+    }
   });
 });

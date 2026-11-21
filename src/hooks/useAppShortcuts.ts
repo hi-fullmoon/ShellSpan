@@ -74,6 +74,9 @@ export function useAppShortcuts(): void {
         case 'openSettings':
           openSettings();
           break;
+        case 'openShortcuts':
+          openSettings('shortcuts');
+          break;
         case 'openCommandPalette':
           document.dispatchEvent(new Event('shellspan:open-command-palette'));
           break;
@@ -86,6 +89,13 @@ export function useAppShortcuts(): void {
           if (activeSection === 'sftp') break;
           useAiPanelStore.getState().toggleOpen(activeSection);
           break;
+        case 'toggleFocusMode': {
+          if (!useAppStore.getState().showFocusMode) break;
+          const focusState = useFocusStore.getState();
+          if (focusState.enabled) focusState.leave();
+          else focusState.enter();
+          break;
+        }
         case 'newTerminalTab':
           document.dispatchEvent(new Event('shellspan:new-terminal-tab'));
           break;
@@ -98,6 +108,12 @@ export function useAppShortcuts(): void {
         case 'findTerminal':
           document.dispatchEvent(new Event('shellspan:find-terminal'));
           break;
+        case 'terminalClearScreen':
+          document.dispatchEvent(new Event('shellspan:clear-terminal-screen'));
+          break;
+        case 'terminalSendToAi':
+          document.dispatchEvent(new Event('shellspan:send-terminal-to-ai'));
+          break;
         case 'newSftpConnection':
           document.dispatchEvent(new Event('shellspan:new-sftp-connection'));
           break;
@@ -109,6 +125,26 @@ export function useAppShortcuts(): void {
           break;
         case 'switchSftpTab':
           document.dispatchEvent(new Event('shellspan:switch-sftp-tab'));
+          break;
+        case 'sftpRefresh':
+          document.dispatchEvent(new Event('shellspan:sftp-refresh'));
+          break;
+        case 'sftpNewFolder':
+          document.dispatchEvent(new Event('shellspan:sftp-new-folder'));
+          break;
+        case 'sftpToggleHiddenFiles': {
+          const app = useAppStore.getState();
+          app.setSftpShowHiddenFiles(!app.sftpShowHiddenFiles);
+          break;
+        }
+        case 'sftpFocusPath':
+          document.dispatchEvent(new Event('shellspan:sftp-focus-path'));
+          break;
+        case 'sftpParentDirectory':
+          document.dispatchEvent(new Event('shellspan:sftp-parent-directory'));
+          break;
+        case 'sftpOpenTerminalHere':
+          document.dispatchEvent(new Event('shellspan:sftp-open-terminal-here'));
           break;
         case 'nextSftpTab':
         case 'previousSftpTab': {

@@ -4,9 +4,11 @@ import type { ShortcutAction, ShortcutBindings } from '@/types';
 const MODIFIER_KEYS = new Set(['Control', 'Meta', 'Alt', 'Shift']);
 
 function shortcutKey(key: string, shifted: boolean): string {
-  // Shift+[ / Shift+] are reported as braces by browser keyboard events.
+  // Shift+[ / Shift+] / Shift+. / Shift+, report shifted symbols in browser keyboard events.
   if (shifted && key === '{') return '[';
   if (shifted && key === '}') return ']';
+  if (shifted && key === '>') return '.';
+  if (shifted && key === '<') return ',';
   return key === ' ' ? 'space' : key.toLowerCase();
 }
 
@@ -24,20 +26,30 @@ export const SHORTCUT_SCOPES: Record<ShortcutAction, ShortcutScope> = {
   openTerminal: 'global',
   openSftp: 'global',
   openSettings: 'global',
+  openShortcuts: 'global',
   openCommandPalette: 'global',
   toggleAiPanel: 'global',
+  toggleFocusMode: 'global',
   newTerminalTab: 'terminal',
   closeTerminalTab: 'terminal',
   switchTerminalTab: 'terminal',
   nextTerminalTab: 'terminal',
   previousTerminalTab: 'terminal',
   findTerminal: 'terminal',
+  terminalClearScreen: 'terminal',
+  terminalSendToAi: 'terminal',
   newSftpConnection: 'sftp',
   findSftp: 'sftp',
   closeSftpTab: 'sftp',
   switchSftpTab: 'sftp',
   nextSftpTab: 'sftp',
   previousSftpTab: 'sftp',
+  sftpRefresh: 'sftp',
+  sftpNewFolder: 'sftp',
+  sftpToggleHiddenFiles: 'sftp',
+  sftpFocusPath: 'sftp',
+  sftpParentDirectory: 'sftp',
+  sftpOpenTerminalHere: 'sftp',
   terminalLeader: 'terminal',
   terminalFocusLeft: 'terminal',
   terminalFocusDown: 'terminal',
@@ -50,6 +62,8 @@ export const SHORTCUT_SCOPES: Record<ShortcutAction, ShortcutScope> = {
   terminalSwapPane: 'terminal',
   terminalPreviousCommand: 'terminal',
   terminalNextCommand: 'terminal',
+  terminalToggleBroadcast: 'terminal',
+  terminalScrollToBottom: 'terminal',
   terminalClosePane: 'terminal',
 };
 
@@ -67,6 +81,8 @@ export const LEADER_SHORTCUT_ACTIONS: readonly ShortcutAction[] = [
   'terminalSwapPane',
   'terminalPreviousCommand',
   'terminalNextCommand',
+  'terminalToggleBroadcast',
+  'terminalScrollToBottom',
   'terminalClosePane',
 ];
 
@@ -158,6 +174,10 @@ export function getShortcutKeys(shortcut: string | undefined, platform: Platform
     alt: platform === 'macos' ? '⌥' : 'Alt',
     shift: platform === 'macos' ? '⇧' : 'Shift',
     space: 'Space',
+    arrowup: '↑',
+    arrowdown: '↓',
+    arrowleft: '←',
+    arrowright: '→',
     ',': ',',
   };
 
