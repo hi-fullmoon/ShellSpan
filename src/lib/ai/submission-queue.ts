@@ -86,6 +86,18 @@ export class AiSubmissionQueue {
     })();
   }
 
+  /** Drops a blocked queue head (e.g. a non-retryable failure) so later inputs can drain. */
+  discard(id: string): boolean {
+    const head = this.entries[0];
+    if (!this.blocked || this.acknowledging || !head || head.id !== id) return false;
+    this.stopObserving?.();
+    this.stopObserving = undefined;
+    this.entries.shift();
+    this.blocked = false;
+    queueMicrotask(() => { void this.drain(); });
+    return true;
+  }
+
   pause(): void { for (const entry of this.entries) entry.paused = true; }
 
   private async drain(): Promise<void> {
@@ -114,6 +126,7 @@ export class AiSubmissionQueue {
             if (timedOut) this.acknowledge(receipt);
             return receipt;
           });
+          void admission.catch(() => undefined);
           const receipt = await Promise.race([
             admission,
             new Promise<AiSubmitReceipt>((_, reject) => {

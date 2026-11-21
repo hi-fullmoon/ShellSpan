@@ -334,7 +334,11 @@ export function reduceAiComposer(
       return {
         state: {
           ...state,
-          phase: state.phase === 'stopping' ? 'stopping' : runtimePhase(state),
+          phase: state.phase === 'stopping'
+            ? 'stopping'
+            : state.detached !== null && state.detached.clientOperationId !== event.receipt.clientOperationId
+              ? 'submitting'
+              : runtimePhase(state),
           sessionId: event.receipt.sessionId,
           detached: state.detached?.clientOperationId === event.receipt.clientOperationId
             ? null

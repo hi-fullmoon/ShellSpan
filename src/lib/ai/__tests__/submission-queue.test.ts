@@ -129,4 +129,22 @@ describe('continuous admission', () => {
     expect(order).toEqual(['A', 'B', 'C']);
     expect(owners).toEqual([null, 'created', 'created']);
   });
+
+  it('unblocks queued work when a blocked head is discarded', async () => {
+    const received: string[] = [];
+    const input = (id: string): AiSubmitInput => ({ clientOperationId: id, content: id, mode: 'nextTurn',
+      provider: { id: 'local', kind: 'openAiCompatible', profile: 'generic', baseUrl: '', model: 'local', requiresApiKey: false } });
+    const queue = new AiSubmissionQueue('session', async (sessionId, value) => {
+      if (value.clientOperationId === 'A') throw new Error('archived');
+      received.push(value.clientOperationId);
+      return { sessionId: sessionId!, clientOperationId: value.clientOperationId, mode: value.mode };
+    });
+    const first = queue.enqueue('A', async () => input('A'));
+    const second = queue.enqueue('B', async () => input('B'));
+    await expect(first).rejects.toThrow('archived');
+    expect(received).toEqual([]);
+    expect(queue.discard('A')).toBe(true);
+    await second;
+    expect(received).toEqual(['B']);
+  });
 });
