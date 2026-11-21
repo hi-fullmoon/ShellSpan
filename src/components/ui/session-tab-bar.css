@@ -22,7 +22,7 @@
   z-index: 1;
 }
 
-:is([data-terminal-workspace], [data-terminal-tab-bar]) {
+:is([data-terminal-workspace], [data-terminal-tab-bar], [data-sftp-workspace], [data-sftp-tab-bar]) {
   /* Match the title bar's border over its surface, regardless of the terminal theme. */
   --terminal-tab-edge-surface: color-mix(in srgb, var(--app-surface) 90%, var(--background));
   --terminal-tab-edge-color: color-mix(in oklab, var(--app-border) 50%, transparent);
@@ -36,25 +36,27 @@
 /* Paint the top edge (when standalone) and the non-selected bottom edge above
    the tabs and the inactive split-pane shading. */
 [data-terminal-tab-bar]::before,
-[data-terminal-tab-bar] .session-tab-slot:has(> .session-tab[aria-selected='false'])::after,
+[data-sftp-tab-bar]::before,
+:is([data-terminal-tab-bar], [data-sftp-tab-bar]) .session-tab-slot:has(> .session-tab[aria-selected='false'])::after,
 [data-terminal-tab-bar] [data-terminal-tab-actions]::after {
   @apply pointer-events-none absolute inset-x-0 z-20;
   content: '';
   background-color: var(--terminal-tab-edge-surface);
 }
 
-[data-terminal-tab-bar]::before {
+[data-terminal-tab-bar]::before,
+[data-sftp-tab-bar]::before {
   top: 0;
   border-top: 1px solid var(--terminal-tab-edge-color);
 }
 
-[data-terminal-tab-bar] .session-tab-slot:has(> .session-tab[aria-selected='false'])::after,
+:is([data-terminal-tab-bar], [data-sftp-tab-bar]) .session-tab-slot:has(> .session-tab[aria-selected='false'])::after,
 [data-terminal-tab-bar] [data-terminal-tab-actions]::after {
   bottom: 0;
   border-bottom: 1px solid var(--terminal-tab-edge-color);
 }
 
-[data-terminal-tab-bar] [role='tablist']::after {
+:is([data-terminal-tab-bar], [data-sftp-tab-bar]) [role='tablist']::after {
   @apply pointer-events-none relative z-20 self-end;
   content: '';
   flex: 1 0 0;
@@ -63,7 +65,8 @@
 }
 
 /* In the workspace, the header, broadcast banner, or divider supplies the top edge. */
-[data-terminal-workspace] [data-terminal-tab-bar]::before {
+[data-terminal-workspace] [data-terminal-tab-bar]::before,
+[data-sftp-workspace] [data-sftp-tab-bar]::before {
   content: none;
 }
 
