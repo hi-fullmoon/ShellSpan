@@ -2,8 +2,13 @@ export const MAX_AI_CONTEXT_BYTES = 256 * 1024;
 const MAX_BUFFER_BYTES = MAX_AI_CONTEXT_BYTES;
 const AI_CONTEXT_TRUNCATION_MARKER = '[... earlier terminal content omitted ...]\n';
 
+interface TerminalOutputChunk {
+  text: string;
+  bytes: number;
+}
+
 interface TerminalOutputBuffer {
-  chunks: Uint8Array[];
+  chunks: TerminalOutputChunk[];
   head: number;
   byteLength: number;
   version: number;
@@ -50,18 +55,70 @@ export function subscribeTerminalOutput(
   };
 }
 
+function utf8ByteLength(value: string): number {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 0x80) {
+      bytes += 1;
+    } else if (code < 0x800) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        index += 1;
+      } else {
+        bytes += 3;
+      }
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
+}
+
+function dropLeadingUtf8Bytes(value: string, excessBytes: number): TerminalOutputChunk {
+  let dropped = 0;
+  let index = 0;
+  while (index < value.length && dropped < excessBytes) {
+    const code = value.charCodeAt(index);
+    if (code < 0x80) {
+      dropped += 1;
+      index += 1;
+    } else if (code < 0x800) {
+      dropped += 2;
+      index += 1;
+    } else if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        dropped += 4;
+        index += 2;
+      } else {
+        dropped += 3;
+        index += 1;
+      }
+    } else {
+      dropped += 3;
+      index += 1;
+    }
+  }
+  const text = value.slice(index);
+  return { text, bytes: utf8ByteLength(text) };
+}
+
 export function appendTerminalOutput(sessionId: string, chunk: string): void {
   if (!chunk) return;
 
-  const bytes = encoder.encode(chunk);
+  const bytes = utf8ByteLength(chunk);
   const buffer = buffers.get(sessionId) ?? {
     chunks: [],
     head: 0,
     byteLength: 0,
     version: 0,
   };
-  buffer.chunks.push(bytes);
-  buffer.byteLength += bytes.length;
+  buffer.chunks.push({ text: chunk, bytes });
+  buffer.byteLength += bytes;
   const trimmed = trimBufferHead(buffer, MAX_BUFFER_BYTES);
   buffer.version += 1;
   // Preserve a safe checkpoint until the next actual reader. Multiple output
@@ -292,22 +349,19 @@ function trimBufferHead(buffer: TerminalOutputBuffer, maxBytes: number): boolean
   while (excess > 0 && buffer.head < buffer.chunks.length) {
     trimmed = true;
     const current = buffer.chunks[buffer.head];
-    if (current.length <= excess) {
-      excess -= current.length;
-      buffer.byteLength -= current.length;
+    if (current.bytes <= excess) {
+      excess -= current.bytes;
+      buffer.byteLength -= current.bytes;
       buffer.head += 1;
       continue;
     }
 
-    let offset = excess;
-    // The retained tail must start at a UTF-8 code point boundary. Dropping
-    // continuation bytes can make the buffer a few bytes smaller than the
-    // nominal cap, which is preferable to introducing U+FFFD into AI context.
-    while (offset < current.length && (current[offset] & 0xc0) === 0x80) {
-      offset += 1;
-    }
-    buffer.chunks[buffer.head] = current.slice(offset);
-    buffer.byteLength -= offset;
+    // The retained tail must start at a Unicode code point boundary. Dropping
+    // a full multi-byte character can make the buffer a few bytes smaller than
+    // the nominal cap, which avoids introducing U+FFFD into AI context.
+    const next = dropLeadingUtf8Bytes(current.text, excess);
+    buffer.byteLength -= current.bytes - next.bytes;
+    buffer.chunks[buffer.head] = next;
     excess = 0;
   }
 
@@ -321,13 +375,7 @@ function trimBufferHead(buffer: TerminalOutputBuffer, maxBytes: number): boolean
 
 function decodeBuffer(buffer: TerminalOutputBuffer | undefined): string {
   if (!buffer || buffer.byteLength === 0) return '';
-  const bytes = new Uint8Array(buffer.byteLength);
-  let offset = 0;
-  for (let index = buffer.head; index < buffer.chunks.length; index += 1) {
-    bytes.set(buffer.chunks[index], offset);
-    offset += buffer.chunks[index].length;
-  }
-  return decoder.decode(bytes);
+  return decodeBufferChunks(buffer, buffer.head);
 }
 
 function normalizeLineLimit(maxLines: number): number {
@@ -372,11 +420,11 @@ function appendToContextCache(
 }
 
 function decodeBufferChunks(buffer: TerminalOutputBuffer, startIndex: number): string {
-  const decoded: string[] = [];
+  const parts: string[] = [];
   for (let index = startIndex; index < buffer.chunks.length; index += 1) {
-    decoded.push(decoder.decode(buffer.chunks[index]));
+    parts.push(buffer.chunks[index].text);
   }
-  return decoded.join('');
+  return parts.join('');
 }
 
 function isIncrementalAppendBoundarySafe(raw: string, normalized: string): boolean {
