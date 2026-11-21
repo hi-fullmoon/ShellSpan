@@ -34,6 +34,7 @@ import { createStreamingMarkdownSplitter } from '@/lib/streaming-markdown';
 import { taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
 import { isRuntimeArtifact } from '@/lib/ai/conversation-artifact';
 import { requestErrorMessageKey, requestRetryMessageKey } from '@/lib/ai/request-error';
+import { aiErrorMessage } from '@/lib/ai/error-message';
 import { AiToolCopyButton, AiToolRow, AiToolTextSection } from './ai-tool-presentation';
 import { AiTurnFooter } from './ai-turn-footer';
 import { AiProcessingStatus } from './ai-processing-status';
@@ -73,12 +74,14 @@ function assistantText(node: AiConversationNodeOf<'assistantMessage'>): string {
 
 function SemanticNoteDisclosure({
   body,
+  bodyClassName,
   icon,
   label,
   summary,
   content,
 }: {
   readonly body: string;
+  readonly bodyClassName?: string;
   readonly icon: React.ReactNode;
   readonly label: string;
   readonly summary?: string;
@@ -118,10 +121,15 @@ function SemanticNoteDisclosure({
         </MarkerPrimitive>
         <CollapsibleContent>
           <Separator className="ai-semantic-note-separator" />
-          {content ?? <div className="ai-semantic-note-body relative mt-1 ml-[22px] box-border max-h-65 w-[calc(100%-22px)] overflow-auto pt-2.5 pr-10 pb-3 pl-3 whitespace-pre-wrap [overflow-wrap:anywhere]">
-            {body}
-            <AiToolCopyButton text={body} className="ai-content-copy absolute top-1 right-1" />
-          </div>}
+          {content ?? (
+            <div className={cn(
+              'ai-semantic-note-body relative mt-1 ml-[22px] box-border max-h-65 w-[calc(100%-22px)] overflow-auto pt-2.5 pr-10 pb-3 pl-3 whitespace-pre-wrap [overflow-wrap:anywhere]',
+              bodyClassName,
+            )}>
+              {body}
+              <AiToolCopyButton text={body} className="ai-content-copy absolute top-1 right-1" />
+            </div>
+          )}
         </CollapsibleContent>
       </div>
     </Collapsible>
@@ -168,6 +176,7 @@ function ContextInjectionRow({ node }: { readonly node: AiConversationNodeOf<'co
   return (
     <SemanticNoteDisclosure
       body={body}
+      bodyClassName={node.provenance.kind === 'session-reference' ? 'ml-1 w-auto' : undefined}
       content={node.provenance.kind === 'skill-invocation' ? (
         <div className="ai-io-card my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col gap-3">
           <AiToolTextSection title={t(node.loadedSkill ? 'ai.workspace.skills.instructions' : 'ai.workspace.skills.loadFailed')} text={skillBody} copyText={body} />
@@ -466,11 +475,17 @@ function RetryNodeView({ node }: { readonly node: AiConversationNodeOf<'retry'> 
   );
 }
 
-function errorNodeMessage(node: AiConversationNodeOf<'error'>, t: (key: LocaleKey) => string): string {
+function errorNodeMessage(
+  node: AiConversationNodeOf<'error'>,
+  t: (key: LocaleKey, values?: Record<string, string | number>) => string,
+): string {
   if (node.message.startsWith('taskTokenBudgetExceeded:')) return t('ai.workspace.tokenBudget.title');
-  return node.message === 'outputLimit' || node.message.startsWith('outputLimit:') || node.message.includes('code=OUTPUT_LIMIT')
-    ? t('ai.error.outputLimit')
-    : t(requestErrorMessageKey(node.message));
+  if (node.message === 'outputLimit' || node.message.startsWith('outputLimit:') || node.message.includes('code=OUTPUT_LIMIT')) {
+    return t('ai.error.outputLimit');
+  }
+  const translated = aiErrorMessage(node.message, t);
+  if (translated !== node.message) return translated;
+  return t(requestErrorMessageKey(node.message));
 }
 
 function ErrorNodeView({ node }: { readonly node: AiConversationNodeOf<'error'> }) {

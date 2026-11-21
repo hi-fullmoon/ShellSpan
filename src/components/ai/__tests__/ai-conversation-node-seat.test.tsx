@@ -188,6 +188,35 @@ describe('AiConversationNodeList', () => {
     expect(details).toHaveAttribute('aria-expanded', 'false');
   });
 
+  it('renders a localized step-limit message without falling back to generic configuration guidance', () => {
+    const raw = 'stepLimitExceeded: maximum 6 Steps per Turn';
+    const error: AiConversationNodeOf<'error'> = {
+      kind: 'error',
+      key: 'error:step-limit',
+      sourceKind: 'agent',
+      sessionId: 'session-step-limit',
+      turnId: 'turn-step-limit',
+      stepId: 'step-step-limit',
+      firstSeq: 1,
+      lastSeq: 1,
+      timestamp: '2026-09-18T00:00:00.000Z',
+      scope: 'session',
+      message: raw,
+      code: null,
+      state: 'failed',
+    };
+
+    render(<AiConversationNodeList nodes={[error]} />);
+
+    expect(within(screen.getByRole('alert')).getByText(
+      'This turn reached its step limit of 6 steps. Completed operations and results are preserved.',
+    )).toBeVisible();
+    expect(screen.queryByText(/check the service configuration/i)).not.toBeInTheDocument();
+    const details = screen.getByRole('button', { name: 'View error details' });
+    fireEvent.click(details);
+    expect(screen.getByText(raw)).toBeVisible();
+  });
+
   it('renders output-limit continuation as a readable status without an error count', () => {
     const nodes = projectAgentChatNodes([
       sessionEvent(0, { type: 'turn/start', turnId: 'turn-recovery' }),
@@ -834,15 +863,37 @@ describe('AiConversationNodeList', () => {
       output: null,
     });
 
+    const inspectTool = toolNode({
+      key: 'tool:inspect',
+      name: 'inspect_child_agent',
+      nativeName: 'inspect_child_agent',
+      state: 'succeeded',
+      input: { childSessionId: 'child-1' },
+      output: {
+        snapshot: {
+          status: 'failed',
+          header: {
+            sessionId: 'child-1',
+            goal: 'Check upstream health',
+            subagent: { role: 'operator' },
+          },
+        },
+      },
+    });
+
     const { rerender, container } = render(<AiToolRow node={regularTool} />);
-    expect(container.querySelector('.ai-tool-row')).toBeVisible();
+    expect(container.querySelector('.ai-tool-row-root')).toBeVisible();
     expect(container.querySelector('[data-slot="ai-subagent-card"]')).toBeNull();
 
     rerender(<AiToolRow node={subagentTool} />);
     expect(container.querySelector('[data-slot="ai-subagent-card"]')).toBeVisible();
-    expect(container.querySelector('.ai-tool-row')).toBeNull();
+    expect(container.querySelector('.ai-tool-row-root')).toBeNull();
+
+    rerender(<AiToolRow node={inspectTool} />);
+    expect(container.querySelector('.ai-tool-row-root')).toBeVisible();
+    expect(container.querySelector('[data-slot="ai-subagent-card"]')).toBeNull();
 
     rerender(<AiToolRow node={regularTool} />);
-    expect(container.querySelector('.ai-tool-row')).toBeVisible();
+    expect(container.querySelector('.ai-tool-row-root')).toBeVisible();
   });
 });
