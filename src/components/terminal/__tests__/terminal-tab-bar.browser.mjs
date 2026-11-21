@@ -758,10 +758,13 @@ try {
       assert.equal(before.width, 20);
       assert.equal(before.height, 20);
       await targetTab.hover({ position: { x: 30, y: 16 } });
+      assert.equal(await targetIcon.isVisible(), true);
+      assert.equal(await closeIcon.isVisible(), false);
+      assert.deepEqual(await closeTarget.boundingBox(), before);
+      await closeTarget.hover();
       await closeIcon.waitFor({ state: 'visible' });
       assert.equal(await targetIcon.isVisible(), false);
       assert.deepEqual(await closeTarget.boundingBox(), before);
-      await closeTarget.hover();
       const closeFill = await background(closeTarget);
       assert.notEqual(closeFill, 'rgba(0, 0, 0, 0)');
       if (!active) {

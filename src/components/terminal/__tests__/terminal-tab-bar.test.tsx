@@ -5,6 +5,7 @@ import { TerminalTabBar } from '../terminal-tab-bar';
 import { useTerminalBroadcastStore } from '@/stores/terminalBroadcastStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useAppStore } from '@/stores/appStore';
+import { useFocusStore } from '@/stores/focusStore';
 import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
 import { resolveTerminalTheme } from '../registry/terminal-registry';
 import { beginSshConnection } from '@/lib/terminal/ssh-connection-attempt';
@@ -942,5 +943,69 @@ describe('TerminalTabBar', () => {
     expect(screen.getByRole('menuitem', { name: 'settings.shortcuts.terminalSwapPane' })).toHaveAttribute('aria-disabled', 'true');
     fireEvent.click(restoreItem);
     expect(onArrangePanes).toHaveBeenCalledWith('terminalZoomPane');
+  });
+
+  it('swaps the Agent target icon to the close icon only on close button hover/focus', () => {
+    addSession('s1', 'Primary');
+    const previousFocus = useFocusStore.getState();
+    useFocusStore.setState({ enabled: true, targetSessionId: 's1' });
+    try {
+      render(<TerminalTabBar />);
+      const actionButton = screen.getByRole('button', { name: 'sessionTab.close' });
+      const targetIcon = within(actionButton).getByRole('img', { name: 'focus.agentTarget' });
+      const closeIcon = actionButton.querySelector('svg.lucide-x');
+      expect(actionButton).toHaveClass('group/close');
+      expect(targetIcon).toHaveClass('group-hover/close:hidden', 'group-focus-visible/close:hidden');
+      expect(targetIcon).not.toHaveClass('group-hover/session-tab-slot:hidden');
+      expect(closeIcon).toHaveClass('hidden', 'group-hover/close:block', 'group-focus-visible/close:block');
+      expect(closeIcon).not.toHaveClass('group-hover/session-tab-slot:block');
+    } finally {
+      useFocusStore.setState(previousFocus, true);
+    }
+  });
+
+  it('shows a background Agent indicator on an inactive tab while leased and hides it when focused', () => {
+    addSession('s1', 'Primary');
+    addSession('s2', 'Other');
+    useTerminalStore.getState().setActiveSession('s2');
+    agentTerminalLeaseState.set({
+      sessionId: 's1',
+      agentSessionId: 'agent-1',
+      taskId: 'task-1',
+      operationId: 'op-1',
+      acquiredAtUnixMs: 1,
+      state: 'acquired',
+      terminalOwned: true,
+      inputBlocked: false,
+      takeoverRequested: false,
+      takeoverFailed: false,
+      requestTakeover: vi.fn(),
+    });
+    try {
+      render(<TerminalTabBar />);
+      const primarySlot = screen.getByRole('tab', { name: 'Primary' }).parentElement as HTMLElement;
+      const otherSlot = screen.getByRole('tab', { name: 'Other' }).parentElement as HTMLElement;
+      const primaryAction = within(primarySlot).getByRole('button', { name: 'sessionTab.close' });
+      const indicator = within(primaryAction).getByRole('img', { name: 'terminal.agentLease.turnRunning' });
+      const closeIcon = primaryAction.querySelector('svg.lucide-x');
+      expect(primaryAction).not.toHaveClass('invisible');
+      expect(indicator).toHaveAttribute('data-terminal-agent-active');
+      expect(indicator).toHaveClass('group-hover/close:hidden', 'group-focus-visible/close:hidden');
+      expect(closeIcon).toHaveClass('hidden', 'group-hover/close:block', 'group-focus-visible/close:block');
+      expect(within(otherSlot).queryByRole('img', { name: 'terminal.agentLease.turnRunning' })).toBeNull();
+
+      act(() => useTerminalStore.getState().setActiveSession('s1'));
+      expect(within(primarySlot).queryByRole('img', { name: 'terminal.agentLease.turnRunning' })).toBeNull();
+
+      act(() => useTerminalStore.getState().setActiveSession('s2'));
+      expect(within(primaryAction).getByRole('img', { name: 'terminal.agentLease.turnRunning' })).toBeInTheDocument();
+
+      act(() => {
+        agentTerminalLeaseState.update('s1', 'op-1', (lease) => ({ ...lease, waitingForUserAction: true }));
+      });
+      expect(within(primarySlot).queryByRole('img', { name: 'terminal.agentLease.turnRunning' })).toBeNull();
+    } finally {
+      agentTerminalLeaseState.clearAll();
+    }
   });
 });

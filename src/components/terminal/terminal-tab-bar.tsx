@@ -31,7 +31,7 @@ import { Kbd } from '@/components/ui/kbd';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { CircleDotIcon, EllipsisIcon, Link2Icon, LockIcon, Minimize2Icon, PinIcon, RadioTowerIcon, XIcon } from 'lucide-react';
+import { BotIcon, CircleDotIcon, EllipsisIcon, Link2Icon, LockIcon, Minimize2Icon, PinIcon, RadioTowerIcon, XIcon } from 'lucide-react';
 import { useCloseTerminal } from '@/hooks/useCloseTerminal';
 import { cancelSshConnection } from '@/lib/terminal/ssh-connection-attempt';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
@@ -132,10 +132,12 @@ const SessionTab: React.FC<SessionTabProps> = ({
     terminalInputReadiness.subscribe,
     () => inBroadcast && terminalInputReadiness.isPreparing(session.sessionId),
   );
-  const broadcastLeased = useSyncExternalStore(
+  const activeLease = useSyncExternalStore(
     agentTerminalLeaseState.subscribe,
-    () => inBroadcast && Boolean(agentTerminalLeaseState.get(session.sessionId)),
+    () => agentTerminalLeaseState.get(session.sessionId),
   );
+  const broadcastLeased = inBroadcast && Boolean(activeLease);
+  const agentActiveInBackground = !active && Boolean(activeLease && !activeLease.waitingForUserAction);
   const broadcastTarget = inBroadcast && !broadcastPreparing && !broadcastLeased && canReceiveTerminalBroadcast(session);
   const terminalTheme = colorScheme === 'app' ? colorOverrides : resolveTerminalTheme(colorScheme, colorOverrides);
   const tab = (
@@ -206,6 +208,9 @@ const SessionTab: React.FC<SessionTabProps> = ({
           <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full ring-1 ring-app-bg/60', sessionStatusDotClass(session.status))} />
         )}
         <span className="block flex-1 truncate text-left text-xs leading-none font-normal">{session.title}</span>
+        {agentActiveInBackground && (session.pinned || session.pendingConnection) && <span role="img" data-terminal-agent-active aria-label={t('terminal.agentLease.turnRunning')} title={t('terminal.agentLease.turnRunning')} className="flex size-4 shrink-0 items-center justify-center text-(--terminal-agent-glow) motion-safe:animate-pulse">
+          <BotIcon aria-hidden="true" className="size-3" />
+        </span>}
         {session.readOnly && <span title={t('terminal.inputLock.label')} data-terminal-input-lock className="inline-flex shrink-0 items-center">
           <LockIcon aria-hidden="true" className="size-3" />
         </span>}
@@ -242,16 +247,22 @@ const SessionTab: React.FC<SessionTabProps> = ({
           }}
           className={cn(
             'session-tab-action group/close',
-            !canUnpin && !canCancel && !agentTarget && (dragging || !active)
+            !canUnpin && !canCancel && !agentTarget && !agentActiveInBackground && (dragging || !active)
               && 'invisible group-hover/session-tab-slot:visible group-focus-within/session-tab-slot:visible',
           )}
         >
           {canUnpin ? <PinIcon aria-hidden="true" className="size-3" strokeWidth={1.5} /> : (
             <>
-              {agentTarget && !canCancel && <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} className="flex size-4 items-center justify-center text-app-success group-hover/session-tab-slot:hidden group-focus-visible/close:hidden">
-                <Link2Icon aria-hidden="true" className="size-3" />
-              </span>}
-              <XIcon aria-hidden="true" className={cn('size-3', agentTarget && !canCancel && 'hidden group-hover/session-tab-slot:block group-focus-visible/close:block')} strokeWidth={1.5} />
+              {agentActiveInBackground && !canCancel ? (
+                <span role="img" data-terminal-agent-active aria-label={t('terminal.agentLease.turnRunning')} title={t('terminal.agentLease.turnRunning')} className="flex size-4 items-center justify-center text-(--terminal-agent-glow) motion-safe:animate-pulse group-hover/close:hidden group-focus-visible/close:hidden">
+                  <BotIcon aria-hidden="true" className="size-3" />
+                </span>
+              ) : agentTarget && !canCancel && (
+                <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} className="flex size-4 items-center justify-center text-app-success group-hover/close:hidden group-focus-visible/close:hidden">
+                  <Link2Icon aria-hidden="true" className="size-3" />
+                </span>
+              )}
+              <XIcon aria-hidden="true" className={cn('size-3', (agentActiveInBackground || agentTarget) && !canCancel && 'hidden group-hover/close:block group-focus-visible/close:block')} strokeWidth={1.5} />
             </>
           )}
         </button>
