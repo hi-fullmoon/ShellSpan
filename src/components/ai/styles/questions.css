@@ -200,3 +200,14 @@
 .ai-approval-command-card {
   color: var(--ai-text-secondary);
 }
+
+.ai-question-panel-content .ai-markdown-code-copy {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ai-question-panel-content .ai-markdown-code-block .ai-code-block-pre {
+  padding-right: 3rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

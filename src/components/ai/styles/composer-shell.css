@@ -67,8 +67,10 @@
     box-shadow 160ms ease;
 }
 
-.ai-composer-input-anchor > [data-slot='input-group']:hover {
+.ai-composer-input-anchor > [data-slot='input-group']:hover,
+.ai-composer-input-anchor > [data-slot='input-group']:has([data-slot='input-group-control']:focus-visible) {
   --ai-elevation-stroke-color: var(--ai-border);
+  outline: none;
 }
 
 .ai-composer-seat [data-slot='input-group-control'] {

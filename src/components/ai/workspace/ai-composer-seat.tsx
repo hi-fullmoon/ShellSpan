@@ -51,7 +51,6 @@ import { AiApprovalSeat } from './ai-approval-panel';
 import { AiQuestionSeat } from './ai-question-panel';
 import { AiContextMeter } from './ai-context-meter';
 import { AiQueueDock } from './ai-queue-dock';
-import { AiQueueEditComposer } from './ai-queue-edit-composer';
 import { useDocumentImport } from './use-document-import';
 import { DOCUMENT_ACCEPT, IMAGE_ACCEPT, documentErrorKey, isDocumentName } from '@/lib/ai/document-import';
 import { decodeDocumentMessage, encodeDocumentMessage } from '@/lib/ai/document-message';
@@ -120,9 +119,10 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly onSubmitGesture?: (gesture: 'keyboard' | 'primary', accelerated: boolean) => void;
   readonly onStop?: () => void;
   readonly onBusyPreferenceChange?: (value: 'queue' | 'steer') => void;
+  readonly onEditQueueItem?: (item: AiInboxItem) => Promise<boolean> | boolean | void;
   readonly onUpdateQueueItem?: AiSessionController['updateQueueItem'];
   readonly onDiscardQueueEdit?: AiSessionController['discardQueueEdit'];
-  readonly onRemoveQueueItem?: (item: AiInboxItem) => void;
+  readonly onRemoveQueueItem?: (item: AiInboxItem) => Promise<boolean> | boolean | void;
   readonly onSteerQueueItem?: (item: AiInboxItem) => void;
   readonly onResumeQueueItem?: (item: AiInboxItem) => void;
   readonly onReorderQueueLane?: (lane: AiInboxItem['lane'], orderedItemIds: readonly string[]) => void;
@@ -187,8 +187,7 @@ export function AiComposerSeat({
   onSubmitGesture,
   onStop,
   onBusyPreferenceChange,
-  onUpdateQueueItem,
-  onDiscardQueueEdit,
+  onEditQueueItem,
   onRemoveQueueItem,
   onSteerQueueItem,
   onResumeQueueItem,
@@ -219,7 +218,6 @@ export function AiComposerSeat({
   const attachmentOwner = JSON.stringify([mode, attachmentScopeKey, composerState?.sessionId, skillsScopeKey]);
   const queueSessionId = currentSessionId ?? composerState?.sessionId;
   const queueOwner = JSON.stringify([attachmentOwner, queueSessionId]);
-  const [queueEdit, setQueueEdit] = useState<{ owner: string; item: AiInboxItem } | null>(null);
   const [uncontrolledTaskStripOpen, setUncontrolledTaskStripOpen] = useState(false);
   const blockingPromptKey = pendingApproval
     ? `approval:${pendingApproval.approvalId}`
@@ -238,10 +236,6 @@ export function AiComposerSeat({
     if (taskStripOpen === undefined) setUncontrolledTaskStripOpen(next);
     onTaskStripOpenChange?.(next);
   };
-  const editingItem = queueEdit?.owner === queueOwner && inputExpanded && onUpdateQueueItem ? queueEdit.item : undefined;
-  useEffect(() => {
-    setQueueEdit(edit => edit && edit.owner !== queueOwner ? null : edit);
-  }, [queueOwner]);
   const attachmentOwnerRef = useRef(attachmentOwner);
   attachmentOwnerRef.current = attachmentOwner;
   const message = useMemo(() => decodeDocumentMessage(rawDraft), [rawDraft]);
@@ -352,12 +346,6 @@ export function AiComposerSeat({
   }, [composerState?.pendingSubmissions, inbox]);
 
   const mutableQueue = !stopping && queueMutable && !['completed', 'cancelled'].includes(status);
-  const editedItem = editingItem && mutableQueue && status !== 'failed'
-    ? queueItems.find(item => item.id === editingItem.id && item.state === 'queued')
-    : undefined;
-  const queueIntent = queueMutation?.intent;
-  const editingFailedUpdate = queueMutation?.status === 'failed' && editingItem
-    && (queueIntent?.type === 'update' || queueIntent?.type === 'updateWithImages') && queueIntent.itemId === editingItem.id;
   const attachmentsEnabled = inputExpanded && !terminal && !unavailable && !submitting && !imageLocked && !documents.busy;
   const addPaths = async (paths: readonly string[], kind?: 'file' | 'directory'): Promise<void> => {
     if (!attachmentsEnabled || !paths.length || attachmentOwnerRef.current !== attachmentOwner) return;
@@ -455,7 +443,7 @@ export function AiComposerSeat({
   const skillCompletion = useSkillCompletion({ text: draft, update: updateDraft, query: mode === 'agent' ? onListSkills : undefined, scopeKey: skillsScopeKey, editor: completion.editor, disabled: Boolean(terminal || waitingApproval || waitingQuestion || unavailable || imageLocked || submitting) });
   const wasStopping = useRef(false);
   useEffect(() => {
-    if (!running || stopping || terminal || !onStop || editingItem) return;
+    if (!running || stopping || terminal || !onStop) return;
     let previous: { target: EventTarget | null; time: number } | null = null;
     const reset = () => { previous = null; };
     const keyDown = (event: KeyboardEvent) => {
@@ -489,7 +477,7 @@ export function AiComposerSeat({
       document.removeEventListener('compositionstart', reset);
       window.removeEventListener('blur', reset);
     };
-  }, [running, stopping, terminal, onStop, attachmentOwner, editingItem]);
+  }, [running, stopping, terminal, onStop, attachmentOwner]);
   const blockedSubmitReason = submitting ? 'ai.workspace.announce.submitting'
     : mode === 'ask' && running ? 'ai.workspace.announce.askRunning' : null;
   const announcedBlock = useRef<string | null>(null);
@@ -583,16 +571,31 @@ export function AiComposerSeat({
         {mode === 'agent' && <AiQueueDock key={queueOwner}
           items={queueItems}
           sessionId={queueSessionId}
-          editingId={editingItem?.id}
           mutation={queueMutation}
-          onRetry={editingFailedUpdate ? undefined : onRetryQueueMutation}
+          onRetry={onRetryQueueMutation}
           running={status === 'running'}
           mutable={mutableQueue}
           resumeOnly={status === 'failed'}
-          onEdit={inputExpanded && onUpdateQueueItem ? item => {
+          onEdit={inputExpanded && (onEditQueueItem || onRemoveQueueItem) ? item => {
             completion.dismiss();
             skillCompletion.dismiss();
-            setQueueEdit({ owner: queueOwner, item });
+            const focusEditor = () => requestAnimationFrame(() => {
+              const editor = completion.editor.current;
+              editor?.focus();
+              const end = editor?.value.length ?? 0;
+              editor?.setSelectionRange(end, end);
+            });
+            if (onEditQueueItem) {
+              void Promise.resolve(onEditQueueItem(item)).then(recalled => {
+                if (recalled !== false) focusEditor();
+              });
+              return;
+            }
+            void Promise.resolve(onRemoveQueueItem?.(item)).then(removed => {
+              if (removed === false) return;
+              updateRawDraft(item.content);
+              focusEditor();
+            });
           } : undefined}
           onRemove={onRemoveQueueItem}
           onSteer={onSteerQueueItem}
@@ -600,28 +603,14 @@ export function AiComposerSeat({
           onReorder={onReorderQueueLane}
         />}
       </div>
-      {editingItem && onUpdateQueueItem && (
-        <div className="ai-composer-input-anchor flex min-h-0 min-w-0 shrink-0 flex-col">
-          <AiQueueEditComposer key={queueOwner} item={editingItem} current={editedItem}
-            sessionId={queueSessionId} mutation={queueMutation} onUpdate={onUpdateQueueItem} onRetry={onRetryQueueMutation}
-            allowImageAdd={Boolean(onPasteImages)}
-            onClose={saved => {
-              if (!saved) onDiscardQueueEdit?.(editingItem.id);
-              setQueueEdit(null);
-              if (!editedItem) requestAnimationFrame(() => {
-                if (document.activeElement === document.body) completion.editor.current?.focus();
-              });
-            }} />
-        </div>
-      )}
       {inputExpanded && (
-        <div id={inputRegionId} ref={completionAnchor} hidden={Boolean(editingItem)}
-          className={cn('ai-composer-input-anchor relative flex min-h-24 min-w-0 shrink flex-col', editingItem && 'hidden')}>
+        <div id={inputRegionId} ref={completionAnchor}
+          className="ai-composer-input-anchor relative flex min-h-24 min-w-0 shrink flex-col">
           <InputGroup ref={cardRef} className={cn(
             'h-auto min-h-0 flex-col items-stretch gap-0 overflow-hidden [&>.ai-composer-editor-wrap]:min-h-0 [&>.ai-composer-editor-wrap]:grid-rows-[minmax(0,1fr)]',
             dragActive && 'ring-2 ring-primary',
             !imageControls && (phase === 'hero' ? 'pt-1.5' : 'pt-2.5'),
-          )} data-composer-card={editingItem ? undefined : ''} onClick={event => {
+          )} data-composer-card="" onClick={event => {
             if (event.target === event.currentTarget) completion.editor.current?.focus();
           }} onDragOver={event => {
             if (!isTauriRuntime() && event.dataTransfer.types.includes('Files')) { event.preventDefault(); setDragActive(attachmentsEnabled); }

@@ -70,7 +70,8 @@ import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
 import { documentMessageSummary } from '@/lib/ai/document-message';
 import { chatReferenceFile } from '@/lib/ai/chat-reference';
 import { routeProviderConfigs, useLlmRoutesStore } from '@/stores/llmRoutesStore';
-import { isTauriRuntime } from '@/lib/ipc/tauri';
+import { invokeAgentImagePreview, isTauriRuntime } from '@/lib/ipc/tauri';
+import { imageErrorKey } from '@/lib/ai/image-error';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { readTerminalCurrentDirectory } from '@/lib/terminal/terminal-current-directory';
 import { terminalConnectionPresentationState, type RealTerminalPresentationState, type RemoteGlibcMismatch } from '@/lib/terminal/terminal-surface-semantics';
@@ -83,7 +84,7 @@ import {
 import { getRecentTerminalOutputSnapshot, truncateAiContext } from '@/lib/terminal/terminal-output-buffer';
 import type { AppSection } from '@/types';
 import type { AgentPermissionMode } from '@/types/agent-approval';
-import type { AgentInboxImageEdit } from '@/types/agent-image';
+import type { AgentImageRef, AgentImageUpload, AgentInboxImageEdit } from '@/types/agent-image';
 import type {
   AgentExecutionSurface,
   AgentInboxMutation,
@@ -181,6 +182,7 @@ export interface AiSessionController {
   readonly readSessionReference: (summary: AiSessionSummary, signal: AbortSignal) => Promise<File>;
   readonly archiveSession: (summary: AiSessionSummary) => void;
   readonly deleteSession: (summary: AiSessionSummary) => void;
+  readonly editQueueItem: (item: AiInboxItem) => Promise<boolean>;
   readonly updateQueueItem: (item: AiInboxItem, content: string, images?: AgentInboxImageEdit) => Promise<boolean>;
   readonly removeQueueItem: (item: AiInboxItem) => void;
   readonly steerQueueItem: (item: AiInboxItem) => void;
@@ -2273,6 +2275,34 @@ export function useAiSessionController({
     },
     archiveSession,
     deleteSession,
+    editQueueItem: async (item) => {
+      const current = viewRef.current;
+      if (!current || imageDraft.busy || imageDraft.locked || queueOperationRef.current?.pending) return false;
+      const sessionId = current.summary.id;
+      let recalledImages: AgentImageUpload[] = [];
+      if (item.images?.length) {
+        try {
+          recalledImages = await Promise.all(item.images.map(async (image: AgentImageRef) => {
+            const url = await invokeAgentImagePreview({ sessionId, sha256: image.sha256 });
+            const comma = url.indexOf(',');
+            if (comma < 0) throw new Error('IMAGE_DECODE_FAILED');
+            return { mediaType: image.mediaType, data: url.slice(comma + 1), name: image.name };
+          }));
+        } catch (error) {
+          if (mountedRef.current && viewRef.current?.summary.id === sessionId) {
+            toast.error(t(imageErrorKey(String(error))));
+          }
+          return false;
+        }
+        if (!mountedRef.current || viewRef.current?.summary.id !== sessionId) return false;
+      }
+      const removed = await executeQueueMutation({ type: 'remove', itemId: item.id });
+      if (!removed || !mountedRef.current || viewRef.current?.summary.id !== sessionId) return false;
+      claimWorkspace();
+      dispatch({ type: 'draft.changed', value: item.content });
+      await imageDraft.replace(recalledImages, item.content);
+      return true;
+    },
     updateQueueItem: (item, content, images) => executeQueueMutation(images
       ? { type: 'updateWithImages', itemId: item.id, content, images }
       : { type: 'update', itemId: item.id, content }),

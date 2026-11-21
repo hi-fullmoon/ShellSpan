@@ -24,13 +24,9 @@
 .ai-queue-dock {
   border: 0;
   border-radius: 12px;
-  background: var(--ai-selector);
-  color: var(--ai-text);
+  background: var(--ai-code-block);
+  color: var(--ai-text-secondary);
   box-shadow: none;
-}
-
-.ai-queue-dock:has(> .ai-queue-header[aria-expanded='false']) {
-  padding-bottom: 0;
 }
 
 .ai-queue-dock::after {
@@ -57,14 +53,15 @@
   line-height: 20px;
 }
 
-.ai-task-strip-title {
+.ai-task-strip-title,
+.ai-queue-title {
   color: var(--ai-text);
 }
 
 .ai-queue-header {
   border-radius: 0;
   font-size: 13px;
-  line-height: 24px;
+  line-height: 20px;
 }
 
 .ai-queue-header[aria-expanded='true'] {
@@ -72,7 +69,7 @@
 }
 
 .ai-task-strip-trigger:hover,
-.ai-queue-header:hover {
+.ai-queue-header:hover:not(:disabled) {
   background: var(--ai-action-hover);
 }
 
@@ -81,21 +78,14 @@
   width: 14px;
   height: 14px;
   flex: none;
-}
-
-.ai-task-strip-trigger > svg {
   color: var(--ai-text-muted);
 }
 
-.ai-task-strip-progress {
+.ai-task-strip-progress,
+.ai-queue-count {
   color: var(--ai-text-muted);
   font-weight: 400;
   line-height: 20px;
-}
-
-.ai-queue-header > svg {
-  width: 14px;
-  height: 14px;
 }
 
 /* ListEnd's lower arrow shifts its visible center below the title. */
@@ -182,6 +172,20 @@
 
 .ai-queue-row[data-editing] {
   background: var(--ai-action-hover);
+}
+
+.ai-queue-row[data-draggable]:hover:not([data-dragging]) {
+  background: var(--ai-action-hover);
+}
+
+.ai-queue-row[data-dragging] {
+  border-radius: 8px;
+  background: var(--ai-surface);
+  box-shadow: var(--ai-elevation-panel);
+}
+
+.ai-queue-row[data-dragging] + .ai-queue-row {
+  box-shadow: none;
 }
 
 .ai-queue-editor .ai-image-thumbnail-remove {

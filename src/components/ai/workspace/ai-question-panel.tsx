@@ -45,6 +45,7 @@ import { AiToolCopyButton } from './ai-tool-presentation';
 import { AiSubmissionButtonLabel, submissionFeedbackMs } from './ai-submission-button-label';
 import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
 import { cn } from '@/lib/utils';
+import { formatUserActionInstructions } from '@/lib/ai/user-action-instructions';
 import { questionIssue, questionIssueMessageKey, questionSubmissionIssue, type QuestionSubmissionIssue } from '@/lib/ai/question-submission';
 import {
   questionKey,
@@ -315,7 +316,7 @@ export function AiQuestionPanel({
           <CardContent ref={content} className="ai-question-panel-content max-h-65 min-h-0 overflow-x-hidden overflow-y-auto px-4 pt-px pb-1.5 @max-[421px]/ai-workspace:px-2.5 @max-[421px]/ai-workspace:pt-0">
             {userAction ? <FieldGroup className="gap-2" aria-live="polite">
               <MarkdownContent copiedLabel={t('common.copied')} copyLabel={t('ai.workspace.tool.copyCommand')} showCodeBlockActions>
-                {userAction.instructions}
+                {formatUserActionInstructions(userAction.instructions)}
               </MarkdownContent>
               <Field>
                 <FieldDescription>{t('ai.workspace.question.actionVerification')}</FieldDescription>
@@ -584,7 +585,7 @@ export function AiQuestionHistory({
         <CollapsibleContent>
           <Card
             data-slot="ai-question-history"
-            className="ai-question-history-card mt-0.5 ml-[22px] h-fit shrink-0 gap-0 py-1.5"
+            className="ai-question-history-card mt-0.5 h-fit shrink-0 gap-0 py-1.5"
             variant="outline"
           >
             <CardHeader className="sr-only">

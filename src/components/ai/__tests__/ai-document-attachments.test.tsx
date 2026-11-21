@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
@@ -187,17 +187,20 @@ describe('document attachment surfaces', () => {
 
   it('preserves attachments when editing a queued prompt', async () => {
     const user = userEvent.setup();
-    let saved = '';
+    const removed = vi.fn();
+    let submitted = '';
     const item: AiInboxItem = { id: 'queued', lane: 'nextTurn', source: 'user', state: 'queued', content: encodeDocumentMessage('Explain this project', documents) };
     render(<AiComposerSeat phase="active" status="waiting" inbox={[item]}
-      onUpdateQueueItem={async (_item, content) => { saved = content; return true; }} />);
+      onRemoveQueueItem={removed}
+      onSubmit={async content => { submitted = content; }} />);
     expect(screen.getByText('Explain this project')).toBeVisible();
     await user.click(screen.getByRole('button', { name: /Edit/ }));
-    const input = screen.getByRole('textbox', { name: 'Queued input text' });
-    await user.clear(input);
-    await user.type(input, 'Summarize it');
-    await user.click(screen.getByRole('button', { name: 'Save' }));
-    expect(decodeDocumentMessage(saved)).toEqual({ text: 'Summarize it', documents });
+    expect(removed).toHaveBeenCalledWith(item);
+    const input = screen.getByTestId('ai-workspace-composer');
+    await waitFor(() => expect(input).toHaveTextContent('Explain this project'));
+    expect(screen.getByText('README.md')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Queue for next turn' }));
+    expect(decodeDocumentMessage(submitted)).toEqual({ text: 'Explain this project', documents });
   });
 
   it('blocks sending and shows a persistent alert when attached documents exceed a small context window', async () => {

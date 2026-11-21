@@ -526,7 +526,8 @@ describe('Question form', () => {
     const historyContent = historyCard?.querySelector<HTMLElement>(
       '[data-slot="card-content"]',
     );
-    expect(historyCard).toHaveClass('ml-[22px]', 'h-fit', 'shrink-0', 'py-1.5');
+    expect(historyCard).toHaveClass('h-fit', 'shrink-0', 'py-1.5');
+    expect(historyCard).not.toHaveClass('ml-[22px]');
     expect(historyContent).toHaveClass('flex-none', 'px-2.5');
     const historyList = historyCard!.querySelector<HTMLElement>(
       '[data-slot="field-group"]',

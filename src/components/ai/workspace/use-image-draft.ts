@@ -6,6 +6,7 @@ import { imageErrorKey } from '@/lib/ai/image-error';
 import { prepareImageFiles } from '@/lib/ai/prepare-image-files';
 import { IMAGE_LIMITS } from '@/lib/ai/vision-contract';
 import { invokeCancelAgentImageSubmission } from '@/lib/ipc/tauri';
+import type { AgentImageUpload } from '@/types/agent-image';
 
 async function bindImageOperation(
   bind: () => Promise<NonNullable<ImageDraft['operation']>>, signal: AbortSignal,
@@ -97,6 +98,20 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
       if (!isCurrent(generation)) return;
       const previous = base();
       await persist({ ...previous, revision: previous.revision + 1, text: textRef.current, images: previous.images.filter((_, i) => i !== index) }, generation);
+    }
+    catch (e) { if (isCurrent(generation)) reportError(String(e)); }
+    finally { if (isCurrent(generation)) { running.current = false; setBusy(false); } }
+  }
+  async function replace(images: readonly AgentImageUpload[], nextText: string): Promise<void> {
+    if (running.current || !ready.current || current.current?.operation) return;
+    const generation = epoch.current;
+    running.current = true; setBusy(true); setError(null);
+    try {
+      if (saving.current?.generation === generation) await saving.current.promise;
+      if (!isCurrent(generation)) return;
+      const previous = base();
+      if (!previous.images.length && !images.length) return;
+      await persist({ ...previous, revision: previous.revision + 1, text: nextText, images: [...images] }, generation);
     }
     catch (e) { if (isCurrent(generation)) reportError(String(e)); }
     finally { if (isCurrent(generation)) { running.current = false; setBusy(false); } }
@@ -213,5 +228,5 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
     } catch (e) { if (isCurrent(generation)) reportError(String(e)); }
     finally { if (cancelling.current === generation) cancelling.current = null; }
   }
-  return { owner, draft, pendingFiles, busy, submittedOperationId, error, add, remove, send, detach, cancel, locked: Boolean(draft?.operation), reportError };
+  return { owner, draft, pendingFiles, busy, submittedOperationId, error, add, remove, replace, send, detach, cancel, locked: Boolean(draft?.operation), reportError };
 }

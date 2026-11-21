@@ -1,7 +1,22 @@
-import { useId, useLayoutEffect, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowDownUpIcon,
-  ArrowDownIcon,
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  type Modifier,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import {
   ArrowUpIcon,
   ChevronDownIcon,
   ChevronUpIcon,
@@ -12,24 +27,22 @@ import {
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Spinner } from '@/components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiInboxItem } from '@/lib/ai/session-adapter';
 import { documentMessageSummary } from '@/lib/ai/document-message';
+import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
 import { AiQueueNotice } from './ai-queue-notice';
 import { AiCommittedImages } from './ai-image-attachments';
 import type { AiQueueMutationState } from './use-ai-session-controller';
+
+const restrictToVerticalAxis: Modifier = ({ transform }) => ({
+  ...transform,
+  x: 0,
+});
 
 export interface AiQueueDockProps {
   readonly items: readonly AiInboxItem[];
@@ -91,6 +104,167 @@ function IconAction({
   );
 }
 
+interface SortableQueueRowProps {
+  readonly item: AiInboxItem;
+  readonly singleItem: boolean;
+  readonly sessionId?: string | null;
+  readonly editing: boolean;
+  readonly editingActive: boolean;
+  readonly editable: boolean;
+  readonly draggable: boolean;
+  readonly running: boolean;
+  readonly mutable: boolean;
+  readonly pending: boolean;
+  readonly steering: boolean;
+  readonly editButtons: React.RefObject<Map<string, HTMLButtonElement>>;
+  readonly restoreEditFocus: React.RefObject<string | null>;
+  readonly onEdit?: (item: AiInboxItem) => void;
+  readonly onRemove?: (item: AiInboxItem) => void;
+  readonly onSteer?: (item: AiInboxItem) => void;
+  readonly onResume?: (item: AiInboxItem) => void;
+}
+
+function SortableQueueRow({
+  item,
+  singleItem,
+  sessionId,
+  editing,
+  editingActive,
+  editable,
+  draggable,
+  running,
+  mutable,
+  pending,
+  steering,
+  editButtons,
+  restoreEditFocus,
+  onEdit,
+  onRemove,
+  onSteer,
+  onResume,
+}: SortableQueueRowProps): React.ReactNode {
+  const { t } = useI18n();
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: item.id,
+    disabled: !draggable,
+    attributes: { role: 'listitem' },
+  });
+  const imageCount = item.images?.length ?? 0;
+  const summary = documentMessageSummary(item.content);
+  const style = transform || transition
+    ? { transform: CSS.Transform.toString(transform), transition }
+    : undefined;
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      {...(draggable ? { ...attributes, ...listeners } : {})}
+      className={cn(
+        'ai-queue-row relative flex min-h-8 w-full min-w-0 items-center gap-1 box-border py-1 pr-[5px] pl-3',
+        draggable && 'cursor-grab touch-none select-none active:cursor-grabbing',
+        isDragging && 'z-10 cursor-grabbing',
+      )}
+      data-state={item.state}
+      data-editing={editing || undefined}
+      data-draggable={draggable || undefined}
+      data-dragging={isDragging || undefined}
+    >
+      {singleItem && <ListEndIcon aria-hidden="true" />}
+      <div className="ai-queue-row-content flex w-full min-w-0 items-center gap-2.5">
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          {sessionId && imageCount > 0 && <AiCommittedImages sessionId={sessionId} images={item.images?.slice(0, 2)} compact />}
+          {summary && <span className="min-w-0 truncate">{summary}</span>}
+          {imageCount > 0
+            ? <span className="shrink-0 text-muted-foreground">{t(imageCount === 1 ? 'ai.workspace.queue.image' : 'ai.workspace.queue.images', { count: imageCount })}</span>
+            : !summary && item.hasImages ? <span className="truncate">{t('ai.workspace.images.attachments')}</span> : null}
+        </div>
+        {item.paused && <Badge variant="secondary">{t('ai.workspace.queue.paused')}</Badge>}
+        {item.confirming && <Badge variant="secondary">{t('ai.workspace.messageConfirming')}</Badge>}
+        {item.waitingForAdmission && <Badge variant="secondary">{t('ai.workspace.queue.waitingAdmission')}</Badge>}
+        {item.redirected && <Badge variant="secondary" title={t('ai.workspace.queue.redirectedDescription')}>{t('ai.workspace.queue.redirected')}</Badge>}
+        {item.lane === 'nextStep' && <Badge variant="secondary">{t(item.state === 'pending'
+          ? 'ai.workspace.queue.lane.nextStep' : 'ai.workspace.queue.waitingNextStep')}</Badge>}
+        {item.state === 'pending' && !item.waitingForAdmission && !item.confirming && (
+          <Spinner aria-label={t('ai.workspace.queue.state.pending')} />
+        )}
+        <span className="sr-only">
+          {t(`ai.workspace.queue.lane.${item.lane}` as LocaleKey)} ·{' '}
+          {t(`ai.workspace.queue.state.${item.state}` as LocaleKey)}
+        </span>
+        {!editable && mutable && item.paused && onResume && (
+          <div
+            className="ai-queue-actions flex shrink-0 cursor-default items-center gap-1"
+            onPointerDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            <IconAction label={t('ai.workspace.queue.resume')} disabled={pending} onClick={() => onResume(item)}>
+              <ArrowUpIcon data-icon="inline-start" />
+            </IconAction>
+          </div>
+        )}
+        {editing && <Badge variant="secondary">{t('ai.workspace.queue.editing')}</Badge>}
+        {editable && !editing && (
+          <div
+            className="ai-queue-actions flex shrink-0 cursor-default items-center gap-1"
+            onPointerDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            <IconAction
+              label={t('ai.workspace.queue.edit')}
+              onTooltipOpenChange={(open, details) => {
+                // Restoring focus after editing should not announce the edit hint again.
+                if (open && details.reason === 'trigger-focus' && restoreEditFocus.current === item.id) {
+                  details.cancel();
+                }
+              }}
+              buttonRef={(button) => {
+                if (button) editButtons.current.set(item.id, button);
+                else editButtons.current.delete(item.id);
+              }}
+              disabled={pending || editingActive || onEdit === undefined}
+              onClick={() => onEdit?.(item)}
+            >
+              <PencilIcon data-icon="inline-start" />
+            </IconAction>
+            <IconAction
+              label={t('ai.workspace.queue.remove')}
+              disabled={pending || editingActive || onRemove === undefined}
+              onClick={() => onRemove?.(item)}
+            >
+              <Trash2Icon data-icon="inline-start" />
+            </IconAction>
+            {item.paused && onResume && (
+              <IconAction label={t('ai.workspace.queue.resume')} disabled={pending || editingActive} onClick={() => onResume(item)}>
+                <ArrowUpIcon data-icon="inline-start" />
+              </IconAction>
+            )}
+            {running && !item.paused && item.lane === 'nextTurn' && onSteer && (
+              <IconAction
+                label={t('ai.workspace.queue.steer')}
+                tooltip={t('ai.workspace.queue.steerTooltip')}
+                disabled={pending || editingActive}
+                onClick={() => onSteer(item)}
+              >
+                {steering
+                  ? <Spinner aria-label={t('ai.workspace.queue.pending')} data-icon="inline-start" />
+                  : <ArrowUpIcon data-icon="inline-start" />}
+              </IconAction>
+            )}
+          </div>
+        )}
+      </div>
+    </li>
+  );
+}
+
 /** Runtime-projected Inbox rows. Editing takes place in the composer. */
 export function AiQueueDock({
   items,
@@ -113,6 +287,11 @@ export function AiQueueDock({
   const restoreEditFocus = useRef<string | null>(null);
   const retrying = mutation?.status === 'retrying';
   const pending = mutation?.status === 'pending' || retrying;
+  const sensors = useSensors(
+    useSensor(TrackpadSafePointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const sortableIds = useMemo(() => items.map((item) => item.id), [items]);
 
   useLayoutEffect(() => {
     if (editingId) {
@@ -129,16 +308,20 @@ export function AiQueueDock({
   if (items.length === 0 && !mutation) return null;
   const expanded = items.length === 1 || !collapsed || Boolean(editingId);
 
-  const move = (item: AiInboxItem, offset: -1 | 1): void => {
+  const handleDragEnd = (event: DragEndEvent): void => {
+    const { active, over } = event;
+    if (!over || active.id === over.id || !onReorder) return;
+    const activeItem = items.find((candidate) => candidate.id === active.id);
+    const overItem = items.find((candidate) => candidate.id === over.id);
+    if (!activeItem || !overItem) return;
+    if (activeItem.lane !== overItem.lane || activeItem.state !== 'queued' || overItem.state !== 'queued') return;
     const laneItems = items.filter((candidate) => (
-      candidate.lane === item.lane && candidate.state === 'queued'
+      candidate.lane === activeItem.lane && candidate.state === 'queued'
     ));
-    const index = laneItems.findIndex((candidate) => candidate.id === item.id);
-    const destination = index + offset;
-    if (index < 0 || destination < 0 || destination >= laneItems.length) return;
-    const ordered = laneItems.map((candidate) => candidate.id);
-    [ordered[index], ordered[destination]] = [ordered[destination], ordered[index]];
-    onReorder?.(item.lane, ordered);
+    const oldIndex = laneItems.findIndex((candidate) => candidate.id === activeItem.id);
+    const newIndex = laneItems.findIndex((candidate) => candidate.id === overItem.id);
+    if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return;
+    onReorder(activeItem.lane, arrayMove(laneItems, oldIndex, newIndex).map((candidate) => candidate.id));
   };
 
   return (
@@ -149,127 +332,70 @@ export function AiQueueDock({
       {items.length > 0 && <section
       data-slot="ai-queue-dock"
       aria-label={t('ai.workspace.queue.title')}
-      className={cn('ai-queue-dock relative w-full min-w-0 shrink-0 overflow-hidden box-border',
-        items.length === 1 ? 'py-px' : 'pb-0.5')}
+      className="ai-queue-dock relative w-full min-w-0 shrink-0 overflow-hidden box-border"
     >
       {items.length > 1 && (
         <Button
           type="button"
           variant="plain"
-          className="ai-queue-header flex h-9 w-full min-w-0 items-center gap-1 px-3 py-1 [&>:last-child]:ml-auto"
+          size="sm"
+          className="ai-queue-header flex h-8 w-full min-w-0 items-center gap-1 px-3 py-1 disabled:opacity-100 [&>:last-child]:ml-auto"
           aria-expanded={expanded}
+          aria-label={t('ai.workspace.queue.count', { count: items.length })}
           disabled={Boolean(editingId)}
           onClick={() => setCollapsed((value) => !value)}
         >
           <ListEndIcon aria-hidden="true" />
-          <span>{t('ai.workspace.queue.count', { count: items.length })}</span>
+          <span className="ai-queue-title shrink-0">{t('ai.workspace.queue.header')}</span>
+          <span className="ai-queue-count shrink-0">· {items.length}</span>
           {pending && <Spinner aria-label={t('ai.workspace.queue.pending')} />}
           {expanded ? <ChevronDownIcon aria-hidden="true" /> : <ChevronUpIcon aria-hidden="true" />}
         </Button>
       )}
-      {expanded && <ul className="ai-queue-list m-0 max-h-[min(108px,16dvh)] list-none overflow-y-auto p-0">
-        {items.map((item) => {
-          const laneItems = items.filter((candidate) => (
-            candidate.lane === item.lane && candidate.state === 'queued'
-          ));
-          const laneIndex = laneItems.findIndex((candidate) => candidate.id === item.id);
-          const editable = mutable && !resumeOnly && item.state === 'queued' && item.source === 'user';
-          const steering = pending && mutation.intent.type === 'steer' && mutation.intent.itemId === item.id;
-          const editing = editingId === item.id;
-          const imageCount = item.images?.length ?? 0;
-          const summary = documentMessageSummary(item.content);
-          return (
-            <li key={item.id} className="ai-queue-row flex h-9 w-full min-w-0 items-center gap-1 box-border py-1 pr-[5px] pl-3"
-              data-state={item.state} data-editing={editing || undefined}>
-              {items.length === 1 && <ListEndIcon aria-hidden="true" />}
-                <div className="ai-queue-row-content flex w-full min-w-0 items-center gap-2.5">
-                  <div className="flex min-w-0 flex-1 items-center gap-1">
-                    {sessionId && imageCount > 0 && <AiCommittedImages sessionId={sessionId} images={item.images?.slice(0, 2)} compact />}
-                    {summary && <span className="min-w-0 truncate">{summary}</span>}
-                    {imageCount > 0
-                      ? <span className="shrink-0 text-muted-foreground">{t(imageCount === 1 ? 'ai.workspace.queue.image' : 'ai.workspace.queue.images', { count: imageCount })}</span>
-                      : !summary && item.hasImages ? <span className="truncate">{t('ai.workspace.images.attachments')}</span> : null}
-                  </div>
-                  {item.paused && <Badge variant="secondary">{t('ai.workspace.queue.paused')}</Badge>}
-                  {item.confirming && <Badge variant="secondary">{t('ai.workspace.messageConfirming')}</Badge>}
-                  {item.waitingForAdmission && <Badge variant="secondary">{t('ai.workspace.queue.waitingAdmission')}</Badge>}
-                  {item.redirected && <Badge variant="secondary" title={t('ai.workspace.queue.redirectedDescription')}>{t('ai.workspace.queue.redirected')}</Badge>}
-                  {item.lane === 'nextStep' && <Badge variant="secondary">{t(item.state === 'pending'
-                    ? 'ai.workspace.queue.lane.nextStep' : 'ai.workspace.queue.waitingNextStep')}</Badge>}
-                  {item.state === 'pending' && !item.waitingForAdmission && !item.confirming && (
-                    <Spinner aria-label={t('ai.workspace.queue.state.pending')} />
-                  )}
-                  <span className="sr-only">
-                    {t(`ai.workspace.queue.lane.${item.lane}` as LocaleKey)} ·{' '}
-                    {t(`ai.workspace.queue.state.${item.state}` as LocaleKey)}
-                  </span>
-                  {!editable && mutable && item.paused && onResume && <IconAction label={t('ai.workspace.queue.resume')} disabled={pending} onClick={() => onResume(item)}><ArrowUpIcon data-icon="inline-start" /></IconAction>}
-                  {editing && <Badge variant="secondary">{t('ai.workspace.queue.editing')}</Badge>}
-                  {editable && !editing && (
-                    <div className="ai-queue-actions flex shrink-0 items-center gap-1">
-                      {laneItems.length > 1 && onReorder && <DropdownMenu>
-                        <DropdownMenuTrigger render={(
-                          <Button type="button" variant="ghost" size="icon-xs" className="shrink-0"
-                            disabled={pending || Boolean(editingId)} aria-label={t('ai.workspace.queue.reorder')} />
-                        )}>
-                          <ArrowDownUpIcon data-icon="inline-start" />
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" side="top" className="w-40 max-w-(--available-width)">
-                          <DropdownMenuGroup>
-                            <DropdownMenuLabel>{t(`ai.workspace.queue.lane.${item.lane}` as LocaleKey)}</DropdownMenuLabel>
-                            <DropdownMenuItem className="whitespace-nowrap" disabled={pending || laneIndex <= 0} onClick={() => move(item, -1)}>
-                              <ArrowUpIcon />{t('ai.workspace.queue.moveUp')}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem className="whitespace-nowrap" disabled={pending || laneIndex < 0 || laneIndex >= laneItems.length - 1} onClick={() => move(item, 1)}>
-                              <ArrowDownIcon />{t('ai.workspace.queue.moveDown')}
-                            </DropdownMenuItem>
-                          </DropdownMenuGroup>
-                        </DropdownMenuContent>
-                      </DropdownMenu>}
-                      <IconAction
-                        label={t('ai.workspace.queue.edit')}
-                        onTooltipOpenChange={(open, details) => {
-                          // Restoring focus after editing should not announce the edit hint again.
-                          if (open && details.reason === 'trigger-focus' && restoreEditFocus.current === item.id) {
-                            details.cancel();
-                          }
-                        }}
-                        buttonRef={(button) => {
-                          if (button) editButtons.current.set(item.id, button);
-                          else editButtons.current.delete(item.id);
-                        }}
-                        disabled={pending || Boolean(editingId) || onEdit === undefined}
-                        onClick={() => onEdit?.(item)}
-                      >
-                        <PencilIcon data-icon="inline-start" />
-                      </IconAction>
-                      <IconAction
-                        label={t('ai.workspace.queue.remove')}
-                        disabled={pending || Boolean(editingId) || onRemove === undefined}
-                        onClick={() => onRemove?.(item)}
-                      >
-                        <Trash2Icon data-icon="inline-start" />
-                      </IconAction>
-                      {item.paused && onResume && <IconAction label={t('ai.workspace.queue.resume')} disabled={pending || Boolean(editingId)} onClick={() => onResume(item)}><ArrowUpIcon data-icon="inline-start" /></IconAction>}
-                      {running && !item.paused && item.lane === 'nextTurn' && onSteer && (
-                        <IconAction
-                          label={t('ai.workspace.queue.steer')}
-                          tooltip={t('ai.workspace.queue.steerTooltip')}
-                          disabled={pending || Boolean(editingId)}
-                          onClick={() => onSteer(item)}
-                        >
-                          {steering
-                            ? <Spinner aria-label={t('ai.workspace.queue.pending')} data-icon="inline-start" />
-                            : <ArrowUpIcon data-icon="inline-start" />}
-                        </IconAction>
-                      )}
-                    </div>
-                  )}
-                </div>
-            </li>
-          );
-        })}
-      </ul>}
+      {expanded && (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          modifiers={[restrictToVerticalAxis]}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+            <ul className="ai-queue-list m-0 max-h-[min(108px,16dvh)] list-none overflow-x-hidden overflow-y-auto p-0">
+              {items.map((item) => {
+                const laneCount = items.filter((candidate) => (
+                  candidate.lane === item.lane && candidate.state === 'queued'
+                )).length;
+                const editable = mutable && !resumeOnly && item.state === 'queued' && item.source === 'user';
+                const steering = pending && mutation.intent.type === 'steer' && mutation.intent.itemId === item.id;
+                const editing = editingId === item.id;
+                const draggable = editable && !editing && !pending && !editingId && laneCount > 1 && Boolean(onReorder);
+                return (
+                  <SortableQueueRow
+                    key={item.id}
+                    item={item}
+                    singleItem={items.length === 1}
+                    sessionId={sessionId}
+                    editing={editing}
+                    editingActive={Boolean(editingId)}
+                    editable={editable}
+                    draggable={draggable}
+                    running={running}
+                    mutable={mutable}
+                    pending={pending}
+                    steering={steering}
+                    editButtons={editButtons}
+                    restoreEditFocus={restoreEditFocus}
+                    onEdit={onEdit}
+                    onRemove={onRemove}
+                    onSteer={onSteer}
+                    onResume={onResume}
+                  />
+                );
+              })}
+            </ul>
+          </SortableContext>
+        </DndContext>
+      )}
       </section>}
     </div>
   );

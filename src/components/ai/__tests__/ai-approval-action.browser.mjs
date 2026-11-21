@@ -115,7 +115,8 @@ try {
           await page.mouse.move(0, 0);
           await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
           await show({ toolName: 'run_terminal_command', arguments: { command: longCommand } }, locale);
-          assert.equal(await commandCard.locator('.ai-content-header').textContent(), heading);
+          assert.equal(await page.locator('[data-slot="ai-approval-command-label"]').textContent(), heading);
+          assert.equal(await commandCard.locator('[data-slot="ai-approval-command-label"]').count(), 0, `${context}: the label stays outside the code block`);
           const viewport = commandCard.locator('pre');
           assert.equal(await viewport.textContent(), longCommand, `${context}: the complete command must be shown`);
           assert.equal(await viewport.getAttribute('aria-label'), heading);
@@ -163,7 +164,7 @@ try {
             await footer.getByRole('button', { name: label, exact: true }).click();
             assert.equal(await page.locator('body').getAttribute('data-action'), expected);
           }
-          await commandCard.locator('.ai-content-header').scrollIntoViewIfNeeded();
+          await page.locator('[data-slot="ai-approval-command-label"]').scrollIntoViewIfNeeded();
           await page.screenshot({ path: `/tmp/ai-approval-command-${engine.name()}-${width}-${theme}.png` });
         }
         await page.evaluate(() => { delete document.documentElement.dataset.theme; });

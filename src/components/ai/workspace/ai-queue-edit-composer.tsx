@@ -1,11 +1,13 @@
-import { useId, useLayoutEffect, useRef, useState } from 'react';
-import { CheckIcon, ImagePlusIcon, TriangleAlertIcon } from 'lucide-react';
+import { useLayoutEffect, useRef, useState } from 'react';
+import { CheckIcon, PlusIcon, TriangleAlertIcon } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { InputGroup, InputGroupAddon, InputGroupTextarea } from '@/components/ui/input-group';
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from '@/components/ui/input-group';
 import { Spinner } from '@/components/ui/spinner';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
+import { cn } from '@/lib/utils';
 import { DOCUMENT_LIMITS, IMAGE_ACCEPT, documentErrorKey } from '@/lib/ai/document-import';
 import { decodeDocumentMessage, encodeDocumentMessage } from '@/lib/ai/document-message';
 import { imageErrorKey } from '@/lib/ai/image-error';
@@ -38,7 +40,6 @@ export function AiQueueEditComposer({ item, current, sessionId, mutation, onUpda
 }) {
   const { t } = useI18n();
   const toast = useToast();
-  const labelId = useId();
   const editor = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const mounted = useRef(false);
@@ -58,13 +59,19 @@ export function AiQueueEditComposer({ item, current, sessionId, mutation, onUpda
   const changedElsewhere = current && (current.content !== item.content || !sameImages(current.images ?? noImages, sourceImages));
   const unavailable = !current || changedElsewhere;
   const count = kept.length + added.length;
+  const hasAttachments = count > 0 || files.length > 0;
   const busy = loading || saving || pending;
   const canSave = !busy && !unavailable && Boolean(value.trim() || source.documents.length || count);
   const canAdd = allowImageAdd && !busy && !unavailable && Boolean(sessionId) && count < IMAGE_LIMITS.maxImages;
 
   useLayoutEffect(() => {
     mounted.current = true;
-    editor.current?.focus({ preventScroll: true });
+    const element = editor.current;
+    if (element) {
+      element.focus({ preventScroll: true });
+      const end = element.value.length;
+      element.setSelectionRange(end, end);
+    }
     return () => { mounted.current = false; };
   }, []);
 
@@ -121,23 +128,28 @@ export function AiQueueEditComposer({ item, current, sessionId, mutation, onUpda
   };
 
   return (
-    <InputGroup data-composer-card="" data-queue-edit-composer="" aria-labelledby={labelId}
-      className="ai-queue-editor h-auto min-h-0 flex-col items-stretch gap-0 overflow-hidden pt-2.5"
+    <InputGroup data-composer-card="" data-queue-edit-composer="" aria-label={t('ai.workspace.queue.editingTitle')}
+      className={cn(
+        'ai-queue-editor h-auto min-h-0 flex-col items-stretch gap-0 overflow-hidden',
+        !hasAttachments && 'pt-2.5',
+      )}
       aria-busy={busy || undefined}
+      onClick={event => {
+        if (event.target === event.currentTarget) editor.current?.focus();
+      }}
       onKeyDown={event => {
         if (!event.currentTarget.contains(event.target as Node)
           || event.defaultPrevented || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
         if (event.key === 'Escape' && !saving && !pending) {
           event.preventDefault();
           onClose(false);
-        } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+        } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey || (!event.shiftKey && event.target === editor.current))) {
           event.preventDefault();
-          void save();
+          if (!event.repeat) void save();
         }
       }}>
-      <label id={labelId} htmlFor={`${labelId}-input`} className="px-4 text-sm font-medium">{t('ai.workspace.queue.editingTitle')}</label>
-      <InputGroupTextarea ref={editor} id={`${labelId}-input`} aria-label={t('ai.workspace.queue.editLabel')} rows={2}
-        className="max-h-[min(192px,30dvh)] min-h-14 resize-none overflow-y-auto px-4 [field-sizing:content]"
+      <InputGroupTextarea ref={editor} aria-label={t('ai.workspace.queue.editLabel')} rows={1}
+        className="w-full shrink resize-none overflow-y-auto pt-1 pr-3 pb-0 pl-4 [field-sizing:content] max-h-[min(336px,42vh)] min-h-7"
         value={value} onChange={event => setValue(event.currentTarget.value)}
         readOnly={saving || pending}
         placeholder={t('ai.workspace.queue.editPlaceholder')}
@@ -156,8 +168,8 @@ export function AiQueueEditComposer({ item, current, sessionId, mutation, onUpda
           event.preventDefault();
           void addFiles(async () => pasted);
         }} />
-      {(count > 0 || files.length > 0) && (
-        <InputGroupAddon align="block-start" className="ai-image-draft-addon order-none block min-w-0 px-3">
+      {hasAttachments && (
+        <InputGroupAddon align="block-start" className="ai-image-draft-addon block min-w-0 px-3" onClick={event => event.stopPropagation()}>
           <UnifiedAttachmentContext value>
             <AiDraftAttachmentRail unified count={count + files.length}>
               {sessionId && <AiCommittedImages sessionId={sessionId} images={kept}
@@ -178,30 +190,71 @@ export function AiQueueEditComposer({ item, current, sessionId, mutation, onUpda
         <TriangleAlertIcon aria-hidden="true" />
         <AlertDescription>{t(changedElsewhere ? 'ai.workspace.queue.editChanged' : 'ai.workspace.queue.errorNotActionable')}</AlertDescription>
       </Alert>}
-      <InputGroupAddon align="block-end" className="flex min-w-0 shrink-0 flex-wrap justify-between gap-1 px-3 py-2">
-        <input ref={picker} type="file" accept={IMAGE_ACCEPT} multiple hidden onChange={event => {
-          const selected = Array.from(event.currentTarget.files ?? []);
-          event.currentTarget.value = '';
-          void addFiles(async () => selected);
-        }} />
-        {allowImageAdd && <Button type="button" size="sm" variant="ghost" disabled={!canAdd} onClick={() => {
-          if (!isTauriRuntime()) { picker.current?.click(); return; }
-          void addFiles(async () => {
-            const paths = await invokePickLocalFiles();
-            if (!mounted.current) return [];
-            if (count + paths.length > IMAGE_LIMITS.maxImages) {
-              toast.error(t('ai.workspace.images.error.count', { max: IMAGE_LIMITS.maxImages }));
-              return [];
-            }
-            return Promise.all(paths.map(readLocalImageFile));
-          });
-        }}><ImagePlusIcon data-icon="inline-start" />{t('ai.workspace.images.add')}</Button>}
-        <div className="ml-auto flex items-center gap-1">
-          <Button type="button" size="sm" variant="ghost" disabled={saving || pending} onClick={() => onClose(false)}>{t('common.cancel')}</Button>
-          <Button type="button" size="sm" disabled={!canSave} onClick={() => void save()}>
-            {saving || pending ? <Spinner data-icon="inline-start" aria-hidden="true" /> : <CheckIcon data-icon="inline-start" aria-hidden="true" />}
-            {t('common.save')}
+      <InputGroupAddon align="block-end" className="ai-composer-toolbar mt-3 min-h-10.5 min-w-0 shrink-0 justify-between gap-3 px-2 pt-0.5 pb-1.5 @max-[400px]/ai-workspace:gap-1 @max-[400px]/ai-workspace:px-[7px]" onClick={event => {
+        if (!event.currentTarget.contains(event.target as Node)) return;
+        if (!(event.target as HTMLElement).closest('button, [role="button"]')) editor.current?.focus();
+      }}>
+        <div className="ai-composer-tools flex min-w-0 flex-[0_2_auto] items-center gap-1">
+          <input ref={picker} type="file" accept={IMAGE_ACCEPT} multiple hidden onChange={event => {
+            const selected = Array.from(event.currentTarget.files ?? []);
+            event.currentTarget.value = '';
+            void addFiles(async () => selected);
+          }} />
+          {allowImageAdd && (
+            <Tooltip disabled={!canAdd}>
+              <TooltipTrigger
+                render={(
+                  <InputGroupButton
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="ai-composer-add size-7 shrink-0 rounded-full"
+                    aria-label={t('ai.workspace.images.add')}
+                    disabled={!canAdd}
+                    onClick={() => {
+                      if (!isTauriRuntime()) { picker.current?.click(); return; }
+                      void addFiles(async () => {
+                        const paths = await invokePickLocalFiles();
+                        if (!mounted.current) return [];
+                        if (count + paths.length > IMAGE_LIMITS.maxImages) {
+                          toast.error(t('ai.workspace.images.error.count', { max: IMAGE_LIMITS.maxImages }));
+                          return [];
+                        }
+                        return Promise.all(paths.map(readLocalImageFile));
+                      });
+                    }}
+                  />
+                )}
+              >
+                <PlusIcon nonScalingStroke strokeWidth={1.2} />
+              </TooltipTrigger>
+              <TooltipContent>{t('ai.workspace.images.add')}</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+        <div className="ai-composer-trailing flex min-w-0 flex-[1_1_auto] items-center justify-end gap-1.5 @max-[400px]/ai-workspace:gap-[3px]">
+          <Button type="button" size="xs" variant="ghost" className="ai-queue-editor-action h-7 rounded-full px-2.5 text-xs text-muted-foreground hover:text-foreground" disabled={saving || pending} onClick={() => onClose(false)}>
+            {t('common.cancel')}
           </Button>
+          <Tooltip disabled={!canSave}>
+            <TooltipTrigger
+              render={(
+                <InputGroupButton
+                  type="button"
+                  variant="default"
+                  size="icon-sm"
+                  className="ai-composer-primary size-7 shrink-0"
+                  disabled={!canSave}
+                  aria-label={t('common.save')}
+                  aria-busy={saving || pending || undefined}
+                  onClick={() => void save()}
+                />
+              )}
+            >
+              {saving || pending ? <Spinner aria-hidden="true" /> : <CheckIcon />}
+            </TooltipTrigger>
+            <TooltipContent>{t('common.save')}</TooltipContent>
+          </Tooltip>
         </div>
       </InputGroupAddon>
     </InputGroup>

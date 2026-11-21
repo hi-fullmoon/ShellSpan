@@ -64,63 +64,78 @@ describe('Queue Dock', () => {
     }
   });
 
-  it('supports keyboard edit, remove, and complete same-lane reorder intents', async () => {
+  it('supports keyboard edit recall, remove, and complete same-lane reorder intents', async () => {
     const user = userEvent.setup();
-    const update = vi.fn();
     const remove = vi.fn();
     const reorder = vi.fn();
-    const { rerender } = render(
+    render(
       <AiComposerSeat phase="active" status="waiting"
         inbox={queue}
-        onUpdateQueueItem={async (item, content) => { update(item, content); return true; }}
         onRemoveQueueItem={remove}
         onReorderQueueLane={reorder}
       />,
     );
 
     await user.click(screen.getAllByRole('button', { name: 'Edit queued input' })[0]);
-    const input = screen.getByRole('textbox', { name: 'Queued input text' });
-    await user.clear(input);
-    await user.type(input, 'Updated task{Control>}{Enter}{/Control}');
-    expect(update).toHaveBeenCalledWith(queue[0], 'Updated task');
-    expect(input).not.toBeInTheDocument();
-    rerender(<AiComposerSeat phase="active" status="waiting" inbox={[{ ...queue[0], content: 'Updated task' }, queue[1]]}
-      onRemoveQueueItem={remove} onReorderQueueLane={reorder} />);
+    expect(remove).toHaveBeenCalledWith(queue[0]);
+    await waitFor(() => expect(screen.getByTestId('ai-workspace-composer')).toHaveTextContent('First queued task'));
+    expect(document.querySelector('[data-queue-edit-composer]')).toBeNull();
 
-    await user.click(screen.getAllByRole('button', { name: 'Reorder queued input' })[0]);
-    await user.click(await screen.findByRole('menuitem', { name: 'Move down' }));
+    expect(screen.queryByRole('button', { name: 'Reorder queued input' })).toBeNull();
+    const rows = screen.getAllByRole('listitem');
+    expect(rows[0]).toHaveAttribute('data-draggable', 'true');
+    expect(rows[1]).toHaveAttribute('data-draggable', 'true');
+    rows[0].getBoundingClientRect = () => ({ x: 0, y: 0, width: 320, height: 32, top: 0, right: 320, bottom: 32, left: 0, toJSON: () => ({}) });
+    rows[1].getBoundingClientRect = () => ({ x: 0, y: 32, width: 320, height: 32, top: 32, right: 320, bottom: 64, left: 0, toJSON: () => ({}) });
+    rows[0].focus();
+    await user.keyboard(' {ArrowDown} ');
     expect(reorder).toHaveBeenCalledWith('nextTurn', ['item-b', 'item-a']);
 
     await user.click(screen.getAllByRole('button', { name: 'Remove queued input' })[1]);
     expect(remove).toHaveBeenCalledWith(queue[1]);
   });
 
-  it('returns keyboard focus to the edit action on cancel and after a pending save settles', async () => {
+  it('recalls queued input directly into the regular composer without altering toolbar controls', async () => {
     const user = userEvent.setup();
-    const update = vi.fn();
-    let committed!: (value: boolean) => void;
-    const receipt = new Promise<boolean>(resolve => { committed = resolve; });
-    render(<AiComposerSeat phase="active" status="waiting" inbox={[queue[0]]}
-      defaultDraft="Keep my draft" onUpdateQueueItem={(item, content) => { update(item, content); return receipt; }} />);
+    const edit = vi.fn(async () => true);
+    render(
+      <AiComposerSeat
+        phase="active"
+        status="running"
+        currentSessionId="session-1"
+        inbox={[queue[0]]}
+        defaultDraft="Old draft"
+        modelLabel="MiniMax-M3.1-Flash"
+        permissionControl={<button type="button">Request approval</button>}
+        executionSurfaceControl={<button type="button">Direct execution</button>}
+        onEditQueueItem={edit}
+      />,
+    );
+
     await user.click(screen.getByRole('button', { name: 'Edit queued input' }));
-    await user.type(screen.getByRole('textbox', { name: 'Queued input text' }), ' discarded{Escape}');
-    expect(update).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Edit queued input' })).toHaveFocus();
-    expect(screen.getByTestId('ai-workspace-composer')).toHaveTextContent('Keep my draft');
+    expect(edit).toHaveBeenCalledExactlyOnceWith(queue[0]);
+    expect(document.querySelector('[data-queue-edit-composer]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Request approval' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Direct execution' })).toBeVisible();
+    expect(screen.getByRole('button', { name: /MiniMax-M3\.1-Flash/ })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Running input behavior' })).toBeVisible();
+  });
 
-    await user.keyboard('{Enter}');
-    await user.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(screen.getByRole('button', { name: 'Edit queued input' })).toHaveFocus();
+  it('keeps the existing draft when recalling a queued item fails', async () => {
+    const user = userEvent.setup();
+    const remove = vi.fn(async () => false);
+    render(
+      <AiComposerSeat
+        phase="active"
+        status="waiting"
+        inbox={[queue[0]]}
+        defaultDraft="Keep my draft"
+        onRemoveQueueItem={remove}
+      />,
+    );
 
-    await user.keyboard('{Enter}');
-    const input = screen.getByRole('textbox', { name: 'Queued input text' });
-    await user.clear(input);
-    await user.type(input, 'Saved text{Control>}{Enter}{/Control}');
-    expect(input).toHaveValue('Saved text');
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
-    committed(true);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit queued input' })).toHaveFocus());
-    expect(update).toHaveBeenCalledExactlyOnceWith(queue[0], 'Saved text');
+    await user.click(screen.getByRole('button', { name: 'Edit queued input' }));
+    expect(remove).toHaveBeenCalledExactlyOnceWith(queue[0]);
     expect(screen.getByTestId('ai-workspace-composer')).toHaveTextContent('Keep my draft');
   });
 

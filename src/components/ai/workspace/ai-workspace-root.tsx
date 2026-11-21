@@ -42,7 +42,11 @@ import { AiSubagentCatalog } from './ai-subagent-catalog';
 import { AiSubagentContext } from './ai-subagent-context';
 import { AiSubagentStrip } from './ai-subagent-strip';
 import { subagentModeLabel, subagentRoleLabel, subagentStatusLabel } from './ai-subagent-tree';
-import { buildSubagentLineage, correlateSubagentToolSessions } from '@/lib/ai/subagent-lineage';
+import {
+  buildSubagentLineage,
+  correlateSubagentToolSessions,
+  filterActiveSubagentEntries,
+} from '@/lib/ai/subagent-lineage';
 import { AiToolDetails } from './ai-tool-details';
 import { AiArtifactDetails } from './ai-artifact-details';
 import type { AiQueueMutationState } from './use-ai-session-controller';
@@ -217,6 +221,7 @@ export interface AiWorkspaceRootProps {
   readonly onOpenSession?: (summary: AiSessionSummary) => void;
   readonly onArchiveSession?: (summary: AiSessionSummary) => void;
   readonly onDeleteSession?: (summary: AiSessionSummary) => void;
+  readonly onEditQueueItem?: import('./use-ai-session-controller').AiSessionController['editQueueItem'];
   readonly onUpdateQueueItem?: import('./use-ai-session-controller').AiSessionController['updateQueueItem'];
   readonly onDiscardQueueEdit?: (itemId: string) => void;
   readonly onRemoveQueueItem?: (item: AiInboxItem) => void;
@@ -318,6 +323,7 @@ export function AiWorkspaceRoot({
   onOpenSession,
   onArchiveSession,
   onDeleteSession,
+  onEditQueueItem,
   onUpdateQueueItem,
   onDiscardQueueEdit,
   onRemoveQueueItem,
@@ -468,6 +474,10 @@ export function AiWorkspaceRoot({
   const lineage = useMemo(
     () => buildSubagentLineage(lineageView, sessions, toolCorrelation.goalByChildId),
     [lineageView, sessions, toolCorrelation.goalByChildId],
+  );
+  const activeSubagentEntries = useMemo(
+    () => (lineage ? filterActiveSubagentEntries(lineage.currentChildren) : []),
+    [lineage],
   );
   const [expandedDockStrips, setExpandedDockStrips] = useState<Readonly<Record<string, 'tasks' | 'subagents'>>>({});
   const dockStripScopeId = lineage?.current.id ?? selectedSessionId ?? '__default__';
@@ -827,11 +837,11 @@ export function AiWorkspaceRoot({
           taskPlanActive={terminalRecovery ? false : view?.taskPlanActive}
           taskStripOpen={expandedDockStrip === 'tasks'}
           onTaskStripOpenChange={(open) => setDockStripOpen('tasks', open)}
-          subagentStrip={surfaceMode === 'agent' && onOpenSession && lineage && lineage.currentChildren.length > 0
+          subagentStrip={surfaceMode === 'agent' && onOpenSession && lineage && activeSubagentEntries.length > 0
             ? (
                 <AiSubagentStrip
                   key={`subagent:${lineage.current.id}`}
-                  entries={lineage.currentChildren}
+                  entries={activeSubagentEntries}
                   currentSessionId={lineage.current.id}
                   currentBudgetExhausted={currentSubagentBudgetExhausted}
                   open={expandedDockStrip === 'subagents'}
@@ -876,6 +886,7 @@ export function AiWorkspaceRoot({
           onStop={readOnlySession ? undefined : onStop}
           onBusyPreferenceChange={surfaceMode === 'agent' && !readOnlySession
             && !view?.snapshot.value.header.subagent ? onBusyPreferenceChange : undefined}
+          onEditQueueItem={surfaceMode === 'agent' && !readOnlySession ? onEditQueueItem : undefined}
           onUpdateQueueItem={surfaceMode === 'agent' && !readOnlySession ? onUpdateQueueItem : undefined}
           onDiscardQueueEdit={onDiscardQueueEdit}
           onRemoveQueueItem={surfaceMode === 'agent' && !readOnlySession ? onRemoveQueueItem : undefined}

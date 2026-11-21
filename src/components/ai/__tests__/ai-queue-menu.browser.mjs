@@ -37,22 +37,24 @@ try {
       const page = await browser.newPage({ viewport: { width, height: 500 } });
       await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/?locale=${locale}`);
       const chinese = locale === 'zh-CN';
-      const triggers = page.getByRole('button', { name: chinese ? '调整排队顺序' : 'Reorder queued input' });
-      await triggers.first().waitFor();
       const header = page.locator('.ai-queue-header');
+      await header.waitFor();
+      assert.equal(await page.getByRole('button', { name: chinese ? '调整排队顺序' : 'Reorder queued input' }).count(), 0, 'Reorder dropdown trigger must be removed in favor of drag-and-drop');
       const titleGeometry = await header.evaluate(element => {
         const icon = element.firstElementChild.getBoundingClientRect();
-        const label = element.querySelector('span').getBoundingClientRect();
+        const label = element.querySelector('.ai-queue-title').getBoundingClientRect();
         const chevron = element.lastElementChild.getBoundingClientRect();
         return {
           iconOffset: icon.top + icon.height / 2 - (label.top + label.height / 2),
           chevronOffset: chevron.top + chevron.height / 2 - (label.top + label.height / 2),
           gap: label.left - icon.right,
+          height: element.getBoundingClientRect().height,
         };
       });
       assert.equal(titleGeometry.iconOffset, -1, 'Queue icon must compensate for its lower arrow to visually align with the title');
       assert.equal(titleGeometry.chevronOffset, 0, 'Collapse icon must remain centered with the title');
       assert.equal(titleGeometry.gap, 4, 'Queue title must retain the shared icon gap');
+      assert.equal(titleGeometry.height, 32, 'Queue header must match the 32px height of task and subagent strips');
       const headerBorder = await header.evaluate(element => {
         const style = getComputedStyle(element);
         const row = element.closest('.ai-queue-dock').querySelector('.ai-queue-row + .ai-queue-row');
@@ -107,7 +109,8 @@ try {
       assert.ok(queueGeometry.rowRadii.every(radius => radius === '0px'), 'Row separators must have straight ends');
       await page.screenshot({ path: join(screenshots, `${locale}-${width}-header-hover.png`) });
       const actions = page.locator('.ai-queue-actions').first().getByRole('button');
-      for (let index = 0; index < 3; index += 1) {
+      assert.equal(await actions.count(), 2, 'Queue row actions should only show edit and remove');
+      for (let index = 0; index < 2; index += 1) {
         const action = actions.nth(index);
         const before = await action.boundingBox();
         await action.hover();
@@ -121,89 +124,34 @@ try {
         await page.screenshot({ path: join(screenshots, `${locale}-${width}-hover-${index}.png`) });
         await page.mouse.move(0, 0);
       }
-      await triggers.first().click();
-      const menu = page.getByRole('menu');
-      await menu.waitFor();
-      await menu.evaluate(element => Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished)));
-      await page.mouse.move(0, 0);
-      await triggers.first().evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));
-      assert.notEqual(await triggers.first().evaluate(element => getComputedStyle(element).backgroundColor), 'rgba(0, 0, 0, 0)', 'Open menu must keep its trigger highlighted');
-      assert.equal(await menu.getAttribute('data-side'), 'top');
-      assert.equal(await menu.locator('[data-slot="dropdown-menu-label"]').textContent(), chinese ? '下一步骤' : 'Next step');
-      const up = page.getByRole('menuitem', { name: chinese ? '上移' : 'Move up', exact: true });
-      const down = page.getByRole('menuitem', { name: chinese ? '下移' : 'Move down', exact: true });
-      assert.equal(await up.getAttribute('aria-disabled'), 'true');
-      const geometry = await down.evaluate(element => {
-        const icon = element.querySelector('svg').getBoundingClientRect();
-        const range = document.createRange();
-        range.selectNodeContents(element.lastChild);
-        const text = range.getBoundingClientRect();
-        return { gap: text.left - icon.right, lines: range.getClientRects().length, overflow: element.scrollWidth > element.clientWidth };
-      });
-      assert.equal(geometry.lines, 1);
-      assert.equal(geometry.gap, 4);
-      assert.equal(geometry.overflow, false);
-      const box = await menu.boundingBox();
-      assert.ok(box.x >= 0 && box.x + box.width <= width && box.width === 160);
-      await page.screenshot({ path: join(screenshots, `${locale}-${width}.png`) });
-      await page.keyboard.press('Escape');
-      await page.waitForFunction(element => element === document.activeElement, await triggers.first().elementHandle());
-      await page.keyboard.press('Enter');
-      await down.waitFor();
-      await down.focus();
-      await page.keyboard.press('Enter');
+      const dragRow = async (fromIndex, toIndex) => {
+        const rows = page.locator('.ai-queue-row');
+        const fromBox = await rows.nth(fromIndex).boundingBox();
+        const toBox = await rows.nth(toIndex).boundingBox();
+        const startX = fromBox.x + 40;
+        const startY = fromBox.y + fromBox.height / 2;
+        const endY = toBox.y + toBox.height / 2;
+        await page.mouse.move(startX, startY);
+        await page.mouse.down();
+        await page.mouse.move(startX, startY + (endY > startY ? 6 : -6), { steps: 3 });
+        await page.mouse.move(startX, endY, { steps: 8 });
+        await page.mouse.up();
+      };
+      await dragRow(0, 1);
       await page.waitForFunction(() => document.querySelector('.ai-queue-row-content > div:first-child').textContent === '年后');
-      await triggers.nth(1).click();
-      assert.equal(await down.getAttribute('aria-disabled'), 'true');
-      await up.click();
+      await dragRow(1, 0);
       await page.waitForFunction(() => document.querySelector('.ai-queue-row-content > div:first-child').textContent === 'hello');
+      await page.waitForTimeout(80);
       const edit = page.getByRole('button', { name: chinese ? '编辑排队输入' : 'Edit queued input', exact: true }).first();
-      const rowBefore = await page.locator('.ai-queue-row').first().boundingBox();
       await edit.click();
-      const editor = page.locator('.ai-queue-editor');
-      const input = editor.getByRole('textbox');
-      await input.waitFor();
-      assert.equal(await input.evaluate(element => document.activeElement === element), true);
-      const editGeometry = await editor.evaluate(element => {
-        const queueRect = document.querySelector('.ai-queue-dock').getBoundingClientRect();
-        const box = element.getBoundingClientRect();
-        return {
-          topGap: box.top - queueRect.bottom,
-          buttons: [...element.querySelectorAll('button')].map(button => {
-            const rect = button.getBoundingClientRect();
-            return { height: rect.height, top: rect.top };
-          }),
-          overflow: element.scrollWidth > element.clientWidth,
-        };
-      });
-      assert.ok(editGeometry.topGap >= 4, 'The editor must have room below the queue');
-      assert.equal(editGeometry.overflow, false, 'The editor must fit a narrow composer');
-      assert.deepEqual(editGeometry.buttons[0], editGeometry.buttons[1], 'Save and cancel must align at equal heights');
-      assert.equal((await page.locator('.ai-queue-row').first().boundingBox()).height, rowBefore.height, 'Editing must preserve queue row height');
+      const composer = page.getByTestId('ai-workspace-composer');
+      await page.waitForFunction(() => document.querySelector('[data-testid="ai-workspace-composer"]')?.textContent === 'hello');
+      assert.equal(await page.locator('.ai-queue-editor').count(), 0, 'Editing must reuse the regular composer instead of opening a separate edit card');
+      assert.equal(await page.locator('.ai-queue-row').count(), 1, 'Editing must remove the recalled item from the queue');
+      assert.equal(await page.locator('.ai-queue-row-content > div:first-child').first().textContent(), '年后');
+      assert.equal(await composer.evaluate(element => element === document.activeElement || element.contains(document.activeElement)), true, 'Recalling into the composer must focus the editor');
       await page.mouse.move(0, 0);
       await page.screenshot({ path: join(screenshots, `${locale}-${width}-editing.png`) });
-      for (const key of ['Control+Enter', 'Escape']) {
-        if (key === 'Escape') await edit.click();
-        await page.mouse.move(0, 0);
-        await input.fill('Updated queued input');
-        await input.press(key);
-        await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label')?.includes('queued input') || document.activeElement?.getAttribute('aria-label') === '编辑排队输入');
-        // Wait beyond the tooltip delay to catch an unintended focus-triggered popup.
-        await page.waitForTimeout(700);
-        assert.equal(await page.getByRole('tooltip').count(), 0, `${key} must restore focus without opening a tooltip`);
-        assert.equal(await page.locator('.ai-queue-row-content > div:first-child').first().textContent(), 'Updated queued input');
-        await page.screenshot({ path: join(screenshots, `${locale}-${width}-after-${key}.png`) });
-        await page.keyboard.press('Tab');
-        await page.keyboard.press('Shift+Tab');
-        await page.getByRole('tooltip').filter({ hasText: chinese ? '编辑排队输入' : 'Edit queued input' }).waitFor();
-        await page.keyboard.press('Escape');
-        await page.waitForFunction(() => document.querySelectorAll('[role="tooltip"]').length === 0);
-        await edit.hover();
-        await page.getByRole('tooltip').filter({ hasText: chinese ? '编辑排队输入' : 'Edit queued input' }).waitFor();
-        await page.mouse.move(0, 0);
-        await page.keyboard.press('Escape');
-        await page.waitForFunction(() => document.querySelectorAll('[role="tooltip"]').length === 0);
-      }
       await page.close();
     }
   }

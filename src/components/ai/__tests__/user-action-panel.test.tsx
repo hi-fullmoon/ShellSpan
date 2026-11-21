@@ -63,6 +63,43 @@ describe('user operation within the existing question card', () => {
     expect(toast.error).not.toHaveBeenCalled();
   });
 
+  it('promotes standalone unfenced and inline-code command lines in instructions to copyable code blocks', async () => {
+    await initI18n('zh-CN');
+    useAppStore.setState({ locale: 'zh-CN' });
+    const user = userEvent.setup();
+    const bareCommand = `rm -v /home/yiqishua-0.2.0-x64.exe /home/C54F61A6F9AB41C0A949BED4B1F62A4E.zip; echo "RM_EXIT=$?"; ls /home/ | grep -E 'yiqishua|C54F61A6' || echo BOTH_GONE`;
+    const inlineCommand = 'sudo systemctl restart nginx';
+    const instructions = [
+      '请在绑定的终端（提示符应为 [root@VM-0-3-tencentos ~]#）粘贴执行这一行，并把输出回给我：',
+      '',
+      bareCommand,
+      '',
+      `\`${inlineCommand}\``,
+      '',
+      '判定：',
+      '- 输出含两行 removed 且末尾为 BOTH_GONE → 删除成功，我直接出最终报告。',
+    ].join('\n');
+
+    const { container } = render(<AiQuestionPanel question={{ ...question, questions: [{
+      id: 'manual', question: 'Run the command', multi_select: false,
+      user_action: { ...action, instructions },
+    }], answers: [] }} />);
+
+    const markdownCodeBlocks = container.querySelectorAll('.ai-markdown-code-block');
+    expect(markdownCodeBlocks).toHaveLength(2);
+
+    for (const [index, expected] of [bareCommand, inlineCommand].entries()) {
+      const copy = markdownCodeBlocks[index].querySelector('button.ai-markdown-code-copy')!;
+      expect(copy).toHaveAccessibleName('复制命令');
+      await user.click(copy);
+      expect(await navigator.clipboard.readText()).toBe(expected);
+      expect(copy).toHaveAccessibleName('已复制');
+    }
+
+    expect(screen.getByText('判定：')).toBeVisible();
+    expect(container.querySelectorAll('.ai-markdown-code-block')).toHaveLength(2);
+  });
+
   it('reports clipboard failure once without showing success and allows retry', async () => {
     const user = userEvent.setup();
     const write = vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValueOnce(new Error('locked'));

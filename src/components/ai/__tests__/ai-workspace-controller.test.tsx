@@ -603,7 +603,7 @@ it('does not mount an empty image addon for stale image errors', () => {
   const imageDraft = vi.spyOn(imageDraftModule, 'useImageDraft').mockReturnValue({
     owner: 'test', draft: { owner: 'test', revision: 1, text: '', images: [] },
     pendingFiles: [], busy: false, submittedOperationId: undefined, locked: false, error: 'IMAGE_CANCELLED',
-    send: vi.fn(), detach: async () => null, reportError: vi.fn(), add: vi.fn(), remove: vi.fn(), cancel: vi.fn(),
+    send: vi.fn(), detach: async () => null, reportError: vi.fn(), add: vi.fn(), remove: vi.fn(), replace: vi.fn(), cancel: vi.fn(),
   });
   try {
     const { container } = render(<AiWorkspaceController scope="terminal" adapter={adapter()} />);
@@ -622,7 +622,7 @@ it.each(['', ' \n\t '])('routes image-only text %j through image submission', as
     owner: 'test', draft: { owner: 'test', revision: 1, text: draft,
       images: [{ name: 'fixture.png', mediaType: 'image/png', data: 'aGVsbG8=' }] },
     pendingFiles: [], busy: false, submittedOperationId: undefined, locked: false, error: null,
-    send: async () => {}, detach: send, reportError, add: vi.fn(), remove: vi.fn(), cancel: vi.fn(),
+    send: async () => {}, detach: send, reportError, add: vi.fn(), remove: vi.fn(), replace: vi.fn(), cancel: vi.fn(),
   });
   const vision = vi.spyOn(visionContract, 'requireVision').mockImplementation(() => undefined);
   try {

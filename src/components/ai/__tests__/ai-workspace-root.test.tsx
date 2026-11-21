@@ -1142,6 +1142,124 @@ describe('AiWorkspaceRoot conversation structure', () => {
     expect(screen.getByRole('button', { name: 'New conversation' })).toBeVisible();
   });
 
+  it('hides the docked subagent strip once all child sessions end and shows only active subagents', async () => {
+    const user = userEvent.setup();
+    const base = agentView('idle');
+    const cancelledChild = {
+      ...base.summary,
+      id: 'session-child-cancelled',
+      title: 'Inspect disk usage',
+      status: 'cancelled' as const,
+      parentSessionId: base.summary.id,
+      subagent: {
+        descriptorId: 'descriptor-cancelled',
+        role: 'operator',
+        continuable: true,
+        depth: 1,
+      },
+    };
+    const completedChild = {
+      ...base.summary,
+      id: 'session-child-completed',
+      title: 'Check system info',
+      status: 'completed' as const,
+      parentSessionId: base.summary.id,
+      subagent: {
+        descriptorId: 'descriptor-completed',
+        role: 'explorer',
+        continuable: false,
+        depth: 1,
+      },
+    };
+    const idleContinuableChild = {
+      ...base.summary,
+      id: 'session-child-active-idle',
+      title: 'Standby operator',
+      status: 'idle' as const,
+      parentSessionId: base.summary.id,
+      subagent: {
+        descriptorId: 'descriptor-active-idle',
+        role: 'operator',
+        continuable: true,
+        depth: 1,
+      },
+    };
+
+    const { container, rerender } = render(
+      <AiWorkspaceRoot
+        view={{
+          ...base,
+          subagents: [
+            {
+              sessionId: cancelledChild.id,
+              parentSessionId: base.summary.id,
+              descriptorId: cancelledChild.subagent.descriptorId,
+              role: cancelledChild.subagent.role,
+              continuable: true,
+              depth: 1,
+              status: 'idle',
+            },
+            {
+              sessionId: completedChild.id,
+              parentSessionId: base.summary.id,
+              descriptorId: completedChild.subagent.descriptorId,
+              role: completedChild.subagent.role,
+              continuable: false,
+              depth: 1,
+              status: 'completed',
+            },
+          ],
+        }}
+        scope="terminal"
+        mode="agent"
+        sessions={[base.summary, cancelledChild, completedChild]}
+        onOpenSession={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector('[data-slot="ai-subagent-strip"]')).toBeNull();
+
+    rerender(
+      <AiWorkspaceRoot
+        view={{
+          ...base,
+          subagents: [
+            {
+              sessionId: cancelledChild.id,
+              parentSessionId: base.summary.id,
+              descriptorId: cancelledChild.subagent.descriptorId,
+              role: cancelledChild.subagent.role,
+              continuable: true,
+              depth: 1,
+              status: 'idle',
+            },
+            {
+              sessionId: idleContinuableChild.id,
+              parentSessionId: base.summary.id,
+              descriptorId: idleContinuableChild.subagent.descriptorId,
+              role: idleContinuableChild.subagent.role,
+              continuable: true,
+              depth: 1,
+              status: 'idle',
+            },
+          ],
+        }}
+        scope="terminal"
+        mode="agent"
+        sessions={[base.summary, cancelledChild, idleContinuableChild]}
+        onOpenSession={vi.fn()}
+      />,
+    );
+
+    const strip = container.querySelector('[data-slot="ai-subagent-strip"]') as HTMLElement;
+    expect(strip).toBeVisible();
+    const trigger = within(strip).getByRole('button', { name: 'Toggle 1 subagents' });
+    expect(trigger).toHaveTextContent('1 idle');
+    await user.click(trigger);
+    expect(within(strip).getByText('Standby operator')).toBeVisible();
+    expect(within(strip).queryByText('Inspect disk usage')).toBeNull();
+  });
+
   it('keeps question submission visible briefly after a fast commit and preserves the composer draft', async () => {
     const base = agentView();
     const pendingQuestion: NonNullable<AiSessionView['pendingQuestion']> = {

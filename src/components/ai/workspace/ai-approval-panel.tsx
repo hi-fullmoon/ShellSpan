@@ -27,7 +27,7 @@ import { AiToolCopyButton } from './ai-tool-presentation';
 import { AiContentTitle } from './ai-content-title';
 import { AiNativeCodeFade } from './ai-native-code-fade';
 import { AiSubmissionButtonLabel, submissionFeedbackMs } from './ai-submission-button-label';
-import { AI_CONTENT_CODE_CLASS, AI_CONTENT_HEADER_CLASS } from './ai-style-classes';
+import { AI_CONTENT_CODE_CLASS } from './ai-style-classes';
 
 export interface AiApprovalPanelProps {
   readonly approval: AiPendingApproval;
@@ -185,9 +185,9 @@ function ApprovalCommandPreview({ text, label, copyLabel }: {
 }) {
   const viewportRef = useRef<HTMLPreElement>(null);
   return (
-    <div className="ai-approval-command ai-approval-command-card min-w-0 overflow-hidden">
-      <p className={AI_CONTENT_HEADER_CLASS}>{label}</p>
-      <div className="ai-tool-content-region relative min-w-0" data-ai-copy-region>
+    <div className="flex min-w-0 flex-col gap-1">
+      <p className="text-xs font-medium text-muted-foreground" data-slot="ai-approval-command-label">{label}</p>
+      <div className="ai-approval-command ai-approval-command-card ai-tool-content-region relative min-w-0 overflow-hidden" data-ai-copy-region>
         <pre ref={viewportRef} className={cn(AI_CONTENT_CODE_CLASS, 'max-h-65 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]')} tabIndex={0} aria-label={label}><code>{text}</code></pre>
         <AiToolCopyButton text={text} label={copyLabel} />
         <AiNativeCodeFade viewportRef={viewportRef} text={text} />

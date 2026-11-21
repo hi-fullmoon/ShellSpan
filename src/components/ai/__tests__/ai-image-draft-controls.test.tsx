@@ -40,6 +40,7 @@ describe('image draft controls', () => {
       locked: false,
       add: async () => {},
       remove: async () => {},
+      replace: async () => {},
       send: async () => {},
       detach: async () => null,
       cancel,
