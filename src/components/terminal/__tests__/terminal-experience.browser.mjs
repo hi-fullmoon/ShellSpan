@@ -299,12 +299,25 @@ try {
         return { width, height };
       });
       const rects = [...element.querySelectorAll('input,button,[role=status]')].map(control => control.getBoundingClientRect());
+      const field = element.querySelector('[data-slot=input-group]');
+      const fieldRect = field.getBoundingClientRect();
+      const fieldStyle = getComputedStyle(field);
+      const fieldTopInner = fieldRect.top + parseFloat(fieldStyle.borderTopWidth);
+      const fieldBottomInner = fieldRect.bottom - parseFloat(fieldStyle.borderBottomWidth);
+      const optionInsets = [...field.querySelectorAll('button')].map((button) => {
+        const rect = button.getBoundingClientRect();
+        return {
+          top: rect.top - fieldTopInner,
+          bottom: fieldBottomInner - rect.bottom,
+        };
+      });
       return {
         inside: bounds.left >= pane.left && bounds.right <= pane.right && bounds.top >= pane.top && bounds.bottom <= pane.bottom,
         height: bounds.height,
         controls,
         buttons,
-        fieldRadius: parseFloat(getComputedStyle(element.querySelector('[data-slot=input-group]')).borderTopLeftRadius),
+        optionInsets,
+        fieldRadius: parseFloat(fieldStyle.borderTopLeftRadius),
         barRadius: parseFloat(getComputedStyle(element).borderTopLeftRadius),
         centers: rects.map(rect => rect.top + rect.height / 2),
         leftEdges: rects.map(rect => rect.left),
@@ -314,6 +327,7 @@ try {
     assert.ok(geometry.inside && !geometry.overflow, JSON.stringify(geometry));
     assert.ok(geometry.controls.every((height) => height === geometry.controls[0]), JSON.stringify(geometry));
     assert.ok(geometry.buttons.every(({ width, height }) => width === height), `Search buttons must be square: ${JSON.stringify(geometry.buttons)}`);
+    assert.ok(geometry.optionInsets.every(({ top, bottom }) => top >= 2 && bottom >= 2), `Search option buttons must not touch the field border: ${JSON.stringify(geometry.optionInsets)}`);
     assert.ok(geometry.fieldRadius > 0 && geometry.fieldRadius < geometry.barRadius, 'The search field should have tighter corners than the search bar');
     const [input, caseOption, regexOption, wholeWordOption, status, previous, next, close] = geometry.centers;
     assert.ok(caseOption === regexOption && regexOption === wholeWordOption, 'The search options must stay together');
@@ -1730,15 +1744,25 @@ try {
         const lines = range.getClientRects();
         const lineHeight = parseFloat(getComputedStyle(message.parentElement).lineHeight);
         const textCenter = message.parentElement.getBoundingClientRect().top + lineHeight / 2;
+        const buttonHeights = [...element.querySelectorAll('button')].map((button) => button.getBoundingClientRect().height);
         return {
           centerOffset: icon.top + icon.height / 2 - textCenter,
           gap: lines[0].left - icon.right,
           wrapped: lines[lines.length - 1].top > lines[0].top,
+          buttonHeights,
         };
       });
       assert.equal(alignment.wrapped, width === 120, JSON.stringify(alignment));
       assert.ok(Math.abs(alignment.centerOffset) <= 0.5 && Math.abs(alignment.gap - 4) <= 0.5,
         'The broadcast icon must align to the first line with a 4px gap: ' + JSON.stringify(alignment));
+      assert.ok(alignment.buttonHeights.length === 2 && alignment.buttonHeights[0] === alignment.buttonHeights[1],
+        'Broadcast banner action buttons must have equal height: ' + JSON.stringify(alignment.buttonHeights));
+      if (width === 700) {
+        await broadcastAlert.screenshot({ animations: 'disabled', path: `${root}artifacts/tests/terminal-broadcast/light-700.png` });
+        await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+        await broadcastAlert.screenshot({ animations: 'disabled', path: `${root}artifacts/tests/terminal-broadcast/dark-700.png` });
+        await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+      }
     }
     await broadcastAlert.getByRole('button', { name: '停止', exact: true }).click();
   } finally {

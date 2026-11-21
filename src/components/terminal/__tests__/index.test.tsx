@@ -675,6 +675,92 @@ describe('Terminal', () => {
     expect(within(firstGroup).queryByRole('tab', { name: /s1/ })).toBeNull();
   });
 
+  it('splits into the replacement session when a dragged tab finishes reconnecting mid-drag', async () => {
+    ['s1', 's2'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+
+    const { container } = render(<Terminal />);
+    const content = container.querySelector<HTMLElement>('[data-terminal-content]')!;
+    content.getBoundingClientRect = () => ({
+      left: 0,
+      top: 40,
+      right: 800,
+      bottom: 540,
+      x: 0,
+      y: 40,
+      width: 800,
+      height: 500,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    // Start dragging s2 toward the bottom split edge while it is still reconnecting.
+    await dragTabTo(screen.getByRole('tab', { name: /s2/ }), 200, 400, 500);
+    expect(container.querySelector('[data-testid="terminal-split-drop-preview"]'))
+      .toHaveAttribute('data-direction', 'bottom');
+
+    // Reconnect finishes before pointerup, replacing s2 with s2-next.
+    act(() => {
+      useTerminalStore.getState().reconnectSession('s2', {
+        sessionId: 's2-next',
+        title: 's2-next',
+        host: 'h',
+        port: 22,
+        username: 'u',
+      });
+    });
+
+    await act(async () => {
+      fireEvent.pointerUp(document, { clientX: 400, clientY: 500 });
+    });
+
+    const groups = [...container.querySelectorAll<HTMLElement>('[data-terminal-group]')];
+    expect(groups).toHaveLength(2);
+    expect(within(groups[0]).getAllByRole('tab').map((tab) => tab.getAttribute('data-session-tab')))
+      .toEqual(['s1']);
+    expect(within(groups[1]).getAllByRole('tab').map((tab) => tab.getAttribute('data-session-tab')))
+      .toEqual(['s2-next']);
+    expect(useTerminalStore.getState().activeSessionId).toBe('s2-next');
+  });
+
+  it('does not create an empty split pane if the dragged session closes mid-drag', async () => {
+    ['s1', 's2'].forEach((sessionId) => {
+      useTerminalStore.getState().addSession({
+        sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
+      });
+    });
+
+    const { container } = render(<Terminal />);
+    const content = container.querySelector<HTMLElement>('[data-terminal-content]')!;
+    content.getBoundingClientRect = () => ({
+      left: 0,
+      top: 40,
+      right: 800,
+      bottom: 540,
+      x: 0,
+      y: 40,
+      width: 800,
+      height: 500,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    await dragTabTo(screen.getByRole('tab', { name: /s2/ }), 200, 400, 500);
+
+    act(() => {
+      useTerminalStore.getState().removeSession('s2');
+    });
+
+    await act(async () => {
+      fireEvent.pointerUp(document, { clientX: 400, clientY: 500 });
+    });
+
+    expect(container.querySelectorAll('[data-terminal-group]')).toHaveLength(0);
+    expect(useTerminalStore.getState().workspaceSplit).toBeNull();
+    expect(useTerminalStore.getState().activeSessionId).toBe('s1');
+  });
+
   it('repairs restored duplicate group ids and allocates a fresh id for the next split', () => {
     useTerminalStore.getState().addRestoredSessions(
       ['s1', 's2', 's3'].map((sessionId) => ({

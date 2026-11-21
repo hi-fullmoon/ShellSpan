@@ -69,6 +69,17 @@ type DropPreview =
   | { kind: 'move'; slot: TerminalGroupSlot }
   | { kind: 'tab-bar'; slot: TerminalGroupSlot; insertIndex: number };
 
+function resolveCurrentSessionId(
+  sessions: readonly TerminalSession[],
+  sessionId: string,
+): string | null {
+  if (sessions.some((session) => session.sessionId === sessionId)) return sessionId;
+  const replacement = sessions.find(
+    (session) => session.replacesSessionId === sessionId || session.replacedSessionIds?.includes(sessionId),
+  );
+  return replacement?.sessionId ?? null;
+}
+
 const Terminal: React.FC = () => {
   const { t } = useI18n();
   const { error: showError } = useToast();
@@ -264,8 +275,14 @@ const Terminal: React.FC = () => {
     // Apply those replacements before filtering unavailable ids so the tab
     // stays in the same terminal group, including during automatic reconnect.
     for (const session of currentSessions) {
-      if (!session.replacesSessionId) continue;
-      nextLayout = replaceTerminalSessionId(nextLayout, session.replacesSessionId, session.sessionId);
+      if (session.replacesSessionId) {
+        nextLayout = replaceTerminalSessionId(nextLayout, session.replacesSessionId, session.sessionId);
+      }
+      if (session.replacedSessionIds) {
+        for (const previousId of session.replacedSessionIds) {
+          nextLayout = replaceTerminalSessionId(nextLayout, previousId, session.sessionId);
+        }
+      }
     }
 
     const availableIds = new Set(currentSessions.map((session) => session.sessionId));
@@ -412,11 +429,16 @@ const Terminal: React.FC = () => {
     targetGroupId?: TerminalGroupSlot,
   ): boolean => {
     const { sessions, activeSessionId, workspaceSplit: split } = useTerminalStore.getState();
+    const resolvedSessionId = resolveCurrentSessionId(sessions, sessionId);
+    if (!resolvedSessionId) {
+      setDropPreview(null);
+      return false;
+    }
     const incomingFirst = direction === 'left' || direction === 'top';
     const orientation = direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical';
 
     if (split) {
-      const sourceGroup = getTerminalGroups(split).find((group) => group.sessionIds.includes(sessionId));
+      const sourceGroup = getTerminalGroups(split).find((group) => group.sessionIds.includes(resolvedSessionId));
       const targetGroup = targetGroupId
         ? findTerminalGroup(split, targetGroupId)
         : sourceGroup;
@@ -425,13 +447,13 @@ const Terminal: React.FC = () => {
 
       let nextLayout: TerminalLayoutNode = split;
       if (sourceGroup.id === targetGroup.id) {
-        const remainingIds = sourceGroup.sessionIds.filter((id) => id !== sessionId);
+        const remainingIds = sourceGroup.sessionIds.filter((id) => id !== resolvedSessionId);
         if (remainingIds.length === 0) return false;
         const newGroup: TerminalGroupState = {
           kind: 'group',
           id: createGroupId(),
-          sessionIds: [sessionId],
-          activeSessionId: sessionId,
+          sessionIds: [resolvedSessionId],
+          activeSessionId: resolvedSessionId,
         };
         const remainingGroup: TerminalGroupState = {
           ...sourceGroup,
@@ -452,9 +474,9 @@ const Terminal: React.FC = () => {
       } else {
         nextLayout = updateTerminalGroup(nextLayout, sourceGroup.id, (group) => ({
           ...group,
-          sessionIds: group.sessionIds.filter((id) => id !== sessionId),
-          activeSessionId: group.activeSessionId === sessionId
-            ? group.sessionIds.filter((id) => id !== sessionId).slice(-1)[0] ?? ''
+          sessionIds: group.sessionIds.filter((id) => id !== resolvedSessionId),
+          activeSessionId: group.activeSessionId === resolvedSessionId
+            ? group.sessionIds.filter((id) => id !== resolvedSessionId).slice(-1)[0] ?? ''
             : group.activeSessionId,
         }));
         const pruned = pruneEmptyTerminalGroups(nextLayout);
@@ -465,8 +487,8 @@ const Terminal: React.FC = () => {
         const newGroup: TerminalGroupState = {
           kind: 'group',
           id: createGroupId(),
-          sessionIds: [sessionId],
-          activeSessionId: sessionId,
+          sessionIds: [resolvedSessionId],
+          activeSessionId: resolvedSessionId,
         };
         const nestedSplit: TerminalSplitState = {
           kind: 'split',
@@ -480,7 +502,7 @@ const Terminal: React.FC = () => {
       }
       if (nextLayout.kind !== 'split') return false;
       setSplit(nextLayout);
-      useTerminalStore.getState().setActiveSession(sessionId);
+      useTerminalStore.getState().setActiveSession(resolvedSessionId);
       setDropPreview(null);
       return true;
     }
@@ -489,13 +511,13 @@ const Terminal: React.FC = () => {
     if (!canCreateSplitAt(direction)) return false;
     const remainingIds = sessions
       .map((session) => session.sessionId)
-      .filter((id) => id !== sessionId);
+      .filter((id) => id !== resolvedSessionId);
     if (remainingIds.length === 0) return false;
     const baseActiveId = activeSessionId && remainingIds.includes(activeSessionId)
       ? activeSessionId
       : remainingIds[remainingIds.length - 1];
     const targetGroup: TerminalGroupState = {
-      kind: 'group', id: incomingFirst ? 'first' : 'second', sessionIds: [sessionId], activeSessionId: sessionId,
+      kind: 'group', id: incomingFirst ? 'first' : 'second', sessionIds: [resolvedSessionId], activeSessionId: resolvedSessionId,
     };
     const baseGroup: TerminalGroupState = {
       kind: 'group', id: incomingFirst ? 'second' : 'first', sessionIds: remainingIds, activeSessionId: baseActiveId,
@@ -509,7 +531,7 @@ const Terminal: React.FC = () => {
       orientation,
       split: 0.5,
     });
-    useTerminalStore.getState().setActiveSession(sessionId);
+    useTerminalStore.getState().setActiveSession(resolvedSessionId);
     setDropPreview(null);
     return true;
   }, [canCreateSplitAt, createGroupId, focusGroup, setSplit]);
@@ -688,13 +710,16 @@ const Terminal: React.FC = () => {
       if (!current) return current;
       const group = findTerminalGroup(current, slot);
       if (!group) return current;
+      const currentSessions = useTerminalStore.getState().sessions;
+      const resolvedSessionId = resolveCurrentSessionId(currentSessions, sessionId);
+      if (!resolvedSessionId || !group.sessionIds.includes(resolvedSessionId)) return current;
       const pinnedIds = new Set(
-        useTerminalStore.getState().sessions
+        currentSessions
           .filter((session) => session.pinned)
           .map((session) => session.sessionId),
       );
-      const ids = group.sessionIds.filter((id) => id !== sessionId);
-      ids.splice(Math.max(0, Math.min(insertIndex, ids.length)), 0, sessionId);
+      const ids = group.sessionIds.filter((id) => id !== resolvedSessionId);
+      ids.splice(Math.max(0, Math.min(insertIndex, ids.length)), 0, resolvedSessionId);
       const ordered = partitionSessionIdsPinnedFirst(ids, (id) => pinnedIds.has(id));
       return updateTerminalGroup(current, slot, (value) => ({ ...value, sessionIds: ordered })) as TerminalSplitState;
     });
@@ -702,16 +727,21 @@ const Terminal: React.FC = () => {
 
   const moveTabToGroup = useCallback((sessionId: string, source: TerminalGroupSlot, target: TerminalGroupSlot, insertIndex: number): boolean => {
     if (source === target) return false;
-    const current = split;
+    const { sessions: currentSessions, workspaceSplit: current } = useTerminalStore.getState();
+    const resolvedSessionId = resolveCurrentSessionId(currentSessions, sessionId);
+    if (!resolvedSessionId) {
+      setDropPreview(null);
+      return false;
+    }
     const sourceGroup = current ? findTerminalGroup(current, source) : null;
     const targetGroup = current ? findTerminalGroup(current, target) : null;
-    if (!current || !sourceGroup?.sessionIds.includes(sessionId) || !targetGroup) return false;
-    const sourceIds = sourceGroup.sessionIds.filter((id) => id !== sessionId);
-    const targetIds = targetGroup.sessionIds.filter((id) => id !== sessionId);
-    targetIds.splice(Math.max(0, Math.min(insertIndex, targetIds.length)), 0, sessionId);
+    if (!current || !sourceGroup?.sessionIds.includes(resolvedSessionId) || !targetGroup) return false;
+    const sourceIds = sourceGroup.sessionIds.filter((id) => id !== resolvedSessionId);
+    const targetIds = targetGroup.sessionIds.filter((id) => id !== resolvedSessionId);
+    targetIds.splice(Math.max(0, Math.min(insertIndex, targetIds.length)), 0, resolvedSessionId);
     const orderedTargetIds = partitionSessionIdsPinnedFirst(
       targetIds,
-      (id) => Boolean(sessions.find((session) => session.sessionId === id)?.pinned),
+      (id) => Boolean(currentSessions.find((session) => session.sessionId === id)?.pinned),
     );
     let nextLayout = updateTerminalGroup(current, source, (group) => ({
       ...group,
@@ -723,7 +753,7 @@ const Terminal: React.FC = () => {
     nextLayout = updateTerminalGroup(nextLayout, target, (group) => ({
       ...group,
       sessionIds: orderedTargetIds,
-      activeSessionId: sessionId,
+      activeSessionId: resolvedSessionId,
     }));
     const pruned = pruneEmptyTerminalGroups(nextLayout);
     if (!pruned || pruned.kind === 'group') {
@@ -737,12 +767,17 @@ const Terminal: React.FC = () => {
       setSplit(pruned);
     }
     focusGroup(target);
-    useTerminalStore.getState().setActiveSession(sessionId);
+    useTerminalStore.getState().setActiveSession(resolvedSessionId);
     setDropPreview(null);
     return true;
-  }, [focusGroup, sessions, split]);
+  }, [focusGroup, setSplit]);
 
   const handleTabDragMove = useCallback((sessionId: string, source: TerminalGroupSlot | null, x: number, y: number): void => {
+    const resolvedSessionId = resolveCurrentSessionId(sessions, sessionId);
+    if (!resolvedSessionId) {
+      setDropPreview(null);
+      return;
+    }
     if (split && source) {
       const target = getGroupRegionAtPoint(x, y);
       if (!target) {
@@ -751,7 +786,7 @@ const Terminal: React.FC = () => {
       }
       if (target.region === 'tab-bar') {
         setDropPreview(target.slot !== source
-          ? { kind: 'tab-bar', slot: target.slot, insertIndex: getCrossGroupInsertIndex(sessionId, target.slot, target.element, x) }
+          ? { kind: 'tab-bar', slot: target.slot, insertIndex: getCrossGroupInsertIndex(resolvedSessionId, target.slot, target.element, x) }
           : null);
         return;
       }
@@ -763,7 +798,7 @@ const Terminal: React.FC = () => {
         const targetGroup = findTerminalGroup(split, target.slot);
         const splittable = targetGroup !== null
           && canCreateSplitAt(direction, target.slot)
-          && (target.slot !== source || targetGroup.sessionIds.some((id) => id !== sessionId));
+          && (target.slot !== source || targetGroup.sessionIds.some((id) => id !== resolvedSessionId));
         setDropPreview(splittable
           ? { kind: 'split', direction, slot: target.slot }
           : null);
@@ -779,7 +814,7 @@ const Terminal: React.FC = () => {
     setDropPreview(direction && sessions.length > 1 && canCreateSplitAt(direction)
       ? { kind: 'split', direction, slot: null }
       : null);
-  }, [canCreateSplitAt, getCrossGroupInsertIndex, getGroupRegionAtPoint, sessions.length, split]);
+  }, [canCreateSplitAt, getCrossGroupInsertIndex, getGroupRegionAtPoint, sessions, split]);
 
   const handleTabDragEnd = useCallback((sessionId: string, source: TerminalGroupSlot | null, x: number, y: number): boolean => {
     if (split && source) {

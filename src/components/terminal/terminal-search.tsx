@@ -131,7 +131,7 @@ export function TerminalSearch({ addon, onClose, active = true, initialQuery = '
     <div
       data-terminal-search
       style={surfaceStyle}
-      className="absolute right-2 top-2 z-20 flex max-h-[calc(100%-0.5rem)] min-h-8 w-[26rem] max-w-[calc(100%-1rem)] flex-wrap items-center gap-x-1 gap-y-0.5 overflow-y-auto rounded-lg border px-1 py-0.5 shadow-md [&_button]:size-5.5"
+      className="absolute right-2 top-2 z-20 flex max-h-[calc(100%-0.5rem)] min-h-8 w-[26rem] max-w-[calc(100%-1rem)] flex-wrap items-center gap-x-1 gap-y-0.5 overflow-y-auto rounded-lg border px-1 py-0.5 shadow-md [&_button]:size-5"
       onKeyDown={(event) => {
         const previous = eventMatchesShortcut(event.nativeEvent, 'mod+shift+g');
         if (previous || eventMatchesShortcut(event.nativeEvent, 'mod+g')) {
@@ -146,7 +146,7 @@ export function TerminalSearch({ addon, onClose, active = true, initialQuery = '
         onClose();
       }}
     >
-      <InputGroup style={{ backgroundColor: 'var(--background)' }} className="h-auto flex-[1_1_10rem] flex-wrap rounded-md">
+      <InputGroup style={{ backgroundColor: 'var(--background)' }} className="h-auto flex-[1_1_10.5rem] flex-wrap rounded-md">
         <InputGroupInput
           ref={inputRef}
           value={query}
@@ -155,7 +155,7 @@ export function TerminalSearch({ addon, onClose, active = true, initialQuery = '
           aria-label={t('terminal.search.placeholder')}
           aria-invalid={invalidRegex || undefined}
           aria-describedby={statusId}
-          className="h-5.5 min-w-[min(100%,6rem)] px-2 text-xs text-foreground"
+          className="h-5 min-w-[min(100%,6rem)] px-2 text-xs text-foreground"
           autoFocus
           onKeyDown={(event) => {
             if (event.key !== 'Enter') return;
@@ -163,7 +163,7 @@ export function TerminalSearch({ addon, onClose, active = true, initialQuery = '
             find(event.shiftKey);
           }}
         />
-        <InputGroupAddon align="inline-end" className="ml-auto shrink-0 px-0.5 py-0 has-[>button]:mr-0">
+        <InputGroupAddon align="inline-end" className="ml-auto shrink-0 p-0.5 has-[>button]:mr-0">
           <Button variant={caseSensitive ? 'secondary' : 'ghost'} size="icon-xs" onClick={() => setCaseSensitive(!caseSensitive)} aria-pressed={caseSensitive} aria-label={t('terminal.search.caseSensitive')} title={t('terminal.search.caseSensitive')}>
             <CaseSensitiveIcon />
           </Button>

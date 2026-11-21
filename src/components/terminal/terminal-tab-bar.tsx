@@ -568,8 +568,23 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     }
   };
 
+  const resolveDraggedSessionId = (id: string): string | null => {
+    const currentSessions = tabBarSessionsRef.current;
+    if (currentSessions.some((session) => session.sessionId === id)) return id;
+    const replacement = currentSessions.find(
+      (session) => session.replacesSessionId === id || session.replacedSessionIds?.includes(id),
+    );
+    return replacement?.sessionId ?? null;
+  };
+
   const handleDragMove = (event: DragMoveEvent): void => {
     if (!draggingSessionId) {
+      return;
+    }
+    const activeId = resolveDraggedSessionId(draggingSessionId);
+    if (!activeId) {
+      onTabDragCancel?.();
+      setInsertIndex(null);
       return;
     }
 
@@ -587,7 +602,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     if (isKeyboardDrag) {
       autoScrollSpeedRef.current = 0;
     } else {
-      onTabDragMove?.(draggingSessionId, pointerX, pointerY);
+      onTabDragMove?.(activeId, pointerX, pointerY);
       if (container) {
         const containerRect = container.getBoundingClientRect();
         const edgeSize = 48;
@@ -614,7 +629,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
       return;
     }
 
-    const visibleTabs = tabs.filter((tab) => tab.dataset.sessionTab !== draggingSessionId);
+    const visibleTabs = tabs.filter((tab) => tab.dataset.sessionTab !== activeId);
 
     let newInsertIndex = 0;
     for (let i = 0; i < visibleTabs.length; i++) {
@@ -633,14 +648,19 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
       }
     }
 
-    const draggedSession = sessions.find((s) => s.sessionId === draggingSessionId);
+    const draggedSession = sessions.find((s) => s.sessionId === activeId);
     const pinnedCount = sessions.filter((s) => s.pinned).length;
     const minInsertIndex = draggedSession?.pinned ? 0 : pinnedCount;
     setInsertIndex(Math.max(minInsertIndex, newInsertIndex));
   };
 
   const handleDragEnd = (event: DragEndEvent): void => {
-    const activeId = String(event.active.id);
+    const activeId = resolveDraggedSessionId(String(event.active.id));
+    if (!activeId) {
+      onTabDragCancel?.();
+      finishDrag();
+      return;
+    }
     // Keyboard drags only reorder within this tab bar; pointer coordinates are
     // meaningless there, so split/cross-group handling is skipped.
     // Same scroll compensation as handleDragMove: drop coordinates must be in
@@ -671,16 +691,21 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     finishDrag();
   };
 
-  const draggingSession = draggingSessionId ? (sessions.find((s) => s.sessionId === draggingSessionId) ?? null) : null;
+  const draggingSession = draggingSessionId
+    ? (sessions.find((s) => s.sessionId === draggingSessionId)
+      ?? sessions.find((s) => s.replacesSessionId === draggingSessionId || s.replacedSessionIds?.includes(draggingSessionId))
+      ?? null)
+    : null;
+  const effectiveDraggingSessionId = draggingSession?.sessionId ?? draggingSessionId;
 
   const closingSession = closingSessionId ? (sessions.find((s) => s.sessionId === closingSessionId) ?? null) : null;
 
-  const visibleTabCount = sessions.length - (draggingSessionId ? 1 : 0);
+  const visibleTabCount = sessions.length - (draggingSession ? 1 : 0);
   const displayedInsertIndex = externalInsertIndex !== null ? externalInsertIndex : draggingSessionId ? insertIndex : null;
   // Dropping back into the dragged tab's own slot is a no-op, so suppress the
   // indicator that would otherwise sit between the dragged tab and its right
   // neighbor.
-  const draggedOriginalIndex = draggingSessionId ? sessions.findIndex((s) => s.sessionId === draggingSessionId) : -1;
+  const draggedOriginalIndex = effectiveDraggingSessionId ? sessions.findIndex((s) => s.sessionId === effectiveDraggingSessionId) : -1;
   const effectiveInsertIndex = displayedInsertIndex !== null && displayedInsertIndex === draggedOriginalIndex ? null : displayedInsertIndex;
 
   const focusEnabled = useFocusStore(state => state.enabled);
