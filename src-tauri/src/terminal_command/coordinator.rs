@@ -158,9 +158,8 @@ impl TerminalSessionBroker {
         message: &nip::ConnectionEnvelope,
     ) -> Result<(), String> {
         message.validate().map_err(wire_error)?;
-        let mut state = self.lock()?;
-        let attachment = current_attachment(&state, transport)?.clone();
-        let record = current_record_mut(&mut state, transport, &attachment)?;
+        let (attachment, slot) = self.lookup_session_slot(transport)?;
+        let mut record = slot.lock_current(transport, &attachment)?;
         if record.input_mode != InputMode::NativeInline
             || record.integration_id.as_ref() != Some(&message.connection.control_id)
             || record.terminal_generation != message.connection.terminal_generation
@@ -190,7 +189,7 @@ impl TerminalSessionBroker {
                 // Optional native jobs do not grant/revoke the authenticated
                 // NIP input channel. A non-monitor Zsh can still run a native
                 // foreground command with its complete input proof.
-                advance_integration_state_revision(record)?;
+                advance_integration_state_revision(&mut record)?;
                 Ok(())
             }
             nip::ConnectionPayload::Directory { cwd } => {
@@ -201,7 +200,7 @@ impl TerminalSessionBroker {
                     data.cwd = Some(cwd.clone());
                     data.revision = next_command_revision(data.revision)?;
                 }
-                advance_integration_state_revision(record)?;
+                advance_integration_state_revision(&mut record)?;
                 Ok(())
             }
             nip::ConnectionPayload::DisplayCommand {
@@ -234,7 +233,8 @@ impl TerminalSessionBroker {
                     state: observed.clone(),
                     exit_code: *exit_code,
                 };
-                drop(state);
+                drop(record);
+                slot.notify();
                 // Reuse the existing native-job contract reducer only. This
                 // never registers TSP or forwards legacy S/E lifecycle events.
                 self.accept_integration_event(transport, &id, event)
@@ -247,9 +247,9 @@ impl TerminalSessionBroker {
         transport: &str,
         profile: crate::terminal_command::registration::VerifiedNativeProfile,
     ) -> Result<nip::ConnectionEnvelope, String> {
-        let mut state = self.lock()?;
-        let attachment = current_attachment(&state, transport)?.clone();
-        current_record_mut(&mut state, transport, &attachment)?.register_native_channel(profile)
+        let (attachment, slot) = self.lookup_session_slot(transport)?;
+        let mut record = slot.lock_current(transport, &attachment)?;
+        record.register_native_channel(profile)
     }
     /// Real private-channel Readline observations, including ordinary user input.
     /// No operation/Agent/task is invented for connection initialization.
@@ -267,9 +267,8 @@ impl TerminalSessionBroker {
         else {
             return Ok(());
         };
-        let mut state = self.lock()?;
-        let attachment = current_attachment(&state, transport)?.clone();
-        let record = current_record_mut(&mut state, transport, &attachment)?;
+        let (attachment, slot) = self.lookup_session_slot(transport)?;
+        let mut record = slot.lock_current(transport, &attachment)?;
         if record.input_mode != InputMode::NativeInline
             || record.integration_id.as_ref() != Some(&message.connection.control_id)
             || record.terminal_session_id != message.connection.terminal_session_id
@@ -312,11 +311,12 @@ impl TerminalSessionBroker {
         record.prompt_ready = !record.native_recovery_required;
         record.command_input_pending =
             record.native_recovery_required || record.native_clear_pending.is_some();
-        advance_integration_state_revision(record)?;
+        advance_integration_state_revision(&mut record)?;
         if record.prompt_ready {
             record.prompt_ready_revision = record.integration_state_revision;
         }
-        drop(state);
+        drop(record);
+        slot.notify();
         if let Some(operation) = ready_operation {
             operation.notify();
         }
@@ -328,10 +328,11 @@ impl TerminalSessionBroker {
         transport: &str,
         message: &nip::ConnectionEnvelope,
     ) -> Result<(), String> {
-        let mut state = self.lock()?;
-        let attachment = current_attachment(&state, transport)?.clone();
-        current_record_mut(&mut state, transport, &attachment)?
-            .accept_native_capabilities(message)?;
+        let (attachment, slot) = self.lookup_session_slot(transport)?;
+        let mut record = slot.lock_current(transport, &attachment)?;
+        record.accept_native_capabilities(message)?;
+        drop(record);
+        slot.notify();
         self.changed.notify_all();
         Ok(())
     }
@@ -342,20 +343,25 @@ impl TerminalSessionBroker {
         timeout: Duration,
     ) -> Result<Option<nip::DisplayBinding>, String> {
         let deadline = Instant::now() + timeout;
-        let mut state = self.lock()?;
+        let (attachment, slot) = self.lookup_session_slot(transport)?;
+        let mut record = slot.lock_current(transport, &attachment)?;
         loop {
-            let attachment = current_attachment(&state, transport)?.clone();
-            let record = current_record_mut(&mut state, transport, &attachment)?;
+            if !record.open
+                || record.terminal_generation != attachment.terminal_generation
+                || record.transport_session_id != transport
+            {
+                return Err("TERMINAL_BROKER_STALE_GENERATION".into());
+            }
             if record.integration_state != TerminalIntegrationState::Initializing
                 || Instant::now() >= deadline
             {
                 return Ok(record.native_display_binding());
             }
-            let (next, _) = self
+            let (next, _) = slot
                 .changed
-                .wait_timeout(state, deadline.saturating_duration_since(Instant::now()))
+                .wait_timeout(record, deadline.saturating_duration_since(Instant::now()))
                 .map_err(|_| "TERMINAL_BROKER_UNAVAILABLE")?;
-            state = next;
+            record = next;
         }
     }
     pub(crate) fn native_input_coordinator(
@@ -363,9 +369,8 @@ impl TerminalSessionBroker {
         transport: &str,
         operation_id: &str,
     ) -> Result<NativeInputCoordinator, String> {
-        let mut state = self.lock()?;
-        let attachment = current_attachment(&state, transport)?.clone();
-        let record = current_record_mut(&mut state, transport, &attachment)?;
+        let (attachment, slot) = self.lookup_session_slot(transport)?;
+        let record = slot.lock_current(transport, &attachment)?;
         if record.input_mode != InputMode::NativeInline {
             return Err("TERMINAL_NATIVE_MODE_NOT_NEGOTIATED".into());
         }
@@ -556,12 +561,8 @@ impl NativeInputCoordinator {
         let request = self.request("prepare", payload)?;
         let bytes = request.encode().map_err(wire_error)?;
         {
-            let state = self.broker.lock()?;
-            let attachment = current_attachment(&state, &self.transport)?.clone();
-            let record = state
-                .sessions
-                .get(&attachment.terminal_session_id)
-                .ok_or("TERMINAL_BROKER_SESSION_NOT_FOUND")?;
+            let (_, slot) = self.broker.lookup_session_slot(&self.transport)?;
+            let record = slot.lock()?;
             if record
                 .native_profile
                 .as_ref()
@@ -1265,9 +1266,8 @@ impl NativeInputCoordinator {
                 .native_job_started(&self.transport, &self.identity()?.operation_id)?;
         }
         if receipt == "cleared" {
-            let mut state = self.broker.lock()?;
-            let attachment = current_attachment(&state, &self.transport)?.clone();
-            let record = current_record_mut(&mut state, &self.transport, &attachment)?;
+            let (attachment, slot) = self.broker.lookup_session_slot(&self.transport)?;
+            let mut record = slot.lock_current(&self.transport, &attachment)?;
             if record
                 .active_command
                 .as_ref()
@@ -1276,6 +1276,8 @@ impl NativeInputCoordinator {
                 record.command_input_pending = record.native_recovery_required;
                 record.prompt_ready = !record.native_recovery_required;
             }
+            drop(record);
+            slot.notify();
         }
         self.operation.notify();
         self.broker.settle_submission(&self.operation)?;

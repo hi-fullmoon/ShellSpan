@@ -26,11 +26,14 @@ fn claimed() -> NativeInputCoordinator {
     operation.lock().unwrap().native_protocol = true;
     let operation = Arc::new(operation);
     {
-        let mut state = broker.lock().unwrap();
-        let record = state
+        let state = broker.lock().unwrap();
+        let slot = state
             .sessions
-            .get_mut(&attachment.terminal_session_id)
+            .get(&attachment.terminal_session_id)
+            .cloned()
             .unwrap();
+        drop(state);
+        let mut record = slot.lock().unwrap();
         record.active_command = Some(operation.clone());
         record.lease = Some(TerminalLeaseSnapshot {
             lease_id: "unit-lease".into(),
@@ -297,8 +300,10 @@ fn follow_up_revalidates_generation_operation_and_owner() {
             .unwrap();
         started(&coordinator);
         {
-            let mut state = coordinator.broker.lock().unwrap();
-            let record = state.sessions.values_mut().next().unwrap();
+            let state = coordinator.broker.lock().unwrap();
+            let slot = state.sessions.values().next().cloned().unwrap();
+            drop(state);
+            let mut record = slot.lock().unwrap();
             match changed {
                 "generation" => record.terminal_generation += 1,
                 "operation" => record.active_command = None,
