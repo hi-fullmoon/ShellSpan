@@ -70,7 +70,7 @@ try {
           if (referenceEvent) {
             const reference = page.locator('#session-reference-disclosure');
             const trigger = reference.getByRole('button', { name: locale === 'zh-CN' ? '会话引用' : 'Session reference' });
-            const body = reference.locator('.ai-semantic-note-body');
+            const body = reference.locator('.ai-io-card');
             await trigger.press('Enter');
             const insets = await body.evaluate(element => {
               const body = element.getBoundingClientRect();

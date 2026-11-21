@@ -287,12 +287,35 @@ try {
         }
         assert.equal(await page.locator('[data-composer-editor]').textContent(), multilineDraft);
         await page.setViewportSize({ width, height: 300 });
-        const compactGeometry = await page.locator('[data-composer-seat]').evaluate(el => ({
-          bottom: el.getBoundingClientRect().bottom, viewport: innerHeight,
-          height: el.clientHeight, scrollHeight: el.scrollHeight,
-        }));
+        const compactGeometry = await page.locator('[data-composer-seat]').evaluate(el => {
+          const box = el.getBoundingClientRect();
+          const parentBox = el.parentElement.getBoundingClientRect();
+          return {
+            bottom: box.bottom, viewport: innerHeight,
+            right: box.right, parentRight: parentBox.right,
+            height: el.clientHeight, scrollHeight: el.scrollHeight,
+          };
+        });
         assert.ok(compactGeometry.bottom <= compactGeometry.viewport && compactGeometry.scrollHeight > compactGeometry.height,
           `A short window must keep the composer within the viewport and scrollable: ${JSON.stringify(compactGeometry)}`);
+        assert.ok(Math.abs(compactGeometry.right - compactGeometry.parentRight) <= 1,
+          `A scrollable composer seat must stay flush with its container right edge: ${JSON.stringify(compactGeometry)}`);
+        await page.setViewportSize({ width: 960, height: 300 });
+        const wideCompactGeometry = await page.locator('[data-composer-seat]').evaluate(el => {
+          const box = el.getBoundingClientRect();
+          const parentBox = el.parentElement.getBoundingClientRect();
+          const innerBox = el.querySelector('[data-slot="ai-composer-seat-inner"]').getBoundingClientRect();
+          return {
+            right: box.right, parentRight: parentBox.right,
+            innerWidth: innerBox.width, width: box.width,
+            height: el.clientHeight, scrollHeight: el.scrollHeight,
+          };
+        });
+        assert.ok(wideCompactGeometry.scrollHeight > wideCompactGeometry.height
+          && Math.abs(wideCompactGeometry.right - wideCompactGeometry.parentRight) <= 1
+          && wideCompactGeometry.innerWidth < wideCompactGeometry.width,
+          `A wide short window must keep the scrollbar flush to the right edge while centering inner content: ${JSON.stringify(wideCompactGeometry)}`);
+        await page.setViewportSize({ width, height: 300 });
         await page.locator('.ai-composer-primary').click();
         assert.equal(await page.locator('body').getAttribute('data-action'), 'queue');
         await page.getByRole('button', { name: '取消', exact: true }).click();

@@ -91,8 +91,13 @@ try {
           assert.ok(geometry.thumbRight >= 2, `${context}: scrollbar thumb retains clearance from the card edge`);
           assert.equal(geometry.thumbWidth, geometry.outputThumbWidth, `${context}: command and output scrollbar widths match`);
           assert.ok(Math.abs(await textRight() - collapsedRight) <= 6, `${context}: expansion preserves text alignment within scrollbar width`);
+          const promptBeforeScroll = await page.locator('.ai-terminal-prompt').boundingBox();
           await viewport.evaluate(element => { element.scrollTop = element.scrollHeight; });
-          assert.ok(await viewport.evaluate(element => element.scrollTop > 0), `${context}: final command lines remain reachable`);
+          const scrolledTop = await viewport.evaluate(element => element.scrollTop);
+          assert.ok(scrolledTop > 0, `${context}: final command lines remain reachable`);
+          const promptAfterScroll = await page.locator('.ai-terminal-prompt').boundingBox();
+          assert.ok(promptBeforeScroll.y - promptAfterScroll.y >= scrolledTop - 1,
+            `${context}: prompt $ must scroll with the first command line`);
           await title.hover();
           await page.screenshot({ path: join(artifacts, `${context}.png`) });
           if (showCopyActions) {

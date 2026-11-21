@@ -2,7 +2,7 @@
   --ai-composer-stack-gap: 7px;
 }
 
-.ai-composer-seat[data-phase='active'][data-ai-mode='agent'] > .ai-composer-input-anchor + [data-slot='ai-composer-disclaimer'] {
+.ai-composer-seat[data-phase='active'][data-ai-mode='agent'] .ai-composer-input-anchor + [data-slot='ai-composer-disclaimer'] {
   margin-block-start: calc(4px - var(--ai-composer-stack-gap));
 }
 

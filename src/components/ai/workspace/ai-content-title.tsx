@@ -4,8 +4,9 @@ import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
 
 /** Keep truncation on the inner span: WebKit does not clamp native buttons. */
-export function AiContentTitle({ children, className, buttonClassName, expandLabel, collapseLabel, collapsible = false, customScrollbar = false }: {
+export function AiContentTitle({ children, leading, className, buttonClassName, expandLabel, collapseLabel, collapsible = false, customScrollbar = false }: {
   readonly children: ReactNode;
+  readonly leading?: ReactNode;
   readonly className?: string;
   readonly buttonClassName?: string;
   readonly expandLabel?: string;
@@ -42,18 +43,24 @@ export function AiContentTitle({ children, className, buttonClassName, expandLab
   >
     {text}
   </button> : text;
+  const inner = leading ? (
+    <span className="flex min-w-0 items-start gap-1">
+      {leading}
+      <span className="min-w-0 flex-1">{content}</span>
+    </span>
+  ) : content;
   if (customScrollbar) return (
     <ScrollArea
       className={cn('ai-content-title ai-tool-scroll-area flex min-h-0 min-w-0 flex-col overflow-hidden', expanded && 'max-h-[6lh]', className)}
       data-expanded={expanded}
       viewportRender={<div className="h-auto min-h-0 min-w-0 flex-1 overscroll-contain" style={{ overflowX: 'hidden' }} />}
     >
-      <ScrollAreaContent className="min-w-0" style={{ minWidth: 0 }}>{content}</ScrollAreaContent>
+      <ScrollAreaContent className="min-w-0" style={{ minWidth: 0 }}>{inner}</ScrollAreaContent>
     </ScrollArea>
   );
   return (
     <span className={cn('ai-content-title block min-w-0', expanded && 'max-h-[6lh] overflow-auto overscroll-contain', className)} data-expanded={expanded}>
-      {content}
+      {inner}
     </span>
   );
 }
