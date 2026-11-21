@@ -44,8 +44,8 @@ try {
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
       for (const [locale, labels] of [
-        ['zh-CN', { customize: '自定义', title: '自定义终端颜色', background: '背景', picker: '选择背景颜色', red: '红色', resetRed: '恢复红色默认颜色', reset: '恢复默认', close: '关闭', match: '普通匹配背景', activeMatch: '当前匹配背景', invalid: '请输入 #RRGGBB 或 #RRGGBBAA 格式的颜色。' }],
-        ['en-US', { customize: 'Customize', title: 'Customize terminal colors', background: 'Background', picker: 'Choose Background color', red: 'Red', resetRed: 'Restore default Red color', reset: 'Restore defaults', close: 'Close', match: 'Match background', activeMatch: 'Current match background', invalid: 'Enter a color in #RRGGBB or #RRGGBBAA format.' }],
+        ['zh-CN', { customize: '自定义', title: '自定义终端颜色', tabBasic: '基础与选区', tabAnsi: 'ANSI 颜色', tabSearch: '搜索高亮', background: '背景', picker: '选择背景颜色', red: '红色', resetRed: '恢复红色默认颜色', reset: '恢复默认', close: '关闭', match: '普通匹配背景', activeMatch: '当前匹配背景', invalid: '请输入 #RRGGBB 或 #RRGGBBAA 格式的颜色。' }],
+        ['en-US', { customize: 'Customize', title: 'Customize terminal colors', tabBasic: 'Basic', tabAnsi: 'ANSI', tabSearch: 'Search', background: 'Background', picker: 'Choose Background color', red: 'Red', resetRed: 'Restore default Red color', reset: 'Restore defaults', close: 'Close', match: 'Match background', activeMatch: 'Current match background', invalid: 'Enter a color in #RRGGBB or #RRGGBBAA format.' }],
       ]) {
         for (const theme of ['light', 'dark']) {
           for (const width of [1100, 380]) {
@@ -89,14 +89,12 @@ try {
               return { screen: { right: screen.right, bottom: screen.bottom, width: screen.width, height: screen.height }, host: { right: host.right, bottom: host.bottom, width: host.width, height: host.height } };
             });
             assert.ok(previewBounds.screen.right <= previewBounds.host.right && previewBounds.screen.bottom <= previewBounds.host.bottom, `${context}: all preview rows fit without clipping: ${JSON.stringify(previewBounds)}`);
-            assert.equal(await dialog.locator('input[type="color"]').count(), 25, `${context}: all individual colors`);
+            const buttonsWithIcons = await dialog.evaluate(element => [...element.querySelectorAll('button:not([data-slot="dialog-close"])')].filter(button => button.querySelector('svg')).length);
+            assert.equal(buttonsWithIcons, 0, `${context}: editor buttons must not have icons`);
+            assert.equal(await dialog.getByRole('tabpanel').locator('input[type="color"]').count(), 7, `${context}: basic tab colors`);
             const background = dialog.getByRole('textbox', { name: labels.background, exact: true });
             assert.equal(await background.inputValue(), '#282c34', `${context}: inherited colors are editable hex values`);
             assert.equal(await background.locator('../..').getByText(locale === 'zh-CN' ? '沿用方案' : 'Follow preset', { exact: true }).count(), 1, `${context}: inherited colors have an explicit status`);
-            const inheritedMatch = dialog.getByRole('textbox', { name: labels.match, exact: true });
-            assert.equal(await inheritedMatch.inputValue(), '', `${context}: absent search backgrounds do not invent a color`);
-            assert.equal(await inheritedMatch.getAttribute('placeholder'), locale === 'zh-CN' ? '无背景' : 'No background');
-            assert.equal(await inheritedMatch.locator('..').locator('[data-swatch-color]').evaluate(element => element.style.backgroundColor), 'transparent', `${context}: inherited search swatches show transparency instead of black`);
             assert.equal(await preview.locator('[data-ansi-palette="normal"] > span').count(), 8);
             assert.equal(await preview.locator('[data-ansi-palette="bright"] > span').count(), 8);
             await background.fill('#123456');
@@ -110,16 +108,9 @@ try {
             assert.equal(await dialog.getByRole('button', { name: labels.picker, exact: true }).count(), 1, `${context}: readable color picker label`);
             await dialog.locator('input[type="color"]').first().fill('#203040');
             assert.equal(await background.inputValue(), '#203040');
-            const red = dialog.getByRole('textbox', { name: labels.red, exact: true });
-            await red.fill('#aabbcc');
-            const resetRed = dialog.getByRole('button', { name: labels.resetRed, exact: true });
-            await red.press('Tab');
+            await background.focus();
+            await background.press('Tab');
             assert.ok(await page.evaluate(() => document.activeElement?.hasAttribute('data-color-swatch')), `${context}: color picker remains keyboard accessible inside the input`);
-            await page.keyboard.press('Tab');
-            assert.ok(await resetRed.evaluate(element => element === document.activeElement), `${context}: reset follows color picker in keyboard order`);
-            await resetRed.press('Enter');
-            assert.equal(await red.inputValue(), '#e06c75', `${context}: reset restores the readable inherited color`);
-            assert.ok(await resetRed.isDisabled(), `${context}: inherited colors have no override to reset`);
             const selection = dialog.getByRole('textbox', { name: locale === 'zh-CN' ? '选区背景' : 'Selection background', exact: true });
             await dialog.getByRole('textbox', { name: locale === 'zh-CN' ? '非活动选区背景' : 'Inactive selection background', exact: true }).fill('#44556680');
             await selection.fill('#ff000080');
@@ -131,45 +122,6 @@ try {
             assert.notEqual(await preview.locator('[data-selection-preview="selectionInactiveBackground"]').evaluate(element => element.style.backgroundColor), await selectionPreview.evaluate(element => element.style.backgroundColor), `${context}: active and inactive selection samples are independent`);
             const swatch = selection.locator('..').locator('[data-swatch-color]');
             assert.equal(await swatch.evaluate(element => element.style.backgroundColor), alphaColor, `${context}: swatches render their actual alpha`);
-            const layout = await dialog.evaluate(element => {
-              const bounds = element.getBoundingClientRect();
-              const viewport = element.querySelector('[data-slot="scroll-area-viewport"]');
-              const footer = element.querySelector('[data-slot="dialog-footer"]');
-              const scrollbar = element.querySelector('[data-slot="scroll-area-scrollbar"][data-orientation="vertical"]').getBoundingClientRect();
-              const border = parseFloat(getComputedStyle(element).borderRightWidth);
-              return {
-                inside: bounds.left >= 0 && bounds.right <= innerWidth && bounds.top >= 0 && bounds.bottom <= innerHeight,
-                overflow: element.scrollWidth > element.clientWidth,
-                scrolls: viewport.scrollHeight > viewport.clientHeight,
-                footerInside: footer.getBoundingClientRect().bottom <= bounds.bottom,
-                footerBorder: getComputedStyle(footer).borderTopWidth,
-                scrollbarEdge: Math.abs(scrollbar.right - (bounds.right - border)) < 0.5,
-                scrollbarInside: scrollbar.left >= bounds.left && scrollbar.right <= bounds.right,
-                rows: [...element.querySelectorAll('[data-slot="field"]')].map(field => {
-                  const pickerElement = field.querySelector('[data-color-swatch]');
-                  const picker = pickerElement.getBoundingClientRect();
-                  const group = field.querySelector('[data-slot="input-group"]').getBoundingClientRect();
-                  const input = field.querySelector('[data-slot="input-group-control"]').getBoundingClientRect();
-                  const button = field.querySelector('[data-align="inline-end"] button').getBoundingClientRect();
-                  const swatch = pickerElement.querySelector('span').getBoundingClientRect();
-                  const icon = field.querySelector('[data-align="inline-end"] svg').getBoundingClientRect();
-                  const centerY = group.top + group.height / 2;
-                  return {
-                    height: group.height,
-                    pickerInside: picker.left >= group.left && picker.right <= group.right && picker.top >= group.top && picker.bottom <= group.bottom,
-                    sharedBorder: pickerElement.closest('[data-slot="input-group"]') === field.querySelector('[data-slot="input-group"]') && getComputedStyle(pickerElement).borderWidth === '0px',
-                    resetInside: button.left >= group.left && button.right <= group.right && button.top >= group.top && button.bottom <= group.bottom,
-                    noOverlap: picker.right <= input.left && input.right <= button.left,
-                    centerOffsets: [swatch, input, icon].map(rect => rect.top + rect.height / 2 - centerY),
-                  };
-                }),
-              };
-            });
-            assert.ok(layout.inside && !layout.overflow && layout.scrolls && layout.footerInside, `${context}: ${JSON.stringify(layout)}`);
-            assert.equal(layout.footerBorder, '0px', `${context}: no footer separator`);
-            assert.ok(layout.scrollbarEdge && layout.scrollbarInside, `${context}: scrollbar must touch the dialog edge and remain unclipped: ${JSON.stringify(layout)}`);
-            assert.ok(layout.rows.every(row => row.height === 36 && row.pickerInside && row.sharedBorder && row.resetInside && row.noOverlap), `${context}: swatch, text and reset share one control without overlapping: ${JSON.stringify(layout.rows)}`);
-            assert.ok(layout.rows.every(row => row.centerOffsets.every(offset => Math.abs(offset) <= 0.5)), `${context}: swatch, value and reset icon must be vertically centered: ${JSON.stringify(layout.rows.map(row => row.centerOffsets))}`);
             await background.scrollIntoViewIfNeeded();
             const textRegion = await background.evaluate(element => {
               const bounds = element.getBoundingClientRect();
@@ -220,23 +172,77 @@ try {
             } finally {
               await background.evaluate((element, previous) => { element.style.paddingTop = previous; }, previousPadding);
             }
-            await dialog.locator('[data-slot="scroll-area-viewport"]').evaluate(element => { element.scrollTop = element.scrollHeight; });
+            await page.screenshot({ path: `${artifacts}/${engine}-${locale}-${theme}-${width}.png` });
+            await dialog.getByRole('tab', { name: new RegExp(`^${labels.tabAnsi}`) }).click();
+            assert.equal(await dialog.getByRole('tabpanel').locator('input[type="color"]').count(), 16, `${context}: ansi tab colors`);
+            await dialog.locator('[data-slot="scroll-area-scrollbar"][data-orientation="vertical"]').waitFor();
+            const red = dialog.getByRole('textbox', { name: labels.red, exact: true });
+            await red.fill('#aabbcc');
+            const resetRed = dialog.getByRole('button', { name: labels.resetRed, exact: true });
+            assert.equal(await resetRed.locator('svg').count(), 0, `${context}: reset button has no icon`);
+            await page.screenshot({ path: `${artifacts}/${engine}-${locale}-${theme}-${width}-ansi.png` });
+            await resetRed.focus();
+            await resetRed.press('Enter');
+            assert.equal(await red.inputValue(), '#e06c75', `${context}: reset restores the readable inherited color`);
+            assert.equal(await resetRed.count(), 0, `${context}: inherited colors hide reset action`);
+            const layout = await dialog.evaluate(element => {
+              const bounds = element.getBoundingClientRect();
+              const viewport = element.querySelector('[data-slot="scroll-area-viewport"]');
+              const previewRect = element.querySelector('[data-terminal-color-preview]').getBoundingClientRect();
+              const footer = element.querySelector('[data-slot="dialog-footer"]');
+              const scrollbar = element.querySelector('[data-slot="scroll-area-scrollbar"][data-orientation="vertical"]').getBoundingClientRect();
+              const border = parseFloat(getComputedStyle(element).borderRightWidth);
+              return {
+                inside: bounds.left >= 0 && bounds.right <= innerWidth && bounds.top >= 0 && bounds.bottom <= innerHeight,
+                overflow: element.scrollWidth > element.clientWidth,
+                scrolls: viewport.scrollHeight > viewport.clientHeight,
+                previewPinned: previewRect.bottom <= viewport.getBoundingClientRect().top,
+                footerInside: footer.getBoundingClientRect().bottom <= bounds.bottom,
+                footerBorder: getComputedStyle(footer).borderTopWidth,
+                scrollbarEdge: Math.abs(scrollbar.right - (bounds.right - border)) < 0.5,
+                scrollbarInside: scrollbar.left >= bounds.left && scrollbar.right <= bounds.right,
+                rows: [...element.querySelectorAll('[data-slot="field"]')].map(field => {
+                  const pickerElement = field.querySelector('[data-color-swatch]');
+                  const picker = pickerElement.getBoundingClientRect();
+                  const group = field.querySelector('[data-slot="input-group"]').getBoundingClientRect();
+                  const input = field.querySelector('[data-slot="input-group-control"]').getBoundingClientRect();
+                  const swatchRect = pickerElement.querySelector('span').getBoundingClientRect();
+                  const centerY = group.top + group.height / 2;
+                  return {
+                    height: group.height,
+                    pickerInside: picker.left >= group.left && picker.right <= group.right && picker.top >= group.top && picker.bottom <= group.bottom,
+                    sharedBorder: pickerElement.closest('[data-slot="input-group"]') === field.querySelector('[data-slot="input-group"]') && getComputedStyle(pickerElement).borderWidth === '0px',
+                    noOverlap: picker.right <= input.left,
+                    centerOffsets: [swatchRect, input].map(rect => rect.top + rect.height / 2 - centerY),
+                  };
+                }),
+              };
+            });
+            assert.ok(layout.inside && !layout.overflow && layout.scrolls && layout.previewPinned && layout.footerInside, `${context}: ${JSON.stringify(layout)}`);
+            assert.equal(layout.footerBorder, '0px', `${context}: no footer separator`);
+            assert.ok(layout.scrollbarEdge && layout.scrollbarInside, `${context}: scrollbar must touch the dialog edge and remain unclipped: ${JSON.stringify(layout)}`);
+            assert.ok(layout.rows.every(row => row.height === 36 && row.pickerInside && row.sharedBorder && row.noOverlap), `${context}: swatch and text share one control without overlapping: ${JSON.stringify(layout.rows)}`);
+            assert.ok(layout.rows.every(row => row.centerOffsets.every(offset => Math.abs(offset) <= 0.5)), `${context}: swatch and value must be vertically centered: ${JSON.stringify(layout.rows.map(row => row.centerOffsets))}`);
+            await dialog.getByRole('tab', { name: new RegExp(`^${labels.tabSearch}`) }).click();
+            assert.equal(await dialog.getByRole('tabpanel').locator('input[type="color"]').count(), 2, `${context}: search tab colors`);
+            const inheritedMatch = dialog.getByRole('textbox', { name: labels.match, exact: true });
+            assert.equal(await inheritedMatch.inputValue(), '', `${context}: absent search backgrounds do not invent a color`);
+            assert.equal(await inheritedMatch.getAttribute('placeholder'), locale === 'zh-CN' ? '无背景' : 'No background');
+            assert.equal(await inheritedMatch.locator('..').locator('[data-swatch-color]').evaluate(element => element.style.backgroundColor), 'transparent', `${context}: inherited search swatches show transparency instead of black`);
             await dialog.getByRole('textbox', { name: labels.activeMatch, exact: true }).fill('#ff000080');
-            await preview.scrollIntoViewIfNeeded();
             await page.waitForFunction(() => [...document.querySelectorAll('[data-terminal-color-preview] .xterm-rows span')].some(element => getComputedStyle(element).backgroundColor === 'rgb(144, 24, 32)'));
+            await dialog.getByRole('tab', { name: new RegExp(`^${labels.tabBasic}`) }).click();
             await background.fill('#102030');
-            await preview.scrollIntoViewIfNeeded();
             await page.waitForFunction(() => [...document.querySelectorAll('[data-terminal-color-preview] .xterm-rows span')].some(element => getComputedStyle(element).backgroundColor === 'rgb(136, 16, 24)'));
             await background.fill('#203040');
+            await dialog.getByRole('tab', { name: new RegExp(`^${labels.tabSearch}`) }).click();
             await dialog.getByRole('textbox', { name: labels.match, exact: true }).fill('#778899');
             await dialog.getByRole('textbox', { name: labels.activeMatch, exact: true }).fill('#aabbcc');
-            await preview.scrollIntoViewIfNeeded();
             await page.waitForFunction(() => [...document.querySelectorAll('[data-terminal-color-preview] .xterm-rows span')].some(element => getComputedStyle(element).backgroundColor === 'rgb(170, 187, 204)'));
             await page.screenshot({ path: `${artifacts}/${engine}-${locale}-${theme}-${width}-search.png` });
-            await dialog.locator('[data-slot="scroll-area-viewport"]').evaluate(element => { element.scrollTop = 0; });
-            await page.screenshot({ path: `${artifacts}/${engine}-${locale}-${theme}-${width}.png` });
             await dialog.getByRole('button', { name: labels.reset, exact: true }).click();
             assert.deepEqual(await page.evaluate(async () => (await import('/color-runtime')).useAppStore.getState().terminalColorOverrides), {});
+            await dialog.getByRole('tab', { name: new RegExp(`^${labels.tabBasic}`) }).click();
             await background.fill('#112233');
             await page.keyboard.press('Escape');
             await dialog.waitFor({ state: 'hidden' });
