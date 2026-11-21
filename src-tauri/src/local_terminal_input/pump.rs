@@ -1,7 +1,9 @@
 //! One ordered input owner, independent of the worker draining PTY output.
 use crate::models::SessionCommand;
 use crate::terminal_command::local::NativeControlHandle;
-use crossbeam_channel::{unbounded, Receiver, Sender};
+#[cfg(test)]
+use crossbeam_channel::unbounded;
+use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
 use portable_pty::{MasterPty, PtySize};
 use std::io::Write;
 use std::sync::{
@@ -9,6 +11,8 @@ use std::sync::{
     Arc,
 };
 use std::thread;
+
+const LOCAL_INPUT_PUMP_CAPACITY: usize = 4096;
 
 pub(crate) struct LocalInputPump {
     sender: Option<Sender<SessionCommand>>,
@@ -36,10 +40,10 @@ impl LocalInputPump {
                 session_id.clone(),
             ));
         }
-        // SessionCommand already enters an unbounded FIFO at SessionManager.
-        // Preserve that order, including NativeControlFrame's inflight guard,
-        // without blocking the sole consumer of the bounded output queue.
-        let (sender, receiver) = unbounded();
+        // Preserve ordered input delivery without blocking the sole consumer
+        // of the bounded output queue, while capping queued frames if a PTY
+        // stalls.
+        let (sender, receiver) = bounded(LOCAL_INPUT_PUMP_CAPACITY);
         let (finished_sender, finished) = crossbeam_channel::bounded(1);
         let stopped = Arc::new(AtomicBool::new(false));
         let worker_stopped = stopped.clone();
@@ -126,8 +130,11 @@ impl LocalInputPump {
             .as_ref()
             .filter(|_| !self.stopped.load(Ordering::Acquire))
             .ok_or_else(|| "local terminal input is closed".to_string())?
-            .send(command)
-            .map_err(|_| "local terminal input is closed".to_string())
+            .try_send(command)
+            .map_err(|error| match error {
+                TrySendError::Full(_) => "local terminal input queue is full".to_string(),
+                TrySendError::Disconnected(_) => "local terminal input is closed".to_string(),
+            })
     }
 
     pub(crate) fn stop(&mut self) {

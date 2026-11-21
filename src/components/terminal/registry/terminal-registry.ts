@@ -57,7 +57,11 @@ import type { IDisposable, ILink } from '@xterm/xterm';
 import { useTerminalStore } from '@/stores/terminalStore';
 import type { TerminalDisplayBinding } from '@/types/agent-session';
 import { restoreTerminalDisplay } from '@/lib/terminal/terminal-display-restore';
-import { applyTerminalColorOverrides, type TerminalColorOverrides } from '@/lib/terminal/terminal-colors';
+import type { TerminalColorOverrides } from '@/lib/terminal/terminal-colors';
+import { playBellSound, resolveTerminalTheme } from './terminal-themes';
+import { applyTrackedUserInput, hasKnownCredentialPrompt as detectKnownCredentialPrompt } from './terminal-input-heuristics';
+
+export { resolveTerminalTheme };
 
 const logger = createLogger('terminal');
 
@@ -136,212 +140,6 @@ const OUTPUT_PAUSE_HIGH_WATERMARK = 512 * 1024;
 const OUTPUT_RESUME_LOW_WATERMARK = 128 * 1024;
 const OUTPUT_RESUME_RETRY_BASE_MS = 250;
 const OUTPUT_RESUME_RETRY_MAX_MS = 2000;
-
-function playBellSound(): void {
-  const AudioContextConstructor = window.AudioContext;
-  if (!AudioContextConstructor) return;
-  const context = new AudioContextConstructor();
-  const oscillator = context.createOscillator();
-  const gain = context.createGain();
-  oscillator.frequency.value = 880;
-  gain.gain.setValueAtTime(0.05, context.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.08);
-  oscillator.connect(gain);
-  gain.connect(context.destination);
-  oscillator.start();
-  oscillator.stop(context.currentTime + 0.08);
-  oscillator.addEventListener('ended', () => void context.close(), { once: true });
-}
-
-type TerminalTheme = NonNullable<ConstructorParameters<typeof Terminal>[0]>['theme'];
-
-const LIGHT_SELECTION_BACKGROUND = 'rgba(24, 24, 24, 0.22)';
-const LIGHT_SELECTION_INACTIVE_BACKGROUND = 'rgba(24, 24, 24, 0.12)';
-
-const TERMINAL_COLOR_THEMES: Record<Exclude<TerminalColorScheme, 'app'>, TerminalTheme> = {
-  oneDark: {
-    background: '#282c34',
-    foreground: '#abb2bf',
-    cursor: '#528bff',
-    black: '#282c34',
-    red: '#e06c75',
-    green: '#98c379',
-    yellow: '#e5c07b',
-    blue: '#61afef',
-    magenta: '#c678dd',
-    cyan: '#56b6c2',
-    white: '#abb2bf',
-  },
-  solarizedDark: {
-    background: '#002b36',
-    foreground: '#839496',
-    cursor: '#93a1a1',
-    black: '#073642',
-    red: '#dc322f',
-    green: '#859900',
-    yellow: '#b58900',
-    blue: '#268bd2',
-    magenta: '#d33682',
-    cyan: '#2aa198',
-    white: '#eee8d5',
-  },
-  dracula: {
-    background: '#282a36',
-    foreground: '#e5e5df',
-    cursor: '#e5e5df',
-    selectionBackground: '#44475a',
-    black: '#21222c',
-    red: '#ff5555',
-    green: '#50fa7b',
-    yellow: '#f1fa8c',
-    blue: '#bd93f9',
-    magenta: '#ff79c6',
-    cyan: '#8be9fd',
-    white: '#f8f8f2',
-    brightBlack: '#6272a4',
-    brightRed: '#ff6e6e',
-    brightGreen: '#69ff94',
-    brightYellow: '#ffffa5',
-    brightBlue: '#d6acff',
-    brightMagenta: '#ff92df',
-    brightCyan: '#a4ffff',
-    brightWhite: '#ffffff',
-  },
-  nord: {
-    background: '#2e3440',
-    foreground: '#d8dee9',
-    cursor: '#d8dee9',
-    selectionBackground: '#434c5e',
-    black: '#3b4252',
-    red: '#bf616a',
-    green: '#a3be8c',
-    yellow: '#ebcb8b',
-    blue: '#81a1c1',
-    magenta: '#b48ead',
-    cyan: '#88c0d0',
-    white: '#e5e9f0',
-    brightBlack: '#4c566a',
-    brightRed: '#bf616a',
-    brightGreen: '#a3be8c',
-    brightYellow: '#ebcb8b',
-    brightBlue: '#81a1c1',
-    brightMagenta: '#b48ead',
-    brightCyan: '#8fbcbb',
-    brightWhite: '#eceff4',
-  },
-  gruvboxDark: {
-    background: '#282828',
-    foreground: '#ebdbb2',
-    cursor: '#ebdbb2',
-    selectionBackground: '#504945',
-    black: '#282828',
-    red: '#cc241d',
-    green: '#98971a',
-    yellow: '#d79921',
-    blue: '#458588',
-    magenta: '#b16286',
-    cyan: '#689d6a',
-    white: '#a89984',
-    brightBlack: '#928374',
-    brightRed: '#fb4934',
-    brightGreen: '#b8bb26',
-    brightYellow: '#fabd2f',
-    brightBlue: '#83a598',
-    brightMagenta: '#d3869b',
-    brightCyan: '#8ec07c',
-    brightWhite: '#ebdbb2',
-  },
-  tokyoNight: {
-    background: '#1a1b26',
-    foreground: '#c0caf5',
-    cursor: '#c0caf5',
-    selectionBackground: '#33467c',
-    black: '#15161e',
-    red: '#f7768e',
-    green: '#9ece6a',
-    yellow: '#e0af68',
-    blue: '#7aa2f7',
-    magenta: '#bb9af7',
-    cyan: '#7dcfff',
-    white: '#a9b1d6',
-    brightBlack: '#414868',
-    brightRed: '#f7768e',
-    brightGreen: '#9ece6a',
-    brightYellow: '#e0af68',
-    brightBlue: '#7aa2f7',
-    brightMagenta: '#bb9af7',
-    brightCyan: '#7dcfff',
-    brightWhite: '#c0caf5',
-  },
-  catppuccinMocha: {
-    background: '#1e1e2e',
-    foreground: '#cdd6f4',
-    cursor: '#f5e0dc',
-    selectionBackground: '#45475a',
-    black: '#45475a',
-    red: '#f38ba8',
-    green: '#a6e3a1',
-    yellow: '#f9e2af',
-    blue: '#89b4fa',
-    magenta: '#f5c2e7',
-    cyan: '#94e2d5',
-    white: '#bac2de',
-    brightBlack: '#585b70',
-    brightRed: '#f38ba8',
-    brightGreen: '#a6e3a1',
-    brightYellow: '#f9e2af',
-    brightBlue: '#89b4fa',
-    brightMagenta: '#f5c2e7',
-    brightCyan: '#94e2d5',
-    brightWhite: '#a6adc8',
-  },
-  light: {
-    background: '#ffffff',
-    foreground: '#1f2328',
-    cursor: '#0969da',
-    selectionBackground: LIGHT_SELECTION_BACKGROUND,
-    selectionInactiveBackground: LIGHT_SELECTION_INACTIVE_BACKGROUND,
-    black: '#24292f',
-    red: '#cf222e',
-    green: '#116329',
-    yellow: '#4d2d00',
-    blue: '#0969da',
-    magenta: '#8250df',
-    cyan: '#1b7c83',
-    white: '#f6f8fa',
-  },
-};
-
-function readAppColor(variable: string, lightFallback: string, darkFallback: string): string {
-  const resolved = getComputedStyle(document.documentElement).getPropertyValue(variable).trim();
-  if (resolved) return resolved;
-  return document.documentElement.dataset.theme === 'dark' ? darkFallback : lightFallback;
-}
-
-function resolveBaseTerminalTheme(colorScheme: TerminalColorScheme): TerminalTheme {
-  if (colorScheme !== 'app') return { ...TERMINAL_COLOR_THEMES[colorScheme], overviewRulerBorder: '#00000000' };
-  return {
-    // Keep search markers without xterm's default full-height ruler border.
-    overviewRulerBorder: '#00000000',
-    background: readAppColor('--app-surface', '#ffffff', '#202122'),
-    foreground: readAppColor('--app-text', '#181818', '#d4d4d8'),
-    cursor: readAppColor('--app-primary', '#282828', '#b3b3b8'),
-    selectionBackground: readAppColor(
-      '--app-terminal-selection',
-      LIGHT_SELECTION_BACKGROUND,
-      'rgba(244, 244, 245, 0.22)',
-    ),
-    selectionInactiveBackground: readAppColor(
-      '--app-terminal-selection-inactive',
-      LIGHT_SELECTION_INACTIVE_BACKGROUND,
-      'rgba(244, 244, 245, 0.12)',
-    ),
-  };
-}
-
-export function resolveTerminalTheme(colorScheme: TerminalColorScheme, overrides: TerminalColorOverrides = {}): TerminalTheme {
-  return applyTerminalColorOverrides(resolveBaseTerminalTheme(colorScheme) ?? {}, overrides);
-}
 
 export interface TerminalController {
   readonly inputMode: 'native-inline' | 'raw';
@@ -867,34 +665,50 @@ class TerminalControllerImpl implements TerminalController {
     };
     let snapshotNeeded = false;
     let recovery: Promise<void> | undefined;
-    const replay = restore && restoreTerminalDisplay(restore, writeOutput, () => {
-      snapshotNeeded = true;
-      if (!this.restoringDisplay) void recoverDisplay().catch(error => markRestoreFailure(error));
-    });
+    const MAX_DISPLAY_RECOVERY_ATTEMPTS = 5;
+    let recoveryFailed = false;
     const markRestoreFailure = (error: unknown): void => {
-      if (!isCurrent()) return;
+      if (!isCurrent() || recoveryFailed) return;
+      recoveryFailed = true;
       logger.warn(`Terminal display recovery failed for ${sessionId}`, error);
       this.setStatus(sessionId, { sessionId, status: 'disconnected' });
     };
+    const replay = restore && restoreTerminalDisplay(restore, writeOutput, () => {
+      if (recoveryFailed) return;
+      snapshotNeeded = true;
+      if (!this.restoringDisplay) void recoverDisplay().catch(error => markRestoreFailure(error));
+    }, {
+      onOverflow: () => markRestoreFailure(new Error('Terminal display pending frame buffer overflow')),
+    });
     const recoverDisplay = (): Promise<void> => {
       if (recovery) return recovery;
       recovery = (async () => {
-        if (!restore || !replay) return;
+        if (!restore || !replay || recoveryFailed) return;
         this.restoringDisplay = true;
+        let attempts = 0;
         do {
+          if (attempts >= MAX_DISPLAY_RECOVERY_ATTEMPTS) {
+            markRestoreFailure(new Error('Terminal display recovery exceeded retry limit'));
+            return;
+          }
+          if (attempts > 0) {
+            await new Promise<void>((resolve) => setTimeout(resolve, Math.min(250, 25 * (2 ** (attempts - 1)))));
+            if (!isCurrent() || recoveryFailed) return;
+          }
+          attempts += 1;
           snapshotNeeded = false;
           const snapshot = await invokeGetTerminalDisplaySnapshot(sessionId, restore);
-          if (!isCurrent()) return;
+          if (!isCurrent() || recoveryFailed) return;
           await new Promise<void>((resolve) => this.terminal.write('', resolve));
-          if (!isCurrent()) return;
+          if (!isCurrent() || recoveryFailed) return;
           this.terminal.resize(snapshot.columns, snapshot.rows);
           this.terminal.reset();
           clearTerminalOutput(sessionId);
           this.recentOutputTail = '';
           replay.apply(snapshot);
           await new Promise<void>((resolve) => this.terminal.write('', resolve));
-        } while (isCurrent() && snapshotNeeded);
-        if (isCurrent() && replay.ready()) this.restoringDisplay = false;
+        } while (isCurrent() && !recoveryFailed && snapshotNeeded);
+        if (isCurrent() && !recoveryFailed && replay.ready()) this.restoringDisplay = false;
       })().finally(() => { recovery = undefined; });
       return recovery;
     };
@@ -1359,111 +1173,19 @@ class TerminalControllerImpl implements TerminalController {
   }
 
   hasKnownCredentialPrompt(): boolean {
-    const tail = this.recentOutputTail
-      .replace(/\u001b\][\s\S]*?(?:\u0007|\u001b\\)/g, '')
-      .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
-      .replace(/\u001b[@-_]/g, '')
-      .trimEnd();
-    return /(?:password|passphrase|one[- ]time (?:password|code)|verification code|otp|continue connecting|host key)[^\r\n]{0,160}[:?]\s*$/i.test(tail);
-  }
-
-  private inputLineNeedsContinuation(value: string): boolean {
-    const trimmed = value.trimEnd();
-    if (!trimmed) return false;
-    if (/(?:\\|`)\s*$/.test(value) || /(?:\||&&|\|\|)\s*$/.test(value)) return true;
-    const heredoc = /<<(?!<)-?\s*(?:'([^']+)'|"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))/g;
-    const delimiters: Array<{ delimiter: string; stripTabs: boolean }> = [];
-    const openingLine = value.split('\n', 1)[0];
-    const isUnquotedAt = (offset: number): boolean => {
-      let heredocQuote: "'" | '"' | null = null;
-      let heredocEscaped = false;
-      for (let index = 0; index < offset; index += 1) {
-        const character = openingLine[index];
-        if (heredocEscaped) {
-          heredocEscaped = false;
-        } else if (heredocQuote) {
-          if (character === heredocQuote) heredocQuote = null;
-          else if (character === '\\' && heredocQuote === '"') heredocEscaped = true;
-        } else if (character === '\\') {
-          heredocEscaped = true;
-        } else if (character === "'" || character === '"') {
-          heredocQuote = character;
-        }
-      }
-      return heredocQuote === null && !heredocEscaped;
-    };
-    for (const match of openingLine.matchAll(heredoc)) {
-      if (!isUnquotedAt(match.index ?? 0)) continue;
-      delimiters.push({
-        delimiter: match[1] ?? match[2] ?? match[3],
-        stripTabs: match[0].startsWith('<<-'),
-      });
-    }
-    if (delimiters.length > 0) {
-      const bodyLines = value.split('\n').slice(1);
-      let delimiterIndex = 0;
-      for (const line of bodyLines) {
-        const expected = delimiters[delimiterIndex];
-        if (!expected) break;
-        const candidate = expected.stripTabs ? line.replace(/^\t+/, '') : line;
-        if (candidate === expected.delimiter) delimiterIndex += 1;
-      }
-      if (delimiterIndex < delimiters.length) return true;
-    }
-    let quote: "'" | '"' | null = null;
-    let escaped = false;
-    const closers: string[] = [];
-    const matchingCloser: Record<string, string> = { '(': ')', '[': ']', '{': '}' };
-    for (const character of value) {
-      if (escaped) {
-        escaped = false;
-      } else if (quote) {
-        if (character === '\\' && quote === '"') escaped = true;
-        else if (character === quote) quote = null;
-      } else if (character === "'" || character === '"') {
-        quote = character;
-      } else if (matchingCloser[character]) {
-        closers.push(matchingCloser[character]);
-      } else if (closers[closers.length - 1] === character) {
-        closers.pop();
-      }
-    }
-    return quote !== null
-      || closers.length > 0
-      || /(?:\bthen|\bdo|\belse|\bcase\s+\S+\s+in)\s*$/i.test(trimmed);
+    return detectKnownCredentialPrompt(this.recentOutputTail);
   }
 
   private trackUserInput(data: string): void {
-    for (let index = 0; index < data.length; index += 1) {
-      const character = data[index];
-      if (character === '\u001b') {
-        if (data[index + 1] === '[') {
-          index += 2;
-          while (index < data.length && !/[A-Za-z~]/.test(data[index])) index += 1;
-        }
-        continue;
-      }
-      if (character === '\u0003') {
-        this.submittedContinuationText = '';
-        this.pendingUserInputText = '';
-      } else if (character === '\u0015') {
-        this.pendingUserInputText = '';
-      } else if (character === '\u007f' || character === '\b') {
-        this.pendingUserInputText = [...this.pendingUserInputText].slice(0, -1).join('');
-      } else if (character === '\r' || character === '\n') {
-        if (character === '\r' && data[index + 1] === '\n') index += 1;
-        const submittedInput = this.submittedContinuationText + this.pendingUserInputText;
-        if (this.inputLineNeedsContinuation(submittedInput)) {
-          this.submittedContinuationText = `${submittedInput}\n`;
-        } else {
-          if (submittedInput.trim()) this.unverifiedUserSubmission = true;
-          this.submittedContinuationText = '';
-        }
-        this.pendingUserInputText = '';
-      } else if (character === '\t' || character >= ' ') {
-        this.pendingUserInputText += character;
-      }
-    }
+    const state = {
+      pendingUserInputText: this.pendingUserInputText,
+      submittedContinuationText: this.submittedContinuationText,
+      unverifiedUserSubmission: this.unverifiedUserSubmission,
+    };
+    applyTrackedUserInput(state, data);
+    this.pendingUserInputText = state.pendingUserInputText;
+    this.submittedContinuationText = state.submittedContinuationText;
+    this.unverifiedUserSubmission = state.unverifiedUserSubmission;
   }
 
   private isReadOnly(): boolean {
@@ -1522,7 +1244,24 @@ class TerminalControllerImpl implements TerminalController {
           await invokeRespondTerminalPromptOrigin(request, observation);
           return;
         }
-        await new Promise(resolve => setTimeout(resolve, 20));
+        const progressed = await new Promise<boolean>(resolve => {
+          let settled = false;
+          const disposables: Array<{ dispose(): void }> = [];
+          const finish = (value: boolean) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            for (const disposable of disposables) disposable.dispose();
+            resolve(value);
+          };
+          const timer = setTimeout(() => finish(false), Math.max(1, end - Date.now()));
+          disposables.push(
+            this.terminal.onWriteParsed(() => finish(true)),
+            this.terminal.onCursorMove(() => finish(true)),
+            this.terminal.onResize(() => finish(true)),
+          );
+        });
+        if (!progressed) return;
       }
     } catch (error) {
       if (current()) logger.warn('Display origin observation could not be delivered', error);

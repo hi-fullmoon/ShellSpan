@@ -80,11 +80,15 @@ export function createTerminalCommandBlocks(terminal: Terminal) {
   const resize = terminal.onResize(({ cols }) => {
     if (columns === cols) return;
     columns = cols;
-    // xterm reflows its markers by row. Cell offsets on boundary rows no
-    // longer identify the original span when the column count has changed.
-    pendingPrompt?.dispose();
-    pendingPrompt = undefined;
-    [...blocks.keys()].forEach(remove);
+    // xterm reflows its markers by row. Line-aligned boundaries (column 0)
+    // remain valid across horizontal reflow, whereas mid-line column offsets
+    // no longer identify the original span.
+    for (const [id, block] of [...blocks.entries()]) {
+      const hasMidLineBoundary = (block.output !== undefined && block.output.column > 0)
+        || (block.end !== undefined && block.end.column > 0);
+      if (hasMidLineBoundary) remove(id);
+    }
+    publish();
   });
 
   return {

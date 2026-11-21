@@ -116,13 +116,18 @@ impl vte::Perform for PrivateKeyScreenState {
             return;
         }
         self.boundary.push(character);
-        if self.boundary.len() > PRIVATE_KEY_BOUNDARY_BYTES {
-            self.boundary.remove(0);
+        if self.boundary.len() >= PRIVATE_KEY_BOUNDARY_BYTES * 2 {
+            let drain_to = self.boundary.len() - PRIVATE_KEY_BOUNDARY_BYTES;
+            self.boundary.drain(..drain_to);
         }
         if character != '-' {
             return;
         }
-        match crate::redaction::terminal_private_key_boundary(&self.boundary) {
+        let window_start = self
+            .boundary
+            .len()
+            .saturating_sub(PRIVATE_KEY_BOUNDARY_BYTES);
+        match crate::redaction::terminal_private_key_boundary(&self.boundary[window_start..]) {
             Some(crate::redaction::PrivateKeyBoundary::Begin) => {
                 self.inside_private_key = true;
                 // Also break the opening delimiter in the safe screen, so a
@@ -140,20 +145,32 @@ impl vte::Perform for PrivateKeyScreenState {
 }
 
 impl PrivateKeyScreenFilter {
-    fn filter(&mut self, bytes: &[u8]) -> Vec<u8> {
-        bytes
-            .iter()
-            .map(|byte| {
-                self.state.mask_ascii = false;
-                self.parser
-                    .advance(&mut self.state, std::slice::from_ref(byte));
-                if self.state.mask_ascii {
-                    b'*'
-                } else {
-                    *byte
-                }
-            })
-            .collect()
+    fn filter<'a>(&mut self, bytes: &'a [u8]) -> Cow<'a, [u8]> {
+        if !self.state.inside_private_key && !bytes.contains(&b'-') {
+            self.state.mask_ascii = false;
+            self.parser.advance(&mut self.state, bytes);
+            return Cow::Borrowed(bytes);
+        }
+        let mut owned: Option<Vec<u8>> = None;
+        for (index, &byte) in bytes.iter().enumerate() {
+            self.state.mask_ascii = false;
+            self.parser
+                .advance(&mut self.state, std::slice::from_ref(&byte));
+            if self.state.mask_ascii {
+                let buf = owned.get_or_insert_with(|| {
+                    let mut v = Vec::with_capacity(bytes.len());
+                    v.extend_from_slice(&bytes[..index]);
+                    v
+                });
+                buf.push(b'*');
+            } else if let Some(buf) = owned.as_mut() {
+                buf.push(byte);
+            }
+        }
+        match owned {
+            Some(buf) => Cow::Owned(buf),
+            None => Cow::Borrowed(bytes),
+        }
     }
 }
 
@@ -256,8 +273,8 @@ impl TerminalScreenModel {
         let display = self
             .recovery
             .as_mut()
-            .map_or(Cow::Borrowed(safe.as_slice()), |recovery| {
-                recovery.apply(&safe)
+            .map_or(Cow::Borrowed(safe.as_ref()), |recovery| {
+                recovery.apply(safe.as_ref())
             });
         self.parser.process(&display);
         self.version = next;

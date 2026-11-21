@@ -85,7 +85,7 @@ const AgentTerminalStatusBar: React.FC<{
   const workspaceLabel = t(ownerWorkspace === 'focus' ? 'terminal.occupancy.focus' : 'terminal.occupancy.terminal');
   const inputLabel = inputLocked ? t('terminal.agentLease.inputLockedLabel') : null;
   const identity = (
-    <span className="grid size-5 shrink-0 place-items-center rounded-md bg-app-surface-muted text-app-primary"
+    <span className="grid size-5 shrink-0 place-items-center rounded-md bg-app-surface-muted/60 text-app-primary/80"
       data-testid="agent-terminal-lease-identity">
       <TerminalIcon aria-hidden="true" className="size-3" />
     </span>
@@ -99,7 +99,7 @@ const AgentTerminalStatusBar: React.FC<{
       data-terminal-owned={lease.terminalOwned || undefined}
       data-input-blocked={lease.inputBlocked || undefined}
     >
-      <div className="pointer-events-auto flex w-fit max-w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-lg border border-app-border/70 bg-app-surface/75 p-1 shadow-md backdrop-blur-md motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150 motion-safe:ease-out">
+      <div className="pointer-events-auto flex w-fit max-w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-lg border border-app-border/45 bg-app-surface/55 p-1 shadow-xs backdrop-blur-md motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150 motion-safe:ease-out">
         <div className={cn(
           'agent-terminal-lease-status flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden',
           !lease.waitingForUserAction && '@max-[160px]/terminal-lease:hidden',
@@ -113,10 +113,10 @@ const AgentTerminalStatusBar: React.FC<{
             </Tooltip>
           </TooltipProvider>
           <div className="flex min-w-0 flex-col @max-[220px]/terminal-lease:hidden @min-[420px]/terminal-lease:flex-row @min-[420px]/terminal-lease:items-center @min-[420px]/terminal-lease:gap-1.5" aria-hidden="true">
-            <div className="agent-terminal-lease-description truncate text-xs leading-3.5 font-semibold text-app-text" title={interactionHint ? `${activityLabel} — ${interactionHint}` : activityLabel}>
+            <div className="agent-terminal-lease-description truncate text-xs leading-3.5 font-semibold text-app-text/85" title={interactionHint ? `${activityLabel} — ${interactionHint}` : activityLabel}>
               {activityLabel}
             </div>
-            <div className="flex min-w-0 items-center gap-1 text-[11px] leading-3 text-app-text-soft">
+            <div className="flex min-w-0 items-center gap-1 text-[11px] leading-3 text-app-text-soft/85">
               <span className={cn('truncate', inputLocked && 'hidden @min-[520px]/terminal-lease:inline')}>{modeLabel}</span>
               {inputLabel && <>
                 <span className={cn(inputLocked && 'hidden @min-[520px]/terminal-lease:inline')}>·</span>
@@ -157,7 +157,7 @@ const AgentTerminalStatusBar: React.FC<{
             type="button"
             variant="secondary"
             size="xs"
-            className="agent-terminal-takeover max-w-full truncate"
+            className="agent-terminal-takeover max-w-full truncate bg-secondary/65 text-secondary-foreground/85 hover:bg-secondary/85"
             disabled={lease.takeoverRequested}
             aria-busy={lease.takeoverRequested || undefined}
             onClick={lease.requestTakeover}
@@ -412,12 +412,32 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     };
   }, [activeSessionId, handleOpenSearch, isActive, showError, t, terminal]);
 
+  const keyPasteHandlersRef = useRef({
+    activeLease,
+    searchOpen,
+    handleCloseSearch,
+    showError,
+    t,
+    trimTrailingWhitespace,
+    pasteText,
+  });
+  keyPasteHandlersRef.current = {
+    activeLease,
+    searchOpen,
+    handleCloseSearch,
+    showError,
+    t,
+    trimTrailingWhitespace,
+    pasteText,
+  };
+
   // Bind xterm custom key handler for app shortcuts, find/escape, and copy.
   useEffect(() => {
     if (!terminal) return;
 
     terminal.attachCustomKeyEventHandler((event) => {
       if (event.type !== 'keydown') return true;
+      const latest = keyPasteHandlersRef.current;
 
       // Leader-key chords (default Ctrl+B then a command key) are resolved
       // before anything else and never reach the pty.
@@ -480,7 +500,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         const selection = terminal.getSelection();
         if (selection) {
           event.preventDefault();
-          const copiedText = trimTrailingWhitespace
+          const copiedText = latest.trimTrailingWhitespace
             ? selection.replace(/[ \t]+(?=\r?$)/gm, '')
             : selection;
           void copyTerminalText(copiedText);
@@ -489,15 +509,15 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       }
 
       if (event.key === 'Escape') {
-        if (activeLease && !activeLease.waitingForUserAction) {
+        if (latest.activeLease && !latest.activeLease.waitingForUserAction) {
           event.preventDefault();
           event.stopPropagation();
-          activeLease.requestTakeover();
+          latest.activeLease.requestTakeover();
           return false;
         }
-        if (searchOpen) {
+        if (latest.searchOpen) {
           event.preventDefault();
-          handleCloseSearch();
+          latest.handleCloseSearch();
           return false;
         }
       }
@@ -505,14 +525,18 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       return true;
     });
 
-    const disposePaste = installTerminalPasteHandler(terminal, pasteText, () => showError(t('terminal.feedback.pasteFailed')));
+    const disposePaste = installTerminalPasteHandler(
+      terminal,
+      (text) => keyPasteHandlersRef.current.pasteText(text),
+      () => keyPasteHandlersRef.current.showError(keyPasteHandlersRef.current.t('terminal.feedback.pasteFailed')),
+    );
 
     return () => {
       disposePaste?.();
-      // Reset key handler to avoid stale closures when session changes.
+      // Reset key handler to avoid stale closures when terminal changes.
       terminal.attachCustomKeyEventHandler(() => true);
     };
-  }, [activeLease, activeSession, activeSessionId, terminal, searchOpen, handleOpenSearch, handleCloseSearch, showError, t, largePasteWarning, multiLinePasteWarning, trimTrailingWhitespace, pasteText]);
+  }, [terminal]);
 
   // Session observations and shortcut UI can rerender while a drag settles.
   // Keep its copy timer scoped to the displayed terminal and copy preferences.
@@ -555,7 +579,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           focus();
         }}>{t('terminal.inputLock.unlock')}</Button>
       </div>}
-      <div className={cn('relative min-h-0 flex-1', activeSession?.currentDirectory && 'pl-1.5')}
+      <div className="relative min-h-0 flex-1 pl-1.5"
         style={{ backgroundColor: terminalSurfaceStyle.backgroundColor }}>
         {activeLease && !activeLease.waitingForUserAction && (
           <div

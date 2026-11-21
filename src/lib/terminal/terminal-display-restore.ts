@@ -1,13 +1,22 @@
 import type { TerminalDisplayBinding, TerminalDisplayFrame, TerminalDisplaySnapshot } from '@/types/agent-session';
 
+export const DEFAULT_MAX_PENDING_DISPLAY_FRAMES = 2048;
+
+export interface RestoreTerminalDisplayOptions {
+  maxPendingFrames?: number;
+  onOverflow?: () => void;
+}
+
 /** Orders the snapshot boundary and the live frames from the same renderer. */
 export function restoreTerminalDisplay(
   binding: TerminalDisplayBinding,
   write: (text: string) => void,
   requestSnapshot: () => void,
+  options?: RestoreTerminalDisplayOptions,
 ) {
   let through: number | undefined;
   const pending = new Map<number, string>();
+  const maxPendingFrames = options?.maxPendingFrames ?? DEFAULT_MAX_PENDING_DISPLAY_FRAMES;
 
   const flush = (): void => {
     if (through === undefined) return;
@@ -29,6 +38,16 @@ export function restoreTerminalDisplay(
   return {
     receive(frame: TerminalDisplayFrame): void {
       if (frame.terminalSessionId !== binding.terminalSessionId || frame.terminalGeneration !== binding.terminalGeneration) return;
+      if (!pending.has(frame.sequence) && pending.size >= maxPendingFrames) {
+        pending.clear();
+        through = undefined;
+        if (options?.onOverflow) {
+          options.onOverflow();
+        } else {
+          requestSnapshot();
+        }
+        return;
+      }
       pending.set(frame.sequence, frame.text);
       flush();
     },

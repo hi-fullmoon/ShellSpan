@@ -48,3 +48,23 @@ it('applies output buffered during refresh after the snapshot boundary', async (
     terminal.dispose();
   }
 });
+
+it('caps pending out-of-order frames and invokes onOverflow', () => {
+  const { binding } = capture;
+  let overflowCount = 0;
+  let snapshotRequests = 0;
+  const replay = restoreTerminalDisplay(
+    binding,
+    () => {},
+    () => { snapshotRequests += 1; },
+    { maxPendingFrames: 2, onOverflow: () => { overflowCount += 1; } },
+  );
+
+  replay.receive({ ...binding, sequence: 10, text: 'a' });
+  replay.receive({ ...binding, sequence: 11, text: 'b' });
+  expect(overflowCount).toBe(0);
+  replay.receive({ ...binding, sequence: 12, text: 'c' });
+  expect(overflowCount).toBe(1);
+  expect(snapshotRequests).toBe(0);
+  expect(replay.ready()).toBe(false);
+});

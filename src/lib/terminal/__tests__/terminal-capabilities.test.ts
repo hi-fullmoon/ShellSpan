@@ -307,4 +307,21 @@ describe('terminal capabilities', () => {
       terminal.dispose();
     }
   });
+
+  it('preserves line-aligned command blocks across horizontal resize', async () => {
+    const terminal = new Terminal({ cols: 32, rows: 8, allowProposedApi: true });
+    const tracker = createTerminalCommandBlocks(terminal);
+    try {
+      await new Promise<void>((resolve) => terminal.write(
+        '\x1b]133;A\x07$ echo hello\r\n\x1b]133;C;ShellSpan=2\x07hello\r\n\x1b]133;D;0;ShellSpan=2\x07$ ', resolve,
+      ));
+      expect(readTerminalCommandOutput(terminal, tracker.list()[0])).toBe('hello');
+      terminal.resize(20, 8);
+      expect(tracker.list()).toHaveLength(1);
+      expect(readTerminalCommandOutput(terminal, tracker.list()[0])).toBe('hello');
+    } finally {
+      tracker.dispose();
+      terminal.dispose();
+    }
+  });
 });

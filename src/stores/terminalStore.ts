@@ -14,6 +14,7 @@ import { useAppStore } from './appStore';
 import { useProfileStore } from './profileStore';
 import { cleanTerminalTitle, formatTabTitle, resolveTabTitleValues } from '@/lib/terminal/tab-title';
 import type { TerminalRecordingStatus } from '@/lib/ipc/tauri';
+import { agentTerminalLeaseState } from '@/components/terminal/agent-terminal-lease-state';
 
 export interface TerminalSession {
   sessionId: string;
@@ -540,6 +541,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
           && session.promptReady === event.promptReady
           && session.promptReadyRevision === event.promptReadyRevision
           && session.currentDirectory === event.currentDirectory
+          && session.foregroundHandoffActive === event.inputObservation?.foregroundHandoffActive
         ) return session;
         changed = true;
         return {
@@ -614,8 +616,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
     }),
 }));
 
-function refreshTabTitles(): void {
-  const { sessions } = useTerminalStore.getState();
+function computeRefreshedTabTitles(sessions: TerminalSession[]): TerminalSession[] | null {
   const preferences = useAppStore.getState();
   const profiles = useProfileStore.getState();
   const identity = (session: TerminalSession) => session.profileId ?? `${session.username}@${session.host}:${session.port}`;
@@ -640,20 +641,33 @@ function refreshTabTitles(): void {
     changed = true;
     return { ...session, title, baseTitle, titleIndex: index };
   });
-  if (changed) useTerminalStore.setState({ sessions: next });
+  return changed ? next : null;
+}
+
+function refreshTabTitles(): void {
+  const next = computeRefreshedTabTitles(useTerminalStore.getState().sessions);
+  if (next) useTerminalStore.setState({ sessions: next });
 }
 
 useTerminalStore.subscribe((state, previous) => {
   if (state.sessions !== previous.sessions) {
+    agentTerminalLeaseState.syncForegroundHandoff(
+      state.sessions.filter((session) => session.foregroundHandoffActive === true).map((session) => session.sessionId),
+    );
+    const patch: Partial<TerminalState> = {};
     if (state.workspace === previous.workspace && Object.keys(state.workspaceViews).length > 0) {
       const workspaceViews = { ...state.workspaceViews };
       for (const workspace of ['terminal', 'focus'] as const) {
         const view = workspaceViews[workspace];
         if (workspace !== state.workspace && view) workspaceViews[workspace] = reconcileWorkspace(view, state.sessions);
       }
-      useTerminalStore.setState({ workspaceViews });
+      patch.workspaceViews = workspaceViews;
     }
-    refreshTabTitles();
+    const nextSessions = computeRefreshedTabTitles(state.sessions);
+    if (nextSessions) patch.sessions = nextSessions;
+    if (patch.workspaceViews !== undefined || patch.sessions !== undefined) {
+      useTerminalStore.setState(patch);
+    }
   }
 });
 useAppStore.subscribe((state, previous) => {

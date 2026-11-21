@@ -19,6 +19,7 @@ export interface AgentTerminalLeaseView extends AgentTerminalLeaseEvent {
 }
 
 const leases = new Map<string, AgentTerminalLeaseView>();
+const foregroundHandoffSessions = new Set<string>();
 const listeners = new Set<() => void>();
 
 function notify(): void {
@@ -43,9 +44,27 @@ export const agentTerminalLeaseState = {
     return undefined;
   },
 
-  blocksUserInput(sessionId: string, foregroundHandoffActive = false): boolean {
+  blocksUserInput(sessionId: string, foregroundHandoffActive?: boolean): boolean {
     const lease = leases.get(sessionId);
-    return !!lease && !lease.waitingForUserAction && !foregroundHandoffActive;
+    const handoffActive = foregroundHandoffActive ?? foregroundHandoffSessions.has(sessionId);
+    return !!lease && !lease.waitingForUserAction && !handoffActive;
+  },
+
+  syncForegroundHandoff(activeSessionIds: Iterable<string>): void {
+    const next = new Set(activeSessionIds);
+    if (next.size === foregroundHandoffSessions.size) {
+      let identical = true;
+      for (const id of next) {
+        if (!foregroundHandoffSessions.has(id)) {
+          identical = false;
+          break;
+        }
+      }
+      if (identical) return;
+    }
+    foregroundHandoffSessions.clear();
+    for (const id of next) foregroundHandoffSessions.add(id);
+    notify();
   },
 
   set(lease: AgentTerminalLeaseView): void {
@@ -95,8 +114,9 @@ export const agentTerminalLeaseState = {
   },
 
   clearAll(): void {
-    if (leases.size === 0) return;
+    if (leases.size === 0 && foregroundHandoffSessions.size === 0) return;
     leases.clear();
+    foregroundHandoffSessions.clear();
     notify();
   },
 };

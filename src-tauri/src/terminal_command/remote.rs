@@ -10,6 +10,11 @@ use sha2::{Digest, Sha256};
 pub(super) const GLIBC_TOO_OLD_REASON: &str = "remoteGlibcTooOld:";
 const X86_GLIBC_MINIMUM_MINOR: u32 = 28;
 const UNSUPPORTED_PROFILE: &str = "TERMINAL_NATIVE_PROFILE_UNSUPPORTED";
+// Keep `{parent}/.ss-nip-<32>/control.control` comfortably under Linux's
+// 108-byte sockaddr_un.sun_path limit.
+const MAX_STAGING_PARENT_BYTES: usize = 48;
+const STALE_STAGING_MAX_AGE_SECS: u64 = 24 * 60 * 60;
+const MAX_STALE_STAGING_CLEANUPS: usize = 8;
 // libssh2 pipelines SFTP packets within one read or write. Keep enough bytes
 // outstanding for remote SSH links while retaining the connection deadline.
 const NATIVE_SFTP_TRANSFER_WINDOW: usize = 1024 * 1024;
@@ -265,7 +270,9 @@ impl RemoteNativeBash {
         } else {
             None
         };
-        let root = format!("/tmp/.ss-nip-{}", Uuid::new_v4().simple());
+        let parent = resolve_staging_parent(session);
+        cleanup_stale_staging_dirs(&sftp, &parent);
+        let root = format!("{parent}/.ss-nip-{}", Uuid::new_v4().simple());
         sftp.mkdir(Path::new(&root), 0o700)
             .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
         let result = (|| {
@@ -471,7 +478,9 @@ impl RemoteNativeBash {
             &artifact.module_sha256,
         )?
         .bind_scoped_zle_core(&core)?;
-        let root = format!("/tmp/.ss-nip-{}", Uuid::new_v4().simple());
+        let parent = resolve_staging_parent(session);
+        cleanup_stale_staging_dirs(&sftp, &parent);
+        let root = format!("{parent}/.ss-nip-{}", Uuid::new_v4().simple());
         sftp.mkdir(Path::new(&root), 0o700)
             .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
         let result = (|| {
@@ -763,4 +772,135 @@ fn cleanup(sftp: &ssh2::Sftp, root: &str) {
         }
     }
     let _ = sftp.rmdir(Path::new(root));
+}
+
+fn is_valid_staging_parent(path: &str) -> bool {
+    let trimmed = path.trim_end_matches('/');
+    !trimmed.is_empty()
+        && trimmed.starts_with('/')
+        && trimmed.len() <= MAX_STAGING_PARENT_BYTES
+        && !trimmed
+            .bytes()
+            .any(|b| b < 0x20 || b == 0x7f || b == b'\'' || b == b'"' || b == b'\\')
+        && !trimmed.split('/').any(|segment| segment == "..")
+}
+
+fn parse_staging_parent(tag: &str, output: &[u8]) -> Option<String> {
+    let prefix = format!("{tag}\t");
+    let mut records = output
+        .split(|byte| *byte == b'\n')
+        .filter_map(|line| line.strip_prefix(prefix.as_bytes()));
+    let candidate = std::str::from_utf8(records.next()?).ok()?.trim();
+    if records.next().is_some() {
+        return None;
+    }
+    let normalized = candidate.trim_end_matches('/');
+    is_valid_staging_parent(normalized).then(|| normalized.to_string())
+}
+
+fn resolve_staging_parent(session: &Session) -> String {
+    let tag = format!("shellspan-stage-{}", Uuid::new_v4().simple());
+    let probe = format!(
+        r#"ss_try_dir() {{
+  dir=$1
+  create=$2
+  [ -n "$dir" ] || return 1
+  [ "${{#dir}}" -le {max_len} ] || return 1
+  if [ "$create" = "1" ]; then
+    command mkdir -p "$dir" 2>/dev/null || return 1
+    command chmod 700 "$dir" 2>/dev/null || true
+  fi
+  [ -d "$dir" ] && [ -w "$dir" ] || return 1
+  p="$dir/.ss-probe-$$"
+  (umask 077 && builtin printf '#!/bin/sh\nexit 0\n' > "$p" && command chmod 700 "$p" && "$p") 2>/dev/null
+  rc=$?
+  command rm -f "$p" 2>/dev/null || true
+  [ "$rc" -eq 0 ] || return 1
+  builtin printf '\n%s\t%s\n' '{tag}' "$dir"
+  return 0
+}}
+ss_try_dir "${{XDG_RUNTIME_DIR:-}}" 0 && exit 0
+if [ -n "${{HOME:-}}" ]; then
+  ss_try_dir "${{HOME}}/.cache/shellspan" 1 && exit 0
+fi
+ss_try_dir "/tmp" 0 && exit 0
+exit 1"#,
+        max_len = MAX_STAGING_PARENT_BYTES,
+        tag = tag,
+    );
+    read_ssh_setup_command(session, &probe)
+        .ok()
+        .and_then(|output| parse_staging_parent(&tag, &output))
+        .unwrap_or_else(|| "/tmp".to_string())
+}
+
+fn is_staging_dir_name(name: &str) -> bool {
+    name.strip_prefix(".ss-nip-")
+        .is_some_and(|hex| hex.len() == 32 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+fn cleanup_stale_staging_dirs(sftp: &ssh2::Sftp, parent: &str) {
+    let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) else {
+        return;
+    };
+    let cutoff = now.as_secs().saturating_sub(STALE_STAGING_MAX_AGE_SECS);
+    let Ok(entries) = sftp.readdir(Path::new(parent)) else {
+        return;
+    };
+    let mut cleaned = 0usize;
+    for (path, stat) in entries {
+        if cleaned >= MAX_STALE_STAGING_CLEANUPS {
+            break;
+        }
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if !is_staging_dir_name(name) {
+            continue;
+        }
+        if stat.mtime.is_some_and(|mtime| mtime <= cutoff) {
+            if let Some(dir) = path.to_str() {
+                cleanup(sftp, dir);
+                cleaned += 1;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod staging_tests {
+    use super::*;
+
+    #[test]
+    fn parse_staging_parent_validates_bounds_and_safety() {
+        assert_eq!(
+            parse_staging_parent("tag", b"banner\ntag\t/run/user/1000/\n"),
+            Some("/run/user/1000".into())
+        );
+        assert_eq!(
+            parse_staging_parent("tag", b"tag\t/home/u/.cache/shellspan\n"),
+            Some("/home/u/.cache/shellspan".into())
+        );
+        assert_eq!(parse_staging_parent("tag", b"tag\t/\n"), None);
+        assert_eq!(parse_staging_parent("tag", b"tag\trelative/path\n"), None);
+        assert_eq!(parse_staging_parent("tag", b"tag\t/tmp/../etc\n"), None);
+        let too_long = format!("tag\t/{}\n", "a".repeat(MAX_STAGING_PARENT_BYTES + 1));
+        assert_eq!(parse_staging_parent("tag", too_long.as_bytes()), None);
+        assert_eq!(
+            parse_staging_parent("tag", b"tag\t/tmp\ntag\t/run/user/1000\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn staging_dir_name_matches_only_shellspan_nip_hex_dirs() {
+        assert!(is_staging_dir_name(
+            ".ss-nip-0123456789abcdef0123456789abcdef"
+        ));
+        assert!(!is_staging_dir_name(".ss-nip-short"));
+        assert!(!is_staging_dir_name(
+            ".ss-nip-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        ));
+        assert!(!is_staging_dir_name("other-dir"));
+    }
 }

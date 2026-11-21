@@ -37,18 +37,45 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
 
   useEffect(() => {
     let frame: number | undefined;
+    let cachedScreen: HTMLElement | null = null;
+    let geometryDirty = true;
+    let cachedGeometry: { offset: number; rowHeight: number } | null = null;
+    let lastRenderKey = '';
+
+    const measureGeometry = (overlay: HTMLElement): { offset: number; rowHeight: number } | null => {
+      if (!cachedScreen || !cachedScreen.isConnected) {
+        cachedScreen = terminal.element?.querySelector<HTMLElement>('.xterm-screen') ?? null;
+      }
+      if (!cachedScreen || !cachedScreen.clientHeight || terminal.rows <= 0) return null;
+      return {
+        offset: cachedScreen.getBoundingClientRect().top - overlay.getBoundingClientRect().top,
+        rowHeight: cachedScreen.clientHeight / terminal.rows,
+      };
+    };
+
     const update = () => {
       frame = undefined;
-      const screen = terminal.element?.querySelector<HTMLElement>('.xterm-screen');
       const overlay = bounds.current;
       const buffer = terminal.buffer.active;
-      if (!screen || !overlay || !screen.clientHeight || buffer.type !== 'normal' || !tracker) {
+      if (!overlay || buffer.type !== 'normal' || !tracker) {
+        lastRenderKey = '';
+        setVisible((current) => current.length ? [] : current);
+        return;
+      }
+      if (geometryDirty || !cachedGeometry) {
+        cachedGeometry = measureGeometry(overlay);
+        geometryDirty = false;
+      }
+      if (!cachedGeometry) {
+        lastRenderKey = '';
         setVisible((current) => current.length ? [] : current);
         return;
       }
       const { viewportY } = buffer;
-      const height = screen.clientHeight / terminal.rows;
-      const offset = screen.getBoundingClientRect().top - overlay.getBoundingClientRect().top;
+      const { offset, rowHeight } = cachedGeometry;
+      const renderKey = `${viewportY}|${terminal.rows}|${revision}|${offset}|${rowHeight}`;
+      if (renderKey === lastRenderKey) return;
+      lastRenderKey = renderKey;
       const rows = new Map<number, TerminalCommandBlock>();
       for (const block of tracker.list()) {
         const line = block.prompt?.line;
@@ -56,17 +83,24 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
           rows.set(line, block);
         }
       }
-      const visibleBlocks = [...rows].map(([line, block]) => ({ block, top: offset + (line - viewportY + 0.5) * height }));
+      const visibleBlocks = [...rows].map(([line, block]) => ({ block, top: offset + (line - viewportY + 0.5) * rowHeight }));
       setVisible((current) => current.length === visibleBlocks.length && current.every((item, index) =>
         item.block === visibleBlocks[index].block && item.top === visibleBlocks[index].top,
       ) ? current : visibleBlocks);
     };
     const schedule = () => { if (frame === undefined) frame = requestAnimationFrame(update); };
+    const invalidateGeometry = () => {
+      geometryDirty = true;
+      schedule();
+    };
     schedule();
-    const disposables = [terminal.onScroll(schedule), terminal.onResize(schedule),
-      terminal.onRender(schedule), terminal.buffer.onBufferChange(schedule)];
+    const disposables = [terminal.onScroll(schedule), terminal.onResize(invalidateGeometry),
+      terminal.onRender(schedule), terminal.buffer.onBufferChange(invalidateGeometry)];
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(invalidateGeometry) : null;
+    if (observer && bounds.current) observer.observe(bounds.current);
     return () => {
       if (frame !== undefined) cancelAnimationFrame(frame);
+      observer?.disconnect();
       disposables.forEach((disposable) => disposable.dispose());
     };
   }, [terminal, tracker, revision]);

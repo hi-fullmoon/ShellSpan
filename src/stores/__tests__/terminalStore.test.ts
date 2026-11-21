@@ -564,4 +564,76 @@ describe('terminalStore', () => {
     });
     expect(useTerminalStore.getState().sessions[0]?.status).toBe('disconnected');
   });
+
+  it('syncs foregroundHandoffActive updates into agentTerminalLeaseState', async () => {
+    const { agentTerminalLeaseState } = await import('@/components/terminal/agent-terminal-lease-state');
+    const store = useTerminalStore.getState();
+    store.addSession({
+      sessionId: 's1',
+      terminalSessionId: 'term-1',
+      terminalGeneration: 1,
+      title: 'A',
+      host: 'local',
+      port: 0,
+      username: 'u',
+    });
+    agentTerminalLeaseState.set({
+      sessionId: 's1',
+      agentSessionId: 'agent-1',
+      taskId: 'task-1',
+      operationId: 'op-1',
+      state: 'acquired',
+      acquiredAtUnixMs: 1,
+      terminalOwned: true,
+      inputBlocked: true,
+      takeoverRequested: false,
+      takeoverFailed: false,
+      requestTakeover: () => {},
+    });
+
+    expect(agentTerminalLeaseState.blocksUserInput('s1')).toBe(true);
+
+    store.setIntegrationState({
+      sessionId: 's1',
+      terminalSessionId: 'term-1',
+      terminalGeneration: 1,
+      state: 'ready',
+      integrationStateRevision: 1,
+      promptReady: true,
+      promptReadyRevision: 1,
+      inputObservation: {
+        snapshotSequence: 1,
+        commandInputPending: false,
+        nativeRecoveryRequired: false,
+        nativeClearPending: false,
+        commandObservationUnavailable: false,
+        foregroundHandoffActive: true,
+      },
+    });
+
+    expect(useTerminalStore.getState().sessions[0]?.foregroundHandoffActive).toBe(true);
+    expect(agentTerminalLeaseState.blocksUserInput('s1')).toBe(false);
+
+    store.setIntegrationState({
+      sessionId: 's1',
+      terminalSessionId: 'term-1',
+      terminalGeneration: 1,
+      state: 'ready',
+      integrationStateRevision: 2,
+      promptReady: true,
+      promptReadyRevision: 1,
+      inputObservation: {
+        snapshotSequence: 2,
+        commandInputPending: false,
+        nativeRecoveryRequired: false,
+        nativeClearPending: false,
+        commandObservationUnavailable: false,
+        foregroundHandoffActive: false,
+      },
+    });
+
+    expect(useTerminalStore.getState().sessions[0]?.foregroundHandoffActive).toBe(false);
+    expect(agentTerminalLeaseState.blocksUserInput('s1')).toBe(true);
+    agentTerminalLeaseState.clearAll();
+  });
 });

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, LockResult, Mutex, MutexGuard, WaitTimeoutResult};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -2141,10 +2141,62 @@ impl Default for BrokerState {
     }
 }
 
+struct BrokerSignal {
+    changed: Condvar,
+    waiters: AtomicUsize,
+}
+
+struct SignalWaiterGuard<'a>(&'a AtomicUsize);
+
+impl Drop for SignalWaiterGuard<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+impl BrokerSignal {
+    fn new() -> Self {
+        Self {
+            changed: Condvar::new(),
+            waiters: AtomicUsize::new(0),
+        }
+    }
+
+    fn notify_all(&self) {
+        if self.waiters.load(Ordering::Acquire) > 0 {
+            self.changed.notify_all();
+        }
+    }
+
+    fn wait_timeout<'a, T>(
+        &self,
+        guard: MutexGuard<'a, T>,
+        dur: Duration,
+    ) -> LockResult<(MutexGuard<'a, T>, WaitTimeoutResult)> {
+        self.waiters.fetch_add(1, Ordering::AcqRel);
+        let _waiter = SignalWaiterGuard(&self.waiters);
+        self.changed.wait_timeout(guard, dur)
+    }
+
+    fn wait_timeout_while<'a, T, F>(
+        &self,
+        guard: MutexGuard<'a, T>,
+        dur: Duration,
+        condition: F,
+    ) -> LockResult<(MutexGuard<'a, T>, WaitTimeoutResult)>
+    where
+        F: FnMut(&mut T) -> bool,
+    {
+        self.waiters.fetch_add(1, Ordering::AcqRel);
+        let _waiter = SignalWaiterGuard(&self.waiters);
+        self.changed.wait_timeout_while(guard, dur, condition)
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct TerminalSessionBroker {
     state: Arc<Mutex<BrokerState>>,
-    changed: Arc<Condvar>,
+    changed: Arc<BrokerSignal>,
     counters: Arc<TerminalRolloutCounters>,
     submission_journal: SubmissionJournal,
     config: TerminalBrokerConfig,
@@ -2154,7 +2206,7 @@ impl Default for TerminalSessionBroker {
     fn default() -> Self {
         Self {
             state: Arc::new(Mutex::new(BrokerState::default())),
-            changed: Arc::new(Condvar::new()),
+            changed: Arc::new(BrokerSignal::new()),
             counters: Arc::new(TerminalRolloutCounters::default()),
             submission_journal: SubmissionJournal::default(),
             config: TerminalBrokerConfig::default(),
@@ -5491,7 +5543,7 @@ impl TerminalSessionBroker {
     ) -> Self {
         let broker = Self {
             state: Arc::new(Mutex::new(BrokerState::default())),
-            changed: Arc::new(Condvar::new()),
+            changed: Arc::new(BrokerSignal::new()),
             counters: Arc::new(TerminalRolloutCounters::default()),
             submission_journal: SubmissionJournal::temporary(),
             config: TerminalBrokerConfig {
@@ -5524,7 +5576,7 @@ impl TerminalSessionBroker {
     pub(crate) fn phase3_enabled_for_test(capture: usize) -> Self {
         let broker = Self {
             state: Arc::new(Mutex::new(BrokerState::default())),
-            changed: Arc::new(Condvar::new()),
+            changed: Arc::new(BrokerSignal::new()),
             counters: Arc::new(TerminalRolloutCounters::default()),
             submission_journal: SubmissionJournal::temporary(),
             config: TerminalBrokerConfig {
@@ -5564,7 +5616,7 @@ impl TerminalSessionBroker {
     pub(crate) fn phase4_enabled_for_test(capture: usize) -> Self {
         let broker = Self {
             state: Arc::new(Mutex::new(BrokerState::default())),
-            changed: Arc::new(Condvar::new()),
+            changed: Arc::new(BrokerSignal::new()),
             counters: Arc::new(TerminalRolloutCounters::default()),
             submission_journal: SubmissionJournal::temporary(),
             config: TerminalBrokerConfig {
@@ -5595,7 +5647,7 @@ impl TerminalSessionBroker {
     pub(crate) fn phase5_enabled_for_test(capture: usize) -> Self {
         let broker = Self {
             state: Arc::new(Mutex::new(BrokerState::default())),
-            changed: Arc::new(Condvar::new()),
+            changed: Arc::new(BrokerSignal::new()),
             counters: Arc::new(TerminalRolloutCounters::default()),
             submission_journal: SubmissionJournal::temporary(),
             config: TerminalBrokerConfig {
@@ -5635,7 +5687,7 @@ impl TerminalSessionBroker {
     fn enabled_with_closed_capacity_for_test(closed_session_capacity: usize) -> Self {
         let broker = Self {
             state: Arc::new(Mutex::new(BrokerState::default())),
-            changed: Arc::new(Condvar::new()),
+            changed: Arc::new(BrokerSignal::new()),
             counters: Arc::new(TerminalRolloutCounters::default()),
             submission_journal: SubmissionJournal::temporary(),
             config: TerminalBrokerConfig {
@@ -6048,6 +6100,7 @@ fn accept_raw_frame(
     // frame bytes. Derived subscribers own separate state and cannot replace
     // the bytes already assigned to display.
     record.subscribers.display.observe(&frame)?;
+    #[cfg(debug_assertions)]
     let display_bytes = frame.bytes.clone();
 
     record.subscribers.capture.observe(&frame)?;

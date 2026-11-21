@@ -7,19 +7,37 @@ export const TERMINAL_CONTAINER_CLASS = 'h-full w-full [&_.xterm-viewport]:opaci
 export function installTerminalScrollbarVisibility(terminal: Terminal) {
   // xterm's pixel-based scrollbar dimensions can lag behind a resize or clear.
   // The active buffer is authoritative about whether there is history to scroll.
-  const update = () => {
-    terminal.element?.toggleAttribute('data-no-scrollback', terminal.buffer.active.baseY === 0);
+  let frame: number | undefined;
+  let lastNoScrollback: boolean | undefined;
+  const apply = () => {
+    frame = undefined;
+    const noScrollback = terminal.buffer.active.baseY === 0;
+    if (noScrollback === lastNoScrollback) return;
+    lastNoScrollback = noScrollback;
+    terminal.element?.toggleAttribute('data-no-scrollback', noScrollback);
+  };
+  const schedule = () => {
+    if (frame !== undefined) return;
+    if (typeof requestAnimationFrame === 'function') {
+      frame = requestAnimationFrame(apply);
+    } else {
+      apply();
+    }
   };
   const listeners = [
-    terminal.onRender(update),
-    terminal.onResize(update),
-    terminal.onScroll(update),
-    terminal.onWriteParsed(update),
-    terminal.buffer.onBufferChange(update),
+    terminal.onRender(schedule),
+    terminal.onResize(schedule),
+    terminal.onScroll(schedule),
+    terminal.onWriteParsed(schedule),
+    terminal.buffer.onBufferChange(schedule),
   ];
-  update();
+  apply();
   return {
     dispose() {
+      if (frame !== undefined && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(frame);
+        frame = undefined;
+      }
       listeners.forEach((listener) => listener.dispose());
       terminal.element?.removeAttribute('data-no-scrollback');
     },

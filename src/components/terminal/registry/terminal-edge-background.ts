@@ -74,44 +74,84 @@ export function installTerminalEdgeBackground(terminal: Terminal): IDisposable {
     return edge;
   });
   let frame: number | undefined;
+  let lastVisible: boolean | undefined;
+  let layoutDirty = true;
+  let cachedLayout: {
+    outerWidth: number;
+    outerHeight: number;
+    left: number;
+    top: number;
+    innerWidth: number;
+    innerHeight: number;
+  } | null = null;
+  const lastPainted = ['', '', '', ''];
+  const invalidateLayout = () => {
+    layoutDirty = true;
+    schedule();
+  };
   const update = () => {
     frame = undefined;
     const active = terminal.buffer.active;
     const visible = active.type === 'alternate' && element.isConnected && element.clientWidth > 0;
-    for (const edge of edges) edge.style.display = visible ? 'block' : 'none';
+    if (visible !== lastVisible) {
+      lastVisible = visible;
+      for (const edge of edges) edge.style.display = visible ? 'block' : 'none';
+      if (visible) layoutDirty = true;
+    }
     if (!visible) return;
 
-    const outer = element.getBoundingClientRect();
-    const inner = screen.getBoundingClientRect();
-    if (!inner.width || !inner.height) return;
-    const left = inner.left - outer.left;
-    const top = inner.top - outer.top;
-    const right = left + inner.width;
-    const bottom = top + inner.height;
+    if (layoutDirty || !cachedLayout) {
+      const outer = element.getBoundingClientRect();
+      const inner = screen.getBoundingClientRect();
+      if (!inner.width || !inner.height) return;
+      cachedLayout = {
+        outerWidth: outer.width,
+        outerHeight: outer.height,
+        left: inner.left - outer.left,
+        top: inner.top - outer.top,
+        innerWidth: inner.width,
+        innerHeight: inner.height,
+      };
+      layoutDirty = false;
+    }
+
+    const { outerWidth, outerHeight, left, top, innerWidth, innerHeight } = cachedLayout;
+    const right = left + innerWidth;
+    const bottom = top + innerHeight;
     const { cols, rows } = terminal;
     const colors = theme.colors;
     const cellColor = (x: number, y: number) => background(active.getLine(active.viewportY + y)?.getCell(x), colors);
     const horizontal = [0, rows - 1].map((y) => Array.from({ length: cols }, (_, x) => cellColor(x, y)));
     const vertical = [0, cols - 1].map((x) => Array.from({ length: rows }, (_, y) => cellColor(x, y)));
-    const paint = (edge: HTMLElement, x: number, y: number, width: number, height: number, fill: string) => {
-      Object.assign(edge.style, {
-        left: `${x}px`, top: `${y}px`, width: `${Math.max(0, width)}px`,
-        height: `${Math.max(0, height)}px`, background: fill,
+    const paint = (index: number, x: number, y: number, width: number, height: number, fill: string) => {
+      const w = Math.max(0, width);
+      const h = Math.max(0, height);
+      const key = `${x}|${y}|${w}|${h}|${fill}`;
+      if (lastPainted[index] === key) return;
+      lastPainted[index] = key;
+      Object.assign(edges[index].style, {
+        left: `${x}px`, top: `${y}px`, width: `${w}px`,
+        height: `${h}px`, background: fill,
       });
     };
     // Side strips cover corners as well, extending their first/last color.
-    paint(edges[0], left, 0, inner.width, top, gradient(horizontal[0], inner.width, 'right'));
-    paint(edges[1], left, bottom, inner.width, outer.height - bottom, gradient(horizontal[1], inner.width, 'right'));
+    paint(0, left, 0, innerWidth, top, gradient(horizontal[0], innerWidth, 'right'));
+    paint(1, left, bottom, innerWidth, outerHeight - bottom, gradient(horizontal[1], innerWidth, 'right'));
     for (let side = 0; side < 2; side++) {
-      paint(edges[side + 2], side ? right : 0, 0, side ? outer.width - right : left, outer.height,
-        gradient(vertical[side], inner.height, 'bottom', top));
+      paint(side + 2, side ? right : 0, 0, side ? outerWidth - right : left, outerHeight,
+        gradient(vertical[side], innerHeight, 'bottom', top));
     }
   };
   const schedule = () => {
     if (frame === undefined) frame = requestAnimationFrame(update);
   };
-  const subscriptions = [terminal.onRender(schedule), terminal.buffer.onBufferChange(schedule), theme.onChangeColors(schedule)];
-  const observer = new ResizeObserver(schedule);
+  const subscriptions = [
+    terminal.onRender(schedule),
+    terminal.onResize(invalidateLayout),
+    terminal.buffer.onBufferChange(schedule),
+    theme.onChangeColors(schedule),
+  ];
+  const observer = new ResizeObserver(invalidateLayout);
   observer.observe(element);
   schedule();
   return {
