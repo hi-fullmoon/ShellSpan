@@ -186,7 +186,8 @@ impl QuestionArguments {
 pub(crate) fn action_schema() -> Value {
     json!({"type":"object","additionalProperties":false,
         "required":["instructions","verification_command"],"properties":{
-        "instructions":{"type":"string","minLength":1,"maxLength":8192},
+        "instructions":{"type":"string","minLength":1,"maxLength":8192,
+            "description":"Clear Markdown instructions for the user. Put any shell command the user should run in its own fenced code block (for example ```sh) so it can be copied directly."},
         "verification_command":{"type":"string","minLength":1,"maxLength":8192,
             "description":"One bounded foreground command that verifies the prerequisite without requesting credentials or changing configuration. Zero exit code is required before dependent work."}
     }})

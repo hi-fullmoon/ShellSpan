@@ -1,5 +1,6 @@
 import type { IBuffer, IBufferCellPosition, ILink } from '@xterm/xterm';
 import type { TerminalSession } from '@/stores/terminalStore';
+import { getPlatform, type Platform } from '@/lib/platform';
 import { isAbsoluteTerminalPath, openTerminalSftpPath } from '@/lib/terminal/terminal-current-directory';
 import { invokeRevealPath } from '@/lib/ipc/tauri';
 import { parsePosixPath, parentPosixPath } from '@/lib/path-utils';
@@ -13,6 +14,13 @@ interface DetectedLink {
   text: string;
   start: number;
   end: number;
+}
+
+export function shouldActivateTerminalLink(
+  event: Pick<MouseEvent, 'metaKey' | 'ctrlKey'>,
+  platform: Platform = getPlatform(),
+): boolean {
+  return platform === 'macos' ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 }
 
 export function terminalHttpUrl(text: string): string | null {

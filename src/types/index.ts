@@ -18,7 +18,7 @@ export type TerminalColorScheme = (typeof TERMINAL_COLOR_SCHEME_IDS)[number];
 export type TerminalBellStyle = 'none' | 'sound';
 export type TerminalOsc52Policy = 'writeOnly' | 'disabled';
 export type SftpConflictPolicy = 'ask' | 'overwrite' | 'skip';
-export type WorkbenchTab = 'connections' | 'knownHosts' | 'keychain' | 'monitor' | 'logs' | 'snippets';
+export type WorkbenchTab = 'connections' | 'knownHosts' | 'keychain' | 'monitor' | 'logs';
 export type SettingsSection = 'appearance' | 'general' | 'terminal' | 'sftp' | 'ai' | 'shortcuts' | 'experimental' | 'feedback';
 export type PetdexConnectionStatus =
   | 'disabled'
@@ -56,20 +56,30 @@ export type ShortcutAction =
   | 'openTerminal'
   | 'openSftp'
   | 'openSettings'
+  | 'openShortcuts'
   | 'openCommandPalette'
   | 'toggleAiPanel'
+  | 'toggleFocusMode'
   | 'newTerminalTab'
   | 'closeTerminalTab'
   | 'switchTerminalTab'
   | 'nextTerminalTab'
   | 'previousTerminalTab'
   | 'findTerminal'
+  | 'terminalClearScreen'
+  | 'terminalSendToAi'
   | 'newSftpConnection'
   | 'findSftp'
   | 'closeSftpTab'
   | 'switchSftpTab'
   | 'nextSftpTab'
   | 'previousSftpTab'
+  | 'sftpRefresh'
+  | 'sftpNewFolder'
+  | 'sftpToggleHiddenFiles'
+  | 'sftpFocusPath'
+  | 'sftpParentDirectory'
+  | 'sftpOpenTerminalHere'
   | 'terminalLeader'
   | 'terminalFocusLeft'
   | 'terminalFocusDown'
@@ -82,6 +92,8 @@ export type ShortcutAction =
   | 'terminalSwapPane'
   | 'terminalPreviousCommand'
   | 'terminalNextCommand'
+  | 'terminalToggleBroadcast'
+  | 'terminalScrollToBottom'
   | 'terminalClosePane';
 export type ShortcutBindings = Record<ShortcutAction, string>;
 export type AuthMethod = 'password' | 'key' | 'agent' | 'keyboardInteractive';
