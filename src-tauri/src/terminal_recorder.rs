@@ -3,8 +3,8 @@ use std::fmt::Write as _;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -90,7 +90,8 @@ impl Recording {
 
 #[derive(Clone, Default)]
 pub(crate) struct TerminalRecorder {
-    sessions: Arc<Mutex<HashMap<String, Recording>>>,
+    sessions: Arc<RwLock<HashMap<String, Recording>>>,
+    active_count: Arc<AtomicUsize>,
 }
 
 impl TerminalRecorder {
@@ -112,18 +113,20 @@ impl TerminalRecorder {
         }
         .map_err(|error| error.to_string())?;
         let portable_path = crate::portable_local_path(&path);
-        let mut sessions = self
-            .sessions
-            .lock()
-            .map_err(|_| "terminal recorder unavailable")?;
-        if sessions.contains_key(&id) {
-            return Err("a recording already exists for this session".into());
-        }
-        if sessions
-            .values()
-            .any(|recording| recording.path == portable_path)
         {
-            return Err("the selected file is already recording a terminal".into());
+            let sessions = self
+                .sessions
+                .read()
+                .map_err(|_| "terminal recorder unavailable")?;
+            if sessions.contains_key(&id) {
+                return Err("a recording already exists for this session".into());
+            }
+            if sessions
+                .values()
+                .any(|recording| recording.path == portable_path)
+            {
+                return Err("the selected file is already recording a terminal".into());
+            }
         }
         let mut file = BufWriter::new(open_output_file(&path).map_err(|error| error.to_string())?);
         if matches!(format, RecordingFormat::AsciinemaV2) {
@@ -158,7 +161,7 @@ impl TerminalRecorder {
             })
             .map_err(|error| error.to_string())?;
         let recording = Recording {
-            path: portable_path,
+            path: portable_path.clone(),
             tx,
             started: Instant::now(),
             dropped,
@@ -166,28 +169,60 @@ impl TerminalRecorder {
             worker,
         };
         let status = recording.status();
+        let mut sessions = self
+            .sessions
+            .write()
+            .map_err(|_| "terminal recorder unavailable")?;
+        if sessions.contains_key(&id) {
+            drop(sessions);
+            let _ = recording.stop();
+            return Err("a recording already exists for this session".into());
+        }
+        if sessions
+            .values()
+            .any(|existing| existing.path == portable_path)
+        {
+            drop(sessions);
+            let _ = recording.stop();
+            return Err("the selected file is already recording a terminal".into());
+        }
         sessions.insert(id, recording);
+        self.active_count.fetch_add(1, Ordering::Release);
         Ok(status)
     }
 
     pub(crate) fn output(&self, id: &str, bytes: &[u8]) {
-        if let Ok(sessions) = self.sessions.try_lock() {
+        if self.active_count.load(Ordering::Acquire) == 0 {
+            return;
+        }
+        if let Ok(sessions) = self.sessions.read() {
             if let Some(recording) = sessions.get(id) {
-                recording.offer(Frame::Output(bytes.to_vec()));
+                if !recording.failed.load(Ordering::Relaxed) {
+                    recording.offer(Frame::Output(bytes.to_vec()));
+                }
             }
         }
     }
 
     pub(crate) fn resize(&self, id: &str, cols: u32, rows: u32) {
-        if let Ok(sessions) = self.sessions.try_lock() {
+        if self.active_count.load(Ordering::Acquire) == 0 {
+            return;
+        }
+        if let Ok(sessions) = self.sessions.read() {
             if let Some(recording) = sessions.get(id) {
-                recording.offer(Frame::Resize(cols, rows));
+                if !recording.failed.load(Ordering::Relaxed) {
+                    recording.offer(Frame::Resize(cols, rows));
+                }
             }
         }
     }
 
     fn take(&self, id: &str) -> Option<Recording> {
-        self.sessions.lock().ok()?.remove(id)
+        let removed = self.sessions.write().ok()?.remove(id);
+        if removed.is_some() {
+            self.active_count.fetch_sub(1, Ordering::Release);
+        }
+        removed
     }
 
     pub(crate) fn close(&self, id: &str) {
@@ -219,7 +254,11 @@ struct SanitizedOutput {
 
 impl SanitizedOutput {
     fn finish_line(&mut self, newline: bool) {
-        let private_key = terminal_private_key_boundary(&self.text.replace(' ', ""));
+        let private_key = if self.text.contains("-----") {
+            terminal_private_key_boundary(&self.text.replace(' ', ""))
+        } else {
+            None
+        };
         let was_private_key = self.inside_private_key;
         self.inside_private_key = match private_key {
             Some(PrivateKeyBoundary::Begin) => true,
@@ -350,7 +389,7 @@ fn record(
     let mut parser = Parser::new();
     let mut last_time = 0.0;
     let mut last_loss = 0;
-    for (time, loss, frame) in rx {
+    while let Ok((time, loss, frame)) = rx.recv() {
         last_time = time;
         if loss != last_loss {
             clean.mark_gap();
@@ -360,7 +399,8 @@ fn record(
         match frame {
             Frame::Output(bytes) => {
                 parser.advance(&mut clean, &bytes);
-                write_output(&mut file, ansi, time, &std::mem::take(&mut clean.ready))?;
+                write_output(&mut file, ansi, time, &clean.ready)?;
+                clean.ready.clear();
             }
             Frame::Resize(cols, rows) if ansi => {
                 writeln!(
@@ -371,7 +411,9 @@ fn record(
             }
             Frame::Resize(..) => {}
         }
-        file.flush()?;
+        if rx.is_empty() {
+            file.flush()?;
+        }
     }
     if dropped.load(Ordering::Relaxed) != last_loss {
         clean.mark_gap();
@@ -491,7 +533,7 @@ pub(crate) fn get_terminal_recording_status(
 ) -> Option<RecordingStatus> {
     recorder
         .sessions
-        .lock()
+        .read()
         .ok()?
         .get(&session_id)
         .map(Recording::status)

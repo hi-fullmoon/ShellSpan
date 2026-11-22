@@ -787,21 +787,27 @@ impl PreparedLocalShellIntegration {
                     }
                 }
                 #[cfg(any(windows, test))]
-                ControlEndpoint::Windows { pipe_path } => match open_windows_pipe(&pipe_path) {
-                    Ok(mut reader) => {
-                        let result = read_control_events(&mut reader, &mut on_event);
-                        let failed = result.is_err();
-                        on_closed(if reader_stopped.load(Ordering::Acquire) {
+                ControlEndpoint::Windows { pipe_path } => {
+                    match open_windows_pipe(&pipe_path, &reader_stopped) {
+                        Ok(mut reader) => {
+                            let result = read_control_events(&mut reader, &mut on_event);
+                            let failed = result.is_err();
+                            on_closed(if reader_stopped.load(Ordering::Acquire) {
+                                None
+                            } else {
+                                result.err()
+                            });
+                            if failed {
+                                drain_failed_control_channel(&mut reader, &reader_stopped);
+                            }
+                        }
+                        Err(error) => on_closed(if reader_stopped.load(Ordering::Acquire) {
                             None
                         } else {
-                            result.err()
-                        });
-                        if failed {
-                            drain_failed_control_channel(&mut reader, &reader_stopped);
-                        }
+                            Some(error)
+                        }),
                     }
-                    Err(error) => on_closed(Some(error)),
-                },
+                }
             }
         });
         TerminalIntegrationControlHandle {
@@ -1099,10 +1105,6 @@ __shellspan_prompt_cycle() {{
     unset -f "$__shellspan_job_armed_handle"
     __shellspan_job_armed_handle=
   fi
-  if [[ -n "$__shellspan_previous_prompt_command" ]]; then
-    builtin eval -- "$__shellspan_previous_prompt_command"
-  fi
-  __shellspan_guard_prompt_tty
   if [[ $__shellspan_command_active -eq 1 && -n "$__shellspan_previous_int_trap" ]]; then
     __shellspan_emit U
   fi
@@ -1110,6 +1112,10 @@ __shellspan_prompt_cycle() {{
     __shellspan_emit E "$__shellspan_status" "$PWD"
     __shellspan_command_active=0
   fi
+  if [[ -n "$__shellspan_previous_prompt_command" ]]; then
+    builtin eval -- "$__shellspan_previous_prompt_command"
+  fi
+  __shellspan_guard_prompt_tty
   __shellspan_emit P "$PWD"
   # Bash 4.x executes bind-x's command string in place. Rebinding the active
   # receiver from its syntax-rejection callback frees that executing string.
@@ -2179,9 +2185,12 @@ fn powershell_bootstrap(pipe_name: &str, shell: TerminalShellKind) -> String {
 }
 
 #[cfg(any(windows, test))]
-fn open_windows_pipe(pipe_path: &str) -> Result<File, String> {
+fn open_windows_pipe(pipe_path: &str, stopped: &AtomicBool) -> Result<File, String> {
     let deadline = Instant::now() + WINDOWS_PIPE_CONNECT_TIMEOUT;
     loop {
+        if stopped.load(Ordering::Acquire) {
+            return Err("PowerShell integration pipe reader stopped".into());
+        }
         match File::open(pipe_path) {
             Ok(file) => return Ok(file),
             Err(error) if Instant::now() < deadline => {
@@ -2207,6 +2216,8 @@ fn read_control_events(
     reader: &mut impl Read,
     on_event: &mut impl FnMut(TerminalIntegrationControlEvent) -> Result<(), String>,
 ) -> Result<(), String> {
+    let mut reader = io::BufReader::new(reader);
+    let reader = &mut reader;
     loop {
         let Some(kind) = read_field(reader)? else {
             return Ok(());
@@ -2306,28 +2317,33 @@ fn read_control_events(
     }
 }
 
-fn required_field(reader: &mut impl Read, label: &str) -> Result<String, String> {
+fn required_field(reader: &mut impl io::BufRead, label: &str) -> Result<String, String> {
     read_field(reader)?
         .ok_or_else(|| format!("TERMINAL_INTEGRATION_TRUNCATED_EVENT: missing {label}"))
 }
 
-fn read_field(reader: &mut impl Read) -> Result<Option<String>, String> {
+fn read_field(reader: &mut impl io::BufRead) -> Result<Option<String>, String> {
     let mut bytes = Vec::new();
-    let mut byte = [0_u8; 1];
+    let max_read = (MAX_CONTROL_FIELD_BYTES + 1) as u64;
     loop {
-        match reader.read(&mut byte) {
+        let remaining = max_read.saturating_sub(bytes.len() as u64);
+        if remaining == 0 {
+            return Err("TERMINAL_INTEGRATION_FIELD_TOO_LARGE".into());
+        }
+        let mut limited = reader.take(remaining);
+        match io::BufRead::read_until(&mut limited, 0, &mut bytes) {
             Ok(0) if bytes.is_empty() => return Ok(None),
             Ok(0) => return Err("TERMINAL_INTEGRATION_TRUNCATED_FIELD".into()),
-            Ok(_) if byte[0] == 0 => {
-                return String::from_utf8(bytes)
-                    .map(Some)
-                    .map_err(|_| "TERMINAL_INTEGRATION_NON_UTF8_FIELD".into())
-            }
             Ok(_) => {
-                if bytes.len() >= MAX_CONTROL_FIELD_BYTES {
+                if bytes.last() == Some(&0) {
+                    bytes.pop();
+                    return String::from_utf8(bytes)
+                        .map(Some)
+                        .map_err(|_| "TERMINAL_INTEGRATION_NON_UTF8_FIELD".into());
+                }
+                if bytes.len() > MAX_CONTROL_FIELD_BYTES {
                     return Err("TERMINAL_INTEGRATION_FIELD_TOO_LARGE".into());
                 }
-                bytes.push(byte[0]);
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) => return Err(format!("terminal integration control read failed: {error}")),

@@ -50,7 +50,7 @@ const EXEC_EFFECTS: &[AgentEffectKindNative] = &[
     AgentEffectKindNative::ExternalSideEffect,
 ];
 
-pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 24] = [
+pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 25] = [
     AgentToolDescriptorNative {
         name: "inspect_host",
         target_kinds: LOCAL_REMOTE,
@@ -131,6 +131,12 @@ pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 24] = [
     },
     AgentToolDescriptorNative {
         name: vim::SAVE,
+        target_kinds: REMOTE,
+        effect_mode: AgentToolEffectModeNative::Fixed,
+        allowed_effects: STATE_CHANGE,
+    },
+    AgentToolDescriptorNative {
+        name: vim::CLOSE,
         target_kinds: REMOTE,
         effect_mode: AgentToolEffectModeNative::Fixed,
         allowed_effects: STATE_CHANGE,
@@ -616,10 +622,10 @@ pub fn validate_tool_arguments_native(
                 return Err("Invalid Vim buffer insertion arguments".into());
             }
         }
-        vim::SAVE => {
+        vim::SAVE | vim::CLOSE => {
             let target = decode_arguments::<EditorTarget>(arguments)?;
             if !vim::valid_id(&target.snapshot_id) || !vim::valid_path(&target.path) {
-                return Err("Invalid Vim buffer save arguments".into());
+                return Err("Invalid Vim editor target arguments".into());
             }
         }
         "write_terminal_input" => {

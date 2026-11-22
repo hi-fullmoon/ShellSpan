@@ -5,8 +5,8 @@ use crate::agent_runtime::native::TerminalInputSource;
 use crate::models::SessionManager;
 use crate::terminal_broker::{
     TerminalBrokerAttachment, TerminalBrokerSnapshot, TerminalGenerationCloseReason,
-    TerminalGeometry, TerminalIntegrationState, TerminalRawOutputFrame, TerminalSessionBroker,
-    TerminalTransportKind, TerminalVisibleCommandRoute,
+    TerminalGeometry, TerminalIntegrationState, TerminalSessionBroker, TerminalTransportKind,
+    TerminalVisibleCommandRoute,
 };
 use crate::terminal_integration::{TerminalIntegrationControlEvent, TerminalShellKind};
 
@@ -171,11 +171,17 @@ impl NativeToolEngine {
             .attachment_for_transport(transport_session_id)
     }
 
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
     pub(crate) fn observe_terminal_raw_output(
         &self,
         transport_session_id: &str,
         bytes: &[u8],
-    ) -> Result<Option<TerminalRawOutputFrame>, String> {
+    ) -> Result<Option<crate::terminal_broker::TerminalRawOutputFrame>, String> {
         self.terminal_broker
             .observe_raw_output(transport_session_id, bytes)
     }

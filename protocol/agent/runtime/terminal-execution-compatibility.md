@@ -246,14 +246,18 @@ its own activation. Bash or Zsh continues to use its existing visible command
 lifecycle independently of the editor.
 
 The root bound-terminal Agent can inspect the active named UTF-8 regular-file
-buffer, insert literal text at the cursor or either end, and separately save the
-entire buffer when authorized. Inspection returns metadata and a snapshot
+buffer, insert literal text at the cursor or either end, separately save the
+entire buffer when authorized, and cleanly exit the editor (`close_vim_editor`)
+when the user requests it and all buffers are unmodified without open embedded
+terminal buffers. Inspection returns metadata and a snapshot
 identifier. The adapter checks the foreground SSH PTY, editor instance, window,
 buffer, file, edit version, and applicable cursor position again at commit.
 A window or buffer switch, user edit, or format change can invalidate the
 snapshot. Suspending the editor invalidates its pending changes, and resuming
 republishes the foreground attachment. The user keeps the keyboard while an
-approval is pending.
+approval is pending. Clean exit never force-quits or discards unsaved changes,
+waits for the editor bridge to detach after `VimLeavePre`, and confirms shell
+prompt readiness before returning when available.
 
 Requests and replies use a private channel on the same authenticated SSH
 connection. The relay transports bounded JSON lines through user-private FIFOs.

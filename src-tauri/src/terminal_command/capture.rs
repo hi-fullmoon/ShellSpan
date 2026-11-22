@@ -6,12 +6,12 @@ use std::collections::VecDeque;
 
 #[derive(Default)]
 struct ObservedOsc {
-    payload: Option<Vec<u8>>,
+    osc_1337_seen: bool,
 }
 impl vte_capture::Perform for ObservedOsc {
     fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
         if bell_terminated && params.len() == 2 && params[0] == b"1337" {
-            self.payload = Some(params[1].to_vec());
+            self.osc_1337_seen = true;
         }
     }
 }
@@ -68,7 +68,11 @@ impl CaptureFence {
     /// ordinary OSC/control text. Retaining one marker length makes the result
     /// independent of PTY reads, private receipt order and UTF-8 fragmentation.
     pub fn push(&mut self, bytes: &[u8]) -> Vec<u8> {
-        let mut output = Vec::new();
+        let mut output = if self.started {
+            Vec::with_capacity(bytes.len())
+        } else {
+            Vec::new()
+        };
         let mut observed = ObservedOsc::default();
         for byte in bytes {
             if self.finished() {
@@ -76,7 +80,7 @@ impl CaptureFence {
             }
             self.tail.push_back(*byte);
             self.parser.advance(&mut observed, &[*byte]);
-            if observed.payload.take().is_some() {
+            if std::mem::take(&mut observed.osc_1337_seen) {
                 let expected = if self.started { &self.end } else { &self.start };
                 if self.tail.len() >= expected.len()
                     && self

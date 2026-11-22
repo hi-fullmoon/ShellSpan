@@ -468,8 +468,8 @@ impl TerminalCommandOperation {
     }
 
     pub(crate) fn mark_uncertain(&self) -> Result<bool, String> {
-        let changed =
-            settle_command_uncertain(self, self.snapshot()?.capture_end_sequence.unwrap_or(0));
+        let through_sequence = self.lock()?.capture_end_sequence.unwrap_or(0);
+        let changed = settle_command_uncertain(self, through_sequence);
         Ok(changed)
     }
 

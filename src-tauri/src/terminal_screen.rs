@@ -152,7 +152,28 @@ impl PrivateKeyScreenFilter {
             return Cow::Borrowed(bytes);
         }
         let mut owned: Option<Vec<u8>> = None;
-        for (index, &byte) in bytes.iter().enumerate() {
+        let mut index = 0;
+        while index < bytes.len() {
+            if !self.state.inside_private_key && self.state.boundary.is_empty() {
+                let tail = &bytes[index..];
+                let next_dash = tail.iter().position(|&b| b == b'-');
+                let bulk_len = match next_dash {
+                    Some(0) => 0,
+                    Some(pos) => pos,
+                    None => tail.len(),
+                };
+                if bulk_len > 0 {
+                    let slice = &bytes[index..index + bulk_len];
+                    self.state.mask_ascii = false;
+                    self.parser.advance(&mut self.state, slice);
+                    if let Some(buf) = owned.as_mut() {
+                        buf.extend_from_slice(slice);
+                    }
+                    index += bulk_len;
+                    continue;
+                }
+            }
+            let byte = bytes[index];
             self.state.mask_ascii = false;
             self.parser
                 .advance(&mut self.state, std::slice::from_ref(&byte));
@@ -166,6 +187,7 @@ impl PrivateKeyScreenFilter {
             } else if let Some(buf) = owned.as_mut() {
                 buf.push(byte);
             }
+            index += 1;
         }
         match owned {
             Some(buf) => Cow::Owned(buf),
@@ -351,6 +373,10 @@ impl TerminalScreenModel {
 
     pub(crate) fn version(&self) -> u64 {
         self.version
+    }
+
+    pub(crate) fn through_output_sequence(&self) -> u64 {
+        self.through_output_sequence
     }
 
     pub(crate) fn snapshot(

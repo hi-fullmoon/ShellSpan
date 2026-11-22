@@ -1044,7 +1044,25 @@ impl TerminalExecuteRegistry {
         operation: &Arc<TerminalCommandOperation>,
         timeout: Duration,
     ) -> Result<TerminalCommandSnapshot, String> {
-        self.wait_bounded(sessions, session_id, operation, timeout, false)
+        self.wait_bounded(sessions, session_id, operation, timeout, false, None)
+    }
+
+    pub(crate) fn wait_with_progress(
+        &self,
+        sessions: &SessionManager,
+        session_id: &str,
+        operation: &Arc<TerminalCommandOperation>,
+        timeout: Duration,
+        on_progress: &mut dyn FnMut(&TerminalCommandSnapshot),
+    ) -> Result<TerminalCommandSnapshot, String> {
+        self.wait_bounded(
+            sessions,
+            session_id,
+            operation,
+            timeout,
+            false,
+            Some(on_progress),
+        )
     }
 
     pub(crate) fn wait_management(
@@ -1054,18 +1072,20 @@ impl TerminalExecuteRegistry {
         operation: &Arc<TerminalCommandOperation>,
         timeout: Duration,
     ) -> Result<TerminalCommandSnapshot, String> {
-        self.wait_bounded(sessions, session_id, operation, timeout, true)
+        self.wait_bounded(sessions, session_id, operation, timeout, true, None)
     }
 
-    pub(crate) fn wait_foreground_handoff(
+    pub(crate) fn wait_foreground_handoff_with_progress(
         &self,
         sessions: &SessionManager,
         session: &str,
         operation: &Arc<TerminalCommandOperation>,
         timeout: Duration,
         cancelled: impl Fn() -> bool,
+        mut on_progress: Option<&mut dyn FnMut(&TerminalCommandSnapshot)>,
     ) -> Result<(TerminalCommandSnapshot, bool), String> {
         let deadline = Instant::now() + timeout;
+        let mut last_revision = 0u64;
         loop {
             let snapshot = operation.snapshot()?;
             if snapshot.phase.is_terminal()
@@ -1074,6 +1094,12 @@ impl TerminalExecuteRegistry {
                 || Instant::now() >= deadline
             {
                 break;
+            }
+            if snapshot.revision != last_revision {
+                last_revision = snapshot.revision;
+                if let Some(callback) = on_progress.as_deref_mut() {
+                    callback(&snapshot);
+                }
             }
             if snapshot.state == TerminalCommandState::Running {
                 // Serialize giving away input with the old owner's scoped stop.
@@ -1104,7 +1130,7 @@ impl TerminalExecuteRegistry {
         } else {
             Duration::ZERO
         };
-        self.wait(sessions, session, operation, wait)
+        self.wait_bounded(sessions, session, operation, wait, false, on_progress)
             .map(|snapshot| (snapshot, false))
     }
 
@@ -1115,9 +1141,11 @@ impl TerminalExecuteRegistry {
         operation: &Arc<TerminalCommandOperation>,
         timeout: Duration,
         hard_deadline: bool,
+        mut on_progress: Option<&mut dyn FnMut(&TerminalCommandSnapshot)>,
     ) -> Result<TerminalCommandSnapshot, String> {
         let deadline = Instant::now() + timeout;
         let mut interrupt_deadline = None;
+        let mut last_revision = 0u64;
         loop {
             let slice = if hard_deadline {
                 WAIT_SLICE.min(deadline.saturating_duration_since(Instant::now()))
@@ -1127,6 +1155,12 @@ impl TerminalExecuteRegistry {
             let snapshot = operation.wait_until_terminal(slice)?;
             if snapshot.phase.is_terminal() && operation.native_capture_complete()? {
                 break;
+            }
+            if !snapshot.phase.is_terminal() && snapshot.revision != last_revision {
+                last_revision = snapshot.revision;
+                if let Some(callback) = on_progress.as_deref_mut() {
+                    callback(&snapshot);
+                }
             }
             if snapshot.phase.is_terminal() {
                 operation.wait_native_capture(slice)?;

@@ -1790,6 +1790,15 @@ impl SessionManager {
         })
     }
 
+    pub(crate) fn vim_bridge_attached(&self, session_id: &str) -> bool {
+        self.registry.lock().is_ok_and(|registry| {
+            registry
+                .vim_bridges
+                .get(session_id)
+                .is_some_and(|bridge| bridge.attached())
+        })
+    }
+
     pub(crate) fn enqueue_vim_command(
         &self,
         session_id: &str,

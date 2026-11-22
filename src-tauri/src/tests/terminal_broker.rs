@@ -2894,3 +2894,100 @@ fn interactive_wait_observes_idle_and_terminal_closure_without_replay() {
     assert!(!closed.open);
     assert!(closed.snapshot.is_none());
 }
+
+#[test]
+fn drain_decoded_output_handles_invalid_bytes_and_trailing_incomplete_utf8() {
+    let mut pending = vec![b'a', 0xff, 0xfe, b'b', 0xe2, 0x82];
+    let mut output = String::new();
+    crate::drain_decoded_output(&mut pending, &mut output);
+    assert_eq!(output, "a\u{FFFD}\u{FFFD}b");
+    assert_eq!(pending, vec![0xe2, 0x82]);
+
+    pending.push(0xac);
+    crate::drain_decoded_output(&mut pending, &mut output);
+    assert_eq!(output, "a\u{FFFD}\u{FFFD}b€");
+    assert!(pending.is_empty());
+}
+
+#[test]
+fn integration_channel_closed_wakes_waiting_prompt_observers_and_close_frees_buffers() {
+    let broker = TerminalSessionBroker::phase5_enabled_for_test(4096);
+    let attachment = broker
+        .attach_transport(
+            "close-wake-transport",
+            None,
+            TerminalTransportKind::LocalPty,
+            TerminalGeometry::new(80, 24),
+        )
+        .unwrap()
+        .unwrap();
+    broker
+        .register_integration_channel("close-wake-transport", "int-wake", TerminalShellKind::Bash)
+        .unwrap();
+    broker
+        .observe_raw_output_discard("close-wake-transport", &vec![b'x'; 4096])
+        .unwrap();
+
+    broker
+        .accept_integration_event(
+            "close-wake-transport",
+            "int-wake",
+            TerminalIntegrationControlEvent::Ready {
+                shell: TerminalShellKind::Bash,
+            },
+        )
+        .unwrap();
+    broker
+        .accept_integration_event(
+            "close-wake-transport",
+            "int-wake",
+            TerminalIntegrationControlEvent::PromptStart { cwd: "/tmp".into() },
+        )
+        .unwrap();
+    broker
+        .accept_integration_event(
+            "close-wake-transport",
+            "int-wake",
+            TerminalIntegrationControlEvent::PromptEnd,
+        )
+        .unwrap();
+    broker
+        .acquire_agent_lease("close-wake-transport", "agent-1", "task-1", "op-wake")
+        .unwrap();
+    let operation = broker
+        .begin_command("close-wake-transport", "op-wake", "echo hi")
+        .unwrap();
+
+    let waiter = {
+        let broker = broker.clone();
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            let result = broker
+                .wait_command_prompt(&operation, Duration::from_secs(3))
+                .unwrap();
+            (result, started.elapsed())
+        })
+    };
+    std::thread::sleep(Duration::from_millis(30));
+    broker
+        .integration_channel_closed("close-wake-transport", "int-wake", "controlChannelClosed")
+        .unwrap();
+    let (ready, elapsed) = waiter.join().unwrap();
+    assert!(!ready);
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "integration_channel_closed should wake waiters immediately, elapsed={elapsed:?}"
+    );
+
+    broker
+        .close_transport(
+            "close-wake-transport",
+            TerminalGenerationCloseReason::UserClosed,
+        )
+        .unwrap();
+    let state = broker.lock().unwrap();
+    let slot = state.sessions.get(&attachment.terminal_session_id).unwrap();
+    let record = slot.lock().unwrap();
+    assert_eq!(record.replay.capacity(), 0);
+    assert_eq!(record.capture.capacity(), 0);
+}

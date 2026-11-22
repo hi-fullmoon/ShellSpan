@@ -162,16 +162,29 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<NativeArti
             include_str!("../../../scripts/native-input/prototype/readline-sources.json"),
         ),
     ];
-    if required_sources
+    static REQUIRED_SOURCE_SHAS: std::sync::OnceLock<Vec<(&'static str, String)>> =
+        std::sync::OnceLock::new();
+    let required_source_shas = REQUIRED_SOURCE_SHAS.get_or_init(|| {
+        required_sources
+            .iter()
+            .map(|(name, source)| (*name, super::protocol::sha(source)))
+            .collect()
+    });
+    if required_source_shas
         .iter()
-        .any(|(name, source)| catalogue.sources.get(*name) != Some(&super::protocol::sha(source)))
+        .any(|(name, digest)| catalogue.sources.get(*name) != Some(digest))
     {
         return Err("TERMINAL_NATIVE_STALE_ARTIFACTS".into());
     }
     if target == super::protocol::LINUX_X86_64_BASH_TARGET {
         let recipe = "scripts/native-input/integration/Dockerfile.amd64";
-        let contents = include_str!("../../../scripts/native-input/integration/Dockerfile.amd64");
-        if catalogue.sources.get(recipe) != Some(&super::protocol::sha(contents)) {
+        static DOCKERFILE_SHA: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+        let digest = DOCKERFILE_SHA.get_or_init(|| {
+            super::protocol::sha(include_str!(
+                "../../../scripts/native-input/integration/Dockerfile.amd64"
+            ))
+        });
+        if catalogue.sources.get(recipe) != Some(digest) {
             return Err("TERMINAL_NATIVE_STALE_ARTIFACTS".into());
         }
     }
@@ -182,9 +195,13 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<NativeArti
             .any(|artifact| artifact.id == SHELLSPAN_BASH_PROFILE)
     {
         let pin = "scripts/dependency-builds/bash-native/bash-5.3-patches.json";
-        let contents =
-            include_str!("../../../scripts/dependency-builds/bash-native/bash-5.3-patches.json");
-        if catalogue.sources.get(pin) != Some(&super::protocol::sha(contents)) {
+        static PATCHES_SHA: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+        let digest = PATCHES_SHA.get_or_init(|| {
+            super::protocol::sha(include_str!(
+                "../../../scripts/dependency-builds/bash-native/bash-5.3-patches.json"
+            ))
+        });
+        if catalogue.sources.get(pin) != Some(digest) {
             return Err("TERMINAL_NATIVE_STALE_ARTIFACTS".into());
         }
     }

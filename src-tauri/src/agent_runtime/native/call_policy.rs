@@ -62,8 +62,9 @@ pub(crate) fn inspect_call_policy_scope_native(
     call: &AgentToolCallNative,
 ) -> Result<CallPolicyScopeNative, String> {
     let paths = match call.tool_name.as_str() {
-        crate::terminal_vim_bridge::INSERT | crate::terminal_vim_bridge::SAVE => call.arguments
-            ["path"]
+        crate::terminal_vim_bridge::INSERT
+        | crate::terminal_vim_bridge::SAVE
+        | crate::terminal_vim_bridge::CLOSE => call.arguments["path"]
             .as_str()
             .map(|path| vec![path.to_owned()])
             .ok_or("Vim buffer target path is unavailable")?,

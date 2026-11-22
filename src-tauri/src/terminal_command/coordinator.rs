@@ -425,9 +425,8 @@ impl NativeInputCoordinator {
     }
 
     fn verify_stop_scope(&self) -> Result<(), String> {
-        let mut state = self.broker.lock()?;
-        let attachment = current_attachment(&state, &self.transport)?.clone();
-        let record = current_record_mut(&mut state, &self.transport, &attachment)?;
+        let (attachment, slot) = self.broker.lookup_session_slot(&self.transport)?;
+        let record = slot.lock_current(&self.transport, &attachment)?;
         let data = self.operation.lock()?;
         if record.terminal_generation != data.intent.identity.terminal_generation
             || record.terminal_session_id != data.intent.identity.terminal_session_id
@@ -486,9 +485,8 @@ impl NativeInputCoordinator {
         Ok(self.operation.lock()?.native_commit_armed)
     }
     fn verify_current(&self, require_lease: bool) -> Result<(), String> {
-        let mut state = self.broker.lock()?;
-        let attachment = current_attachment(&state, &self.transport)?.clone();
-        let record = current_record_mut(&mut state, &self.transport, &attachment)?;
+        let (attachment, slot) = self.broker.lookup_session_slot(&self.transport)?;
+        let record = slot.lock_current(&self.transport, &attachment)?;
         let data = self.operation.lock()?;
         if record.integration_id != data.integration_id {
             return Err("TERMINAL_NATIVE_IDENTITY_MISMATCH".into());

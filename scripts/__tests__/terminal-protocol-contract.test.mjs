@@ -14,10 +14,14 @@ async function readJson(relativePath) {
 describe('terminal execution protocol contract', () => {
   it('keeps terminal display on the raw transport instead of replaying tool metadata', async () => {
     const controller = await readFile(path.join(repositoryRoot, 'src/components/terminal/terminal-controller-layer.tsx'), 'utf8');
+    const leaseCoordinator = await readFile(path.join(repositoryRoot, 'src/components/terminal/agent-terminal-lease-coordinator.ts'), 'utf8');
     expect(controller).not.toContain('agent-command-echo');
     expect(controller).not.toContain('appendTerminalOutput');
     expect(controller).not.toContain('controller.write(');
-    expect(controller).toContain('controller.suppressUserInput(');
+    expect(leaseCoordinator).not.toContain('agent-command-echo');
+    expect(leaseCoordinator).not.toContain('appendTerminalOutput');
+    expect(leaseCoordinator).not.toContain('controller.write(');
+    expect(leaseCoordinator).toContain('controller.suppressUserInput(');
     expect(controller).toContain('listenToAgentRuntimeSession(');
     for (const locale of ['zh-CN', 'en-US']) {
       const source = await readFile(path.join(repositoryRoot, `src/locales/${locale}.ts`), 'utf8');
@@ -598,8 +602,9 @@ describe('terminal execution protocol contract', () => {
     expect(runtime).not.toContain('AgentExecutionChannelNative::Pty');
     expect(broker).not.toContain('terminal_legacy_wrapper_fallback');
     expect(broker).toMatch(/TERMINAL_BROKER_DEFAULT_ENABLED: bool =\s+cfg!\(any\(target_os = "macos", target_os = "windows"\)\)/);
+    const brokerTypes = await readFile(path.join(repositoryRoot, 'src-tauri/src/terminal_broker/types.rs'), 'utf8');
     expect(broker).toContain('remote_visible_command_route');
-    expect(broker).toContain('TerminalRolloutCountersSnapshot');
+    expect(brokerTypes).toContain('TerminalRolloutCountersSnapshot');
     expect(manifest.tools.map(({ name }) => name)).toContain('terminal_execute');
     expect(manifest.tools.find(({ name }) => name === 'terminal_execute')).toMatchObject({
       targetKinds: ['local', 'remote'],

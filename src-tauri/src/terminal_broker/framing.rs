@@ -75,8 +75,6 @@ pub(super) fn accept_raw_frame(
     // frame bytes. Derived subscribers own separate state and cannot replace
     // the bytes already assigned to display.
     record.subscribers.display.observe(&frame)?;
-    #[cfg(debug_assertions)]
-    let display_bytes = frame.bytes.clone();
 
     record.subscribers.capture.observe(&frame)?;
     if !record.capture_truncated {
@@ -100,7 +98,6 @@ pub(super) fn accept_raw_frame(
     if let Some(command) = &record.active_command {
         command.capture(&frame)?;
     }
-    debug_assert_eq!(display_bytes, frame.bytes);
 
     record.next_output_sequence = next_output_sequence;
     record.next_byte_offset = next_byte_offset;
@@ -119,25 +116,12 @@ pub(super) fn accept_raw_frame(
     Ok(RawFrameAcceptance::Accepted)
 }
 
-pub(super) fn terminal_wait_reason(
+pub(super) fn terminal_wait_scalar_reason(
     record: &SessionRecord,
-    snapshot: &TerminalScreenSnapshot,
+    through_output_sequence: u64,
+    screen_version: u64,
     request: &TerminalWaitRequest,
 ) -> Option<TerminalWaitReason> {
-    if let Some(text) = request.text.as_deref() {
-        let found = if request.case_sensitive {
-            snapshot.content.iter().any(|row| row.contains(text))
-        } else {
-            let needle = text.to_lowercase();
-            snapshot
-                .content
-                .iter()
-                .any(|row| row.to_lowercase().contains(&needle))
-        };
-        if found {
-            return Some(TerminalWaitReason::TextFound);
-        }
-    }
     if request
         .after_lifecycle_sequence
         .is_some_and(|sequence| record.integration_event_sequence > sequence)
@@ -146,13 +130,13 @@ pub(super) fn terminal_wait_reason(
     }
     if request
         .after_output_sequence
-        .is_some_and(|sequence| snapshot.through_output_sequence > sequence)
+        .is_some_and(|sequence| through_output_sequence > sequence)
     {
         return Some(TerminalWaitReason::OutputObserved);
     }
     if request
         .after_screen_version
-        .is_some_and(|version| snapshot.screen_version > version)
+        .is_some_and(|version| screen_version > version)
     {
         return Some(TerminalWaitReason::ScreenChanged);
     }
@@ -163,6 +147,30 @@ pub(super) fn terminal_wait_reason(
         return Some(TerminalWaitReason::Idle);
     }
     None
+}
+
+pub(super) fn terminal_wait_text_matches(
+    snapshot: &TerminalScreenSnapshot,
+    text: &str,
+    case_sensitive: bool,
+    needle_lower: Option<&str>,
+) -> bool {
+    if case_sensitive {
+        snapshot.content.iter().any(|row| row.contains(text))
+    } else {
+        let owned;
+        let needle = match needle_lower {
+            Some(needle) => needle,
+            None => {
+                owned = text.to_lowercase();
+                &owned
+            }
+        };
+        snapshot
+            .content
+            .iter()
+            .any(|row| row.to_lowercase().contains(needle))
+    }
 }
 
 pub(super) fn replay_from_record(
@@ -214,15 +222,39 @@ pub(super) fn replay_from_record(
     })
 }
 
+#[cfg(test)]
 pub(super) fn validate_input(
     record: &SessionRecord,
     request: &TerminalInputRequest,
 ) -> Result<TerminalInputReceipt, String> {
+    validate_input_fields(
+        record,
+        &request.terminal_session_id,
+        request.terminal_generation,
+        &request.lease_id,
+        request.input_sequence,
+        &request.source,
+        request.input_kind,
+        request.bytes.len(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn validate_input_fields(
+    record: &SessionRecord,
+    terminal_session_id: &str,
+    terminal_generation: u64,
+    lease_id: &str,
+    input_sequence: u64,
+    source: &TerminalBrokerInputSource,
+    input_kind: TerminalInputKind,
+    byte_len: usize,
+) -> Result<TerminalInputReceipt, String> {
     if !record.open {
         return Err("TERMINAL_BROKER_GENERATION_CLOSED".into());
     }
-    if request.terminal_session_id != record.terminal_session_id
-        || request.terminal_generation != record.terminal_generation
+    if terminal_session_id != record.terminal_session_id
+        || terminal_generation != record.terminal_generation
     {
         return Err("TERMINAL_BROKER_STALE_GENERATION".into());
     }
@@ -230,20 +262,20 @@ pub(super) fn validate_input(
         .lease
         .as_ref()
         .ok_or_else(|| "TERMINAL_BROKER_LEASE_UNAVAILABLE".to_string())?;
-    if request.lease_id != lease.lease_id {
+    if lease_id != lease.lease_id {
         return Err("TERMINAL_BROKER_STALE_LEASE".into());
     }
-    if request.input_sequence != record.next_input_sequence {
+    if input_sequence != record.next_input_sequence {
         return Err(format!(
             "TERMINAL_BROKER_STALE_INPUT: expected sequence {}, received {}",
-            record.next_input_sequence, request.input_sequence
+            record.next_input_sequence, input_sequence
         ));
     }
-    if request.bytes.is_empty() || request.bytes.len() > MAX_FRAME_BYTES {
+    if byte_len == 0 || byte_len > MAX_FRAME_BYTES {
         return Err("TERMINAL_BROKER_INPUT_SIZE_INVALID".into());
     }
 
-    let source_owner_id = match (&request.source, &lease.owner) {
+    let source_owner_id = match (source, &lease.owner) {
         (TerminalBrokerInputSource::User, TerminalLeaseOwner::User { owner_id }) => {
             owner_id.clone()
         }
@@ -277,7 +309,7 @@ pub(super) fn validate_input(
             },
         ) if operation_id == expected_operation
             && matches!(
-                request.input_kind,
+                input_kind,
                 TerminalInputKind::Interrupt | TerminalInputKind::SystemControl
             ) =>
         {
@@ -295,7 +327,7 @@ pub(super) fn validate_input(
                 operation_id: expected_operation,
                 owner_id,
             },
-        ) if request.input_kind == TerminalInputKind::NativeDraftClear
+        ) if input_kind == TerminalInputKind::NativeDraftClear
             && agent_session_id == expected_agent
             && task_id == expected_task
             && operation_id == expected_operation =>
@@ -312,9 +344,9 @@ pub(super) fn validate_input(
         terminal_session_id: record.terminal_session_id.clone(),
         terminal_generation: record.terminal_generation,
         lease_id: lease.lease_id.clone(),
-        input_sequence: request.input_sequence,
+        input_sequence,
         source_owner_id,
-        accepted_bytes: request.bytes.len(),
+        accepted_bytes: byte_len,
     })
 }
 

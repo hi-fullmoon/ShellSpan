@@ -130,8 +130,22 @@ impl NativeToolEngine {
                 });
                 match launch {
                     Ok(process) => {
-                        let snapshot =
-                            process.wait(timeout.saturating_add(Duration::from_secs(4)))?;
+                        let mut progress = self.tool_progress.begin(
+                            context.request.user_session_id.clone(),
+                            call.call_id.clone(),
+                        );
+                        let snapshot = if progress.has_publisher() {
+                            process.wait_with_progress(
+                                timeout.saturating_add(Duration::from_secs(4)),
+                                TOOL_PROGRESS_THROTTLE_INTERVAL,
+                                |stdout, stderr, total_bytes, truncated| {
+                                    progress.publish_direct(stdout, stderr, total_bytes, truncated);
+                                },
+                            )
+                        } else {
+                            process.wait(timeout.saturating_add(Duration::from_secs(4)))
+                        }?;
+                        progress.finish();
                         self.processes
                             .remove_terminal(&snapshot.process_handle, snapshot.state)?;
                         let termination_confirmed = snapshot.termination_confirmed;
@@ -340,7 +354,23 @@ impl NativeToolEngine {
         let snapshot = if background {
             process.snapshot()?
         } else {
-            process.wait(timeout.saturating_add(Duration::from_secs(1)))?
+            let mut progress = self.tool_progress.begin(
+                context.request.user_session_id.clone(),
+                call.call_id.clone(),
+            );
+            let snapshot = if progress.has_publisher() {
+                process.wait_with_progress(
+                    timeout.saturating_add(Duration::from_secs(1)),
+                    TOOL_PROGRESS_THROTTLE_INTERVAL,
+                    |stdout, stderr, total_bytes, truncated| {
+                        progress.publish_direct(stdout, stderr, total_bytes, truncated);
+                    },
+                )?
+            } else {
+                process.wait(timeout.saturating_add(Duration::from_secs(1)))?
+            };
+            progress.finish();
+            snapshot
         };
         if !background {
             self.processes

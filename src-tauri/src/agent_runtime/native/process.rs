@@ -314,7 +314,76 @@ impl ManagedProcessNative {
             .changed
             .wait_timeout_while(state, timeout, |state| !state.lifecycle.is_terminal())
             .map_err(|_| "Process state is unavailable".to_string())?;
-        Ok(ProcessSnapshotNative {
+        Ok(self.snapshot_from_state(&state))
+    }
+
+    pub(crate) fn wait_with_progress<F>(
+        &self,
+        timeout: Duration,
+        poll_interval: Duration,
+        mut on_progress: F,
+    ) -> Result<ProcessSnapshotNative, String>
+    where
+        F: FnMut(&str, &str, u64, bool),
+    {
+        let deadline = Instant::now() + timeout;
+        let throttle = poll_interval.max(Duration::from_millis(20));
+        let mut last_bytes: (u64, u64) = (0, 0);
+        let mut last_sample_at: Option<Instant> = None;
+        loop {
+            let progress_sample = {
+                let state = self
+                    .state
+                    .lock()
+                    .map_err(|_| "Process state is unavailable".to_string())?;
+                let now = Instant::now();
+                if state.lifecycle.is_terminal() || now >= deadline {
+                    return Ok(self.snapshot_from_state(&state));
+                }
+                let remaining = deadline.saturating_duration_since(now);
+                let cooldown = last_sample_at
+                    .map(|at| throttle.saturating_sub(now.saturating_duration_since(at)))
+                    .unwrap_or(Duration::ZERO);
+                let (state, _) = if !cooldown.is_zero() {
+                    // During the throttle window, sleep until the cooldown elapses or the process finishes.
+                    self.changed
+                        .wait_timeout_while(state, remaining.min(cooldown), |state| {
+                            !state.lifecycle.is_terminal()
+                        })
+                        .map_err(|_| "Process state is unavailable".to_string())?
+                } else {
+                    self.changed
+                        .wait_timeout_while(state, remaining, |state| {
+                            !state.lifecycle.is_terminal()
+                                && (state.stdout.bytes_read, state.stderr.bytes_read) == last_bytes
+                        })
+                        .map_err(|_| "Process state is unavailable".to_string())?
+                };
+                if state.lifecycle.is_terminal() || Instant::now() >= deadline {
+                    return Ok(self.snapshot_from_state(&state));
+                }
+                let current_bytes = (state.stdout.bytes_read, state.stderr.bytes_read);
+                if current_bytes != last_bytes {
+                    last_bytes = current_bytes;
+                    last_sample_at = Some(Instant::now());
+                    Some((
+                        self.stdout_text(&state),
+                        state.stderr.text(&self.secrets),
+                        current_bytes.0.saturating_add(current_bytes.1),
+                        state.stdout.truncated() || state.stderr.truncated(),
+                    ))
+                } else {
+                    None
+                }
+            };
+            if let Some((stdout, stderr, total_bytes, truncated)) = progress_sample {
+                on_progress(&stdout, &stderr, total_bytes, truncated);
+            }
+        }
+    }
+
+    fn snapshot_from_state(&self, state: &ProcessStateNative) -> ProcessSnapshotNative {
+        ProcessSnapshotNative {
             process_handle: self.process_handle.clone(),
             target_id: self.target_id.clone(),
             owner_target_id: self.owner_target_id.clone(),
@@ -323,7 +392,7 @@ impl ManagedProcessNative {
             channel: self.channel,
             state: state.lifecycle,
             exit_code: state.exit_code,
-            stdout: self.stdout_text(&state),
+            stdout: self.stdout_text(state),
             stderr: state.stderr.text(&self.secrets),
             stdout_bytes_read: state.stdout.bytes_read,
             stderr_bytes_read: state.stderr.bytes_read,
@@ -333,7 +402,7 @@ impl ManagedProcessNative {
             started_at_unix_ms: self.started_at_unix_ms,
             completed_at_unix_ms: state.completed_at_unix_ms,
             error: state.error.clone(),
-        })
+        }
     }
 
     fn stdout_text(&self, state: &ProcessStateNative) -> String {
@@ -635,9 +704,10 @@ pub(super) fn spawn_sandbox_acceptance_process(
         .current_dir(workspace)
         .stdin(Stdio::piped())
         .arg("--seccomp-network")
+        .arg("--read-file")
+        .arg(node)
         .arg(workspace)
         .arg(temporary.path())
-        .arg(node)
         .arg("--")
         .arg(shell.get_program())
         .args(shell.get_args());
@@ -910,12 +980,7 @@ pub(super) fn prepare_mac_sandbox_acceptance_process(
         if inherit_cwd {
             child.arg("--inherit-cwd");
         }
-        child
-            .arg(workspace)
-            .arg(&writable)
-            .arg("/bin/sh")
-            .arg("--")
-            .arg(program);
+        child.arg(workspace).arg(&writable).arg("--").arg(program);
         child
     };
     let mut child = if let Some(plan) = reviewed_command {

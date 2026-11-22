@@ -302,7 +302,7 @@ impl PreparedNativeBash {
                     .set_nonblocking(false)
                     .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
                 stream
-                    .set_read_timeout(Some(Duration::from_millis(50)))
+                    .set_read_timeout(None)
                     .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
                 stream
                     .set_write_timeout(Some(Duration::from_secs(1)))

@@ -26,6 +26,7 @@ pub(crate) const ACTIVATE: &str = ":source $SHELLSPAN_VIM_BRIDGE";
 pub(crate) const INSPECT: &str = "inspect_vim_buffer";
 pub(crate) const INSERT: &str = "insert_vim_text";
 pub(crate) const SAVE: &str = "save_vim_buffer";
+pub(crate) const CLOSE: &str = "close_vim_editor";
 pub(crate) const MAX_TEXT_BYTES: usize = 32 * 1024;
 const MAX_FRAME_BYTES: usize = 256 * 1024;
 const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(4);
@@ -38,7 +39,7 @@ const ADAPTER: &str = include_str!("terminal_vim_bridge/bridge.vim");
 const RELAY: &str = include_str!("terminal_vim_bridge/relay.sh");
 
 pub(crate) fn is_tool(name: &str) -> bool {
-    matches!(name, INSPECT | INSERT | SAVE)
+    matches!(name, INSPECT | INSERT | SAVE | CLOSE)
 }
 
 pub(crate) fn valid_id(id: &str) -> bool {
@@ -94,6 +95,7 @@ pub(crate) enum EditAction {
         text: String,
     },
     Save,
+    Close,
 }
 
 #[derive(Serialize)]
@@ -156,6 +158,7 @@ pub(crate) enum EditorReply {
     Prepared,
     Inserted { snapshot: EditorSnapshot },
     Saved { snapshot: EditorSnapshot },
+    Closed { snapshot: EditorSnapshot },
     Rejected { code: EditorError },
     Uncertain { code: EditorError },
 }
@@ -175,6 +178,7 @@ pub(crate) enum EditorError {
     UnsupportedChangeHook,
     ReadOnly,
     SaveUnverified,
+    UnsavedChanges,
     OperationExpired,
     UnsupportedOperation,
     EditorError,
@@ -233,11 +237,16 @@ struct Request {
 pub(crate) struct BridgeClient {
     requests: Sender<Request>,
     active: Arc<AtomicBool>,
+    attached: Arc<AtomicBool>,
 }
 
 impl BridgeClient {
     pub(crate) fn available(&self) -> bool {
         self.active.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn attached(&self) -> bool {
+        self.active.load(Ordering::Acquire) && self.attached.load(Ordering::Acquire)
     }
 
     pub(crate) fn enqueue(&self, command: EditorCommand) -> Result<PendingReply, BridgeFailure> {
@@ -414,6 +423,7 @@ impl RemoteVimBridge {
             client: BridgeClient {
                 requests: sender,
                 active: Arc::new(AtomicBool::new(true)),
+                attached: Arc::new(AtomicBool::new(false)),
             },
             requests,
             instance: None,
@@ -522,6 +532,7 @@ impl RemoteVimBridge {
                     self.finish_pending(BridgeFailure::Unavailable);
                 }
                 self.instance = Some((wire.instance, editor));
+                self.client.attached.store(true, Ordering::Release);
             }
             Message::Detached
                 if self
@@ -530,6 +541,7 @@ impl RemoteVimBridge {
                     .is_some_and(|(instance, _)| *instance == wire.instance) =>
             {
                 self.instance = None;
+                self.client.attached.store(false, Ordering::Release);
                 self.finish_pending(BridgeFailure::NotAttached);
             }
             Message::Reply { id, reply } => {
@@ -561,6 +573,7 @@ impl RemoteVimBridge {
 impl Drop for RemoteVimBridge {
     fn drop(&mut self) {
         self.client.active.store(false, Ordering::Release);
+        self.client.attached.store(false, Ordering::Release);
         self.finish_pending(BridgeFailure::Unavailable);
     }
 }

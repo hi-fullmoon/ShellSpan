@@ -416,10 +416,10 @@ impl SessionRecord {
         for frame in &mut self.replay {
             frame.bytes.fill(0);
         }
-        self.replay.clear();
+        self.replay = VecDeque::new();
         self.replay_bytes = 0;
         self.capture.fill(0);
-        self.capture.clear();
+        self.capture = Vec::new();
         self.screen_model = None;
         self.display_screen = None;
         #[cfg(unix)]
@@ -438,6 +438,34 @@ impl SessionRecord {
                     profile.display_binding()
                 })
         })
+    }
+
+    pub(super) fn integration_capabilities(&self) -> Vec<&'static str> {
+        if self.integration_state == TerminalIntegrationState::Ready {
+            let mut capabilities = vec![
+                "promptLifecycle",
+                "commandLifecycle",
+                "exactCommandLine",
+                "exitStatus",
+                "currentDirectory",
+            ];
+            if self.native_input
+                && self.native_checkpoints
+                && !self.native_recovery_required
+                && (!matches!(
+                    self.integration_shell,
+                    Some(TerminalShellKind::Bash | TerminalShellKind::Zsh)
+                ) || self.native_private_control)
+            {
+                capabilities.push("nativeScriptInput");
+            }
+            if self.native_jobs && self.native_checkpoints && !self.native_recovery_required {
+                capabilities.push("nativeJobControl");
+            }
+            capabilities
+        } else {
+            Vec::new()
+        }
     }
 
     pub(super) fn snapshot(&self) -> Result<TerminalBrokerSessionSnapshot, String> {
@@ -470,31 +498,7 @@ impl SessionRecord {
             integration_reason: self.integration_reason.clone(),
             integration_event_sequence: self.integration_event_sequence,
             integration_state_revision: self.integration_state_revision,
-            integration_capabilities: if self.integration_state == TerminalIntegrationState::Ready {
-                let mut capabilities = vec![
-                    "promptLifecycle",
-                    "commandLifecycle",
-                    "exactCommandLine",
-                    "exitStatus",
-                    "currentDirectory",
-                ];
-                if self.native_input
-                    && self.native_checkpoints
-                    && !self.native_recovery_required
-                    && (!matches!(
-                        self.integration_shell,
-                        Some(TerminalShellKind::Bash | TerminalShellKind::Zsh)
-                    ) || self.native_private_control)
-                {
-                    capabilities.push("nativeScriptInput");
-                }
-                if self.native_jobs && self.native_checkpoints && !self.native_recovery_required {
-                    capabilities.push("nativeJobControl");
-                }
-                capabilities
-            } else {
-                Vec::new()
-            },
+            integration_capabilities: self.integration_capabilities(),
             prompt_ready: self.prompt_ready,
             prompt_ready_revision: self.prompt_ready_revision,
             #[cfg(test)]

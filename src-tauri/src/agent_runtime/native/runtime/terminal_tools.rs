@@ -3,7 +3,9 @@ use std::time::{Duration, Instant};
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
-use crate::agent_runtime::native::{sanitize_terminal_screen, strip_ansi, TerminalSubmissionError};
+use crate::agent_runtime::native::{
+    sanitize_terminal_screen, strip_ansi, strip_shell_control_osc, TerminalSubmissionError,
+};
 use crate::agent_runtime::{
     AgentObservedEffectNative, AgentToolCallNative, AgentToolResultNative,
     AgentToolResultStatusNative, ReadTerminalArgumentsNative, TerminalExecuteArgumentsNative,
@@ -125,13 +127,27 @@ impl NativeToolEngine {
                 );
             }
         };
+        let mut progress = self.tool_progress.begin(
+            context.request.user_session_id.clone(),
+            call.call_id.clone(),
+        );
+        let publish_enabled = progress.has_publisher();
+        let is_native_protocol = operation.is_native_protocol().unwrap_or(false);
+        let mut emit_progress = |snapshot: &crate::terminal_broker::TerminalCommandSnapshot| {
+            progress.publish_terminal(
+                &snapshot.combined_output,
+                is_native_protocol,
+                snapshot.capture_truncated,
+            );
+        };
         let waited = if arguments.handoff_to_user {
-            self.terminal_execute.wait_foreground_handoff(
+            self.terminal_execute.wait_foreground_handoff_with_progress(
                 sessions,
                 &session_id,
                 &operation,
                 timeout.min(Duration::from_secs(10)),
                 || cancellation.is_cancelled(),
+                publish_enabled.then_some(&mut emit_progress as &mut dyn FnMut(&_)),
             )
         } else if let Some(deadline) = launch_deadline {
             self.terminal_execute
@@ -142,11 +158,23 @@ impl NativeToolEngine {
                     deadline.saturating_duration_since(Instant::now()),
                 )
                 .map(|snapshot| (snapshot, false))
+        } else if publish_enabled {
+            self.terminal_execute
+                .wait_with_progress(
+                    sessions,
+                    &session_id,
+                    &operation,
+                    timeout,
+                    &mut emit_progress,
+                )
+                .map(|snapshot| (snapshot, false))
         } else {
             self.terminal_execute
                 .wait(sessions, &session_id, &operation, timeout)
                 .map(|snapshot| (snapshot, false))
         };
+        drop(emit_progress);
+        progress.finish();
         let (snapshot, handed_off) = match waited {
             Ok(snapshot) => snapshot,
             Err(message) => {
@@ -178,9 +206,12 @@ impl NativeToolEngine {
         let plain_output = strip_ansi(&snapshot.combined_output);
         let redacted_plain = crate::redaction::redact_sensitive_text(&plain_output);
         // Native capture preserves real program controls. Keep the established
-        // sensitive-output boundary, including secrets split by ANSI sequences.
+        // sensitive-output boundary, including secrets split by ANSI sequences,
+        // while stripping shell-chrome OSC sequences (title/integration markers)
+        // so models do not mistake them for truncated output.
         let model_output = if operation.is_native_protocol()? && redacted_plain == plain_output {
-            crate::redaction::redact_sensitive_text(&snapshot.combined_output)
+            let cleaned = strip_shell_control_osc(&snapshot.combined_output);
+            crate::redaction::redact_sensitive_text(&cleaned)
         } else {
             redacted_plain
         };

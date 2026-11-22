@@ -299,6 +299,36 @@ function! s:save(request, state) abort
     return current
 endfunction
 
+function! s:check_close(state) abort
+    if a:state.modified || !empty(getbufinfo({'bufmodified': 1}))
+        call s:fail('unsavedChanges')
+    endif
+    for buf in getbufinfo()
+        if getbufvar(buf.bufnr, '&buftype') ==# 'terminal'
+            call s:fail('editorNotReady')
+        endif
+    endfor
+endfunction
+
+function! s:finish_close(timer) abort
+    if s:suspended || !s:foreground() || mode(1) !=# 'n' || !empty(getcmdwintype())
+                \ || !empty(getbufinfo({'bufmodified': 1}))
+        return
+    endif
+    for buf in getbufinfo()
+        if getbufvar(buf.bufnr, '&buftype') ==# 'terminal'
+            return
+        endif
+    endfor
+    let saved_confirm = &confirm
+    let &confirm = 0
+    try
+        silent quitall
+    catch
+        let &confirm = saved_confirm
+    endtry
+endfunction
+
 function! s:dispatch(request) abort
     if a:request.operation ==# 'inspect'
         let current = s:state(a:request.root)
@@ -308,7 +338,10 @@ function! s:dispatch(request) abort
         return {'status': 'observed', 'snapshot': s:snapshot(current, a:request.root, a:request.owner)}
     endif
     if a:request.operation ==# 'prepare'
-        call s:assert_snapshot(a:request)
+        let current = s:assert_snapshot(a:request)
+        if get(a:request, 'action', '') ==# 'close'
+            call s:check_close(current)
+        endif
         let s:prepared = {'request': a:request, 'started': reltime()}
         return {'status': 'prepared'}
     endif
@@ -333,6 +366,12 @@ function! s:dispatch(request) abort
     elseif request.action ==# 'save'
         let updated = s:save(request, current)
         let reply = {'status': 'saved', 'snapshot': s:snapshot(updated, request.root, request.owner)}
+    elseif request.action ==# 'close'
+        call s:check_close(current)
+        let snapshot = s:snapshot(current, request.root, request.owner)
+        let s:observed = {}
+        call timer_start(20, function('s:finish_close'))
+        let reply = {'status': 'closed', 'snapshot': snapshot}
     else
         call s:fail('unsupportedOperation')
     endif

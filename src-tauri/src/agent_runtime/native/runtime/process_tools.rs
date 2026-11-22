@@ -73,9 +73,24 @@ impl NativeToolEngine {
                 dispatch_policy,
             );
         }
-        let snapshot = self.processes.get(handle)?.wait(Duration::from_millis(
-            arguments.timeout_ms.unwrap_or(30_000),
-        ))?;
+        let process = self.processes.get(handle)?;
+        let wait_timeout = Duration::from_millis(arguments.timeout_ms.unwrap_or(30_000));
+        let mut progress = self.tool_progress.begin(
+            context.request.user_session_id.clone(),
+            call.call_id.clone(),
+        );
+        let snapshot = if progress.has_publisher() {
+            process.wait_with_progress(
+                wait_timeout,
+                TOOL_PROGRESS_THROTTLE_INTERVAL,
+                |stdout, stderr, total_bytes, truncated| {
+                    progress.publish_direct(stdout, stderr, total_bytes, truncated);
+                },
+            )?
+        } else {
+            process.wait(wait_timeout)?
+        };
+        progress.finish();
         self.processes.remove_terminal(handle, snapshot.state)?;
         let limit = arguments.max_output_bytes.unwrap_or(1_048_576) as usize;
         let (stdout, stdout_cut) = truncate_utf8(&snapshot.stdout, limit.saturating_mul(3) / 4);

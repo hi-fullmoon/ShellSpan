@@ -2,11 +2,12 @@
 use libc::{poll, pollfd, POLLIN, POLLOUT};
 use log::{error, info, warn};
 use ssh2::{BlockDirections, Channel, ExtendedData, Session};
+#[cfg(any(not(unix), test))]
+use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::{
     cell::Cell,
     collections::VecDeque,
     io::{ErrorKind, Read, Write},
-    net::{Ipv4Addr, TcpListener, TcpStream},
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering as AtomicOrdering},
@@ -229,13 +230,14 @@ impl RemoteSshShellIntegration {
         }
     }
 
-    fn disable_after_control_failure(&mut self, session: &Session) {
+    fn disable_after_control_failure(&mut self, _session: &Session) {
         self.active = false;
         self.accept_events = false;
+        // Defer remote SFTP file cleanup until session teardown (`close`) so we
+        // never switch a live nonblocking SSH session into blocking mode or
+        // stall PTY I/O across SFTP RTTs.
         let _ = self.control.send_eof();
         let _ = self.control.close();
-        self.cleanup_files(session);
-        session.set_blocking(false);
     }
 
     fn close(mut self, session: &Session) {
@@ -431,20 +433,44 @@ fn read_ssh_setup_command(session: &Session, command: &str) -> Result<Vec<u8>, S
 /// enqueueing a command so the session loop wakes from its idle poll
 /// immediately instead of discovering the command on the next 20ms slice.
 pub(crate) struct SessionWaker {
+    #[cfg(unix)]
+    stream: std::os::unix::net::UnixStream,
+    #[cfg(not(unix))]
     stream: TcpStream,
 }
 
 /// Read half of the session self-pipe, polled by the session loop alongside
 /// the SSH socket.
 pub(crate) struct SessionWakeSource {
+    #[cfg(unix)]
+    stream: std::os::unix::net::UnixStream,
+    #[cfg(not(unix))]
     stream: TcpStream,
 }
 
+#[cfg(unix)]
+pub(crate) fn session_wake_pair() -> std::io::Result<(SessionWaker, SessionWakeSource)> {
+    let (writer, reader) = std::os::unix::net::UnixStream::pair()?;
+    writer.set_nonblocking(true)?;
+    reader.set_nonblocking(true)?;
+    Ok((
+        SessionWaker { stream: writer },
+        SessionWakeSource { stream: reader },
+    ))
+}
+
+#[cfg(not(unix))]
 pub(crate) fn session_wake_pair() -> std::io::Result<(SessionWaker, SessionWakeSource)> {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
     let address = listener.local_addr()?;
     let writer = TcpStream::connect(address)?;
-    let (reader, _) = listener.accept()?;
+    let expected_peer = writer.local_addr()?;
+    let reader = loop {
+        let (candidate, peer) = listener.accept()?;
+        if peer == expected_peer {
+            break candidate;
+        }
+    };
     writer.set_nodelay(true)?;
     writer.set_nonblocking(true)?;
     reader.set_nonblocking(true)?;
@@ -2046,7 +2072,10 @@ fn session_loop_inner(
 
         let keepalive_due_in = next_keepalive_at.saturating_duration_since(now);
         if output_paused.load(AtomicOrdering::Relaxed) {
-            thread::sleep(keepalive_due_in.min(Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS)));
+            poll_wake_only(
+                wake,
+                keepalive_due_in.min(Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS)),
+            );
             continue;
         }
 
@@ -2284,7 +2313,9 @@ fn poll_session_events(
     loop {
         let result = unsafe { poll(fds.as_mut_ptr(), 2, timeout_ms) };
         if result >= 0 {
-            wake.drain();
+            if fds[1].revents != 0 {
+                wake.drain();
+            }
             return Ok(fds[0].revents);
         }
 
@@ -2294,6 +2325,40 @@ fn poll_session_events(
         }
 
         return Err(format!("failed to wait for ssh socket readiness: {error}"));
+    }
+}
+
+#[cfg(unix)]
+fn poll_wake_only(wake: &SessionWakeSource, timeout: Duration) {
+    use libc::{poll, pollfd, POLLIN};
+
+    let timeout_ms = timeout.as_millis().min(i32::MAX as u128);
+    let timeout_ms = i32::try_from(timeout_ms).unwrap_or(i32::MAX);
+    let mut fd = pollfd {
+        fd: wake.fd(),
+        events: POLLIN,
+        revents: 0,
+    };
+    let result = unsafe { poll(&mut fd, 1, timeout_ms) };
+    if result > 0 && fd.revents != 0 {
+        wake.drain();
+    }
+}
+
+#[cfg(windows)]
+fn poll_wake_only(wake: &SessionWakeSource, timeout: Duration) {
+    use windows_sys::Win32::Networking::WinSock::{WSAPoll, POLLIN, WSAPOLLFD};
+
+    let timeout_ms = timeout.as_millis().min(i32::MAX as u128);
+    let timeout_ms = i32::try_from(timeout_ms).unwrap_or(i32::MAX);
+    let mut fd = WSAPOLLFD {
+        fd: wake.socket() as _,
+        events: POLLIN,
+        revents: 0,
+    };
+    let result = unsafe { WSAPoll(&mut fd, 1, timeout_ms) };
+    if result > 0 && fd.revents != 0 {
+        wake.drain();
     }
 }
 
@@ -2326,7 +2391,9 @@ fn poll_session_events(
     loop {
         let result = unsafe { WSAPoll(fds.as_mut_ptr(), 2, timeout_ms) };
         if result >= 0 {
-            wake.drain();
+            if fds[1].revents != 0 {
+                wake.drain();
+            }
             return Ok(fds[0].revents);
         }
 

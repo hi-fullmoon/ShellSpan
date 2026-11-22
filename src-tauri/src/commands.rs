@@ -1229,7 +1229,27 @@ fn create_local_session_blocking(
         };
         #[cfg(any(unix, windows))]
         if let Some(native) = prepared_native {
-            let probe = runtime.register_native_terminal(&session_id, native.profile.clone())?;
+            let probe = match runtime.register_native_terminal(&session_id, native.profile.clone())
+            {
+                Ok(probe) => probe,
+                Err(error) => {
+                    let _ = runtime.close_terminal_broker_transport(
+                        &session_id,
+                        crate::terminal_broker::TerminalGenerationCloseReason::TransportDisconnected,
+                    );
+                    return Err(rollback_local_broker_attachment_failure(
+                        state,
+                        &session_id,
+                        child.as_mut(),
+                        move || {
+                            drop(writer);
+                            drop(master);
+                            drop(reader);
+                        },
+                        &error,
+                    ));
+                }
+            };
             #[cfg(unix)]
             let _ = runtime
                 .terminal_broker()
@@ -1274,6 +1294,10 @@ fn create_local_session_blocking(
                 &integration_id,
                 integration.shell(),
             ) {
+                let _ = runtime.close_terminal_broker_transport(
+                    &session_id,
+                    crate::terminal_broker::TerminalGenerationCloseReason::TransportDisconnected,
+                );
                 return Err(rollback_local_broker_attachment_failure(
                     state,
                     &session_id,
@@ -1338,6 +1362,10 @@ fn create_local_session_blocking(
             } else {
                 runtime.mark_terminal_integration_degraded(&session_id, shell_kind, reason)
             } {
+                let _ = runtime.close_terminal_broker_transport(
+                    &session_id,
+                    crate::terminal_broker::TerminalGenerationCloseReason::TransportDisconnected,
+                );
                 return Err(rollback_local_broker_attachment_failure(
                     state,
                     &session_id,
@@ -1667,6 +1695,12 @@ fn create_local_session_blocking(
         // stays detached and its next send fails once the output receiver is
         // dropped at the end of this closure.
         worker_output_paused.store(false, AtomicOrdering::Relaxed);
+        #[cfg(unix)]
+        if let Some(runtime) = app.try_state::<crate::agent_runtime::AgentRuntime>() {
+            let _ = runtime
+                .terminal_broker()
+                .detach_local_echo_probe(&worker_id);
+        }
         #[cfg(target_os = "macos")]
         input_pump.stop();
         #[cfg(not(target_os = "macos"))]

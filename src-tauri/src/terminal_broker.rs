@@ -109,6 +109,7 @@ pub(crate) enum TerminalBrokerInputSource {
     },
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TerminalInputRequest {
     pub(crate) terminal_session_id: String,
@@ -831,6 +832,56 @@ impl TerminalSessionBroker {
         Ok(())
     }
 
+    #[cfg(unix)]
+    pub(crate) fn detach_local_echo_probe(&self, transport_session_id: &str) -> Result<(), String> {
+        let Some((attachment, slot)) = self.lookup_enabled_session_slot(transport_session_id)?
+        else {
+            return Ok(());
+        };
+        let mut record = slot.lock_current(transport_session_id, &attachment)?;
+        record.echo_probe = None;
+        Ok(())
+    }
+
+    pub(crate) fn observe_raw_output_discard(
+        &self,
+        transport_session_id: &str,
+        bytes: &[u8],
+    ) -> Result<bool, String> {
+        if bytes.is_empty() {
+            return Ok(false);
+        }
+        let Some((attachment, slot)) = self.lookup_enabled_session_slot(transport_session_id)?
+        else {
+            return Ok(false);
+        };
+        let mut record = slot.lock_current(transport_session_id, &attachment)?;
+        let latency_sample_started =
+            (record.next_output_sequence % TRANSPORT_LATENCY_SAMPLE_INTERVAL_FRAMES == 1)
+                .then(Instant::now);
+        let frame = TerminalRawOutputFrame {
+            protocol_version: 1,
+            terminal_session_id: record.terminal_session_id.clone(),
+            terminal_generation: record.terminal_generation,
+            frame_type: "rawOutput",
+            sequence: record.next_output_sequence,
+            byte_offset: record.next_byte_offset,
+            bytes: bytes.to_vec(),
+        };
+        let accepted = matches!(
+            accept_raw_frame(&mut record, frame, self.config, &self.counters)?,
+            RawFrameAcceptance::Accepted
+        );
+        if accepted {
+            if let Some(started) = latency_sample_started {
+                self.counters.observe_transport_latency(started.elapsed());
+            }
+        }
+        drop(record);
+        slot.notify();
+        Ok(accepted)
+    }
+
     pub(crate) fn observe_raw_output(
         &self,
         transport_session_id: &str,
@@ -951,10 +1002,8 @@ impl TerminalSessionBroker {
         terminal_session_id: &str,
         terminal_generation: u64,
     ) -> Result<TerminalDisplaySnapshot, String> {
-        let state = self.lock()?;
-        let attachment = current_attachment(&state, transport_session_id)?.clone();
-        let mut record_guard = current_record_mut(&state, transport_session_id, &attachment)?;
-        let record = &mut *record_guard;
+        let (attachment, slot) = self.lookup_session_slot(transport_session_id)?;
+        let record = slot.lock_current(transport_session_id, &attachment)?;
         if record.terminal_session_id != terminal_session_id
             || record.terminal_generation != terminal_generation
         {
@@ -1082,13 +1131,12 @@ impl TerminalSessionBroker {
     ) -> Result<TerminalExecutionCapabilities, String> {
         let (_, slot) = self.lookup_session_slot(transport_session_id)?;
         let record = slot.lock()?;
-        let snapshot = record.snapshot()?;
         Ok(TerminalExecutionCapabilities {
-            terminal_generation: snapshot.terminal_generation,
-            open: snapshot.open,
-            shell: snapshot.integration_shell,
-            prompt_ready: snapshot.prompt_ready,
-            integration_capabilities: snapshot.integration_capabilities,
+            terminal_generation: record.terminal_generation,
+            open: record.open,
+            shell: record.integration_shell,
+            prompt_ready: record.prompt_ready,
+            integration_capabilities: record.integration_capabilities(),
             input_recovery_required: record.native_recovery_required
                 || record.native_clear_pending.is_some(),
         })
@@ -1157,6 +1205,10 @@ impl TerminalSessionBroker {
             .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
         drop(state);
         on_attached();
+        let needle_lower = (!request.case_sensitive)
+            .then(|| request.text.as_deref().map(str::to_lowercase))
+            .flatten();
+        let mut last_checked_screen_version: Option<u64> = None;
         let mut record = slot.lock()?;
         loop {
             if record.terminal_generation != terminal_generation || !record.open {
@@ -1167,12 +1219,41 @@ impl TerminalSessionBroker {
                     snapshot: None,
                 });
             }
-            let snapshot = record
+            let screen = record
                 .screen_model
                 .as_ref()
-                .map(|screen| screen.snapshot(&terminal_session_id, terminal_generation))
                 .ok_or_else(|| "TERMINAL_SCREEN_UNAVAILABLE".to_string())?;
-            if let Some(reason) = terminal_wait_reason(&record, &snapshot, &request) {
+            let screen_version = screen.version();
+            let through_output_sequence = screen.through_output_sequence();
+            let mut snapshot: Option<TerminalScreenSnapshot> = None;
+            if let Some(text) = request.text.as_deref() {
+                if last_checked_screen_version != Some(screen_version) {
+                    last_checked_screen_version = Some(screen_version);
+                    let built = screen.snapshot(&terminal_session_id, terminal_generation);
+                    if terminal_wait_text_matches(
+                        &built,
+                        text,
+                        request.case_sensitive,
+                        needle_lower.as_deref(),
+                    ) {
+                        return Ok(TerminalWaitResult {
+                            reason: TerminalWaitReason::TextFound,
+                            lifecycle_sequence: record.integration_event_sequence,
+                            open: true,
+                            snapshot: Some(built),
+                        });
+                    }
+                    snapshot = Some(built);
+                }
+            }
+            if let Some(reason) = terminal_wait_scalar_reason(
+                &record,
+                through_output_sequence,
+                screen_version,
+                &request,
+            ) {
+                let snapshot = snapshot
+                    .unwrap_or_else(|| screen.snapshot(&terminal_session_id, terminal_generation));
                 return Ok(TerminalWaitResult {
                     reason,
                     lifecycle_sequence: record.integration_event_sequence,
@@ -1182,6 +1263,8 @@ impl TerminalSessionBroker {
             }
             let now = Instant::now();
             if now >= deadline {
+                let snapshot = snapshot
+                    .unwrap_or_else(|| screen.snapshot(&terminal_session_id, terminal_generation));
                 TerminalRolloutCounters::increment(&self.counters.timeout);
                 return Ok(TerminalWaitResult {
                     reason: TerminalWaitReason::TimedOut,
@@ -1263,6 +1346,9 @@ impl TerminalSessionBroker {
         if !shell.supported() {
             record.integration_shell = Some(shell);
             degrade_record(record, "unsupportedShell")?;
+            drop(record_guard);
+            notify_session(&state, &attachment.terminal_session_id);
+            self.changed.notify_all();
             return Ok(());
         }
         record.integration_state = TerminalIntegrationState::Initializing;
@@ -1284,6 +1370,9 @@ impl TerminalSessionBroker {
         record.native_jobs = false;
         record.native_comments = false;
         advance_integration_state_revision(record)?;
+        drop(record_guard);
+        notify_session(&state, &attachment.terminal_session_id);
+        self.changed.notify_all();
         Ok(())
     }
 
@@ -1476,9 +1565,10 @@ impl TerminalSessionBroker {
                 let operation = current_record_mut(&mut state, transport_session_id, &attachment)?
                     .active_command
                     .as_ref()
-                    .map(|operation| operation.snapshot())
-                    .transpose()?
-                    .map(|snapshot| snapshot.operation_id);
+                    .map(|operation| {
+                        Ok::<_, String>(operation.lock()?.intent.identity.operation_id.clone())
+                    })
+                    .transpose()?;
                 operation.as_ref().and_then(|operation| {
                     state
                         .prepared_job_commands
@@ -1736,8 +1826,8 @@ impl TerminalSessionBroker {
                     && !read_only_probe
                     && record.active_command.as_ref().is_some_and(|command| {
                         command
-                            .snapshot()
-                            .is_ok_and(|snapshot| snapshot.state == TerminalCommandState::Submitted)
+                            .lock()
+                            .is_ok_and(|data| data.state() == TerminalCommandState::Submitted)
                     })
                 {
                     record.native_recovery_required = true;
@@ -2008,6 +2098,9 @@ impl TerminalSessionBroker {
             return Ok(());
         }
         degrade_record(record, reason)?;
+        drop(record_guard);
+        notify_session(&state, &attachment.terminal_session_id);
+        self.changed.notify_all();
         Ok(())
     }
 
@@ -2349,7 +2442,28 @@ impl TerminalSessionBroker {
     ) -> Result<crate::terminal_jobs::NativeShellJob, String> {
         let mut state = self.lock()?;
         if state.jobs.len() >= 4096 {
-            return Err("TERMINAL_JOB_CAPACITY_REACHED".into());
+            let BrokerState { jobs, sessions, .. } = &mut *state;
+            jobs.retain(|_, job| {
+                let terminal_state = job.state == "exited" || job.state == "rejected";
+                !terminal_state
+                    || sessions
+                        .get(&job.terminal_session_id)
+                        .is_some_and(|slot| slot.lock().is_ok_and(|record| record.open))
+            });
+            if state.jobs.len() >= 4096 {
+                if let Some(oldest_terminal_key) = state
+                    .jobs
+                    .iter()
+                    .filter(|(_, job)| job.state == "exited" || job.state == "rejected")
+                    .min_by_key(|(_, job)| job.observed_at_unix_ms)
+                    .map(|(handle, _)| handle.clone())
+                {
+                    state.jobs.remove(&oldest_terminal_key);
+                }
+            }
+            if state.jobs.len() >= 4096 {
+                return Err("TERMINAL_JOB_CAPACITY_REACHED".into());
+            }
         }
         if state.jobs.values().any(|job| {
             job.owner_target_id == target.target_id()
@@ -3252,24 +3366,28 @@ impl TerminalSessionBroker {
         F: FnOnce() -> Result<(), String>,
     {
         let state = self.lock()?;
+        let looked_up = state
+            .transports
+            .get(transport_session_id)
+            .and_then(|attachment| {
+                state
+                    .sessions
+                    .get(&attachment.terminal_session_id)
+                    .map(|slot| (attachment.clone(), slot.clone()))
+            });
+        let mut record_guard = match looked_up.as_ref() {
+            Some((_, slot)) => Some(slot.lock()?),
+            None => None,
+        };
         if require_foreground_handoff {
-            let handoff_active = state
-                .transports
-                .get(transport_session_id)
-                .and_then(|attachment| {
-                    state
-                        .sessions
-                        .get(&attachment.terminal_session_id)
-                        .map(|slot| (attachment, slot))
-                })
-                .is_some_and(|(attachment, slot)| {
-                    slot.lock().is_ok_and(|record| {
-                        record.open
-                            && record.transport_session_id == transport_session_id
-                            && record.terminal_generation == attachment.terminal_generation
-                            && record.user_controls_foreground()
-                    })
-                });
+            let handoff_active = looked_up.as_ref().zip(record_guard.as_deref()).is_some_and(
+                |((attachment, _), record)| {
+                    record.open
+                        && record.transport_session_id == transport_session_id
+                        && record.terminal_generation == attachment.terminal_generation
+                        && record.user_controls_foreground()
+                },
+            );
             if !handoff_active {
                 return Err("TERMINAL_INPUT_BLOCKED_BY_AGENT: user input is blocked while an Agent owns the terminal".into());
             }
@@ -3277,13 +3395,7 @@ impl TerminalSessionBroker {
         // Even a lease release or trusted feature rollback must not expose a
         // partially typed command to a later user Enter. A scoped interrupt is
         // still allowed; only a trusted prompt or a new generation clears it.
-        if let Some(slot) = state
-            .transports
-            .get(transport_session_id)
-            .and_then(|attachment| state.sessions.get(&attachment.terminal_session_id))
-            .cloned()
-        {
-            let record = slot.lock()?;
+        if let Some(record) = record_guard.as_deref() {
             let owned_clear = bytes == [0x18, 0x04]
                 && matches!(&source,TerminalBrokerInputSource::System{operation_id}if record.native_clear_pending.as_ref().is_some_and(|(expected,_,_,_)|expected==operation_id));
             let owned_native_clear = input_kind == TerminalInputKind::NativeDraftClear
@@ -3321,6 +3433,7 @@ impl TerminalSessionBroker {
             }
         }
         if !state.rollout.enabled {
+            drop(record_guard);
             write()?;
             return Ok(None);
         }
@@ -3335,8 +3448,17 @@ impl TerminalSessionBroker {
             TerminalBrokerInputSource::User => None,
         };
         let attachment = current_attachment(&state, transport_session_id)?.clone();
-        let mut record_guard = current_record_mut(&state, transport_session_id, &attachment)?;
-        let record = &mut *record_guard;
+        let record = record_guard
+            .as_deref_mut()
+            .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
+        if !record.open {
+            return Err("TERMINAL_BROKER_GENERATION_CLOSED".into());
+        }
+        if record.transport_session_id != transport_session_id
+            || record.terminal_generation != attachment.terminal_generation
+        {
+            return Err("TERMINAL_BROKER_STALE_GENERATION".into());
+        }
         let scoped_native_interrupt = matches!(&source,TerminalBrokerInputSource::System{operation_id} if input_kind==TerminalInputKind::Interrupt && bytes==[3] && record.active_command.as_ref().is_some_and(|command|command.lock().is_ok_and(|data|data.native_protocol && data.intent.identity.operation_id==*operation_id && data.lifecycle.may_have_submitted() && !data.lifecycle.ended())));
         if let Some((operation, prepared)) =
             prepared_job.as_ref().filter(|_| !scoped_native_interrupt)
@@ -3361,21 +3483,14 @@ impl TerminalSessionBroker {
         {
             return Err("TERMINAL_INTEGRATION_NOT_READY".into());
         }
-        let lease = record
+        let lease_id = record
             .lease
             .as_ref()
-            .ok_or_else(|| "TERMINAL_BROKER_LEASE_UNAVAILABLE".to_string())?;
-        let request = TerminalInputRequest {
-            terminal_session_id: record.terminal_session_id.clone(),
-            terminal_generation: record.terminal_generation,
-            lease_id: lease.lease_id.clone(),
-            input_sequence: record.next_input_sequence,
-            source,
-            input_kind,
-            bytes: bytes.to_vec(),
-        };
+            .ok_or_else(|| "TERMINAL_BROKER_LEASE_UNAVAILABLE".to_string())?
+            .lease_id
+            .clone();
         if bytes != [3]
-            && matches!(request.source, TerminalBrokerInputSource::User)
+            && matches!(source, TerminalBrokerInputSource::User)
             && record.active_command.as_ref().is_some_and(|command| {
                 command.lock().is_ok_and(|data| {
                     data.lifecycle.requested_settlement().is_some()
@@ -3388,7 +3503,16 @@ impl TerminalSessionBroker {
                 "TERMINAL_INPUT_RECOVERY_REQUIRED: stop settlement is not confirmed".into(),
             );
         }
-        let receipt = validate_input(record, &request)?;
+        let receipt = validate_input_fields(
+            record,
+            &record.terminal_session_id,
+            record.terminal_generation,
+            &lease_id,
+            record.next_input_sequence,
+            &source,
+            input_kind,
+            bytes.len(),
+        )?;
         let next_input_sequence = record
             .next_input_sequence
             .checked_add(1)
@@ -3407,28 +3531,26 @@ impl TerminalSessionBroker {
                             .is_some_and(|(prefix, _)| prefix.is_empty())
                 })
             });
-        let user_submission = matches!(&request.source, TerminalBrokerInputSource::User)
+        let user_submission = matches!(&source, TerminalBrokerInputSource::User)
             && record.prompt_ready
             && (bytes == b"\n" || bytes == b"\r");
-        let submitted_agent_line =
-            matches!(&request.source, TerminalBrokerInputSource::Agent { .. })
-                && (bytes == [0x18, 0x05] || bytes == b"\n" || bytes == b"\r");
-        let command_input_pending =
-            matches!(&request.source, TerminalBrokerInputSource::Agent { .. })
-                && record
-                    .active_command
-                    .as_ref()
-                    .map(|command| {
-                        command
-                            .lock()
-                            .map(|data| data.state() == TerminalCommandState::Submitted)
-                    })
-                    .transpose()?
-                    .unwrap_or(false);
+        let submitted_agent_line = matches!(&source, TerminalBrokerInputSource::Agent { .. })
+            && (bytes == [0x18, 0x05] || bytes == b"\n" || bytes == b"\r");
+        let command_input_pending = matches!(&source, TerminalBrokerInputSource::Agent { .. })
+            && record
+                .active_command
+                .as_ref()
+                .map(|command| {
+                    command
+                        .lock()
+                        .map(|data| data.state() == TerminalCommandState::Submitted)
+                })
+                .transpose()?
+                .unwrap_or(false);
         // Authorization, transport admission, and input-sequence commit share
         // the broker lock. A rejected transport enqueue therefore consumes no
         // sequence and writes no partial input.
-        if matches!(&request.source, TerminalBrokerInputSource::Agent { .. })
+        if matches!(&source, TerminalBrokerInputSource::Agent { .. })
             && bytes != [0x18, 0x01]
             && bytes != [0x18, 0x02]
         {
@@ -3463,7 +3585,7 @@ impl TerminalSessionBroker {
                     {
                         return Err("TERMINAL_INPUT_PROOF_REQUIRED".into());
                     }
-                    if data.intent.identity.lease_id != request.lease_id {
+                    if data.intent.identity.lease_id != lease_id {
                         return Err("TERMINAL_BROKER_STALE_LEASE".into());
                     }
                     let event = if data.requires_complete_proof {
@@ -3488,7 +3610,7 @@ impl TerminalSessionBroker {
         }
         write()?;
         if record.active_command.is_none()
-            && matches!(request.source, TerminalBrokerInputSource::Agent { .. })
+            && matches!(source, TerminalBrokerInputSource::Agent { .. })
         {
             let previous = record.interactive_input.take();
             let text = std::str::from_utf8(bytes).ok().filter(|text| {
@@ -3520,7 +3642,7 @@ impl TerminalSessionBroker {
         }
         if input_kind == TerminalInputKind::Interrupt
             && bytes == [3]
-            && matches!(request.source, TerminalBrokerInputSource::System { .. })
+            && matches!(source, TerminalBrokerInputSource::System { .. })
         {
             if let Some(command) = &record.active_command {
                 let mut data = command.lock()?;
@@ -3535,9 +3657,7 @@ impl TerminalSessionBroker {
                 }
             }
         }
-        if bytes == [0x18, 0x04]
-            && matches!(&request.source, TerminalBrokerInputSource::System { .. })
-        {
+        if bytes == [0x18, 0x04] && matches!(&source, TerminalBrokerInputSource::System { .. }) {
             if let Some((_, _, _, queued)) = &mut record.native_clear_pending {
                 *queued = true;
             }
@@ -3548,13 +3668,14 @@ impl TerminalSessionBroker {
         if submitted_agent_line {
             record.native_clear_scope = None;
         }
+        record.next_input_sequence = next_input_sequence;
         if user_submission {
             record.prompt_ready = false;
             advance_integration_state_revision(record)?;
+            drop(record_guard);
             notify_session(&state, &attachment.terminal_session_id);
             self.changed.notify_all();
         }
-        record.next_input_sequence = next_input_sequence;
         Ok(Some(receipt))
     }
 
@@ -3565,19 +3686,38 @@ impl TerminalSessionBroker {
         if let Some(transport_session_id) = transport_session_id {
             validate_identifier(transport_session_id, "transport session id")?;
         }
-        let state = self.lock()?;
-        let session = transport_session_id
-            .and_then(|transport_session_id| state.transports.get(transport_session_id))
-            .and_then(|attachment| state.sessions.get(&attachment.terminal_session_id))
-            .map(|slot| slot.lock()?.snapshot())
-            .transpose()?;
+        let (
+            rollout,
+            shell_integration_rollout,
+            terminal_execute_rollout,
+            remote_bound_terminal_rollout,
+            interactive_tools_rollout,
+            remote_interactive_tools_rollout,
+            slot,
+        ) = {
+            let state = self.lock()?;
+            let slot = transport_session_id
+                .and_then(|transport_session_id| state.transports.get(transport_session_id))
+                .and_then(|attachment| state.sessions.get(&attachment.terminal_session_id))
+                .cloned();
+            (
+                state.rollout.clone(),
+                state.shell_integration_rollout.clone(),
+                state.terminal_execute_rollout.clone(),
+                state.remote_bound_terminal_rollout.clone(),
+                state.interactive_tools_rollout.clone(),
+                state.remote_interactive_tools_rollout.clone(),
+                slot,
+            )
+        };
+        let session = slot.map(|slot| slot.lock()?.snapshot()).transpose()?;
         Ok(TerminalBrokerSnapshot {
-            rollout: state.rollout.clone(),
-            shell_integration_rollout: state.shell_integration_rollout.clone(),
-            terminal_execute_rollout: state.terminal_execute_rollout.clone(),
-            remote_bound_terminal_rollout: state.remote_bound_terminal_rollout.clone(),
-            interactive_tools_rollout: state.interactive_tools_rollout.clone(),
-            remote_interactive_tools_rollout: state.remote_interactive_tools_rollout.clone(),
+            rollout,
+            shell_integration_rollout,
+            terminal_execute_rollout,
+            remote_bound_terminal_rollout,
+            interactive_tools_rollout,
+            remote_interactive_tools_rollout,
             counters: self.counters.snapshot(),
             session,
         })
@@ -4041,6 +4181,12 @@ fn remember_closed_session(
             state
                 .transports
                 .retain(|_, attachment| attachment.terminal_session_id != evicted_session_id);
+            state
+                .jobs
+                .retain(|_, job| job.terminal_session_id != evicted_session_id);
+            state
+                .prepared_job_commands
+                .retain(|_, prepared| prepared.job.terminal_session_id != evicted_session_id);
         }
     }
 }

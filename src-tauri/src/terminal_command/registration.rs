@@ -8,10 +8,17 @@ pub(crate) const POWERSHELL7_NATIVE_PROFILE: &str =
     "powershell-7.6.9-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native";
 
 pub(crate) fn mac_zle_pin(field: &str) -> Result<String, String> {
-    let pin: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../scripts/dependency-builds/zsh/pin.json"
-    ))
-    .map_err(|_| "TERMINAL_NATIVE_SCOPED_CORE_MISMATCH")?;
+    static PIN: std::sync::OnceLock<Result<serde_json::Value, &'static str>> =
+        std::sync::OnceLock::new();
+    let pin = PIN
+        .get_or_init(|| {
+            serde_json::from_str(include_str!(
+                "../../../scripts/dependency-builds/zsh/pin.json"
+            ))
+            .map_err(|_| "TERMINAL_NATIVE_SCOPED_CORE_MISMATCH")
+        })
+        .as_ref()
+        .map_err(|&error| error.to_string())?;
     pin["targets"]["macos-arm64"][field]
         .as_str()
         .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))

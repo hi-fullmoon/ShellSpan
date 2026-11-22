@@ -41,7 +41,7 @@ struct PromptBoundary {
     command_epoch: u64,
     application: Option<ForegroundApplication>,
     cleanup: String,
-    tty_reply: Option<TtyRecoveryReply>,
+    tty_replies: Vec<TtyRecoveryReply>,
 }
 
 fn parse_job_ids(jobs: &[u8]) -> Option<Vec<u32>> {
@@ -192,7 +192,7 @@ impl vte::Perform for PromptBoundary {
             } else {
                 TtyDecision::Keep
             };
-            self.tty_reply = Some(TtyRecoveryReply { ticket, decision });
+            self.tty_replies.push(TtyRecoveryReply { ticket, decision });
             return;
         }
         let (stopped, jobs, suspended) = match (*kind, fields) {
@@ -270,7 +270,7 @@ impl DisplayRecovery {
                 command_epoch: 0,
                 application: None,
                 cleanup: String::new(),
-                tty_reply: None,
+                tty_replies: Vec::new(),
             },
         }
     }
@@ -301,9 +301,15 @@ impl DisplayRecovery {
     // Inspect the raw PTY stream in the transport worker before output delivery
     // can be deferred by frontend backpressure. The shell reads the reply only
     // at the primary prompt while the OS tty still has the candidate settings.
+    pub(crate) fn tty_replies(&mut self, bytes: &[u8]) -> Vec<TtyRecoveryReply> {
+        self.parser.advance(&mut self.boundary, bytes);
+        self.boundary.cleanup.clear();
+        std::mem::take(&mut self.boundary.tty_replies)
+    }
+
+    #[cfg(test)]
     pub(crate) fn tty_reply(&mut self, bytes: &[u8]) -> Option<TtyRecoveryReply> {
-        let _ = self.apply(bytes);
-        self.boundary.tty_reply.take()
+        self.tty_replies(bytes).pop()
     }
 }
 
@@ -334,7 +340,7 @@ impl TtyRecoveryWatcher {
 
     #[cfg(unix)]
     pub(crate) fn observe_local(&mut self, bytes: &[u8]) {
-        if let Some(reply) = self.recovery.tty_reply(bytes) {
+        for reply in self.recovery.tty_replies(bytes) {
             if let Err(error) = reply.answer_local(&self.root) {
                 log::warn!("Failed to deliver local terminal mode recovery reply: {error}");
             }
@@ -342,7 +348,15 @@ impl TtyRecoveryWatcher {
     }
 
     pub(crate) fn observe_ssh(&mut self, bytes: &[u8]) -> Option<Vec<u8>> {
-        self.recovery.tty_reply(bytes).map(|reply| reply.encode())
+        let replies = self.recovery.tty_replies(bytes);
+        if replies.is_empty() {
+            return None;
+        }
+        let mut encoded = Vec::new();
+        for reply in replies {
+            encoded.extend_from_slice(&reply.encode());
+        }
+        Some(encoded)
     }
 }
 
@@ -446,5 +460,16 @@ mod tests {
         assert_eq!(reply.encode(), b"TTY-RECOVERY 1 1\n");
         let prompt = b"\x1b]6973;pty-fixture;0; ; \x07";
         assert_eq!(recovery.apply(prompt).as_ref(), prompt);
+    }
+
+    #[test]
+    fn coalesced_tty_recovery_requests_return_all_replies_in_order() {
+        let mut recovery = DisplayRecovery::new("pty-fixture");
+        let _ = recovery.apply(b"\x1b]6975;pty-fixture;1; \x07");
+        let chunk = b"\x1b]6974;pty-fixture;1;0; ; ;1\x07\x1b]6974;pty-fixture;2;0; ; ;1\x07";
+        let replies = recovery.tty_replies(chunk);
+        assert_eq!(replies.len(), 2);
+        assert_eq!(replies[0].encode(), b"TTY-RECOVERY 1 0\n");
+        assert_eq!(replies[1].encode(), b"TTY-RECOVERY 2 0\n");
     }
 }

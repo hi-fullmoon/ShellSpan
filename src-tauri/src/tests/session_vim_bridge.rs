@@ -806,7 +806,64 @@ fn isolated_ssh_vim_bridge_guards_disk_versions_and_resumes() {
             agent.engine.release_terminal_turn("editor-agent").unwrap();
         }
 
-        ui_input(&mut terminal, ":qa!\r");
+        // Unsaved changes in any buffer must reject close_vim_editor and preserve the editor.
+        let dirty_observed = inspect(&mut terminal, &mut bridge, &root);
+        let dirty_insert = prepare(
+            &mut terminal,
+            &mut bridge,
+            &root,
+            dirty_observed,
+            EditAction::Insert {
+                position: InsertPosition::End,
+                text: "unsaved close guard".into(),
+            },
+        );
+        let EditorReply::Inserted {
+            snapshot: dirty_snapshot,
+        } = commit(&mut terminal, &mut bridge, dirty_insert)
+        else {
+            panic!("{editor} expected dirty insertion before close guard");
+        };
+        let (_, _, rejected_close) = exchange(
+            &mut terminal,
+            &mut bridge,
+            EditorCommand::Prepare {
+                root: root.clone(),
+                owner: OWNER.into(),
+                target: EditorTarget {
+                    snapshot_id: dirty_snapshot.id,
+                    path: dirty_snapshot.path,
+                },
+                action: EditAction::Close,
+            },
+        )
+        .unwrap();
+        assert!(
+            matches!(
+                rejected_close,
+                EditorReply::Rejected {
+                    code: EditorError::UnsavedChanges
+                }
+            ),
+            "{editor} close with unsaved buffer: {rejected_close:?}"
+        );
+        assert!(bridge.attached(), "{editor} must stay open when unsaved");
+
+        // Reload cleanly, then close through the bridge and verify detach + prompt return.
+        editor_command(&mut terminal, &mut bridge, ":edit!");
+        let clean_observed = inspect(&mut terminal, &mut bridge, &root);
+        let clean_close = prepare(
+            &mut terminal,
+            &mut bridge,
+            &root,
+            clean_observed,
+            EditAction::Close,
+        );
+        let closed = commit(&mut terminal, &mut bridge, clean_close);
+        assert!(
+            matches!(closed, EditorReply::Closed { .. }),
+            "{editor} clean close: {closed:?}"
+        );
         until(&mut terminal, &mut bridge, |terminal, bridge| {
             !bridge.attached()
                 && terminal

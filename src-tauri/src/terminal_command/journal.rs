@@ -23,6 +23,13 @@ pub(crate) struct SubmissionIntent {
     pub no_auto_replay: bool,
 }
 
+#[derive(Debug)]
+struct CachedJournalConnection {
+    connection: Connection,
+    #[cfg(unix)]
+    file_identity: (u64, u64),
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct SubmissionJournal {
     configured_root: Arc<Mutex<Option<PathBuf>>>,
@@ -30,7 +37,7 @@ pub(crate) struct SubmissionJournal {
     // Keep this journal's independent connection lifetimes/transactions from
     // racing WAL shared-memory teardown on Windows. This is a journal-local
     // I/O gate, never the Broker/operation state lock.
-    io_gate: Arc<Mutex<()>>,
+    io_gate: Arc<Mutex<Option<CachedJournalConnection>>>,
     root: Arc<Mutex<Option<PathBuf>>>,
     startup_unsettled: Arc<Mutex<HashSet<String>>>,
     #[cfg(test)]
@@ -46,7 +53,7 @@ impl SubmissionJournal {
         Self {
             configured_root: Arc::new(Mutex::new(None)),
             initialization_gate: Arc::new(Mutex::new(())),
-            io_gate: Arc::new(Mutex::new(())),
+            io_gate: Arc::new(Mutex::new(None)),
             root: Arc::new(Mutex::new(None)),
             startup_unsettled: Arc::new(Mutex::new(HashSet::new())),
             #[cfg(test)]
@@ -279,7 +286,11 @@ impl SubmissionJournal {
         *result.temporary.lock().unwrap() = Some(directory);
         result
     }
-    fn connection(&self) -> Result<Connection, String> {
+    fn with_connection<T>(
+        &self,
+        operation: impl FnOnce(&Connection) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let mut cached = self.io_gate.lock().map_err(|_| unavailable())?;
         self.ensure_initialized()?;
         let path = self
             .root
@@ -289,18 +300,60 @@ impl SubmissionJournal {
             .ok_or_else(unavailable)?;
         let app_root = path.parent().and_then(Path::parent).ok_or_else(invalid)?;
         if !read_initialization_marker(app_root)? {
+            *cached = None;
             return Err(unavailable());
         }
-        let connection = connect(&path, false)?;
-        if connection
-            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
-            .map_err(db_error)?
-            != SCHEMA_VERSION
+        let db_meta = match fs::symlink_metadata(&path) {
+            Ok(meta) if meta.is_file() && !meta.file_type().is_symlink() => meta,
+            _ => {
+                *cached = None;
+                return Err(unavailable());
+            }
+        };
+        #[cfg(unix)]
+        let current_identity = {
+            use std::os::unix::fs::MetadataExt;
+            (db_meta.dev(), db_meta.ino())
+        };
+        #[cfg(not(unix))]
+        let _ = db_meta;
+        #[cfg(unix)]
+        if cached
+            .as_ref()
+            .is_some_and(|entry| entry.file_identity != current_identity)
         {
-            return Err(invalid());
+            *cached = None;
         }
-        validate_schema(&connection)?;
-        Ok(connection)
+        if cached.is_none() {
+            let connection = connect(&path, false)?;
+            if connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .map_err(db_error)?
+                != SCHEMA_VERSION
+            {
+                return Err(invalid());
+            }
+            validate_schema(&connection)?;
+            *cached = Some(CachedJournalConnection {
+                connection,
+                #[cfg(unix)]
+                file_identity: current_identity,
+            });
+        }
+        let result = operation(
+            &cached
+                .as_ref()
+                .expect("initialized journal connection")
+                .connection,
+        );
+        if let Err(ref error) = result {
+            if error != "TERMINAL_SUBMISSION_ALREADY_RECORDED"
+                && error != "TERMINAL_SUBMISSION_IDENTITY_MISMATCH"
+            {
+                *cached = None;
+            }
+        }
+        result
     }
     pub fn ensure_new_operation(
         &self,
@@ -308,24 +361,21 @@ impl SubmissionJournal {
         task: &str,
         operation: &str,
     ) -> Result<(), String> {
-        let _io = self.io_gate.lock().map_err(|_| unavailable())?;
-        let connection = self.connection()?;
-        let exists: bool = connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM submissions WHERE call_key=?1)",
-                [key_for_call(agent, task, operation)],
-                |row| row.get(0),
-            )
-            .map_err(db_error)?;
-        if exists {
-            Err("TERMINAL_SUBMISSION_ALREADY_RECORDED".into())
-        } else {
-            Ok(())
-        }
+        self.with_connection(|connection| {
+            let mut stmt = connection
+                .prepare_cached("SELECT EXISTS(SELECT 1 FROM submissions WHERE call_key=?1)")
+                .map_err(db_error)?;
+            let exists: bool = stmt
+                .query_row([key_for_call(agent, task, operation)], |row| row.get(0))
+                .map_err(db_error)?;
+            if exists {
+                Err("TERMINAL_SUBMISSION_ALREADY_RECORDED".into())
+            } else {
+                Ok(())
+            }
+        })
     }
     pub fn record(&self, identity: &CommandIdentity) -> Result<(), String> {
-        let _io = self.io_gate.lock().map_err(|_| unavailable())?;
-        let connection = self.connection()?;
         let record = SubmissionIntent {
             version: 1,
             identity: identity.clone(),
@@ -335,35 +385,43 @@ impl SubmissionJournal {
         if encoded.len() > 4096 {
             return Err(invalid());
         }
-        connection.execute("INSERT INTO submissions(call_key,agent_session_id,record_json,settled) VALUES(?1,?2,?3,0)",
-            params![key(identity),identity.agent_session_id,encoded]).map_err(|error|match error {
-                rusqlite::Error::SqliteFailure(code,_) if code.code==rusqlite::ErrorCode::ConstraintViolation=>"TERMINAL_SUBMISSION_ALREADY_RECORDED".into(),
-                other=>db_error(other),
-            })?;
-        Ok(())
+        self.with_connection(|connection| {
+            let mut stmt = connection
+                .prepare_cached("INSERT INTO submissions(call_key,agent_session_id,record_json,settled) VALUES(?1,?2,?3,0)")
+                .map_err(db_error)?;
+            stmt.execute(params![key(identity), identity.agent_session_id, encoded])
+                .map_err(|error| match error {
+                    rusqlite::Error::SqliteFailure(code, _)
+                        if code.code == rusqlite::ErrorCode::ConstraintViolation =>
+                    {
+                        "TERMINAL_SUBMISSION_ALREADY_RECORDED".into()
+                    }
+                    other => db_error(other),
+                })?;
+            Ok(())
+        })
     }
     pub fn settle(&self, identity: &CommandIdentity) -> Result<(), String> {
-        let _io = self.io_gate.lock().map_err(|_| unavailable())?;
-        let connection = self.connection()?;
-        let encoded: Option<String> = connection
-            .query_row(
-                "SELECT record_json FROM submissions WHERE call_key=?1",
-                [key(identity)],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(db_error)?;
-        let record = decode(&encoded.ok_or_else(invalid)?)?;
-        if &record.identity != identity {
-            return Err("TERMINAL_SUBMISSION_IDENTITY_MISMATCH".into());
-        }
-        connection
-            .execute(
-                "UPDATE submissions SET settled=1 WHERE call_key=?1",
-                [key(identity)],
-            )
-            .map_err(db_error)?;
-        Ok(())
+        self.with_connection(|connection| {
+            let call_key = key(identity);
+            let encoded: Option<String> = {
+                let mut stmt = connection
+                    .prepare_cached("SELECT record_json FROM submissions WHERE call_key=?1")
+                    .map_err(db_error)?;
+                stmt.query_row([&call_key], |row| row.get(0))
+                    .optional()
+                    .map_err(db_error)?
+            };
+            let record = decode(&encoded.ok_or_else(invalid)?)?;
+            if &record.identity != identity {
+                return Err("TERMINAL_SUBMISSION_IDENTITY_MISMATCH".into());
+            }
+            let mut stmt = connection
+                .prepare_cached("UPDATE submissions SET settled=1 WHERE call_key=?1")
+                .map_err(db_error)?;
+            stmt.execute([&call_key]).map_err(db_error)?;
+            Ok(())
+        })
     }
     #[cfg(test)]
     pub fn unresolved(&self) -> Result<Vec<SubmissionIntent>, String> {
@@ -373,39 +431,39 @@ impl SubmissionJournal {
         &self,
         agent: Option<&str>,
     ) -> Result<Vec<SubmissionIntent>, String> {
-        let _io = self.io_gate.lock().map_err(|_| unavailable())?;
-        let connection = self.connection()?;
-        let sql = if agent.is_some() {
-            "SELECT call_key,agent_session_id,record_json FROM submissions WHERE settled=0 AND agent_session_id=?1 ORDER BY call_key LIMIT 4097"
-        } else {
-            "SELECT call_key,agent_session_id,record_json FROM submissions WHERE settled=0 AND ?1 IS NULL ORDER BY call_key LIMIT 4097"
-        };
-        let mut statement = connection.prepare(sql).map_err(db_error)?;
-        let rows = statement
-            .query_map([agent], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })
-            .map_err(db_error)?;
-        let mut result = Vec::new();
-        for row in rows {
-            let (stored_key, stored_agent, encoded) = row.map_err(db_error)?;
-            let record = decode(&encoded)?;
-            if key(&record.identity) != stored_key
-                || record.identity.agent_session_id != stored_agent
-                || result.len() >= 4096
-            {
-                return Err(invalid());
+        self.with_connection(|connection| {
+            let sql = if agent.is_some() {
+                "SELECT call_key,agent_session_id,record_json FROM submissions WHERE settled=0 AND agent_session_id=?1 ORDER BY call_key LIMIT 4097"
+            } else {
+                "SELECT call_key,agent_session_id,record_json FROM submissions WHERE settled=0 AND ?1 IS NULL ORDER BY call_key LIMIT 4097"
+            };
+            let mut statement = connection.prepare_cached(sql).map_err(db_error)?;
+            let rows = statement
+                .query_map([agent], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })
+                .map_err(db_error)?;
+            let mut result = Vec::new();
+            for row in rows {
+                let (stored_key, stored_agent, encoded) = row.map_err(db_error)?;
+                let record = decode(&encoded)?;
+                if key(&record.identity) != stored_key
+                    || record.identity.agent_session_id != stored_agent
+                    || result.len() >= 4096
+                {
+                    return Err(invalid());
+                }
+                if agent.is_some_and(|agent| agent != record.identity.agent_session_id) {
+                    return Err(invalid());
+                }
+                result.push(record);
             }
-            if agent.is_some_and(|agent| agent != record.identity.agent_session_id) {
-                return Err(invalid());
-            }
-            result.push(record);
-        }
-        Ok(result)
+            Ok(result)
+        })
     }
     pub fn recovered_for_agent(&self, agent: &str) -> Result<Vec<SubmissionIntent>, String> {
         let unresolved = self.unresolved_for_agent(Some(agent))?;

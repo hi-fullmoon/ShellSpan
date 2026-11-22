@@ -48,7 +48,8 @@ use super::{
     NativeCapabilityStoreNative, ProcessLifecycleNative, ProcessRegistryNative,
     RegisteredToolNative, TerminalExecuteRegistry, TerminalExecuteValidationStage,
     TerminalInteractiveRegistry, TerminalInteractiveValidationStage, TerminalLeaseManager,
-    ToolRegistryErrorNative, ToolRegistryNative,
+    ToolProgressHub, ToolProgressPublisher, ToolRegistryErrorNative, ToolRegistryNative,
+    TOOL_PROGRESS_THROTTLE_INTERVAL,
 };
 
 pub(crate) const DEFAULT_CAPABILITY_TTL_MS: u64 = 120_000;
@@ -176,6 +177,7 @@ pub(crate) struct NativeToolEngine {
     file_operations: FileOperationRegistryNative,
     checkpoint_root: Arc<Mutex<Option<PathBuf>>>,
     pub(crate) sudo_prompts: Arc<super::SudoPrompts>,
+    pub(crate) tool_progress: ToolProgressHub,
     #[cfg(all(test, target_os = "linux"))]
     local_sandbox: Option<local_sandbox_acceptance::Launcher>,
 }
@@ -207,6 +209,7 @@ impl NativeToolEngine {
             file_operations: FileOperationRegistryNative::default(),
             checkpoint_root: Arc::new(Mutex::new(None)),
             sudo_prompts: Arc::default(),
+            tool_progress: ToolProgressHub::default(),
             #[cfg(all(test, target_os = "linux"))]
             local_sandbox: None,
         }
@@ -214,6 +217,13 @@ impl NativeToolEngine {
 }
 
 impl NativeToolEngine {
+    pub(crate) fn set_tool_progress_publisher(
+        &self,
+        publisher: ToolProgressPublisher,
+    ) -> Result<(), String> {
+        self.tool_progress.set_publisher(publisher)
+    }
+
     pub(crate) fn configure_checkpoint_root(&self, root: PathBuf) -> Result<(), String> {
         let mut stored = self
             .checkpoint_root
@@ -227,6 +237,12 @@ impl NativeToolEngine {
             *stored = Some(root);
         }
         Ok(())
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn reclaim_windows_sandbox_workspace(&self, cwd: &Path) -> Result<(), String> {
+        let root = self.checkpoint_root()?;
+        super::windows_sandbox::remove_workspace(&root, cwd)
     }
 
     pub(crate) fn tool(&self, name: &str) -> Result<&RegisteredToolNative, String> {
@@ -356,14 +372,21 @@ impl NativeToolEngine {
             "{}\nApproval review: {}{}",
             native_prompt(&context, &call, &effect, &scope, &preview, ttl_ms),
             review.reason,
-            sandbox
-                .as_ref()
-                .and_then(|b| b.state.policy.as_ref())
-                .map(|p| format!(
-                    "\nRemote Bubblewrap sandbox: {} ({:?}). Network is disabled.",
-                    p.workspace, p.mode
-                ))
-                .unwrap_or_default()
+            if call.tool_name == "exec_command" && call.arguments["elevated"] == json!(true) {
+                "\nExecution boundary: runs outside any remote Bubblewrap sandbox via the configured restricted sudo runner."
+                    .to_string()
+            } else {
+                sandbox
+                    .as_ref()
+                    .and_then(|b| b.state.policy.as_ref())
+                    .map(|p| {
+                        format!(
+                            "\nRemote Bubblewrap sandbox: {} ({:?}). Network is disabled.",
+                            p.workspace, p.mode
+                        )
+                    })
+                    .unwrap_or_default()
+            }
         );
         #[cfg(all(test, target_os = "linux"))]
         let native_prompt = match &local_sandbox {
@@ -1859,6 +1882,7 @@ mod tests {
             file_operations: FileOperationRegistryNative::default(),
             checkpoint_root: Arc::new(Mutex::new(None)),
             sudo_prompts: Arc::default(),
+            tool_progress: ToolProgressHub::default(),
             #[cfg(target_os = "linux")]
             local_sandbox: None,
         }
