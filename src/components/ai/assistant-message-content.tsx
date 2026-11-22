@@ -9,6 +9,7 @@ import React, {
 } from 'react';
 import Markdown, { defaultUrlTransform, type Components, type ExtraProps, type UrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import hljs from 'highlight.js/lib/common';
 import { toast } from 'sonner';
 import { Check, Copy, Terminal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -25,8 +26,10 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Separator } from '@/components/ui/separator';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import { aiLocalFileReference } from '@/lib/ai/file-reference';
+import { isTerminalInsertLanguage, sanitizeSingleLineTerminalCommand } from '@/lib/ai/terminal-insert';
 import { invokeOpenUrl, isTauriRuntime } from '@/lib/ipc/tauri';
 import { createStreamingMarkdownSplitter } from '@/lib/streaming-markdown';
 import type { AgentSessionAssistantContentBlock, AgentSessionTarget } from '@/types/agent-session';
@@ -52,8 +55,69 @@ function languageFromNode(node: React.ReactNode): string {
   return /language-([^\s]+)/u.exec(child.props.className ?? '')?.[1] ?? '';
 }
 
+function codeClassNameFromNode(node: React.ReactNode): string | undefined {
+  const child = React.Children.toArray(node).find(React.isValidElement);
+  if (!React.isValidElement<{ className?: string }>(child)) return undefined;
+  return child.props.className;
+}
+
+const HIGHLIGHT_CODE_LIMIT = 32 * 1024;
+const HIGHLIGHT_LANGUAGE_ALIASES: Readonly<Record<string, string>> = {
+  vue: 'xml',
+  svg: 'xml',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  docker: 'dockerfile',
+  dotenv: 'ini',
+  env: 'ini',
+  conf: 'ini',
+  cfg: 'ini',
+  shellsession: 'bash',
+  console: 'bash',
+  ps1: 'powershell',
+  pwsh: 'powershell',
+};
+
+function resolveHighlightLanguage(language: string): string | null {
+  const normalized = language.trim().toLowerCase();
+  if (!normalized) return null;
+  if (hljs.getLanguage(normalized)) return normalized;
+  const alias = HIGHLIGHT_LANGUAGE_ALIASES[normalized];
+  return alias && hljs.getLanguage(alias) ? alias : null;
+}
+
+function isFencedCodeBlockClosed(source: string, startOffset?: number, endOffset?: number): boolean {
+  if (startOffset === undefined || endOffset === undefined) return false;
+  if (endOffset < source.length) return true;
+  const slice = source.slice(startOffset, endOffset).replace(/\r?\n$/u, '');
+  const firstNewline = slice.indexOf('\n');
+  if (firstNewline === -1) return false;
+  const openLine = slice.slice(0, firstNewline).replace(/\r$/u, '');
+  const openFence = /^ {0,3}(`{3,}|~{3,})/u.exec(openLine)?.[1];
+  if (!openFence) return false;
+  const lastNewline = slice.lastIndexOf('\n');
+  const closeLine = slice.slice(lastNewline + 1).replace(/\r$/u, '');
+  const closeMatch = /^ {0,3}(`{3,}|~{3,})[ \t]*$/u.exec(closeLine);
+  return Boolean(closeMatch && closeMatch[1][0] === openFence[0] && closeMatch[1].length >= openFence.length);
+}
+
+function selectionIntersectsElement(element: HTMLElement | null): boolean {
+  if (!element || typeof window === 'undefined') return false;
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed) return false;
+  return Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index))
+    .some((range) => range.intersectsNode(element));
+}
+
+export interface AiTerminalInsertContextValue {
+  readonly targetName?: string;
+  readonly insert: (code: string) => boolean;
+}
+
 const MarkdownLinkContext = createContext(false);
+const MarkdownSourceContext = createContext<{ source: string; streaming: boolean }>({ source: '', streaming: false });
 export const AiMarkdownTargetContext = createContext<AgentSessionTarget | undefined>(undefined);
+export const AiTerminalInsertContext = createContext<AiTerminalInsertContextValue | undefined>(undefined);
 
 function MarkdownLink({ children, href }: { children: React.ReactNode; href?: string }) {
   const { t } = useI18n();
@@ -116,6 +180,8 @@ function MarkdownCodeBlock({
   copiedLabel,
   copyLabel,
   showActions,
+  sourceStart,
+  sourceEnd,
   onInsertToTerminal,
   insertLabel,
   insertedLabel,
@@ -124,22 +190,68 @@ function MarkdownCodeBlock({
   copiedLabel: string;
   copyLabel: string;
   showActions: boolean;
+  sourceStart?: number;
+  sourceEnd?: number;
   onInsertToTerminal?: (code: string) => boolean;
   insertLabel?: string;
   insertedLabel?: string;
 }) {
-  const code = textFromNode(children).replace(/\n$/, '');
-  const canInsertCode = Boolean(onInsertToTerminal && code.trim() && !/[\r\n]/.test(code));
+  const { t } = useI18n();
+  const { source, streaming } = useContext(MarkdownSourceContext);
+  const terminalInsert = useContext(AiTerminalInsertContext);
+  const rawCode = textFromNode(children);
+  const code = rawCode.replace(/\n$/, '');
   const language = languageFromNode(children);
+  const effectiveInsert = onInsertToTerminal ?? terminalInsert?.insert;
+  const canInsertCode = Boolean(
+    effectiveInsert
+    && sanitizeSingleLineTerminalCommand(code)
+    && (onInsertToTerminal || isTerminalInsertLanguage(language)),
+  );
+  const resolvedInsertLabel = insertLabel ?? (
+    terminalInsert?.targetName
+      ? t('ai.workspace.question.actionInsertCommandToTarget', { target: terminalInsert.targetName })
+      : t('ai.workspace.question.actionInsertCommand')
+  );
+  const resolvedInsertedLabel = insertedLabel ?? t('ai.workspace.question.actionInsertedCommand');
+  const codeClassName = codeClassNameFromNode(children);
   const { copied, copy } = useCopyFeedback();
   const [inserted, setInserted] = useState(false);
   const insertTimerRef = useRef<number | null>(null);
   const viewportRef = useRef<HTMLPreElement>(null);
+  const highlightedRef = useRef(false);
+  const isStable = !streaming || isFencedCodeBlockClosed(source, sourceStart, sourceEnd);
+  const [selectionDeferred, setSelectionDeferred] = useState(false);
+  const deferHighlight = selectionDeferred
+    || (isStable && !highlightedRef.current && selectionIntersectsElement(viewportRef.current));
+  const shouldHighlight = isStable && !deferHighlight;
+  const highlightedHtml = useMemo(() => {
+    if (!shouldHighlight || !code || rawCode.length > HIGHLIGHT_CODE_LIMIT) return null;
+    const resolved = resolveHighlightLanguage(language);
+    if (!resolved) return null;
+    try {
+      return hljs.highlight(rawCode, { language: resolved, ignoreIllegals: true }).value;
+    } catch {
+      return null;
+    }
+  }, [shouldHighlight, code, rawCode, language]);
+  useLayoutEffect(() => {
+    highlightedRef.current = highlightedHtml !== null;
+    if (deferHighlight && !selectionDeferred) setSelectionDeferred(true);
+  }, [deferHighlight, highlightedHtml, selectionDeferred]);
+  useEffect(() => {
+    if (!selectionDeferred || typeof document === 'undefined') return;
+    const onSelectionChange = (): void => {
+      if (!selectionIntersectsElement(viewportRef.current)) setSelectionDeferred(false);
+    };
+    document.addEventListener('selectionchange', onSelectionChange);
+    return () => document.removeEventListener('selectionchange', onSelectionChange);
+  }, [selectionDeferred]);
   useEffect(() => () => {
     if (insertTimerRef.current !== null) window.clearTimeout(insertTimerRef.current);
   }, []);
   const handleInsert = (): void => {
-    if (!onInsertToTerminal?.(code)) return;
+    if (!effectiveInsert?.(code)) return;
     setInserted(true);
     if (insertTimerRef.current !== null) window.clearTimeout(insertTimerRef.current);
     insertTimerRef.current = window.setTimeout(() => {
@@ -156,43 +268,66 @@ function MarkdownCodeBlock({
       <div className="relative min-w-0" data-ai-copy-region>
         {showActions && (canInsertCode ? (
           <div className="ai-markdown-code-actions absolute top-1 right-3.5 z-10 flex items-center gap-0.5">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className="ai-markdown-code-insert ai-markdown-code-copy ai-content-copy"
-              aria-label={inserted ? (insertedLabel ?? insertLabel ?? '') : (insertLabel ?? '')}
-              title={inserted ? undefined : insertLabel}
-              onClick={handleInsert}
-            >
-              {inserted ? <Check data-icon="inline-start" /> : <Terminal data-icon="inline-start" />}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className="ai-markdown-code-copy ai-content-copy"
-              aria-label={copied ? copiedLabel : copyLabel}
-              title={copied ? undefined : copyLabel}
-              onClick={() => { void copy(code); }}
-            >
-              {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={(
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="ai-markdown-code-insert ai-markdown-code-copy ai-content-copy"
+                    aria-label={inserted ? resolvedInsertedLabel : resolvedInsertLabel}
+                    onClick={handleInsert}
+                  />
+                )}
+              >
+                {inserted ? <Check data-icon="inline-start" /> : <Terminal data-icon="inline-start" />}
+              </TooltipTrigger>
+              <TooltipContent>{inserted ? resolvedInsertedLabel : resolvedInsertLabel}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={(
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="ai-markdown-code-copy ai-content-copy"
+                    aria-label={copied ? copiedLabel : copyLabel}
+                    onClick={() => { void copy(code); }}
+                  />
+                )}
+              >
+                {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+              </TooltipTrigger>
+              <TooltipContent>{copied ? copiedLabel : copyLabel}</TooltipContent>
+            </Tooltip>
           </div>
         ) : (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            className="ai-markdown-code-copy ai-content-copy absolute top-1 right-3.5 z-10"
-            aria-label={copied ? copiedLabel : copyLabel}
-            title={copied ? undefined : copyLabel}
-            onClick={() => { void copy(code); }}
-          >
-            {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={(
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="ai-markdown-code-copy ai-content-copy absolute top-1 right-3.5 z-10"
+                  aria-label={copied ? copiedLabel : copyLabel}
+                  onClick={() => { void copy(code); }}
+                />
+              )}
+            >
+              {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+            </TooltipTrigger>
+            <TooltipContent>{copied ? copiedLabel : copyLabel}</TooltipContent>
+          </Tooltip>
         ))}
-        <pre ref={viewportRef} tabIndex={0} className={cn(AI_CONTENT_CODE_CLASS, 'ai-code-block-pre max-h-65 overflow-auto overscroll-x-contain whitespace-pre')}>{children}</pre>
+        <pre ref={viewportRef} tabIndex={0} className={cn(AI_CONTENT_CODE_CLASS, 'ai-code-block-pre max-h-65 overflow-auto overscroll-x-contain whitespace-pre')}>
+          {/* Only highlight.js-generated, escaped markup is inserted; unknown languages stay plain text. */}
+          {highlightedHtml !== null ? (
+            <code className={codeClassName || undefined} data-highlighted="true" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+          ) : children}
+        </pre>
         <AiNativeCodeFade viewportRef={viewportRef} text={code} />
       </div>
     </div>
@@ -213,6 +348,7 @@ export const MarkdownContent = React.memo(function MarkdownContent({
   copyLabel,
   showCodeBlockActions,
   initialSource = '',
+  streaming = false,
   onInsertToTerminal,
   insertLabel,
   insertedLabel,
@@ -223,6 +359,7 @@ export const MarkdownContent = React.memo(function MarkdownContent({
   showCodeBlockActions: boolean;
   /** Previously displayed source moved here by a streaming chunk split. */
   initialSource?: string;
+  streaming?: boolean;
   onInsertToTerminal?: (code: string) => boolean;
   insertLabel?: string;
   insertedLabel?: string;
@@ -235,6 +372,7 @@ export const MarkdownContent = React.memo(function MarkdownContent({
   const fallbackImageAlt = t('ai.workspace.images.fallbackAlt');
   const revealFrom = children.startsWith(previousSource.current) ? previousSource.current.length : children.length;
   useLayoutEffect(() => { previousSource.current = children; }, [children]);
+  const markdownSource = useMemo(() => ({ source: children, streaming }), [children, streaming]);
   // Stable element types preserve code/table DOM (focus and horizontal scroll)
   // when the growing chunk is parsed again.
   const components = useMemo<Components>(() => ({
@@ -250,11 +388,13 @@ export const MarkdownContent = React.memo(function MarkdownContent({
     ),
     hr: () => <Separator />,
     img: ({ alt }) => <span className="ai-markdown-image-alt">[{alt || fallbackImageAlt}]</span>,
-    pre: ({ children: codeChildren }) => (
+    pre: ({ children: codeChildren, node }) => (
       <MarkdownCodeBlock
         copiedLabel={copiedLabel}
         copyLabel={copyLabel}
         showActions={showCodeBlockActions}
+        sourceStart={node?.position?.start.offset}
+        sourceEnd={node?.position?.end.offset}
         onInsertToTerminal={onInsertToTerminal}
         insertLabel={insertLabel}
         insertedLabel={insertedLabel}
@@ -270,17 +410,19 @@ export const MarkdownContent = React.memo(function MarkdownContent({
   }), [copiedLabel, copyLabel, showCodeBlockActions, fallbackImageAlt, onInsertToTerminal, insertLabel, insertedLabel]);
   return (
     <div className="ai-assistant-markdown min-w-0 max-w-full [overflow-wrap:anywhere]">
-      <StreamingTextBoundaryContext.Provider value={revealFrom}>
-        <Markdown
-          remarkPlugins={MARKDOWN_PLUGINS}
-          rehypePlugins={STREAMING_TEXT_PLUGINS}
-          urlTransform={markdownUrlTransform}
-          skipHtml
-          components={components}
-        >
-          {children}
-        </Markdown>
-      </StreamingTextBoundaryContext.Provider>
+      <MarkdownSourceContext.Provider value={markdownSource}>
+        <StreamingTextBoundaryContext.Provider value={revealFrom}>
+          <Markdown
+            remarkPlugins={MARKDOWN_PLUGINS}
+            rehypePlugins={STREAMING_TEXT_PLUGINS}
+            urlTransform={markdownUrlTransform}
+            skipHtml
+            components={components}
+          >
+            {children}
+          </Markdown>
+        </StreamingTextBoundaryContext.Provider>
+      </MarkdownSourceContext.Provider>
     </div>
   );
 });
@@ -324,7 +466,7 @@ export const StreamingMarkdownContent = React.memo(function StreamingMarkdownCon
   useMessageLayoutCommit(layoutRevision);
   return (
     <StreamingTextContext.Provider value={streaming && animateText}>
-      <MarkdownContent {...props}>{shown}</MarkdownContent>
+      <MarkdownContent {...props} streaming={streaming}>{shown}</MarkdownContent>
     </StreamingTextContext.Provider>
   );
 });

@@ -62,10 +62,18 @@
 
   :is(.ai-semantic-note-body, .ai-queue-notice-preview, .ai-detail-code-wrap):hover :is(.ai-tool-copy-button, .ai-detail-copy),
   [data-ai-copy-region]:hover > :is(.ai-tool-copy-button, .ai-markdown-code-copy),
+  [data-ai-copy-region]:hover > .ai-markdown-code-actions > .ai-markdown-code-copy,
   [data-ai-copy-region]:hover > [data-ai-copy-anchor] > .ai-tool-copy-button,
-  :is(.ai-tool-copy-button, .ai-markdown-code-copy, .ai-detail-copy):focus-visible {
+  :is(.ai-tool-copy-button, .ai-markdown-code-copy, .ai-detail-copy):focus-visible,
+  .ai-markdown-code-actions:focus-within > .ai-markdown-code-copy {
     opacity: 1;
     pointer-events: auto;
+  }
+
+  [data-ai-copy-region]:hover > .ai-markdown-code-actions,
+  .ai-markdown-code-actions:focus-within {
+    border-radius: 6px;
+    background: var(--ai-code-block);
   }
 }
 
@@ -75,7 +83,7 @@
 }
 
 :where(.ai-tool-content-region, .ai-markdown-code-block [data-ai-copy-region], .ai-detail-code-wrap, .ai-semantic-note-body)
-  > :is(.ai-tool-copy-button, .ai-markdown-code-copy) {
+  > :is(.ai-tool-copy-button, .ai-markdown-code-copy, .ai-markdown-code-actions) {
   top: var(--ai-copy-first-line-center, calc(var(--spacing) * 2 + var(--ai-code-line-height) / 2));
   translate: 0 -50%;
 }

@@ -73,6 +73,13 @@
   line-height: 24px;
 }
 
+.ai-elapsed-timer,
+.ai-elapsed-duration {
+  color: var(--ai-text-muted);
+  font-size: 13px;
+  line-height: 24px;
+}
+
 .ai-disclosure-summary[data-error] {
   color: var(--ai-text-muted);
 }
@@ -178,9 +185,14 @@
 @media (prefers-reduced-motion: reduce) {
   .ai-turn-process > [data-slot='collapsible-content'],
   .ai-turn-process-trigger > .ai-disclosure-leading > .ai-disclosure-chevron,
-  .ai-conversation-row > [data-slot='collapsible-content'] {
+  .ai-conversation-row > [data-slot='collapsible-content'],
+  .ai-tool-row-root > [data-slot='collapsible-content'] {
     transition: none;
   }
+}
+
+.ai-tool-group-body {
+  border-color: var(--ai-border-soft);
 }
 
 .ai-tool-duration {

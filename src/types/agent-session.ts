@@ -147,6 +147,16 @@ export interface AgentTerminalLeaseControlInput {
   reducedMotion?: boolean;
 }
 
+export interface AgentToolProgressEvent {
+  readonly sessionId: string;
+  readonly callId: string;
+  readonly revision: number;
+  readonly tail: string;
+  readonly totalBytes: number;
+  readonly truncated: boolean;
+  readonly alternateScreen: boolean;
+}
+
 export type AgentSessionInboxLane = 'nextTurn' | 'nextStep';
 export type AgentSessionInboxOperation = 'enqueued' | 'claimed' | 'discarded';
 

@@ -1,5 +1,6 @@
 import { Activity, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { CircleAlertIcon, InfoIcon, MessageCircleQuestionIcon, TriangleAlertIcon } from 'lucide-react';
+import { toast } from 'sonner';
 import { ShellSpanGlyph } from '@/components/brand/shellspan-mark';
 import { Spinner } from '@/components/ui/spinner';
 import { StableContent } from '@/components/ui/stable-content';
@@ -35,7 +36,14 @@ import { latestFailureRecovery } from '@/lib/ai/failure-recovery';
 import { childBudgetExhausted } from '@/lib/ai/subagent-continuation';
 import { terminalExecutionRecovery } from '@/lib/ai/terminal-execution-recovery';
 import { AiTerminalRecoveryNotice } from './ai-terminal-recovery-notice';
-import { aiAskConversationNodeRenderers } from './ai-conversation-node-seat';
+import { aiAskConversationNodeRenderers, AiContinueGenerationContext } from './ai-conversation-node-seat';
+import {
+  exportConversationFileName,
+  formatConversationMarkdown,
+  hasExportableConversationMessages,
+} from '@/lib/ai/conversation-export';
+import { invokeExportLogFile, invokeRevealPath, isTauriRuntime } from '@/lib/ipc/tauri';
+import { getPlatform } from '@/lib/platform';
 import { AiSessionHeader, type AiSessionHeaderSubagentNav } from './ai-session-header';
 import { AiSessionBrowser } from './ai-session-browser';
 import { AiSubagentCatalog } from './ai-subagent-catalog';
@@ -54,7 +62,9 @@ import { AiWorkspaceErrorNotices } from './ai-workspace-error-notices';
 import { AiFailedDraftRecoveryContext } from './ai-failed-draft-recovery';
 import { AiNoticeTransition } from './ai-notice-transition';
 import { AiNoticeAction } from './ai-notice-action';
-import { AiMarkdownTargetContext } from '@/components/ai/assistant-message-content';
+import { AiMarkdownTargetContext, AiTerminalInsertContext } from '@/components/ai/assistant-message-content';
+import { insertCommandIntoTerminal, useTerminalInsertTarget } from './ai-terminal-insert';
+import { toolLiveOutputStore } from './use-tool-live-output';
 
 export interface AiWorkspaceSubmitInput {
   readonly content: string;
@@ -358,6 +368,10 @@ export function AiWorkspaceRoot({
   const selectedSessionId = view?.summary.id ?? composerState?.sessionId
     ?? (route.kind === 'conversation' ? route.sessionId : null);
   const sessionLoading = !view && (restoringSession || selectedSessionId !== null) && visibleNodes.length === 0;
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    return () => toolLiveOutputStore.clearSession(selectedSessionId);
+  }, [selectedSessionId]);
   const taskSteps = view?.snapshot.kind === 'agent'
     ? view.snapshot.value.task.plan?.steps ?? []
     : [];
@@ -388,6 +402,20 @@ export function AiWorkspaceRoot({
     ? terminalExecutionRecovery(view) : null;
   const sessionTarget = view?.snapshot.value.header.target;
   const historicalTargetLabel = sessionTarget?.kind === 'local'
+  const terminalInsertTarget = useTerminalInsertTarget(
+    !readOnlySession && !historicalTargetUnavailable ? sessionTarget?.sessionId : null,
+  );
+  const terminalInsertContext = useMemo(
+    () => (terminalInsertTarget ? {
+      targetName: terminalInsertTarget.targetName,
+      insert: (code: string) => {
+        const inserted = insertCommandIntoTerminal(terminalInsertTarget.sessionId, code);
+        if (!inserted) toast.error(t('ai.workspace.question.actionInsertCommandFailed'));
+        return inserted;
+      },
+    } : undefined),
+    [terminalInsertTarget, t],
+  );
     ? t('ai.workspace.localTarget')
     : sessionTarget && (terminalLoginLabel(sessionTarget) ?? sessionTarget.label ?? sessionTarget.host);
   const terminalContext = readOnlySession || historicalTargetUnavailable
@@ -593,6 +621,87 @@ export function AiWorkspaceRoot({
   const availabilityCopyClass = cn('min-w-0 flex-1 basis-48', availabilityAction && 'py-1');
 
   return (
+  const canContinueGeneration = Boolean(
+    onSubmit
+    && !submissionDisabled
+    && !readOnlySession
+    && !historicalTargetUnavailable
+    && status !== 'running'
+    && status !== 'waiting',
+  );
+  const latestInterruptedAssistantKey = useMemo(() => {
+    if (!canContinueGeneration) return null;
+    for (let index = conversationNodes.length - 1; index >= 0; index -= 1) {
+      const node = conversationNodes[index];
+      if (node.kind === 'userMessage') return null;
+      if (node.kind === 'assistantMessage') {
+        return node.state === 'cancelled' || node.state === 'interrupted' || node.partialReason === 'outputLimit'
+          ? node.key
+          : null;
+      }
+      if (node.kind === 'turnProcess') {
+        for (let childIndex = node.children.length - 1; childIndex >= 0; childIndex -= 1) {
+          const child = node.children[childIndex];
+          if (child.kind === 'assistantMessage') {
+            return child.state === 'cancelled' || child.state === 'interrupted' || child.partialReason === 'outputLimit'
+              ? child.key
+              : null;
+          }
+        }
+      }
+    }
+    return null;
+  }, [canContinueGeneration, conversationNodes]);
+  const continueGenerationContext = useMemo(
+    () => (latestInterruptedAssistantKey ? {
+      latestAssistantKey: latestInterruptedAssistantKey,
+      busy: activeComposerState?.phase === 'submitting' || activeComposerState?.phase === 'stopping',
+      onContinue: () => { void onSubmit?.({ content: t('ai.workspace.continuePrompt') }); },
+    } : undefined),
+    [activeComposerState?.phase, latestInterruptedAssistantKey, onSubmit, t],
+  );
+  const canExportMarkdown = useMemo(
+    () => !hero && hasExportableConversationMessages(conversationNodes),
+    [conversationNodes, hero],
+  );
+  const handleExportMarkdown = (): void => {
+    const markdown = formatConversationMarkdown({
+      title: resolvedTitle,
+      nodes: conversationNodes,
+      userLabel: t('ai.message.user'),
+      assistantLabel: t('ai.message.assistant'),
+    });
+    if (!markdown) return;
+    const fileName = exportConversationFileName(resolvedTitle);
+    if (isTauriRuntime()) {
+      void invokeExportLogFile(fileName, markdown).then((savedPath) => {
+        if (!savedPath) return;
+        const revealLabel = t(getPlatform() === 'macos' ? 'ai.path.revealFinder' : 'ai.path.revealExplorer');
+        toast.success(t('ai.workspace.export.success'), {
+          action: {
+            label: revealLabel,
+            onClick: () => { void invokeRevealPath(savedPath); },
+          },
+        });
+      }).catch(() => {
+        toast.error(t('ai.workspace.export.failed'));
+      });
+      return;
+    }
+    try {
+      const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = fileName;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      toast.success(t('ai.workspace.export.success'));
+    } catch {
+      toast.error(t('ai.workspace.export.failed'));
+    }
+  };
+
     <section
       ref={rootRef}
       data-slot="ai-workspace-root"
@@ -658,6 +767,7 @@ export function AiWorkspaceRoot({
         )}
         onNewSession={onNewSession && canStartAgent ? onNewSession : undefined}
       />
+        onExportMarkdown={canExportMarkdown ? handleExportMarkdown : undefined}
 
       <div
         ref={firstSubmitTransition.bodyRef}
@@ -701,6 +811,8 @@ export function AiWorkspaceRoot({
             }}>
             <AiMarkdownTargetContext.Provider value={sessionTarget}>
             <AiSubagentContext.Provider value={subagentContextValue}>
+            <AiTerminalInsertContext.Provider value={terminalInsertContext}>
+            <AiContinueGenerationContext.Provider value={continueGenerationContext}>
             <AiConversation
               key={conversationIdentity.generation}
               nodes={conversationNodes}
@@ -727,6 +839,8 @@ export function AiWorkspaceRoot({
             </AiMarkdownTargetContext.Provider>
             </AiFailedDraftRecoveryContext.Provider>
             </AiFailureRecoveryContext.Provider>
+            </AiContinueGenerationContext.Provider>
+            </AiTerminalInsertContext.Provider>
           )}
         </div>
 

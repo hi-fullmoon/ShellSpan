@@ -1,6 +1,7 @@
 import {
   ArrowLeftIcon,
   BotIcon,
+  DownloadIcon,
   MessageCircleQuestionIcon,
   HistoryIcon,
   PanelRightCloseIcon,
@@ -39,6 +40,7 @@ export interface AiSessionHeaderProps {
   readonly historyContent?: React.ReactNode;
   readonly onHistoryClose?: () => void;
   readonly onNewSession?: () => void;
+  readonly onExportMarkdown?: () => void;
 }
 
 export function AiSessionHeader({
@@ -55,6 +57,7 @@ export function AiSessionHeader({
   historyContent,
   onHistoryClose,
   onNewSession,
+  onExportMarkdown,
 }: AiSessionHeaderProps): React.ReactNode {
   const { t } = useI18n();
   const statusLabel = status === 'idle'
@@ -179,6 +182,22 @@ export function AiSessionHeader({
               <SquarePenIcon data-icon="inline-start" />
             </TooltipTrigger>
             <TooltipContent>{t('ai.newConversation')}</TooltipContent>
+          </Tooltip>
+        )}
+
+        {!subagentNav?.hideSessionChrome && onExportMarkdown && (
+          <Tooltip>
+            <TooltipTrigger
+              render={(
+                <AiHeaderIconButton
+                  onClick={onExportMarkdown}
+                  aria-label={t('ai.workspace.export.markdown')}
+                />
+              )}
+            >
+              <DownloadIcon data-icon="inline-start" />
+            </TooltipTrigger>
+            <TooltipContent>{t('ai.workspace.export.markdown')}</TooltipContent>
           </Tooltip>
         )}
 

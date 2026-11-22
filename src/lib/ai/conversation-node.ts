@@ -73,6 +73,8 @@ export interface AiReasoningNode extends AiConversationNodeBase {
   readonly content: string;
   /** `settled` means reasoning output stopped, but the assistant message is not committed yet. */
   readonly state: 'streaming' | 'settled' | 'completed' | 'interrupted';
+  readonly startedAtUnixMs?: number;
+  readonly durationMs?: number | null;
 }
 
 export interface AiToolDetailRef {
@@ -240,6 +242,7 @@ export type AiTurnProcessChildNode =
 export interface AiTurnProcessNode extends AiConversationNodeBase {
   readonly kind: 'turnProcess';
   readonly status: AiTurnProcessStatus;
+  readonly startedAtUnixMs?: number;
   /** Stable request generation used to scope disclosure state across stream revisions. */
   readonly answerGeneration: string;
   readonly hasStartBoundary: boolean;

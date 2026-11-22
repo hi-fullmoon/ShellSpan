@@ -43,10 +43,8 @@ import { isLocalImagePath, readLocalImageFile } from '@/lib/ai/prepare-image-fil
 import { imageErrorKey } from '@/lib/ai/image-error';
 import { useToast } from '@/hooks/useToast';
 import { agentTerminalLeaseState } from '@/components/terminal/agent-terminal-lease-state';
-import { terminalInputReadiness } from '@/components/terminal/terminal-input-readiness';
-import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
-import { useAppStore } from '@/stores/appStore';
-import { useTerminalStore } from '@/stores/terminalStore';
+import { sanitizeSingleLineTerminalCommand } from '@/lib/ai/terminal-insert';
+import { insertCommandIntoTerminal } from './ai-terminal-insert';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
 import type { AiSessionStatus } from '@/lib/ai/conversation-node';
 import type { AiContextUsage, AiInboxItem, AiPendingApproval } from '@/lib/ai/session-adapter';
@@ -537,26 +535,11 @@ export function AiComposerSeat({
   );
   const handoffTerminalId = handoffLease?.sessionId ?? null;
   const handleInsertHandoffCommand = useCallback((code: string): boolean => {
-    if (!handoffTerminalId) return false;
-    const session = useTerminalStore.getState().sessions.find((item) => item.sessionId === handoffTerminalId);
-    const controller = terminalRegistry.get(handoffTerminalId);
-    const canInsert = Boolean(
-      session?.status === 'connected'
-      && !session.readOnly
-      && !terminalInputReadiness.isPreparing(handoffTerminalId)
-      && !agentTerminalLeaseState.blocksUserInput(handoffTerminalId, session.foregroundHandoffActive)
-      && controller?.terminal,
-    );
-    if (!canInsert || !controller?.terminal) {
+    if (!handoffTerminalId || !sanitizeSingleLineTerminalCommand(code)) return false;
+    if (!insertCommandIntoTerminal(handoffTerminalId, code)) {
       toast.error(t('ai.workspace.question.actionInsertCommandFailed'));
       return false;
     }
-    const sanitized = code.replace(/[\r\n]+$/g, '');
-    if (!sanitized || /[\r\n]/.test(sanitized)) return false;
-    useTerminalStore.getState().setActiveSession(handoffTerminalId);
-    useAppStore.getState().setActiveSection('terminal');
-    controller.terminal.focus();
-    controller.terminal.paste(sanitized);
     return true;
   }, [handoffTerminalId, t, toast]);
 

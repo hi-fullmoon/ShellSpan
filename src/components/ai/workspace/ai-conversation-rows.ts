@@ -1,10 +1,60 @@
-import type { AiConversationNode, AiConversationNodeOf } from '@/lib/ai/conversation-node';
+import type {
+  AiConversationNode,
+  AiConversationNodeOf,
+  AiTurnProcessChildNode,
+} from '@/lib/ai/conversation-node';
+import { isSubagentDelegationTool, subagentToolAction } from '@/lib/ai/subagent-lineage';
+import { classifyAiTool } from './ai-tool-presentation';
+
+export interface AiGroupedTurnProcessEntry {
+  readonly node: AiTurnProcessChildNode;
+  readonly groupedTools?: readonly AiConversationNodeOf<'tool'>[];
+}
 
 export interface AiConversationRow {
   readonly node: AiConversationNode;
   readonly process?: AiConversationNodeOf<'turnProcess'>;
   readonly processMember?: boolean;
   readonly hasResponse?: boolean;
+  readonly groupedTools?: readonly AiConversationNodeOf<'tool'>[];
+  readonly processChildKeys?: readonly string[];
+}
+
+export function isGroupableReadOnlyTool(node: AiConversationNode): node is AiConversationNodeOf<'tool'> {
+  if (node.kind !== 'tool') return false;
+  if (node.state !== 'succeeded') return false;
+  if (node.recoveredByToolKey) return false;
+  if (isSubagentDelegationTool(node.name, node.nativeName) || subagentToolAction(node.name, node.nativeName) !== null) {
+    return false;
+  }
+  const variant = classifyAiTool(node.name, node.nativeName);
+  return variant === 'read' || variant === 'search';
+}
+
+export function groupTurnProcessChildren(
+  children: readonly AiTurnProcessChildNode[],
+): AiGroupedTurnProcessEntry[] {
+  const entries: AiGroupedTurnProcessEntry[] = [];
+  let run: AiConversationNodeOf<'tool'>[] = [];
+  const flushRun = (): void => {
+    if (run.length === 0) return;
+    if (run.length >= 2) {
+      entries.push({ node: run[0], groupedTools: run });
+    } else {
+      entries.push({ node: run[0] });
+    }
+    run = [];
+  };
+  for (const child of children) {
+    if (isGroupableReadOnlyTool(child)) {
+      run.push(child);
+    } else {
+      flushRun();
+      entries.push({ node: child });
+    }
+  }
+  flushRun();
+  return entries;
 }
 
 /** Keep message keys and parents stable when streamed text becomes tool-bearing progress. */
@@ -16,15 +66,30 @@ export function conversationRows(nodes: readonly AiConversationNode[]): AiConver
     if (node.kind === 'turnProcess') {
       process = node;
       controlIndex = rows.length;
-      rows.push({ node, process });
-      for (const child of node.children) rows.push({ node: child, process, processMember: true });
+      const entries = groupTurnProcessChildren(node.children);
+      rows.push({
+        node,
+        process,
+        processChildKeys: entries.map((entry) => entry.node.key),
+      });
+      for (const entry of entries) {
+        rows.push({
+          node: entry.node,
+          process,
+          processMember: true,
+          groupedTools: entry.groupedTools,
+        });
+      }
     } else {
       if (process && (process.sessionId !== node.sessionId || process.turnId !== node.turnId
         || node.kind === 'userMessage')) process = undefined;
       if (node.kind === 'assistantMessage' && process) {
         rows[controlIndex] = { ...rows[controlIndex], hasResponse: true };
       }
-      rows.push({ node, process: node.kind === 'assistantMessage' ? process : undefined });
+      rows.push({
+        node,
+        process: node.kind === 'assistantMessage' || node.kind === 'turnTail' ? process : undefined,
+      });
     }
   }
   return rows;

@@ -89,9 +89,10 @@ const ConversationRow = memo(function ConversationRow({
   process,
   processMember,
   hasResponse,
+  groupedTools,
   panelId,
   ...props
-}: ComponentProps<typeof AiConversationNodeSeat> & Omit<AiConversationRow, 'node'> & { indicator?: ReactNode; panelId: string }) {
+}: ComponentProps<typeof AiConversationNodeSeat> & Omit<AiConversationRow, 'node' | 'processChildKeys'> & { indicator?: ReactNode; panelId: string }) {
   const { open } = useProcessDisclosure(processMember ? process : undefined);
   const ref = useRef<HTMLDivElement>(null);
   const processKey = process && processDisclosureKey(process);
@@ -105,6 +106,8 @@ const ConversationRow = memo(function ConversationRow({
         <div ref={ref} className="ai-conversation-row-body" data-ai-process-child={processMember ? props.node.kind : undefined}
           data-ai-process-child-key={processMember ? props.node.key : undefined}>
           <AiConversationNodeSeat {...props} inTurnProcess={processMember}
+            groupedTools={groupedTools}
+            turnProcess={props.node.kind === 'turnTail' ? process : undefined}
             processControlOnly={props.node.kind === 'turnProcess'} hasResponse={hasResponse} />
         </div>
       </CollapsibleContent>
@@ -253,7 +256,7 @@ export const AiConversation = memo(function AiConversation({
         )
       }
     >
-      {rows.map(({ node, process, processMember, hasResponse }, index) => (
+      {rows.map(({ node, process, processMember, hasResponse, groupedTools, processChildKeys }, index) => (
         <ConversationRow
           key={conversationItemId(node)}
           node={node}
@@ -261,9 +264,10 @@ export const AiConversation = memo(function AiConversation({
           process={process}
           processMember={processMember}
           hasResponse={hasResponse}
+          groupedTools={groupedTools}
           panelId={`${panelPrefix}:${node.key}`}
           processPanelIds={node.kind === 'turnProcess'
-            ? node.children.map(child => `${panelPrefix}:${child.key}`).join(' ') : undefined}
+            ? (processChildKeys ?? []).map(key => `${panelPrefix}:${key}`).join(' ') : undefined}
           deferMessageActions={node.kind === 'assistantMessage' && (running || pending) && footerTurns.has(`${node.sessionId}:${node.turnId}`)}
           scrollItemId={conversationItemId(node)}
           scrollItemClassName={cn(

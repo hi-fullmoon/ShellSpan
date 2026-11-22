@@ -1324,6 +1324,14 @@ export async function listenToAgentTerminalLease(
   });
 }
 
+export async function listenToAgentToolProgress(
+  callback: EventCallback<import('@/types/agent-session').AgentToolProgressEvent>,
+): Promise<UnlistenFn> {
+  return listen<import('@/types/agent-session').AgentToolProgressEvent>('agent-tool-progress', (event) => {
+    callback(event);
+  });
+}
+
 export async function listenToTerminalIntegrationState(
   callback: EventCallback<TerminalIntegrationStateEvent>,
 ): Promise<UnlistenFn> {

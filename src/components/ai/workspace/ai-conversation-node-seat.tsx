@@ -1,4 +1,4 @@
-import React, { use, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, use, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   BrainIcon,
   ChevronDownIcon,
@@ -35,7 +35,8 @@ import { taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
 import { isRuntimeArtifact } from '@/lib/ai/conversation-artifact';
 import { requestErrorMessageKey, requestRetryMessageKey } from '@/lib/ai/request-error';
 import { aiErrorMessage } from '@/lib/ai/error-message';
-import { AiToolCopyButton, AiToolRow, AiToolTextSection } from './ai-tool-presentation';
+import { AiToolCopyButton, AiToolGroupRow, AiToolRow, AiToolTextSection, toolLiveActionSummary } from './ai-tool-presentation';
+import { groupTurnProcessChildren } from './ai-conversation-rows';
 import { AiTurnFooter } from './ai-turn-footer';
 import { AiProcessingStatus } from './ai-processing-status';
 import { AiCompactionStatus } from './ai-compaction-status';
@@ -55,6 +56,7 @@ import {
 type AiConversationNodeRendererProps<Kind extends AiConversationNode['kind']> = {
   readonly node: AiConversationNodeOf<Kind>;
   readonly inTurnProcess?: boolean;
+  readonly turnProcess?: AiConversationNodeOf<'turnProcess'>;
   readonly deferMessageActions?: boolean;
   readonly processControlOnly?: boolean;
   readonly hasResponse?: boolean;
@@ -252,24 +254,46 @@ function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'us
   );
 }
 
+export interface AiContinueGenerationContextValue {
+  readonly latestAssistantKey: string | null;
+  readonly busy: boolean;
+  readonly onContinue: () => void;
+}
+
+export const AiContinueGenerationContext = createContext<AiContinueGenerationContextValue | undefined>(undefined);
+
 function AssistantMessageNodeView({ node, inTurnProcess = false, deferMessageActions = false }: AiConversationNodeRendererProps<'assistantMessage'>) {
   const { t } = useI18n();
   const text = assistantText(node);
+  const canResumeState = node.state === 'interrupted' || node.state === 'cancelled' || node.partialReason === 'outputLimit';
+  const continueContext = canResumeState ? use(AiContinueGenerationContext) : undefined;
+  const showContinue = Boolean(canResumeState && continueContext && continueContext.latestAssistantKey === node.key);
   if (!text) return null;
   return (
     <Message role="assistant">
       <Bubble role="assistant">
         <AssistantMessageContent blocks={node.blocks} streaming={node.state === 'streaming'} />
         {(node.state === 'interrupted' || node.state === 'failed' || node.state === 'cancelled') && (
-          <span className="ai-assistant-stopped self-start px-1.5" data-state={node.state}>
-            {node.partialReason === 'outputLimit'
-              ? t('ai.workspace.messageOutputLimit')
-              : node.state === 'failed'
-                ? t('ai.message.failed')
-                : node.state === 'cancelled'
-                  ? t('ai.message.cancelled')
-                  : t('ai.workspace.messageInterrupted')}
-          </span>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <span className="ai-assistant-stopped inline-flex items-center px-1.5" data-state={node.state}>
+              {node.partialReason === 'outputLimit'
+                ? t('ai.workspace.messageOutputLimit')
+                : node.state === 'failed'
+                  ? t('ai.message.failed')
+                  : node.state === 'cancelled'
+                    ? t('ai.message.cancelled')
+                    : t('ai.workspace.messageInterrupted')}
+            </span>
+            {showContinue && continueContext && (
+              <AiNoticeAction
+                className="ai-continue-generation h-[18px] font-normal leading-[18px] text-muted-foreground hover:text-foreground"
+                disabled={continueContext.busy}
+                onClick={continueContext.onContinue}
+              >
+                {t('ai.workspace.continueGeneration')}
+              </AiNoticeAction>
+            )}
+          </div>
         )}
       </Bubble>
       {!inTurnProcess && !deferMessageActions && !node.hasTurnTail && node.state === 'completed' && (
@@ -320,13 +344,114 @@ function ReasoningContent({ children, streaming }: { readonly children: string; 
   );
 }
 
+const MAX_LIVE_ELAPSED_MS = 24 * 60 * 60 * 1_000;
+
+function parseStartedAtUnixMs(startedAtUnixMs?: number, timestamp?: string): number | null {
+  if (typeof startedAtUnixMs === 'number' && Number.isFinite(startedAtUnixMs)) return startedAtUnixMs;
+  if (!timestamp) return null;
+  const parsed = Date.parse(timestamp);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatElapsedDuration(
+  milliseconds: number,
+  t: ReturnType<typeof useI18n>['t'],
+  fractional: boolean,
+): string {
+  const safeMs = Math.max(0, milliseconds);
+  const seconds = fractional && safeMs < 10_000
+    ? Math.max(0.1, Math.round(safeMs / 100) / 10)
+    : fractional
+      ? Math.round(safeMs / 1_000)
+      : Math.floor(safeMs / 1_000);
+  if (seconds < 60) {
+    return t('ai.workspace.duration.seconds', { seconds });
+  }
+  const wholeSeconds = Math.floor(seconds);
+  return t('ai.workspace.duration.minutes', {
+    minutes: Math.floor(wholeSeconds / 60),
+    seconds: wholeSeconds % 60,
+  });
+}
+
+const ElapsedTimer = React.memo(function ElapsedTimer({
+  startedAtUnixMs,
+  active,
+  withSeparator = false,
+  className,
+}: {
+  readonly startedAtUnixMs: number | null;
+  readonly active: boolean;
+  readonly withSeparator?: boolean;
+  readonly className?: string;
+}) {
+  const { t } = useI18n();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active || startedAtUnixMs === null) return;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    const start = (): void => {
+      if (intervalId !== null) return;
+      setNow(Date.now());
+      intervalId = setInterval(() => setNow(Date.now()), 1_000);
+    };
+    const stop = (): void => {
+      if (intervalId === null) return;
+      clearInterval(intervalId);
+      intervalId = null;
+    };
+    const syncVisibility = (): void => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') stop();
+      else start();
+    };
+    syncVisibility();
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', syncVisibility);
+    }
+    return () => {
+      stop();
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', syncVisibility);
+      }
+    };
+  }, [active, startedAtUnixMs]);
+  if (!active || startedAtUnixMs === null) return null;
+  const elapsedMs = now - startedAtUnixMs;
+  if (elapsedMs < 1_000 || elapsedMs > MAX_LIVE_ELAPSED_MS) return null;
+  return (
+    <>
+      {withSeparator && <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />}
+      <span
+        className={cn('ai-elapsed-timer shrink-0 tabular-nums whitespace-nowrap', className)}
+        data-ai-elapsed-timer=""
+        aria-hidden="true"
+      >
+        {formatElapsedDuration(elapsedMs, t, false)}
+      </span>
+    </>
+  );
+});
+
 function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reasoning'> }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const isStreaming = node.state === 'streaming';
+  const wasStreamingRef = useRef(isStreaming);
+  const [announcement, setAnnouncement] = useState('');
   const lines = node.content.trim().split('\n');
   const summary = (isStreaming ? lines[lines.length - 1] : lines[0]) || node.summary.trim();
   const title = isStreaming ? t('ai.thinking.inProgress') : node.state === 'interrupted' ? t('ai.thinking.interrupted') : t('ai.workspace.reasoning');
+  const startedAtUnixMs = parseStartedAtUnixMs(node.startedAtUnixMs, node.timestamp);
+  const completedDuration = !isStreaming && typeof node.durationMs === 'number' && node.durationMs >= 100
+    ? formatElapsedDuration(node.durationMs, t, true)
+    : null;
+
+  useEffect(() => {
+    if (wasStreamingRef.current && !isStreaming && completedDuration) {
+      setAnnouncement(t('ai.thinking.completedDuration', { duration: completedDuration }));
+    }
+    wasStreamingRef.current = isStreaming;
+  }, [completedDuration, isStreaming, t]);
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -353,6 +478,16 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
             <ChevronDownIcon className="ai-disclosure-chevron" />
           </span>
           <span className={cn(AI_DISCLOSURE_TITLE_CLASS, isStreaming && 'shimmer')}>{title}</span>
+          {isStreaming ? (
+            <ElapsedTimer startedAtUnixMs={startedAtUnixMs} active className="ml-1.5" />
+          ) : completedDuration ? (
+            <span
+              className="ai-elapsed-duration ml-1.5 shrink-0 tabular-nums whitespace-nowrap"
+              data-ai-reasoning-duration=""
+            >
+              {completedDuration}
+            </span>
+          ) : null}
           {summary && (
             <>
               <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
@@ -364,6 +499,7 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
             </>
           )}
         </CollapsibleTrigger>
+        {announcement && <span className="sr-only" aria-live="polite">{announcement}</span>}
         <CollapsibleContent>
           <ReasoningContent streaming={isStreaming}>{node.content || node.summary}</ReasoningContent>
         </CollapsibleContent>
@@ -376,8 +512,21 @@ function AskReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'r
   const { t } = useI18n();
   const [manualOpen, setManualOpen] = useState<boolean>();
   const isStreaming = node.state === 'streaming';
+  const wasStreamingRef = useRef(isStreaming);
+  const [announcement, setAnnouncement] = useState('');
   const open = manualOpen ?? isStreaming;
   const title = isStreaming ? t('ai.thinking.inProgress') : node.state === 'interrupted' ? t('ai.thinking.interrupted') : t('ai.thinking');
+  const startedAtUnixMs = parseStartedAtUnixMs(node.startedAtUnixMs, node.timestamp);
+  const completedDuration = !isStreaming && typeof node.durationMs === 'number' && node.durationMs >= 100
+    ? formatElapsedDuration(node.durationMs, t, true)
+    : null;
+
+  useEffect(() => {
+    if (wasStreamingRef.current && !isStreaming && completedDuration) {
+      setAnnouncement(t('ai.thinking.completedDuration', { duration: completedDuration }));
+    }
+    wasStreamingRef.current = isStreaming;
+  }, [completedDuration, isStreaming, t]);
 
   return (
     <Collapsible open={open} onOpenChange={setManualOpen}>
@@ -395,7 +544,18 @@ function AskReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'r
             <ChevronDownIcon className="ai-disclosure-chevron" />
           </span>
           <span className={cn(AI_DISCLOSURE_TITLE_CLASS, isStreaming && 'shimmer')}>{title}</span>
+          {isStreaming ? (
+            <ElapsedTimer startedAtUnixMs={startedAtUnixMs} active className="ml-1.5" />
+          ) : completedDuration ? (
+            <span
+              className="ai-elapsed-duration ml-1.5 shrink-0 tabular-nums whitespace-nowrap"
+              data-ai-reasoning-duration=""
+            >
+              {completedDuration}
+            </span>
+          ) : null}
         </CollapsibleTrigger>
+        {announcement && <span className="sr-only" aria-live="polite">{announcement}</span>}
         <CollapsibleContent>
           <ReasoningContent streaming={isStreaming}>{node.content || node.summary}</ReasoningContent>
         </CollapsibleContent>
@@ -571,6 +731,20 @@ function turnProcessSummary(node: AiConversationNodeOf<'turnProcess'>, t: Return
     .join(t('ai.workspace.turnProcess.separator'));
 }
 
+function liveTurnProcessAction(
+  node: AiConversationNodeOf<'turnProcess'>,
+  t: ReturnType<typeof useI18n>['t'],
+): string | null {
+  if (node.status !== 'running') return null;
+  for (let index = node.children.length - 1; index >= 0; index -= 1) {
+    const child = node.children[index];
+    if (child.kind === 'tool' && (child.state === 'running' || child.state === 'preparing' || child.state === 'approval')) {
+      return toolLiveActionSummary(child, t);
+    }
+  }
+  return null;
+}
+
 function TurnProcessDisclosure({
   node,
   onOpenArtifact,
@@ -593,7 +767,9 @@ function TurnProcessDisclosure({
   const foldOnCompletion = processFoldsOnCompletion(node);
   const bodyRef = useRef<HTMLDivElement>(null);
   const label = t(turnProcessLabelKey(node.status));
-  const summary = turnProcessSummary(node, t);
+  const liveAction = liveTurnProcessAction(node, t);
+  const summary = liveAction ?? turnProcessSummary(node, t);
+  const startedAtUnixMs = parseStartedAtUnixMs(node.startedAtUnixMs, node.timestamp);
 
   const updateOpen = (next: boolean): void => {
     storeProcessDisclosure(stateKey, { open: next, manualOpen: next });
@@ -635,7 +811,10 @@ function TurnProcessDisclosure({
           }
         >
           {node.status === 'running' ? (
-            <AiProcessingStatus />
+            <>
+              <AiProcessingStatus />
+              <ElapsedTimer startedAtUnixMs={startedAtUnixMs} active withSeparator />
+            </>
           ) : <>
             <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
               <ChevronDownIcon className="ai-disclosure-chevron" />
@@ -645,21 +824,34 @@ function TurnProcessDisclosure({
           {summary && (
             <>
               <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
-              <span className={AI_DISCLOSURE_SUMMARY_CLASS}>{summary}</span>
+              <span
+                className={AI_DISCLOSURE_SUMMARY_CLASS}
+                title={liveAction ? summary : undefined}
+                data-ai-live-action={liveAction ? '' : undefined}
+              >
+                {summary}
+              </span>
             </>
           )}
         </CollapsibleTrigger>
         <Separator className="ai-turn-process-separator" />
         {!processControlOnly && <CollapsibleContent>
           <div ref={bodyRef} className="ai-turn-process-body flex w-full min-w-0 max-w-full flex-col gap-1 box-border pt-1.5 pr-0 pb-0.5">
-            {node.children.map((child) => (
+            {groupTurnProcessChildren(node.children).map((entry) => (
               <div
-                key={child.key}
+                key={entry.node.key}
                 className="ai-turn-process-child min-w-0 max-w-full empty:hidden"
-                data-ai-process-child={child.kind}
-                data-ai-process-child-key={child.key}
+                data-ai-process-child={entry.node.kind}
+                data-ai-process-child-key={entry.node.key}
               >
-                <ConversationNodeContent node={child} renderers={renderers} onOpenTool={onOpenTool} onOpenArtifact={onOpenArtifact} inTurnProcess />
+                <ConversationNodeContent
+                  node={entry.node}
+                  groupedTools={entry.groupedTools}
+                  renderers={renderers}
+                  onOpenTool={onOpenTool}
+                  onOpenArtifact={onOpenArtifact}
+                  inTurnProcess
+                />
               </div>
             ))}
           </div>
@@ -720,6 +912,8 @@ function renderNode(
   processControlOnly = false,
   hasResponse = false,
   processPanelIds?: string,
+  turnProcess?: AiConversationNodeOf<'turnProcess'>,
+  groupedTools?: readonly AiConversationNodeOf<'tool'>[],
 ): React.ReactNode {
   switch (node.kind) {
     case 'compaction':
@@ -735,6 +929,9 @@ function renderNode(
     case 'reasoning':
       return React.createElement(renderers.reasoning, { node });
     case 'tool':
+      if (groupedTools && groupedTools.length > 1 && renderers.tool === ToolNodeView) {
+        return <AiToolGroupRow tools={groupedTools} onInspect={onOpenTool} />;
+      }
       return React.createElement(renderers.tool, { node, onOpenTool });
     case 'question':
       return React.createElement(renderers.question, { node });
@@ -759,7 +956,7 @@ function renderNode(
         processPanelIds,
       });
     case 'turnTail':
-      return React.createElement(renderers.turnTail, { node, renderers });
+      return React.createElement(renderers.turnTail, { node, renderers, turnProcess, onOpenTool });
     default:
       return assertNever(node);
   }
@@ -775,7 +972,7 @@ export function aiConversationNodeRevision(node: AiConversationNode): string {
     case 'assistantMessage':
       return `${base}:${node.state}:${node.hasTurnTail ?? false}:${node.partialReason ?? ''}`;
     case 'reasoning':
-      return `${base}:${node.state}`;
+      return `${base}:${node.state}:${node.durationMs ?? ''}`;
     case 'tool':
       return `${base}:${node.state}`;
     case 'question':
@@ -804,24 +1001,39 @@ export function aiConversationNodeRevision(node: AiConversationNode): string {
 const ConversationNodeContent = React.memo(
   function ConversationNodeContent({
     node,
+    groupedTools,
     renderers,
     onOpenTool,
     onOpenArtifact,
     inTurnProcess,
   }: {
     readonly node: AiConversationNode;
+    readonly groupedTools?: readonly AiConversationNodeOf<'tool'>[];
     readonly renderers: AiConversationNodeRendererMap;
     readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
     readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
     readonly inTurnProcess?: boolean;
   }) {
-    return renderNode(node, renderers, onOpenTool, onOpenArtifact, inTurnProcess);
+    return renderNode(
+      node,
+      renderers,
+      onOpenTool,
+      onOpenArtifact,
+      inTurnProcess,
+      false,
+      false,
+      false,
+      undefined,
+      undefined,
+      groupedTools,
+    );
   },
   (previous, next) =>
     previous.renderers === next.renderers &&
     previous.onOpenTool === next.onOpenTool &&
     previous.onOpenArtifact === next.onOpenArtifact &&
     previous.inTurnProcess === next.inTurnProcess &&
+    sameGroupedTools(previous.groupedTools, next.groupedTools) &&
     sameConversationNode(previous.node, next.node),
 );
 
@@ -831,25 +1043,38 @@ function sameConversationNode(previous: AiConversationNode, next: AiConversation
   return aiConversationNodeRevision(previous) === aiConversationNodeRevision(next);
 }
 
+function sameGroupedTools(
+  previous?: readonly AiConversationNodeOf<'tool'>[],
+  next?: readonly AiConversationNodeOf<'tool'>[],
+): boolean {
+  if (previous === next) return true;
+  if (!previous || !next || previous.length !== next.length) return false;
+  return previous.every((tool, index) => sameConversationNode(tool, next[index]));
+}
+
 export const AiConversationNodeSeat = React.memo(
   function AiConversationNodeSeat({
     node,
+    groupedTools,
     renderers = aiConversationNodeRenderers,
     onOpenTool,
     onOpenArtifact,
     deferMessageActions = false,
     inTurnProcess = false,
+    turnProcess,
     processControlOnly = false,
     hasResponse = false,
     processPanelIds,
   }: {
     readonly node: AiConversationNode;
+    readonly groupedTools?: readonly AiConversationNodeOf<'tool'>[];
     readonly renderers?: AiConversationNodeRendererMap;
     readonly scrollAnchor?: boolean;
     readonly scrollItemId?: string;
     readonly scrollItemClassName?: string;
     readonly deferMessageActions?: boolean;
     readonly inTurnProcess?: boolean;
+    readonly turnProcess?: AiConversationNodeOf<'turnProcess'>;
     readonly processControlOnly?: boolean;
     readonly hasResponse?: boolean;
     readonly processPanelIds?: string;
@@ -864,7 +1089,19 @@ export const AiConversationNodeSeat = React.memo(
         data-ai-node-kind={node.kind}
         data-ai-turn-id={node.turnId ?? undefined}
       >
-        {renderNode(node, renderers, onOpenTool, onOpenArtifact, inTurnProcess, deferMessageActions, processControlOnly, hasResponse, processPanelIds)}
+        {renderNode(
+          node,
+          renderers,
+          onOpenTool,
+          onOpenArtifact,
+          inTurnProcess,
+          deferMessageActions,
+          processControlOnly,
+          hasResponse,
+          processPanelIds,
+          turnProcess,
+          groupedTools,
+        )}
       </div>
     );
   },
@@ -874,9 +1111,11 @@ export const AiConversationNodeSeat = React.memo(
     previous.onOpenArtifact === next.onOpenArtifact &&
     previous.deferMessageActions === next.deferMessageActions &&
     previous.inTurnProcess === next.inTurnProcess &&
+    previous.turnProcess === next.turnProcess &&
     previous.processControlOnly === next.processControlOnly &&
     previous.hasResponse === next.hasResponse &&
     previous.processPanelIds === next.processPanelIds &&
+    sameGroupedTools(previous.groupedTools, next.groupedTools) &&
     sameConversationNode(previous.node, next.node),
 );
 AiConversationNodeSeat.displayName = 'AiConversationNodeSeat';
@@ -892,6 +1131,12 @@ export function AiConversationNodeList({
   readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
   readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
 }) {
+  const processByTurn = new Map<string, AiConversationNodeOf<'turnProcess'>>();
+  for (const node of nodes) {
+    if (node.kind === 'turnProcess' && node.turnId) {
+      processByTurn.set(`${node.sessionId}:${node.turnId}`, node);
+    }
+  }
   return nodes.map((node) => (
     <AiConversationNodeSeat
       key={node.key}
@@ -899,6 +1144,7 @@ export function AiConversationNodeList({
       renderers={renderers}
       onOpenTool={onOpenTool}
       onOpenArtifact={onOpenArtifact}
+      turnProcess={node.kind === 'turnTail' && node.turnId ? processByTurn.get(`${node.sessionId}:${node.turnId}`) : undefined}
       scrollAnchor={node.kind === 'userMessage'}
     />
   ));

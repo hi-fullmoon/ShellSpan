@@ -9,6 +9,7 @@ import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import type { LocaleKey } from '@/locales';
+import { AiTurnChangesSummary } from './ai-turn-changes-summary';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 
@@ -80,7 +81,15 @@ function StatPopover({
   );
 }
 
-export function AiTurnFooter({ node }: { readonly node: AiConversationNodeOf<'turnTail'> }) {
+export function AiTurnFooter({
+  node,
+  turnProcess,
+  onOpenTool,
+}: {
+  readonly node: AiConversationNodeOf<'turnTail'>;
+  readonly turnProcess?: AiConversationNodeOf<'turnProcess'>;
+  readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
+}) {
   const { t, locale } = useI18n();
   const routes = useLlmRoutesStore((state) => state.snapshot?.routes);
   const providers = useAiSettingsStore((state) => state.providers);
@@ -118,6 +127,7 @@ export function AiTurnFooter({ node }: { readonly node: AiConversationNodeOf<'tu
       data-stop-reason={node.stopReason ?? undefined}
       aria-label={t('ai.workspace.stats.label')}
     >
+      <AiTurnChangesSummary process={turnProcess} onOpenTool={onOpenTool} />
       {node.status === 'incomplete' && (
         <Badge variant="secondary" className="mb-1">
           {t(stepBudgetReached ? 'ai.workspace.turnProcess.stepBudgetReached' : 'ai.workspace.turnProcess.incomplete')}

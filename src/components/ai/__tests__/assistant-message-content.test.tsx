@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { toast } from 'sonner';
 import { getPlatform } from '@/lib/platform';
-import { AssistantMessageContent } from '../assistant-message-content';
+import { AiTerminalInsertContext, AssistantMessageContent } from '../assistant-message-content';
 
 const { invokeOpenPath, invokeOpenUrl, invokeRevealPath, invokeReadLocalFileText } = vi.hoisted(() => ({
   invokeOpenPath: vi.fn().mockResolvedValue(undefined),
@@ -28,9 +28,11 @@ vi.mock('sonner', () => ({
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
-    t: (key: string, variables?: Record<string, string | number>) => (
-      variables ? `${key}:${variables.seconds}` : key
-    ),
+    t: (key: string, variables?: Record<string, string | number>) => {
+      if (!variables) return key;
+      if ('target' in variables) return `${key}:${variables.target}`;
+      return `${key}:${variables.seconds}`;
+    },
     ready: true,
     locale: 'en-US',
     setLocale: () => {},
@@ -253,7 +255,7 @@ describe('AssistantMessageContent', () => {
   });
 
   it('renders fenced code blocks without actions when disabled', () => {
-    render(
+    const { container } = render(
       <AssistantMessageContent
         blocks={[{ type: 'text', text: 'Review:\n```bash\ndf -h\n```' }]}
         streaming={false}
@@ -261,8 +263,103 @@ describe('AssistantMessageContent', () => {
       />,
     );
 
-    expect(screen.getByText('df -h')).toBeInTheDocument();
+    expect(container.querySelector('pre code')).toHaveTextContent('df -h');
     expect(screen.queryByRole('button', { name: 'common.copy' })).not.toBeInTheDocument();
+  });
+
+  it('highlights recognized languages and copies raw source rather than markup', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    const source = 'const count: number = 42;\nconsole.log(count);';
+    const { container } = render(
+      <AssistantMessageContent
+        blocks={[{ type: 'text', text: `\`\`\`typescript\n${source}\n\`\`\`` }]}
+        streaming={false}
+      />,
+    );
+
+    const code = container.querySelector('.ai-markdown-code-block pre code');
+    expect(code).toHaveAttribute('data-highlighted', 'true');
+    expect(code?.querySelector('.hljs-keyword')).toHaveTextContent('const');
+    expect(code?.querySelector('.hljs-number')).toHaveTextContent('42');
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.copy' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(source));
+  });
+
+  it('keeps unknown languages, unlabelled blocks, and oversized blocks as plain text', () => {
+    const oversized = `const value = "${'a'.repeat(33 * 1024)}";`;
+    const { container } = render(
+      <AssistantMessageContent
+        blocks={[{
+          type: 'text',
+          text: [
+            '```unknownlang\nconst x = 1;\n```',
+            '```\nconst y = 2;\n```',
+            `\`\`\`typescript\n${oversized}\n\`\`\``,
+          ].join('\n\n'),
+        }]}
+        streaming={false}
+      />,
+    );
+
+    const codes = container.querySelectorAll('.ai-markdown-code-block pre code');
+    expect(codes).toHaveLength(3);
+    for (const code of codes) {
+      expect(code).not.toHaveAttribute('data-highlighted');
+      expect(code.querySelector('[class*="hljs-"]')).toBeNull();
+    }
+  });
+
+  it('does not inject highlight markup while a fenced block is still open during streaming, then highlights in place once closed', () => {
+    const openMarkdown = '```typescript\nconst count: number = 42;\n';
+    const { container, rerender } = render(
+      <AssistantMessageContent blocks={[{ type: 'text', text: openMarkdown }]} streaming />,
+    );
+
+    const pre = container.querySelector('.ai-markdown-code-block pre');
+    expect(pre?.querySelector('code')).not.toHaveAttribute('data-highlighted');
+    expect(pre?.querySelector('.hljs-keyword')).toBeNull();
+
+    rerender(
+      <AssistantMessageContent blocks={[{ type: 'text', text: `${openMarkdown}\`\`\`` }]} streaming />,
+    );
+
+    expect(container.querySelector('.ai-markdown-code-block pre')).toBe(pre);
+    expect(pre?.querySelector('code')).toHaveAttribute('data-highlighted', 'true');
+    expect(pre?.querySelector('.hljs-keyword')).toHaveTextContent('const');
+  });
+
+  it('defers highlight DOM replacement while text inside a streaming code block is selected', () => {
+    const openMarkdown = '```typescript\nconst count: number = 42;\n';
+    const { container, rerender } = render(
+      <AssistantMessageContent blocks={[{ type: 'text', text: openMarkdown }]} streaming />,
+    );
+
+    const pre = container.querySelector('.ai-markdown-code-block pre')!;
+    const textNode = pre.querySelector('code')!.firstChild!;
+    const range = document.createRange();
+    range.setStart(textNode, 0);
+    range.setEnd(textNode, 5);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    rerender(
+      <AssistantMessageContent blocks={[{ type: 'text', text: `${openMarkdown}\`\`\`` }]} streaming={false} />,
+    );
+
+    expect(pre.querySelector('code')).not.toHaveAttribute('data-highlighted');
+    expect(pre.querySelector('code')?.firstChild).toBe(textNode);
+
+    selection.removeAllRanges();
+    fireEvent(document, new Event('selectionchange'));
+
+    expect(pre.querySelector('code')).toHaveAttribute('data-highlighted', 'true');
+    expect(pre.querySelector('.hljs-keyword')).toHaveTextContent('const');
   });
 
   it('renders Markdown while streaming', () => {
@@ -303,5 +400,37 @@ describe('AssistantMessageContent', () => {
     expect(container.querySelectorAll('ol')).toHaveLength(1);
     expect(screen.getAllByRole('listitem')).toHaveLength(120);
     expect(screen.getByText('After the list.')).toBeInTheDocument();
+  });
+
+  it('offers single-line shell command insertion with target name in regular replies and hides it for multiline, non-shell, or unavailable terminals', () => {
+    const insert = vi.fn(() => true);
+    const markdown = [
+      '```bash\nkubectl get pods -n prod\n```',
+      '```\nuptime\n```',
+      '```bash\necho first\necho second\n```',
+      '```typescript\nconst ok = true;\n```',
+    ].join('\n\n');
+
+    const { rerender } = render(
+      <AiTerminalInsertContext.Provider value={{ targetName: 'prod-web-01', insert }}>
+        <AssistantMessageContent blocks={[{ type: 'text', text: markdown }]} streaming={false} />
+      </AiTerminalInsertContext.Provider>,
+    );
+
+    const insertButtons = screen.getAllByRole('button', { name: 'ai.workspace.question.actionInsertCommandToTarget:prod-web-01' });
+    expect(insertButtons).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'common.copy' })).toHaveLength(4);
+
+    fireEvent.click(insertButtons[0]);
+    expect(insert).toHaveBeenCalledExactlyOnceWith('kubectl get pods -n prod');
+    expect(insertButtons[0]).toHaveAccessibleName('ai.workspace.question.actionInsertedCommand');
+
+    rerender(
+      <AiTerminalInsertContext.Provider value={undefined}>
+        <AssistantMessageContent blocks={[{ type: 'text', text: markdown }]} streaming={false} />
+      </AiTerminalInsertContext.Provider>,
+    );
+
+    expect(screen.queryByRole('button', { name: /actionInsertCommand/ })).not.toBeInTheDocument();
   });
 });

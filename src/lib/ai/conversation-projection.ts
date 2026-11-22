@@ -400,6 +400,12 @@ function createChatProjection() {
     const previous = turn?.children.get(key) ?? unscopedNodes.get(key);
     const previousReasoning = previous?.kind === 'reasoning' ? previous : undefined;
     const nextContent = replace ? content : `${previousReasoning?.content ?? ''}${content}`;
+    const startedAtUnixMs = previousReasoning?.startedAtUnixMs ?? event.timeUnixMs;
+    const durationMs = state === 'streaming'
+      ? null
+      : previousReasoning
+        ? (previousReasoning.durationMs ?? Math.max(0, event.timeUnixMs - startedAtUnixMs))
+        : null;
     const node: AiReasoningNode = {
       kind: 'reasoning',
       key,
@@ -414,6 +420,8 @@ function createChatProjection() {
       summary: nextContent.trim().split('\n')[0] ?? '',
       content: nextContent,
       state,
+      startedAtUnixMs,
+      durationMs,
     };
     putProcessChild(turnId, node);
   };
@@ -541,7 +549,14 @@ function createChatProjection() {
         // Runtime failures can end a scope without committing an assistant/message.
         // Keep the partial content, but never leave it streaming or imply it completed.
         nodes.set(key, node.kind === 'reasoning'
-          ? { ...node, lastSeq: event.seq, state: 'interrupted' }
+          ? {
+            ...node,
+            lastSeq: event.seq,
+            state: 'interrupted',
+            durationMs: node.durationMs ?? (
+              node.startedAtUnixMs !== undefined ? Math.max(0, event.timeUnixMs - node.startedAtUnixMs) : null
+            ),
+          }
           : {
             ...node,
             lastSeq: event.seq,
@@ -573,7 +588,14 @@ function createChatProjection() {
         if (!canTransition
           || node.turnId !== turnId
           || node.stepId !== stepId) continue;
-        nodes.set(key, { ...node, lastSeq: event.seq, state });
+        nodes.set(key, {
+          ...node,
+          lastSeq: event.seq,
+          state,
+          durationMs: node.durationMs ?? (
+            node.startedAtUnixMs !== undefined ? Math.max(0, event.timeUnixMs - node.startedAtUnixMs) : null
+          ),
+        });
       }
     }
   };
@@ -1433,6 +1455,7 @@ function createChatProjection() {
         firstSeq: turn.startSeq ?? turn.firstSeq,
         lastSeq: turn.lastSeq,
         timestamp: turn.timestamp,
+        startedAtUnixMs: turn.startedAt,
         status,
         answerGeneration,
         hasStartBoundary: turn.startSeq !== undefined,

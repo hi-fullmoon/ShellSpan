@@ -330,6 +330,30 @@
   color: var(--ai-text-secondary);
 }
 
+.ai-markdown-code-block .ai-code-block-pre :is(.hljs-keyword, .hljs-selector-tag, .hljs-meta-keyword, .hljs-template-tag) {
+  color: var(--ai-syntax-keyword);
+}
+
+.ai-markdown-code-block .ai-code-block-pre :is(.hljs-string, .hljs-regexp, .hljs-attr, .hljs-attribute, .hljs-addition) {
+  color: var(--ai-success);
+}
+
+.ai-markdown-code-block .ai-code-block-pre :is(.hljs-number, .hljs-literal, .hljs-built_in, .hljs-type, .hljs-variable, .hljs-template-variable) {
+  color: var(--ai-syntax-number);
+}
+
+.ai-markdown-code-block .ai-code-block-pre :is(.hljs-title, .hljs-name, .hljs-section, .hljs-selector-class, .hljs-selector-id) {
+  color: var(--ai-syntax-title);
+}
+
+.ai-markdown-code-block .ai-code-block-pre :is(.hljs-comment, .hljs-quote, .hljs-meta) {
+  color: var(--ai-text-muted);
+}
+
+.ai-markdown-code-block .ai-code-block-pre .hljs-deletion {
+  color: var(--ai-error);
+}
+
 .ai-markdown-table-scroll table {
   width: max-content;
   min-width: 100%;
