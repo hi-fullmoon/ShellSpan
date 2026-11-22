@@ -6,6 +6,7 @@ import { useProfileStore } from '@/stores/profileStore';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { usePortForwardStore } from '@/stores/portForwardStore';
 import { useAppStore } from '@/stores/appStore';
+import { appendTerminalOutput, getRecentTerminalOutput } from '@/lib/terminal/terminal-output-buffer';
 
 vi.mock('@/lib/ipc/tauri', async (importActual) => ({
   ...await importActual<typeof import('@/lib/ipc/tauri')>(),
@@ -446,5 +447,74 @@ describe('useReconnectSession', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); await reconnect; });
     expect(invokeCreateSession).toHaveBeenCalledTimes(3);
     expect(useTerminalStore.getState().sessions[0]?.sessionId).toBe('s2');
+  });
+
+  it('clears screen, scrollback, and buffered output when resetBuffer is requested', async () => {
+    useProfileStore.setState({
+      profiles: [{
+        id: 'p1',
+        name: 'Alpha',
+        host: 'h',
+        port: 22,
+        username: 'u',
+        authMethod: 'password',
+        createdAt: 0,
+        updatedAt: 0,
+      }],
+    });
+    useTerminalStore.getState().addSession(
+      { sessionId: 's1', title: 'Alpha', host: 'h', port: 22, username: 'u' },
+      'p1',
+    );
+    useTerminalStore.getState().setStatus('s1', { sessionId: 's1', status: 'connected' });
+    useTerminalStore.getState().togglePin('s1');
+    useTerminalStore.getState().setTabColor('s1', '#10b981');
+    const controller = terminalRegistry.create(
+      's1',
+      vi.fn(),
+      vi.fn(),
+      () => 'connected',
+      vi.fn(),
+    );
+    const resetSpy = vi.spyOn(controller.terminal, 'reset');
+    const clearSelectionSpy = vi.spyOn(controller.terminal, 'clearSelection');
+    controller.write('previous session output\r\n');
+    appendTerminalOutput('s1', 'previous session output\n');
+
+    const { result } = renderHook(() => useReconnectSession());
+    await act(async () => {
+      await result.current('s1', false, { resetBuffer: true });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(resetSpy).toHaveBeenCalledTimes(1);
+    expect(clearSelectionSpy).toHaveBeenCalledTimes(1);
+    expect(getRecentTerminalOutput('s2', 20)).toBe('');
+    const replaced = useTerminalStore.getState().sessions[0];
+    expect(replaced?.sessionId).toBe('s2');
+    expect(replaced?.pinned).toBe(true);
+    expect(replaced?.color).toBe('#10b981');
+    expect(replaced?.title).toBe('Alpha');
+  });
+
+  it('keeps a connected local session intact and toasts when fresh reconnect fails', async () => {
+    useTerminalStore.getState().addSession({
+      sessionId: 's1',
+      title: 'zsh',
+      host: 'local',
+      port: 0,
+      username: 'u',
+    });
+    useTerminalStore.getState().setStatus('s1', { sessionId: 's1', status: 'connected' });
+
+    const { invokeCreateLocalSession } = await import('@/lib/ipc/tauri');
+    vi.mocked(invokeCreateLocalSession).mockRejectedValueOnce(new Error('spawn failed'));
+
+    const { result } = renderHook(() => useReconnectSession());
+    await act(async () => {
+      await result.current('s1', false, { resetBuffer: true });
+    });
+
+    expect(useTerminalStore.getState().sessions[0]?.status).toBe('connected');
   });
 });

@@ -640,4 +640,54 @@ describe('terminalStore', () => {
     expect(agentTerminalLeaseState.blocksUserInput('s1')).toBe(true);
     agentTerminalLeaseState.clearAll();
   });
+
+  it('tracks inputObservation.nativeRecoveryRequired across integration state updates', () => {
+    const store = useTerminalStore.getState();
+    store.addSession({
+      sessionId: 's1',
+      terminalSessionId: 'term-1',
+      terminalGeneration: 1,
+      title: 'local',
+      host: 'localhost',
+      port: 0,
+      username: 'local',
+    });
+
+    store.setIntegrationState({
+      sessionId: 's1',
+      terminalSessionId: 'term-1',
+      terminalGeneration: 1,
+      state: 'degraded',
+      reason: 'promptDuringUnsubmittedInput:sourceMayBeEnqueued',
+      integrationStateRevision: 1,
+      promptReady: false,
+      promptReadyRevision: 1,
+      inputObservation: {
+        snapshotSequence: 1,
+        commandInputPending: true,
+        nativeRecoveryRequired: true,
+        nativeClearPending: false,
+        commandObservationUnavailable: false,
+      },
+    });
+    expect(useTerminalStore.getState().sessions[0]?.nativeRecoveryRequired).toBe(true);
+
+    store.setIntegrationState({
+      sessionId: 's1',
+      terminalSessionId: 'term-1',
+      terminalGeneration: 1,
+      state: 'ready',
+      integrationStateRevision: 2,
+      promptReady: true,
+      promptReadyRevision: 2,
+      inputObservation: {
+        snapshotSequence: 2,
+        commandInputPending: false,
+        nativeRecoveryRequired: false,
+        nativeClearPending: false,
+        commandObservationUnavailable: false,
+      },
+    });
+    expect(useTerminalStore.getState().sessions[0]?.nativeRecoveryRequired).toBe(false);
+  });
 });

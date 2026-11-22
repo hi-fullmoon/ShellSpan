@@ -142,6 +142,11 @@ const OUTPUT_RESUME_LOW_WATERMARK = 128 * 1024;
 const OUTPUT_RESUME_RETRY_BASE_MS = 250;
 const OUTPUT_RESUME_RETRY_MAX_MS = 2000;
 
+export interface RebindSessionOptions {
+  /** Clear screen, scrollback, and buffered output so the rebound session starts fresh. */
+  resetBuffer?: boolean;
+}
+
 export interface TerminalController {
   readonly inputMode: 'native-inline' | 'raw';
   sessionId: string;
@@ -182,7 +187,7 @@ export interface TerminalController {
   writeDisconnectedHint(): void;
   writeConnectionFailure(message: string): void;
   clearConnectionFailure(): void;
-  rebindSession(sessionId: string, ptyInfo?: SessionPtyInfo): void;
+  rebindSession(sessionId: string, ptyInfo?: SessionPtyInfo, options?: RebindSessionOptions): void;
   updateOptions(preferences: TerminalDisplayPreferences): void;
   refreshTheme(): void;
   dispose(): void;
@@ -1428,7 +1433,7 @@ class TerminalControllerImpl implements TerminalController {
     this.inputBlockedNoticeRef = true;
   }
 
-  rebindSession(sessionId: string, ptyInfo?: SessionPtyInfo): void {
+  rebindSession(sessionId: string, ptyInfo?: SessionPtyInfo, options?: RebindSessionOptions): void {
     if (this.disposed || sessionId === this.sessionId) return;
     this.restoringDisplay = false;
     this.failureMessage = undefined;
@@ -1464,7 +1469,12 @@ class TerminalControllerImpl implements TerminalController {
     this.outputGeneration += 1;
     this.commandDecorations.rebind();
     this.sessionId = sessionId;
-    rebindTerminalOutput(previousSessionId, sessionId);
+    if (options?.resetBuffer) {
+      clearTerminalOutput(previousSessionId);
+      clearTerminalOutput(sessionId);
+    } else {
+      rebindTerminalOutput(previousSessionId, sessionId);
+    }
     this.resetNoticeState();
     terminalInputReadiness.begin(sessionId);
     const generation = this.listenerGeneration;
@@ -1477,11 +1487,16 @@ class TerminalControllerImpl implements TerminalController {
       // Use only standard stream/cursor/scroll operations, never reset/clear,
       // parser mutation, or replaying a separately stored copy of the text.
       this.terminal.options.windowsPty = resolveWindowsPty(ptyInfo);
-      const boundary = ptyInfo?.transportKind === 'windowsConPty' && this.terminal.buffer.active.type === 'normal'
-        ? `\u001b\\\u001b[${this.terminal.rows};1H${'\r\n'.repeat(this.terminal.rows)}\u001b[H`
-        : '\u001b\\';
-      this.emitDisplayOutput(boundary, 'local');
-      this.terminal.write(boundary, this.displayOutputParsedCallback(boundary, 'local'));
+      if (options?.resetBuffer) {
+        this.terminal.reset();
+        this.terminal.clearSelection();
+      } else {
+        const boundary = ptyInfo?.transportKind === 'windowsConPty' && this.terminal.buffer.active.type === 'normal'
+          ? `\u001b\\\u001b[${this.terminal.rows};1H${'\r\n'.repeat(this.terminal.rows)}\u001b[H`
+          : '\u001b\\';
+        this.emitDisplayOutput(boundary, 'local');
+        this.terminal.write(boundary, this.displayOutputParsedCallback(boundary, 'local'));
+      }
       this.commandDecorations = this.installInputRendering(ptyInfo);
       return this.startListenerSetup(true);
     });
@@ -1641,7 +1656,7 @@ interface TerminalRegistry {
     ptyInfo?: SessionPtyInfo,
   ): TerminalController;
   get(sessionId: string): TerminalController | undefined;
-  rebindSession(oldSessionId: string, newSessionId: string, ptyInfo?: SessionPtyInfo): void;
+  rebindSession(oldSessionId: string, newSessionId: string, ptyInfo?: SessionPtyInfo, options?: RebindSessionOptions): void;
   updateOptions(preferences: TerminalDisplayPreferences): void;
   refreshTheme(): void;
   dispose(sessionId: string): void;
@@ -1703,13 +1718,13 @@ export const terminalRegistry: TerminalRegistry = retainedRegistry ?? (() => {
     get(sessionId) {
       return controllers.get(sessionId);
     },
-    rebindSession(oldSessionId, newSessionId, ptyInfo) {
+    rebindSession(oldSessionId, newSessionId, ptyInfo, options) {
       if (oldSessionId === newSessionId) return;
       const controller = controllers.get(oldSessionId);
       if (!controller) return;
       controllers.get(newSessionId)?.dispose();
       controllers.delete(oldSessionId);
-      controller.rebindSession(newSessionId, ptyInfo);
+      controller.rebindSession(newSessionId, ptyInfo, options);
       controllers.set(newSessionId, controller);
       notify();
     },

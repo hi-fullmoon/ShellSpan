@@ -18,6 +18,7 @@ import { useAppStore, DEFAULT_SHORTCUTS } from '@/stores/appStore';
 import { useAiDraftStore } from '@/stores/aiDraftStore';
 import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useFocusStore } from '@/stores/focusStore';
+import { useProfileStore } from '@/stores/profileStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { terminalRegistry } from './registry/terminal-registry';
 import { terminalInputReadiness } from './terminal-input-readiness';
@@ -104,6 +105,7 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
   const { selection, url, path } = snapshot;
   const [clipboard, setClipboard] = useState<string | null>(null);
   const [clearTarget, setClearTarget] = useState<Terminal | null>(null);
+  const [reconnectConfirmSessionId, setReconnectConfirmSessionId] = useState<string | null>(null);
   const [recordingBusy, setRecordingBusy] = useState(false);
   const opening = useRef(0);
   const mounted = useRef(true);
@@ -115,6 +117,7 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
     opening.current++;
     setOpen(false);
     setClearTarget(null);
+    setReconnectConfirmSessionId(null);
     mounted.current = true;
     return () => { mounted.current = false; opening.current++; };
   }, [sessionId, terminal]);
@@ -122,6 +125,12 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
   const valid = (): boolean => Boolean(mounted.current && currentTerminal.current === terminal && sessionId && terminal && terminalRegistry.get(sessionId)?.terminal === terminal
     && useTerminalStore.getState().sessions.some(item => item.sessionId === sessionId));
   const connected = session?.status === 'connected';
+  const hasProfile = useProfileStore((state) => !session?.profileId || state.profiles.some((p) => p.id === session.profileId));
+  const canReconnect = Boolean(session)
+    && !session?.reconnecting
+    && !session?.pendingConnection
+    && session?.status !== 'connecting'
+    && hasProfile;
   const preparing = useSyncExternalStore(terminalInputReadiness.subscribe, () => terminalInputReadiness.isPreparing(sessionId ?? null));
   const lease = useSyncExternalStore(agentTerminalLeaseState.subscribe, () => agentTerminalLeaseState.get(sessionId ?? null));
   const canPaste = connected && !session?.readOnly && !preparing && (!lease || lease.waitingForUserAction || session?.foregroundHandoffActive);
@@ -300,7 +309,15 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
             }).catch(() => { if (valid()) showError(t('terminal.notice.writeFailedLabel')); });
           })}>{t('terminal.menu.clearScreen')}</ContextMenuItem>
           <ContextMenuItem disabled={terminal?.buffer.active.type !== 'normal' || !terminal?.buffer.normal.baseY} onClick={() => run(() => { restoreFocus.current = false; setClearTarget(terminal); })}>{t('terminal.menu.clearHistory')}</ContextMenuItem>
-          {(session?.status === 'disconnected' || session?.status === 'error') && <ContextMenuItem onClick={() => run(() => { restoreFocus.current = false; void reconnect(sessionId!); })}>{t('terminal.menu.reconnect')}</ContextMenuItem>}
+          <ContextMenuItem disabled={!canReconnect} onClick={() => run(() => {
+            if (!sessionId) return;
+            restoreFocus.current = false;
+            if (agentTerminalLeaseState.get(sessionId)) {
+              setReconnectConfirmSessionId(sessionId);
+              return;
+            }
+            void reconnect(sessionId, false, { resetBuffer: true });
+          })}>{t('terminal.menu.reconnect')}</ContextMenuItem>
         </ContextMenuGroup>
       </ContextMenuContent>
     </ContextMenu>
@@ -311,5 +328,18 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
         setClearTarget(null);
         terminal?.focus();
       }} />
+    <ConfirmationDialog
+      open={Boolean(reconnectConfirmSessionId)}
+      onOpenChange={next => { if (!next) setReconnectConfirmSessionId(null); }}
+      title={t('terminal.menu.reconnectConfirmTitle')}
+      description={t('terminal.menu.reconnectConfirmDescription')}
+      confirmLabel={t('terminal.menu.reconnect')}
+      confirmVariant="destructive"
+      onConfirm={() => {
+        const targetId = reconnectConfirmSessionId;
+        setReconnectConfirmSessionId(null);
+        if (targetId) void reconnect(targetId, false, { resetBuffer: true });
+      }}
+    />
   </>;
 }

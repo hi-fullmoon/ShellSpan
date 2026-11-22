@@ -158,4 +158,39 @@ describe('terminal busy feedback', () => {
     rerender(<>{null}</>);
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
+
+  it('offers terminal reconnect instead of disabled Direct switch when recovery is required', async () => {
+    let reconnects = 0;
+    render(<AgentTerminalBusyNotice
+      disabled
+      state="recoveryRequired"
+      reconnectDisabled={false}
+      onSwitchDirect={() => undefined}
+      onReconnectTerminal={() => { reconnects++; }}
+    />);
+    expect(screen.getByRole('status')).toHaveTextContent(t('agent.executionSurface.v1.recoveryRequiredDescription'));
+    expect(screen.queryByRole('button', { name: t('agent.executionSurface.v1.switchDirect') })).not.toBeInTheDocument();
+    const button = screen.getByRole('button', { name: t('ai.workspace.status.reconnect') });
+    expect(button).toBeEnabled();
+    await userEvent.click(button);
+    expect(reconnects).toBe(1);
+  });
+
+  it('explains that execution mode is locked by an uncertain outcome instead of offering disabled Direct switch', async () => {
+    let reconnects = 0;
+    render(<AgentTerminalBusyNotice
+      disabled
+      state="unavailable"
+      switchDirectLockedByUncertain
+      reconnectDisabled={false}
+      onSwitchDirect={() => undefined}
+      onReconnectTerminal={() => { reconnects++; }}
+    />);
+    expect(screen.getByRole('status')).toHaveTextContent(t('agent.executionSurface.v1.unavailableLockedDescription'));
+    expect(screen.queryByRole('button', { name: t('agent.executionSurface.v1.switchDirect') })).not.toBeInTheDocument();
+    const button = screen.getByRole('button', { name: t('ai.workspace.status.reconnect') });
+    expect(button).toBeEnabled();
+    await userEvent.click(button);
+    expect(reconnects).toBe(1);
+  });
 });

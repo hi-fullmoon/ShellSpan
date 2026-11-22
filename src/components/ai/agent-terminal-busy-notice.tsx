@@ -9,14 +9,17 @@ import { AiNoticeAction } from './workspace/ai-notice-action';
 
 interface AgentTerminalBusyNoticeProps {
   readonly disabled: boolean;
-  readonly state?: 'busy' | 'initializing' | 'unavailable';
+  readonly state?: 'busy' | 'initializing' | 'unavailable' | 'recoveryRequired';
   readonly focusMode?: boolean;
   readonly glibcMismatch?: RemoteGlibcMismatch | null;
   /** A new runtime rejection during this busy period, rather than a historical failure. */
   readonly blockedAttempt?: string | null;
   /** Changes on navigation, but stays stable when submitting creates a session. */
   readonly context?: object;
+  readonly switchDirectLockedByUncertain?: boolean;
+  readonly reconnectDisabled?: boolean;
   readonly onSwitchDirect?: () => void | Promise<void>;
+  readonly onReconnectTerminal?: () => void | Promise<void>;
 }
 
 const descriptions = {
@@ -32,6 +35,10 @@ const descriptions = {
     terminal: 'agent.executionSurface.v1.unavailableDescription',
     focus: 'focus.terminalCommandsUnavailable',
   },
+  recoveryRequired: {
+    terminal: 'agent.executionSurface.v1.recoveryRequiredDescription',
+    focus: 'agent.executionSurface.v1.recoveryRequiredDescription',
+  },
 } as const;
 
 export function AgentTerminalBusyNotice(props: AgentTerminalBusyNoticeProps): React.ReactNode {
@@ -42,7 +49,17 @@ export function AgentTerminalBusyNotice(props: AgentTerminalBusyNoticeProps): Re
   return <TerminalBusyFeedback key={`${props.state ?? 'busy'}:${owner.revision}`} {...props} />;
 }
 
-function TerminalBusyFeedback({ disabled, onSwitchDirect, state = 'busy', focusMode = false, blockedAttempt = null, glibcMismatch }: AgentTerminalBusyNoticeProps): React.ReactNode {
+function TerminalBusyFeedback({
+  disabled,
+  onSwitchDirect,
+  onReconnectTerminal,
+  reconnectDisabled,
+  switchDirectLockedByUncertain = false,
+  state = 'busy',
+  focusMode = false,
+  blockedAttempt = null,
+  glibcMismatch,
+}: AgentTerminalBusyNoticeProps): React.ReactNode {
   const { t } = useI18n();
   const [initialBlockedAttempt] = useState(blockedAttempt);
   const [initializationTimedOut, setInitializationTimedOut] = useState(false);
@@ -55,16 +72,28 @@ function TerminalBusyFeedback({ disabled, onSwitchDirect, state = 'busy', focusM
   if (state === 'initializing' && !initializationTimedOut) return null;
   if (state === 'busy' && !blocked) return null;
 
+  const unavailableLocked = state === 'unavailable' && !glibcMismatch && !focusMode && switchDirectLockedByUncertain;
+  const action = state === 'recoveryRequired' || unavailableLocked
+    ? (onReconnectTerminal
+      ? { label: t('ai.workspace.status.reconnect'), disabled: reconnectDisabled ?? disabled, onClick: onReconnectTerminal }
+      : null)
+    : (onSwitchDirect
+      ? { label: t('agent.executionSurface.v1.switchDirect'), disabled, onClick: onSwitchDirect }
+      : null);
+  const message = glibcMismatch
+    ? t('agent.executionSurface.v1.remoteGlibcTooOld', { ...glibcMismatch })
+    : unavailableLocked
+      ? t('agent.executionSurface.v1.unavailableLockedDescription')
+      : t(descriptions[state][focusMode ? 'focus' : 'terminal']);
+
   return (
     <Alert variant="warning" size="sm" role="status" data-slot="terminal-busy-notice"
-      className={onSwitchDirect ? '[--alert-icon-inset:--spacing(1)]' : undefined}>
+      className={action ? '[--alert-icon-inset:--spacing(1)]' : undefined}>
       <TriangleAlertIcon aria-hidden="true" />
       <AlertDescription className={AI_NOTICE_ACTION_ROW_CLASS}>
-        <span className={cn(AI_NOTICE_COPY_CLASS, onSwitchDirect && AI_NOTICE_COPY_WITH_ACTION_CLASS)}>{glibcMismatch
-          ? t('agent.executionSurface.v1.remoteGlibcTooOld', { ...glibcMismatch })
-          : t(descriptions[state][focusMode ? 'focus' : 'terminal'])}</span>
-        {onSwitchDirect && <AiNoticeAction disabled={disabled} onClick={onSwitchDirect}>
-          {t('agent.executionSurface.v1.switchDirect')}
+        <span className={cn(AI_NOTICE_COPY_CLASS, action && AI_NOTICE_COPY_WITH_ACTION_CLASS)}>{message}</span>
+        {action && <AiNoticeAction disabled={action.disabled} onClick={action.onClick}>
+          {action.label}
         </AiNoticeAction>}
       </AlertDescription>
     </Alert>

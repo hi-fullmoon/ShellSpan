@@ -330,12 +330,6 @@ export function AiQuestionPanel({
           <AiContentTitle key={currentQuestion.id}>{userAction ? t('ai.workspace.question.actionWaiting') : currentQuestion.question}</AiContentTitle>
         </CardTitle>
         <CardAction className="ai-question-panel-actions flex items-center gap-0.5">
-          {userAction && <AiToolCopyButton
-            text={userAction.instructions}
-            label={t('ai.workspace.question.actionCopyInstructions')}
-            errorLabel={t('ai.workspace.question.actionCopyInstructionsFailed')}
-            placement="inline"
-          />}
           <Button
             type="button"
             variant="ghost"

@@ -29,7 +29,7 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('user operation within the existing question card', () => {
-  it.each(['en-US', 'zh-CN'] as const)('copies instructions and commands with local feedback in %s', async locale => {
+  it.each(['en-US', 'zh-CN'] as const)('copies commands with local feedback without a header copy button in %s', async locale => {
     await initI18n(locale);
     useAppStore.setState({ locale });
     const user = userEvent.setup();
@@ -39,16 +39,9 @@ describe('user operation within the existing question card', () => {
       id: 'manual', question: 'Run the command', multi_select: false,
       user_action: { ...action, instructions },
     }], answers: [] }} />);
-    const copyInstructions = screen.getByRole('button', { name: locale === 'en-US' ? 'Copy instructions' : '复制操作说明' });
-    expect(copyInstructions.closest('[data-slot="card-action"]')).toBeInTheDocument();
+    const headerActions = container.querySelector('.ai-question-panel-actions');
+    expect(headerActions?.querySelectorAll('button')).toHaveLength(1);
     const copiedLabel = locale === 'en-US' ? 'Copied' : '已复制';
-    await user.click(copyInstructions);
-    expect(await navigator.clipboard.readText()).toBe(instructions);
-    expect(copyInstructions).toHaveAccessibleName(copiedLabel);
-    expect(copyInstructions.querySelector('.lucide-check')).toBeInTheDocument();
-    await user.click(copyInstructions);
-    expect(toast.success).not.toHaveBeenCalled();
-    await waitFor(() => expect(copyInstructions).toHaveAccessibleName(locale === 'en-US' ? 'Copy instructions' : '复制操作说明'), { timeout: 2_000 });
 
     const commands = container.querySelectorAll('pre');
     expect(commands).toHaveLength(2);
@@ -104,10 +97,10 @@ describe('user operation within the existing question card', () => {
     const user = userEvent.setup();
     const write = vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValueOnce(new Error('locked'));
     render(<AiQuestionPanel question={question} />);
-    const copy = screen.getByRole('button', { name: 'Copy instructions' });
+    const copy = screen.getByRole('button', { name: 'Copy command' });
     await user.click(copy);
-    expect(toast.error).toHaveBeenCalledExactlyOnceWith('Could not copy the instructions');
-    expect(copy).toHaveAccessibleName('Copy instructions');
+    expect(toast.error).toHaveBeenCalledExactlyOnceWith('Could not copy the command');
+    expect(copy).toHaveAccessibleName('Copy command');
     await user.click(copy);
     expect(copy).toHaveAccessibleName('Copied');
     expect(write).toHaveBeenCalledTimes(2);

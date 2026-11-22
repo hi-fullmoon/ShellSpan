@@ -9,6 +9,7 @@ import { resolveTerminalTheme, terminalRegistry } from '@/components/terminal/re
 import { handleTerminalLeaderKeydown } from '@/components/terminal/terminal-leader';
 import { installTerminalSelectionGuard } from '@/components/terminal/terminal-selection-guard';
 import { useTerminalStore, type TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
+import { useReconnectSession } from '@/hooks/useReconnectSession';
 import { useToast } from '@/hooks/useToast';
 import { getPlatform } from '@/lib/platform';
 import { copyTerminalText, installTerminalPasteHandler } from './terminal-clipboard';
@@ -40,7 +41,7 @@ import {
   agentTerminalLeaseState,
   type AgentTerminalLeaseView,
 } from '@/components/terminal/agent-terminal-lease-state';
-import { LockIcon, RadioTowerIcon, TerminalIcon } from 'lucide-react';
+import { LockIcon, RadioTowerIcon, TerminalIcon, TriangleAlertIcon } from 'lucide-react';
 
 const effectiveShortcuts = (): ShortcutBindings => ({
   ...DEFAULT_SHORTCUTS,
@@ -224,6 +225,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const paneRef = useRef<HTMLDivElement>(null);
   const resizeBoundaryRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
+  const reconnectSession = useReconnectSession();
   const { error: showError } = useToast();
   const copyOnSelect = useAppStore((state) => state.terminalCopyOnSelect);
   const multiLinePasteWarning = useAppStore((state) => state.terminalMultiLinePasteWarning);
@@ -579,6 +581,14 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           focus();
         }}>{t('terminal.inputLock.unlock')}</Button>
       </div>}
+      {activeSession?.status === 'connected' && activeSession.nativeRecoveryRequired && !activeSession.reconnecting && !activeLease && (
+        <div role="status" data-terminal-recovery-bar className="flex shrink-0 flex-wrap items-center justify-between gap-1 border-b border-app-border/50 bg-app-surface px-2.5 py-1 text-xs text-app-text">
+          <span className="flex items-center gap-1"><TriangleAlertIcon aria-hidden="true" className="size-3.5 shrink-0 text-warning" />{t('terminal.notice.inputRecoveryRequired')}</span>
+          <Button type="button" size="xs" variant="ghost" onClick={() => {
+            void reconnectSession(activeSession.sessionId);
+          }}>{t('terminal.menu.reconnect')}</Button>
+        </div>
+      )}
       <div className="relative min-h-0 flex-1 pl-1.5"
         style={{ backgroundColor: terminalSurfaceStyle.backgroundColor }}>
         {activeLease && !activeLease.waitingForUserAction && (

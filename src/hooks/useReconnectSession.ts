@@ -7,7 +7,7 @@ import {
   invokeCreateLocalSession,
 } from '@/lib/ipc/tauri';
 import { createLogger } from '@/lib/logger';
-import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
+import { terminalRegistry, type RebindSessionOptions } from '@/components/terminal/registry/terminal-registry';
 import { promptForMissingPassword, persistPromptedPassword } from '@/lib/connections/password-prompt';
 import { getErrorMessage, getToastErrorMessage } from '@/lib/error';
 import {
@@ -63,9 +63,19 @@ function waitForConnectionRetry(delayMs: number, signal: AbortSignal): Promise<v
   });
 }
 
-export function useReconnectSession(): (sessionId: string, automatic?: boolean) => Promise<void> {
+export type ReconnectSessionOptions = RebindSessionOptions;
+
+export function useReconnectSession(): (
+  sessionId: string,
+  automatic?: boolean,
+  options?: ReconnectSessionOptions,
+) => Promise<void> {
   const { t } = useI18n();
-  return useCallback(async (sessionId: string, automatic = false): Promise<void> => {
+  return useCallback(async (
+    sessionId: string,
+    automatic = false,
+    options?: ReconnectSessionOptions,
+  ): Promise<void> => {
     if (reconnectInFlight.has(sessionId)) {
       logger.info(`Reconnect already in flight for session ${sessionId}, ignoring`);
       return;
@@ -74,7 +84,7 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
     const session = useTerminalStore
       .getState()
       .sessions.find((s) => s.sessionId === sessionId);
-    if (!session) {
+    if (!session || session.pendingConnection) {
       return;
     }
 
@@ -95,6 +105,8 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
 
       // Sessions without a profile are local shells; recreate them directly.
       if (!session.profileId) {
+        const predecessorConnected = (): boolean => useTerminalStore.getState().sessions
+          .some((item) => item.sessionId === sessionId && item.status === 'connected');
         setReconnecting(sessionId, true);
         logger.info(`Reconnecting local session ${sessionId}`);
         try {
@@ -110,7 +122,7 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
             });
             return;
           }
-          terminalRegistry.rebindSession(sessionId, summary.sessionId, summary.ptyInfo);
+          terminalRegistry.rebindSession(sessionId, summary.sessionId, summary.ptyInfo, options);
           reconnectSession(sessionId, summary);
           logger.info(`Reconnected local session ${sessionId} as session ${summary.sessionId}`);
           invokeCloseSession(sessionId).catch((error) => {
@@ -118,11 +130,9 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
           });
         } catch (error) {
           logger.error(`Failed to reconnect local session ${sessionId}`, error);
-          setStatus(sessionId, {
-            sessionId,
-            status: 'error',
-            message: getToastErrorMessage(error),
-          });
+          const message = getToastErrorMessage(error);
+          if (predecessorConnected()) useToastStore.getState().addToast(message, 'error');
+          else setStatus(sessionId, { sessionId, status: 'error', message });
         }
         return;
       }
@@ -169,7 +179,7 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
           });
           return;
         }
-        terminalRegistry.rebindSession(sessionId, summary.sessionId, summary.ptyInfo);
+        terminalRegistry.rebindSession(sessionId, summary.sessionId, summary.ptyInfo, options);
         reconnectSession(sessionId, summary, profile.id);
         invokeCloseSession(sessionId).catch((error) => {
           logger.warn(`Failed to close replaced session ${sessionId}`, error);

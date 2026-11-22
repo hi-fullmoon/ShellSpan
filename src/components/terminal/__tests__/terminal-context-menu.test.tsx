@@ -4,9 +4,11 @@ import { TerminalContextMenu } from '../terminal-context-menu';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useAppStore } from '@/stores/appStore';
+import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
 import type { TerminalSession } from '@/stores/terminalStore';
 
 const mockConnect = vi.fn();
+const mockReconnect = vi.fn();
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -29,6 +31,10 @@ vi.mock('@/hooks/useConnectSession', () => ({
     },
     closeHostKeyDialog: vi.fn(),
   }),
+}));
+
+vi.mock('@/hooks/useReconnectSession', () => ({
+  useReconnectSession: () => mockReconnect,
 }));
 
 vi.mock('@/lib/ipc/tauri', () => ({
@@ -76,7 +82,9 @@ describe('TerminalContextMenu', () => {
   beforeEach(() => {
     useTerminalStore.setState(initialTerminal, true);
     useProfileStore.setState(initialProfile, true);
+    agentTerminalLeaseState.clearAll();
     mockConnect.mockReset();
+    mockReconnect.mockReset();
     Object.assign(navigator, {
       clipboard: {
         writeText: vi.fn().mockResolvedValue(undefined),
@@ -88,6 +96,7 @@ describe('TerminalContextMenu', () => {
     cleanup();
     useTerminalStore.setState(initialTerminal, true);
     useProfileStore.setState(initialProfile, true);
+    agentTerminalLeaseState.clearAll();
   });
 
   it('renders all menu items when open with a profiled session', () => {
@@ -104,6 +113,7 @@ describe('TerminalContextMenu', () => {
 
     expect(screen.getByText('terminal.tab.pin')).toBeInTheDocument();
     expect(screen.getByText('common.rename')).toBeInTheDocument();
+    expect(screen.getByText('terminal.menu.reconnect')).toBeInTheDocument();
     expect(screen.getByText('common.duplicate')).toBeInTheDocument();
     expect(screen.getByText('terminal.tab.copyInfo')).toBeInTheDocument();
     expect(screen.getByText('terminal.tab.openSftp')).toBeInTheDocument();
@@ -847,5 +857,131 @@ describe('TerminalContextMenu', () => {
         pendingSettingsTarget: prev.pendingSettingsTarget,
       });
     }
+  });
+
+  it('reconnects a connected SSH tab immediately with resetBuffer when no Agent task is active', () => {
+    const onClose = vi.fn();
+    useProfileStore.setState({
+      profiles: [{
+        id: 'p1',
+        name: 'Prod',
+        host: '8.216.9.10',
+        port: 22,
+        username: 'root',
+        authMethod: 'password',
+        createdAt: 0,
+        updatedAt: 0,
+      }],
+    });
+    const session = makeSession('s1', 'Prod', 'p1');
+    render(
+      <TerminalContextMenu
+        open
+        x={10}
+        y={10}
+        session={session}
+        onClose={onClose}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'terminal.menu.reconnect' }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(mockReconnect).toHaveBeenCalledWith('s1', false, { resetBuffer: true });
+  });
+
+  it('allows reconnecting a local tab without profileId and disables reconnect while connecting', () => {
+    const localSession: TerminalSession = {
+      sessionId: 'local-1',
+      title: 'zsh',
+      host: 'local',
+      port: 0,
+      username: 'user',
+      status: 'connected',
+    };
+    const { rerender } = render(
+      <TerminalContextMenu
+        open
+        x={10}
+        y={10}
+        session={localSession}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const item = screen.getByRole('menuitem', { name: 'terminal.menu.reconnect' });
+    expect(item).not.toBeDisabled();
+    fireEvent.click(item);
+    expect(mockReconnect).toHaveBeenCalledWith('local-1', false, { resetBuffer: true });
+
+    rerender(
+      <TerminalContextMenu
+        open
+        x={10}
+        y={10}
+        session={{ ...localSession, status: 'connecting' }}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('menuitem', { name: 'terminal.menu.reconnect' })).toBeDisabled();
+  });
+
+  it('asks for confirmation before reconnecting when an Agent task owns the terminal', () => {
+    const onClose = vi.fn();
+    useProfileStore.setState({
+      profiles: [{
+        id: 'p1',
+        name: 'Prod',
+        host: '8.216.9.10',
+        port: 22,
+        username: 'root',
+        authMethod: 'password',
+        createdAt: 0,
+        updatedAt: 0,
+      }],
+    });
+    agentTerminalLeaseState.set({
+      sessionId: 's1',
+      agentSessionId: 'agent-1',
+      taskId: 'task-1',
+      operationId: 'op-1',
+      acquiredAtUnixMs: 1,
+      state: 'acquired',
+      terminalOwned: true,
+      inputBlocked: true,
+      takeoverRequested: false,
+      takeoverFailed: false,
+      requestTakeover: vi.fn(),
+    });
+    const session = makeSession('s1', 'Prod', 'p1');
+    const { rerender } = render(
+      <TerminalContextMenu
+        open
+        x={10}
+        y={10}
+        session={session}
+        onClose={onClose}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'terminal.menu.reconnect' }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(mockReconnect).not.toHaveBeenCalled();
+
+    // Simulate parent closing menu after onClose() while confirmation dialog stays open
+    rerender(
+      <TerminalContextMenu
+        open={false}
+        x={10}
+        y={10}
+        session={null}
+        onClose={onClose}
+      />,
+    );
+
+    expect(screen.getByText('terminal.menu.reconnectConfirmTitle')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'terminal.menu.reconnect' }));
+    expect(mockReconnect).toHaveBeenCalledWith('s1', false, { resetBuffer: true });
   });
 });

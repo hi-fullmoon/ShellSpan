@@ -31,6 +31,7 @@ export interface TerminalSession {
   promptReadyRevision?: number;
   foregroundHandoffActive?: boolean;
   credentialPromptActive?: boolean;
+  nativeRecoveryRequired?: boolean;
   currentDirectory?: string;
   oscTitle?: string;
   readOnly?: boolean;
@@ -544,6 +545,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
           && session.currentDirectory === event.currentDirectory
           && session.foregroundHandoffActive === event.inputObservation?.foregroundHandoffActive
           && session.credentialPromptActive === event.inputObservation?.credentialPromptActive
+          && session.nativeRecoveryRequired === event.inputObservation?.nativeRecoveryRequired
         ) return session;
         changed = true;
         return {
@@ -558,6 +560,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
           currentDirectory: event.currentDirectory,
           foregroundHandoffActive: event.inputObservation?.foregroundHandoffActive,
           credentialPromptActive: event.inputObservation?.credentialPromptActive,
+          nativeRecoveryRequired: event.inputObservation?.nativeRecoveryRequired,
         };
       });
       return changed ? { sessions } : state;

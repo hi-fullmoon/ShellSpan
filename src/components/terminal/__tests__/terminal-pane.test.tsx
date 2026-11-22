@@ -230,6 +230,8 @@ describe('TerminalPane', () => {
     expect(bar).not.toHaveTextContent('terminal.agentLease.runtime');
     expect(bar.querySelector('[aria-label="terminal.agentLease.runtime"]')).toBeNull();
     expect(bar).toHaveClass('@container/terminal-lease', 'pointer-events-none', 'absolute');
+    expect(bar.firstElementChild).toHaveClass('bg-app-surface/55', 'border-app-border/45', 'shadow-xs');
+    expect(bar.firstElementChild).not.toHaveClass('shadow-md');
     expect(screen.getByTestId('agent-visible-terminal-aura'))
       .toHaveClass('agent-visible-terminal-aura', 'pointer-events-none', 'absolute', 'inset-0');
     expect(bar).not.toHaveTextContent('[Agent] $ echo [REDACTED]');
@@ -1021,5 +1023,20 @@ describe('TerminalPane', () => {
     await userEvent.click(screen.getByRole('button', { name: 'terminal.pasteWarning.confirm' }));
     expect(controller.pasteUserText).not.toHaveBeenCalled();
     expect(toastMocks.error).toHaveBeenCalledWith('terminal.broadcast.targetsChanged');
+  });
+
+  it('shows a reconnect recovery bar when connected terminal input requires recovery without an active Agent lease', () => {
+    makeMockTerminal();
+    const session = makeSession({ status: 'connected', nativeRecoveryRequired: true });
+    useTerminalStore.setState({ sessions: [session] });
+    const { container, rerender } = render(<TerminalPane activeSession={session} />);
+
+    const bar = container.querySelector('[data-terminal-recovery-bar]');
+    expect(bar).toBeInTheDocument();
+    expect(bar).toHaveTextContent('terminal.notice.inputRecoveryRequired');
+    expect(screen.getByRole('button', { name: 'terminal.menu.reconnect' })).toBeEnabled();
+
+    rerender(<TerminalPane activeSession={makeSession({ status: 'connected', nativeRecoveryRequired: false })} />);
+    expect(container.querySelector('[data-terminal-recovery-bar]')).not.toBeInTheDocument();
   });
 });

@@ -68,6 +68,9 @@ export function AiWorkspaceController({
   const terminalReconnecting = useTerminalStore((state) => state.sessions.find(
     candidate => candidate.sessionId === activeTerminalId,
   )?.reconnecting ?? false);
+  const activeTerminalNativeRecoveryRequired = useTerminalStore((state) => state.sessions.find(
+    (candidate) => candidate.sessionId === activeTerminalId,
+  )?.nativeRecoveryRequired ?? false);
   const terminalRecovery = !controller.readOnlySession && terminalExecutionRecovery(controller.view);
   const terminalGeneration = useTerminalStore((state) => state.sessions.find(
     (candidate) => candidate.sessionId === activeTerminalId,
@@ -85,6 +88,7 @@ export function AiWorkspaceController({
     || (controller.readOnlySession && !configuringContinuation)
     || existingSessionLocked;
   const runtimeSettingsLocked = modelSettingsLocked;
+  const uncertainNativeEffects = Boolean(controller.view?.snapshot.value.uncertainNativeEffects);
   const executionSurfaceLocked = modelSettingsLocked
     || (!configuringContinuation && (
       controller.composer.phase === 'submitting'
@@ -92,11 +96,29 @@ export function AiWorkspaceController({
       || (controller.view
         ? controller.view.status === 'running'
           || controller.view.status === 'waiting'
-          || Boolean(controller.view.snapshot.value.uncertainNativeEffects)
+          || uncertainNativeEffects
           || Boolean(controller.view.pendingApproval || controller.view.pendingQuestion)
         : Boolean(controller.composer.sessionId))
     ));
   const realTerminalState = controller.realTerminalState;
+  const terminalNeedsRecovery = activeTerminalStatus === 'connected' && activeTerminalNativeRecoveryRequired;
+  const noticeState = terminalNeedsRecovery && !controller.glibcMismatch
+    ? 'recoveryRequired'
+    : realTerminalState !== 'ready'
+      ? realTerminalState
+      : null;
+  const reconnectActionDisabled = terminalReconnecting
+    || controller.composer.phase === 'stopping'
+    || Boolean(terminalRecovery && terminalRecovery.needsStop)
+    || controller.view?.status === 'running'
+    || controller.view?.status === 'waiting';
+  const handleReconnectTerminal = activeTerminalId
+    ? () => {
+      // Stopping must settle first; reconnect must never bypass an active recovery gate.
+      if (reconnectActionDisabled) return;
+      void reconnectSession(activeTerminalId);
+    }
+    : undefined;
   const imageDraftVisible = Boolean(
     controller.imageDraft.draft?.images.length || controller.imageDraft.pendingFiles.length,
   );
@@ -192,17 +214,21 @@ export function AiWorkspaceController({
           )
         : undefined}
       executionSurfaceNotice={session?.header.subagent ? undefined : <>
-        {focusMode && activeTerminalStatus !== 'connected' ? <FocusNoTarget /> : scope === 'terminal' && activeTerminalStatus === 'connected' && realTerminalState !== 'ready'
+        {focusMode && activeTerminalStatus !== 'connected' ? <FocusNoTarget /> : scope === 'terminal' && activeTerminalStatus === 'connected' && noticeState !== null
+        && !(terminalNeedsRecovery && terminalRecovery)
         && (controller.selectedExecutionSurface === 'boundTerminal' || controller.glibcMismatch)
         && (!controller.readOnlySession || (focusMode && controller.historicalContinuationAvailable))
         ? <AgentTerminalBusyNotice
             key={JSON.stringify([activeTerminalId, terminalSessionId, terminalGeneration])}
             context={controller.submissionContext}
             disabled={executionSurfaceLocked}
-            state={realTerminalState}
+            state={noticeState}
             glibcMismatch={controller.glibcMismatch}
             focusMode={focusMode}
             blockedAttempt={blockedAttempt}
+            switchDirectLockedByUncertain={!configuringContinuation && uncertainNativeEffects}
+            reconnectDisabled={reconnectActionDisabled}
+            onReconnectTerminal={handleReconnectTerminal}
             onSwitchDirect={focusMode || controller.selectedExecutionSurface === 'direct'
               ? undefined : () => controller.selectExecutionSurface('direct')} />
         : undefined}
@@ -213,12 +239,8 @@ export function AiWorkspaceController({
       onContinueOnReconnectedTerminal={controller.continueOnReconnectedTerminal ?? undefined}
       terminalReconnectBusy={controller.terminalReconnectBusy}
       onReconnectTerminal={scope === 'terminal' && activeTerminalId
-        && (terminalRecovery || activeTerminalStatus === 'disconnected' || activeTerminalStatus === 'error')
-        ? () => {
-          // Stopping must settle first; reconnect must never bypass an active recovery gate.
-          if (terminalReconnecting || (terminalRecovery && (terminalRecovery.needsStop || controller.composer.phase === 'stopping'))) return;
-          void reconnectSession(activeTerminalId);
-        } : undefined}
+        && (terminalRecovery || terminalNeedsRecovery || activeTerminalStatus === 'disconnected' || activeTerminalStatus === 'error')
+        ? handleReconnectTerminal : undefined}
       historicalContinuationAvailable={controller.historicalContinuationAvailable}
       historicalContinuationBusy={controller.historicalContinuationBusy}
       historicalContinuationError={controller.historicalContinuationError}

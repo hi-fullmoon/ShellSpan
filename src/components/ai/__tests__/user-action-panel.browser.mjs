@@ -99,20 +99,7 @@ try {
             assert.ok(button.bottom <= dimensions.panel.bottom, JSON.stringify(dimensions));
           }
           const copiedLabel = locale === 'zh-CN' ? '已复制' : 'Copied';
-          const instructionsCopy = page.getByRole('button', { name: locale === 'zh-CN' ? '复制操作说明' : 'Copy instructions' });
-          assert.equal(await instructionsCopy.evaluate(element => getComputedStyle(element).opacity), '1');
-          await instructionsCopy.click();
-          await page.locator('.ai-question-panel-actions').getByRole('button', { name: copiedLabel, exact: true }).waitFor();
-          assert.equal(await page.locator('[data-sonner-toast]').count(), 0, 'Copy success must stay on the button.');
-          await page.screenshot({ path: join(output, `${engineName}-${locale}-${width}-instructions.png`) });
-          if (engine === chromium) {
-            const instructions = await page.evaluate(async events => {
-              const { projectQuestions } = await import('/src/lib/ai/question-projection.ts');
-              const { pendingUserAction } = await import('/src/types/agent-question.ts');
-              return pendingUserAction(projectQuestions(events).find(q => pendingUserAction(q))).instructions;
-            }, events);
-            assert.equal((await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n'), instructions.replace(/\r\n/g, '\n'));
-          }
+          assert.equal(await page.locator('.ai-question-panel-actions button').count(), 1, 'Header actions should only contain the collapse toggle.');
           const copyLabel = locale === 'zh-CN' ? '复制命令' : 'Copy command';
           const region = page.locator('.ai-question-panel-content [data-ai-copy-region]').filter({ has: page.locator('[data-ai-copy-anchor]') });
           const copy = region.locator('button');

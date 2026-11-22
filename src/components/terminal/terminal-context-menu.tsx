@@ -4,6 +4,7 @@ import { useI18n } from '@/hooks/useI18n';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useConnectSession } from '@/hooks/useConnectSession';
+import { useReconnectSession } from '@/hooks/useReconnectSession';
 import { useCloseTerminal } from '@/hooks/useCloseTerminal';
 import { useContextMenuNavigation } from '@/hooks/useContextMenuNavigation';
 import { useViewportConstrainedPosition } from '@/hooks/useViewportConstrainedPosition';
@@ -15,6 +16,7 @@ import { cn } from '@/lib/utils';
 import type { TerminalSession } from '@/stores/terminalStore';
 import type { TerminalSplitDirection } from './terminal-split';
 import { TerminalCloseDetails } from './terminal-close-details';
+import { agentTerminalLeaseState } from './agent-terminal-lease-state';
 import { useAppStore } from '@/stores/appStore';
 import { useFocusStore } from '@/stores/focusStore';
 import { useToast } from '@/hooks/useToast';
@@ -97,7 +99,9 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const setTabColor = useTerminalStore((state) => state.setTabColor);
   const getProfile = useProfileStore((state) => state.getProfile);
   const { connect } = useConnectSession();
+  const reconnect = useReconnectSession();
   const [renameTarget, setRenameTarget] = useState<TerminalSession | null>(null);
+  const [reconnectConfirmTarget, setReconnectConfirmTarget] = useState<TerminalSession | null>(null);
   const [confirmationTarget, setConfirmationTarget] = useState<TerminalSession | null>(null);
   const [confirmationOrder, setConfirmationOrder] = useState<string[] | null>(null);
   const [closeOthersConfirm, setCloseOthersConfirm] = useState(false);
@@ -119,8 +123,14 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
     };
   }, [open, onClose]);
 
-  const target = session ?? renameTarget ?? confirmationTarget;
+  const target = session ?? renameTarget ?? confirmationTarget ?? reconnectConfirmTarget;
   if (!target) return null;
+
+  const liveSession = sessions.find((s) => s.sessionId === target.sessionId) ?? target;
+  const canReconnect = !liveSession.reconnecting
+    && !liveSession.pendingConnection
+    && liveSession.status !== 'connecting'
+    && (!liveSession.profileId || Boolean(getProfile(liveSession.profileId)));
 
   const orderedIds = confirmationOrder ?? orderedSessionIds ?? sessions.map((s) => s.sessionId);
   const isUnpinned = (sessionId: string): boolean =>
@@ -138,6 +148,15 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
 
   const closeSession = (sessionId: string): void => {
     void closeTerminal(sessionId);
+  };
+
+  const handleReconnect = (): void => {
+    onClose();
+    if (agentTerminalLeaseState.get(target.sessionId)) {
+      setReconnectConfirmTarget(target);
+      return;
+    }
+    void reconnect(target.sessionId, false, { resetBuffer: true });
   };
 
   const handleDuplicate = (): void => {
@@ -297,6 +316,12 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
           onClose();
         }}>{t('terminal.title.template')}</MenuItem>
         <MenuItem
+          onClick={handleReconnect}
+          disabled={!canReconnect}
+        >
+          {t('terminal.menu.reconnect')}
+        </MenuItem>
+        <MenuItem
           onClick={handleDuplicate}
           disabled={!target.profileId}
         >
@@ -396,6 +421,19 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         confirmText={t('common.save')}
         cancelText={t('common.cancel')}
         defaultValue={renameTarget?.title ?? ''}
+      />
+      <ConfirmationDialog
+        open={!!reconnectConfirmTarget}
+        onOpenChange={(nextOpen) => { if (!nextOpen) setReconnectConfirmTarget(null); }}
+        title={t('terminal.menu.reconnectConfirmTitle')}
+        description={t('terminal.menu.reconnectConfirmDescription')}
+        confirmLabel={t('terminal.menu.reconnect')}
+        confirmVariant="destructive"
+        onConfirm={() => {
+          const confirmed = reconnectConfirmTarget;
+          setReconnectConfirmTarget(null);
+          if (confirmed) void reconnect(confirmed.sessionId, false, { resetBuffer: true });
+        }}
       />
       <ConfirmationDialog
         open={closeOthersConfirm}
