@@ -5,7 +5,7 @@ import type { TerminalSession } from '@/stores/terminalStore';
 export function canSwitchFocusTarget(view: AiSessionView, terminal: TerminalSession | undefined, checkCurrent = false): boolean {
   const snapshot = view.snapshot.value;
   if (snapshot.header.subagent || view.status === 'running' || view.status === 'waiting'
-    || view.pendingApproval || view.pendingQuestion || snapshot.uncertainNativeEffects
+    || view.pendingApproval || view.pendingQuestion || view.pendingSkillProposal || snapshot.uncertainNativeEffects
     || view.subagents?.some(agent => agent.status === 'running' || agent.status === 'waiting')
     || snapshot.inbox.nextStep.length || snapshot.inbox.nextTurn.length) return false;
   if (checkCurrent) return true;

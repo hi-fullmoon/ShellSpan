@@ -503,6 +503,20 @@ function createActivityNodesProjection() {
           event.type, null, event.data, identity.requestId);
         break;
       }
+      case 'skill/proposal_requested':
+      case 'skill/proposal_resolved':
+      case 'skill/proposal_cancelled': {
+        const identity = event.type === 'skill/proposal_resolved'
+          ? event.data.resolution.identity
+          : event.data.identity;
+        const status = event.type === 'skill/proposal_requested'
+          ? 'pending'
+          : event.type === 'skill/proposal_resolved'
+            ? 'completed'
+            : 'cancelled';
+        upsert(`activity:skill-proposal:${identity.proposalId}`, 'question', event, status, event.type, null, event.data, identity.requestId);
+        break;
+      }
       case 'tool/approval': {
         const key = `activity:tool:${agentToolEventKey(event, event.data.callId)}`;
         upsert(

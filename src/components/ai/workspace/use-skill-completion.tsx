@@ -8,7 +8,7 @@ import { useI18n } from '@/hooks/useI18n';
 import type { ComposerEditorHandle } from './ai-composer-editor';
 import { builtinSkills } from '@/lib/ai/builtin-skills';
 import { activeSkillToken, insertSkill } from '@/lib/ai/skill-completion';
-import type { SkillEntry, SkillUserList } from '@/types/agent-skill';
+import { skillOrigin, type SkillEntry, type SkillUserList } from '@/types/agent-skill';
 import { AiErrorNotice } from './ai-error-notice';
 
 export function AiSkillStaleNotice() {
@@ -67,7 +67,13 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
     });
     return () => { active = false; };
   }, [open, cache, disabled]);
-  const description = (skill: SkillEntry): string => locale === 'zh-CN' && skill.resourceBase === 'builtin'
+  const originLabel = (skill: SkillEntry): string => {
+    const origin = skillOrigin(skill);
+    if (origin === 'user') return t('ai.workspace.skills.origin.user');
+    if (origin === 'workspace') return t('ai.workspace.skills.origin.workspace');
+    return t('ai.workspace.skills.origin.builtin');
+  };
+  const description = (skill: SkillEntry): string => locale === 'zh-CN' && skillOrigin(skill) === 'builtin'
     ? builtinSkills.find(item => item.name === skill.name)?.descriptionZh ?? skill.description
     : skill.description;
   const entries = result?.entries.filter(skill => skill.userInvocable &&
@@ -100,7 +106,10 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
         groups={[{ label: t('ai.workspace.skills.title'), showEmptyLabel: true,
           notice: loading ? <span className="flex items-center gap-1"><Spinner />{t('ai.workspace.skills.loading')}</span> : undefined,
           options: entries.map(skill => ({
-          key: `skill:${skill.name}`, label: description(skill), detail: `/${skill.name}`, accessibleLabel: `/${skill.name}`,
+          key: `skill:${skill.name}`,
+          label: description(skill),
+          detail: `/${skill.name} · ${originLabel(skill)}`,
+          accessibleLabel: `/${skill.name}`,
           icon: <BookOpenIcon />, choose: () => choose(skill),
         })) }]} />
     </div>

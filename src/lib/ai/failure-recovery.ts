@@ -38,7 +38,7 @@ export function modelRetryConfirmation(before: AiSessionView, turnId: string): (
 export function latestFailureRecovery(view: AiSessionView, now = Date.now()): AiFailureRecovery | null {
   const snapshot = view.snapshot.value;
   if (snapshot.archived || view.summary.archived || view.syncError
-    || view.pendingApproval || view.pendingQuestion
+    || view.pendingApproval || view.pendingQuestion || view.pendingSkillProposal
     || !['failed', 'idle'].includes(view.status)) return null;
   let latest: AiConversationNode | undefined;
   for (let index = view.nodes.length - 1; index >= 0; index -= 1) {

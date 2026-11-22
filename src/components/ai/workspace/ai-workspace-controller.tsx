@@ -97,7 +97,7 @@ export function AiWorkspaceController({
         ? controller.view.status === 'running'
           || controller.view.status === 'waiting'
           || uncertainNativeEffects
-          || Boolean(controller.view.pendingApproval || controller.view.pendingQuestion)
+          || Boolean(controller.view.pendingApproval || controller.view.pendingQuestion || controller.view.pendingSkillProposal)
         : Boolean(controller.composer.sessionId))
     ));
   const realTerminalState = controller.realTerminalState;
@@ -143,6 +143,8 @@ export function AiWorkspaceController({
       submissionContext={controller.submissionContext}
       onAnswerQuestion={controller.answerQuestion}
       onRefreshQuestionAnswer={controller.refreshQuestionAnswer}
+      onResolveSkillProposal={controller.resolveSkillProposal}
+      onInspectSkillTarget={controller.inspectSkillTarget}
       onListFileReferences={controller.listFileReferences}
       onListProjectDirectories={controller.listProjectDirectories}
       onListSkills={controller.listSkills}

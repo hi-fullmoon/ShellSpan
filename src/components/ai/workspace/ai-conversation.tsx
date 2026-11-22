@@ -44,6 +44,7 @@ function waitingLabelKey(reason: string | undefined): LocaleKey {
     case 'waitingForNetwork': return 'agent.session.waiting.network';
     case 'toolApprovalPending': return 'agent.session.waiting.approval';
     case 'waitingForUserQuestion': return 'agent.session.waiting.answer';
+    case 'waitingForSkillProposal': return 'agent.session.waiting.skillProposal';
     case 'waitingForUserAction': return 'agent.session.waiting.action';
     case 'waitingForTool': return 'agent.session.waiting.tool';
     case 'toolSchedulerRecoveryRequired': return 'agent.session.waiting.toolRecovery';

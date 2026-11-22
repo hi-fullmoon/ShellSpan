@@ -3,8 +3,15 @@ import { createCommittedEventProjection } from './committed-event-projection';
 import { projectContextUsage } from './context-usage';
 import { fallbackSessionTitle } from './session-title';
 import { normalizeAiSessionError } from './session-error';
-import { invokeAnswerAgentRuntimeQuestion, invokeListAgentRuntimeSkills, invokeListAgentFileReferences } from '@/lib/ipc/tauri';
+import {
+  invokeAnswerAgentRuntimeQuestion,
+  invokeInspectAgentRuntimeSkillTarget,
+  invokeListAgentFileReferences,
+  invokeListAgentRuntimeSkills,
+  invokeResolveAgentRuntimeSkillProposal,
+} from '@/lib/ipc/tauri';
 import { projectQuestions } from './question-projection';
+import { projectSkillProposals } from './skill-proposal-projection';
 import { QuestionSubmissionError, questionSubmissionIssue, reconcileQuestionSubmission } from './question-submission';
 import type { AnswerQuestionInput } from '@/types/agent-question';
 import { modelRetryConfirmation } from './failure-recovery';
@@ -87,6 +94,8 @@ export interface AgentSessionAdapterDependencies {
   readonly submitImages?: typeof invokeSubmitAgentImages;
   readonly listFileReferences?: typeof invokeListAgentFileReferences;
   readonly listSkills?: typeof invokeListAgentRuntimeSkills;
+  readonly resolveSkillProposal?: typeof invokeResolveAgentRuntimeSkillProposal;
+  readonly inspectSkillTarget?: typeof invokeInspectAgentRuntimeSkillTarget;
   readonly createSession: typeof invokeCreateAgentRuntimeSession;
   readonly start: typeof invokeStartAgentRuntime;
   readonly answerQuestion: typeof invokeAnswerAgentRuntimeQuestion;
@@ -115,6 +124,8 @@ const defaultDependencies: AgentSessionAdapterDependencies = {
   setExecutionSurface: invokeSetAgentRuntimeExecutionSurface,
   submitImages: invokeSubmitAgentImages,
   listSkills: invokeListAgentRuntimeSkills,
+  resolveSkillProposal: invokeResolveAgentRuntimeSkillProposal,
+  inspectSkillTarget: invokeInspectAgentRuntimeSkillTarget,
   listFileReferences: invokeListAgentFileReferences,
   createSession: invokeCreateAgentRuntimeSession,
   start: invokeStartAgentRuntime,
@@ -476,6 +487,10 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
       || status === 'failed' || status === 'cancelled'
       ? null
       : projectQuestions(events).find((q) => q.status === 'pending') ?? null,
+    pendingSkillProposal: storageFault || state.snapshot.archived || status === 'completed'
+      || status === 'failed' || status === 'cancelled'
+      ? null
+      : projectSkillProposals(events).find((p) => p.status === 'pending') ?? null,
     status,
     statusReason: storageFault ? 'journalWriteFailed' : activity.statusReason,
     recovery,
@@ -496,6 +511,8 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
         case 'question/answered':
         case 'question/action_answered':
           return [event.data.submission.clientOperationId];
+        case 'skill/proposal_resolved':
+          return [event.data.resolution.clientOperationId];
         case 'agent/inbox/item_resumed':
         case 'agent/inbox/item_updated':
         case 'agent/inbox/item_removed':
@@ -862,6 +879,13 @@ export function createAgentSessionAdapter(
     async listSkills(sessionId) {
       return (dependencies.listSkills ?? invokeListAgentRuntimeSkills)(sessionId);
     },
+    async resolveSkillProposal(input): Promise<void> {
+      await waitForCommittedOperation(input.identity.sessionId, input.clientOperationId,
+        () => (dependencies.resolveSkillProposal ?? invokeResolveAgentRuntimeSkillProposal)(input));
+    },
+    async inspectSkillTarget(input) {
+      return (dependencies.inspectSkillTarget ?? invokeInspectAgentRuntimeSkillTarget)(input);
+    },
     create: createSession,
     async continueOnTarget(input) {
       await invokeContinueAgentRuntimeOnTarget(input.request);
@@ -1173,6 +1197,12 @@ export function createAgentSessionAdapter(
     approve: protect(adapter.approve, input => input.sessionId),
     reject: protect(adapter.reject, input => input.sessionId),
     answerQuestion: protect(adapter.answerQuestion, input => input.identity.sessionId),
+    resolveSkillProposal: adapter.resolveSkillProposal
+      ? protect(adapter.resolveSkillProposal, input => input.identity.sessionId)
+      : undefined,
+    inspectSkillTarget: adapter.inspectSkillTarget
+      ? protect(adapter.inspectSkillTarget, input => input.sessionId)
+      : undefined,
     selectModel: protect(adapter.selectModel, id => id),
     setPermission: protect(adapter.setPermission, id => id),
     setExecutionSurface: protect(adapter.setExecutionSurface, id => id),

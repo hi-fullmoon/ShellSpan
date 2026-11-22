@@ -97,6 +97,7 @@ export interface AiSessionSyncRecovery {
 
 export interface AiSessionView {
   readonly pendingQuestion?: import('@/types/agent-question').AgentQuestionView | null;
+  readonly pendingSkillProposal?: import('@/types/agent-skill').AgentSkillProposalView | null;
   readonly summary: AiSessionSummary;
   readonly snapshot: AiSessionSourceSnapshot;
   readonly nodes: readonly AiConversationNode[];
@@ -209,6 +210,8 @@ export type AiSessionListener = (view: AiSessionView) => void;
 export interface AiSessionAdapter<Kind extends AiSessionKind = AiSessionKind> {
   listFileReferences?(sessionId: string, query: string, signal: AbortSignal): Promise<import('@/types/agent-file-reference').FileReferenceList>;
   listSkills?(sessionId: string): Promise<import('@/types/agent-skill').SkillUserList>;
+  resolveSkillProposal?(input: import('@/types/agent-skill').ResolveSkillProposalInput): Promise<void>;
+  inspectSkillTarget?(input: import('@/types/agent-skill').InspectSkillTargetInput): Promise<import('@/types/agent-skill').SkillTargetInspection>;
   answerQuestion(input: import('@/types/agent-question').AnswerQuestionInput): Promise<void>;
   readonly kind: Kind;
   list(input: ListSessionsInput): Promise<AiSessionSummaryPage>;

@@ -130,6 +130,8 @@ export interface AiSessionController {
   readonly projectTargetLabel: string;
   readonly answerQuestion: AiSessionAdapter['answerQuestion'];
   readonly refreshQuestionAnswer: AiSessionAdapter['answerQuestion'];
+  readonly resolveSkillProposal: NonNullable<AiSessionAdapter['resolveSkillProposal']>;
+  readonly inspectSkillTarget: NonNullable<AiSessionAdapter['inspectSkillTarget']>;
   readonly view: AiSessionView | null;
   readonly restoringSession: boolean;
   readonly pendingNodes: readonly AiConversationNode[];
@@ -1222,9 +1224,15 @@ export function useAiSessionController({
           || (scope === 'terminal'
             && view.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId)),
       waitingApproval: view?.pendingApproval !== null && view?.pendingApproval !== undefined,
-      waitingQuestion: Boolean(view?.pendingQuestion),
+      waitingQuestion: Boolean(view?.pendingQuestion || view?.pendingSkillProposal),
     });
   }, [activeTerminal?.sessionId, adoptDraft, dispatch, navigationDraftKey, openedSessionId, restoreDraft, saveCurrentDraft, scope, view]);
+
+  useEffect(() => {
+    const onSkillsUpdated = (): void => setSkillNavigation((count) => count + 1);
+    window.addEventListener('shellspan:skills-updated', onSkillsUpdated);
+    return () => window.removeEventListener('shellspan:skills-updated', onSkillsUpdated);
+  }, []);
 
   useEffect(() => {
     if (!view) return;
@@ -2015,6 +2023,21 @@ export function useAiSessionController({
       const current = viewRef.current?.pendingQuestion;
       if (!current || questionKey(current.identity) !== questionKey(input.identity)) throw new Error('Question is no longer active');
       await adapter.answerQuestion(input);
+    },
+    resolveSkillProposal: async (input) => {
+      const current = viewRef.current?.pendingSkillProposal;
+      if (!current || current.identity.proposalId !== input.identity.proposalId) {
+        throw new Error('Skill proposal is no longer active');
+      }
+      if (!adapter.resolveSkillProposal) throw new Error('Skill proposals are unavailable');
+      await adapter.resolveSkillProposal(input);
+      if (input.action === 'save') {
+        setSkillNavigation((count) => count + 1);
+      }
+    },
+    inspectSkillTarget: async (input) => {
+      if (!adapter.inspectSkillTarget) throw new Error('Skill inspection is unavailable');
+      return adapter.inspectSkillTarget(input);
     },
     refreshQuestionAnswer: async (input) => {
       const key = questionKey(input.identity) + (input.action ? ':action' : '');

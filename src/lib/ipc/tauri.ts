@@ -1518,6 +1518,38 @@ export function invokeListAgentRuntimeSkills(sessionId: string): Promise<import(
   return invokeLogged('agent_runtime_list_skills', { input: { sessionId } });
 }
 
+export function invokeResolveAgentRuntimeSkillProposal(
+  input: import('@/types/agent-skill').ResolveSkillProposalInput,
+): Promise<AgentSessionSnapshot> {
+  return invokeLogged<AgentSessionSnapshot>('agent_runtime_resolve_skill_proposal', { input });
+}
+
+export function invokeInspectAgentRuntimeSkillTarget(
+  input: import('@/types/agent-skill').InspectSkillTargetInput,
+): Promise<import('@/types/agent-skill').SkillTargetInspection> {
+  return invokeLogged<import('@/types/agent-skill').SkillTargetInspection>('agent_runtime_inspect_skill_target', { input });
+}
+
+export function invokeListManagedSkills(): Promise<import('@/types/agent-skill').ManagedSkillCatalog> {
+  return invokeLogged<import('@/types/agent-skill').ManagedSkillCatalog>('agent_runtime_list_managed_skills');
+}
+
+export function invokeSaveUserSkill(
+  input: import('@/types/agent-skill').SaveUserSkillInput,
+): Promise<import('@/types/agent-skill').ManagedSkillItem> {
+  return invokeLogged<import('@/types/agent-skill').ManagedSkillItem>('agent_runtime_save_user_skill', { input });
+}
+
+export function invokeDeleteUserSkill(
+  input: import('@/types/agent-skill').DeleteUserSkillInput,
+): Promise<void> {
+  return invokeLogged<void>('agent_runtime_delete_user_skill', { input });
+}
+
+export function invokeOpenUserSkillsDir(): Promise<void> {
+  return invokeLogged<void>('agent_runtime_open_user_skills_dir');
+}
+
 /** Abort cancels only this query; native work remains bounded if the renderer disappears. */
 export async function invokeListAgentFileReferences(sessionId: string, query: string, signal: AbortSignal): Promise<import('@/types/agent-file-reference').FileReferenceList> {
   if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');

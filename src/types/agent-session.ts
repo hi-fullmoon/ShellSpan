@@ -322,6 +322,10 @@ export type AgentRecoveryCheckpointKind =
   | 'idle'
   | 'openModelRequest'
   | 'waitingApproval'
+  | 'waitingQuestion'
+  | 'questionContinuation'
+  | 'waitingSkillProposal'
+  | 'skillProposalContinuation'
   | 'authorizedBeforeExecute'
   | 'executionInFlight'
   | 'toolResultCommitted'
@@ -569,6 +573,18 @@ export type AgentSessionEvent =
   | AgentSessionEventWithData<'question/answered', { submission: import('./agent-question').AnswerQuestionInput; fingerprint: string }>
   | AgentSessionEventWithData<'question/action_answered', { submission: import('./agent-question').AnswerQuestionInput; fingerprint: string }>
   | AgentSessionEventWithData<'question/cancelled', { identity: import('./agent-question').QuestionIdentity }>
+  | AgentSessionEventWithData<'skill/proposal_requested', {
+    identity: import('./agent-skill').SkillProposalIdentity;
+    proposal: import('./agent-skill').PreparedSkillProposal;
+    provider: AgentSubagentModel;
+  }>
+  | AgentSessionEventWithData<'skill/proposal_resolved', {
+    resolution: import('./agent-skill').SkillProposalResolution;
+    fingerprint: string;
+  }>
+  | AgentSessionEventWithData<'skill/proposal_cancelled', {
+    identity: import('./agent-skill').SkillProposalIdentity;
+  }>
   | AgentSessionEventWithData<'tool/approval', {
       requestId: string;
       callId: string;

@@ -181,6 +181,8 @@ export interface AiWorkspaceRootProps {
   readonly projectTargetLabel?: string;
   readonly onAnswerQuestion?: (input: import('@/types/agent-question').AnswerQuestionInput) => Promise<void>;
   readonly onRefreshQuestionAnswer?: (input: import('@/types/agent-question').AnswerQuestionInput) => Promise<void>;
+  readonly onResolveSkillProposal?: (input: import('@/types/agent-skill').ResolveSkillProposalInput) => Promise<void>;
+  readonly onInspectSkillTarget?: (input: import('@/types/agent-skill').InspectSkillTargetInput) => Promise<import('@/types/agent-skill').SkillTargetInspection>;
   readonly loadingOlder?: boolean;
   readonly queueMutation?: AiQueueMutationState | null;
   readonly onRetryQueueMutation?: import('./use-ai-session-controller').AiSessionController['retryQueueMutation'];
@@ -277,6 +279,8 @@ export function AiWorkspaceRoot({
   approvalArgumentsError = null,
   onAnswerQuestion,
   onRefreshQuestionAnswer,
+  onResolveSkillProposal,
+  onInspectSkillTarget,
   onListFileReferences,
   onListProjectDirectories,
   onListSkills,
@@ -708,6 +712,7 @@ export function AiWorkspaceRoot({
               imageSubmissionId={imageSubmissionId}
               status={status}
               statusReason={view?.statusReason ?? (view?.pendingQuestion ? 'waitingForUserQuestion'
+                : view?.pendingSkillProposal ? 'waitingForSkillProposal'
                 : view?.pendingApproval ? 'toolApprovalPending' : undefined)}
               throughSeq={view?.throughSeq ?? null}
               initialAnchor={scrollAnchor}
@@ -829,6 +834,9 @@ export function AiWorkspaceRoot({
           pendingQuestion={readOnlySession ? undefined : view?.pendingQuestion}
           onAnswerQuestion={readOnlySession ? undefined : onAnswerQuestion}
           onRefreshQuestionAnswer={onRefreshQuestionAnswer}
+          pendingSkillProposal={readOnlySession ? undefined : view?.pendingSkillProposal}
+          onResolveSkillProposal={readOnlySession ? undefined : onResolveSkillProposal}
+          onInspectSkillTarget={readOnlySession ? undefined : onInspectSkillTarget}
           onListFileReferences={surfaceMode === 'agent' && !readOnlySession ? onListFileReferences : undefined}
           onListProjectDirectories={surfaceMode === 'agent' && !readOnlySession ? onListProjectDirectories : undefined}
           onListSkills={surfaceMode === 'agent' && !readOnlySession ? onListSkills : undefined}

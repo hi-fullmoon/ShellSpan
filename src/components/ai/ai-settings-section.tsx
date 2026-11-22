@@ -40,6 +40,7 @@ import {
 } from './provider-brand-icons';
 import { ProviderSetupDialog } from './provider-setup-dialog';
 import { AiSessionRecordsDialog } from './ai-session-records-dialog';
+import { AiSkillsDialog } from './ai-skills-dialog';
 import { SettingRow, SettingsGroup } from '@/components/workbench/settings-layout';
 
 const PRESET_DESCRIPTION_KEYS: Record<AiProviderPreset, LocaleKey> = {
@@ -99,6 +100,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const [agentActionBusy, setAgentActionBusy] = useState(false);
   const [clearAgentOpen, setClearAgentOpen] = useState(false);
   const [recordsOpen, setRecordsOpen] = useState(false);
+  const [skillsOpen, setSkillsOpen] = useState(false);
   const [expandedModels, setExpandedModels] = useState<Record<string, boolean>>({});
   const routeSnapshot=useLlmRoutesStore(state=>state.snapshot);
   const modelsByRoute=useLlmRoutesStore(state=>state.modelsByRoute);
@@ -323,6 +325,19 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
               }}
             />
           </SettingRow>
+          <SettingRow
+            label={t('settings.ai.skills.title')}
+            description={t('settings.ai.skills.description')}
+          >
+            <Button
+              className="w-full @min-[32rem]:w-auto"
+              variant="outline"
+              size="sm"
+              onClick={() => setSkillsOpen(true)}
+            >
+              {t('settings.ai.skills.manage')}
+            </Button>
+          </SettingRow>
         </SettingsGroup>
       )}
 
@@ -360,6 +375,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
       </SettingsGroup>
 
       {recordsOpen && <AiSessionRecordsDialog onOpenChange={setRecordsOpen} />}
+      {skillsOpen && <AiSkillsDialog onOpenChange={setSkillsOpen} />}
 
       <ProviderSetupDialog
         open={addOpen}

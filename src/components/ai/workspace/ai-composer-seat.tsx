@@ -54,6 +54,7 @@ import type { LocaleKey } from '@/locales';
 import type { AgentSessionPlanStep } from '@/types/agent-session';
 import { AiApprovalSeat } from './ai-approval-panel';
 import { AiQuestionSeat } from './ai-question-panel';
+import { AiSkillProposalSeat } from './ai-skill-proposal-panel';
 import { AiContextMeter } from './ai-context-meter';
 import { AiQueueDock } from './ai-queue-dock';
 import { useDocumentImport } from './use-document-import';
@@ -102,6 +103,9 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly announcement?: string | null;
   readonly pendingApproval?: AiPendingApproval | null;
   readonly pendingQuestion?: import('@/types/agent-question').AgentQuestionView | null;
+  readonly pendingSkillProposal?: import('@/types/agent-skill').AgentSkillProposalView | null;
+  readonly onResolveSkillProposal?: (input: import('@/types/agent-skill').ResolveSkillProposalInput) => Promise<void>;
+  readonly onInspectSkillTarget?: (input: import('@/types/agent-skill').InspectSkillTargetInput) => Promise<import('@/types/agent-skill').SkillTargetInspection>;
   readonly onListFileReferences?: import('@/types/agent-file-reference').ListFileReferences;
   readonly onListProjectDirectories?: import('@/types/agent-file-reference').ListProjectDirectories;
   readonly onListSkills?: (root?: string) => Promise<import('@/types/agent-skill').SkillUserList>;
@@ -170,6 +174,9 @@ export function AiComposerSeat({
   announcement,
   pendingApproval,
   pendingQuestion,
+  pendingSkillProposal,
+  onResolveSkillProposal,
+  onInspectSkillTarget,
   onAnswerQuestion,
   onRefreshQuestionAnswer,
   onListFileReferences,
@@ -228,7 +235,9 @@ export function AiComposerSeat({
     ? `approval:${pendingApproval.approvalId}`
     : pendingQuestion
       ? `question:${pendingQuestion.identity.questionRequestId}`
-      : null;
+      : pendingSkillProposal
+        ? `skillProposal:${pendingSkillProposal.identity.proposalId}`
+        : null;
   const lastBlockingPromptKeyRef = useRef<string | null>(blockingPromptKey);
   useEffect(() => {
     if (blockingPromptKey !== null && lastBlockingPromptKeyRef.current !== blockingPromptKey) {
@@ -261,7 +270,7 @@ export function AiComposerSeat({
   const draft = missingChatTitles.length ? `${[message.text, ...missingChatTitles].filter(Boolean).join(' ')} ` : message.text;
   const running = status === 'running' || status === 'waiting';
   const waitingApproval = mode === 'agent' && composerState?.phase === 'waitingApproval';
-  const waitingQuestion = Boolean(pendingQuestion) || composerState?.phase === 'waitingQuestion';
+  const waitingQuestion = Boolean(pendingQuestion || pendingSkillProposal) || composerState?.phase === 'waitingQuestion';
   const submitting = imageBusy;
   const terminal = composerState?.terminal ?? false;
   const stopping = composerState?.phase === 'stopping';
@@ -591,6 +600,13 @@ export function AiComposerSeat({
           onOpenSettings={onOpenModel}
           onInsertToTerminal={handoffTerminalId ? handleInsertHandoffCommand : undefined}
         />
+        {mode === 'agent' && (
+          <AiSkillProposalSeat
+            proposal={pendingSkillProposal}
+            onResolve={onResolveSkillProposal}
+            onInspectTarget={onInspectSkillTarget}
+          />
+        )}
         {mode === 'agent' && <AiApprovalSeat key={`approval:${currentSessionId ?? composerState?.sessionId ?? ''}`}
           approval={!stopping && pendingApproval ? {
             ...pendingApproval, arguments: approvalArguments ?? pendingApproval.arguments,

@@ -7,7 +7,7 @@ export const builtinSkillPreview: SkillUserList = {
   sessionId: '', status: 'fresh', revision: null, diagnostics: [],
   entries: catalog.map(skill => ({
     name: skill.name, description: skill.description,
-    relativePath: `builtin/${skill.name}.md`, resourceBase: 'builtin',
+    relativePath: `builtin/${skill.name}.md`, resourceBase: 'builtin', origin: 'builtin',
     modelInvocable: true, userInvocable: true, fileHash: '', instructionHash: '', extensions: {},
   })),
 };
