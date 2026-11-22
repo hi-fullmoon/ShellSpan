@@ -340,27 +340,15 @@ describe('AiWorkspaceRoot conversation structure', () => {
     expect(screen.getByTestId('ai-workspace-composer')).toHaveTextContent('Unsent draft');
   });
 
-  it.each(['waitingApproval', 'waitingQuestion'] as const)('places %s notices above the input inside the composer', (phase) => {
-    const { container, rerender } = render(<AiWorkspaceRoot scope="terminal" view={agentView('running')}
+  it.each(['waitingApproval', 'waitingQuestion'] as const)('keeps the notice area hidden when %s has no pending prompt record', (phase) => {
+    const { container } = render(<AiWorkspaceRoot scope="terminal" view={agentView('running')}
       composerState={createAiComposerState({ phase, runtimeStatus: 'running' })} />);
     const notices = container.querySelector<HTMLElement>('[data-slot="ai-workspace-status-notices"]')!;
-    const body = container.querySelector('[data-slot="ai-workspace-body"]')!;
-    const composer = container.querySelector('[data-slot="ai-composer-seat"]')!;
-    const alert = notices.querySelector('[data-slot="alert"]');
-    expect(alert).toHaveAttribute('data-size', 'sm');
-    expect(alert).toHaveClass('border-primary/30', 'bg-primary/10');
-    expect(alert?.querySelector(':scope > svg')).toHaveAttribute('aria-hidden', 'true');
-    expect(notices).toHaveClass('gap-1.5');
-    expect(body).toContainElement(notices);
-    expect(composer).toContainElement(notices);
-    expect(notices.compareDocumentPosition(composer.querySelector('[data-composer-card]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    rerender(<AiWorkspaceRoot scope="terminal" view={agentView('idle')}
-      composerState={createAiComposerState({ phase: 'idle', runtimeStatus: 'idle' })} />);
     expect(notices).toBeEmptyDOMElement();
     expect(notices).toHaveClass('empty:hidden');
   });
 
-  it('places history and availability notices above the input with a continuation action', () => {
+  it('places history error and availability notices above the input with a continuation action', () => {
     const { container } = render(<AiWorkspaceRoot scope="terminal" view={agentView('failed')}
       historicalContinuationAvailable historicalContinuationBusy historicalContinuationError="Connection lost"
       agentUnavailableReason="Connect a terminal" onContinueOnReconnectedTerminal={() => {}} />);
@@ -379,7 +367,7 @@ describe('AiWorkspaceRoot conversation structure', () => {
     }
     const availability = within(notices).getByRole('status', { name: 'Agent is unavailable' });
     expect(screen.getByRole('textbox')).toHaveAttribute('aria-describedby', availability.id);
-    const continuation = within(notices).getByRole('button', { name: 'Verify connection and continue' });
+    const continuation = within(notices).getByRole('button', { name: 'Verify and continue' });
     expect(continuation).toBeVisible();
     expect(continuation.querySelector('svg')).toBeNull();
     expect(continuation).toHaveClass('h-6', 'text-[11px]');
@@ -398,8 +386,8 @@ describe('AiWorkspaceRoot conversation structure', () => {
     }
     const { container } = render(<ContinuedWorkspace />);
     const notices = container.querySelector<HTMLElement>('[data-slot="ai-workspace-status-notices"]')!;
-    expect(within(notices).getByText('Your history and draft are preserved. Verify the current connection and execution state to continue this conversation. Earlier commands will not run automatically.')).toBeVisible();
-    await user.click(within(notices).getByRole('button', { name: 'Verify connection and continue' }));
+    expect(within(notices).getByText('Verify the current connection to continue. Earlier commands will not run automatically.')).toBeVisible();
+    await user.click(within(notices).getByRole('button', { name: 'Verify and continue' }));
     expect(container.querySelector('output')).toHaveTextContent('continued');
   });
 
@@ -475,9 +463,7 @@ describe('AiWorkspaceRoot conversation structure', () => {
     expect(error).not.toHaveTextContent('taskTokenBudgetExceeded:');
     expect(screen.queryByText(artifact)).toBeNull();
     expect(screen.queryByRole('button', { name: locale === 'zh-CN' ? '运行记录' : 'Run records' })).toBeNull();
-    expect(container.querySelector('[data-token-budget-notice]')).not.toBeNull();
-    const notice = container.querySelector('[data-token-budget-notice]') as HTMLElement;
-    expect(within(notice).queryByRole('button')).toBeNull();
+    expect(container.querySelector('[data-token-budget-notice]')).toBeNull();
     expect(screen.queryByRole('button', { name: action })).toBeNull();
     expect(screen.getByRole('textbox')).toBeEnabled();
     rerender(<AiWorkspaceRoot scope="workbench" mode="ask" view={taskTokenBudgetView(true)} canStartAgent />);

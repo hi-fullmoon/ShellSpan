@@ -12,8 +12,8 @@ import { terminalLoginLabel } from '@/lib/ai/terminal-login-scope';
 import { contextUsageForModel } from '@/lib/ai/session-settings';
 import { conversationArtifacts } from '@/lib/ai/conversation-artifact';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
-import { canResumeTokenBudgetedTask, hasTokenBudgetCheckpoint, taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { findConversationTool, storedToolOutputId } from '@/lib/ai/conversation-tool';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
 import type { AiInboxItem, AiSessionView } from '@/lib/ai/session-adapter';
@@ -746,40 +746,10 @@ export function AiWorkspaceRoot({
                 {terminalRecovery && <AiTerminalRecoveryNotice id={availabilityHintId} recovery={terminalRecovery}
                   stopping={activeComposerState?.phase === 'stopping'} reconnecting={terminalReconnecting}
                   onStop={onStop} onReconnect={onReconnectTerminal} />}
-                {historicalContinuationAvailable && !historicalContinuationError && (
-                  <Alert variant="info" size="sm" role="status">
-                    <InfoIcon aria-hidden="true" />
-                    <AlertDescription>{t(historicalContinuationBusy
-                      ? 'ai.workspace.sessions.continuePreparing'
-                      : 'ai.workspace.sessions.continueComposerHint')}</AlertDescription>
-                  </Alert>
-                )}
                 {historicalContinuationError && (
                   <Alert variant="destructiveSubtle" size="sm" className="items-center">
                     <CircleAlertIcon aria-hidden="true" />
                     <AlertDescription>{aiErrorMessage(historicalContinuationError, t)}</AlertDescription>
-                  </Alert>
-                )}
-                {!readOnlySession && canResumeTokenBudgetedTask(view) && (
-                  <Alert variant="info" size="sm" role="status" data-token-budget-notice="">
-                    <InfoIcon aria-hidden="true" />
-                    <AlertDescription>{t(view && hasTokenBudgetCheckpoint(view)
-                      ? 'ai.workspace.tokenBudget.checkpointSaved'
-                      : 'ai.workspace.tokenBudget.description')}</AlertDescription>
-                  </Alert>
-                )}
-                {surfaceMode === 'agent' && activeComposerState?.phase === 'waitingApproval' && !view?.pendingApproval && (
-                  <Alert variant="info" size="sm">
-                    <InfoIcon aria-hidden="true" />
-                    <AlertTitle>{t('ai.workspace.approvalWaiting')}</AlertTitle>
-                    <AlertDescription>{t('ai.workspace.approvalPhase5')}</AlertDescription>
-                  </Alert>
-                )}
-                {activeComposerState?.phase === 'waitingQuestion' && !view?.pendingQuestion && (
-                  <Alert variant="info" size="sm">
-                    <InfoIcon aria-hidden="true" />
-                    <AlertTitle>{t('ai.workspace.question.pending')}</AlertTitle>
-                    <AlertDescription>{t('ai.workspace.announce.waitingQuestion')}</AlertDescription>
                   </Alert>
                 )}
                 <AiNoticeTransition key={subagent ? selectedSessionId : undefined}>

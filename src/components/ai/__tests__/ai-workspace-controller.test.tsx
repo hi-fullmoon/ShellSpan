@@ -678,6 +678,27 @@ it.each([
   }
 });
 
+it('gates submission while checking sandbox settings without flashing an availability banner', async () => {
+  let resolvePreview!: (value: boolean) => void;
+  const previewSpy = vi.spyOn(tauri, 'isLocalAgentSandboxPreview')
+    .mockImplementation(() => new Promise<boolean>((resolve) => { resolvePreview = resolve; }));
+  try {
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    connectedLocalTerminal();
+    setNativeRoute('route-default', 'route-model', 7);
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: adapter() }));
+
+    expect(result.current.canSubmitAgent).toBe(false);
+    expect(result.current.agentUnavailableReason).toBeNull();
+
+    act(() => resolvePreview(false));
+    await waitFor(() => expect(result.current.canSubmitAgent).toBe(true));
+    expect(result.current.agentUnavailableReason).toBeNull();
+  } finally {
+    previewSpy.mockRestore();
+  }
+});
+
 it('shows an invalid frozen route revision without crashing or falling back', async () => {
   (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
   connectedTerminal();
@@ -916,13 +937,13 @@ describe('AiWorkspaceController', () => {
     expect(submit).not.toHaveBeenCalledWith('agent-old', expect.anything());
   });
 
-  it('shows the historical composer without an extra continue button', () => {
+  it('shows the historical composer without an extra continue button or banner', () => {
     const old = runningAgentView('agent-old', 'terminal-old');
-    render(<AiWorkspaceRoot scope="terminal" view={old} readOnlySession
+    const { container } = render(<AiWorkspaceRoot scope="terminal" view={old} readOnlySession
       historicalContinuationAvailable />);
     expect(screen.getByTestId('ai-workspace-composer')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Continue answering' })).not.toBeInTheDocument();
-    expect(screen.getByText(/Sending continues this history in a new conversation/)).toBeInTheDocument();
+    expect(container.querySelector('[data-slot="ai-workspace-status-notices"]')).toBeEmptyDOMElement();
   });
 
   it('sends from the normal historical composer through a new linked session', async () => {
@@ -952,7 +973,7 @@ describe('AiWorkspaceController', () => {
     await user.click(await within(history).findByText('Run checks'));
     const editor = await screen.findByTestId('ai-workspace-composer');
     expect(editor).toHaveAttribute('contenteditable', 'true');
-    expect(screen.getByText(/Sending continues this history in a new conversation/)).toBeInTheDocument();
+    expect(screen.queryByText(/Sending continues this history in a new conversation/)).not.toBeInTheDocument();
     await user.type(editor, 'Check nginx status now');
     await user.click(screen.getByRole('button', { name: 'Send' }));
 
@@ -1123,7 +1144,7 @@ describe('AiWorkspaceController', () => {
       snapshot: { kind: 'agent', value: { ...base.snapshot.value, status: 'failed', ended: true } },
     };
     render(<AiWorkspaceRoot scope="terminal" view={failed} readOnlySession />);
-    expect(screen.queryByRole('button', { name: 'Verify connection and continue' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Verify and continue' })).toBeNull();
   });
 
   it('renews the subscription when history selects the current session again', async () => {

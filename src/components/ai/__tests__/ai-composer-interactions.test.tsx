@@ -138,7 +138,7 @@ describe('AiComposerSeat interactions', () => {
 
   it('does not show a new-terminal continuation button after failure', () => {
     render(<AiComposerSeat phase="active" status="failed" />);
-    expect(screen.queryByRole('button', { name: 'Verify connection and continue' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Verify and continue' })).toBeNull();
   });
 
   it('adds pasted images once without submitting the message', () => {
