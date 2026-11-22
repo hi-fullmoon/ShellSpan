@@ -92,6 +92,7 @@ describe('single Agent Runtime architecture', () => {
       'inspect_vim_buffer',
       'insert_vim_text',
       'save_vim_buffer',
+      'close_vim_editor',
       'write_stdin',
       'wait_process',
       'kill_process',

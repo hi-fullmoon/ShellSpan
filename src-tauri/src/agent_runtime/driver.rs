@@ -644,6 +644,16 @@ async fn drive_agent_inner(
                 }
             }
         }
+        if let Some(settlement) = tools.continue_skill_proposals(entry).await? {
+            match settlement {
+                ToolPipelineSettlement::Completed => continue,
+                ToolPipelineSettlement::Waiting => return Ok(AgentDriverSettlement::Waiting),
+                ToolPipelineSettlement::Cancelled => {
+                    close_open_scope(sessions, entry, "cancelled")?;
+                    return Ok(AgentDriverSettlement::Cancelled);
+                }
+            }
+        }
         if let Some(settlement) = tools.continue_skills(entry).await? {
             match settlement {
                 ToolPipelineSettlement::Completed => continue,
@@ -1147,6 +1157,12 @@ fn model_tools_for(
         // historical native capability scopes retained by a resumed root.
         .filter(|tool| {
             (super::user_questions::is_question_tool(&tool.name)
+                || (super::skill_proposals::is_proposal_tool(&tool.name)
+                    && entry.subagent.is_none()
+                    && scope
+                        .tool_names
+                        .iter()
+                        .any(|name| name == super::skills::SKILL_TOOL))
                 || scope.tool_names.iter().any(|name| name == &tool.name))
                 && (tool.name != super::tool_output::READ_TOOL_RESULT
                     || scope.effects.contains(&super::AgentSessionEffect::ReadOnly))
@@ -1940,6 +1956,7 @@ pub(super) fn text_response_completion_for_step(
         TextResponseCompletion::CheckPlan
     } else if incomplete_plan_for_turn(events, turn_id)
         || !super::user_questions::can_complete_turn(events, turn_id)
+        || !super::skill_proposals::can_complete_turn(events, turn_id)
     {
         TextResponseCompletion::Incomplete
     } else {

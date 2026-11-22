@@ -30,6 +30,7 @@ mod runtime;
 mod scratch;
 mod session;
 mod session_title;
+pub(crate) mod skill_proposals;
 pub(crate) mod skill_runtime;
 pub(crate) mod skills;
 mod stream_writer;

@@ -23,6 +23,13 @@
       "description": "Loads an observed workspace Skill into the Session prompt surface without granting execution authority."
     },
     {
+      "name": "propose_skill",
+      "category": "userInteraction",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Pauses the root Session to present a structured Skill draft for human review before controlled saving."
+    },
+    {
       "name": "ask_user_question",
       "category": "userInteraction",
       "interceptedBy": "sessionRuntime",

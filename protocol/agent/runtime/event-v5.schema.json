@@ -56,6 +56,9 @@
         "skill/catalog_observed",
         "skill/catalog_published",
         "skill/step_prepared",
+        "skill/proposal_requested",
+        "skill/proposal_resolved",
+        "skill/proposal_cancelled",
         "turn/start",
         "turn/end",
         "step/start",
@@ -1954,6 +1957,111 @@
             "properties": {
               "prepared": {
                 "$ref": "#/$defs/skillStepPrepared"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "skill/proposal_requested"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "identity",
+              "proposal",
+              "provider"
+            ],
+            "properties": {
+              "identity": {
+                "$ref": "#/$defs/skillProposalIdentity"
+              },
+              "proposal": {
+                "$ref": "#/$defs/preparedSkillProposal"
+              },
+              "provider": {
+                "$ref": "#/$defs/selection"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "skill/proposal_resolved"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "resolution",
+              "fingerprint"
+            ],
+            "properties": {
+              "resolution": {
+                "$ref": "#/$defs/skillProposalResolution"
+              },
+              "fingerprint": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "skill/proposal_cancelled"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "identity"
+            ],
+            "properties": {
+              "identity": {
+                "$ref": "#/$defs/skillProposalIdentity"
               }
             }
           }
@@ -5140,6 +5248,110 @@
         },
         "extensions": {
           "type": "object"
+        },
+        "origin": {
+          "type": "string",
+          "enum": [
+            "workspace",
+            "user",
+            "builtin"
+          ]
+        }
+      }
+    },
+    "skillProposalIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "turnId",
+        "stepId",
+        "requestId",
+        "callId",
+        "proposalId"
+      ],
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "turnId": { "type": "string", "minLength": 1 },
+        "stepId": { "type": "string", "minLength": 1 },
+        "requestId": { "type": "string", "minLength": 1 },
+        "callId": { "type": "string", "minLength": 1 },
+        "proposalId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "skillProposalIssue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "field", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "field": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    },
+    "preparedSkillProposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "scope",
+        "workspaceAllowed",
+        "name",
+        "description",
+        "instructions",
+        "userInvocable",
+        "disableModelInvocation",
+        "overwritesBuiltin",
+        "shadowedByWorkspace",
+        "validationIssues"
+      ],
+      "properties": {
+        "mode": { "type": "string", "enum": ["create", "update"] },
+        "scope": { "type": "string", "enum": ["user", "workspace"] },
+        "workspaceAllowed": { "type": "boolean" },
+        "scopeDowngradeReason": { "type": ["string", "null"] },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "instructions": { "type": "string" },
+        "userInvocable": { "type": "boolean" },
+        "disableModelInvocation": { "type": "boolean" },
+        "summary": { "type": ["string", "null"] },
+        "existingContent": { "type": ["string", "null"] },
+        "existingFileHash": { "type": ["string", "null"] },
+        "overwritesBuiltin": { "type": "boolean" },
+        "shadowedByWorkspace": { "type": "boolean" },
+        "validationIssues": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/skillProposalIssue" }
+        }
+      }
+    },
+    "savedSkillMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "name", "relativePath", "fileHash", "editedByUser"],
+      "properties": {
+        "scope": { "type": "string", "enum": ["user", "workspace"] },
+        "name": { "type": "string" },
+        "relativePath": { "type": "string" },
+        "fileHash": { "$ref": "#/$defs/sha256" },
+        "editedByUser": { "type": "boolean" }
+      }
+    },
+    "skillProposalResolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "clientOperationId", "action"],
+      "properties": {
+        "identity": { "$ref": "#/$defs/skillProposalIdentity" },
+        "clientOperationId": { "type": "string", "minLength": 1 },
+        "action": { "type": "string", "enum": ["save", "requestRevision", "cancel"] },
+        "note": { "type": ["string", "null"] },
+        "saved": {
+          "oneOf": [
+            { "$ref": "#/$defs/savedSkillMetadata" },
+            { "type": "null" }
+          ]
         }
       }
     },

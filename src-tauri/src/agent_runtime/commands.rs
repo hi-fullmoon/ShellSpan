@@ -324,10 +324,10 @@ fn apply_connection_sandbox(
     if target.kind == "local" && target.target_id != "workbench-ai" {
         let db = app.state::<crate::db::Database>();
         if db.agent_sandbox_enabled()? {
-            target.windows_sandbox_required = Some(true);
+            target.local_sandbox_required = Some(super::LocalSandboxKind::WindowsAppContainer);
         }
     }
-    if target.windows_sandbox_required == Some(true) {
+    if target.requires_windows_sandbox() {
         if target.kind != "local"
             || target.target_id == "workbench-ai"
             || request.execution_surface != super::AgentExecutionSurface::Direct
@@ -979,6 +979,79 @@ pub(crate) async fn agent_runtime_list_skills(
 ) -> Result<super::skill_runtime::SkillUserList, String> {
     configure_runtime(&app, &runtime)?;
     runtime.list_skills(&input.session_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn agent_runtime_resolve_skill_proposal(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    credentials: State<'_, crate::keychain::CredentialManager>,
+    input: super::skill_proposals::ResolveSkillProposalInput,
+) -> Result<AgentSessionSnapshot, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime
+        .resolve_skill_proposal(input, Some(credentials.inner()))
+        .await
+}
+
+#[tauri::command]
+pub(crate) fn agent_runtime_inspect_skill_target(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: super::skill_proposals::InspectSkillTargetInput,
+) -> Result<super::skill_proposals::SkillTargetInspection, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.inspect_skill_target(input)
+}
+
+#[tauri::command]
+pub(crate) async fn agent_runtime_list_managed_skills(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+) -> Result<super::skill_proposals::ManagedSkillCatalog, String> {
+    configure_runtime(&app, &runtime)?;
+    let runtime = runtime.inner().clone();
+    tokio::task::spawn_blocking(move || runtime.list_managed_skills())
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn agent_runtime_save_user_skill(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: super::skill_proposals::SaveUserSkillInput,
+) -> Result<super::skill_proposals::ManagedSkillItem, String> {
+    configure_runtime(&app, &runtime)?;
+    let runtime = runtime.inner().clone();
+    tokio::task::spawn_blocking(move || runtime.save_user_skill(input))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn agent_runtime_delete_user_skill(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: super::skill_proposals::DeleteUserSkillInput,
+) -> Result<(), String> {
+    configure_runtime(&app, &runtime)?;
+    let runtime = runtime.inner().clone();
+    tokio::task::spawn_blocking(move || runtime.delete_user_skill(input))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn agent_runtime_open_user_skills_dir(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+) -> Result<(), String> {
+    configure_runtime(&app, &runtime)?;
+    let runtime = runtime.inner().clone();
+    tokio::task::spawn_blocking(move || runtime.open_user_skills_dir())
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

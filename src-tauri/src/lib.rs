@@ -145,36 +145,43 @@ pub(crate) fn observe_terminal_raw_output(app: &AppHandle, session_id: &str, byt
         recorder.output(session_id, bytes);
     }
     if let Some(runtime) = app.try_state::<agent_runtime::AgentRuntime>() {
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
         match runtime.observe_terminal_raw_output(session_id, bytes) {
             Err(error) => log::warn!(
                 "Terminal broker raw-output observation failed session_id={session_id} byte_count={}: {error}",
                 bytes.len()
             ),
-            Ok(frame) => {
-                #[cfg(all(
-                    feature = "native-input-acceptance",
-                    debug_assertions,
-                    target_os = "macos",
-                    target_arch = "aarch64"
-                ))]
-                if let Some(frame) = frame {
-                    if commands::terminal_acceptance_directory().is_ok() {
-                        if let Err(error) = app.emit(
-                            "terminal-acceptance-raw-output",
-                            serde_json::json!({"transportSessionId": session_id, "frame": frame}),
-                        ) {
-                            log::warn!("Acceptance raw-frame observation delivery failed session_id={session_id}: {error}");
-                        }
+            Ok(Some(frame)) => {
+                if commands::terminal_acceptance_directory().is_ok() {
+                    if let Err(error) = app.emit(
+                        "terminal-acceptance-raw-output",
+                        serde_json::json!({"transportSessionId": session_id, "frame": frame}),
+                    ) {
+                        log::warn!("Acceptance raw-frame observation delivery failed session_id={session_id}: {error}");
                     }
                 }
-                #[cfg(not(all(
-                    feature = "native-input-acceptance",
-                    debug_assertions,
-                    target_os = "macos",
-                    target_arch = "aarch64"
-                )))]
-                let _ = frame;
             }
+            Ok(None) => {}
+        }
+        #[cfg(not(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        )))]
+        if let Err(error) = runtime
+            .terminal_broker()
+            .observe_raw_output_discard(session_id, bytes)
+        {
+            log::warn!(
+                "Terminal broker raw-output observation failed session_id={session_id} byte_count={}: {error}",
+                bytes.len()
+            );
         }
     }
 }
@@ -183,8 +190,9 @@ pub(crate) fn observe_terminal_raw_output(app: &AppHandle, session_id: &str, byt
 /// incomplete multi-byte sequence at the tail stays in `pending_bytes` for
 /// the next call; invalid bytes are replaced with U+FFFD.
 pub(crate) fn drain_decoded_output(pending_bytes: &mut Vec<u8>, output: &mut String) {
-    loop {
-        match std::str::from_utf8(pending_bytes) {
+    let mut cursor = 0;
+    while cursor < pending_bytes.len() {
+        match std::str::from_utf8(&pending_bytes[cursor..]) {
             Ok(text) => {
                 output.push_str(text);
                 pending_bytes.clear();
@@ -192,22 +200,27 @@ pub(crate) fn drain_decoded_output(pending_bytes: &mut Vec<u8>, output: &mut Str
             }
             Err(error) => {
                 let valid_up_to = error.valid_up_to();
-                output.push_str(
-                    std::str::from_utf8(&pending_bytes[..valid_up_to])
-                        .expect("valid_up_to marks a valid UTF-8 prefix"),
-                );
+                if valid_up_to > 0 {
+                    output.push_str(
+                        std::str::from_utf8(&pending_bytes[cursor..cursor + valid_up_to])
+                            .expect("valid_up_to marks a valid UTF-8 prefix"),
+                    );
+                    cursor += valid_up_to;
+                }
                 match error.error_len() {
                     Some(invalid_len) => {
                         output.push('\u{FFFD}');
-                        pending_bytes.drain(..valid_up_to + invalid_len);
+                        cursor += invalid_len;
                     }
                     None => {
-                        pending_bytes.drain(..valid_up_to);
-                        return;
+                        break;
                     }
                 }
             }
         }
+    }
+    if cursor > 0 {
+        pending_bytes.drain(..cursor);
     }
 }
 
@@ -521,6 +534,12 @@ pub fn run() {
             agent_runtime::agent_runtime_bind_project_root,
             agent_runtime::agent_runtime_answer_question,
             agent_runtime::agent_runtime_list_skills,
+            agent_runtime::agent_runtime_resolve_skill_proposal,
+            agent_runtime::agent_runtime_inspect_skill_target,
+            agent_runtime::agent_runtime_list_managed_skills,
+            agent_runtime::agent_runtime_save_user_skill,
+            agent_runtime::agent_runtime_delete_user_skill,
+            agent_runtime::agent_runtime_open_user_skills_dir,
             agent_runtime::agent_runtime_list_file_references,
             agent_runtime::agent_runtime_cancel_file_references,
             agent_runtime::agent_runtime_spawn_subagent,

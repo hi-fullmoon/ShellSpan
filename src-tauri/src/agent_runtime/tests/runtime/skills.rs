@@ -28,7 +28,7 @@ pub(super) fn create_skill_session(runtime: &AgentRuntime, session: &str, root: 
                 root_path: None,
                 local_root: None,
                 remote_sandbox_required: None,
-                windows_sandbox_required: None,
+                local_sandbox_required: None,
             }),
             permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
             execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,
@@ -1266,4 +1266,490 @@ async fn skill_before_after_and_failure_hooks_keep_existing_authority() {
         assert_eq!(hook.after.load(Ordering::SeqCst), usize::from(!reject));
         assert_eq!(hook.failed.load(Ordering::SeqCst), usize::from(reject));
     }
+}
+
+fn propose_skill_call(call_id: &str, args: serde_json::Value) -> ModelToolCall {
+    ModelToolCall {
+        call_id: call_id.into(),
+        provider_call_id: Some(format!("wire-{call_id}")),
+        name: crate::agent_runtime::skill_proposals::TOOL_NAME.into(),
+        arguments: args,
+    }
+}
+
+#[tokio::test]
+async fn skill_three_layer_precedence_user_redaction_isolation_and_builtin_creator() {
+    let model = FakeAdapter::new(vec![reply("ok", &[])]);
+    let (storage, runtime) = configured(model);
+    let root = tempfile::tempdir().unwrap();
+    // Workspace skill shadows user skill of the same name.
+    write_skill(root.path(), "shared", "", "workspace shared body");
+    // User skills in <data_dir>/skills: one valid, one shadowed by workspace, one overriding builtin, one redacted.
+    let user_dir = storage.path().join("skills");
+    std::fs::create_dir_all(user_dir.join("deploy-api")).unwrap();
+    std::fs::write(
+        user_dir.join("deploy-api/SKILL.md"),
+        "---\nname: deploy-api\ndescription: Deploy orders api safely\n---\n# Deploy API\nRun checks.\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(user_dir.join("shared")).unwrap();
+    std::fs::write(
+        user_dir.join("shared/SKILL.md"),
+        "---\nname: shared\ndescription: User shared\n---\nuser shared body\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(user_dir.join("system-status")).unwrap();
+    std::fs::write(
+        user_dir.join("system-status/SKILL.md"),
+        "---\nname: system-status\ndescription: Custom user status\n---\n# Custom status\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(user_dir.join("leaky")).unwrap();
+    std::fs::write(
+        user_dir.join("leaky/SKILL.md"),
+        "---\nname: leaky\ndescription: Bad secret\n---\nAuthorization: Bearer sk-secret-token-12345678901234567890\n",
+    )
+    .unwrap();
+
+    create_skill_session(&runtime, "three-layer", root.path());
+    let list = runtime.list_skills("three-layer").await.unwrap();
+    assert_eq!(list.status, "fresh");
+    assert!(list
+        .entries
+        .iter()
+        .any(|e| e.name == "skill-creator" && e.origin == Some(SkillOrigin::Builtin)));
+    assert!(list
+        .entries
+        .iter()
+        .any(|e| e.name == "deploy-api" && e.origin == Some(SkillOrigin::User)));
+    assert!(list
+        .entries
+        .iter()
+        .any(|e| e.name == "shared" && e.origin == Some(SkillOrigin::Workspace)));
+    assert!(list
+        .entries
+        .iter()
+        .any(|e| e.name == "system-status" && e.origin == Some(SkillOrigin::User)));
+    assert!(!list.entries.iter().any(|e| e.name == "leaky"));
+    assert!(list
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "redactionBlocked" && d.path.contains("leaky")));
+    assert!(list
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "shadowed" && d.path.contains("shared")));
+
+    let loaded_user = runtime
+        .tools
+        .skills
+        .load(
+            "three-layer",
+            "deploy-api",
+            SkillInvocationKind::User,
+            vec![],
+            None,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        loaded_user.provenance.provider_identity,
+        crate::agent_runtime::skill_runtime::USER_SKILLS_PROVIDER
+    );
+    assert!(loaded_user.instructions.contains("Run checks."));
+}
+
+#[tokio::test]
+async fn skill_proposal_create_revise_save_conflict_remote_downgrade_and_redaction() {
+    use crate::agent_runtime::skill_proposals::*;
+    let model = FakeAdapter::new(vec![
+        tool_response(vec![propose_skill_call(
+            "prop-1",
+            json!({
+                "mode": "create",
+                "scope": "workspace",
+                "name": "deploy-orders",
+                "description": "Deploy orders service to production",
+                "instructions": "# Deploy Orders\n1. Check health\n",
+                "disableModelInvocation": true,
+                "summary": "Captured deploy steps"
+            }),
+        )]),
+        tool_response(vec![propose_skill_call(
+            "prop-2",
+            json!({
+                "mode": "create",
+                "scope": "user",
+                "name": "deploy-orders",
+                "description": "Deploy orders service with rollback",
+                "instructions": "# Deploy Orders\n1. Check health\n2. Rollback on failure\n",
+                "disableModelInvocation": true,
+                "summary": "Added rollback"
+            }),
+        )]),
+        reply("Saved deploy-orders.", &[]),
+    ]);
+    let (storage, runtime) = configured(model.clone());
+    // Remote rootless session: workspace scope must downgrade to user and reject workspace saves.
+    runtime
+        .create_session(CreateAgentSessionRequest {
+            session_id: "remote-prop".into(),
+            task_id: "task-remote-prop".into(),
+            goal: "Summarize deploy".into(),
+            parent_session_id: None,
+            continued_from_session_id: None,
+            target: Some(AgentSessionTarget {
+                kind: "remote".into(),
+                target_id: "ssh-prod".into(),
+                session_id: "term-ssh".into(),
+                label: Some("prod".into()),
+                profile_id: Some("p1".into()),
+                host: Some("prod.example".into()),
+                port: Some(22),
+                username: Some("deploy".into()),
+                cwd: None,
+                root_path: None,
+                local_root: None,
+                remote_sandbox_required: None,
+                local_sandbox_required: None,
+            }),
+            permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
+            execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,
+            success_criteria: vec![],
+            capability_scope: None,
+            subagent: None,
+        })
+        .unwrap();
+    runtime
+        .followup("remote-prop", "u".into(), "/skill-creator".into())
+        .unwrap();
+    runtime.start("remote-prop", provider(), None).unwrap();
+    idle_skill(&runtime, "remote-prop").await;
+
+    let first_req = all_events(&runtime, "remote-prop")
+        .into_iter()
+        .find_map(|e| match e.payload {
+            AgentSessionEventPayload::SkillProposalRequested {
+                identity, proposal, ..
+            } => Some((identity, proposal)),
+            _ => None,
+        })
+        .expect("pending skill proposal");
+    assert_eq!(first_req.1.scope, SkillProposalScope::User);
+    assert!(!first_req.1.workspace_allowed);
+    assert!(first_req.1.scope_downgrade_reason.is_some());
+    assert_eq!(
+        runtime.session("remote-prop").unwrap().recovery.kind,
+        crate::agent_runtime::AgentRecoveryCheckpointKind::WaitingSkillProposal
+    );
+
+    // Reject saving with a secret.
+    let secret_err = runtime
+        .resolve_skill_proposal(
+            ResolveSkillProposalInput {
+                identity: first_req.0.clone(),
+                client_operation_id: "op-secret".into(),
+                action: SkillProposalAction::Save,
+                scope: Some(SkillProposalScope::User),
+                name: None,
+                description: None,
+                instructions: Some(
+                    "Authorization: Bearer sk-secret-token-12345678901234567890".into(),
+                ),
+                user_invocable: None,
+                disable_model_invocation: None,
+                expected_base_hash: None,
+                note: None,
+            },
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert!(secret_err.contains("redactionRequired"));
+
+    // Reject saving into workspace on remote target.
+    let remote_ws_err = runtime
+        .resolve_skill_proposal(
+            ResolveSkillProposalInput {
+                identity: first_req.0.clone(),
+                client_operation_id: "op-ws".into(),
+                action: SkillProposalAction::Save,
+                scope: Some(SkillProposalScope::Workspace),
+                name: None,
+                description: None,
+                instructions: None,
+                user_invocable: None,
+                disable_model_invocation: None,
+                expected_base_hash: None,
+                note: None,
+            },
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert!(remote_ws_err.contains("workspace scope"));
+
+    // Request revision from the model.
+    runtime
+        .resolve_skill_proposal(
+            ResolveSkillProposalInput {
+                identity: first_req.0.clone(),
+                client_operation_id: "op-revise".into(),
+                action: SkillProposalAction::RequestRevision,
+                scope: None,
+                name: None,
+                description: None,
+                instructions: None,
+                user_invocable: None,
+                disable_model_invocation: None,
+                expected_base_hash: None,
+                note: Some("Add rollback step".into()),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    idle_skill(&runtime, "remote-prop").await;
+
+    let second_req = all_events(&runtime, "remote-prop")
+        .into_iter()
+        .rev()
+        .find_map(|e| match e.payload {
+            AgentSessionEventPayload::SkillProposalRequested {
+                identity, proposal, ..
+            } => Some((identity, proposal)),
+            _ => None,
+        })
+        .expect("revised skill proposal");
+    assert_eq!(second_req.0.call_id, "prop-2");
+
+    // Approve and save into <data_dir>/skills/deploy-orders/SKILL.md.
+    runtime
+        .resolve_skill_proposal(
+            ResolveSkillProposalInput {
+                identity: second_req.0.clone(),
+                client_operation_id: "op-save".into(),
+                action: SkillProposalAction::Save,
+                scope: Some(SkillProposalScope::User),
+                name: None,
+                description: None,
+                instructions: None,
+                user_invocable: None,
+                disable_model_invocation: Some(true),
+                expected_base_hash: None,
+                note: None,
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    idle_skill(&runtime, "remote-prop").await;
+
+    let saved_path = storage.path().join("skills/deploy-orders/SKILL.md");
+    assert!(saved_path.is_file());
+    let saved_text = std::fs::read_to_string(&saved_path).unwrap();
+    assert!(saved_text.contains("disable-model-invocation: true"));
+    assert!(saved_text.contains("Rollback on failure"));
+
+    // Immediately visible in list_skills with origin == User and model_invocable == false.
+    let list = runtime.list_skills("remote-prop").await.unwrap();
+    let entry = list
+        .entries
+        .iter()
+        .find(|e| e.name == "deploy-orders")
+        .expect("saved skill appears in list_skills");
+    assert_eq!(entry.origin, Some(SkillOrigin::User));
+    assert!(!entry.model_invocable);
+    assert!(entry.user_invocable);
+
+    // Inspect target reports existing content + hash.
+    let inspected = runtime
+        .inspect_skill_target(InspectSkillTargetInput {
+            session_id: "remote-prop".into(),
+            scope: SkillProposalScope::User,
+            name: "deploy-orders".into(),
+        })
+        .unwrap();
+    assert!(inspected.exists);
+    assert!(inspected.existing_file_hash.is_some());
+    assert!(inspected
+        .existing_content
+        .as_deref()
+        .unwrap()
+        .contains("Rollback on failure"));
+}
+
+#[tokio::test]
+async fn skill_managed_catalog_create_update_conflict_redaction_and_builtin_override() {
+    use crate::agent_runtime::skill_proposals::*;
+    let model = FakeAdapter::new(vec![reply("ok", &[])]);
+    let (storage, runtime) = configured(model);
+
+    let initial = runtime.list_managed_skills().unwrap();
+    assert!(!initial.user_skills_dir_exists);
+    assert!(initial
+        .skills
+        .iter()
+        .all(|s| s.origin == SkillOrigin::Builtin));
+    assert!(initial.skills.iter().any(|s| s.name == "skill-creator"));
+
+    // Reject redaction-triggering save.
+    let secret_err = runtime
+        .save_user_skill(SaveUserSkillInput {
+            name: "my-deploy".into(),
+            description: "Deploy safely".into(),
+            instructions: "Authorization: Bearer sk-secret-token-12345678901234567890".into(),
+            user_invocable: true,
+            disable_model_invocation: true,
+            expected_base_hash: None,
+        })
+        .unwrap_err();
+    assert!(secret_err.contains("redactionRequired"));
+
+    // Create a user skill overriding builtin `system-status`.
+    let created = runtime
+        .save_user_skill(SaveUserSkillInput {
+            name: "system-status".into(),
+            description: "Custom ops status".into(),
+            instructions: "# Custom Status\nCheck GPU and disks.\n".into(),
+            user_invocable: true,
+            disable_model_invocation: true,
+            expected_base_hash: None,
+        })
+        .unwrap();
+    assert_eq!(created.origin, SkillOrigin::User);
+    assert!(created.overrides_builtin);
+    assert!(created.disable_model_invocation);
+    assert!(storage
+        .path()
+        .join("skills/system-status/SKILL.md")
+        .is_file());
+
+    // Duplicate create without expected_base_hash fails with conflict.
+    let dup_err = runtime
+        .save_user_skill(SaveUserSkillInput {
+            name: "system-status".into(),
+            description: "Another".into(),
+            instructions: "# Another\n".into(),
+            user_invocable: true,
+            disable_model_invocation: false,
+            expected_base_hash: None,
+        })
+        .unwrap_err();
+    assert!(dup_err.contains("SKILL_CONFLICT"));
+
+    // Update with matching expected_base_hash succeeds.
+    let updated = runtime
+        .save_user_skill(SaveUserSkillInput {
+            name: "system-status".into(),
+            description: "Custom ops status v2".into(),
+            instructions: "# Custom Status v2\nCheck memory too.\n".into(),
+            user_invocable: true,
+            disable_model_invocation: false,
+            expected_base_hash: Some(created.file_hash.clone()),
+        })
+        .unwrap();
+    assert_ne!(updated.file_hash, created.file_hash);
+    assert!(!updated.disable_model_invocation);
+
+    // Delete with stale hash fails with SKILL_CONFLICT.
+    let stale_del = runtime
+        .delete_user_skill(DeleteUserSkillInput {
+            name: "system-status".into(),
+            expected_file_hash: created.file_hash.clone(),
+        })
+        .unwrap_err();
+    assert!(stale_del.contains("SKILL_CONFLICT"));
+
+    let catalog = runtime.list_managed_skills().unwrap();
+    assert!(catalog.user_skills_dir_exists);
+    let item = catalog
+        .skills
+        .iter()
+        .find(|s| s.name == "system-status")
+        .unwrap();
+    assert_eq!(item.origin, SkillOrigin::User);
+    assert!(item.overrides_builtin);
+    assert_eq!(item.description, "Custom ops status v2");
+
+    // Flat `<name>.md` skill updates in place without creating a shadowed `<name>/SKILL.md`.
+    let flat_path = storage.path().join("skills/flat-sop.md");
+    std::fs::write(
+        &flat_path,
+        "---\nname: flat-sop\ndescription: Flat initial\n---\nInitial body\n",
+    )
+    .unwrap();
+    let before_flat = runtime
+        .list_managed_skills()
+        .unwrap()
+        .skills
+        .into_iter()
+        .find(|s| s.name == "flat-sop")
+        .expect("flat skill discovered");
+    let updated_flat = runtime
+        .save_user_skill(SaveUserSkillInput {
+            name: "flat-sop".into(),
+            description: "Flat updated".into(),
+            instructions: "Updated body\n".into(),
+            user_invocable: true,
+            disable_model_invocation: false,
+            expected_base_hash: Some(before_flat.file_hash),
+        })
+        .unwrap();
+    assert_eq!(updated_flat.relative_path, "user/flat-sop.md");
+    assert!(!storage.path().join("skills/flat-sop/SKILL.md").exists());
+    let reread_flat = runtime
+        .list_managed_skills()
+        .unwrap()
+        .skills
+        .into_iter()
+        .find(|s| s.name == "flat-sop")
+        .unwrap();
+    assert_eq!(reread_flat.description, "Flat updated");
+    assert!(reread_flat.instructions.contains("Updated body"));
+}
+
+#[tokio::test]
+async fn skill_proposal_rejects_secret_arguments_before_persisting_proposal_event() {
+    let model = FakeAdapter::new(vec![
+        tool_response(vec![propose_skill_call(
+            "secret-prop",
+            json!({
+                "mode": "create",
+                "scope": "user",
+                "name": "bad-secret",
+                "description": "Leaky deploy",
+                "instructions": "Authorization: Bearer sk-secret-token-12345678901234567890"
+            }),
+        )]),
+        reply("Removed secret.", &[]),
+    ]);
+    let (_storage, runtime) = configured(model);
+    let root = tempfile::tempdir().unwrap();
+    create_skill_session(&runtime, "secret-check", root.path());
+    runtime
+        .followup("secret-check", "u".into(), "save skill".into())
+        .unwrap();
+    runtime.start("secret-check", provider(), None).unwrap();
+    idle_skill(&runtime, "secret-check").await;
+
+    let events = all_events(&runtime, "secret-check");
+    assert!(
+        !events.iter().any(|e| matches!(
+            e.payload,
+            AgentSessionEventPayload::SkillProposalRequested { .. }
+        )),
+        "secret-bearing proposal must fail before creating a pending proposal event"
+    );
+    assert!(events.iter().any(|e| matches!(
+        &e.payload,
+        AgentSessionEventPayload::ToolResult {
+            name,
+            status: AgentToolResultStatus::Failed,
+            summary,
+            ..
+        } if name == crate::agent_runtime::skill_proposals::TOOL_NAME
+            && summary.contains("SKILL_REDACTION_REQUIRED")
+    )));
 }

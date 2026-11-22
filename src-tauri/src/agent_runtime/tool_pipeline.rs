@@ -1063,6 +1063,31 @@ impl AgentToolPipeline {
                             }
                         }
                     }
+                    if super::skill_proposals::is_proposal_tool(&call.name) {
+                        if !running.is_empty() {
+                            draining_barrier = true;
+                            continue;
+                        }
+                        match self.request_skill_proposal(
+                            entry,
+                            turn_id,
+                            step_id,
+                            request_id,
+                            call.clone(),
+                        )? {
+                            ToolPipelineSettlement::Completed => {
+                                next += 1;
+                                committed += 1;
+                                continue;
+                            }
+                            ToolPipelineSettlement::Waiting => {
+                                return Ok(ToolPipelineSettlement::Waiting);
+                            }
+                            ToolPipelineSettlement::Cancelled => {
+                                continue;
+                            }
+                        }
+                    }
                     if is_session_tool(&call.name) || is_orchestration_tool(&call.name) {
                         if !running.is_empty() {
                             draining_barrier = true;

@@ -202,8 +202,15 @@ pub(crate) enum AgentExecutionSurface {
     BoundTerminal,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum LocalSandboxKind {
+    WindowsAppContainer,
+    MacNono,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase", from = "AgentSessionTargetWire")]
 pub(crate) struct AgentSessionTarget {
     pub(crate) kind: String,
     pub(crate) target_id: String,
@@ -227,7 +234,71 @@ pub(crate) struct AgentSessionTarget {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) remote_sandbox_required: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) windows_sandbox_required: Option<bool>,
+    pub(crate) local_sandbox_required: Option<LocalSandboxKind>,
+}
+
+impl AgentSessionTarget {
+    pub(crate) fn requires_windows_sandbox(&self) -> bool {
+        self.local_sandbox_required == Some(LocalSandboxKind::WindowsAppContainer)
+    }
+
+    pub(crate) fn requires_local_sandbox(&self) -> bool {
+        self.local_sandbox_required.is_some()
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentSessionTargetWire {
+    kind: String,
+    target_id: String,
+    session_id: String,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    profile_id: Option<String>,
+    #[serde(default)]
+    host: Option<String>,
+    #[serde(default)]
+    port: Option<u16>,
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    root_path: Option<String>,
+    #[serde(default)]
+    local_root: Option<String>,
+    #[serde(default)]
+    remote_sandbox_required: Option<bool>,
+    #[serde(default)]
+    local_sandbox_required: Option<LocalSandboxKind>,
+    #[serde(default)]
+    windows_sandbox_required: Option<bool>,
+}
+
+impl From<AgentSessionTargetWire> for AgentSessionTarget {
+    fn from(wire: AgentSessionTargetWire) -> Self {
+        let local_sandbox_required = wire.local_sandbox_required.or_else(|| {
+            (wire.windows_sandbox_required == Some(true))
+                .then_some(LocalSandboxKind::WindowsAppContainer)
+        });
+        Self {
+            kind: wire.kind,
+            target_id: wire.target_id,
+            session_id: wire.session_id,
+            label: wire.label,
+            profile_id: wire.profile_id,
+            host: wire.host,
+            port: wire.port,
+            username: wire.username,
+            cwd: wire.cwd,
+            root_path: wire.root_path,
+            local_root: wire.local_root,
+            remote_sandbox_required: wire.remote_sandbox_required,
+            local_sandbox_required,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -890,6 +961,21 @@ pub(crate) enum AgentSessionEventPayload {
     QuestionCancelled {
         identity: super::user_questions::QuestionIdentity,
     },
+    #[serde(rename = "skill/proposal_requested")]
+    SkillProposalRequested {
+        identity: super::skill_proposals::SkillProposalIdentity,
+        proposal: super::skill_proposals::PreparedSkillProposal,
+        provider: super::AgentSubagentModel,
+    },
+    #[serde(rename = "skill/proposal_resolved")]
+    SkillProposalResolved {
+        resolution: super::skill_proposals::SkillProposalResolution,
+        fingerprint: String,
+    },
+    #[serde(rename = "skill/proposal_cancelled")]
+    SkillProposalCancelled {
+        identity: super::skill_proposals::SkillProposalIdentity,
+    },
     #[serde(rename = "tool/approval")]
     ToolApproval {
         request_id: String,
@@ -1250,5 +1336,26 @@ mod tests {
             }
         });
         assert!(serde_json::from_value::<AgentSessionEvent>(unknown_payload).is_err());
+    }
+
+    #[test]
+    fn legacy_windows_sandbox_required_deserializes_into_local_sandbox_required() {
+        let legacy = serde_json::json!({
+            "kind": "local",
+            "targetId": "local-1",
+            "sessionId": "term-1",
+            "cwd": "C:/Users/demo/.shellspan/windows-agent-workspaces/0123456789abcdef0123456789abcdef",
+            "localRoot": "C:/Users/demo/.shellspan/windows-agent-workspaces/0123456789abcdef0123456789abcdef",
+            "windowsSandboxRequired": true
+        });
+        let target: AgentSessionTarget = serde_json::from_value(legacy).unwrap();
+        assert_eq!(
+            target.local_sandbox_required,
+            Some(LocalSandboxKind::WindowsAppContainer)
+        );
+        assert!(target.requires_windows_sandbox());
+        let encoded = serde_json::to_value(&target).unwrap();
+        assert_eq!(encoded["localSandboxRequired"], "windowsAppContainer");
+        assert!(encoded.get("windowsSandboxRequired").is_none());
     }
 }

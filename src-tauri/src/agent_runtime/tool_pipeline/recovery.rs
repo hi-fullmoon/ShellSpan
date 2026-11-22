@@ -41,6 +41,7 @@ impl AgentToolPipeline {
                 "cancel-token",
             )?;
             self.cancel_questions(&entry.session_id)?;
+            self.cancel_skill_proposals(&entry.session_id)?;
         }
         let session_id = &entry.session_id;
         let keys = self

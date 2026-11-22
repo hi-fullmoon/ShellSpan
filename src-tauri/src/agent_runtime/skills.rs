@@ -51,6 +51,14 @@ impl SkillDiagnostic {
     }
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum SkillOrigin {
+    Workspace,
+    User,
+    Builtin,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SkillEntry {
@@ -63,6 +71,8 @@ pub(crate) struct SkillEntry {
     pub(crate) file_hash: String,
     pub(crate) instruction_hash: String,
     pub(crate) extensions: BTreeMap<String, Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) origin: Option<SkillOrigin>,
 }
 
 #[derive(Debug, Clone)]
@@ -432,6 +442,7 @@ pub(crate) fn parse_skill(
         file_hash: digest(bytes),
         instruction_hash: digest(instructions.as_bytes()),
         extensions,
+        origin: Some(SkillOrigin::Workspace),
     };
     Ok((
         SkillDefinition {
@@ -440,6 +451,59 @@ pub(crate) fn parse_skill(
         },
         diagnostics,
     ))
+}
+
+pub(crate) fn render_skill_markdown(
+    name: &str,
+    description: &str,
+    instructions: &str,
+    user_invocable: bool,
+    disable_model_invocation: bool,
+) -> Result<String, String> {
+    if !valid_name(name) {
+        return Err("invalid Skill name".into());
+    }
+    let normalized_description: String = description
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(500)
+        .collect();
+    if normalized_description.is_empty() {
+        return Err("description must be a non-empty string".into());
+    }
+    let mut frontmatter = serde_yaml::Mapping::new();
+    frontmatter.insert(
+        serde_yaml::Value::String("name".into()),
+        serde_yaml::Value::String(name.into()),
+    );
+    frontmatter.insert(
+        serde_yaml::Value::String("description".into()),
+        serde_yaml::Value::String(normalized_description),
+    );
+    frontmatter.insert(
+        serde_yaml::Value::String("user-invocable".into()),
+        serde_yaml::Value::Bool(user_invocable),
+    );
+    frontmatter.insert(
+        serde_yaml::Value::String("disable-model-invocation".into()),
+        serde_yaml::Value::Bool(disable_model_invocation),
+    );
+    let yaml = serde_yaml::to_string(&frontmatter)
+        .map_err(|e| format!("failed to serialize Skill frontmatter: {e}"))?;
+    let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
+    let body = instructions.trim_start_matches(['\r', '\n']);
+    let mut rendered = format!("---\n{yaml}---\n\n{body}");
+    if !rendered.ends_with('\n') {
+        rendered.push('\n');
+    }
+    if rendered.len() > MAX_SKILL_FILE {
+        return Err("Skill file exceeds byte limit".into());
+    }
+    // Roundtrip check with the canonical parser.
+    let _ = parse_skill(&format!("{name}/SKILL.md"), rendered.as_bytes())?;
+    Ok(rendered)
 }
 
 pub(crate) fn slash_candidates(

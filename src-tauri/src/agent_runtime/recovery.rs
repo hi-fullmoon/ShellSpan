@@ -15,6 +15,8 @@ pub(crate) enum AgentRecoveryCheckpointKind {
     WaitingApproval,
     WaitingQuestion,
     QuestionContinuation,
+    WaitingSkillProposal,
+    SkillProposalContinuation,
     AuthorizedBeforeExecute,
     ExecutionInFlight,
     ToolResultCommitted,
@@ -451,6 +453,41 @@ pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentR
             AgentRecoveryCheckpointKind::QuestionContinuation,
             AgentRecoveryStatus::Available,
             "Resume the committed assistant question queue without repeating completed tools.",
+            Some(request),
+            None,
+            None,
+            None,
+        );
+    }
+    if let Some(proposal) =
+        super::skill_proposals::unresolved(events).filter(|_| !native_unresolved)
+    {
+        let pending = proposal.waiting();
+        return make(
+            if pending {
+                AgentRecoveryCheckpointKind::WaitingSkillProposal
+            } else {
+                AgentRecoveryCheckpointKind::SkillProposalContinuation
+            },
+            AgentRecoveryStatus::Available,
+            if pending {
+                "Waiting for user review of the proposed Skill."
+            } else {
+                "Continue the tool queue from the committed Skill proposal decision."
+            },
+            Some(proposal.identity.request_id),
+            Some(proposal.identity.call_id),
+            None,
+            None,
+        );
+    }
+    if let Some((_, _, request)) =
+        super::skill_proposals::proposal_queue(events).filter(|_| !native_unresolved)
+    {
+        return make(
+            AgentRecoveryCheckpointKind::SkillProposalContinuation,
+            AgentRecoveryStatus::Available,
+            "Resume the committed assistant Skill proposal queue without repeating completed tools.",
             Some(request),
             None,
             None,

@@ -3645,6 +3645,7 @@ fn validate_model_retry_record(record: &AgentSessionRecord, turn_id: &str) -> Re
             event.payload,
             AgentSessionEventPayload::ToolCall { .. }
                 | AgentSessionEventPayload::QuestionRequested { .. }
+                | AgentSessionEventPayload::SkillProposalRequested { .. }
         )
     }) {
         return Err("MODEL_RETRY_VERIFY: inspect tool execution before continuing".into());
@@ -4404,6 +4405,11 @@ fn validate_event_transition(
         | AgentSessionEventPayload::QuestionCancelled { .. } => {
             super::user_questions::validate_transition(&record.events, event)
         }
+        AgentSessionEventPayload::SkillProposalRequested { .. }
+        | AgentSessionEventPayload::SkillProposalResolved { .. }
+        | AgentSessionEventPayload::SkillProposalCancelled { .. } => {
+            super::skill_proposals::validate_transition(&record.events, event)
+        }
         _ => Ok(()),
     }
 }
@@ -4796,6 +4802,19 @@ fn validate_tool_result_transition(
         }
         return Err("question result does not match its durable answer or cancellation".into());
     }
+    if let Some(proposal) = super::skill_proposals::records(&record.events)
+        .into_iter()
+        .find(|p| {
+            p.identity.call_id == call_id && event.step_id.as_deref() == Some(&p.identity.step_id)
+        })
+    {
+        if super::skill_proposals::matches_result(&proposal, &event.payload) {
+            return Ok(());
+        }
+        return Err(
+            "skill proposal result does not match its durable resolution or cancellation".into(),
+        );
+    }
     let allowed = match approval {
         Some(super::AgentToolApprovalStatus::Approved) => dispatched,
         Some(super::AgentToolApprovalStatus::Rejected) => {
@@ -4943,6 +4962,9 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
         | Payload::QuestionAnswered { .. }
         | Payload::QuestionActionAnswered { .. }
         | Payload::QuestionCancelled { .. } => super::user_questions::validate_payload(event),
+        Payload::SkillProposalRequested { .. }
+        | Payload::SkillProposalResolved { .. }
+        | Payload::SkillProposalCancelled { .. } => super::skill_proposals::validate_payload(event),
         Payload::SessionCreated { .. }
         | Payload::AgentCreated { .. }
         | Payload::SessionResumed {}

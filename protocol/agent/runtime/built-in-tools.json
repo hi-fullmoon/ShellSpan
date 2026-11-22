@@ -210,6 +210,22 @@
       "untrustedResultFields": ["/data/snapshot/path"]
     },
     {
+      "name": "close_vim_editor",
+      "version": "1.0.0",
+      "targetKinds": ["remote"],
+      "effectMode": "fixed",
+      "allowedEffects": ["stateChange"],
+      "idempotency": "no",
+      "parallel": false,
+      "cancellable": true,
+      "retryPolicy": "never",
+      "defaultTimeoutMs": 10000,
+      "maxOutputBytes": 8192,
+      "maxConcurrency": 1,
+      "requiredCapabilities": ["terminal.editor.close"],
+      "untrustedResultFields": ["/data/snapshot/path"]
+    },
+    {
       "name": "write_stdin",
       "version": "1.0.0",
       "targetKinds": ["process"],

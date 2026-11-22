@@ -32,6 +32,7 @@ pub(crate) fn definitions() -> Vec<SkillDefinition> {
                         include_str!("../../skills/deployment-verification.md")
                     }
                     "tls-diagnosis" => include_str!("../../skills/tls-diagnosis.md"),
+                    "skill-creator" => include_str!("../../skills/skill-creator.md"),
                     _ => panic!("bundled skill has no instructions"),
                 };
                 SkillDefinition {
@@ -45,6 +46,7 @@ pub(crate) fn definitions() -> Vec<SkillDefinition> {
                         file_hash: digest(instructions.as_bytes()),
                         instruction_hash: digest(instructions.as_bytes()),
                         extensions: Default::default(),
+                        origin: Some(SkillOrigin::Builtin),
                     },
                     instructions: instructions.into(),
                 }

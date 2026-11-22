@@ -39,6 +39,7 @@
         "inspect_vim_buffer",
         "insert_vim_text",
         "save_vim_buffer",
+        "close_vim_editor",
         "write_stdin",
         "wait_process",
         "kill_process",
@@ -537,6 +538,10 @@
             }
           } } },
           { "properties": { "toolName": { "const": "save_vim_buffer" }, "arguments": {
+            "type": "object", "additionalProperties": false, "required": ["snapshotId", "path"],
+            "properties": { "snapshotId": { "$ref": "#/$defs/vimSnapshotId" }, "path": { "$ref": "#/$defs/vimPath" } }
+          } } },
+          { "properties": { "toolName": { "const": "close_vim_editor" }, "arguments": {
             "type": "object", "additionalProperties": false, "required": ["snapshotId", "path"],
             "properties": { "snapshotId": { "$ref": "#/$defs/vimSnapshotId" }, "path": { "$ref": "#/$defs/vimPath" } }
           } } }
@@ -1172,10 +1177,10 @@
       "allOf": [
         { "$ref": "#/$defs/toolResultBase" },
         { "properties": {
-          "toolName": { "enum": ["inspect_vim_buffer", "insert_vim_text", "save_vim_buffer"] },
+          "toolName": { "enum": ["inspect_vim_buffer", "insert_vim_text", "save_vim_buffer", "close_vim_editor"] },
           "data": { "oneOf": [
             { "type": "object", "additionalProperties": false, "required": ["outcome", "editor", "snapshot"], "properties": {
-              "outcome": { "enum": ["observed", "inserted", "saved"] },
+              "outcome": { "enum": ["observed", "inserted", "saved", "closed"] },
               "editor": { "enum": ["vim", "neovim"] },
               "snapshot": { "$ref": "#/$defs/vimEditorSnapshot" }
             } },

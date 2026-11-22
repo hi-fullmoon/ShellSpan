@@ -72,7 +72,10 @@ pub(crate) fn bound_scope(event: &super::AgentSessionEvent) -> Option<&SkillScop
             .snapshot
             .as_ref()
             .map(|s| &s.scope)
-            .filter(|scope| !super::builtin_skills::is_builtin_scope(scope)),
+            .filter(|scope| {
+                !super::builtin_skills::is_builtin_scope(scope)
+                    && !super::skill_runtime::is_user_skills_scope(scope)
+            }),
         _ => None,
     }
 }

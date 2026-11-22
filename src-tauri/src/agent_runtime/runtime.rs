@@ -576,6 +576,115 @@ impl AgentRuntime {
             .await
     }
 
+    pub(crate) async fn resolve_skill_proposal(
+        &self,
+        input: super::skill_proposals::ResolveSkillProposalInput,
+        _credentials: Option<&crate::keychain::CredentialManager>,
+    ) -> Result<AgentSessionSnapshot, String> {
+        input.validate()?;
+        let session_id = input.identity.session_id.clone();
+        let records = super::skill_proposals::records(&self.sessions.all_events(&session_id)?);
+        let proposal = records
+            .iter()
+            .find(|r| r.identity == input.identity)
+            .ok_or("unknown or stale skill proposal identity")?;
+        if proposal.cancelled
+            || self.sessions.snapshot(&session_id)?.status == super::AgentSessionStatus::Cancelled
+        {
+            return Err("skill proposal was cancelled".into());
+        }
+        if proposal.resolution.is_some()
+            && !super::skill_proposals::is_same_submission(proposal, &input)?
+        {
+            return Err("skill proposal resolution conflicts with its committed decision".into());
+        }
+        if self.sessions.snapshot(&session_id)?.ended {
+            return if super::skill_proposals::is_same_submission(proposal, &input)? {
+                self.sessions.snapshot(&session_id)
+            } else {
+                Err("skill proposal Session has ended".into())
+            };
+        }
+        if self.agents.get(&session_id)?.is_none() {
+            let selected = self.sessions.snapshot(&session_id)?.header.model_selection;
+            let provider = self
+                .models
+                .restore_selection(selected.as_ref().unwrap_or(&proposal.provider))?;
+            crate::ai::validate_provider_config(&provider, true)?;
+            #[cfg(not(test))]
+            let api_key = None;
+            #[cfg(test)]
+            let api_key = if self.models.uses_route_store() {
+                None
+            } else {
+                match _credentials {
+                    Some(credentials) => crate::ai::api_key_for_provider(credentials, &provider)?,
+                    None if provider.requires_api_key => {
+                        return Err(
+                            "skill proposal continuation requires provider credentials".into()
+                        )
+                    }
+                    None => None,
+                }
+            };
+            self.start(&session_id, provider, api_key)?;
+        }
+        let entry = self
+            .agents
+            .get(&session_id)?
+            .ok_or("skill proposal Agent is not live")?;
+        let saved_file = self
+            .tools
+            .submit_skill_proposal_resolution(&entry, input)?;
+        if saved_file {
+            let _ = self.tools.skills.refresh(&session_id).await;
+        }
+        self.wake(&session_id)?;
+        self.sessions.snapshot(&session_id)
+    }
+
+    pub(crate) fn inspect_skill_target(
+        &self,
+        input: super::skill_proposals::InspectSkillTargetInput,
+    ) -> Result<super::skill_proposals::SkillTargetInspection, String> {
+        let header = self.sessions.snapshot(&input.session_id)?.header;
+        let user_dir = self.tools.skills.user_skills_dir();
+        super::skill_proposals::inspect_target(
+            &header,
+            user_dir.as_deref(),
+            input.scope,
+            &input.name,
+        )
+    }
+
+    pub(crate) fn list_managed_skills(
+        &self,
+    ) -> Result<super::skill_proposals::ManagedSkillCatalog, String> {
+        let user_dir = self.tools.skills.user_skills_dir();
+        super::skill_proposals::list_managed_skills(user_dir.as_deref())
+    }
+
+    pub(crate) fn save_user_skill(
+        &self,
+        input: super::skill_proposals::SaveUserSkillInput,
+    ) -> Result<super::skill_proposals::ManagedSkillItem, String> {
+        let user_dir = self.tools.skills.user_skills_dir();
+        super::skill_proposals::save_user_skill(user_dir.as_deref(), input)
+    }
+
+    pub(crate) fn delete_user_skill(
+        &self,
+        input: super::skill_proposals::DeleteUserSkillInput,
+    ) -> Result<(), String> {
+        let user_dir = self.tools.skills.user_skills_dir();
+        super::skill_proposals::delete_user_skill(user_dir.as_deref(), input)
+    }
+
+    pub(crate) fn open_user_skills_dir(&self) -> Result<(), String> {
+        let user_dir = self.tools.skills.user_skills_dir();
+        super::skill_proposals::open_user_skills_dir(user_dir.as_deref())
+    }
+
     pub(crate) fn answer_question(
         &self,
         input: super::user_questions::AnswerQuestionInput,
@@ -690,6 +799,13 @@ impl AgentRuntime {
                     }
                 }
             }))?;
+        let progress_emitter = app.clone();
+        self.native_engine
+            .set_tool_progress_publisher(Arc::new(move |event| {
+                if let Err(error) = progress_emitter.emit(super::AGENT_TOOL_PROGRESS_EVENT, event) {
+                    log::warn!("Failed to publish Agent tool progress event: {error}");
+                }
+            }))?;
         if let Some(slot) = &self.native_slot {
             slot.install(Arc::new(NativeToolAdapter::new(
                 app,
@@ -707,6 +823,12 @@ impl AgentRuntime {
         self.native_engine.sudo_prompts.respond(prompt_id, password)
     }
 
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
     pub(crate) fn observe_terminal_raw_output(
         &self,
         session_id: &str,
@@ -1274,6 +1396,7 @@ impl AgentRuntime {
             })?;
         self.tools.configure_parallelism(parallelism.as_deref())?;
         self.sessions.configure(app_data_root.clone())?;
+        self.tools.skills.configure(&app_data_root)?;
         self.sessions.pause_restored_inputs()?;
         self.models.images.configure(&app_data_root)?;
         self.cleanup_images();
@@ -1567,7 +1690,7 @@ impl AgentRuntime {
             }
         }
         if let Some(target) = &snapshot.header.target {
-            if target.windows_sandbox_required == Some(true) {
+            if target.requires_windows_sandbox() {
                 return Err("WINDOWS_SANDBOX_MANAGED_ROOT_REQUIRED".into());
             }
             if self.native_engine.has_terminal_lease(&target.session_id)? {
@@ -1618,7 +1741,7 @@ impl AgentRuntime {
                 }
             }
             if let Some(target) = &snapshot.header.target {
-                if target.windows_sandbox_required == Some(true)
+                if target.requires_windows_sandbox()
                     && surface != super::AgentExecutionSurface::Direct
                 {
                     return Err("WINDOWS_SANDBOX_DIRECT_REQUIRED".into());
@@ -1757,6 +1880,7 @@ impl AgentRuntime {
         }
         recover_open_scope(&self.sessions, entry)?;
         self.tools.restore_question_phase(entry)?;
+        self.tools.restore_skill_proposal_phase(entry)?;
         self.tools.recover_waiting(entry)?;
         self.tools.restore_skill_phase(entry)
     }
@@ -2283,6 +2407,7 @@ impl AgentRuntime {
             let gate = self.tools.question_gate(session_id)?;
             let _gate = gate.lock().map_err(|_| "question gate unavailable")?;
             self.tools.cancel_questions(session_id)?;
+            self.tools.cancel_skill_proposals(session_id)?;
             if self.sessions.snapshot(session_id)?.ended {
                 self.sessions.snapshot(session_id)?
             } else if terminate {
@@ -2688,7 +2813,27 @@ impl AgentRuntime {
 
     pub(crate) fn delete_session(&self, session_id: &str) -> Result<(), String> {
         let _blobs = self.models.images.lock_blobs()?;
+        #[cfg(windows)]
+        let windows_sandbox_cwd = self
+            .sessions
+            .snapshot(session_id)
+            .ok()
+            .and_then(|snapshot| snapshot.header.target)
+            .filter(|target| target.requires_windows_sandbox())
+            .and_then(|target| target.cwd);
         self.sessions.delete_archived(session_id)?;
+        #[cfg(windows)]
+        if let Some(cwd) = windows_sandbox_cwd {
+            if let Err(error) = self
+                .native_engine
+                .reclaim_windows_sandbox_workspace(std::path::Path::new(&cwd))
+            {
+                log::warn!(
+                    "Failed to reclaim Windows sandbox workspace: {}",
+                    crate::redaction::redact_sensitive_text(&error)
+                );
+            }
+        }
         self.cleanup_images();
         Ok(())
     }

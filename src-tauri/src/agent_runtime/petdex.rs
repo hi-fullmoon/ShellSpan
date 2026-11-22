@@ -187,7 +187,8 @@ impl PetdexActivities {
             AgentRecoveryCheckpointKind::WaitingApproval => {
                 ActivityPhase::Waiting(WaitReason::Approval)
             }
-            AgentRecoveryCheckpointKind::WaitingQuestion => {
+            AgentRecoveryCheckpointKind::WaitingQuestion
+            | AgentRecoveryCheckpointKind::WaitingSkillProposal => {
                 ActivityPhase::Waiting(WaitReason::Answer)
             }
             _ => ActivityPhase::Running,

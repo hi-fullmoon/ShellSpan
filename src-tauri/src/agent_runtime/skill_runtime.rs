@@ -1,14 +1,29 @@
 use super::{
     native::scoped_read::*, skills::*, AgentEntry, AgentSessionEffect, AgentSessionEventPayload,
-    AgentSessionHeader, AgentSessionStore,
+    AgentSessionHeader, AgentSessionStore, AgentSessionTarget,
 };
 use serde::Serialize;
 use std::{
     collections::BTreeSet,
-    sync::Arc,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tokio_util::sync::CancellationToken;
+
+pub(crate) const USER_SKILLS_PROVIDER: &str = "shellspan.user-skills.v1";
+
+pub(crate) fn user_skills_scope(target: AgentSessionTarget, root: &Path) -> SkillScope {
+    SkillScope {
+        target,
+        root: crate::path_utils::portable_local_path(root),
+        root_identity: USER_SKILLS_PROVIDER.into(),
+    }
+}
+
+pub(crate) fn is_user_skills_scope(scope: &SkillScope) -> bool {
+    scope.root_identity == USER_SKILLS_PROVIDER
+}
 
 pub(crate) struct SkillReadRequest {
     pub(crate) target: super::AgentSessionTarget,
@@ -199,6 +214,150 @@ pub(crate) fn read_local(request: SkillReadRequest) -> SkillReadResult {
     discover(&reader, &request, &control)
 }
 
+pub(crate) fn discover_user_skills(
+    dir: &Path,
+    cancellation: &CancellationToken,
+) -> (Vec<SkillDefinition>, Vec<SkillDiagnostic>) {
+    if !dir.exists() {
+        return (Vec::new(), Vec::new());
+    }
+    let Some(dir_str) = dir.to_str() else {
+        return (
+            Vec::new(),
+            vec![SkillDiagnostic::new(
+                "user",
+                "readFailure",
+                "User skills path is not valid UTF-8",
+            )],
+        );
+    };
+    let reader = match LocalScopedReader::open(dir_str) {
+        Ok(r) => r,
+        Err(error) => {
+            return (
+                Vec::new(),
+                vec![SkillDiagnostic::new(
+                    "user",
+                    "readFailure",
+                    error.to_string(),
+                )],
+            );
+        }
+    };
+    let control = ReadControl {
+        cancellation: cancellation.clone(),
+        deadline: Instant::now() + Duration::from_secs(10),
+    };
+    let run = || -> Result<(Vec<SkillDefinition>, Vec<SkillDiagnostic>), ScopeReadError> {
+        control.check()?;
+        reader.check_root()?;
+        let entries = match reader.list("", MAX_SKILL_ENTRIES, &control) {
+            Ok(entries) => entries,
+            Err(ScopeReadError::Absent) => Vec::new(),
+            Err(e) => return Err(e),
+        };
+        let mut paths = Vec::new();
+        for entry in &entries {
+            if entry.directory {
+                paths.push(format!("{}/SKILL.md", entry.name));
+            } else if entry.file && entry.name.ends_with(".md") {
+                paths.push(entry.name.clone());
+            }
+        }
+        paths.sort();
+        let mut definitions = Vec::new();
+        let mut diagnostics = Vec::new();
+        let mut names = BTreeSet::new();
+        let mut total = 0;
+        for path in paths {
+            let bytes = match reader.read(&path, MAX_SKILL_FILE, &control) {
+                Ok(bytes) => bytes,
+                Err(ScopeReadError::Absent) if path.ends_with("/SKILL.md") => continue,
+                Err(ScopeReadError::Denied) => {
+                    diagnostics.push(SkillDiagnostic::new(
+                        &format!("user/{path}"),
+                        "denied",
+                        "Skill path denied by scoped reader",
+                    ));
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
+            total += bytes.len();
+            if total > MAX_SKILL_READ {
+                return Err(ScopeReadError::Limit);
+            }
+            let display_path = format!("user/{path}");
+            match parse_skill(&display_path, &bytes) {
+                Ok((mut definition, mut notes)) => {
+                    definition.entry.origin = Some(SkillOrigin::User);
+                    definition.entry.resource_base = "user".into();
+                    if unchanged_by_redaction(&definition.entry).is_err()
+                        || unchanged_by_redaction(&definition.instructions).is_err()
+                    {
+                        diagnostics.push(SkillDiagnostic::new(
+                            &display_path,
+                            "redactionBlocked",
+                            "Skill content requires redaction and was skipped",
+                        ));
+                        continue;
+                    }
+                    diagnostics.append(&mut notes);
+                    if names.insert(definition.entry.name.clone()) {
+                        definitions.push(definition);
+                        if definitions.len() > MAX_SKILLS {
+                            return Err(ScopeReadError::Limit);
+                        }
+                    } else {
+                        let winner = definitions
+                            .iter()
+                            .find(|d| d.entry.name == definition.entry.name)
+                            .expect("winner");
+                        diagnostics.push(SkillDiagnostic::new(
+                            &display_path,
+                            "shadowed",
+                            format!("first path wins: {}", winner.entry.relative_path),
+                        ));
+                    }
+                }
+                Err(message) => {
+                    diagnostics.push(SkillDiagnostic::new(&display_path, "malformed", message))
+                }
+            }
+            if diagnostics.len() > MAX_SKILL_ENTRIES
+                || serde_json::to_vec(&diagnostics)
+                    .map_err(|_| ScopeReadError::Limit)?
+                    .len()
+                    > 32 * 1024
+            {
+                return Err(ScopeReadError::Limit);
+            }
+        }
+        let after = match reader.list("", MAX_SKILL_ENTRIES, &control) {
+            Ok(e) => e,
+            Err(ScopeReadError::Absent) => Vec::new(),
+            Err(e) => return Err(e),
+        };
+        if entries != after {
+            return Err(ScopeReadError::Io);
+        }
+        reader.check_root()?;
+        control.check()?;
+        definitions.sort_by(|a, b| a.entry.name.cmp(&b.entry.name));
+        Ok((definitions, diagnostics))
+    };
+    run().unwrap_or_else(|error| {
+        (
+            Vec::new(),
+            vec![SkillDiagnostic::new(
+                "user",
+                "readFailure",
+                error.to_string(),
+            )],
+        )
+    })
+}
+
 pub(crate) fn scope_enabled(header: &AgentSessionHeader) -> bool {
     let Some(target) = &header.target else {
         return false;
@@ -215,14 +374,41 @@ pub(crate) fn scope_enabled(header: &AgentSessionHeader) -> bool {
 pub(crate) struct SkillRuntime {
     sessions: AgentSessionStore,
     native: Arc<dyn super::NativeToolRuntime>,
+    user_skills_root: Arc<Mutex<Option<PathBuf>>>,
 }
 impl SkillRuntime {
     pub(crate) fn new(
         sessions: AgentSessionStore,
         native: Arc<dyn super::NativeToolRuntime>,
     ) -> Self {
-        Self { sessions, native }
+        Self {
+            sessions,
+            native,
+            user_skills_root: Arc::new(Mutex::new(None)),
+        }
     }
+
+    pub(crate) fn configure(&self, app_data_root: &Path) -> Result<(), String> {
+        let mut guard = self
+            .user_skills_root
+            .lock()
+            .map_err(|_| "Skill runtime configuration unavailable")?;
+        *guard = Some(app_data_root.join("skills"));
+        Ok(())
+    }
+
+    pub(crate) fn user_skills_dir(&self) -> Option<PathBuf> {
+        self.user_skills_root
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone())
+    }
+
+    pub(crate) async fn refresh(&self, session_id: &str) -> Result<(), String> {
+        let _ = self.observe(session_id, CancellationToken::new()).await?;
+        Ok(())
+    }
+
     async fn observe(
         &self,
         session_id: &str,
@@ -259,9 +445,7 @@ impl SkillRuntime {
         };
         // Always join native work, also on cancellation. No detached I/O thread may outlive a load.
         let mut result = if root.is_none_or(|root| root.trim().is_empty()) {
-            let definitions = super::builtin_skills::definitions();
-            let snapshot =
-                SkillSnapshot::new(super::builtin_skills::scope(request.target), &definitions);
+            let snapshot = SkillSnapshot::new(super::builtin_skills::scope(request.target), &[]);
             SkillReadResult {
                 observation: SkillObservation {
                     protocol_version: SKILL_PROTOCOL,
@@ -269,7 +453,7 @@ impl SkillRuntime {
                     snapshot: Some(snapshot),
                     diagnostics: vec![],
                 },
-                definitions,
+                definitions: Vec::new(),
             }
         } else {
             tokio::task::spawn_blocking(move || native.read_skills(request))
@@ -277,17 +461,50 @@ impl SkillRuntime {
                 .map_err(|e| format!("Skills provider failed: {e}"))?
         };
         if let Some(snapshot) = &result.observation.snapshot {
-            // Existing directory definitions keep precedence for previously bound sessions.
-            let names: BTreeSet<_> = result
+            let mut names: BTreeSet<_> = result
                 .definitions
                 .iter()
                 .map(|d| d.entry.name.clone())
                 .collect();
-            result.definitions.extend(
-                super::builtin_skills::definitions()
-                    .into_iter()
-                    .filter(|d| !names.contains(&d.entry.name)),
-            );
+            if let Some(user_dir) = self.user_skills_dir() {
+                let cancel = cancellation.clone();
+                let (user_defs, user_diags) =
+                    tokio::task::spawn_blocking(move || discover_user_skills(&user_dir, &cancel))
+                        .await
+                        .map_err(|e| format!("User skills provider failed: {e}"))?;
+                for diag in user_diags {
+                    if result.observation.diagnostics.len() < MAX_SKILL_ENTRIES {
+                        result.observation.diagnostics.push(diag);
+                    }
+                }
+                for def in user_defs {
+                    if names.insert(def.entry.name.clone()) {
+                        if result.definitions.len() < MAX_SKILLS {
+                            result.definitions.push(def);
+                        }
+                    } else if result.observation.diagnostics.len() < MAX_SKILL_ENTRIES {
+                        let winner = result
+                            .definitions
+                            .iter()
+                            .find(|d| d.entry.name == def.entry.name)
+                            .map(|d| d.entry.relative_path.as_str())
+                            .unwrap_or("workspace");
+                        result.observation.diagnostics.push(SkillDiagnostic::new(
+                            &def.entry.relative_path,
+                            "shadowed",
+                            format!("workspace skill takes precedence: {winner}"),
+                        ));
+                    }
+                }
+            }
+            for def in super::builtin_skills::definitions() {
+                if names.insert(def.entry.name.clone()) && result.definitions.len() < MAX_SKILLS {
+                    result.definitions.push(def);
+                }
+            }
+            result
+                .definitions
+                .sort_by(|a, b| a.entry.name.cmp(&b.entry.name));
             result.observation.snapshot = Some(SkillSnapshot::new(
                 snapshot.scope.clone(),
                 &result.definitions,
@@ -386,22 +603,37 @@ impl SkillRuntime {
         }
         let (request_id, call_id) =
             model_identity.map_or((None, None), |(r, c)| (Some(r), Some(c)));
+        let is_builtin = definition.entry.origin == Some(SkillOrigin::Builtin)
+            || definition.entry.resource_base == "builtin";
+        let is_user = definition.entry.origin == Some(SkillOrigin::User)
+            || definition.entry.resource_base == "user";
+        let (provider_identity, scope) = if is_builtin {
+            (
+                super::builtin_skills::PROVIDER.into(),
+                super::builtin_skills::scope(snapshot.scope.target),
+            )
+        } else if is_user {
+            let root = self
+                .user_skills_dir()
+                .unwrap_or_else(|| PathBuf::from("user"));
+            (
+                USER_SKILLS_PROVIDER.into(),
+                user_skills_scope(snapshot.scope.target, &root),
+            )
+        } else {
+            (
+                format!("shellspan.frozen-{}.v1", snapshot.scope.target.kind),
+                snapshot.scope,
+            )
+        };
         LoadedSkill::new(
             name.into(),
             definition.instructions,
             SkillProvenance {
                 protocol_version: SKILL_PROTOCOL,
                 renderer_version: 1,
-                provider_identity: if definition.entry.resource_base == "builtin" {
-                    super::builtin_skills::PROVIDER.into()
-                } else {
-                    format!("shellspan.frozen-{}.v1", snapshot.scope.target.kind)
-                },
-                scope: if definition.entry.resource_base == "builtin" {
-                    super::builtin_skills::scope(snapshot.scope.target)
-                } else {
-                    snapshot.scope
-                },
+                provider_identity,
+                scope,
                 relative_path: definition.entry.relative_path,
                 resource_base: definition.entry.resource_base,
                 invocation,
