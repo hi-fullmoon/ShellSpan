@@ -7,6 +7,7 @@ interface CommandRange {
   start: IMarker;
   end?: { marker: IMarker; exclusive: boolean };
   element?: HTMLDivElement;
+  lastStyle?: string;
 }
 
 interface PendingCommand {
@@ -34,6 +35,9 @@ export function installTerminalCommandDecorations(
   let promptReady = true;
   let disposed = false;
   let frame: number | undefined;
+  let cachedScreen: HTMLElement | null = null;
+  let cachedRowHeight = 0;
+  let layoutDirty = true;
   const displayScope = () => {
     if (terminal.buffer.active.type !== 'normal') return undefined;
     const pending = pendingCommands[0];
@@ -48,11 +52,10 @@ export function installTerminalCommandDecorations(
   const remove = (range: CommandRange) => {
     ranges.delete(range);
     range.element?.remove();
+    range.element = undefined;
+    range.lastStyle = undefined;
     range.start.dispose();
     range.end?.marker.dispose();
-    if (!disposed) {
-      terminal.refresh(0, terminal.rows - 1);
-    }
   };
   const startPendingCommand = () => {
     const pending = pendingCommands[0];
@@ -62,6 +65,10 @@ export function installTerminalCommandDecorations(
     const cursor = terminal.buffer.active.baseY + terminal.buffer.active.cursorY;
     const start = terminal.registerMarker(prompt && !prompt.isDisposed ? prompt.line - cursor : 0);
     if (start) {
+      if (ranges.size >= MAX_PENDING_COMMANDS) {
+        const oldest = ranges.values().next().value;
+        if (oldest) remove(oldest);
+      }
       pending.range = { operationId: pending.operationId, start };
       ranges.add(pending.range);
     }
@@ -81,11 +88,21 @@ export function installTerminalCommandDecorations(
   };
   const render = () => {
     frame = undefined;
+    if (ranges.size === 0) return;
     const buffer = terminal.buffer.active;
-    const screen = terminal.element?.querySelector<HTMLElement>('.xterm-screen');
+    if (!cachedScreen || !cachedScreen.isConnected) {
+      cachedScreen = terminal.element?.querySelector<HTMLElement>('.xterm-screen') ?? null;
+      layoutDirty = true;
+    }
+    const screen = cachedScreen;
     if (!screen) return;
-    const rowHeight = screen.clientHeight / terminal.rows;
+    if (layoutDirty || cachedRowHeight <= 0) {
+      cachedRowHeight = terminal.rows > 0 ? screen.clientHeight / terminal.rows : 0;
+      layoutDirty = false;
+    }
+    const rowHeight = cachedRowHeight;
     const scope = displayScope();
+    const commandColor = terminal.options.theme?.foreground ?? 'var(--app-primary)';
     for (const range of ranges) {
       if (range.start.isDisposed || range.end?.marker.isDisposed) {
         remove(range);
@@ -100,6 +117,7 @@ export function installTerminalCommandDecorations(
       if (buffer.type !== 'normal' || first > last || !rowHeight || (!range.end && !typing)) {
         range.element?.remove();
         range.element = undefined;
+        range.lastStyle = undefined;
         continue;
       }
       if (!range.element) {
@@ -108,13 +126,23 @@ export function installTerminalCommandDecorations(
         range.element.setAttribute('aria-hidden', 'true');
         screen.appendChild(range.element);
       }
-      range.element.style.setProperty('--terminal-command-color', terminal.options.theme?.foreground ?? 'var(--app-primary)');
-      range.element.style.top = `${first * rowHeight}px`;
-      range.element.style.height = `${(last - first + 1) * rowHeight}px`;
+      const top = first * rowHeight;
+      const height = (last - first + 1) * rowHeight;
+      const styleKey = `${commandColor}|${top}|${height}`;
+      if (range.lastStyle !== styleKey) {
+        range.lastStyle = styleKey;
+        range.element.style.setProperty('--terminal-command-color', commandColor);
+        range.element.style.top = `${top}px`;
+        range.element.style.height = `${height}px`;
+      }
     }
   };
   const schedule = () => {
-    if (!disposed && frame === undefined) frame = requestAnimationFrame(render);
+    if (!disposed && ranges.size > 0 && frame === undefined) frame = requestAnimationFrame(render);
+  };
+  const handleResize = () => {
+    layoutDirty = true;
+    schedule();
   };
   const syncLease = () => {
     const lease = agentTerminalLeaseState.get(sessionId);
@@ -220,7 +248,7 @@ export function installTerminalCommandDecorations(
     boundaryHandler,
     terminal.onRender(schedule),
     terminal.onScroll(schedule),
-    terminal.onResize(schedule),
+    terminal.onResize(handleResize),
     terminal.onWriteParsed(schedule),
     terminal.buffer.onBufferChange(schedule),
   ];

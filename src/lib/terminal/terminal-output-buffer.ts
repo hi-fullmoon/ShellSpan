@@ -10,6 +10,7 @@ interface TerminalOutputChunk {
 interface TerminalOutputBuffer {
   chunks: TerminalOutputChunk[];
   head: number;
+  baseChunkIndex: number;
   byteLength: number;
   version: number;
   contextCache?: TerminalOutputContextCache;
@@ -78,7 +79,11 @@ function utf8ByteLength(value: string): number {
   return bytes;
 }
 
-function dropLeadingUtf8Bytes(value: string, excessBytes: number): TerminalOutputChunk {
+function dropLeadingUtf8Bytes(
+  value: string,
+  totalBytes: number,
+  excessBytes: number,
+): TerminalOutputChunk {
   let dropped = 0;
   let index = 0;
   while (index < value.length && dropped < excessBytes) {
@@ -104,7 +109,7 @@ function dropLeadingUtf8Bytes(value: string, excessBytes: number): TerminalOutpu
     }
   }
   const text = value.slice(index);
-  return { text, bytes: utf8ByteLength(text) };
+  return { text, bytes: Math.max(0, totalBytes - dropped) };
 }
 
 export function appendTerminalOutput(sessionId: string, chunk: string): void {
@@ -114,6 +119,7 @@ export function appendTerminalOutput(sessionId: string, chunk: string): void {
   const buffer = buffers.get(sessionId) ?? {
     chunks: [],
     head: 0,
+    baseChunkIndex: 0,
     byteLength: 0,
     version: 0,
   };
@@ -121,10 +127,18 @@ export function appendTerminalOutput(sessionId: string, chunk: string): void {
   buffer.byteLength += bytes;
   const trimmed = trimBufferHead(buffer, MAX_BUFFER_BYTES);
   buffer.version += 1;
-  // Preserve a safe checkpoint until the next actual reader. Multiple output
-  // chunks can then be normalized/redacted once after the live hook coalesces
-  // their notifications. Ring-buffer trimming invalidates its chunk cursor.
-  if (trimmed) buffer.contextCache = undefined;
+  // Keep incremental context cache across ring-buffer head trims when the
+  // cache already holds a full maxLines window and its cursor is still at or
+  // ahead of the retained head.
+  if (trimmed && buffer.contextCache) {
+    const firstRetainedChunkIndex = buffer.baseChunkIndex + buffer.head;
+    if (
+      buffer.contextCache.nextChunkIndex < firstRetainedChunkIndex
+      || buffer.contextCache.redactedLines.length < buffer.contextCache.maxLines
+    ) {
+      buffer.contextCache = undefined;
+    }
+  }
   buffers.set(sessionId, buffer);
   notifyOutputChanged(sessionId);
 }
@@ -167,17 +181,20 @@ export function getRecentTerminalOutputSnapshot(
     return cached.snapshot;
   }
 
+  const totalChunkCount = buffer.baseChunkIndex + buffer.chunks.length;
+  const firstRetainedChunkIndex = buffer.baseChunkIndex + buffer.head;
   if (
     cached?.maxLines === lineLimit
     && cached.appendBoundarySafe
-    && cached.nextChunkIndex <= buffer.chunks.length
+    && cached.nextChunkIndex >= firstRetainedChunkIndex
+    && cached.nextChunkIndex <= totalChunkCount
   ) {
-    const appendedRaw = decodeBufferChunks(buffer, cached.nextChunkIndex);
+    const appendedRaw = decodeBufferChunks(buffer, cached.nextChunkIndex - buffer.baseChunkIndex);
     const appendedCache = appendToContextCache(
       cached,
       appendedRaw,
       buffer.version,
-      buffer.chunks.length,
+      totalChunkCount,
     );
     buffer.contextCache = appendedCache;
     return appendedCache.snapshot;
@@ -195,7 +212,7 @@ export function getRecentTerminalOutputSnapshot(
     redactedLines,
     snapshot,
     appendBoundarySafe: isIncrementalAppendBoundarySafe(raw, normalized),
-    nextChunkIndex: buffer.chunks.length,
+    nextChunkIndex: totalChunkCount,
   };
   return snapshot;
 }
@@ -359,7 +376,7 @@ function trimBufferHead(buffer: TerminalOutputBuffer, maxBytes: number): boolean
     // The retained tail must start at a Unicode code point boundary. Dropping
     // a full multi-byte character can make the buffer a few bytes smaller than
     // the nominal cap, which avoids introducing U+FFFD into AI context.
-    const next = dropLeadingUtf8Bytes(current.text, excess);
+    const next = dropLeadingUtf8Bytes(current.text, current.bytes, excess);
     buffer.byteLength -= current.bytes - next.bytes;
     buffer.chunks[buffer.head] = next;
     excess = 0;
@@ -368,6 +385,7 @@ function trimBufferHead(buffer: TerminalOutputBuffer, maxBytes: number): boolean
   // Avoid retaining an ever-growing prefix of already-consumed chunk slots.
   if (buffer.head > 64 && buffer.head * 2 >= buffer.chunks.length) {
     buffer.chunks = buffer.chunks.slice(buffer.head);
+    buffer.baseChunkIndex += buffer.head;
     buffer.head = 0;
   }
   return trimmed;

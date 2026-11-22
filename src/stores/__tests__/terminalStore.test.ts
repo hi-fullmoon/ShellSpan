@@ -690,4 +690,22 @@ describe('terminalStore', () => {
     });
     expect(useTerminalStore.getState().sessions[0]?.nativeRecoveryRequired).toBe(false);
   });
+
+  it('avoids cascading workspaceViews churn on non-topology updates and no-op setters', () => {
+    const store = useTerminalStore.getState();
+    store.addSession({ sessionId: 's1', title: 's1', host: 'localhost', username: 'user', port: 22 });
+    store.switchWorkspace('focus');
+    store.switchWorkspace('terminal');
+    const viewsBefore = useTerminalStore.getState().workspaceViews;
+
+    store.setUnreadCommand('s1', 'completed');
+    expect(useTerminalStore.getState().workspaceViews).toBe(viewsBefore);
+
+    const sessionsBeforeReset = useTerminalStore.getState().sessions;
+    store.resetTitle('s1');
+    expect(useTerminalStore.getState().sessions).toBe(sessionsBeforeReset);
+
+    store.setRecording('s1', undefined);
+    expect(useTerminalStore.getState().sessions).toBe(sessionsBeforeReset);
+  });
 });

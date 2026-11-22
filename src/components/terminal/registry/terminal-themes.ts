@@ -4,10 +4,23 @@ import { applyTerminalColorOverrides, type TerminalColorOverrides } from '@/lib/
 
 export type TerminalTheme = NonNullable<ConstructorParameters<typeof Terminal>[0]>['theme'];
 
+const BELL_COOLDOWN_MS = 100;
+let sharedBellContext: AudioContext | null = null;
+let lastBellPlayedAt = 0;
+
 export function playBellSound(): void {
   const AudioContextConstructor = window.AudioContext;
   if (!AudioContextConstructor) return;
-  const context = new AudioContextConstructor();
+  const now = performance.now();
+  if (now - lastBellPlayedAt < BELL_COOLDOWN_MS) return;
+  lastBellPlayedAt = now;
+  if (!sharedBellContext || sharedBellContext.state === 'closed') {
+    sharedBellContext = new AudioContextConstructor();
+  }
+  const context = sharedBellContext;
+  if (context.state === 'suspended') {
+    void context.resume().catch(() => {});
+  }
   const oscillator = context.createOscillator();
   const gain = context.createGain();
   oscillator.frequency.value = 880;
@@ -17,7 +30,6 @@ export function playBellSound(): void {
   gain.connect(context.destination);
   oscillator.start();
   oscillator.stop(context.currentTime + 0.08);
-  oscillator.addEventListener('ended', () => void context.close(), { once: true });
 }
 
 const LIGHT_SELECTION_BACKGROUND = 'rgba(24, 24, 24, 0.22)';

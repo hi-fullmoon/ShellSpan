@@ -28,6 +28,7 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
   const revision = useSyncExternalStore(tracker?.subscribe ?? noSubscribe, tracker?.getRevision ?? emptyRevision);
   const bounds = useRef<HTMLDivElement>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const scheduleRef = useRef<(() => void) | null>(null);
   const [visible, setVisible] = useState<Array<{ block: TerminalCommandBlock; top: number }>>([]);
   const [copiedBlockId, setCopiedBlockId] = useState<number | null>(null);
 
@@ -93,16 +94,22 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
       ) ? current : visibleBlocks);
     };
     const schedule = () => { if (frame === undefined) frame = requestAnimationFrame(update); };
+    scheduleRef.current = schedule;
     schedule();
     const disposables = [terminal.onScroll(schedule), terminal.onResize(invalidateGeometry),
-      terminal.onRender(schedule), terminal.buffer.onBufferChange(invalidateGeometry)];
+      terminal.buffer.onBufferChange(invalidateGeometry)];
     if (observer && bounds.current) observer.observe(bounds.current);
     return () => {
+      scheduleRef.current = null;
       if (frame !== undefined) cancelAnimationFrame(frame);
       observer?.disconnect();
       disposables.forEach((disposable) => disposable.dispose());
     };
-  }, [terminal, tracker, revision]);
+  }, [terminal, tracker]);
+
+  useEffect(() => {
+    scheduleRef.current?.();
+  }, [revision]);
 
   const read = (block: TerminalCommandBlock): string | null => {
     const contents = readTerminalCommandOutput(terminal, block);

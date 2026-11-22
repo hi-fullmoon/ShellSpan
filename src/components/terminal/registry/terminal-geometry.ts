@@ -17,6 +17,7 @@ export function installTerminalScrollbarVisibility(terminal: Terminal) {
     terminal.element?.toggleAttribute('data-no-scrollback', noScrollback);
   };
   const schedule = () => {
+    if ((terminal.buffer.active.baseY === 0) === lastNoScrollback) return;
     if (frame !== undefined) return;
     if (typeof requestAnimationFrame === 'function') {
       frame = requestAnimationFrame(apply);

@@ -120,9 +120,21 @@ export function installTerminalEdgeBackground(terminal: Terminal): IDisposable {
     const bottom = top + innerHeight;
     const { cols, rows } = terminal;
     const colors = theme.colors;
-    const cellColor = (x: number, y: number) => background(active.getLine(active.viewportY + y)?.getCell(x), colors);
-    const horizontal = [0, rows - 1].map((y) => Array.from({ length: cols }, (_, x) => cellColor(x, y)));
-    const vertical = [0, cols - 1].map((x) => Array.from({ length: rows }, (_, y) => cellColor(x, y)));
+    const reusableCell = active.getNullCell();
+    const topLine = active.getLine(active.viewportY);
+    const bottomLine = active.getLine(active.viewportY + rows - 1);
+    const horizontal = [
+      Array.from({ length: cols }, (_, x) => background(topLine?.getCell(x, reusableCell), colors)),
+      Array.from({ length: cols }, (_, x) => background(bottomLine?.getCell(x, reusableCell), colors)),
+    ];
+    const leftEdge = new Array<string>(rows);
+    const rightEdge = new Array<string>(rows);
+    for (let y = 0; y < rows; y++) {
+      const line = active.getLine(active.viewportY + y);
+      leftEdge[y] = background(line?.getCell(0, reusableCell), colors);
+      rightEdge[y] = background(line?.getCell(cols - 1, reusableCell), colors);
+    }
+    const vertical = [leftEdge, rightEdge];
     const paint = (index: number, x: number, y: number, width: number, height: number, fill: string) => {
       const w = Math.max(0, width);
       const h = Math.max(0, height);
@@ -143,6 +155,7 @@ export function installTerminalEdgeBackground(terminal: Terminal): IDisposable {
     }
   };
   const schedule = () => {
+    if (terminal.buffer.active.type !== 'alternate' && !lastVisible) return;
     if (frame === undefined) frame = requestAnimationFrame(update);
   };
   const subscriptions = [

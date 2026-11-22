@@ -38,6 +38,14 @@ export function restoreTerminalDisplay(
   return {
     receive(frame: TerminalDisplayFrame): void {
       if (frame.terminalSessionId !== binding.terminalSessionId || frame.terminalGeneration !== binding.terminalGeneration) return;
+      if (through !== undefined && pending.size === 0) {
+        if (frame.sequence <= through) return;
+        if (frame.sequence === through + 1) {
+          write(frame.text);
+          through = frame.sequence;
+          return;
+        }
+      }
       if (!pending.has(frame.sequence) && pending.size >= maxPendingFrames) {
         pending.clear();
         through = undefined;

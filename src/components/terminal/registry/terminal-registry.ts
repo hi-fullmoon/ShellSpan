@@ -1016,6 +1016,9 @@ class TerminalControllerImpl implements TerminalController {
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.cancelPendingResize();
+    this.webglLoadToken += 1;
+    this.webglAddon?.dispose();
+    this.webglAddon = undefined;
     this.container.remove();
     this.host = null;
   }
@@ -1100,7 +1103,7 @@ class TerminalControllerImpl implements TerminalController {
     });
   }
 
-  fit(): void {
+  fit(forceRefresh = false): void {
     if (this.disposed) return;
 
     // A restored terminal can be opened while the whole terminal section is
@@ -1113,18 +1116,25 @@ class TerminalControllerImpl implements TerminalController {
       this.cancelPendingResize();
       const previousCols = this.terminal.cols;
       const previousRows = this.terminal.rows;
+      let dimensionsChanged = false;
       try {
-        this.fitAddon.fit();
+        const proposed = this.fitAddon.proposeDimensions();
+        if (!proposed || proposed.cols !== previousCols || proposed.rows !== previousRows) {
+          this.fitAddon.fit();
+          dimensionsChanged = this.terminal.cols !== previousCols || this.terminal.rows !== previousRows;
+        }
       } catch {
         // The host can still be unmeasurable during a section transition.
       }
-      if (this.terminal.cols !== previousCols || this.terminal.rows !== previousRows) {
+      if (dimensionsChanged) {
         this.sendResize(this.terminal.cols, this.terminal.rows);
       }
-      try {
-        this.terminal.refresh(0, this.terminal.rows - 1);
-      } catch {
-        // Ignore redraw failures on a terminal being detached concurrently.
+      if (forceRefresh || dimensionsChanged) {
+        try {
+          this.terminal.refresh(0, this.terminal.rows - 1);
+        } catch {
+          // Ignore redraw failures on a terminal being detached concurrently.
+        }
       }
     }
   }
@@ -1307,7 +1317,9 @@ class TerminalControllerImpl implements TerminalController {
       this.lastInputLineBreak = { terminalSessionId: session?.terminalSessionId,
         generation: session?.terminalGeneration, revision: session?.integrationStateRevision };
     }
-    this.trackUserInput(data);
+    if (this.terminal.buffer.active.type !== 'alternate') {
+      this.trackUserInput(data);
+    }
     const written = this.writeInput(data).then(() => true);
     if (broadcast) this.broadcastInput((target) => target.writeUserInput(data));
     return written;

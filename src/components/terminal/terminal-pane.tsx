@@ -92,41 +92,46 @@ const AgentTerminalStatusBar: React.FC<{
     </span>
   );
 
-  return (
-    <div
-      className="@container/terminal-lease pointer-events-none absolute inset-x-2 top-2 z-20 flex justify-center"
-      data-testid="agent-terminal-lease-bar"
-      data-operation-id={lease.operationId}
-      data-terminal-owned={lease.terminalOwned || undefined}
-      data-input-blocked={lease.inputBlocked || undefined}
-    >
-      <div className="pointer-events-auto flex w-fit max-w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-lg border border-app-border/45 bg-app-surface/55 p-1 shadow-xs backdrop-blur-md motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150 motion-safe:ease-out">
-        <div className={cn(
-          'agent-terminal-lease-status flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden',
-          !lease.waitingForUserAction && '@max-[160px]/terminal-lease:hidden',
-        )}>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger render={identity} />
-              <TooltipContent align="start" side="bottom">
-                {modeLabel} · {workspaceLabel} · {t('terminal.agentLease.agentIdentity', { id: lease.agentSessionId })}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          <div className="flex min-w-0 flex-col @max-[220px]/terminal-lease:hidden @min-[420px]/terminal-lease:flex-row @min-[420px]/terminal-lease:items-center @min-[420px]/terminal-lease:gap-1.5" aria-hidden="true">
-            <div className="agent-terminal-lease-description truncate text-xs leading-3.5 font-semibold text-app-text/85" title={interactionHint ? `${activityLabel} — ${interactionHint}` : activityLabel}>
-              {activityLabel}
-            </div>
-            <div className="flex min-w-0 items-center gap-1 text-[11px] leading-3 text-app-text-soft/85">
-              <span className={cn('truncate', inputLocked && 'hidden @min-[520px]/terminal-lease:inline')}>{modeLabel}</span>
-              {inputLabel && <>
-                <span className={cn(inputLocked && 'hidden @min-[520px]/terminal-lease:inline')}>·</span>
-                <span className="truncate">{inputLabel}</span>
-              </>}
-            </div>
-          </div>
+  const statusSummary = (
+    <div className={cn(
+      'agent-terminal-lease-status flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden',
+      !lease.waitingForUserAction && '@max-[160px]/terminal-lease:hidden',
+    )}>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger render={identity} />
+          <TooltipContent align="start" side="bottom">
+            {modeLabel} · {workspaceLabel} · {t('terminal.agentLease.agentIdentity', { id: lease.agentSessionId })}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      <div className="flex min-w-0 flex-col @max-[220px]/terminal-lease:hidden @min-[420px]/terminal-lease:flex-row @min-[420px]/terminal-lease:items-center @min-[420px]/terminal-lease:gap-1.5" aria-hidden="true">
+        <div className="agent-terminal-lease-description truncate text-xs leading-3.5 font-semibold text-app-text/85" title={interactionHint ? `${activityLabel} — ${interactionHint}` : activityLabel}>
+          {activityLabel}
         </div>
-        {lease.waitingForUserAction && handoffControl ? (
+        <div className="flex min-w-0 items-center gap-1 text-[11px] leading-3 text-app-text-soft/85">
+          <span className={cn('truncate', inputLocked && 'hidden @min-[520px]/terminal-lease:inline')}>{modeLabel}</span>
+          {inputLabel && <>
+            <span className={cn(inputLocked && 'hidden @min-[520px]/terminal-lease:inline')}>·</span>
+            <span className="truncate">{inputLabel}</span>
+          </>}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (lease.waitingForUserAction) {
+    return (
+      <div
+        className="@container/terminal-lease flex shrink-0 items-center justify-between gap-2 border-b border-app-border/50 bg-app-surface px-2.5 py-1 text-xs text-app-text"
+        data-testid="agent-terminal-lease-bar"
+        data-layout="banner"
+        data-operation-id={lease.operationId}
+        data-terminal-owned={lease.terminalOwned || undefined}
+        data-input-blocked={lease.inputBlocked || undefined}
+      >
+        {statusSummary}
+        {handoffControl && (
           <div className="flex shrink-0 items-center gap-1">
             <Button
               type="button"
@@ -145,7 +150,7 @@ const AgentTerminalStatusBar: React.FC<{
               type="button"
               variant="secondary"
               size="xs"
-              className="agent-terminal-handoff-complete max-w-full truncate bg-secondary/65 text-secondary-foreground/85 hover:bg-secondary/85"
+              className="agent-terminal-handoff-complete max-w-full truncate"
               disabled={handoffControl.pending}
               aria-busy={handoffControl.pending || undefined}
               onClick={handoffControl.complete}
@@ -153,7 +158,26 @@ const AgentTerminalStatusBar: React.FC<{
               {t(handoffControl.pending ? 'ai.workspace.question.submitting' : 'ai.workspace.question.actionComplete')}
             </Button>
           </div>
-        ) : !lease.waitingForUserAction && <div className="flex shrink-0 items-center gap-1">
+        )}
+        <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+          {[activityLabel, modeLabel, workspaceLabel, inputLabel, interactionHint].filter(Boolean).join(' · ')}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="@container/terminal-lease pointer-events-none absolute inset-x-2 top-2 z-20 flex justify-center"
+      data-testid="agent-terminal-lease-bar"
+      data-layout="floating"
+      data-operation-id={lease.operationId}
+      data-terminal-owned={lease.terminalOwned || undefined}
+      data-input-blocked={lease.inputBlocked || undefined}
+    >
+      <div className="pointer-events-auto flex w-fit max-w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-lg border border-app-border/45 bg-app-surface/55 p-1 shadow-xs backdrop-blur-md motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150 motion-safe:ease-out">
+        {statusSummary}
+        <div className="flex shrink-0 items-center gap-1">
           <Button
             type="button"
             variant="secondary"
@@ -165,7 +189,7 @@ const AgentTerminalStatusBar: React.FC<{
           >
             {t(lease.takeoverRequested ? 'terminal.agentLease.takingOver' : 'terminal.agentLease.takeover')}
           </Button>
-        </div>}
+        </div>
       </div>
       <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {[activityLabel, modeLabel, workspaceLabel, inputLabel, interactionHint].filter(Boolean).join(' · ')}
@@ -589,20 +613,26 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           }}>{t('terminal.menu.reconnect')}</Button>
         </div>
       )}
+      {activeLease?.waitingForUserAction && (
+        <AgentTerminalStatusBar
+          lease={activeLease}
+          inputLocked={inputLocked}
+        />
+      )}
       <div className="relative min-h-0 flex-1 pl-1.5"
         style={{ backgroundColor: terminalSurfaceStyle.backgroundColor }}>
         {activeLease && !activeLease.waitingForUserAction && (
-          <div
-            className="agent-visible-terminal-aura pointer-events-none absolute inset-0 z-10"
-            data-testid="agent-visible-terminal-aura"
-            aria-hidden="true"
-          />
-        )}
-        {activeLease && (
-          <AgentTerminalStatusBar
-            lease={activeLease}
-            inputLocked={inputLocked}
-          />
+          <>
+            <div
+              className="agent-visible-terminal-aura pointer-events-none absolute inset-0 z-10"
+              data-testid="agent-visible-terminal-aura"
+              aria-hidden="true"
+            />
+            <AgentTerminalStatusBar
+              lease={activeLease}
+              inputLocked={inputLocked}
+            />
+          </>
         )}
         {searchOpen && (
           <TerminalSearch addon={searchAddon} initialQuery={searchInitialQuery} onClose={handleCloseSearch} active={isActive && isVisible} />

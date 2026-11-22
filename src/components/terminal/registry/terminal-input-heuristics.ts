@@ -79,7 +79,40 @@ export function inputLineNeedsContinuation(value: string): boolean {
     || /(?:\bthen|\bdo|\belse|\bcase\s+\S+\s+in)\s*$/i.test(trimmed);
 }
 
+const MAX_TRACKED_USER_INPUT_CHARS = 16 * 1024;
+
+function popTrailingCodePoint(value: string): string {
+  const length = value.length;
+  if (length === 0) return '';
+  if (length >= 2) {
+    const low = value.charCodeAt(length - 1);
+    const high = value.charCodeAt(length - 2);
+    if (low >= 0xdc00 && low <= 0xdfff && high >= 0xd800 && high <= 0xdbff) {
+      return value.slice(0, length - 2);
+    }
+  }
+  return value.slice(0, length - 1);
+}
+
+function clampTrackedInput(value: string): string {
+  if (value.length <= MAX_TRACKED_USER_INPUT_CHARS) return value;
+  return value.slice(value.length - MAX_TRACKED_USER_INPUT_CHARS);
+}
+
 export function applyTrackedUserInput(state: TrackedUserInputState, data: string): void {
+  // Fast path for large multi-line pastes: avoid O(L^2) per-line continuation checks
+  // when a paste contains many newlines, and evaluate continuation once at the end.
+  let lineBreakCount = 0;
+  for (let index = 0; index < data.length; index += 1) {
+    const code = data.charCodeAt(index);
+    if (code === 0x0d || code === 0x0a) {
+      lineBreakCount += 1;
+      if (lineBreakCount > 8) break;
+    }
+  }
+  const deferContinuationChecks = lineBreakCount > 8;
+  let deferredSubmitted = false;
+
   for (let index = 0; index < data.length; index += 1) {
     const character = data[index];
     if (character === '\u001b') {
@@ -92,22 +125,38 @@ export function applyTrackedUserInput(state: TrackedUserInputState, data: string
     if (character === '\u0003') {
       state.submittedContinuationText = '';
       state.pendingUserInputText = '';
+      deferredSubmitted = false;
     } else if (character === '\u0015') {
       state.pendingUserInputText = '';
     } else if (character === '\u007f' || character === '\b') {
-      state.pendingUserInputText = [...state.pendingUserInputText].slice(0, -1).join('');
+      state.pendingUserInputText = popTrailingCodePoint(state.pendingUserInputText);
     } else if (character === '\r' || character === '\n') {
       if (character === '\r' && data[index + 1] === '\n') index += 1;
-      const submittedInput = state.submittedContinuationText + state.pendingUserInputText;
-      if (inputLineNeedsContinuation(submittedInput)) {
-        state.submittedContinuationText = `${submittedInput}\n`;
+      const submittedInput = clampTrackedInput(state.submittedContinuationText + state.pendingUserInputText);
+      if (deferContinuationChecks) {
+        if (submittedInput.trim()) deferredSubmitted = true;
+        state.submittedContinuationText = clampTrackedInput(`${submittedInput}\n`);
+      } else if (inputLineNeedsContinuation(submittedInput)) {
+        state.submittedContinuationText = clampTrackedInput(`${submittedInput}\n`);
       } else {
         if (submittedInput.trim()) state.unverifiedUserSubmission = true;
         state.submittedContinuationText = '';
       }
       state.pendingUserInputText = '';
     } else if (character === '\t' || character >= ' ') {
-      state.pendingUserInputText += character;
+      if (state.pendingUserInputText.length < MAX_TRACKED_USER_INPUT_CHARS) {
+        state.pendingUserInputText += character;
+      }
+    }
+  }
+
+  if (deferContinuationChecks && state.submittedContinuationText) {
+    const combined = state.submittedContinuationText.endsWith('\n')
+      ? state.submittedContinuationText.slice(0, -1)
+      : state.submittedContinuationText;
+    if (!inputLineNeedsContinuation(combined)) {
+      if (deferredSubmitted) state.unverifiedUserSubmission = true;
+      state.submittedContinuationText = '';
     }
   }
 }

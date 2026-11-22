@@ -27,14 +27,17 @@ export function createTerminalCommandBlocks(terminal: Terminal) {
     revision++;
     listeners.forEach((listener) => listener());
   };
-  const remove = (id: number) => {
+  const removeSilent = (id: number): boolean => {
     const block = blocks.get(id);
-    if (!block) return;
+    if (!block) return false;
     blocks.delete(id);
     block.prompt?.dispose();
     block.output?.marker.dispose();
     block.end?.marker.dispose();
-    publish();
+    return true;
+  };
+  const remove = (id: number) => {
+    if (removeSilent(id)) publish();
   };
   const get = (id: number): TerminalCommandBlock => {
     const existing = blocks.get(id);
@@ -86,7 +89,7 @@ export function createTerminalCommandBlocks(terminal: Terminal) {
     for (const [id, block] of [...blocks.entries()]) {
       const hasMidLineBoundary = (block.output !== undefined && block.output.column > 0)
         || (block.end !== undefined && block.end.column > 0);
-      if (hasMidLineBoundary) remove(id);
+      if (hasMidLineBoundary) removeSilent(id);
     }
     publish();
   });
@@ -105,11 +108,11 @@ export function createTerminalCommandBlocks(terminal: Terminal) {
     getRevision: () => revision,
     list: () => [...blocks.values()],
     dispose() {
+      listeners.clear();
       osc.dispose();
       resize.dispose();
       pendingPrompt?.dispose();
-      [...blocks.keys()].forEach(remove);
-      listeners.clear();
+      [...blocks.keys()].forEach(removeSilent);
     },
   };
 }

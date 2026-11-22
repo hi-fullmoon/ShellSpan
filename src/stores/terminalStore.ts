@@ -581,25 +581,38 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
     if (!target || target.oscTitle === oscTitle) return state;
     return { sessions: state.sessions.map((session) => session === target ? { ...session, oscTitle } : session) };
   }),
-  toggleReadOnly: (sessionId) => set((state) => ({
-    sessions: state.sessions.map((session) => session.sessionId === sessionId && !session.pendingConnection
-      ? { ...session, readOnly: !session.readOnly } : session),
-  })),
-  setRecording: (sessionId, recording) => set((state) => ({
-    sessions: state.sessions.map((session) => session.sessionId === sessionId
-      ? { ...session, recording: session.status === 'connected' ? recording : undefined }
-      : session),
-  })),
+  toggleReadOnly: (sessionId) => set((state) => {
+    const target = state.sessions.find((session) => session.sessionId === sessionId);
+    if (!target || target.pendingConnection) return state;
+    return {
+      sessions: state.sessions.map((session) => session === target
+        ? { ...session, readOnly: !session.readOnly } : session),
+    };
+  }),
+  setRecording: (sessionId, recording) => set((state) => {
+    const target = state.sessions.find((session) => session.sessionId === sessionId);
+    if (!target) return state;
+    const nextRecording = target.status === 'connected' ? recording : undefined;
+    if (target.recording === nextRecording) return state;
+    return {
+      sessions: state.sessions.map((session) => session === target
+        ? { ...session, recording: nextRecording } : session),
+    };
+  }),
   setUnreadCommand: (sessionId, unreadCommand) => set((state) => {
     const target = state.sessions.find((session) => session.sessionId === sessionId);
     return !target || target.unreadCommand === unreadCommand ? state : {
       sessions: state.sessions.map((session) => session === target ? { ...session, unreadCommand } : session),
     };
   }),
-  resetTitle: (sessionId) => set((state) => ({
-    sessions: state.sessions.map((session) => session.sessionId === sessionId
-      ? { ...session, manualTitle: undefined } : session),
-  })),
+  resetTitle: (sessionId) => set((state) => {
+    const target = state.sessions.find((session) => session.sessionId === sessionId);
+    if (!target || target.manualTitle === undefined) return state;
+    return {
+      sessions: state.sessions.map((session) => session === target
+        ? { ...session, manualTitle: undefined } : session),
+    };
+  }),
   togglePin: (sessionId) =>
     set((state) => {
       let changed = false;
@@ -655,22 +668,71 @@ function refreshTabTitles(): void {
   if (next) useTerminalStore.setState({ sessions: next });
 }
 
+function sessionsTopologyChanged(current: TerminalSession[], previous: TerminalSession[]): boolean {
+  if (current.length !== previous.length) return true;
+  for (let index = 0; index < current.length; index += 1) {
+    if (
+      current[index].sessionId !== previous[index].sessionId
+      || current[index].replacesSessionId !== previous[index].replacesSessionId
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function sessionsTitleInputsChanged(current: TerminalSession[], previous: TerminalSession[]): boolean {
+  if (current.length !== previous.length) return true;
+  for (let index = 0; index < current.length; index += 1) {
+    const next = current[index];
+    const prev = previous[index];
+    if (
+      next.sessionId !== prev.sessionId
+      || next.oscTitle !== prev.oscTitle
+      || next.currentDirectory !== prev.currentDirectory
+      || next.manualTitle !== prev.manualTitle
+      || next.profileId !== prev.profileId
+      || next.titleIndex !== prev.titleIndex
+      || next.baseTitle !== prev.baseTitle
+      || next.username !== prev.username
+      || next.host !== prev.host
+      || next.port !== prev.port
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 useTerminalStore.subscribe((state, previous) => {
   if (state.sessions !== previous.sessions) {
     agentTerminalLeaseState.syncForegroundHandoff(
       state.sessions.filter((session) => session.foregroundHandoffActive === true).map((session) => session.sessionId),
     );
     const patch: Partial<TerminalState> = {};
-    if (state.workspace === previous.workspace && Object.keys(state.workspaceViews).length > 0) {
+    if (
+      state.workspace === previous.workspace
+      && Object.keys(state.workspaceViews).length > 0
+      && sessionsTopologyChanged(state.sessions, previous.sessions)
+    ) {
+      let viewsChanged = false;
       const workspaceViews = { ...state.workspaceViews };
       for (const workspace of ['terminal', 'focus'] as const) {
         const view = workspaceViews[workspace];
-        if (workspace !== state.workspace && view) workspaceViews[workspace] = reconcileWorkspace(view, state.sessions);
+        if (workspace !== state.workspace && view) {
+          const reconciled = reconcileWorkspace(view, state.sessions);
+          if (reconciled !== view) {
+            workspaceViews[workspace] = reconciled;
+            viewsChanged = true;
+          }
+        }
       }
-      patch.workspaceViews = workspaceViews;
+      if (viewsChanged) patch.workspaceViews = workspaceViews;
     }
-    const nextSessions = computeRefreshedTabTitles(state.sessions);
-    if (nextSessions) patch.sessions = nextSessions;
+    if (sessionsTitleInputsChanged(state.sessions, previous.sessions)) {
+      const nextSessions = computeRefreshedTabTitles(state.sessions);
+      if (nextSessions) patch.sessions = nextSessions;
+    }
     if (patch.workspaceViews !== undefined || patch.sessions !== undefined) {
       useTerminalStore.setState(patch);
     }
