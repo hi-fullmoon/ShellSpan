@@ -1437,8 +1437,10 @@ class TerminalControllerImpl implements TerminalController {
     if (this.disposed || sessionId === this.sessionId) return;
     this.restoringDisplay = false;
     this.failureMessage = undefined;
-    this.emitDisplayOutput('\u001b[?25h', 'local');
-    this.terminal.write('\u001b[?25h', this.displayOutputParsedCallback('\u001b[?25h', 'local'));
+    if (!options?.resetBuffer) {
+      this.emitDisplayOutput('\u001b[?25h', 'local');
+      this.terminal.write('\u001b[?25h', this.displayOutputParsedCallback('\u001b[?25h', 'local'));
+    }
     const previousSessionId = this.sessionId;
     terminalInputReadiness.finish(previousSessionId);
     this.emitLifecycle({

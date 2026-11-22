@@ -953,6 +953,8 @@ describe('TerminalContextMenu', () => {
       takeoverFailed: false,
       requestTakeover: vi.fn(),
     });
+    addSession('s1', 'Prod', 'p1');
+    useTerminalStore.getState().setStatus('s1', { sessionId: 's1', status: 'connected' });
     const session = makeSession('s1', 'Prod', 'p1');
     const { rerender } = render(
       <TerminalContextMenu
@@ -983,5 +985,63 @@ describe('TerminalContextMenu', () => {
     expect(screen.getByText('terminal.menu.reconnectConfirmTitle')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'terminal.menu.reconnect' }));
     expect(mockReconnect).toHaveBeenCalledWith('s1', false, { resetBuffer: true });
+  });
+
+  it('dismisses the reconnect confirmation dialog if the target session closes', () => {
+    useProfileStore.setState({
+      profiles: [{
+        id: 'p1',
+        name: 'Prod',
+        host: '8.216.9.10',
+        port: 22,
+        username: 'root',
+        authMethod: 'password',
+        createdAt: 0,
+        updatedAt: 0,
+      }],
+    });
+    agentTerminalLeaseState.set({
+      sessionId: 's1',
+      agentSessionId: 'agent-1',
+      taskId: 'task-1',
+      operationId: 'op-1',
+      acquiredAtUnixMs: 1,
+      state: 'acquired',
+      terminalOwned: true,
+      inputBlocked: true,
+      takeoverRequested: false,
+      takeoverFailed: false,
+      requestTakeover: vi.fn(),
+    });
+    addSession('s1', 'Prod', 'p1');
+    useTerminalStore.getState().setStatus('s1', { sessionId: 's1', status: 'connected' });
+    const session = makeSession('s1', 'Prod', 'p1');
+    const { rerender } = render(
+      <TerminalContextMenu
+        open
+        x={10}
+        y={10}
+        session={session}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'terminal.menu.reconnect' }));
+    rerender(
+      <TerminalContextMenu
+        open={false}
+        x={10}
+        y={10}
+        session={null}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('terminal.menu.reconnectConfirmTitle')).toBeInTheDocument();
+
+    act(() => {
+      useTerminalStore.getState().removeSession('s1');
+    });
+
+    expect(screen.queryByText('terminal.menu.reconnectConfirmTitle')).not.toBeInTheDocument();
   });
 });

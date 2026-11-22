@@ -311,8 +311,8 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
           <ContextMenuItem disabled={terminal?.buffer.active.type !== 'normal' || !terminal?.buffer.normal.baseY} onClick={() => run(() => { restoreFocus.current = false; setClearTarget(terminal); })}>{t('terminal.menu.clearHistory')}</ContextMenuItem>
           <ContextMenuItem disabled={!canReconnect} onClick={() => run(() => {
             if (!sessionId) return;
-            restoreFocus.current = false;
             if (agentTerminalLeaseState.get(sessionId)) {
+              restoreFocus.current = false;
               setReconnectConfirmSessionId(sessionId);
               return;
             }

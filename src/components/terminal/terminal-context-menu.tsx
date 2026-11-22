@@ -98,6 +98,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const togglePin = useTerminalStore((state) => state.togglePin);
   const setTabColor = useTerminalStore((state) => state.setTabColor);
   const getProfile = useProfileStore((state) => state.getProfile);
+  const profiles = useProfileStore((state) => state.profiles);
   const { connect } = useConnectSession();
   const reconnect = useReconnectSession();
   const [renameTarget, setRenameTarget] = useState<TerminalSession | null>(null);
@@ -123,6 +124,13 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
     };
   }, [open, onClose]);
 
+  useEffect(() => {
+    if (!reconnectConfirmTarget) return;
+    if (!sessions.some((s) => s.sessionId === reconnectConfirmTarget.sessionId)) {
+      setReconnectConfirmTarget(null);
+    }
+  }, [reconnectConfirmTarget, sessions]);
+
   const target = session ?? renameTarget ?? confirmationTarget ?? reconnectConfirmTarget;
   if (!target) return null;
 
@@ -130,7 +138,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const canReconnect = !liveSession.reconnecting
     && !liveSession.pendingConnection
     && liveSession.status !== 'connecting'
-    && (!liveSession.profileId || Boolean(getProfile(liveSession.profileId)));
+    && (!liveSession.profileId || profiles.some((p) => p.id === liveSession.profileId));
 
   const orderedIds = confirmationOrder ?? orderedSessionIds ?? sessions.map((s) => s.sessionId);
   const isUnpinned = (sessionId: string): boolean =>
