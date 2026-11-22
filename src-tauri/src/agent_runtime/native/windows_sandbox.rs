@@ -230,18 +230,35 @@ pub(crate) fn create_workspace(data: &Path, session: &str) -> Result<String, Str
     create().map_err(|error| format!("{START_FAILED}: {error}"))
 }
 
-pub(crate) fn remove_workspace(data: &Path, cwd: &Path) -> Result<(), String> {
-    let workspace = Workspace::open(data, cwd)?;
-    let path = workspace.path.clone();
-    let name = workspace.name.clone();
-    let user = workspace.user.clone();
-    // Release retained directory handles before moving the workspace to the recycle bin.
-    drop(workspace);
+fn parse_managed_workspace_path(data: &Path, cwd: &Path) -> io::Result<(PathBuf, String)> {
+    let path = PathBuf::from(crate::path_utils::portable_local_path(cwd));
+    let base = PathBuf::from(crate::path_utils::portable_local_path(
+        &data.join(WORKSPACES),
+    ));
+    let name = path
+        .file_name()
+        .and_then(OsStr::to_str)
+        .filter(|name| name.len() == 32 && uuid::Uuid::parse_str(name).is_ok())
+        .filter(|_| path.parent() == Some(base.as_path()))
+        .ok_or_else(|| io::Error::other("Invalid managed workspace path"))?
+        .to_string();
+    Ok((path, name))
+}
 
-    if let Err(error) = trash::TrashContext::new().delete(&path) {
-        return Err(format!(
-            "Failed to recycle Windows sandbox workspace: {error}"
-        ));
+pub(crate) fn remove_workspace(data: &Path, cwd: &Path) -> Result<(), String> {
+    let (path, name) = parse_managed_workspace_path(data, cwd)
+        .map_err(|error| format!("{START_FAILED}: {error}"))?;
+    let user = user_sid().map_err(|error| format!("{START_FAILED}: {error}"))?;
+    if path.exists() {
+        // Verify identity before recycling an existing managed workspace, then
+        // release directory handles so Windows allows moving it to the recycle bin.
+        let workspace = Workspace::open(data, &path)?;
+        drop(workspace);
+        if let Err(error) = trash::TrashContext::new().delete(&path) {
+            return Err(format!(
+                "Failed to recycle Windows sandbox workspace: {error}"
+            ));
+        }
     }
     match fs::remove_file(identity_record(&path)) {
         Ok(()) => {}
@@ -275,17 +292,7 @@ pub(super) struct Workspace {
 impl Workspace {
     pub(super) fn open(data: &Path, cwd: &Path) -> Result<Self, String> {
         let open = || -> io::Result<Self> {
-            let path = PathBuf::from(crate::path_utils::portable_local_path(cwd));
-            let base = PathBuf::from(crate::path_utils::portable_local_path(
-                &data.join(WORKSPACES),
-            ));
-            let name = path
-                .file_name()
-                .and_then(OsStr::to_str)
-                .filter(|name| name.len() == 32 && uuid::Uuid::parse_str(name).is_ok())
-                .filter(|_| path.parent() == Some(base.as_path()))
-                .ok_or_else(|| io::Error::other("Invalid managed workspace path"))?
-                .to_string();
+            let (path, name) = parse_managed_workspace_path(data, cwd)?;
             let mut parents = Vec::new();
             for ancestor in path
                 .ancestors()

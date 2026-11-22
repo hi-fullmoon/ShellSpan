@@ -19,7 +19,7 @@ impl AgentRuntime {
             || snapshot
                 .header
                 .target
-                .is_none_or(|target| target.windows_sandbox_required != Some(true))
+                .is_none_or(|target| !target.requires_windows_sandbox())
         {
             return Err("Isolated Windows sandbox acceptance Session required".into());
         }

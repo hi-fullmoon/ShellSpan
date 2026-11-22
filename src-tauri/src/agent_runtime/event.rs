@@ -238,6 +238,7 @@ pub(crate) struct AgentSessionTarget {
 }
 
 impl AgentSessionTarget {
+    #[cfg(any(windows, test))]
     pub(crate) fn requires_windows_sandbox(&self) -> bool {
         self.local_sandbox_required == Some(LocalSandboxKind::WindowsAppContainer)
     }

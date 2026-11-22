@@ -843,6 +843,7 @@ pub(crate) fn execute_command(
             Err(e) => return Err(e),
         };
         if matches!(&reply, Reply::Unstarted { receipt: returned } if returned == &receipt) {
+            invalidate_verify_cache(&binding.profile_id);
             return Ok(CommandOutcome::NotStarted(
                 "SANDBOX_START_FAILED: Bubblewrap could not start the command".into(),
             ));

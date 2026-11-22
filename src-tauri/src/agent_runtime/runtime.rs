@@ -1690,7 +1690,7 @@ impl AgentRuntime {
             }
         }
         if let Some(target) = &snapshot.header.target {
-            if target.requires_windows_sandbox() {
+            if target.requires_local_sandbox() {
                 return Err("WINDOWS_SANDBOX_MANAGED_ROOT_REQUIRED".into());
             }
             if self.native_engine.has_terminal_lease(&target.session_id)? {
@@ -1741,7 +1741,7 @@ impl AgentRuntime {
                 }
             }
             if let Some(target) = &snapshot.header.target {
-                if target.requires_windows_sandbox()
+                if target.requires_local_sandbox()
                     && surface != super::AgentExecutionSurface::Direct
                 {
                     return Err("WINDOWS_SANDBOX_DIRECT_REQUIRED".into());

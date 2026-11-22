@@ -69,7 +69,7 @@ fn file_reference_isolated_ssh_production_listing() {
         root_path: Some(root.clone()),
         local_root: Some(dir.path().to_str().unwrap().into()),
         remote_sandbox_required: None,
-        windows_sandbox_required: None,
+        local_sandbox_required: None,
     };
 
     let request = |query: &str, expected_scope| FileReferenceRequest {

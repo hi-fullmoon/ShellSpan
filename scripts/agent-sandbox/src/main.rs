@@ -21,7 +21,10 @@ struct ExtraPolicy {
 }
 
 fn parse_policy(text: &str) -> Result<ExtraPolicy, Box<dyn Error>> {
-    let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
+    let mut lines = text
+        .lines()
+        .map(|line| line.trim_end_matches(['\r', '\n']))
+        .filter(|line| !line.is_empty());
     if lines.next() != Some("version:1") {
         return Err("unsupported sandbox policy version".into());
     }

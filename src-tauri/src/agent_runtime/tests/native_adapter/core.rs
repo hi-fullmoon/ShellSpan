@@ -53,7 +53,7 @@
             root_path: None,
             local_root: None,
             remote_sandbox_required: None,
-            windows_sandbox_required: None,
+            local_sandbox_required: None,
         }
     }
 
@@ -71,7 +71,7 @@
             root_path: None,
             local_root: None,
             remote_sandbox_required: None,
-            windows_sandbox_required: None,
+            local_sandbox_required: None,
         }
     }
 

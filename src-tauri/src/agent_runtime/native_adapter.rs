@@ -263,7 +263,16 @@ impl NativeToolRuntime for NativeToolAdapter {
         self.configure(runtime)?;
         let known_hosts_path = &self.services.known_hosts_path;
         let mut owner_target = target_native(&request.target)?;
-        let windows_sandbox = request.target.windows_sandbox_required == Some(true);
+        let windows_sandbox = match request.target.local_sandbox_required {
+            Some(super::LocalSandboxKind::WindowsAppContainer) => true,
+            Some(super::LocalSandboxKind::MacNono) => {
+                return Err(
+                    "LOCAL_SANDBOX_UNAVAILABLE: macOS managed local sandbox is not enabled in this build"
+                        .into(),
+                );
+            }
+            None => false,
+        };
         if windows_sandbox {
             if !cfg!(windows) {
                 return Err("WINDOWS_SANDBOX_UNAVAILABLE".into());
