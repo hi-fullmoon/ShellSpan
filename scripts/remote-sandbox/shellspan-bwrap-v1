@@ -10,6 +10,7 @@ import platform
 import re
 import selectors
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -23,7 +24,11 @@ BASE = "/var/lib/shellspan-sandbox"
 ROOTFS = BASE + "/rootfs"
 OUTSIDE = BASE + "/outside-probe"
 WORKSPACES = "/srv/shellspan-workspaces"
-SFTP_SERVER = "/usr/lib/openssh/sftp-server"
+SFTP_SERVERS = (
+    "/usr/lib/openssh/sftp-server",
+    "/usr/libexec/openssh/sftp-server",
+    "/usr/lib/ssh/sftp-server",
+)
 ENV = {"PATH": "/usr/bin:/bin", "LANG": "C"}
 PROBE = r'''
 import errno, os, socket, sys
@@ -134,25 +139,55 @@ def validate_workspace(path, mode):
         raise ValueError("deploy the readable host boundary witness")
 
 
+class ScmpArgCmp(ctypes.Structure):
+    _fields_ = [
+        ("arg", ctypes.c_uint),
+        ("op", ctypes.c_int),
+        ("datum_a", ctypes.c_uint64),
+        ("datum_b", ctypes.c_uint64),
+    ]
+
+
+SCMP_CMP_NE = 1
+
+
 def syscall_filter(output):
     # libseccomp compiles a filter for the current Linux architecture. All
-    # communication with the outside is over the three SSH stdio streams.
+    # external communication stays on the three SSH stdio streams; anonymous
+    # AF_UNIX socketpair is permitted for in-sandbox IPC (e.g. Python asyncio).
     lib = ctypes.CDLL("libseccomp.so.2")
     lib.seccomp_init.argtypes = [ctypes.c_uint32]
     lib.seccomp_init.restype = ctypes.c_void_p
     lib.seccomp_syscall_resolve_name.argtypes = [ctypes.c_char_p]
     lib.seccomp_rule_add.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int, ctypes.c_uint]
+    lib.seccomp_rule_add_array.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_int,
+        ctypes.c_uint,
+        ctypes.POINTER(ScmpArgCmp),
+    ]
     lib.seccomp_export_bpf.argtypes = [ctypes.c_void_p, ctypes.c_int]
     lib.seccomp_release.argtypes = [ctypes.c_void_p]
     context = lib.seccomp_init(0x7FFF0000)  # SCMP_ACT_ALLOW
     if not context:
         raise RuntimeError("seccomp initialization failed")
     try:
-        for name in (b"socket", b"socketcall", b"socketpair", b"connect", b"bind", b"io_uring_setup",
-                     b"symlink", b"symlinkat", b"mknod", b"mknodat"):
+        deny_action = 0x50000 | errno.EPERM
+        for name in (
+            b"socket", b"socketcall", b"connect", b"bind", b"io_uring_setup",
+            b"symlink", b"symlinkat", b"mknod", b"mknodat",
+            b"ptrace", b"process_vm_readv", b"process_vm_writev",
+            b"keyctl", b"add_key", b"request_key", b"userfaultfd", b"perf_event_open",
+        ):
             number = lib.seccomp_syscall_resolve_name(name)
-            if number != -1 and lib.seccomp_rule_add(context, 0x50000 | errno.EPERM, number, 0) != 0:
+            if number != -1 and lib.seccomp_rule_add(context, deny_action, number, 0) != 0:
                 raise RuntimeError("seccomp rule installation failed")
+        socketpair_nr = lib.seccomp_syscall_resolve_name(b"socketpair")
+        if socketpair_nr != -1:
+            non_unix = ScmpArgCmp(0, SCMP_CMP_NE, socket.AF_UNIX, 0)
+            if lib.seccomp_rule_add_array(context, deny_action, socketpair_nr, 1, ctypes.byref(non_unix)) != 0:
+                raise RuntimeError("seccomp socketpair rule installation failed")
         if lib.seccomp_export_bpf(context, output.fileno()) != 0:
             raise RuntimeError("seccomp export failed")
         output.seek(0)
@@ -230,7 +265,7 @@ def execute(workspace, mode, command, timeout_ms, receipt):
                     break
     finally:
         status = stop(process)
-    if state == "exited" and prefix != marker:
+    if prefix != marker:
         return {"type": "unstarted", "receipt": receipt}
     return {"type": "completed", "receipt": receipt, "state": state, "exitCode": status if status >= 0 else 128 - status,
             "stdout": base64.b64encode(captured["stdout"]).decode(),
@@ -252,6 +287,19 @@ def remove_probe(path):
             os.unlink(path)
         except FileNotFoundError:
             pass
+
+
+def resolve_sftp_server(rootfs=ROOTFS):
+    for candidate in SFTP_SERVERS:
+        host_path = rootfs + candidate
+        try:
+            meta = os.lstat(host_path)
+        except FileNotFoundError:
+            continue
+        if (stat.S_ISREG(meta.st_mode) and meta.st_uid == 0
+                and (meta.st_mode & 0o022) == 0 and (meta.st_mode & 0o111) != 0):
+            return candidate
+    raise ValueError("trusted sftp-server not found in sandbox rootfs")
 
 
 def run():
@@ -291,7 +339,7 @@ def run():
             remove_probe(path)
         reply(type="probe", passed=stdout.decode("ascii").splitlines())
     elif kind == "sftp":
-        args = [SFTP_SERVER, "-e", "-d", workspace, "-u", "077"]
+        args = [resolve_sftp_server(), "-e", "-d", workspace, "-u", "077"]
         if mode == "readOnly":
             args.append("-R")
         probe_file = probe_target(workspace, request["probeFile"]) if "probeFile" in request else None

@@ -156,19 +156,43 @@ impl Binding {
     }
 }
 
+fn guard_call(
+    preview: bool,
+    user_session_id: &str,
+    call: &AgentToolCallNative,
+) -> Result<bool, String> {
+    if preview {
+        if !matches!(call.target, AgentToolTargetNative::Local { .. }) {
+            return Ok(false);
+        }
+        if call.tool_name != "exec_command"
+            || call.arguments["background"] == serde_json::json!(true)
+            || call.arguments["elevated"] == serde_json::json!(true)
+        {
+            return Err(
+                "MAC_SANDBOX_PREVIEW_DIRECT_ONLY: use a foreground Direct command in the managed workspace"
+                    .into(),
+            );
+        }
+        return Ok(true);
+    }
+    if call.tool_name != "exec_command" || !user_session_id.starts_with("phase3-submission-") {
+        return Ok(false);
+    }
+    if call.arguments["background"] == serde_json::json!(true) {
+        return Err(
+            "MAC_SANDBOX_PREVIEW_DIRECT_ONLY: use a foreground Direct command in the managed workspace"
+                .into(),
+        );
+    }
+    Ok(true)
+}
+
 pub(super) fn resolve(
     context: &NativeExecutionContext,
     call: &AgentToolCallNative,
 ) -> Result<Option<Binding>, String> {
-    if !active()
-        || call.tool_name != "exec_command"
-        || (automated()
-            && !context
-                .request
-                .user_session_id
-                .starts_with("phase3-submission-"))
-        || (preview_active() && !matches!(call.target, AgentToolTargetNative::Local { .. }))
-    {
+    if !active() || !guard_call(preview_active(), &context.request.user_session_id, call)? {
         return Ok(None);
     }
     let directory = crate::commands::terminal_acceptance_directory()?;
@@ -219,5 +243,38 @@ mod tests {
         assert!(verify_launcher(&path, &checksum)
             .unwrap_err()
             .contains("LOCAL_SANDBOX_LAUNCHER_CHANGED"));
+    }
+
+    #[test]
+    fn preview_guard_rejects_non_foreground_direct_local_calls() {
+        let mut call = AgentToolCallNative {
+            request_id: "req-1".into(),
+            call_id: "call-1".into(),
+            tool_name: "read_file".into(),
+            arguments: serde_json::json!({ "path": "notes.txt", "encoding": "utf8" }),
+            target: AgentToolTargetNative::Local {
+                target_id: "local-1".into(),
+                session_id: "term-1".into(),
+                cwd: Some("/tmp/workspace".into()),
+            },
+            capability_id: "cap-1".into(),
+        };
+        assert!(guard_call(true, "session-1", &call)
+            .unwrap_err()
+            .starts_with("MAC_SANDBOX_PREVIEW_DIRECT_ONLY"));
+
+        call.tool_name = "exec_command".into();
+        call.arguments = serde_json::json!({ "command": "pwd", "background": true });
+        assert!(guard_call(true, "session-1", &call)
+            .unwrap_err()
+            .starts_with("MAC_SANDBOX_PREVIEW_DIRECT_ONLY"));
+
+        call.arguments = serde_json::json!({ "command": "pwd", "elevated": true });
+        assert!(guard_call(true, "session-1", &call)
+            .unwrap_err()
+            .starts_with("MAC_SANDBOX_PREVIEW_DIRECT_ONLY"));
+
+        call.arguments = serde_json::json!({ "command": "pwd" });
+        assert_eq!(guard_call(true, "session-1", &call).unwrap(), true);
     }
 }

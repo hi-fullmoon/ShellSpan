@@ -432,7 +432,7 @@ fn linux_ssh_bubblewrap_acceptance() {
         root_path: Some(WORKSPACE.into()),
         local_root: Some(temp.path().to_str().unwrap().into()),
         remote_sandbox_required: Some(true),
-        windows_sandbox_required: None,
+        local_sandbox_required: None,
     };
     let data_root = temp.path().join("runtime");
     std::fs::create_dir(&data_root).unwrap();
@@ -711,4 +711,25 @@ fn linux_ssh_bubblewrap_acceptance() {
         );
         assert_eq!(result.data.unwrap()["terminationConfirmed"], true);
     });
+}
+
+#[test]
+fn verify_cache_tracks_digest_expiry_and_invalidation() {
+    let mut cache = VerifyCache::default();
+    let start = Instant::now();
+    let ttl = Duration::from_secs(60);
+
+    assert!(!cache.is_valid("profile-a", "digest-1", start));
+    cache.record("profile-a", "digest-1", start, ttl);
+    assert!(cache.is_valid("profile-a", "digest-1", start + Duration::from_secs(30)));
+    // Digest change misses immediately.
+    assert!(!cache.is_valid("profile-a", "digest-2", start + Duration::from_secs(30)));
+    // Expiry invalidates the entry.
+    assert!(!cache.is_valid("profile-a", "digest-1", start + Duration::from_secs(60)));
+
+    cache.record("profile-a", "digest-2", start, ttl);
+    cache.record("profile-b", "digest-b", start, ttl);
+    cache.invalidate_profile("profile-a");
+    assert!(!cache.is_valid("profile-a", "digest-2", start));
+    assert!(cache.is_valid("profile-b", "digest-b", start));
 }

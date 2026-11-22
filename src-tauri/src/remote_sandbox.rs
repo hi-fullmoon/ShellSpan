@@ -1,11 +1,12 @@
 //! Connection policy and authenticated Bubblewrap subsystem. This module never
 //! requests a login shell or the host SFTP subsystem.
 
+use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
 use std::path::Path;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex, OnceLock,
 };
 use std::time::{Duration, Instant};
 
@@ -28,6 +29,8 @@ const WORKSPACE_PARENT: &str = "/srv/shellspan-workspaces/";
 const OUTSIDE: &str = "/var/lib/shellspan-sandbox/outside-probe";
 const MAX_FRAME: usize = 512 * 1024;
 const POLL: Duration = Duration::from_millis(15);
+const VERIFY_CACHE_TTL: Duration = Duration::from_secs(300);
+const VERIFY_CACHE_MAX_ENTRIES: usize = 128;
 pub(crate) const SFTP_UNCERTAIN: &str = "SANDBOX_SFTP_UNCERTAIN: the SFTP operation or remote shutdown could not be confirmed; do not retry automatically";
 pub(crate) const DIRECT_REQUIRED: &str =
     "SANDBOX_DIRECT_REQUIRED: use Direct execution for this SSH sandbox";
@@ -597,6 +600,95 @@ fn verify_session(session: &ssh2::Session, policy: &Policy, control: &Control) -
     result
 }
 
+#[derive(Default)]
+struct VerifyCache {
+    entries: HashMap<(String, String), Instant>,
+}
+
+impl VerifyCache {
+    fn is_valid(&mut self, profile_id: &str, digest: &str, now: Instant) -> bool {
+        let key = (profile_id.to_owned(), digest.to_owned());
+        match self.entries.get(&key).copied() {
+            Some(expires_at) if now < expires_at => true,
+            Some(_) => {
+                self.entries.remove(&key);
+                false
+            }
+            None => false,
+        }
+    }
+
+    fn record(&mut self, profile_id: &str, digest: &str, now: Instant, ttl: Duration) {
+        self.entries.retain(|_, expires_at| now < *expires_at);
+        if self.entries.len() >= VERIFY_CACHE_MAX_ENTRIES {
+            self.entries.clear();
+        }
+        self.entries
+            .insert((profile_id.to_owned(), digest.to_owned()), now + ttl);
+    }
+
+    fn invalidate_profile(&mut self, profile_id: &str) {
+        self.entries.retain(|(id, _), _| id != profile_id);
+    }
+}
+
+fn verify_cache() -> &'static Mutex<VerifyCache> {
+    static CACHE: OnceLock<Mutex<VerifyCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(VerifyCache::default()))
+}
+
+pub(super) fn invalidate_verify_cache(profile_id: &str) {
+    if let Ok(mut cache) = verify_cache().lock() {
+        cache.invalidate_profile(profile_id);
+    }
+}
+
+fn verify_session_light(session: &ssh2::Session, control: &Control) -> Result<(), String> {
+    match exchange(session, control, &json!({"type":"inspect"}))? {
+        Reply::Executor {
+            version: POLICY_VERSION,
+            linux: true,
+            bubblewrap: Bubblewrap::Available,
+            ..
+        } => Ok(()),
+        Reply::Executor {
+            bubblewrap: Bubblewrap::Missing,
+            ..
+        } => Err("SANDBOX_BUBBLEWRAP_MISSING: ask the administrator to install Bubblewrap, then test the executor again".into()),
+        _ => Err("SANDBOX_UNVERIFIED: executorProtocol did not pass; no operation was started".into()),
+    }
+}
+
+pub(super) fn ensure_verified(
+    session: &ssh2::Session,
+    binding: &Binding,
+    policy: &Policy,
+    control: &Control,
+) -> Result<(), String> {
+    let now = Instant::now();
+    let cached = verify_cache()
+        .lock()
+        .map(|mut cache| cache.is_valid(&binding.profile_id, &binding.digest, now))
+        .unwrap_or(false);
+    if cached {
+        if let Err(error) = verify_session_light(session, control) {
+            invalidate_verify_cache(&binding.profile_id);
+            return Err(error);
+        }
+        return Ok(());
+    }
+    verify_session(session, policy, control).verified()?;
+    if let Ok(mut cache) = verify_cache().lock() {
+        cache.record(
+            &binding.profile_id,
+            &binding.digest,
+            Instant::now(),
+            VERIFY_CACHE_TTL,
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -693,7 +785,7 @@ pub(crate) fn execute_command(
             .ok_or("SANDBOX_POLICY_CHANGED")?;
         binding.check(db, known_hosts)?;
         let session = setup(connection, known_hosts, &control)?;
-        verify_session(&session.ssh.target, policy, &control).verified()?;
+        ensure_verified(&session.ssh.target, binding, policy, &control)?;
         let mut channel = open_channel(&session.ssh.target, &control)?;
         send_frame(
             &mut channel,
@@ -702,6 +794,7 @@ pub(crate) fn execute_command(
             |c, b| Ok(c.write(b)),
         )?;
         let Reply::Ready { receipt } = read_frame(&mut channel, &control, &mut Vec::new())? else {
+            invalidate_verify_cache(&binding.profile_id);
             return Err("SANDBOX_EXECUTOR_NOT_READY".into());
         };
         if receipt.len() != 32 || !receipt.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -763,6 +856,7 @@ pub(crate) fn execute_command(
             truncated,
         } = reply
         else {
+            invalidate_verify_cache(&binding.profile_id);
             return Err("SANDBOX_RESULT_UNCONFIRMED".into());
         };
         if returned != receipt || !(0..=255).contains(&exit_code) {

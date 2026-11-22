@@ -11,6 +11,36 @@ use std::process::{Command, ExitCode};
 
 use nono::{AccessMode, CapabilitySet, Sandbox};
 
+const MAX_POLICY_BYTES: usize = 64 * 1024;
+
+#[derive(Default, Debug, PartialEq, Eq)]
+struct ExtraPolicy {
+    read_files: Vec<PathBuf>,
+    read_paths: Vec<PathBuf>,
+    write_paths: Vec<PathBuf>,
+}
+
+fn parse_policy(text: &str) -> Result<ExtraPolicy, Box<dyn Error>> {
+    let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
+    if lines.next() != Some("version:1") {
+        return Err("unsupported sandbox policy version".into());
+    }
+    let mut policy = ExtraPolicy::default();
+    for line in lines {
+        let Some((key, value)) = line.split_once(':') else {
+            return Err("invalid sandbox policy directive".into());
+        };
+        match key {
+            "read-file" => policy.read_files.push(PathBuf::from(value)),
+            "read-path" => policy.read_paths.push(PathBuf::from(value)),
+            "write-path" => policy.write_paths.push(PathBuf::from(value)),
+            "network" if value == "block" => {}
+            _ => return Err(format!("unsupported sandbox policy directive: {key}").into()),
+        }
+    }
+    Ok(policy)
+}
+
 fn directory(value: Option<OsString>) -> Result<PathBuf, Box<dyn Error>> {
     let path = value.ok_or("missing sandbox directory")?;
     let path = Path::new(&path);
@@ -18,6 +48,17 @@ fn directory(value: Option<OsString>) -> Result<PathBuf, Box<dyn Error>> {
         return Err("sandbox directory must be an absolute, existing directory".into());
     }
     Ok(path.canonicalize()?)
+}
+
+fn readable_file(value: &Path) -> Result<PathBuf, Box<dyn Error>> {
+    if !value.is_absolute() {
+        return Err("readable file path must be absolute".into());
+    }
+    let path = value.canonicalize()?;
+    if !path.is_file() {
+        return Err("readable file path must refer to a file".into());
+    }
+    Ok(path)
 }
 
 fn apply(caps: &CapabilitySet, seccomp_network: bool) -> Result<(), Box<dyn Error>> {
@@ -37,6 +78,7 @@ fn apply(caps: &CapabilitySet, seccomp_network: bool) -> Result<(), Box<dyn Erro
 fn run(
     mut args: impl Iterator<Item = OsString>,
     receipt: &mut Option<File>,
+    mut extra_policy: ExtraPolicy,
 ) -> Result<i32, Box<dyn Error>> {
     let mut first = args.next();
     if first.as_deref() == Some("--probe".as_ref()) {
@@ -48,19 +90,31 @@ fn run(
             Err("host does not support the nono sandbox".into())
         };
     }
-    let inherit_cwd = first.as_deref() == Some("--inherit-cwd".as_ref());
-    if inherit_cwd {
-        first = args.next();
-    }
-    let seccomp_network = first.as_deref() == Some("--seccomp-network".as_ref());
-    if seccomp_network {
-        first = args.next();
+    let mut inherit_cwd = false;
+    let mut seccomp_network = false;
+    while let Some(arg) = first.as_deref() {
+        if arg == "--inherit-cwd" {
+            inherit_cwd = true;
+            first = args.next();
+        } else if arg == "--seccomp-network" {
+            seccomp_network = true;
+            first = args.next();
+        } else if arg == "--read-file" {
+            let value = args.next().ok_or("missing --read-file path")?;
+            extra_policy.read_files.push(PathBuf::from(value));
+            first = args.next();
+        } else if arg == "--read-path" {
+            let value = args.next().ok_or("missing --read-path path")?;
+            extra_policy.read_paths.push(PathBuf::from(value));
+            first = args.next();
+        } else {
+            break;
+        }
     }
     let workspace = directory(first)?;
     let temporary = directory(args.next())?;
-    let node = PathBuf::from(args.next().ok_or("missing Node executable")?).canonicalize()?;
-    if !node.is_file() || args.next().as_deref() != Some("--".as_ref()) {
-        return Err("expected an executable path and -- before command".into());
+    if args.next().as_deref() != Some("--".as_ref()) {
+        return Err("expected -- before command".into());
     }
     let executable = args.next().ok_or("missing command executable")?;
     if !Path::new(&executable).is_absolute() {
@@ -69,10 +123,24 @@ fn run(
     let mut caps = CapabilitySet::new()
         .allow_path(&workspace, AccessMode::ReadWrite)?
         .allow_path(&temporary, AccessMode::ReadWrite)?
-        .allow_file(&node, AccessMode::Read)?
         .allow_file("/dev/null", AccessMode::ReadWrite)?
         .allow_file("/dev/urandom", AccessMode::Read)?
         .block_network();
+    for file in &extra_policy.read_files {
+        caps = caps.allow_file(readable_file(file)?, AccessMode::Read)?;
+    }
+    for path in &extra_policy.read_paths {
+        caps = caps.allow_path(
+            directory(Some(path.as_os_str().to_owned()))?,
+            AccessMode::Read,
+        )?;
+    }
+    for path in &extra_policy.write_paths {
+        caps = caps.allow_path(
+            directory(Some(path.as_os_str().to_owned()))?,
+            AccessMode::ReadWrite,
+        )?;
+    }
     for path in [
         "/bin",
         "/sbin",
@@ -147,7 +215,30 @@ fn entry() -> Result<i32, Box<dyn Error>> {
             return Err("application closed the launch gate without authorization".into());
         }
     }
-    let result = run(args, &mut receipt);
+    let result = (|| -> Result<i32, Box<dyn Error>> {
+        let mut extra_policy = ExtraPolicy::default();
+        if args.next_if(|arg| arg == "--policy-fd").is_some() {
+            let fd: i32 = args
+                .next()
+                .ok_or("missing policy descriptor")?
+                .into_string()
+                .map_err(|_| "invalid policy descriptor")?
+                .parse()?;
+            if fd < 3 || unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+                return Err("could not isolate policy descriptor".into());
+            }
+            let file = unsafe { File::from_raw_fd(fd) };
+            let mut raw = Vec::new();
+            file.take((MAX_POLICY_BYTES + 1) as u64)
+                .read_to_end(&mut raw)?;
+            if raw.len() > MAX_POLICY_BYTES {
+                return Err("sandbox policy exceeds size limit".into());
+            }
+            let text = String::from_utf8(raw)?;
+            extra_policy = parse_policy(&text)?;
+        }
+        run(args, &mut receipt, extra_policy)
+    })();
     if result.is_err() {
         if let Some(file) = receipt.as_mut() {
             file.write_all(b"F")?;
@@ -163,5 +254,29 @@ fn main() -> ExitCode {
             eprintln!("sandbox launcher: {error}");
             ExitCode::from(125)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_policy_accepts_valid_v1_directives() {
+        let policy = parse_policy(
+            "version:1\nread-file:/usr/bin/env\nread-path:/opt/homebrew\nwrite-path:/tmp/ws\nnetwork:block\n",
+        )
+        .unwrap();
+        assert_eq!(policy.read_files, vec![PathBuf::from("/usr/bin/env")]);
+        assert_eq!(policy.read_paths, vec![PathBuf::from("/opt/homebrew")]);
+        assert_eq!(policy.write_paths, vec![PathBuf::from("/tmp/ws")]);
+    }
+
+    #[test]
+    fn parse_policy_rejects_unknown_version_directive_or_network_mode() {
+        assert!(parse_policy("version:2\n").is_err());
+        assert!(parse_policy("version:1\nunknown:/tmp\n").is_err());
+        assert!(parse_policy("version:1\nnetwork:allow\n").is_err());
+        assert!(parse_policy("version:1\nmalformed-line\n").is_err());
     }
 }

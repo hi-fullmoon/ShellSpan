@@ -19,8 +19,8 @@ use tokio::{
 use uuid::Uuid;
 
 use super::{
-    open_channel, read_frame, send_frame, setup, verify_session, Binding, Control, Mode, Policy,
-    Reply, OUTSIDE, POLICY_VERSION,
+    ensure_verified, invalidate_verify_cache, open_channel, read_frame, send_frame, setup, Binding,
+    Control, Mode, Policy, Reply, OUTSIDE, POLICY_VERSION,
 };
 use crate::{db::Database, models::RemoteConnectionRequest};
 
@@ -187,14 +187,15 @@ impl SandboxSftp {
                 .min(Instant::now() + Duration::from_secs(25)),
             control.cancelled.clone(),
         );
-        verify_session(&session.ssh.target, policy, &preflight).verified()?;
+        ensure_verified(&session.ssh.target, binding, policy, &preflight)?;
         let mut sftp = Self::start(
             &session.ssh.target,
             policy,
             &control,
             Some((db, binding, known_hosts)),
             None,
-        )?;
+        )
+        .inspect_err(|_| invalidate_verify_cache(&binding.profile_id))?;
         sftp._ssh = Some(session);
         Ok(sftp)
     }

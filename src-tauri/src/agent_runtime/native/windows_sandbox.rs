@@ -18,7 +18,10 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::Security::{
     Authorization::{ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW},
     FreeSid, GetTokenInformation,
-    Isolation::{CreateAppContainerProfile, DeriveAppContainerSidFromAppContainerName},
+    Isolation::{
+        CreateAppContainerProfile, DeleteAppContainerProfile,
+        DeriveAppContainerSidFromAppContainerName,
+    },
     TokenUser, PSID, SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES, TOKEN_QUERY, TOKEN_USER,
 };
 use windows_sys::Win32::Storage::FileSystem::{
@@ -86,12 +89,16 @@ fn user_sid() -> io::Result<String> {
     }
 }
 
+fn container_moniker(workspace: &str, user: &str) -> Vec<u16> {
+    let key = hex::encode(Sha256::digest(format!("{user}\0{workspace}")));
+    wide(format!("ShellSpan.Agent.{}", &key[..40]))
+}
+
 struct ContainerSid(PSID);
 
 impl ContainerSid {
     fn for_workspace(workspace: &str, user: &str) -> io::Result<Self> {
-        let key = hex::encode(Sha256::digest(format!("{user}\0{workspace}")));
-        let name = wide(format!("ShellSpan.Agent.{}", &key[..40]));
+        let name = container_moniker(workspace, user);
         let mut sid = null_mut();
         let label = wide("ShellSpan Agent");
         // SAFETY: all strings are NUL terminated and sid is a valid out pointer.
@@ -223,6 +230,39 @@ pub(crate) fn create_workspace(data: &Path, session: &str) -> Result<String, Str
     create().map_err(|error| format!("{START_FAILED}: {error}"))
 }
 
+pub(crate) fn remove_workspace(data: &Path, cwd: &Path) -> Result<(), String> {
+    let workspace = Workspace::open(data, cwd)?;
+    let path = workspace.path.clone();
+    let name = workspace.name.clone();
+    let user = workspace.user.clone();
+    // Release retained directory handles before moving the workspace to the recycle bin.
+    drop(workspace);
+
+    if let Err(error) = trash::TrashContext::new().delete(&path) {
+        return Err(format!(
+            "Failed to recycle Windows sandbox workspace: {error}"
+        ));
+    }
+    match fs::remove_file(identity_record(&path)) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "Failed to remove Windows sandbox identity record: {error}"
+            ));
+        }
+    }
+    let moniker = container_moniker(&name, &user);
+    // SAFETY: moniker is a valid NUL-terminated UTF-16 AppContainer name.
+    let result = unsafe { DeleteAppContainerProfile(moniker.as_ptr()) };
+    const FILE_NOT_FOUND: i32 = 0x80070002_u32 as i32;
+    const NOT_FOUND: i32 = 0x80070490_u32 as i32;
+    if result < 0 && result != FILE_NOT_FOUND && result != NOT_FOUND {
+        return Err(format!("DeleteAppContainerProfile failed: {result:#x}"));
+    }
+    Ok(())
+}
+
 pub(super) struct Workspace {
     path: PathBuf,
     user: String,
@@ -272,6 +312,16 @@ impl Workspace {
             })
         };
         open().map_err(|error| format!("{START_FAILED}: {error}"))
+    }
+}
+
+impl super::LocalSandboxBackend for Workspace {
+    fn kind(&self) -> crate::agent_runtime::LocalSandboxKind {
+        crate::agent_runtime::LocalSandboxKind::WindowsAppContainer
+    }
+
+    fn digest(&self) -> &str {
+        &self.digest
     }
 }
 
@@ -575,5 +625,18 @@ mod tests {
             udp.recv_from(&mut [0]).unwrap_err().kind(),
             io::ErrorKind::WouldBlock
         );
+        drop(process);
+        remove_workspace(data.path(), Path::new(&root)).unwrap();
+        assert!(!Path::new(&root).exists());
+        assert!(!identity_record(Path::new(&root)).exists());
+    }
+
+    #[test]
+    fn remove_workspace_rejects_unmanaged_paths() {
+        let data = tempfile::tempdir().unwrap();
+        let outside = data.path().join("not-a-workspace");
+        fs::create_dir(&outside).unwrap();
+        assert!(remove_workspace(data.path(), &outside).is_err());
+        assert!(outside.exists());
     }
 }

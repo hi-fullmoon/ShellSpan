@@ -270,7 +270,7 @@ function launch(backend, f, script, options = {}) {
   const executable = backend === 'direct' ? argv.shift() : useNono ? nono : srt;
   const prefix = backend === 'nono-hardened' && platform() === 'linux' ? ['--seccomp-network'] : [];
   const args = useNono
-    ? [...prefix, options.invalid ? join(f.root, 'missing-workspace') : f.workspace, f.temporary, node, '--', ...argv]
+    ? [...prefix, '--read-file', node, options.invalid ? join(f.root, 'missing-workspace') : f.workspace, f.temporary, '--', ...argv]
     : backend === 'srt'
       ? ['--settings', options.invalid ? join(f.root, 'missing-settings.json') : f.settings, '--', ...argv]
       : argv;

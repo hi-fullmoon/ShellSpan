@@ -18,8 +18,32 @@ const JOURNAL: &str = "managed-directory-guard.json";
 #[serde(tag = "phase", rename_all = "camelCase")]
 enum Phase {
     Prepared,
-    Running { group: i32 },
+    Running {
+        group: i32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        boot_time: Option<i64>,
+    },
     Ended,
+}
+
+fn system_boot_time() -> io::Result<i64> {
+    let mut mib = [libc::CTL_KERN, libc::KERN_BOOTTIME];
+    let mut boot = MaybeUninit::<libc::timeval>::uninit();
+    let mut size = std::mem::size_of::<libc::timeval>();
+    if unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as u32,
+            boot.as_mut_ptr().cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    } < 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(unsafe { boot.assume_init() }.tv_sec)
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -134,8 +158,11 @@ impl Directory {
         if self.identity()? != record.anchor {
             return Err(io::Error::other("managed directory identity changed"));
         }
-        if let Phase::Running { group } = record.phase {
-            if !local_process_group_gone(group)? {
+        if let Phase::Running { group, boot_time } = record.phase {
+            let rebooted = boot_time.is_some_and(|recorded| {
+                system_boot_time().is_ok_and(|current| current != recorded)
+            });
+            if !rebooted && !local_process_group_gone(group)? {
                 return Ok(false);
             }
         }
@@ -215,12 +242,15 @@ impl Lease {
                 "sandbox launcher is not a process group leader",
             ));
         }
-        self.record.phase = Phase::Running { group };
+        self.record.phase = Phase::Running {
+            group,
+            boot_time: Some(system_boot_time()?),
+        };
         self.directory.save(self.record)
     }
 
     pub(super) fn record_ended(&mut self) -> io::Result<()> {
-        if let Phase::Running { group } = self.record.phase {
+        if let Phase::Running { group, .. } = self.record.phase {
             if !local_process_group_gone(group)? {
                 return Err(io::Error::other("prior sandbox process group remains live"));
             }
@@ -300,6 +330,28 @@ mod tests {
         let recovered = Lease::acquire(root.path()).unwrap();
         assert!(recovered.release().unwrap());
         assert!(!acquired_while_running);
+        assert!(!root.path().join("data").join(JOURNAL).exists());
+    }
+
+    #[test]
+    fn recovery_unlocks_when_recorded_boot_time_differs_from_current_host() {
+        let root = tempfile::Builder::new()
+            .prefix("ss-sandbox-desktop-")
+            .tempdir_in("/private/tmp")
+            .unwrap();
+        fs::create_dir(root.path().join("data")).unwrap();
+        let mut lease = Lease::acquire(root.path()).unwrap();
+        let current_group = unsafe { libc::getpgrp() };
+        let stale_boot = system_boot_time().unwrap().saturating_sub(600);
+        lease.record.phase = Phase::Running {
+            group: current_group,
+            boot_time: Some(stale_boot),
+        };
+        lease.directory.save(lease.record).unwrap();
+        drop(lease);
+
+        let recovered = Lease::acquire(root.path()).unwrap();
+        assert!(recovered.release().unwrap());
         assert!(!root.path().join("data").join(JOURNAL).exists());
     }
 }

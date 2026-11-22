@@ -25,6 +25,7 @@ mod sudo;
 mod terminal_execute;
 mod terminal_interactive;
 mod terminal_lease;
+mod tool_progress;
 #[cfg(windows)]
 pub(crate) mod windows_sandbox;
 
@@ -52,3 +53,10 @@ pub(crate) use sudo::{SudoPrompts, AGENT_SUDO_PROMPT_EVENT};
 pub(crate) use terminal_execute::*;
 pub(crate) use terminal_interactive::*;
 pub(crate) use terminal_lease::*;
+pub(crate) use tool_progress::*;
+
+#[allow(dead_code)]
+pub(crate) trait LocalSandboxBackend {
+    fn kind(&self) -> crate::agent_runtime::LocalSandboxKind;
+    fn digest(&self) -> &str;
+}
