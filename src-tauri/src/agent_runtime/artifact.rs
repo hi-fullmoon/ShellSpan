@@ -341,7 +341,9 @@ impl AgentArtifactStore {
         {
             let session_entry = session_entry
                 .map_err(|error| format!("failed to inspect Agent artifact session: {error}"))?;
-            if session_entry.file_name() == ARTIFACT_STORE_FORMAT_FILE {
+            if session_entry.file_name() == ARTIFACT_STORE_FORMAT_FILE
+                || is_ignorable_os_metadata_entry(&session_entry)?
+            {
                 continue;
             }
             if !session_entry
@@ -357,6 +359,9 @@ impl AgentArtifactStore {
             {
                 let artifact_entry = artifact_entry
                     .map_err(|error| format!("failed to inspect Agent artifact: {error}"))?;
+                if is_ignorable_os_metadata_entry(&artifact_entry)? {
+                    continue;
+                }
                 let path = artifact_entry.path();
                 let Some(artifact_id) = path
                     .file_stem()
@@ -431,10 +436,17 @@ fn prepare_store_format(root: &Path) -> Result<(), String> {
     match fs::symlink_metadata(&path) {
         Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            let occupied = fs::read_dir(root)
-                .and_then(|mut entries| entries.next().transpose())
+            let mut occupied = false;
+            for entry in fs::read_dir(root)
                 .map_err(|error| format!("failed to inspect Agent artifact root: {error}"))?
-                .is_some();
+            {
+                let entry = entry
+                    .map_err(|error| format!("failed to inspect Agent artifact root: {error}"))?;
+                if !is_ignorable_os_metadata_entry(&entry)? {
+                    occupied = true;
+                    break;
+                }
+            }
             if occupied {
                 // Another initializer may have published the format after our first check.
                 // Existing data alone never establishes a format version.
@@ -567,7 +579,9 @@ fn inspect_artifact_bounds(root: &Path) -> Result<(usize, usize, u64), String> {
     {
         let session = session
             .map_err(|error| format!("failed to inspect Agent artifact session: {error}"))?;
-        if session.file_name() == ARTIFACT_STORE_FORMAT_FILE {
+        if session.file_name() == ARTIFACT_STORE_FORMAT_FILE
+            || is_ignorable_os_metadata_entry(&session)?
+        {
             continue;
         }
         if !session
@@ -582,6 +596,9 @@ fn inspect_artifact_bounds(root: &Path) -> Result<(usize, usize, u64), String> {
         {
             let entry =
                 entry.map_err(|error| format!("failed to inspect Agent artifact: {error}"))?;
+            if is_ignorable_os_metadata_entry(&entry)? {
+                continue;
+            }
             let metadata = fs::symlink_metadata(entry.path())
                 .map_err(|error| format!("failed to inspect Agent artifact: {error}"))?;
             if metadata.file_type().is_symlink() || !metadata.is_file() {
@@ -607,6 +624,24 @@ fn inspect_artifact_bounds(root: &Path) -> Result<(usize, usize, u64), String> {
         }
     }
     Ok((artifact_count, replay_count, bytes))
+}
+
+fn is_os_metadata_file_name(name: &std::ffi::OsStr) -> bool {
+    name.to_str().is_some_and(|value| {
+        value == ".DS_Store"
+            || value.eq_ignore_ascii_case("Thumbs.db")
+            || value.eq_ignore_ascii_case("desktop.ini")
+    })
+}
+
+fn is_ignorable_os_metadata_entry(entry: &fs::DirEntry) -> Result<bool, String> {
+    if !is_os_metadata_file_name(&entry.file_name()) {
+        return Ok(false);
+    }
+    let file_type = entry
+        .file_type()
+        .map_err(|error| format!("failed to inspect Agent artifact entry: {error}"))?;
+    Ok(file_type.is_file() && !file_type.is_symlink())
 }
 
 fn validate_identifier(value: &str, label: &str) -> Result<(), String> {
@@ -905,6 +940,72 @@ mod tests {
         assert_eq!(
             store.verify("session-1", &metadata).unwrap(),
             AgentArtifactIntegrity::Missing
+        );
+    }
+
+    #[test]
+    fn os_metadata_files_are_ignored_in_artifact_root_and_session_directories() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("agent-runtime/artifacts");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join(".DS_Store"), b"finder-metadata").unwrap();
+        fs::write(directory.join("Thumbs.db"), b"explorer-metadata").unwrap();
+        fs::write(directory.join("desktop.ini"), b"[.ShellClassInfo]").unwrap();
+
+        let store = AgentArtifactStore::default();
+        store.configure(root.path()).unwrap();
+        let metadata = store
+            .store_text("session-1", "summary", "summary", "bounded evidence")
+            .unwrap();
+        fs::write(directory.join("session-1/.DS_Store"), b"session-metadata").unwrap();
+
+        assert_eq!(
+            inspect_artifact_bounds(&directory).unwrap(),
+            (1, 0, metadata.size_bytes)
+        );
+        let reopened = AgentArtifactStore::default();
+        reopened.configure(root.path()).unwrap();
+        let referenced = HashSet::from([("session-1".to_string(), metadata.artifact_id)]);
+        assert_eq!(reopened.cleanup_unreferenced(&referenced).unwrap(), 0);
+        assert!(directory.join(".DS_Store").is_file());
+        assert!(directory.join("session-1/.DS_Store").is_file());
+    }
+
+    #[test]
+    fn unexpected_non_metadata_files_in_artifact_root_still_fail_closed() {
+        let root = tempfile::tempdir().unwrap();
+        let store = AgentArtifactStore::default();
+        store.configure(root.path()).unwrap();
+        fs::write(
+            root.path().join("agent-runtime/artifacts/stray.txt"),
+            b"unexpected",
+        )
+        .unwrap();
+
+        assert_eq!(
+            AgentArtifactStore::default()
+                .configure(root.path())
+                .unwrap_err(),
+            "Agent artifact root contains an unsafe entry"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_os_metadata_name_in_artifact_store_still_fails_closed() {
+        let root = tempfile::tempdir().unwrap();
+        let store = AgentArtifactStore::default();
+        store.configure(root.path()).unwrap();
+        let outside = root.path().join("outside.bin");
+        fs::write(&outside, b"outside").unwrap();
+        let directory = root.path().join("agent-runtime/artifacts");
+        std::os::unix::fs::symlink(&outside, directory.join(".DS_Store")).unwrap();
+
+        assert_eq!(
+            AgentArtifactStore::default()
+                .configure(root.path())
+                .unwrap_err(),
+            "Agent artifact root contains an unsafe entry"
         );
     }
 }
