@@ -15,6 +15,7 @@ import { useReconnectSession } from '@/hooks/useReconnectSession';
 import { isTauriRuntime } from '@/lib/ipc/tauri';
 import { AgentPermissionSelector } from '../agent-permission-selector';
 import { AgentExecutionSurfaceSelector } from '../agent-execution-surface-selector';
+import { SandboxStatusBadge } from './sandbox-status-badge';
 import { SandboxSyncDialog } from './sandbox-sync-dialog';
 import { AgentTerminalBusyNotice } from '../agent-terminal-busy-notice';
 import { AiComposerModelSelector } from './ai-composer-model-selector';
@@ -124,9 +125,21 @@ export function AiWorkspaceController({
     controller.imageDraft.draft?.images.length || controller.imageDraft.pendingFiles.length,
   );
   const openAiSettings = (): void => useAppStore.getState().openSettings('ai');
+  const sandboxSyncAction = session?.header.target?.localSandboxRequired
+    ? <SandboxSyncDialog sessionId={session.header.sessionId} />
+    : undefined;
+  const headerActions = (focusMode && !terminalOpen) || sandboxSyncAction
+    ? (
+      <>
+        {sandboxSyncAction}
+        {focusMode && !terminalOpen ? <FocusControls /> : null}
+      </>
+    )
+    : undefined;
   return (
     <AiWorkspaceRoot
-      headerActions={focusMode && !terminalOpen ? <FocusControls /> : undefined}
+      headerActions={headerActions}
+      headerBadge={session?.header.target ? <SandboxStatusBadge target={session.header.target} /> : undefined}
       mode={scope === 'workbench' ? 'ask' : 'agent'}
       view={controller.view}
       contextWindow={activeModel?.contextWindow}
@@ -205,20 +218,15 @@ export function AiWorkspaceController({
         : undefined}
       executionSurfaceControl={!focusMode && scope === 'terminal' && activeTerminalId
         ? (
-            <div className="flex items-center gap-1">
-              <AgentExecutionSurfaceSelector
-                surface={controller.selectedExecutionSurface}
-                realTerminalState={realTerminalState}
-                nativeStartupTimedOut={activeTerminalStatus === 'connected' && nativeStartupTimedOut}
-                glibcMismatch={controller.glibcMismatch}
-                sandboxDirectOnly={controller.sandboxDirectOnly}
-                disabled={executionSurfaceLocked}
-                onSurfaceChange={controller.selectExecutionSurface}
-              />
-              {session?.header.target?.localSandboxRequired && (
-                <SandboxSyncDialog sessionId={session.header.sessionId} />
-              )}
-            </div>
+            <AgentExecutionSurfaceSelector
+              surface={controller.selectedExecutionSurface}
+              realTerminalState={realTerminalState}
+              nativeStartupTimedOut={activeTerminalStatus === 'connected' && nativeStartupTimedOut}
+              glibcMismatch={controller.glibcMismatch}
+              sandboxDirectOnly={controller.sandboxDirectOnly}
+              disabled={executionSurfaceLocked}
+              onSurfaceChange={controller.selectExecutionSurface}
+            />
           )
         : undefined}
       executionSurfaceNotice={session?.header.subagent ? undefined : <>

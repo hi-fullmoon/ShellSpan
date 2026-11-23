@@ -8,6 +8,7 @@ import json
 import os
 import platform
 import re
+import resource
 import selectors
 import signal
 import socket
@@ -176,7 +177,7 @@ def syscall_filter(output):
         deny_action = 0x50000 | errno.EPERM
         for name in (
             b"socket", b"socketcall", b"connect", b"bind", b"io_uring_setup",
-            b"symlink", b"symlinkat", b"mknod", b"mknodat",
+            b"mknod", b"mknodat",
             b"ptrace", b"process_vm_readv", b"process_vm_writev",
             b"keyctl", b"add_key", b"request_key", b"userfaultfd", b"perf_event_open",
         ):
@@ -195,6 +196,25 @@ def syscall_filter(output):
         lib.seccomp_release(context)
 
 
+TMPFS_TMP_BYTES = str(256 * 1024 * 1024)
+TMPFS_RUN_BYTES = str(16 * 1024 * 1024)
+MAX_SANDBOX_FILE_BYTES = 256 * 1024 * 1024
+MAX_SANDBOX_OPEN_FILES = 1024
+
+
+def clamp_rlimit(res, max_value):
+    soft, hard = resource.getrlimit(res)
+    new_hard = max_value if hard == resource.RLIM_INFINITY else min(hard, max_value)
+    new_soft = new_hard if soft == resource.RLIM_INFINITY else min(soft, new_hard)
+    resource.setrlimit(res, (new_soft, new_hard))
+
+
+def apply_sandbox_rlimits():
+    clamp_rlimit(resource.RLIMIT_CORE, 0)
+    clamp_rlimit(resource.RLIMIT_FSIZE, MAX_SANDBOX_FILE_BYTES)
+    clamp_rlimit(resource.RLIMIT_NOFILE, MAX_SANDBOX_OPEN_FILES)
+
+
 def launch(workspace, mode, argv, **kwargs):
     with tempfile.TemporaryFile() as bpf:
         syscall_filter(bpf)
@@ -202,12 +222,13 @@ def launch(workspace, mode, argv, **kwargs):
             BWRAP, "--unshare-all", "--unshare-user", "--disable-userns", "--die-with-parent",
             "--cap-drop", "ALL", "--clearenv", "--setenv", "PATH", ENV["PATH"],
             "--setenv", "LANG", "C", "--setenv", "HOME", "/tmp", "--setenv", "TMPDIR", "/tmp",
-            "--ro-bind", ROOTFS, "/", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
-            "--tmpfs", "/run", "--tmpfs", "/srv", "--dir", WORKSPACES,
+            "--ro-bind", ROOTFS, "/", "--proc", "/proc", "--dev", "/dev",
+            "--size", TMPFS_TMP_BYTES, "--tmpfs", "/tmp",
+            "--size", TMPFS_RUN_BYTES, "--tmpfs", "/run", "--tmpfs", "/srv", "--dir", WORKSPACES,
             "--ro-bind" if mode == "readOnly" else "--bind", workspace, workspace,
             "--remount-ro", "/srv", "--chdir", workspace, "--seccomp", str(bpf.fileno()),
             "--", *argv,
-        ], env=ENV, pass_fds=(bpf.fileno(),), start_new_session=True, **kwargs)
+        ], env=ENV, pass_fds=(bpf.fileno(),), start_new_session=True, preexec_fn=apply_sandbox_rlimits, **kwargs)
 
 
 def stop(process):

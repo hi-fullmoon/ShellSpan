@@ -1,28 +1,29 @@
 //! Managed macOS local sandbox backed by the bundled `nono` launcher.
+use std::collections::{HashSet, VecDeque};
 use std::ffi::OsStr;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
 
 use sha2::{Digest, Sha256};
 
 use super::mac_sandbox_workspace::{
-    recover_on_startup_in, recover_once_in, validate_anchor_path, Lease,
+    recover_managed_on_startup, recover_managed_once, validate_managed_anchor_path,
+    validate_managed_sandbox_parent, Lease,
 };
 
 pub(crate) const EXECUTOR: &str = "macNono";
-pub(crate) const WORKSPACE_PREFIX: &str = ".shellspan-agent-ws-";
+pub(crate) const SANDBOXES_DIR: &str = "sandboxes";
 const START_FAILED: &str = "MAC_SANDBOX_START_FAILED";
 const LAUNCHER_REL_PATH: &str = "native-input/generated/sandbox/shellspan-sandbox-launcher";
 const LAUNCHER_SHA256: Option<&str> = option_env!("SHELLSPAN_MAC_SANDBOX_LAUNCHER_RELEASE_SHA256");
 
 fn is_valid_anchor_name(name: &str) -> bool {
-    let Some(hex_part) = name.strip_prefix(WORKSPACE_PREFIX) else {
-        return false;
-    };
-    hex_part.len() == 32
-        && hex_part
+    name.len() == 32
+        && name
             .bytes()
             .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
@@ -122,6 +123,61 @@ pub(crate) fn resolve_verified_launcher(
     }))
 }
 
+fn verified_probe_cache() -> &'static Mutex<VecDeque<(PathBuf, String)>> {
+    static CACHE: OnceLock<Mutex<VecDeque<(PathBuf, String)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(VecDeque::new()))
+}
+
+pub(crate) fn probe_local_sandbox(
+    data_dir: &Path,
+    resource_dir: Option<&Path>,
+) -> Result<(), String> {
+    let (launcher, expected_sha256) = resolve_verified_launcher(resource_dir)?;
+    let sandboxes_dir = data_dir.join(SANDBOXES_DIR);
+    let probe_target = if sandboxes_dir.exists() {
+        sandboxes_dir
+    } else {
+        data_dir.to_path_buf()
+    };
+    let parent = probe_target.canonicalize().map_err(|error| {
+        format!("LOCAL_SANDBOX_UNAVAILABLE: invalid ShellSpan data directory: {error}")
+    })?;
+    validate_managed_sandbox_parent(&parent).map_err(|error| {
+        format!("LOCAL_SANDBOX_UNAVAILABLE: managed workspace root cannot be protected: {error}")
+    })?;
+    let cache_key = (parent, expected_sha256);
+    if let Ok(cache) = verified_probe_cache().lock() {
+        if cache.contains(&cache_key) {
+            return Ok(());
+        }
+    }
+    let output = Command::new(&launcher)
+        .arg("--probe")
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| {
+            format!("LOCAL_SANDBOX_LAUNCHER_UNAVAILABLE: failed to run sandbox probe: {error}")
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let detail = stderr.trim();
+        return Err(if detail.is_empty() {
+            "LOCAL_SANDBOX_UNAVAILABLE: macOS Seatbelt sandbox probe failed".into()
+        } else {
+            format!("LOCAL_SANDBOX_UNAVAILABLE: macOS Seatbelt sandbox probe failed: {detail}")
+        });
+    }
+    if let Ok(mut cache) = verified_probe_cache().lock() {
+        if cache.len() >= 16 {
+            cache.pop_front();
+        }
+        cache.push_back(cache_key);
+    }
+    Ok(())
+}
+
 fn workspace_identity_digest(
     workspace: &Path,
     anchor_id: (u64, u64),
@@ -141,8 +197,8 @@ fn identity_file(anchor: &Path) -> PathBuf {
     anchor.join("data").join("identity")
 }
 
-fn parse_managed_workspace(home: &Path, cwd: &Path) -> io::Result<(PathBuf, PathBuf, PathBuf)> {
-    let parent = home.canonicalize()?;
+fn parse_managed_workspace(data_dir: &Path, cwd: &Path) -> io::Result<(PathBuf, PathBuf, PathBuf)> {
+    let parent = data_dir.join(SANDBOXES_DIR).canonicalize()?;
     if cwd.file_name() != Some(OsStr::new("workspace")) {
         return Err(io::Error::other("Invalid managed macOS workspace path"));
     }
@@ -158,16 +214,26 @@ fn parse_managed_workspace(home: &Path, cwd: &Path) -> io::Result<(PathBuf, Path
     if anchor != expected_anchor {
         return Err(io::Error::other("Workspace is outside managed macOS root"));
     }
-    validate_anchor_path(&expected_anchor, &parent, WORKSPACE_PREFIX)?;
+    validate_managed_anchor_path(&expected_anchor, &parent)?;
     let workspace = expected_anchor.join("workspace");
     Ok((parent, expected_anchor, workspace))
 }
 
-pub(crate) fn create_workspace(home: &Path, session_id: &str) -> Result<String, String> {
+pub(crate) fn create_workspace(data_dir: &Path, session_id: &str) -> Result<String, String> {
     let create = || -> io::Result<String> {
-        let parent = home.canonicalize()?;
+        let data_root = data_dir.canonicalize()?;
+        validate_managed_sandbox_parent(&data_root)?;
+        let parent = data_root.join(SANDBOXES_DIR);
+        match fs::create_dir(&parent) {
+            Ok(()) => {
+                fs::set_permissions(&parent, fs::Permissions::from_mode(0o700))?;
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+        validate_managed_sandbox_parent(&parent)?;
         let digest = Sha256::digest(format!("{}\0{session_id}", parent.display()));
-        let anchor_name = format!("{WORKSPACE_PREFIX}{}", hex::encode(&digest[..16]));
+        let anchor_name = hex::encode(&digest[..16]);
         let anchor = parent.join(anchor_name);
         let workspace = anchor.join("workspace");
         let temporary = anchor.join("temporary");
@@ -175,7 +241,7 @@ pub(crate) fn create_workspace(home: &Path, session_id: &str) -> Result<String, 
         match fs::create_dir(&anchor) {
             Ok(()) => {
                 fs::set_permissions(&anchor, fs::Permissions::from_mode(0o700))?;
-                validate_anchor_path(&anchor, &parent, WORKSPACE_PREFIX)?;
+                validate_managed_anchor_path(&anchor, &parent)?;
                 fs::create_dir(&workspace)?;
                 fs::create_dir(&temporary)?;
                 fs::create_dir(&data)?;
@@ -208,7 +274,7 @@ fn verify_managed_workspace_files(
     anchor: &Path,
     workspace: &Path,
 ) -> io::Result<((u64, u64), (u64, u64))> {
-    validate_anchor_path(anchor, parent, WORKSPACE_PREFIX)?;
+    validate_managed_anchor_path(anchor, parent)?;
     let anchor_id = entry_identity(anchor, true)?;
     let workspace_id = entry_identity(workspace, true)?;
     let _ = entry_identity(&anchor.join("temporary"), true)?;
@@ -223,15 +289,15 @@ fn verify_managed_workspace_files(
     Ok((anchor_id, workspace_id))
 }
 
-pub(crate) fn remove_workspace(home: &Path, cwd: &Path) -> Result<(), String> {
-    let (parent, anchor, workspace) =
-        parse_managed_workspace(home, cwd).map_err(|error| format!("{START_FAILED}: {error}"))?;
+pub(crate) fn remove_workspace(data_dir: &Path, cwd: &Path) -> Result<(), String> {
+    let (parent, anchor, workspace) = parse_managed_workspace(data_dir, cwd)
+        .map_err(|error| format!("{START_FAILED}: {error}"))?;
     if !anchor.exists() {
         return Ok(());
     }
     verify_managed_workspace_files(&parent, &anchor, &workspace)
         .map_err(|error| format!("{START_FAILED}: {error}"))?;
-    let recovered = recover_once_in(&anchor, &parent, WORKSPACE_PREFIX).map_err(|error| {
+    let recovered = recover_managed_once(&anchor, &parent).map_err(|error| {
         format!("Failed to recover macOS sandbox workspace before removal: {error}")
     })?;
     if !recovered {
@@ -245,8 +311,8 @@ pub(crate) fn remove_workspace(home: &Path, cwd: &Path) -> Result<(), String> {
         .map_err(|error| format!("Failed to recycle macOS sandbox workspace: {error}"))
 }
 
-pub(crate) fn recover_all_on_startup(home: &Path) {
-    let Ok(parent) = home.canonicalize() else {
+pub(crate) fn recover_all_on_startup(data_dir: &Path) {
+    let Ok(parent) = data_dir.join(SANDBOXES_DIR).canonicalize() else {
         return;
     };
     let Ok(entries) = fs::read_dir(&parent) else {
@@ -264,7 +330,36 @@ pub(crate) fn recover_all_on_startup(home: &Path) {
         if !anchor.join("data/managed-directory-guard.json").exists() {
             continue;
         }
-        recover_on_startup_in(&anchor, &parent, WORKSPACE_PREFIX);
+        recover_managed_on_startup(&anchor, &parent);
+    }
+}
+
+pub(crate) fn reclaim_orphaned_workspaces(data_dir: &Path, known_cwds: &HashSet<String>) {
+    let Ok(parent) = data_dir.join(SANDBOXES_DIR).canonicalize() else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(&parent) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !is_valid_anchor_name(name) {
+            continue;
+        }
+        let workspace = entry.path().join("workspace");
+        let portable = crate::path_utils::portable_local_path(&workspace);
+        if known_cwds.contains(&portable) {
+            continue;
+        }
+        if let Err(error) = remove_workspace(data_dir, &workspace) {
+            log::warn!(
+                "Failed to reclaim orphaned macOS sandbox workspace: {}",
+                crate::redaction::redact_sensitive_text(&error)
+            );
+        }
     }
 }
 
@@ -275,26 +370,29 @@ pub(crate) struct Workspace {
     pub(super) workspace: PathBuf,
     pub(super) launcher: PathBuf,
     expected_launcher_sha256: String,
+    pub(crate) network_policy: super::sandbox_proxy::SandboxNetworkPolicy,
     pub(crate) digest: String,
 }
 
 impl Workspace {
     pub(crate) fn open(
-        home: &Path,
+        data_dir: &Path,
         cwd: &Path,
         resource_dir: Option<&Path>,
+        network_policy: super::sandbox_proxy::SandboxNetworkPolicy,
     ) -> Result<Self, String> {
         let (launcher, expected_sha256) = resolve_verified_launcher(resource_dir)?;
-        Self::open_with_launcher(home, cwd, launcher, expected_sha256)
+        Self::open_with_launcher(data_dir, cwd, launcher, expected_sha256, network_policy)
     }
 
     fn open_with_launcher(
-        home: &Path,
+        data_dir: &Path,
         cwd: &Path,
         launcher: PathBuf,
         expected_launcher_sha256: String,
+        network_policy: super::sandbox_proxy::SandboxNetworkPolicy,
     ) -> Result<Self, String> {
-        let (parent, anchor, workspace) = parse_managed_workspace(home, cwd)
+        let (parent, anchor, workspace) = parse_managed_workspace(data_dir, cwd)
             .map_err(|error| format!("{START_FAILED}: {error}"))?;
         verify_managed_workspace_files(&parent, &anchor, &workspace)
             .map_err(|error| format!("{START_FAILED}: {error}"))?;
@@ -305,10 +403,18 @@ impl Workspace {
             workspace,
             launcher,
             expected_launcher_sha256,
+            network_policy,
             digest: String::new(),
         };
         binding.digest = binding.current_digest()?;
         Ok(binding)
+    }
+
+    pub(crate) fn sandbox_policy(&self) -> crate::agent_runtime::SandboxPolicy {
+        crate::agent_runtime::SandboxPolicy::for_mac_nono(
+            self.workspace.to_string_lossy(),
+            &self.network_policy,
+        )
     }
 
     fn current_digest(&self) -> Result<String, String> {
@@ -317,6 +423,7 @@ impl Workspace {
                 .map_err(|error| format!("{START_FAILED}: {error}"))?;
         let launcher_id = entry_identity(&self.launcher, false)
             .map_err(|error| format!("LOCAL_SANDBOX_LAUNCHER_UNAVAILABLE: {error}"))?;
+        let policy_digest = self.sandbox_policy().digest();
         let bytes = serde_json::to_vec(&(
             EXECUTOR,
             &self.workspace,
@@ -326,6 +433,7 @@ impl Workspace {
             &self.launcher,
             launcher_id,
             &self.expected_launcher_sha256,
+            policy_digest,
         ))
         .map_err(|error| error.to_string())?;
         Ok(hex::encode(Sha256::digest(bytes)))
@@ -341,7 +449,7 @@ impl Workspace {
     }
 
     pub(super) fn acquire_lease(&self) -> Result<Lease, String> {
-        Lease::acquire_in(&self.anchor, &self.parent, WORKSPACE_PREFIX)
+        Lease::acquire_managed(&self.anchor, &self.parent)
             .map_err(|error| format!("{START_FAILED}: {error}"))
     }
 }
@@ -362,9 +470,14 @@ mod tests {
 
     #[test]
     fn create_open_and_revalidate_managed_workspace() {
-        let parent = Path::new("/private/tmp");
+        let data_dir = tempfile::tempdir().unwrap();
         let session = format!("mac-sandbox-test-{}", uuid::Uuid::new_v4());
-        let workspace_path = create_workspace(parent, &session).unwrap();
+        let workspace_path = create_workspace(data_dir.path(), &session).unwrap();
+        let canonical_data = data_dir.path().canonicalize().unwrap();
+        assert!(
+            Path::new(&workspace_path).starts_with(canonical_data.join(SANDBOXES_DIR)),
+            "expected workspace under <data_dir>/sandboxes, got {workspace_path}"
+        );
         let launcher_dir = tempfile::tempdir().unwrap();
         let launcher = launcher_dir.path().join("shellspan-sandbox-launcher");
         fs::copy("/bin/sh", &launcher).unwrap();
@@ -372,10 +485,11 @@ mod tests {
         let checksum = hex::encode(Sha256::digest(fs::read(&launcher).unwrap()));
 
         let binding = Workspace::open_with_launcher(
-            parent,
+            data_dir.path(),
             Path::new(&workspace_path),
             launcher.clone(),
             checksum.clone(),
+            crate::agent_runtime::SandboxNetworkPolicy::blocked(),
         )
         .unwrap();
         binding.revalidate().unwrap();
@@ -401,16 +515,17 @@ mod tests {
 
     #[test]
     fn remove_workspace_rejects_unmanaged_paths() {
-        let outside = tempfile::tempdir_in("/private/tmp").unwrap();
-        let error = remove_workspace(Path::new("/private/tmp"), outside.path()).unwrap_err();
+        let data_dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let error = remove_workspace(data_dir.path(), outside.path()).unwrap_err();
         assert!(error.contains(START_FAILED));
     }
 
     #[test]
     fn tampered_identity_is_rejected() {
-        let parent = Path::new("/private/tmp");
+        let data_dir = tempfile::tempdir().unwrap();
         let session = format!("mac-sandbox-tamper-{}", uuid::Uuid::new_v4());
-        let workspace_path = create_workspace(parent, &session).unwrap();
+        let workspace_path = create_workspace(data_dir.path(), &session).unwrap();
         let anchor = Path::new(&workspace_path).parent().unwrap().to_path_buf();
         fs::write(identity_file(&anchor), b"tampered").unwrap();
 
@@ -420,10 +535,23 @@ mod tests {
         fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
         let checksum = hex::encode(Sha256::digest(fs::read(&launcher).unwrap()));
 
-        let error =
-            Workspace::open_with_launcher(parent, Path::new(&workspace_path), launcher, checksum)
-                .unwrap_err();
+        let error = Workspace::open_with_launcher(
+            data_dir.path(),
+            Path::new(&workspace_path),
+            launcher,
+            checksum,
+            crate::agent_runtime::SandboxNetworkPolicy::blocked(),
+        )
+        .unwrap_err();
         assert!(error.contains("identity changed"));
         fs::remove_dir_all(&anchor).unwrap();
+    }
+
+    #[test]
+    fn create_workspace_rejects_group_writable_data_root() {
+        let data_dir = tempfile::tempdir().unwrap();
+        fs::set_permissions(data_dir.path(), fs::Permissions::from_mode(0o775)).unwrap();
+        let error = create_workspace(data_dir.path(), "group-writable-session").unwrap_err();
+        assert!(error.contains("group or world writable"), "got {error}");
     }
 }

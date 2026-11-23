@@ -2,11 +2,9 @@
 use std::path::{Component, Path};
 use std::process::Command;
 
-#[cfg(unix)]
-use crate::agent_runtime::ExecCommandArgumentsNative;
 use crate::agent_runtime::{
     AgentObservedEffectNative, AgentPermissionModeNative, AgentToolCallNative,
-    AgentToolTargetNative,
+    AgentToolTargetNative, ExecCommandArgumentsNative,
 };
 
 #[cfg(unix)]
@@ -80,7 +78,7 @@ pub(crate) fn review_call(
             call.tool_name.as_str(),
             "read_file" | "list_directory" | "search_text"
         )
-        && structured_read_is_scoped(call, scope)
+        && structured_read_is_scoped(call, scope, managed_workspace)
     {
         return ApprovalReview {
             requires_approval: false,
@@ -95,6 +93,28 @@ pub(crate) fn review_call(
             command: Some(command),
         };
     }
+    if let Some(managed_root) = managed_workspace {
+        if scope.sensitive_path_count == 0 && scope.critical_path_count == 0 {
+            if matches!(
+                call.tool_name.as_str(),
+                "write_file" | "edit_file" | "apply_patch" | "trash_file"
+            ) && structured_path_within_managed_workspace(call, scope, managed_root)
+            {
+                return ApprovalReview {
+                    requires_approval: false,
+                    reason: "sandbox_workspace_write",
+                    command: None,
+                };
+            }
+            if sandboxed_local_command_auto_allowed(call, managed_root) {
+                return ApprovalReview {
+                    requires_approval: false,
+                    reason: "sandbox_isolated_command",
+                    command: None,
+                };
+            }
+        }
+    }
     // A generic read-only classification does not prove paths or side effects.
     let requires_approval = !matches!(call.tool_name.as_str(), "wait_process" | "kill_process");
     ApprovalReview {
@@ -108,7 +128,59 @@ pub(crate) fn review_call(
     }
 }
 
-fn structured_read_is_scoped(call: &AgentToolCallNative, scope: &CallPolicyScopeNative) -> bool {
+fn structured_path_within_managed_workspace(
+    call: &AgentToolCallNative,
+    scope: &CallPolicyScopeNative,
+    managed_root: &Path,
+) -> bool {
+    let AgentToolTargetNative::Local {
+        cwd: Some(root), ..
+    } = &call.target
+    else {
+        return false;
+    };
+    let root = Path::new(root);
+    if root != managed_root || !root.has_root() || root.parent().is_none() || scope.paths.is_empty()
+    {
+        return false;
+    }
+    scope.paths.iter().all(|path| {
+        let path = Path::new(path);
+        path.starts_with(root)
+            && !path
+                .components()
+                .any(|part| matches!(part, Component::ParentDir))
+    })
+}
+
+fn sandboxed_local_command_auto_allowed(call: &AgentToolCallNative, managed_root: &Path) -> bool {
+    if call.tool_name != "exec_command" {
+        return false;
+    }
+    let AgentToolTargetNative::Local {
+        cwd: Some(root), ..
+    } = &call.target
+    else {
+        return false;
+    };
+    if Path::new(root) != managed_root {
+        return false;
+    }
+    let Ok(arguments) =
+        serde_json::from_value::<ExecCommandArgumentsNative>(call.arguments.clone())
+    else {
+        return false;
+    };
+    !arguments.elevated.unwrap_or(false)
+        && !arguments.background.unwrap_or(false)
+        && arguments.cwd.as_deref().is_none_or(|cwd| cwd == root)
+}
+
+fn structured_read_is_scoped(
+    call: &AgentToolCallNative,
+    scope: &CallPolicyScopeNative,
+    managed_workspace: Option<&Path>,
+) -> bool {
     if let AgentToolTargetNative::Local {
         cwd: Some(root), ..
     } = &call.target
@@ -117,7 +189,8 @@ fn structured_read_is_scoped(call: &AgentToolCallNative, scope: &CallPolicyScope
         let Ok(reader) = LocalScopedReader::open(root) else {
             return false;
         };
-        if path_is_sensitive_native(reader.root())
+        let managed_root = managed_workspace == Some(Path::new(reader.root()));
+        if (!managed_root && path_is_sensitive_native(reader.root()))
             || super::protected_delete_path_native(reader.root())
         {
             return false;
@@ -781,5 +854,155 @@ mod tests {
             .err()
             .unwrap()
             .starts_with("AUTO_REVIEW_CHANGED"));
+    }
+
+    #[test]
+    fn managed_sandbox_auto_allows_scoped_writes_and_commands_in_scoped_autopilot_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let registry = ToolRegistryNative::from_builtin_manifest().unwrap();
+        let review_with_managed = |mode, call: &AgentToolCallNative, managed: Option<&Path>| {
+            let effect = assess_effect_native(
+                &registry.executable(&call.tool_name).unwrap().descriptor,
+                call,
+            )
+            .unwrap();
+            let scope = inspect_call_policy_scope_native(call).unwrap();
+            review_call(mode, call, &effect, &scope, managed)
+        };
+
+        let write_call = call(
+            &root,
+            "write_file",
+            json!({
+                "path": "src/main.rs",
+                "content": "fn main() {}\n",
+                "precondition": { "mustNotExist": true }
+            }),
+        );
+        let auto_write = review_with_managed(
+            AgentPermissionModeNative::ScopedAutopilot,
+            &write_call,
+            Some(&root),
+        );
+        assert!(!auto_write.requires_approval);
+        assert_eq!(auto_write.reason, "sandbox_workspace_write");
+        assert!(
+            review_with_managed(
+                AgentPermissionModeNative::ScopedAutopilot,
+                &write_call,
+                None
+            )
+            .requires_approval
+        );
+        assert!(
+            review_with_managed(
+                AgentPermissionModeNative::RequestApproval,
+                &write_call,
+                Some(&root),
+            )
+            .requires_approval
+        );
+
+        let sensitive_write = call(
+            &root,
+            "write_file",
+            json!({
+                "path": ".env",
+                "content": "SECRET=1\n",
+                "precondition": { "mustNotExist": true }
+            }),
+        );
+        assert!(
+            review_with_managed(
+                AgentPermissionModeNative::ScopedAutopilot,
+                &sensitive_write,
+                Some(&root),
+            )
+            .requires_approval
+        );
+
+        let cmd_call = command(&root, "cargo test");
+        let auto_cmd = review_with_managed(
+            AgentPermissionModeNative::ScopedAutopilot,
+            &cmd_call,
+            Some(&root),
+        );
+        assert!(!auto_cmd.requires_approval);
+        assert_eq!(auto_cmd.reason, "sandbox_isolated_command");
+        assert!(
+            review_with_managed(AgentPermissionModeNative::ScopedAutopilot, &cmd_call, None)
+                .requires_approval
+        );
+        assert!(
+            review_with_managed(
+                AgentPermissionModeNative::RequestApproval,
+                &cmd_call,
+                Some(&root),
+            )
+            .requires_approval
+        );
+    }
+
+    #[test]
+    fn managed_sandbox_under_dot_shellspan_allows_scoped_reads_and_writes_but_keeps_inner_secrets_gated(
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir
+            .path()
+            .join(".shellspan/sandboxes/0123456789abcdef0123456789abcdef/workspace");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/app.ts"), "export const x = 1;\n").unwrap();
+        std::fs::write(root.join(".env"), "API_KEY=secret\n").unwrap();
+        let root = std::fs::canonicalize(&root).unwrap();
+        let registry = ToolRegistryNative::from_builtin_manifest().unwrap();
+        let review_with_managed = |call: &AgentToolCallNative, managed: Option<&Path>| {
+            let effect = assess_effect_native(
+                &registry.executable(&call.tool_name).unwrap().descriptor,
+                call,
+            )
+            .unwrap();
+            let scope =
+                super::super::inspect_call_policy_scope_with_managed_root_native(call, managed)
+                    .unwrap();
+            review_call(
+                AgentPermissionModeNative::ScopedAutopilot,
+                call,
+                &effect,
+                &scope,
+                managed,
+            )
+        };
+
+        let read_normal = call(
+            &root,
+            "read_file",
+            json!({ "path": "src/app.ts", "encoding": "utf8" }),
+        );
+        let read_review = review_with_managed(&read_normal, Some(&root));
+        assert!(!read_review.requires_approval);
+        assert_eq!(read_review.reason, "scoped_file_read");
+        // Without a verified managed root, the .shellspan ancestor keeps it gated.
+        assert!(review_with_managed(&read_normal, None).requires_approval);
+
+        let read_secret = call(
+            &root,
+            "read_file",
+            json!({ "path": ".env", "encoding": "utf8" }),
+        );
+        assert!(review_with_managed(&read_secret, Some(&root)).requires_approval);
+
+        let write_normal = call(
+            &root,
+            "write_file",
+            json!({
+                "path": "src/next.ts",
+                "content": "export const y = 2;\n",
+                "precondition": { "mustNotExist": true }
+            }),
+        );
+        let write_review = review_with_managed(&write_normal, Some(&root));
+        assert!(!write_review.requires_approval);
+        assert_eq!(write_review.reason, "sandbox_workspace_write");
     }
 }

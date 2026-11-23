@@ -37,12 +37,14 @@ import {
 import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
+import { useToast } from '@/hooks/useToast';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { storedToolOutputId } from '@/lib/ai/conversation-tool';
 import { aiErrorMessage, httpProbeTimeoutKind } from '@/lib/ai/error-message';
 import { renderTerminalTranscript } from '@/lib/terminal/terminal-output-buffer';
 import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
+import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import {
   extractSubagentToolSummary,
   isSubagentDelegationTool,
@@ -639,6 +641,23 @@ function TerminalSurface({ node, showCopyActions, scrollable, showInput, headerA
     && execution !== 'notStarted'
     && execution !== 'unknown'
     && !hasFailedExit;
+  const sandboxViolationRecord = asRecord(outputRecord?.sandboxViolation);
+  const rawViolationCategory = firstString(sandboxViolationRecord, ['category']);
+  const blockedDomains = Array.isArray(sandboxViolationRecord?.blockedDomains)
+    ? sandboxViolationRecord.blockedDomains.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : [];
+  const { error: showError, success: showSuccess } = useToast();
+  const networkMode = useAiSettingsStore((state) => state.agentSandboxNetworkMode);
+  const networkAllowlist = useAiSettingsStore((state) => state.agentSandboxNetworkAllowlist);
+  const networkSaving = useAiSettingsStore((state) => state.agentSandboxNetworkSaving);
+  const allowSandboxDomain = useAiSettingsStore((state) => state.allowSandboxDomain);
+  const sandboxViolationKey: LocaleKey | null = rawViolationCategory === 'networkBlocked'
+    ? 'ai.sandbox.violation.networkBlocked'
+    : rawViolationCategory === 'filesystemDenied'
+      ? 'ai.sandbox.violation.filesystemDenied'
+      : rawViolationCategory === 'resourceLimit'
+        ? 'ai.sandbox.violation.resourceLimit'
+        : null;
   const backgroundNoticeLabel: LocaleKey = observedJob?.state === 'exited'
     ? 'ai.workspace.tool.backgroundCompleted'
     : 'ai.workspace.tool.backgroundStarted';
@@ -726,6 +745,46 @@ function TerminalSurface({ node, showCopyActions, scrollable, showInput, headerA
           )}
         </div>}
       </div>
+      {sandboxViolationKey && (
+        <div
+          className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-destructive/20 bg-destructive/5 px-3.5 py-1.5 text-xs text-destructive"
+          data-ai-sandbox-violation={rawViolationCategory ?? undefined}
+        >
+          <span className="inline-flex items-center gap-1">
+            <ShieldAlertIcon className="size-3.5 shrink-0" />
+            <span>{t(sandboxViolationKey)}</span>
+          </span>
+          {blockedDomains.length > 0 && (
+            <span className="font-mono opacity-90" data-ai-sandbox-blocked-domains="">
+              {t('ai.sandbox.violation.blockedDomains', { domains: blockedDomains.join(', ') })}
+            </span>
+          )}
+          {rawViolationCategory === 'networkBlocked' && blockedDomains.map((domain) => {
+            const normalized = domain.trim().toLowerCase();
+            const alreadyAllowed = networkMode === 'customAllowlist'
+              && networkAllowlist.includes(normalized);
+            return (
+              <Button
+                key={domain}
+                type="button"
+                variant="outline"
+                size="xs"
+                className="text-foreground"
+                disabled={alreadyAllowed || networkSaving}
+                onClick={() => {
+                  void allowSandboxDomain(domain)
+                    .then(() => showSuccess(t('ai.sandbox.violation.domainAllowed', { domain: normalized })))
+                    .catch(() => showError(t('settings.ai.agent.sandboxNetworkSaveFailed')));
+                }}
+              >
+                {alreadyAllowed
+                  ? t('ai.sandbox.violation.domainAlreadyAllowed', { domain: normalized })
+                  : t('ai.sandbox.violation.allowDomain', { domain: normalized })}
+              </Button>
+            );
+          })}
+        </div>
+      )}
       {showInput && (
         <ToolExecutionFooter className="ai-terminal-footer" succeeded={showSuccessIcon} running={showRunningIcon}>
           {hasFailedExit ? exitStatus : <span data-ai-terminal-execution={execution}>{t(footerLabel)}</span>}

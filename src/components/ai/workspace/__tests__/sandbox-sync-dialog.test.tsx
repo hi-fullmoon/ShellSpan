@@ -62,4 +62,45 @@ describe('SandboxSyncDialog', () => {
     });
     expect(diffSpy).toHaveBeenCalledTimes(3);
   });
+
+  it('allows explicitly opting in to overwrite conflicted files and displays apply error details', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(tauri, 'invokeSandboxDiff').mockResolvedValue({
+      sourceRoot: '/Users/demo/project',
+      totalChanges: 1,
+      conflictCount: 1,
+      changes: [
+        { path: 'README.md', kind: 'modified', conflict: true, sandboxSize: 12, sourceSize: 14 },
+      ],
+    });
+    const applySpy = vi.spyOn(tauri, 'invokeSandboxApply').mockResolvedValue({
+      applied: [],
+      skippedConflicts: [],
+      errors: ['README.md: permission denied'],
+    });
+
+    render(<SandboxSyncDialog sessionId="session-conflict" />);
+    await user.click(await screen.findByRole('button', { name: /1/ }));
+
+    const readmeCheckbox = await screen.findByRole('checkbox', { name: 'README.md' });
+    expect(readmeCheckbox).toHaveAttribute('aria-disabled', 'true');
+
+    const overwriteToggle = screen.getByRole('checkbox', {
+      name: /允许覆盖存在外部修改的冲突文件|Allow overwriting conflicted files/i,
+    });
+    await user.click(overwriteToggle);
+    expect(readmeCheckbox).not.toHaveAttribute('aria-disabled', 'true');
+
+    await user.click(readmeCheckbox);
+    await user.click(screen.getByRole('button', { name: /\(1\)/ }));
+
+    await waitFor(() => {
+      expect(applySpy).toHaveBeenCalledWith({
+        sessionId: 'session-conflict',
+        paths: ['README.md'],
+        allowOverwriteConflicts: true,
+      });
+    });
+    expect(await screen.findByText('README.md: permission denied')).toBeInTheDocument();
+  });
 });

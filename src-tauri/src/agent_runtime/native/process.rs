@@ -935,6 +935,7 @@ pub(super) fn prepare_mac_sandbox_process(
     launcher: &Path,
     timeout: Duration,
     lease: &mut super::mac_sandbox_workspace::Lease,
+    proxy: Option<&super::sandbox_proxy::SandboxProxy>,
 ) -> Result<
     (
         Arc<ManagedProcessNative>,
@@ -954,6 +955,7 @@ pub(super) fn prepare_mac_sandbox_process(
         lease,
         false,
         true,
+        proxy,
     )
 }
 
@@ -994,12 +996,13 @@ pub(super) fn prepare_mac_sandbox_acceptance_process(
         lease,
         simulate_missing_temp,
         false,
+        None,
     )
 }
 
 #[cfg(target_os = "macos")]
 fn mac_sandbox_readonly_toolchains() -> (Vec<PathBuf>, String) {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     let is_safe_dir = |path: &Path| {
         std::fs::symlink_metadata(path).is_ok_and(|meta| {
@@ -1008,8 +1011,17 @@ fn mac_sandbox_readonly_toolchains() -> (Vec<PathBuf>, String) {
                 && (meta.permissions().mode() & 0o002 == 0)
         })
     };
+    let owner = unsafe { libc::geteuid() };
+    let is_owned_safe_dir = |path: &Path| {
+        std::fs::symlink_metadata(path).is_ok_and(|meta| {
+            meta.is_dir()
+                && !meta.file_type().is_symlink()
+                && meta.uid() == owner
+                && (meta.permissions().mode() & 0o022 == 0)
+        })
+    };
     let mut read_paths = Vec::new();
-    let mut path_entries = Vec::new();
+    let mut path_entries: Vec<String> = Vec::new();
     // Place root-owned CommandLineTools ahead of /usr/bin so tools like git and
     // python3 bypass macOS xcrun shims (which fail under Seatbelt without /var/select).
     let clt_root = Path::new("/Library/Developer/CommandLineTools");
@@ -1017,20 +1029,78 @@ fn mac_sandbox_readonly_toolchains() -> (Vec<PathBuf>, String) {
     if is_safe_dir(clt_root) {
         read_paths.push(clt_root.to_path_buf());
         if is_safe_dir(clt_bin) {
-            path_entries.push("/Library/Developer/CommandLineTools/usr/bin");
+            path_entries.push("/Library/Developer/CommandLineTools/usr/bin".into());
         }
     }
-    path_entries.push("/usr/bin");
-    path_entries.push("/bin");
+    path_entries.push("/usr/bin".into());
+    path_entries.push("/bin".into());
+    // Only expose read-only toolchain subdirectories under Homebrew / /usr/local,
+    // deliberately excluding `etc` and `var` which may hold local service configs or data.
+    const TOOLCHAIN_SUBDIRS: &[&str] = &[
+        "bin",
+        "lib",
+        "Cellar",
+        "opt",
+        "share",
+        "include",
+        "Frameworks",
+    ];
     for (root, bin) in [
         ("/opt/homebrew", "/opt/homebrew/bin"),
         ("/usr/local", "/usr/local/bin"),
     ] {
         let root_path = Path::new(root);
         if is_safe_dir(root_path) {
-            read_paths.push(root_path.to_path_buf());
+            for subdir in TOOLCHAIN_SUBDIRS {
+                let candidate = root_path.join(subdir);
+                if is_safe_dir(&candidate) {
+                    read_paths.push(candidate);
+                }
+            }
             if is_safe_dir(Path::new(bin)) {
-                path_entries.push(bin);
+                path_entries.push(bin.into());
+            }
+        }
+    }
+    let go_root = Path::new("/usr/local/go");
+    let go_bin = Path::new("/usr/local/go/bin");
+    if is_safe_dir(go_root) && is_safe_dir(go_bin) {
+        read_paths.push(go_root.to_path_buf());
+        path_entries.push("/usr/local/go/bin".into());
+    }
+    if let Some(home) = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+    {
+        // Expose only narrow read-only binary/toolchain directories under $HOME,
+        // never parent directories that may hold credentials (such as ~/.cargo/credentials.toml).
+        let cargo_bin = home.join(".cargo/bin");
+        if is_owned_safe_dir(&cargo_bin) {
+            if let Some(bin_str) = cargo_bin.to_str() {
+                read_paths.push(cargo_bin.clone());
+                path_entries.push(bin_str.to_string());
+                let rustup_toolchains = home.join(".rustup/toolchains");
+                if is_owned_safe_dir(&rustup_toolchains) {
+                    read_paths.push(rustup_toolchains);
+                }
+            }
+        }
+        let volta_bin = home.join(".volta/bin");
+        if is_owned_safe_dir(&volta_bin) {
+            if let Some(bin_str) = volta_bin.to_str() {
+                read_paths.push(volta_bin.clone());
+                path_entries.push(bin_str.to_string());
+                let volta_tools = home.join(".volta/tools");
+                if is_owned_safe_dir(&volta_tools) {
+                    read_paths.push(volta_tools);
+                }
+            }
+        }
+        let local_bin = home.join(".local/bin");
+        if is_owned_safe_dir(&local_bin) {
+            if let Some(bin_str) = local_bin.to_str() {
+                read_paths.push(local_bin.clone());
+                path_entries.push(bin_str.to_string());
             }
         }
     }
@@ -1050,6 +1120,7 @@ fn prepare_mac_sandbox_process_with_writable(
     lease: &mut super::mac_sandbox_workspace::Lease,
     simulate_missing_temp: bool,
     include_toolchains: bool,
+    proxy: Option<&super::sandbox_proxy::SandboxProxy>,
 ) -> Result<
     (
         Arc<ManagedProcessNative>,
@@ -1099,6 +1170,9 @@ fn prepare_mac_sandbox_process_with_writable(
         for path in &readonly_paths {
             child.arg("--read-path").arg(path);
         }
+        if let Some(proxy) = proxy {
+            child.arg("--proxy-port").arg(proxy.port().to_string());
+        }
         child.arg(workspace).arg(&writable).arg("--").arg(program);
         child
     };
@@ -1115,6 +1189,18 @@ fn prepare_mac_sandbox_process_with_writable(
             .env("TMPDIR", temporary.path())
             .current_dir(workspace)
             .stdin(Stdio::piped());
+        if let Some(proxy) = proxy {
+            let proxy_url = proxy.proxy_url();
+            child
+                .env("HTTP_PROXY", &proxy_url)
+                .env("HTTPS_PROXY", &proxy_url)
+                .env("ALL_PROXY", &proxy_url)
+                .env("http_proxy", &proxy_url)
+                .env("https_proxy", &proxy_url)
+                .env("all_proxy", &proxy_url)
+                .env("NO_PROXY", "localhost,127.0.0.1")
+                .env("no_proxy", "localhost,127.0.0.1");
+        }
         child
     };
     // Pass the private descriptor to the launcher. The launcher marks it

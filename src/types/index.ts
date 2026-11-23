@@ -592,7 +592,7 @@ export interface ConnectionPreflightRequest extends RemoteConnectionRequest {
   operationId: string;
 }
 
-export type SandboxMode = 'readOnly' | 'workspaceWrite';
+export type SandboxMode = 'clientReadOnly' | 'readOnly' | 'workspaceWrite';
 
 export interface SandboxPolicy {
   mode: SandboxMode;
@@ -616,6 +616,7 @@ export interface SandboxTestResult {
   cancelled: boolean;
   packageMissing: boolean;
   installCommand: string | null;
+  deployScript?: string | null;
 }
 
 export interface RemoteFileEntry {

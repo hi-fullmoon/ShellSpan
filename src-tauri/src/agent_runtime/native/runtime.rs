@@ -41,14 +41,15 @@ use crate::terminal_broker::{
 use super::{
     assess_effect_native, configured_tool_policy_native, current_unix_ms,
     enforce_native_call_policy_native, execute_file_tool_with_policy, execute_http_probe_native,
-    execute_mcp_tool_native, inspect_call_policy_scope_native, load_mcp_server_native,
-    preview_file_call_native, AgentCallPreviewNative, CapabilityIssueRequestNative,
-    CheckpointStoreNative, FileExecutionContextNative, FileOperationRegistryNative,
-    IssuedCapabilityNative, McpServerConfigNative, McpToolPolicyNative,
-    NativeCapabilityStoreNative, ProcessLifecycleNative, ProcessRegistryNative,
-    RegisteredToolNative, TerminalExecuteRegistry, TerminalExecuteValidationStage,
-    TerminalInteractiveRegistry, TerminalInteractiveValidationStage, TerminalLeaseManager,
-    ToolProgressHub, ToolProgressPublisher, ToolRegistryErrorNative, ToolRegistryNative,
+    execute_mcp_tool_native, inspect_call_policy_scope_with_managed_root_native,
+    load_mcp_server_native, preview_file_call_native, AgentCallPreviewNative,
+    CapabilityIssueRequestNative, CheckpointStoreNative, FileExecutionContextNative,
+    FileOperationRegistryNative, IssuedCapabilityNative, McpServerConfigNative,
+    McpToolPolicyNative, NativeCapabilityStoreNative, ProcessLifecycleNative,
+    ProcessRegistryNative, RegisteredToolNative, TerminalExecuteRegistry,
+    TerminalExecuteValidationStage, TerminalInteractiveRegistry,
+    TerminalInteractiveValidationStage, TerminalLeaseManager, ToolProgressHub,
+    ToolProgressPublisher, ToolRegistryErrorNative, ToolRegistryNative,
     TOOL_PROGRESS_THROTTLE_INTERVAL,
 };
 
@@ -257,14 +258,14 @@ impl NativeToolEngine {
     #[cfg(target_os = "macos")]
     pub(crate) fn configure_mac_sandbox_paths(
         &self,
-        home: PathBuf,
+        data_dir: PathBuf,
         resource_dir: Option<PathBuf>,
     ) -> Result<(), String> {
         let mut stored = self
             .mac_sandbox_paths
             .lock()
             .map_err(|_| "macOS sandbox paths are unavailable".to_string())?;
-        *stored = Some((home, resource_dir));
+        *stored = Some((data_dir, resource_dir));
         Ok(())
     }
 
@@ -277,17 +278,20 @@ impl NativeToolEngine {
         if let Some(paths) = stored.as_ref() {
             return Ok(paths.clone());
         }
+        if let Ok(root) = self.checkpoint_root() {
+            return Ok((root, None));
+        }
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
             .filter(|path| path.is_absolute())
             .ok_or_else(|| "Unable to resolve HOME for macOS sandbox".to_string())?;
-        Ok((home, None))
+        Ok((crate::shellspan_data_dir(&home), None))
     }
 
     #[cfg(target_os = "macos")]
     pub(crate) fn reclaim_mac_sandbox_workspace(&self, cwd: &Path) -> Result<(), String> {
-        let (home, _) = self.mac_sandbox_paths()?;
-        super::mac_sandbox::remove_workspace(&home, cwd)
+        let (data_dir, _) = self.mac_sandbox_paths()?;
+        super::mac_sandbox::remove_workspace(&data_dir, cwd)
     }
 
     pub(crate) fn tool(&self, name: &str) -> Result<&RegisteredToolNative, String> {
@@ -358,10 +362,52 @@ impl NativeToolEngine {
             ensure_unmanaged_call(database, &context, &call)?;
         }
         self.revalidate_target(&context, &call.target, sessions, database)?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let managed_workspace = desktop_sandbox
+            .as_ref()
+            .map(|binding| binding.workspace.as_path())
+            .or_else(|| {
+                mac_sandbox
+                    .as_ref()
+                    .map(|binding| binding.workspace.as_path())
+            });
+        #[cfg(all(
+            target_os = "macos",
+            not(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_arch = "aarch64"
+            ))
+        ))]
+        let managed_workspace = mac_sandbox
+            .as_ref()
+            .map(|binding| binding.workspace.as_path());
+        #[cfg(windows)]
+        let managed_workspace = if windows_sandbox_digest.is_some() {
+            match &call.target {
+                AgentToolTargetNative::Local { cwd: Some(cwd), .. } => Some(Path::new(cwd)),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        #[cfg(not(any(target_os = "macos", windows)))]
+        let managed_workspace = None;
         let mut effect = assess_effect_native(&tool.descriptor, &call)?;
-        let scope = inspect_call_policy_scope_native(&call)?;
+        let scope = inspect_call_policy_scope_with_managed_root_native(&call, managed_workspace)?;
         enforce_native_call_policy_native(&call, &effect, &scope)?;
-        self.enforce_runtime_storage_policy_for_session(&context, &call, &effect, &scope)?;
+        self.enforce_runtime_storage_policy_for_session(
+            &context,
+            &call,
+            &effect,
+            &scope,
+            managed_workspace,
+        )?;
         let ttl_ms = input.ttl_ms.unwrap_or(DEFAULT_CAPABILITY_TTL_MS);
         if ttl_ms == 0 || ttl_ms > MAX_CAPABILITY_TTL_MS {
             return Err("Capability TTL is outside the native limit".into());
@@ -389,33 +435,6 @@ impl NativeToolEngine {
         } else {
             preview_call()?
         };
-        #[cfg(all(
-            feature = "native-input-acceptance",
-            debug_assertions,
-            target_os = "macos",
-            target_arch = "aarch64"
-        ))]
-        let managed_workspace = desktop_sandbox
-            .as_ref()
-            .map(|binding| binding.workspace.as_path())
-            .or_else(|| {
-                mac_sandbox
-                    .as_ref()
-                    .map(|binding| binding.workspace.as_path())
-            });
-        #[cfg(all(
-            target_os = "macos",
-            not(all(
-                feature = "native-input-acceptance",
-                debug_assertions,
-                target_arch = "aarch64"
-            ))
-        ))]
-        let managed_workspace = mac_sandbox
-            .as_ref()
-            .map(|binding| binding.workspace.as_path());
-        #[cfg(not(target_os = "macos"))]
-        let managed_workspace = None;
         let review = super::review_call(
             context.request.permission_mode,
             &call,
@@ -446,6 +465,27 @@ impl NativeToolEngine {
                     .unwrap_or_default()
             }
         );
+        #[cfg(target_os = "macos")]
+        let native_prompt = match &mac_sandbox {
+            Some(binding) => format!(
+                "{native_prompt}\nLocal macOS nono sandbox: {}. {}",
+                binding.workspace.display(),
+                binding.network_policy.prompt_summary()
+            ),
+            None => native_prompt,
+        };
+        #[cfg(windows)]
+        let native_prompt = if windows_sandbox_digest.is_some() {
+            let root = match &call.target {
+                AgentToolTargetNative::Local { cwd: Some(cwd), .. } => cwd.as_str(),
+                _ => "<managed workspace>",
+            };
+            format!(
+                "{native_prompt}\nLocal Windows AppContainer sandbox: {root}. Outbound network is blocked."
+            )
+        } else {
+            native_prompt
+        };
         #[cfg(all(test, target_os = "linux"))]
         let native_prompt = match &local_sandbox {
             Some(binding) => format!(
@@ -799,9 +839,51 @@ impl NativeToolEngine {
         {
             return Err("TERMINAL_INPUT_RECOVERY_REQUIRED: a durable terminal submission has no trusted settlement; inspect its outcome before further writes; no automatic replay".into());
         }
-        let scope = inspect_call_policy_scope_native(&call)?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let managed_workspace = desktop_sandbox
+            .as_ref()
+            .map(|binding| binding.workspace.as_path())
+            .or_else(|| {
+                mac_sandbox
+                    .as_ref()
+                    .map(|binding| binding.workspace.as_path())
+            });
+        #[cfg(all(
+            target_os = "macos",
+            not(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_arch = "aarch64"
+            ))
+        ))]
+        let managed_workspace = mac_sandbox
+            .as_ref()
+            .map(|binding| binding.workspace.as_path());
+        #[cfg(windows)]
+        let managed_workspace = if windows_sandbox.is_some() {
+            match &call.target {
+                AgentToolTargetNative::Local { cwd: Some(cwd), .. } => Some(Path::new(cwd)),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        #[cfg(not(any(target_os = "macos", windows)))]
+        let managed_workspace = None;
+        let scope = inspect_call_policy_scope_with_managed_root_native(&call, managed_workspace)?;
         enforce_native_call_policy_native(&call, &effect, &scope)?;
-        self.enforce_runtime_storage_policy_for_session(context, &call, &effect, &scope)?;
+        self.enforce_runtime_storage_policy_for_session(
+            context,
+            &call,
+            &effect,
+            &scope,
+            managed_workspace,
+        )?;
         let capability = self
             .capabilities
             .verify_bound_call(
@@ -981,16 +1063,26 @@ impl NativeToolEngine {
                 terminal_dispatch.as_ref(),
             ),
             "read_file" | "list_directory" | "search_text" | "write_file" | "edit_file"
-            | "apply_patch" | "transfer_file" | "trash_file" => self.execute_file_tool(
-                context,
-                &call,
-                &effect,
-                database,
-                credentials,
-                known_hosts_path,
-                sandbox.as_ref(),
-                cancellation,
-            ),
+            | "apply_patch" | "transfer_file" | "trash_file" => {
+                #[cfg(target_os = "macos")]
+                if let Some(binding) = mac_sandbox.as_ref() {
+                    database.with_local_sandbox_dispatch(|| binding.revalidate())?;
+                }
+                #[cfg(windows)]
+                if windows_sandbox.is_some() {
+                    database.with_local_sandbox_dispatch(|| Ok(()))?;
+                }
+                self.execute_file_tool(
+                    context,
+                    &call,
+                    &effect,
+                    database,
+                    credentials,
+                    known_hosts_path,
+                    sandbox.as_ref(),
+                    cancellation,
+                )
+            }
             _ => Err("Tool is outside the native execution kernel".into()),
         }
     }
@@ -1116,6 +1208,7 @@ impl NativeToolEngine {
         call: &AgentToolCallNative,
         effect: &AgentObservedEffectNative,
         scope: &super::CallPolicyScopeNative,
+        managed_workspace: Option<&Path>,
     ) -> Result<(), String> {
         if crate::agent_runtime::scratch::is_file_tool(&call.tool_name) {
             let stored = self
@@ -1159,7 +1252,7 @@ impl NativeToolEngine {
                 );
             }
         }
-        self.enforce_runtime_storage_policy(call, effect, scope)
+        self.enforce_runtime_storage_policy(call, effect, scope, managed_workspace)
     }
 
     fn enforce_runtime_storage_policy(
@@ -1167,6 +1260,7 @@ impl NativeToolEngine {
         call: &AgentToolCallNative,
         effect: &AgentObservedEffectNative,
         scope: &super::CallPolicyScopeNative,
+        managed_workspace: Option<&Path>,
     ) -> Result<(), String> {
         let paths = match &call.target {
             AgentToolTargetNative::Local { .. }
@@ -1201,9 +1295,14 @@ impl NativeToolEngine {
             .map_err(|_| "Native runtime storage policy is unavailable".to_string())?;
         if let Some(root) = stored.as_ref() {
             let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.clone());
+            let allowed_managed = managed_workspace
+                .map(|ws| std::fs::canonicalize(ws).unwrap_or_else(|_| ws.to_path_buf()));
             if paths.iter().any(|path| {
                 let path = resolve_runtime_storage_path(Path::new(path));
                 path.starts_with(&root)
+                    && !allowed_managed
+                        .as_ref()
+                        .is_some_and(|ws| path.starts_with(ws))
             }) {
                 return Err("AGENT_CRITICAL_OPERATION_DENIED: Agent tools cannot modify ShellSpan application data, approvals or recovery records".into());
             }
@@ -1862,6 +1961,7 @@ fn completed_result(
 
 #[cfg(test)]
 mod tests {
+    use super::super::inspect_call_policy_scope_native;
     use super::*;
     use crate::agent_runtime::native::TerminalSubmissionError;
     use crate::agent_runtime::{TerminalInteractiveInputKindNative, TerminalKeyNative};
@@ -2350,8 +2450,9 @@ mod tests {
                     assess_effect_native(&engine.tool("read_file").unwrap().descriptor, &call)
                         .unwrap();
                 let scope = inspect_call_policy_scope_native(&call).unwrap();
-                let result = engine
-                    .enforce_runtime_storage_policy_for_session(&context, &call, &effect, &scope);
+                let result = engine.enforce_runtime_storage_policy_for_session(
+                    &context, &call, &effect, &scope, None,
+                );
                 assert!(
                     result.is_err_and(|error| error.starts_with("AGENT_SCRATCH_SCOPE_DENIED")),
                     "managed scratch path reached approval policy: {path}"
@@ -2384,7 +2485,7 @@ mod tests {
             assess_effect_native(&engine.tool("write_file").unwrap().descriptor, &call).unwrap();
         let scope = inspect_call_policy_scope_native(&call).unwrap();
         assert!(engine
-            .enforce_runtime_storage_policy(&call, &effect, &scope)
+            .enforce_runtime_storage_policy(&call, &effect, &scope, None)
             .unwrap_err()
             .starts_with("AGENT_CRITICAL_OPERATION_DENIED"));
         assert!(!root.path().join("approvals.json").exists());
@@ -2406,7 +2507,53 @@ mod tests {
                 .unwrap();
         let scope = inspect_call_policy_scope_native(&download).unwrap();
         assert!(engine
-            .enforce_runtime_storage_policy(&download, &effect, &scope)
+            .enforce_runtime_storage_policy(&download, &effect, &scope, None)
+            .unwrap_err()
+            .starts_with("AGENT_CRITICAL_OPERATION_DENIED"));
+
+        // Verified managed sandbox workspace under <data_dir>/sandboxes/<hash>/workspace
+        // may be written to, while sibling data/ and ShellSpan data files remain protected.
+        let workspace = root
+            .path()
+            .join("sandboxes/0123456789abcdef0123456789abcdef/workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let ws_call = AgentToolCallNative {
+            request_id: "request".into(),
+            call_id: "ws-write".into(),
+            tool_name: "write_file".into(),
+            arguments: json!({"path":"src/index.ts", "content":"export {};", "precondition":{"mustNotExist":true}}),
+            target: AgentToolTargetNative::Local {
+                target_id: "local".into(),
+                session_id: "terminal".into(),
+                cwd: Some(workspace.to_string_lossy().into()),
+            },
+            capability_id: "pending".into(),
+        };
+        let ws_effect =
+            assess_effect_native(&engine.tool("write_file").unwrap().descriptor, &ws_call).unwrap();
+        let ws_scope =
+            inspect_call_policy_scope_with_managed_root_native(&ws_call, Some(&workspace)).unwrap();
+        assert!(engine
+            .enforce_runtime_storage_policy(&ws_call, &ws_effect, &ws_scope, Some(&workspace))
+            .is_ok());
+        assert!(engine
+            .enforce_runtime_storage_policy(&ws_call, &ws_effect, &ws_scope, None)
+            .unwrap_err()
+            .starts_with("AGENT_CRITICAL_OPERATION_DENIED"));
+        let escape_call = AgentToolCallNative {
+            arguments: json!({"path":"../data/identity", "content":"bad", "precondition":{"mustNotExist":true}}),
+            ..ws_call
+        };
+        let escape_scope =
+            inspect_call_policy_scope_with_managed_root_native(&escape_call, Some(&workspace))
+                .unwrap();
+        assert!(engine
+            .enforce_runtime_storage_policy(
+                &escape_call,
+                &ws_effect,
+                &escape_scope,
+                Some(&workspace),
+            )
             .unwrap_err()
             .starts_with("AGENT_CRITICAL_OPERATION_DENIED"));
     }

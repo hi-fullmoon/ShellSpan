@@ -6,13 +6,15 @@ use std::io::{self, Write};
 use std::mem::MaybeUninit;
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use super::process::local_process_group_gone;
 
 const JOURNAL: &str = "managed-directory-guard.json";
+const LOCK_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
+const LOCK_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(tag = "phase", rename_all = "camelCase")]
@@ -79,8 +81,26 @@ impl Directory {
         Self::open_in(root, &parent, prefix)
     }
 
+    #[cfg(any(
+        test,
+        all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        )
+    ))]
     fn open_in(root: &Path, parent: &Path, prefix: &str) -> io::Result<Self> {
         validate_anchor_path(root, parent, prefix)?;
+        Self::open_validated(root)
+    }
+
+    fn open_managed(root: &Path, parent: &Path) -> io::Result<Self> {
+        validate_managed_anchor_path(root, parent)?;
+        Self::open_validated(root)
+    }
+
+    fn open_validated(root: &Path) -> io::Result<Self> {
         let anchor = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
@@ -103,7 +123,16 @@ impl Directory {
             .truncate(false)
             .custom_flags(libc::O_NOFOLLOW)
             .open(state.join("managed-directory-guard.lock"))?;
-        ownership.try_lock().map_err(io::Error::other)?;
+        let deadline = Instant::now() + LOCK_WAIT_TIMEOUT;
+        loop {
+            match ownership.try_lock() {
+                Ok(()) => break,
+                Err(fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                    std::thread::sleep(LOCK_POLL_INTERVAL);
+                }
+                Err(error) => return Err(io::Error::other(error)),
+            }
+        }
         Ok(Self {
             anchor,
             state,
@@ -183,18 +212,16 @@ impl Directory {
     }
 }
 
-pub(super) fn validate_anchor_path(root: &Path, parent: &Path, prefix: &str) -> io::Result<()> {
-    if root.parent() != Some(parent)
-        || !root
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.starts_with(prefix))
-        || root.canonicalize()? != root
-    {
-        return Err(io::Error::other(
-            "expected an owned desktop acceptance directory",
-        ));
-    }
+#[cfg(any(
+    test,
+    all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    )
+))]
+pub(super) fn validate_parent_ancestors(parent: &Path) -> io::Result<()> {
     // The immutable anchor protects its own name and direct entries.
     // Replacing an ancestor requires mutation rights in its parent directory.
     for ancestor in parent.ancestors().skip(1) {
@@ -214,6 +241,106 @@ pub(super) fn validate_anchor_path(root: &Path, parent: &Path, prefix: &str) -> 
     Ok(())
 }
 
+#[cfg(any(
+    test,
+    all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    )
+))]
+pub(super) fn validate_anchor_path(root: &Path, parent: &Path, prefix: &str) -> io::Result<()> {
+    if root.parent() != Some(parent)
+        || !root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with(prefix))
+        || root.canonicalize()? != root
+    {
+        return Err(io::Error::other(
+            "expected an owned desktop acceptance directory",
+        ));
+    }
+    validate_parent_ancestors(parent)
+}
+
+/// Validates a managed sandbox parent located inside ShellSpan's user data root
+/// (e.g. `~/.shellspan/sandboxes`). Every user-owned directory from `parent` up
+/// to the system boundary must be a real, non-symlink directory owned by the
+/// current user without group/world write bits; every ancestor above that
+/// boundary must be non-user-owned and non-writable (except sticky `/private/tmp`
+/// when used as a test/isolated data container).
+pub(super) fn validate_managed_sandbox_parent(parent: &Path) -> io::Result<()> {
+    if !parent.is_absolute() || parent.canonicalize()? != parent {
+        return Err(io::Error::other(
+            "managed sandbox parent must be a canonical absolute directory",
+        ));
+    }
+    let owner = unsafe { libc::geteuid() };
+    let mut entered_system_ancestors = false;
+    for ancestor in parent.ancestors() {
+        let meta = fs::symlink_metadata(ancestor)?;
+        if !meta.is_dir() || meta.file_type().is_symlink() {
+            return Err(io::Error::other(
+                "an ancestor of the managed sandbox directory is not a real directory",
+            ));
+        }
+        let mode = meta.permissions().mode();
+        if meta.uid() == owner {
+            if entered_system_ancestors {
+                return Err(io::Error::other(
+                    "an ancestor of the managed sandbox directory has an untrusted owner",
+                ));
+            }
+            if mode & 0o022 != 0 {
+                return Err(io::Error::other(
+                    "a managed sandbox ancestor must not be group or world writable",
+                ));
+            }
+        } else {
+            entered_system_ancestors = true;
+            let is_sticky_tmp = ancestor == Path::new("/private/tmp")
+                && meta.uid() == 0
+                && (mode & u32::from(libc::S_ISVTX)) != 0;
+            if is_sticky_tmp {
+                continue;
+            }
+            let path = CString::new(ancestor.as_os_str().as_bytes())?;
+            if unsafe { libc::access(path.as_ptr(), libc::W_OK) } == 0 {
+                return Err(io::Error::other(
+                    "an ancestor of the managed sandbox directory can be replaced",
+                ));
+            }
+            match io::Error::last_os_error().raw_os_error() {
+                Some(libc::EACCES | libc::EPERM | libc::EROFS) => {}
+                _ => return Err(io::Error::last_os_error()),
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn validate_managed_anchor_path(root: &Path, parent: &Path) -> io::Result<()> {
+    if root.parent() != Some(parent) || root.canonicalize()? != root {
+        return Err(io::Error::other(
+            "expected a canonical managed sandbox anchor directory",
+        ));
+    }
+    let meta = fs::symlink_metadata(root)?;
+    let owner = unsafe { libc::geteuid() };
+    if !meta.is_dir()
+        || meta.file_type().is_symlink()
+        || meta.uid() != owner
+        || meta.permissions().mode() & 0o022 != 0
+    {
+        return Err(io::Error::other(
+            "managed sandbox anchor must be an owned private directory",
+        ));
+    }
+    validate_managed_sandbox_parent(parent)
+}
+
 pub(super) struct Lease {
     directory: Directory,
     record: Record,
@@ -231,8 +358,14 @@ impl Lease {
         Self::acquire_directory(root, directory)
     }
 
+    #[cfg(test)]
     pub(super) fn acquire_in(root: &Path, parent: &Path, prefix: &str) -> io::Result<Self> {
         let directory = Directory::open_in(root, parent, prefix)?;
+        Self::acquire_directory(root, directory)
+    }
+
+    pub(super) fn acquire_managed(root: &Path, parent: &Path) -> io::Result<Self> {
+        let directory = Directory::open_managed(root, parent)?;
         Self::acquire_directory(root, directory)
     }
 
@@ -313,14 +446,14 @@ pub(crate) fn recover_on_startup(root: PathBuf) {
     }
 }
 
-pub(super) fn recover_once_in(root: &Path, parent: &Path, prefix: &str) -> io::Result<bool> {
-    Directory::open_in(root, parent, prefix).and_then(|directory| directory.recover())
+pub(super) fn recover_managed_once(root: &Path, parent: &Path) -> io::Result<bool> {
+    Directory::open_managed(root, parent).and_then(|directory| directory.recover())
 }
 
-pub(super) fn recover_on_startup_in(root: &Path, parent: &Path, prefix: &str) {
+pub(super) fn recover_managed_on_startup(root: &Path, parent: &Path) {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        match recover_once_in(root, parent, prefix) {
+        match recover_managed_once(root, parent) {
             Ok(true) => return,
             Ok(false) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(75)),
             Ok(false) => {
@@ -431,5 +564,56 @@ mod tests {
         .unwrap();
         assert!(recovered.release().unwrap());
         assert!(!root.path().join("data").join(JOURNAL).exists());
+    }
+
+    #[test]
+    fn concurrent_lease_waits_briefly_for_holder_to_release() {
+        let root = tempfile::Builder::new()
+            .prefix("ss-sandbox-desktop-")
+            .tempdir_in("/private/tmp")
+            .unwrap();
+        fs::create_dir(root.path().join("data")).unwrap();
+        let lease = Lease::acquire_in(
+            root.path(),
+            Path::new("/private/tmp"),
+            "ss-sandbox-desktop-",
+        )
+        .unwrap();
+        let path = root.path().to_path_buf();
+        let waiter = std::thread::spawn(move || {
+            let acquired =
+                Lease::acquire_in(&path, Path::new("/private/tmp"), "ss-sandbox-desktop-").unwrap();
+            assert!(acquired.release().unwrap());
+        });
+        std::thread::sleep(Duration::from_millis(80));
+        assert!(lease.release().unwrap());
+        waiter.join().unwrap();
+    }
+
+    #[test]
+    fn managed_sandbox_parent_accepts_private_nested_data_dir_and_rejects_symlinks_or_world_writable(
+    ) {
+        let base = tempfile::tempdir().unwrap();
+        let data_dir = base.path().join(".shellspan");
+        let sandboxes = data_dir.join("sandboxes");
+        let anchor = sandboxes.join("0123456789abcdef0123456789abcdef");
+        fs::create_dir_all(&anchor).unwrap();
+        fs::set_permissions(&data_dir, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(&sandboxes, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(&anchor, fs::Permissions::from_mode(0o700)).unwrap();
+        let canonical_parent = sandboxes.canonicalize().unwrap();
+        let canonical_anchor = anchor.canonicalize().unwrap();
+
+        validate_managed_anchor_path(&canonical_anchor, &canonical_parent).unwrap();
+
+        // Symlinked parent must be rejected.
+        let link = data_dir.join("sandboxes-link");
+        std::os::unix::fs::symlink(&sandboxes, &link).unwrap();
+        assert!(validate_managed_sandbox_parent(&link).is_err());
+
+        // Group-writable intermediate ancestor must be rejected.
+        fs::set_permissions(&data_dir, fs::Permissions::from_mode(0o775)).unwrap();
+        let error = validate_managed_anchor_path(&canonical_anchor, &canonical_parent).unwrap_err();
+        assert!(error.to_string().contains("group or world writable"));
     }
 }

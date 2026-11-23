@@ -52,8 +52,15 @@ const PROBES: &[&str] = &[
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum Mode {
+    ClientReadOnly,
     ReadOnly,
     WorkspaceWrite,
+}
+
+impl Mode {
+    pub(crate) fn uses_bubblewrap(self) -> bool {
+        !matches!(self, Self::ClientReadOnly)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -65,6 +72,26 @@ pub(crate) struct Policy {
 
 impl Policy {
     pub(crate) fn validate(&self) -> Result<(), String> {
+        if self.mode == Mode::ClientReadOnly {
+            let path = self.workspace.as_str();
+            let valid = path.starts_with('/')
+                && path.len() <= 512
+                && !path.contains('\\')
+                && !path.chars().any(char::is_control)
+                && (path == "/"
+                    || (!path.ends_with('/')
+                        && !path
+                            .split('/')
+                            .skip(1)
+                            .any(|part| matches!(part, "" | "." | ".."))));
+            if !valid {
+                return Err(
+                    "SANDBOX_WORKSPACE_INVALID: use an absolute remote directory without '..' segments"
+                        .into(),
+                );
+            }
+            return Ok(());
+        }
         let name = self
             .workspace
             .strip_prefix(WORKSPACE_PARENT)
@@ -84,16 +111,30 @@ impl Policy {
     }
 
     pub(crate) fn contains(&self, root: &str) -> bool {
-        let root = root.trim_end_matches('/');
-        if root.split('/').skip(1).any(|p| {
-            matches!(p, "" | "." | "..") || p.contains('\\') || p.chars().any(char::is_control)
-        }) {
+        if !root.starts_with('/') || root.contains('\\') || root.chars().any(char::is_control) {
             return false;
         }
-        root == self.workspace
-            || root
+        let trimmed = root.trim_end_matches('/');
+        let normalized = if trimmed.is_empty() { "/" } else { trimmed };
+        if normalized != "/"
+            && normalized
+                .split('/')
+                .skip(1)
+                .any(|p| matches!(p, "" | "." | ".."))
+        {
+            return false;
+        }
+        if self.workspace == "/" {
+            return true;
+        }
+        normalized == self.workspace
+            || normalized
                 .strip_prefix(&self.workspace)
                 .is_some_and(|suffix| suffix.starts_with('/'))
+    }
+
+    pub(crate) fn to_unified_policy(&self) -> crate::agent_runtime::SandboxPolicy {
+        crate::agent_runtime::SandboxPolicy::for_remote(self)
     }
 
     fn request(&self, kind: &str) -> Value {
@@ -200,7 +241,8 @@ fn approval_digest(profile: &ProfileSandbox, known_hosts: &Path) -> Result<Strin
     let mut digest = Sha256::new();
     digest.update(POLICY_VERSION.to_be_bytes());
     digest.update(profile.binding.as_bytes());
-    if profile.policy.is_some() {
+    if let Some(policy) = &profile.policy {
+        digest.update(policy.to_unified_policy().digest().as_bytes());
         digest.update(trust_snapshot(known_hosts)?);
     }
     Ok(hex::encode(digest.finalize()))
@@ -258,6 +300,19 @@ pub(crate) fn guard_tool(
         return Ok(());
     };
     db.require_agent_sandbox_enabled()?;
+    if policy.mode == Mode::ClientReadOnly {
+        return match name {
+            "read_file" | "list_directory" | "search_text" | "inspect_host" | "inspect_service"
+            | "query_logs" | "diagnose_endpoint" => Ok(()),
+            "transfer_file" if args["direction"] == "download" => Ok(()),
+            "write_file" | "edit_file" | "apply_patch" | "transfer_file" => {
+                Err("SANDBOX_READ_ONLY: the remote workspace is read-only".into())
+            }
+            _ => Err(
+                "SANDBOX_TOOL_UNAVAILABLE: this tool cannot run inside the remote sandbox".into(),
+            ),
+        };
+    }
     match name {
         "run_terminal_command" | "exec_command" if args["background"] != true => Ok(()),
         "read_file" | "list_directory" | "search_text" => Ok(()),
@@ -714,6 +769,59 @@ pub(crate) struct TestResult {
     cancelled: bool,
     package_missing: bool,
     install_command: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deploy_script: Option<String>,
+}
+
+pub(crate) fn deployment_script(policy: &Policy, install_cmd: Option<&str>) -> String {
+    let install_line = install_cmd
+        .unwrap_or("apt-get update && apt-get install -y bubblewrap python3 libseccomp2");
+    let workspace = &policy.workspace;
+    format!(
+        "#!/usr/bin/env bash\n\
+set -euo pipefail\n\
+\n\
+# 1. Install Bubblewrap, Python 3, and libseccomp2\n\
+{install_line}\n\
+\n\
+# 2. Prepare trusted root-owned sandbox directories and witness file\n\
+install -d -o root -g root -m 0755 /var/lib/shellspan-sandbox /var/lib/shellspan-sandbox/rootfs /srv/shellspan-workspaces\n\
+printf 'shellspan-host-boundary\\n' > /var/lib/shellspan-sandbox/outside-probe\n\
+chmod 0644 /var/lib/shellspan-sandbox/outside-probe\n\
+\n\
+# 3. Populate /var/lib/shellspan-sandbox/rootfs with a minimal read-only Linux rootfs\n\
+#    containing /bin/sh, /usr/bin/python3, and OpenSSH sftp-server (e.g., via debootstrap/alpine-minirootfs).\n\
+\n\
+# 4. Mount dedicated nodev,nosuid filesystem at {workspace}\n\
+install -d -o root -g root -m 0755 '{workspace}'\n\
+# Example loopback ext4 mount (replace with your dedicated volume/partition in /etc/fstab):\n\
+# mount -o loop,nodev,nosuid /var/lib/shellspan-sandbox/workspace.img '{workspace}'\n\
+\n\
+# 5. Install scripts/remote-sandbox/shellspan-bwrap-v1 as /usr/local/libexec/shellspan-bwrap-v1 (chmod 0755)\n\
+#    and register it in /etc/ssh/sshd_config:\n\
+#      Subsystem shellspan-bwrap-v1 /usr/local/libexec/shellspan-bwrap-v1\n\
+#    then validate and reload OpenSSH:\n\
+#      sshd -t && systemctl reload sshd\n"
+    )
+}
+
+fn verify_client_readonly_workspace(
+    connection: &RemoteConnectionRequest,
+    known_hosts: &Path,
+    policy: &Policy,
+    control: &Control,
+) -> bool {
+    if control.check().is_err() {
+        return false;
+    }
+    let Ok(connected) = crate::connection::connect_sftp(connection, None, Some(known_hosts)) else {
+        return false;
+    };
+    let Ok(guard) = connected.lock() else {
+        return false;
+    };
+    let path = Path::new(&policy.workspace);
+    guard.sftp.stat(path).is_ok_and(|stat| stat.is_dir())
 }
 
 pub(crate) fn test_executor(
@@ -731,6 +839,30 @@ pub(crate) fn test_executor(
         &flag,
     );
     let control = Control::with_flag(Instant::now() + Duration::from_secs(25), flag);
+    if !policy.mode.uses_bubblewrap() {
+        let cancelled =
+            control.is_cancelled() || ssh.status == ConnectionPreflightStatus::Cancelled;
+        let workspace_ok = !cancelled
+            && ssh.status == ConnectionPreflightStatus::Passed
+            && verify_client_readonly_workspace(&connection, known_hosts, policy, &control);
+        let step_status = if workspace_ok {
+            Step::Passed
+        } else if cancelled || ssh.status != ConnectionPreflightStatus::Passed {
+            Step::Blocked
+        } else {
+            Step::Failed
+        };
+        return TestResult {
+            passed: workspace_ok,
+            cancelled,
+            ssh,
+            steps: vec![("workspaceRead", step_status)],
+            protocol_version: None,
+            package_missing: false,
+            install_command: None,
+            deploy_script: None,
+        };
+    }
     let verification = if ssh.status == ConnectionPreflightStatus::Passed {
         verify(&connection, known_hosts, policy, &control)
     } else {
@@ -752,14 +884,18 @@ pub(crate) fn test_executor(
             (id, status)
         })
         .collect();
+    let passed = !cancelled && verification.verified().is_ok();
+    let deploy_script =
+        (!cancelled && !passed).then(|| deployment_script(policy, verification.install_command));
     TestResult {
-        passed: !cancelled && verification.verified().is_ok(),
+        passed,
         cancelled,
         ssh,
         steps,
         protocol_version: verification.protocol_version,
         package_missing: verification.package_missing(),
         install_command: verification.install_command,
+        deploy_script,
     }
 }
 
@@ -783,6 +919,12 @@ pub(crate) fn execute_command(
             .policy
             .as_ref()
             .ok_or("SANDBOX_POLICY_CHANGED")?;
+        if !policy.mode.uses_bubblewrap() {
+            return Err(
+                "SANDBOX_TOOL_UNAVAILABLE: client-side read-only sandbox does not allow shell commands"
+                    .into(),
+            );
+        }
         binding.check(db, known_hosts)?;
         let session = setup(connection, known_hosts, &control)?;
         ensure_verified(&session.ssh.target, binding, policy, &control)?;

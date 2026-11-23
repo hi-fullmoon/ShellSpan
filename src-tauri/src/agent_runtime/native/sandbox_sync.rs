@@ -1,7 +1,7 @@
 //! Host-side project import, baseline tracking, diffing, and safe syncback
 //! for managed local Agent sandbox workspaces.
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
@@ -141,6 +141,298 @@ fn is_ignored_name(name: &str) -> bool {
     IGNORED_NAMES.contains(&name)
 }
 
+fn is_sensitive_import_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    if lower == ".env" {
+        return true;
+    }
+    if let Some(suffix) = lower.strip_prefix(".env.") {
+        return !matches!(suffix, "example" | "sample" | "template" | "dist");
+    }
+    if matches!(
+        lower.as_str(),
+        "id_rsa"
+            | "id_ed25519"
+            | "id_ecdsa"
+            | "id_dsa"
+            | ".npmrc"
+            | ".pypirc"
+            | ".netrc"
+            | "credentials.json"
+            | "service-account.json"
+    ) {
+        return true;
+    }
+    matches!(
+        Path::new(&lower).extension().and_then(|ext| ext.to_str()),
+        Some("pem" | "key" | "p12" | "pfx" | "jks" | "keystore")
+    )
+}
+
+#[derive(Default)]
+struct SimpleGitignore {
+    dir_names: BTreeSet<String>,
+    exact_names: BTreeSet<String>,
+    rel_prefixes: Vec<String>,
+    suffixes: Vec<String>,
+}
+
+impl SimpleGitignore {
+    fn load(root: &Path) -> Self {
+        let mut ignore = Self::default();
+        let path = root.join(".gitignore");
+        let Ok(file) = open_regular_nofollow(&path) else {
+            return ignore;
+        };
+        let mut raw = String::new();
+        if file.take(256 * 1024).read_to_string(&mut raw).is_err() {
+            return ignore;
+        }
+        for line in raw.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('!') {
+                continue;
+            }
+            let dir_only = trimmed.ends_with('/');
+            let pattern = trimmed.trim_start_matches('/').trim_end_matches('/');
+            if pattern.is_empty() {
+                continue;
+            }
+            if let Some(ext) = pattern.strip_prefix('*') {
+                if !ext.is_empty() && !ext.contains(['*', '?', '/']) {
+                    ignore.suffixes.push(ext.to_string());
+                }
+                continue;
+            }
+            if pattern.contains(['*', '?', '[']) {
+                continue;
+            }
+            if pattern.contains('/') {
+                ignore.rel_prefixes.push(pattern.to_string());
+            } else if dir_only {
+                ignore.dir_names.insert(pattern.to_string());
+            } else {
+                ignore.exact_names.insert(pattern.to_string());
+            }
+        }
+        ignore
+    }
+
+    fn matches(&self, rel: &str, name: &str, is_dir: bool) -> bool {
+        if is_dir && self.dir_names.contains(name) {
+            return true;
+        }
+        if self.exact_names.contains(name) {
+            return true;
+        }
+        if self
+            .rel_prefixes
+            .iter()
+            .any(|prefix| rel == prefix || rel.starts_with(&format!("{prefix}/")))
+        {
+            return true;
+        }
+        !is_dir && self.suffixes.iter().any(|suffix| name.ends_with(suffix))
+    }
+}
+
+fn open_regular_nofollow(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let file = options.open(path)?;
+    let meta = file.metadata()?;
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return Err(io::Error::other(format!(
+            "Refusing to read non-regular or symbolic link file at {}",
+            path.display()
+        )));
+    }
+    Ok(file)
+}
+
+#[cfg(unix)]
+fn copy_file_mode(src_meta: &fs::Metadata, dst_file: &File) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = src_meta.permissions().mode() & 0o777;
+    // Ensure owner read/write bits so host tools can still maintain the file.
+    let safe_mode = mode | 0o600;
+    dst_file.set_permissions(fs::Permissions::from_mode(safe_mode))
+}
+
+#[cfg(not(unix))]
+fn copy_file_mode(_src_meta: &fs::Metadata, _dst_file: &File) -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn try_clonefile_regular(src: &Path, dst: &Path) -> io::Result<bool> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::PermissionsExt;
+
+    const CLONE_NOFOLLOW: libc::c_uint = 0x0001;
+    extern "C" {
+        fn clonefile(
+            src: *const libc::c_char,
+            dst: *const libc::c_char,
+            flags: libc::c_uint,
+        ) -> libc::c_int;
+    }
+
+    let src_meta = fs::symlink_metadata(src)?;
+    if src_meta.file_type().is_symlink() || !src_meta.is_file() {
+        return Err(io::Error::other(format!(
+            "Refusing to clone non-regular or symbolic link file at {}",
+            src.display()
+        )));
+    }
+    let src_c = CString::new(src.as_os_str().as_bytes())
+        .map_err(|_| io::Error::other("Invalid NUL byte in source path"))?;
+    let dst_c = CString::new(dst.as_os_str().as_bytes())
+        .map_err(|_| io::Error::other("Invalid NUL byte in destination path"))?;
+    if unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), CLONE_NOFOLLOW) } != 0 {
+        return Ok(false);
+    }
+    let cloned = open_regular_nofollow(dst)?;
+    let mode = (src_meta.permissions().mode() & 0o777) | 0o600;
+    cloned.set_permissions(fs::Permissions::from_mode(mode))?;
+    Ok(true)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn try_clonefile_regular(_src: &Path, _dst: &Path) -> io::Result<bool> {
+    Ok(false)
+}
+
+fn import_regular_file(src: &Path, dst: &Path) -> io::Result<()> {
+    if try_clonefile_regular(src, dst)? {
+        return Ok(());
+    }
+    let mut reader = open_regular_nofollow(src)?;
+    let src_meta = reader.metadata()?;
+    let mut writer = OpenOptions::new().write(true).create_new(true).open(dst)?;
+    io::copy(&mut reader, &mut writer)?;
+    copy_file_mode(&src_meta, &writer)?;
+    Ok(())
+}
+
+fn resolve_host_git() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        for candidate in [
+            "/Library/Developer/CommandLineTools/usr/bin/git",
+            "/usr/bin/git",
+            "/opt/homebrew/bin/git",
+            "/usr/local/bin/git",
+        ] {
+            let path = Path::new(candidate);
+            if path.is_file() {
+                return Some(path.to_path_buf());
+            }
+        }
+        None
+    }
+    #[cfg(windows)]
+    {
+        if let Some(program_files) = std::env::var_os("ProgramFiles").map(PathBuf::from) {
+            let candidate = program_files.join("Git\\cmd\\git.exe");
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+        None
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        for candidate in ["/usr/bin/git", "/bin/git"] {
+            let path = Path::new(candidate);
+            if path.is_file() {
+                return Some(path.to_path_buf());
+            }
+        }
+        None
+    }
+}
+
+/// Initializes a completely isolated, hook-free Git baseline inside `workspace`
+/// when `source_root` is a Git repository, so sandboxed agents can run `git status`
+/// and `git diff` safely without ever touching host `.git` objects or executing
+/// repository-supplied hooks (`core.fsmonitor`, `core.sshCommand`, `.git/hooks`).
+fn init_sanitized_git_snapshot(source_root: &Path, workspace: &Path) {
+    if !source_root.join(".git").exists() {
+        return;
+    }
+    let Some(git) = resolve_host_git() else {
+        return;
+    };
+    let run_git = |args: &[&str]| -> bool {
+        let mut command = std::process::Command::new(&git);
+        command
+            .args(args)
+            .current_dir(workspace)
+            .env_clear()
+            .env("HOME", workspace)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_AUTHOR_NAME", "ShellSpan Sandbox")
+            .env("GIT_AUTHOR_EMAIL", "sandbox@shellspan.local")
+            .env("GIT_COMMITTER_NAME", "ShellSpan Sandbox")
+            .env("GIT_COMMITTER_EMAIL", "sandbox@shellspan.local")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        #[cfg(unix)]
+        {
+            command
+                .env("PATH", "/usr/bin:/bin")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null");
+        }
+        #[cfg(windows)]
+        {
+            if let Some(system_root) = std::env::var_os("SystemRoot") {
+                command.env("SystemRoot", system_root);
+            }
+            command.env("GIT_CONFIG_GLOBAL", "NUL");
+        }
+        command.status().is_ok_and(|status| status.success())
+    };
+    let initialized =
+        run_git(&["init", "-q", "--initial-branch=sandbox-baseline"]) || run_git(&["init", "-q"]);
+    if !initialized {
+        let _ = fs::remove_dir_all(workspace.join(".git"));
+        return;
+    }
+    let _ = fs::remove_dir_all(workspace.join(".git/hooks"));
+    #[cfg(unix)]
+    let _ = run_git(&["config", "--local", "core.hooksPath", "/dev/null"]);
+    let ok = run_git(&["config", "--local", "core.fsmonitor", "false"])
+        && run_git(&["config", "--local", "core.sshCommand", "false"])
+        && run_git(&["config", "--local", "commit.gpgsign", "false"])
+        && run_git(&["config", "--local", "tag.gpgsign", "false"])
+        && run_git(&["add", "-A"])
+        && run_git(&[
+            "commit",
+            "-q",
+            "--no-verify",
+            "--allow-empty",
+            "-m",
+            "Sandbox baseline snapshot",
+        ]);
+    if !ok {
+        let _ = fs::remove_dir_all(workspace.join(".git"));
+    }
+}
+
 fn validate_relative_path(rel: &str) -> Result<PathBuf, String> {
     if rel.is_empty() || rel.contains('\0') {
         return Err("Invalid relative path".into());
@@ -160,7 +452,7 @@ fn validate_relative_path(rel: &str) -> Result<PathBuf, String> {
 }
 
 fn hash_file(path: &Path) -> io::Result<(String, u64)> {
-    let mut file = File::open(path)?;
+    let mut file = open_regular_nofollow(path)?;
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; 64 * 1024];
     let mut total = 0u64;
@@ -178,7 +470,13 @@ fn hash_file(path: &Path) -> io::Result<(String, u64)> {
 fn collect_tree(
     root: &Path,
     enforce_limits: bool,
+    filter_import_policy: bool,
 ) -> Result<(BTreeMap<String, BaselineEntry>, usize), String> {
+    let gitignore = if filter_import_policy {
+        Some(SimpleGitignore::load(root))
+    } else {
+        None
+    };
     let mut files = BTreeMap::new();
     let mut skipped = 0usize;
     let mut total_bytes = 0u64;
@@ -208,9 +506,19 @@ fn collect_tree(
             } else {
                 format!("{prefix}/{name}")
             };
+            if let Some(ignore) = &gitignore {
+                if ignore.matches(&rel, name, meta.is_dir()) {
+                    skipped += 1;
+                    continue;
+                }
+            }
             if meta.is_dir() {
                 stack.push((path, rel));
             } else if meta.is_file() {
+                if filter_import_policy && is_sensitive_import_name(name) {
+                    skipped += 1;
+                    continue;
+                }
                 if enforce_limits && meta.len() > MAX_SINGLE_FILE_BYTES {
                     skipped += 1;
                     continue;
@@ -274,7 +582,7 @@ pub(crate) fn import_source_into_workspace(
     if source_canon.parent().is_none() {
         return Err("Filesystem roots cannot be imported into a sandbox".into());
     }
-    let (files, skipped_count) = collect_tree(&source_canon, true)?;
+    let (files, skipped_count) = collect_tree(&source_canon, true, true)?;
     for rel in files.keys() {
         let clean = validate_relative_path(rel)?;
         let src = source_canon.join(&clean);
@@ -282,9 +590,10 @@ pub(crate) fn import_source_into_workspace(
         if let Some(parent) = dst.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
-        fs::copy(&src, &dst)
+        import_regular_file(&src, &dst)
             .map_err(|error| format!("Failed to import {} into sandbox workspace: {error}", rel))?;
     }
+    init_sanitized_git_snapshot(&source_canon, workspace);
     let baseline = WorkspaceBaseline {
         version: BASELINE_VERSION,
         source_root: crate::path_utils::portable_local_path(&source_canon),
@@ -336,7 +645,7 @@ pub(crate) fn diff_workspace_against_baseline(
 ) -> Result<SandboxDiffReport, String> {
     let baseline = load_baseline(baseline_path)?;
     let source_root = PathBuf::from(&baseline.source_root);
-    let (current_files, _) = collect_tree(workspace, false)?;
+    let (current_files, _) = collect_tree(workspace, false, false)?;
     let mut all_paths = BTreeSet::new();
     for path in baseline.files.keys() {
         all_paths.insert(path.clone());
@@ -409,6 +718,11 @@ pub(crate) fn apply_workspace_changes(
     let mut baseline = load_baseline(baseline_path)?;
     let report = diff_workspace_against_baseline(workspace, baseline_path)?;
     let source_root = PathBuf::from(&baseline.source_root);
+    let source_meta = fs::symlink_metadata(&source_root)
+        .map_err(|error| format!("Invalid sandbox source directory: {error}"))?;
+    if source_meta.file_type().is_symlink() || !source_meta.is_dir() {
+        return Err("Sandbox source root must be a real directory".into());
+    }
     let selected: Option<BTreeSet<&str>> =
         selected_paths.map(|list| list.iter().map(String::as_str).collect());
 
@@ -449,6 +763,28 @@ pub(crate) fn apply_workspace_changes(
                         continue;
                     }
                 };
+                if !allow_overwrite_conflicts {
+                    match source_entry_state(&source_root, &clean) {
+                        Ok(Some(state))
+                            if baseline
+                                .files
+                                .get(&change.path)
+                                .is_none_or(|base| base.sha256 != state.sha256) =>
+                        {
+                            skipped_conflicts.push(change.path);
+                            continue;
+                        }
+                        Ok(None) if baseline.files.contains_key(&change.path) => {
+                            skipped_conflicts.push(change.path);
+                            continue;
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            errors.push(format!("{}: {error}", change.path));
+                            continue;
+                        }
+                    }
+                }
                 if let Some(parent) = dest.parent() {
                     if let Err(error) = fs::create_dir_all(parent) {
                         errors.push(format!("{}: {error}", change.path));
@@ -459,8 +795,9 @@ pub(crate) fn apply_workspace_changes(
                     let parent = dest
                         .parent()
                         .ok_or_else(|| io::Error::other("Missing destination parent"))?;
+                    let mut reader = open_regular_nofollow(&src)?;
+                    let src_meta = reader.metadata()?;
                     let mut temp = tempfile::NamedTempFile::new_in(parent)?;
-                    let mut reader = File::open(&src)?;
                     let mut hasher = Sha256::new();
                     let mut buf = [0u8; 64 * 1024];
                     let mut size = 0u64;
@@ -473,8 +810,16 @@ pub(crate) fn apply_workspace_changes(
                         hasher.update(&buf[..n]);
                         size += n as u64;
                     }
+                    copy_file_mode(&src_meta, temp.as_file())?;
                     temp.flush()?;
                     temp.as_file().sync_all()?;
+                    if let Ok(dest_meta) = fs::symlink_metadata(&dest) {
+                        if dest_meta.file_type().is_symlink() || !dest_meta.is_file() {
+                            return Err(io::Error::other(
+                                "Refusing to overwrite non-regular or symbolic link destination",
+                            ));
+                        }
+                    }
                     temp.persist(&dest).map_err(|e| e.error)?;
                     Ok(BaselineEntry {
                         sha256: hex::encode(hasher.finalize()),
@@ -490,8 +835,40 @@ pub(crate) fn apply_workspace_changes(
                 }
             }
             SandboxChangeKind::Deleted => {
-                if dest.exists() {
-                    if let Err(error) = trash::TrashContext::new().delete(&dest) {
+                match fs::symlink_metadata(&dest) {
+                    Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
+                        errors.push(format!(
+                            "{}: refusing to delete non-regular or symbolic link destination",
+                            change.path
+                        ));
+                        continue;
+                    }
+                    Ok(_) => {
+                        if !allow_overwrite_conflicts {
+                            match hash_file(&dest) {
+                                Ok((sha256, _))
+                                    if baseline
+                                        .files
+                                        .get(&change.path)
+                                        .is_none_or(|base| base.sha256 != sha256) =>
+                                {
+                                    skipped_conflicts.push(change.path);
+                                    continue;
+                                }
+                                Ok(_) => {}
+                                Err(error) => {
+                                    errors.push(format!("{}: {error}", change.path));
+                                    continue;
+                                }
+                            }
+                        }
+                        if let Err(error) = trash::TrashContext::new().delete(&dest) {
+                            errors.push(format!("{}: {error}", change.path));
+                            continue;
+                        }
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => {
                         errors.push(format!("{}: {error}", change.path));
                         continue;
                     }
@@ -511,16 +888,13 @@ pub(crate) fn apply_workspace_changes(
 }
 
 fn read_preview_text(path: &Path) -> Result<Option<(String, bool, bool)>, String> {
-    let meta = match fs::symlink_metadata(path) {
-        Ok(meta) => meta,
+    let mut file = match open_regular_nofollow(path) {
+        Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.to_string()),
     };
-    if meta.file_type().is_symlink() || !meta.is_file() {
-        return Err(format!("Path {} is not a regular file", path.display()));
-    }
+    let meta = file.metadata().map_err(|error| error.to_string())?;
     let truncated = meta.len() > MAX_PREVIEW_FILE_BYTES;
-    let mut file = File::open(path).map_err(|error| error.to_string())?;
     let limit = meta.len().min(MAX_PREVIEW_FILE_BYTES) as usize;
     let mut bytes = vec![0u8; limit];
     file.read_exact(&mut bytes)
@@ -654,5 +1028,116 @@ mod tests {
         assert!(is_importable_project_root(&home, &home, &data).is_none());
         assert!(is_importable_project_root(&data, &home, &data).is_none());
         assert!(is_importable_project_root(&project, &home, &data).is_some());
+    }
+
+    #[test]
+    fn import_skips_sensitive_files_and_gitignore_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("project");
+        let workspace = dir.path().join("sandbox-ws");
+        let baseline_path = dir.path().join("source-baseline.json");
+        fs::create_dir_all(source.join("coverage")).unwrap();
+        fs::create_dir_all(&workspace).unwrap();
+        fs::write(source.join(".gitignore"), "coverage/\n*.log\n").unwrap();
+        fs::write(source.join(".env"), "API_KEY=secret\n").unwrap();
+        fs::write(source.join(".env.local"), "SECRET=1\n").unwrap();
+        fs::write(source.join(".env.example"), "API_KEY=\n").unwrap();
+        fs::write(source.join("tls.key"), "PRIVATE KEY\n").unwrap();
+        fs::write(source.join("debug.log"), "noisy\n").unwrap();
+        fs::write(source.join("coverage/report.html"), "ignored\n").unwrap();
+        fs::write(source.join("main.rs"), "fn main() {}\n").unwrap();
+
+        let baseline = import_source_into_workspace(&source, &workspace, &baseline_path).unwrap();
+        assert!(baseline.files.contains_key("main.rs"));
+        assert!(baseline.files.contains_key(".env.example"));
+        assert!(!workspace.join(".env").exists());
+        assert!(!workspace.join(".env.local").exists());
+        assert!(!workspace.join("tls.key").exists());
+        assert!(!workspace.join("debug.log").exists());
+        assert!(!workspace.join("coverage").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn apply_preserves_unix_executable_mode_and_rejects_symlinks() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("project");
+        let workspace = dir.path().join("sandbox-ws");
+        let baseline_path = dir.path().join("source-baseline.json");
+        let outside = dir.path().join("secret.txt");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&workspace).unwrap();
+        fs::write(&outside, "top-secret").unwrap();
+        let script = source.join("run.sh");
+        fs::write(&script, "#!/bin/sh\necho v1\n").unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+        import_source_into_workspace(&source, &workspace, &baseline_path).unwrap();
+        let ws_script = workspace.join("run.sh");
+        assert_eq!(
+            fs::metadata(&ws_script).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        fs::write(&ws_script, "#!/bin/sh\necho v2\n").unwrap();
+
+        let applied = apply_workspace_changes(&workspace, &baseline_path, None, false).unwrap();
+        assert_eq!(applied.applied, vec!["run.sh"]);
+        assert_eq!(
+            fs::metadata(&script).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+
+        // open_regular_nofollow must reject symlinks directly.
+        let link = workspace.join("leak.txt");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        assert!(open_regular_nofollow(&link).is_err());
+    }
+
+    #[test]
+    fn git_repo_import_creates_sanitized_baseline_snapshot_without_host_hooks() {
+        let Some(git) = resolve_host_git() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("repo");
+        let workspace = dir.path().join("sandbox-ws");
+        let baseline_path = dir.path().join("source-baseline.json");
+        fs::create_dir_all(source.join(".git/hooks")).unwrap();
+        fs::create_dir_all(&workspace).unwrap();
+        fs::write(
+            source.join(".git/hooks/pre-commit"),
+            "#!/bin/sh\necho pwn\n",
+        )
+        .unwrap();
+        fs::write(
+            source.join(".git/config"),
+            "[core]\n\tfsmonitor = malicious-script\n\tsshCommand = evil\n",
+        )
+        .unwrap();
+        fs::write(source.join("app.txt"), "hello\n").unwrap();
+
+        import_source_into_workspace(&source, &workspace, &baseline_path).unwrap();
+        assert!(workspace.join(".git").is_dir());
+        assert!(!workspace.join(".git/hooks/pre-commit").exists());
+        let sandbox_config = fs::read_to_string(workspace.join(".git/config")).unwrap();
+        assert!(!sandbox_config.contains("malicious-script"));
+        assert!(!sandbox_config.contains("evil"));
+
+        // Modifying a file in the sandbox shows up in both git diff and baseline diff,
+        // without leaking `.git` internals into the baseline diff report.
+        fs::write(workspace.join("app.txt"), "hello sandbox\n").unwrap();
+        let git_diff = std::process::Command::new(&git)
+            .args(["diff", "--name-only"])
+            .current_dir(&workspace)
+            .output()
+            .unwrap();
+        assert!(git_diff.status.success());
+        assert_eq!(String::from_utf8_lossy(&git_diff.stdout).trim(), "app.txt");
+
+        let report = diff_workspace_against_baseline(&workspace, &baseline_path).unwrap();
+        assert_eq!(report.total_changes, 1);
+        assert_eq!(report.changes[0].path, "app.txt");
     }
 }

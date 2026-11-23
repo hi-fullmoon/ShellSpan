@@ -15,6 +15,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
+import { aiErrorMessage } from '@/lib/ai/error-message';
 import {
   invokeSandboxApply,
   invokeSandboxDiff,
@@ -36,6 +37,8 @@ export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [allowOverwriteConflicts, setAllowOverwriteConflicts] = useState(false);
+  const [applyErrors, setApplyErrors] = useState<readonly string[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
   const [preview, setPreview] = useState<SandboxFileDiffPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -61,6 +64,9 @@ export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.
       setReport(next);
       setAvailable(next !== null);
       if (next) {
+        if (next.conflictCount === 0) {
+          setAllowOverwriteConflicts(false);
+        }
         setSelected(new Set(next.changes.filter((item) => !item.conflict).map((item) => item.path)));
         setActivePath((current) => {
           if (current && next.changes.some((item) => item.path === current)) return current;
@@ -68,6 +74,8 @@ export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.
         });
         setPreview(null);
       } else {
+        setAllowOverwriteConflicts(false);
+        setApplyErrors([]);
         setSelected(new Set());
         setActivePath(null);
         setPreview(null);
@@ -85,7 +93,10 @@ export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
-    if (nextOpen) void loadDiff(true);
+    if (nextOpen) {
+      setApplyErrors([]);
+      void loadDiff(true);
+    }
   };
 
   const togglePath = (path: string, checked: boolean) => {
@@ -97,23 +108,39 @@ export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.
     });
   };
 
+  const handleToggleOverwriteConflicts = (checked: boolean) => {
+    setAllowOverwriteConflicts(checked);
+    if (!checked && report) {
+      const conflictPaths = new Set(report.changes.filter((item) => item.conflict).map((item) => item.path));
+      setSelected((prev) => {
+        const next = new Set(prev);
+        for (const path of conflictPaths) next.delete(path);
+        return next;
+      });
+    }
+  };
+
   const handleApply = async () => {
     if (!report || selected.size === 0 || applying) return;
     setApplying(true);
+    setApplyErrors([]);
+    const hasSelectedConflicts = report.changes.some((item) => item.conflict && selected.has(item.path));
     try {
       const result = await invokeSandboxApply({
         sessionId,
         paths: [...selected],
-        allowOverwriteConflicts: false,
+        allowOverwriteConflicts: allowOverwriteConflicts && hasSelectedConflicts,
       });
       if (result.errors.length > 0) {
-        showError(t('ai.sandboxSync.applyPartialError', { count: result.errors.length }));
+        setApplyErrors(result.errors);
       } else if (result.applied.length > 0) {
         showSuccess(t('ai.sandboxSync.applySuccess', { count: result.applied.length }));
       }
       await loadDiff(false);
-    } catch {
-      showError(t('ai.sandboxSync.applyFailed'));
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : String(error);
+      const translated = aiErrorMessage(raw, t);
+      showError(translated !== raw ? translated : t('ai.sandboxSync.applyFailed'));
     } finally {
       setApplying(false);
     }
@@ -130,14 +157,22 @@ export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.
         variant="ghost"
         size="sm"
         className="h-7 gap-1 px-2 text-xs"
+        aria-label={pendingCount > 0
+          ? t('ai.sandboxSync.triggerWithCount', { count: pendingCount })
+          : t('ai.sandboxSync.trigger')}
         onClick={() => handleOpenChange(true)}
       >
         <FolderSyncIcon className="size-3.5 shrink-0" />
-        <span>
+        <span className="hidden truncate @min-[420px]/ai-workspace:inline">
           {pendingCount > 0
             ? t('ai.sandboxSync.triggerWithCount', { count: pendingCount })
             : t('ai.sandboxSync.trigger')}
         </span>
+        {pendingCount > 0 && (
+          <span className="tabular-nums @min-[420px]/ai-workspace:hidden" aria-hidden="true">
+            {pendingCount}
+          </span>
+        )}
       </Button>
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-3xl">
@@ -152,8 +187,30 @@ export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.
             {report && report.conflictCount > 0 && (
               <Alert variant="destructive" className="shrink-0">
                 <AlertTriangleIcon className="size-4" />
-                <AlertDescription>
-                  {t('ai.sandboxSync.conflictNotice', { count: report.conflictCount })}
+                <AlertDescription className="flex flex-col gap-2">
+                  <span>{t('ai.sandboxSync.conflictNotice', { count: report.conflictCount })}</span>
+                  <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-foreground">
+                    <Checkbox
+                      checked={allowOverwriteConflicts}
+                      disabled={applying}
+                      onCheckedChange={(value) => handleToggleOverwriteConflicts(value === true)}
+                    />
+                    <span>{t('ai.sandboxSync.allowOverwriteConflicts')}</span>
+                  </label>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {applyErrors.length > 0 && (
+              <Alert variant="destructive" className="shrink-0">
+                <AlertTriangleIcon className="size-4" />
+                <AlertDescription className="flex flex-col gap-1">
+                  <span>{t('ai.sandboxSync.applyErrorsTitle')}</span>
+                  <ul className="list-disc pl-4 font-mono text-[11px]">
+                    {applyErrors.map((item) => (
+                      <li key={item} className="break-all">{item}</li>
+                    ))}
+                  </ul>
                 </AlertDescription>
               </Alert>
             )}
@@ -180,7 +237,7 @@ export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.
                         >
                           <Checkbox
                             checked={checked}
-                            disabled={change.conflict || applying}
+                            disabled={(change.conflict && !allowOverwriteConflicts) || applying}
                             aria-label={change.path}
                             onCheckedChange={(value) => togglePath(change.path, value === true)}
                           />

@@ -34,9 +34,17 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
   const activeTrust = useRef<symbol | null>(null);
   const id = useId();
   const selectedPath = workspace.trim();
-  const valid = /^\/srv\/shellspan-workspaces\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(selectedPath);
+  const isClientReadOnly = mode === 'clientReadOnly';
+  const validClientPath = selectedPath.startsWith('/')
+    && selectedPath.length <= 512
+    && !selectedPath.includes('\\')
+    && !/[\u0000-\u001f\u007f]/.test(selectedPath)
+    && (selectedPath === '/' || (!selectedPath.endsWith('/') && !selectedPath.split('/').slice(1).some((part) => part === '' || part === '.' || part === '..')));
+  const valid = isClientReadOnly
+    ? validClientPath
+    : /^\/srv\/shellspan-workspaces\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(selectedPath);
   const ready = Boolean(saved) && !saving && !loading && !testing && !trusting;
-  const modes = (['off', 'readOnly', 'workspaceWrite'] as const).map((value) => ({ value, label: t(`connection.sandbox.mode.${value}`) }));
+  const modes = (['off', 'clientReadOnly', 'readOnly', 'workspaceWrite'] as const).map((value) => ({ value, label: t(`connection.sandbox.mode.${value}`) }));
 
   useEffect(() => {
     if (!open) return;
@@ -141,7 +149,9 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
               <FieldLabel htmlFor={`${id}-workspace`}>{t('connection.sandbox.workspace')}</FieldLabel>
               <Input id={`${id}-workspace`} aria-describedby={`${id}-workspace-hint`} value={workspace} disabled={!ready}
                 autoComplete="off" onChange={(event) => { setWorkspace(event.target.value); clearReport(); }} />
-              <FieldDescription id={`${id}-workspace-hint`}>{t('connection.sandbox.workspaceHint')}</FieldDescription>
+              <FieldDescription id={`${id}-workspace-hint`}>
+                {t(isClientReadOnly ? 'connection.sandbox.workspaceHintClientReadOnly' : 'connection.sandbox.workspaceHint')}
+              </FieldDescription>
             </Field>}
           </FieldGroup>}
           {testing && <p role="status" className="text-sm text-muted-foreground">{t('connection.sandbox.testing')}</p>}
@@ -157,6 +167,28 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
                     label={t('connection.sandbox.copyInstall')} errorLabel={t('connection.sandbox.copyFailed')} />
                 </> : <p>{t('connection.sandbox.unknownDistro')}</p>}
               </AlertDescription>}
+              {report.deployScript && (
+                <AlertDescription className="mt-2 flex flex-col gap-2">
+                  <p>{t('connection.sandbox.deployScriptHint')}</p>
+                  <details className="rounded border bg-muted/40 p-2">
+                    <summary className="cursor-pointer text-xs font-medium text-foreground">
+                      {t('connection.sandbox.deployScriptSummary')}
+                    </summary>
+                    <pre className="mt-2 max-h-44 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-4 text-foreground">
+                      {report.deployScript}
+                    </pre>
+                  </details>
+                  <CopyButton
+                    key={report.deployScript}
+                    text={report.deployScript}
+                    variant="outline"
+                    size="sm"
+                    className="self-start"
+                    label={t('connection.sandbox.copyDeployScript')}
+                    errorLabel={t('connection.sandbox.copyFailed')}
+                  />
+                </AlertDescription>
+              )}
             </Alert>
             <ol className="flex flex-col gap-2">
               {report.ssh.steps.map((step) => <PreflightStepRow key={step.id} step={step} trustDisabled={!ready} onTrust={(host, port, fingerprint) => void trust(host, port, fingerprint)} />)}

@@ -65,15 +65,16 @@ impl NativeToolAdapter {
             .path()
             .home_dir()
             .map_err(|error| format!("failed to resolve ShellSpan home directory: {error}"))?;
+        let data_root = crate::shellspan_data_dir(&home);
         #[cfg(target_os = "macos")]
-        engine.configure_mac_sandbox_paths(home.clone(), app.path().resource_dir().ok())?;
+        engine.configure_mac_sandbox_paths(data_root.clone(), app.path().resource_dir().ok())?;
         Self::from_services(
             NativeToolServices {
                 sessions: app.state::<SessionManager>().inner().clone(),
                 database: app.state::<Database>().inner().clone(),
                 credentials: app.state::<CredentialManager>().inner().clone(),
                 known_hosts_path: crate::known_hosts::known_hosts_path(&app)?,
-                data_root: crate::shellspan_data_dir(&home),
+                data_root,
             },
             engine,
         )

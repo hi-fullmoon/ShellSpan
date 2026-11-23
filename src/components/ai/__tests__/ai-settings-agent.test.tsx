@@ -48,7 +48,7 @@ describe('Agent Session settings', () => {
     useAiSettingsStore.setState({ initialized: true, setAgentSandboxEnabled: save });
     render(<AiSettingsSection />);
     const toggle = screen.getByRole('switch', { name: 'settings.ai.agent.sandbox' });
-    expect(screen.getAllByRole('switch')).toEqual([toggle]);
+    expect(screen.getAllByRole('switch', { name: /sandbox/i })).toEqual([toggle]);
     expect(toggle).toHaveAccessibleDescription('settings.ai.agent.sandboxDescription');
     expect(toggle).toHaveAttribute('aria-checked', 'false');
     fireEvent.click(toggle);
@@ -91,5 +91,34 @@ describe('Agent Session settings', () => {
     }));
     expect(mocks.cancel.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.archive.mock.invocationCallOrder[0]);
+  });
+
+  it('shows sandbox network policy and custom domain allowlist controls when sandbox is enabled', async () => {
+    const savePolicy = vi.fn().mockResolvedValue(undefined);
+    useAiSettingsStore.setState({
+      initialized: true,
+      agentSandboxEnabled: true,
+      agentSandboxNetworkMode: 'customAllowlist',
+      agentSandboxNetworkAllowlist: ['registry.npmjs.org'],
+      setAgentSandboxNetworkPolicy: savePolicy,
+    });
+    render(<AiSettingsSection />);
+
+    const modeSelect = screen.getByRole('combobox', { name: 'settings.ai.agent.sandboxNetwork' });
+    expect(modeSelect).toHaveTextContent('settings.ai.agent.sandboxNetwork.customAllowlist');
+
+    const input = screen.getByRole('textbox', { name: 'settings.ai.agent.sandboxAllowlist' });
+    expect(input).toHaveValue('registry.npmjs.org');
+    expect(input).toHaveClass('h-8');
+
+    fireEvent.change(input, { target: { value: 'registry.npmmirror.com, *.corp.internal' } });
+    const saveButton = screen.getByRole('button', { name: 'common.save' });
+    expect(saveButton).toHaveClass('h-8');
+    fireEvent.click(saveButton);
+
+    await waitFor(() => expect(savePolicy).toHaveBeenCalledWith(
+      'customAllowlist',
+      ['registry.npmmirror.com', '*.corp.internal'],
+    ));
   });
 });

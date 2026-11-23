@@ -506,7 +506,12 @@ impl AgentSftpConnection {
     ) -> Result<Self, String> {
         if let Some(binding) = binding {
             binding.check(db, known_hosts)?;
-            if binding.state.policy.is_some() {
+            if binding
+                .state
+                .policy
+                .as_ref()
+                .is_some_and(|policy| policy.mode.uses_bubblewrap())
+            {
                 return SandboxSftp::connect(db, binding, connection, known_hosts, control)
                     .map(Self::Sandbox);
             }

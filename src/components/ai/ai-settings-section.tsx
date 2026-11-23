@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Field } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/hooks/useI18n';
@@ -26,7 +27,7 @@ import {
 import { listAllAgentSessionRecords } from '@/lib/ai/session-records';
 import { modelDefinitionOf } from '@/lib/ai/provider-contract';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
-import { useAiSettingsStore } from '@/stores/aiSettingsStore';
+import { type AgentSandboxNetworkMode, useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import type { AiProviderPreset } from '@/types/ai';
 import {
@@ -91,11 +92,41 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const contextLines = useAiSettingsStore((state) => state.contextLines);
   const setContextLines = useAiSettingsStore((state) => state.setContextLines);
   const sandboxControlId = React.useId();
+  const sandboxNetworkControlId = React.useId();
+  const sandboxAllowlistControlId = React.useId();
   const vimAutoAttachControlId = React.useId();
   const preferencesReady = useAiSettingsStore((state) => state.initialized);
   const agentSandboxEnabled = useAiSettingsStore((state) => state.agentSandboxEnabled);
   const agentSandboxSaving = useAiSettingsStore((state) => state.agentSandboxSaving);
   const setAgentSandboxEnabled = useAiSettingsStore((state) => state.setAgentSandboxEnabled);
+  const agentSandboxNetworkMode = useAiSettingsStore((state) => state.agentSandboxNetworkMode);
+  const agentSandboxNetworkAllowlist = useAiSettingsStore((state) => state.agentSandboxNetworkAllowlist);
+  const agentSandboxNetworkSaving = useAiSettingsStore((state) => state.agentSandboxNetworkSaving);
+  const setAgentSandboxNetworkPolicy = useAiSettingsStore((state) => state.setAgentSandboxNetworkPolicy);
+  const [allowlistDraft, setAllowlistDraft] = useState(() => agentSandboxNetworkAllowlist.join(', '));
+  useEffect(() => {
+    setAllowlistDraft(agentSandboxNetworkAllowlist.join(', '));
+  }, [agentSandboxNetworkAllowlist]);
+  const sandboxNetworkModeItems: { value: AgentSandboxNetworkMode; label: string }[] = [
+    { value: 'blocked', label: t('settings.ai.agent.sandboxNetwork.blocked') },
+    { value: 'devRegistries', label: t('settings.ai.agent.sandboxNetwork.devRegistries') },
+    { value: 'customAllowlist', label: t('settings.ai.agent.sandboxNetwork.customAllowlist') },
+  ];
+  const parseSandboxAllowlist = (raw: string): string[] => raw
+    .split(/[\s,;]+/)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  const handleSaveSandboxNetworkPolicy = async (
+    mode: AgentSandboxNetworkMode,
+    allowlist: string[],
+  ): Promise<void> => {
+    try {
+      await setAgentSandboxNetworkPolicy(mode, allowlist);
+      showSuccess(t('settings.ai.agent.sandboxNetworkSaved'));
+    } catch {
+      showError(t('settings.ai.agent.sandboxNetworkSaveFailed'));
+    }
+  };
   const [localSandboxStatus, setLocalSandboxStatus] = React.useState<LocalSandboxStatus | null>(null);
   React.useEffect(() => {
     if (!isTauriRuntime()) return;
@@ -349,6 +380,82 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
               }}
             />
           </SettingRow>
+          {agentSandboxEnabled && (
+            <SettingRow
+              controlId={sandboxNetworkControlId}
+              label={t('settings.ai.agent.sandboxNetwork')}
+              description={t('settings.ai.agent.sandboxNetworkDescription')}
+              descriptionId={`${sandboxNetworkControlId}-description`}
+            >
+              <Select
+                items={sandboxNetworkModeItems}
+                value={agentSandboxNetworkMode}
+                disabled={!preferencesReady || agentSandboxNetworkSaving}
+                onValueChange={(value) => {
+                  if (!value) return;
+                  const nextMode = value as AgentSandboxNetworkMode;
+                  const nextAllowlist = nextMode === 'customAllowlist'
+                    ? parseSandboxAllowlist(allowlistDraft)
+                    : agentSandboxNetworkAllowlist;
+                  void handleSaveSandboxNetworkPolicy(nextMode, nextAllowlist);
+                }}
+              >
+                <SelectTrigger
+                  id={sandboxNetworkControlId}
+                  size="sm"
+                  className="w-full @min-[32rem]:w-64"
+                  aria-label={t('settings.ai.agent.sandboxNetwork')}
+                  aria-describedby={`${sandboxNetworkControlId}-description`}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {sandboxNetworkModeItems.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </SettingRow>
+          )}
+          {agentSandboxEnabled && agentSandboxNetworkMode === 'customAllowlist' && (
+            <SettingRow
+              controlId={sandboxAllowlistControlId}
+              label={t('settings.ai.agent.sandboxAllowlist')}
+              description={t('settings.ai.agent.sandboxAllowlistDescription')}
+              descriptionId={`${sandboxAllowlistControlId}-description`}
+            >
+              <div className="flex w-full items-center gap-2 @min-[32rem]:w-auto">
+                <Input
+                  id={sandboxAllowlistControlId}
+                  aria-label={t('settings.ai.agent.sandboxAllowlist')}
+                  aria-describedby={`${sandboxAllowlistControlId}-description`}
+                  className="h-8 min-w-0 flex-1 text-xs @min-[32rem]:w-56"
+                  value={allowlistDraft}
+                  placeholder={t('settings.ai.agent.sandboxAllowlistPlaceholder')}
+                  disabled={!preferencesReady || agentSandboxNetworkSaving}
+                  onChange={(event) => setAllowlistDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      void handleSaveSandboxNetworkPolicy('customAllowlist', parseSandboxAllowlist(allowlistDraft));
+                    }
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!preferencesReady || agentSandboxNetworkSaving}
+                  onClick={() => void handleSaveSandboxNetworkPolicy('customAllowlist', parseSandboxAllowlist(allowlistDraft))}
+                >
+                  {t('common.save')}
+                </Button>
+              </div>
+            </SettingRow>
+          )}
           <SettingRow
             controlId={vimAutoAttachControlId}
             label={t('ai.settings.vimBridgeAutoAttach.title')}

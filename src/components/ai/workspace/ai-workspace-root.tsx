@@ -189,6 +189,7 @@ function historicalOutput<Node extends AiConversationNode>(node: Node): Node {
 
 export interface AiWorkspaceRootProps {
   readonly headerActions?: React.ReactNode;
+  readonly headerBadge?: React.ReactNode;
   readonly mode?: 'ask' | 'agent';
   readonly imageControls?: React.ReactNode;
   readonly onPasteImages?: (files: File[]) => void | Promise<void>;
@@ -298,6 +299,7 @@ export interface AiWorkspaceRootProps {
 export function AiWorkspaceRoot({
   mode,
   headerActions,
+  headerBadge,
   imageControls, onPasteImages, hasImages, imageBusy, imageSubmissionId, imageLocked,
   submissionContext,
   view,
@@ -839,6 +841,7 @@ export function AiWorkspaceRoot({
       <AiSessionHeader
         extraActions={headerActions}
         editorBadge={editorAttachedBadge}
+        sandboxBadge={headerBadge}
         title={resolvedTitle}
         context={headerContext}
         status={status}

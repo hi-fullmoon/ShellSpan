@@ -1711,8 +1711,14 @@ impl AgentRuntime {
             }
         }
         if let Some(target) = &snapshot.header.target {
-            if target.requires_local_sandbox() {
-                return Err("WINDOWS_SANDBOX_MANAGED_ROOT_REQUIRED".into());
+            if let Some(kind) = target.local_sandbox_required {
+                let code = match kind {
+                    super::LocalSandboxKind::WindowsAppContainer => {
+                        "WINDOWS_SANDBOX_MANAGED_ROOT_REQUIRED"
+                    }
+                    super::LocalSandboxKind::MacNono => "MAC_SANDBOX_MANAGED_ROOT_REQUIRED",
+                };
+                return Err(code.into());
             }
             if self.native_engine.has_terminal_lease(&target.session_id)? {
                 return Err("Busy: wait for the terminal lease to be released".into());
@@ -1762,10 +1768,16 @@ impl AgentRuntime {
                 }
             }
             if let Some(target) = &snapshot.header.target {
-                if target.requires_local_sandbox()
-                    && surface != super::AgentExecutionSurface::Direct
-                {
-                    return Err("WINDOWS_SANDBOX_DIRECT_REQUIRED".into());
+                if let Some(kind) = target.local_sandbox_required {
+                    if surface != super::AgentExecutionSurface::Direct {
+                        let code = match kind {
+                            super::LocalSandboxKind::WindowsAppContainer => {
+                                "WINDOWS_SANDBOX_DIRECT_REQUIRED"
+                            }
+                            super::LocalSandboxKind::MacNono => "MAC_SANDBOX_DIRECT_REQUIRED",
+                        };
+                        return Err(code.into());
+                    }
                 }
                 if self.native_engine.has_terminal_lease(&target.session_id)? {
                     return Err(
@@ -2901,16 +2913,20 @@ impl AgentRuntime {
         Ok(())
     }
 
-    #[cfg(windows)]
-    pub(crate) fn reclaim_orphaned_windows_sandboxes(&self, data_root: &std::path::Path) {
-        let Ok(records) = self.sessions.list(true) else {
-            return;
-        };
+    #[cfg(any(windows, target_os = "macos"))]
+    fn known_local_sandbox_cwds(
+        &self,
+        kind: super::LocalSandboxKind,
+    ) -> Result<std::collections::HashSet<String>, String> {
         let mut known_cwds = std::collections::HashSet::new();
-        for record in records {
-            if let Ok(snapshot) = self.sessions.snapshot(&record.session_id) {
-                if let Some(target) = snapshot.header.target {
-                    if target.requires_windows_sandbox() {
+        let mut cursor = None;
+        loop {
+            let page = self
+                .sessions
+                .list_page(super::AgentSessionListRequest { cursor, limit: 256 })?;
+            for item in page.sessions {
+                if let Some(target) = item.header.target {
+                    if target.local_sandbox_required == Some(kind) {
                         if let Some(cwd) = target.cwd {
                             known_cwds.insert(crate::path_utils::portable_local_path(
                                 std::path::Path::new(&cwd),
@@ -2919,8 +2935,30 @@ impl AgentRuntime {
                     }
                 }
             }
+            match page.next_cursor {
+                Some(next) => cursor = Some(next),
+                None => break,
+            }
         }
+        Ok(known_cwds)
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn reclaim_orphaned_windows_sandboxes(&self, data_root: &std::path::Path) {
+        let Ok(known_cwds) =
+            self.known_local_sandbox_cwds(super::LocalSandboxKind::WindowsAppContainer)
+        else {
+            return;
+        };
         super::native::windows_sandbox::reclaim_orphaned_workspaces(data_root, &known_cwds);
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn reclaim_orphaned_mac_sandboxes(&self, data_dir: &std::path::Path) {
+        let Ok(known_cwds) = self.known_local_sandbox_cwds(super::LocalSandboxKind::MacNono) else {
+            return;
+        };
+        super::native::mac_sandbox::reclaim_orphaned_workspaces(data_dir, &known_cwds);
     }
 
     fn with_image_store<T>(&self, write: impl FnOnce() -> Result<T, String>) -> Result<T, String> {

@@ -371,6 +371,15 @@ fn workspace_prompt(
                         prompt.push_str(" Prefer edit_file for a unique exact text replacement, especially inside long lines; it avoids generating whole-line diffs. Use apply_patch for multi-line changes. Advisory edit sizes must not prevent a necessary complete edit within the native safety bounds.");
                     }
                 }
+                if let Some(kind) = target.local_sandbox_required {
+                    let backend = match kind {
+                        super::LocalSandboxKind::MacNono => "macOS nono",
+                        super::LocalSandboxKind::WindowsAppContainer => "Windows AppContainer",
+                    };
+                    prompt.push_str(&format!(
+                        " This session runs inside a managed local {backend} sandbox. Outbound network access is blocked, writes are confined to the managed workspace and private temporary directory, and background commands, terminal handoff, privilege escalation, HTTP probes, and MCP tools are disabled. Do not retry network downloads or accesses outside the workspace after a sandbox denial. If the workspace was imported from a local project, edits stay isolated in this managed copy until the user reviews and applies them."
+                    ));
+                }
             }
             prompt
         }
@@ -1459,5 +1468,20 @@ mod tests {
             .unwrap();
         assert!(local_role_desc.contains("trash_file"));
         assert!(!local_role_desc.contains("transfer_file"));
+    }
+
+    #[test]
+    fn local_sandbox_session_injects_sandbox_constraints_into_prompt() {
+        let mut sandboxed = header();
+        sandboxed.target.as_mut().unwrap().local_sandbox_required =
+            Some(super::super::LocalSandboxKind::MacNono);
+        let assembled =
+            assemble_model_input(&sandboxed, crate::agent_runtime::default_model_tools());
+        assert!(assembled
+            .system_prompt
+            .contains("managed local macOS nono sandbox"));
+        assert!(assembled
+            .system_prompt
+            .contains("Outbound network access is blocked"));
     }
 }

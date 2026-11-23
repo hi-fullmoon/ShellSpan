@@ -733,3 +733,94 @@ fn verify_cache_tracks_digest_expiry_and_invalidation() {
     assert!(!cache.is_valid("profile-a", "digest-2", start));
     assert!(cache.is_valid("profile-b", "digest-b", start));
 }
+
+#[test]
+fn client_read_only_policy_validation_and_tool_guard() {
+    let valid = Policy {
+        mode: Mode::ClientReadOnly,
+        workspace: "/var/log/nginx".into(),
+    };
+    assert!(valid.validate().is_ok());
+    assert!(valid.contains("/var/log/nginx"));
+    assert!(valid.contains("/var/log/nginx/access.log"));
+    assert!(!valid.contains("/var/log/other"));
+    assert!(!valid.contains("/var/log/nginx/../shadow"));
+
+    for invalid in ["", "var/log", "/var/log/", "/var/../etc", "/var/log\\bad"] {
+        let bad = Policy {
+            mode: Mode::ClientReadOnly,
+            workspace: invalid.into(),
+        };
+        assert!(bad.validate().is_err(), "expected {invalid:?} to fail");
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(&dir.path().join("sandbox.sqlite")).unwrap();
+    db.save_preferences(&[("ai.agentSandboxEnabled".into(), "true".into())])
+        .unwrap();
+    let binding = Binding {
+        profile_id: "profile-l1".into(),
+        state: ProfileSandbox {
+            binding: "rev-1".into(),
+            policy: Some(valid),
+            host: "example.internal".into(),
+            port: 22,
+            username: "ops".into(),
+            was_configured: true,
+        },
+        digest: "digest-1".into(),
+    };
+    for allowed in [
+        "read_file",
+        "list_directory",
+        "search_text",
+        "inspect_host",
+        "inspect_service",
+        "query_logs",
+        "diagnose_endpoint",
+    ] {
+        assert!(
+            guard_tool(&db, Some(&binding), allowed, &json!({})).is_ok(),
+            "expected {allowed} to be allowed in L1 clientReadOnly"
+        );
+    }
+    assert!(guard_tool(
+        &db,
+        Some(&binding),
+        "transfer_file",
+        &json!({"direction": "download"})
+    )
+    .is_ok());
+    assert!(guard_tool(
+        &db,
+        Some(&binding),
+        "transfer_file",
+        &json!({"direction": "upload"})
+    )
+    .unwrap_err()
+    .contains("SANDBOX_READ_ONLY"));
+    for write_tool in ["write_file", "edit_file", "apply_patch"] {
+        assert!(guard_tool(&db, Some(&binding), write_tool, &json!({}))
+            .unwrap_err()
+            .contains("SANDBOX_READ_ONLY"));
+    }
+    for shell_tool in ["run_terminal_command", "exec_command"] {
+        assert!(guard_tool(&db, Some(&binding), shell_tool, &json!({}))
+            .unwrap_err()
+            .contains("SANDBOX_TOOL_UNAVAILABLE"));
+    }
+}
+
+#[test]
+fn bubblewrap_deployment_script_contains_subsystem_and_workspace() {
+    let policy = Policy {
+        mode: Mode::WorkspaceWrite,
+        workspace: "/srv/shellspan-workspaces/staging".into(),
+    };
+    let script = deployment_script(&policy, Some("dnf install bubblewrap"));
+    assert!(script.contains("dnf install bubblewrap"));
+    assert!(script.contains("/srv/shellspan-workspaces/staging"));
+    assert!(script.contains("Subsystem shellspan-bwrap-v1 /usr/local/libexec/shellspan-bwrap-v1"));
+    assert!(script.contains("/var/lib/shellspan-sandbox/outside-probe"));
+    assert!(script.contains("nodev,nosuid"));
+}

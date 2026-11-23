@@ -303,8 +303,9 @@ fn rollback_created_local_sandbox(
         }
         #[cfg(target_os = "macos")]
         super::LocalSandboxKind::MacNono => {
+            let data = crate::shellspan_data_dir(&home);
             if let Err(error) = super::native::mac_sandbox::remove_workspace(
-                &home,
+                &data,
                 std::path::Path::new(&workspace),
             ) {
                 log::warn!(
@@ -421,10 +422,16 @@ fn apply_connection_sandbox(
             let db = app.state::<crate::db::Database>();
             if db.agent_sandbox_enabled()? {
                 let resource_dir = app.path().resource_dir().ok();
-                if super::native::mac_sandbox::resolve_verified_launcher(resource_dir.as_deref())
+                if let Ok(home) = app.path().home_dir() {
+                    let data_dir = crate::shellspan_data_dir(&home);
+                    if super::native::mac_sandbox::probe_local_sandbox(
+                        &data_dir,
+                        resource_dir.as_deref(),
+                    )
                     .is_ok()
-                {
-                    target.local_sandbox_required = Some(super::LocalSandboxKind::MacNono);
+                    {
+                        target.local_sandbox_required = Some(super::LocalSandboxKind::MacNono);
+                    }
                 }
             }
         }
@@ -539,7 +546,7 @@ fn apply_connection_sandbox(
                         )
                     });
                 let workspace =
-                    super::native::mac_sandbox::create_workspace(&home, &request.session_id)?;
+                    super::native::mac_sandbox::create_workspace(&data_dir, &request.session_id)?;
                 target.cwd = Some(workspace.clone());
                 target.local_root = Some(workspace.clone());
                 created_local_sandbox = Some((super::LocalSandboxKind::MacNono, workspace.clone()));
@@ -659,8 +666,21 @@ pub(crate) fn agent_runtime_local_sandbox_status(app: AppHandle) -> LocalSandbox
     #[cfg(target_os = "macos")]
     {
         let resource_dir = app.path().resource_dir().ok();
-        match super::native::mac_sandbox::resolve_verified_launcher(resource_dir.as_deref()) {
-            Ok(_) => LocalSandboxStatus {
+        let home = match app.path().home_dir() {
+            Ok(home) => home,
+            Err(error) => {
+                return LocalSandboxStatus {
+                    supported: false,
+                    kind: None,
+                    reason: Some(format!(
+                        "LOCAL_SANDBOX_UNAVAILABLE: failed to resolve home directory: {error}"
+                    )),
+                };
+            }
+        };
+        let data_dir = crate::shellspan_data_dir(&home);
+        match super::native::mac_sandbox::probe_local_sandbox(&data_dir, resource_dir.as_deref()) {
+            Ok(()) => LocalSandboxStatus {
                 supported: true,
                 kind: Some(super::LocalSandboxKind::MacNono),
                 reason: None,
@@ -696,8 +716,19 @@ pub(crate) struct SandboxApplyInput {
 fn resolve_local_sandbox_workspace_for_session(
     runtime: &AgentRuntime,
     session_id: &str,
+    require_idle: bool,
 ) -> Result<std::path::PathBuf, String> {
     let snapshot = runtime.session(session_id)?;
+    if require_idle
+        && (snapshot.status != super::AgentSessionStatus::Idle
+            || snapshot.uncertain_native_effects
+            || snapshot.recovery.kind == super::AgentRecoveryCheckpointKind::WaitingApproval)
+    {
+        return Err(
+            "SANDBOX_SYNC_BUSY: wait for the Agent session to become idle before applying sandbox changes"
+                .into(),
+        );
+    }
     let target = snapshot
         .header
         .target
@@ -716,7 +747,7 @@ pub(crate) fn agent_runtime_sandbox_diff(
     runtime: State<'_, AgentRuntime>,
     session_id: String,
 ) -> Result<Option<super::native::sandbox_sync::SandboxDiffReport>, String> {
-    let workspace = resolve_local_sandbox_workspace_for_session(&runtime, &session_id)?;
+    let workspace = resolve_local_sandbox_workspace_for_session(&runtime, &session_id, false)?;
     let baseline = super::native::sandbox_sync::baseline_path_for_workspace(&workspace);
     if !baseline.exists() {
         return Ok(None);
@@ -730,7 +761,7 @@ pub(crate) fn agent_runtime_sandbox_file_diff(
     session_id: String,
     path: String,
 ) -> Result<super::native::sandbox_sync::SandboxFileDiffPreview, String> {
-    let workspace = resolve_local_sandbox_workspace_for_session(&runtime, &session_id)?;
+    let workspace = resolve_local_sandbox_workspace_for_session(&runtime, &session_id, false)?;
     let baseline = super::native::sandbox_sync::baseline_path_for_workspace(&workspace);
     super::native::sandbox_sync::diff_file_preview(&workspace, &baseline, &path)
 }
@@ -740,7 +771,7 @@ pub(crate) fn agent_runtime_sandbox_apply(
     runtime: State<'_, AgentRuntime>,
     input: SandboxApplyInput,
 ) -> Result<super::native::sandbox_sync::SandboxApplyReport, String> {
-    let workspace = resolve_local_sandbox_workspace_for_session(&runtime, &input.session_id)?;
+    let workspace = resolve_local_sandbox_workspace_for_session(&runtime, &input.session_id, true)?;
     let baseline = super::native::sandbox_sync::baseline_path_for_workspace(&workspace);
     super::native::sandbox_sync::apply_workspace_changes(
         &workspace,

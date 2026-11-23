@@ -61,6 +61,13 @@ pub(crate) fn current_unix_ms() -> u64 {
 pub(crate) fn inspect_call_policy_scope_native(
     call: &AgentToolCallNative,
 ) -> Result<CallPolicyScopeNative, String> {
+    inspect_call_policy_scope_with_managed_root_native(call, None)
+}
+
+pub(crate) fn inspect_call_policy_scope_with_managed_root_native(
+    call: &AgentToolCallNative,
+    managed_workspace: Option<&std::path::Path>,
+) -> Result<CallPolicyScopeNative, String> {
     let paths = match call.tool_name.as_str() {
         crate::terminal_vim_bridge::INSERT
         | crate::terminal_vim_bridge::SAVE
@@ -181,7 +188,10 @@ pub(crate) fn inspect_call_policy_scope_native(
         }
         _ => Vec::new(),
     };
-    let sensitive_path_count = paths.iter().filter(|p| path_is_sensitive_native(p)).count();
+    let sensitive_path_count = paths
+        .iter()
+        .filter(|p| path_is_sensitive_for_managed_root(p, managed_workspace))
+        .count();
     let critical_path_count = paths.iter().filter(|p| path_is_critical_native(p)).count();
     Ok(CallPolicyScopeNative {
         paths,
@@ -249,6 +259,29 @@ fn normalize_policy_path(path: &str) -> String {
     } else {
         parts.join("/")
     }
+}
+
+pub(crate) fn path_is_sensitive_for_managed_root(
+    path: &str,
+    managed_workspace: Option<&std::path::Path>,
+) -> bool {
+    if let Some(root) = managed_workspace {
+        let normalized_path = normalize_policy_path(path);
+        let normalized_root = normalize_policy_path(&root.to_string_lossy());
+        let trimmed_root = normalized_root.trim_end_matches('/');
+        if !trimmed_root.is_empty() {
+            if normalized_path == trimmed_root {
+                return false;
+            }
+            if let Some(relative) = normalized_path
+                .strip_prefix(trimmed_root)
+                .and_then(|rest| rest.strip_prefix('/'))
+            {
+                return path_is_sensitive_native(relative);
+            }
+        }
+    }
+    path_is_sensitive_native(path)
 }
 
 pub(crate) fn path_is_sensitive_native(path: &str) -> bool {
@@ -917,5 +950,43 @@ mod tests {
         for path in ["//etc/shadow", "/./etc/shadow", "/private//etc/SHADOW"] {
             assert!(path_is_sensitive_native(path), "{path}");
         }
+    }
+
+    #[test]
+    fn managed_sandbox_root_strips_shellspan_prefix_without_relaxing_inner_or_outer_guards() {
+        let managed = std::path::Path::new(
+            "/Users/demo/.shellspan/sandboxes/0123456789abcdef0123456789abcdef/workspace",
+        );
+        // Normal files inside the verified managed workspace are not marked sensitive.
+        assert!(!path_is_sensitive_for_managed_root(
+            "/Users/demo/.shellspan/sandboxes/0123456789abcdef0123456789abcdef/workspace/src/main.rs",
+            Some(managed),
+        ));
+        assert!(!path_is_sensitive_for_managed_root(
+            "/Users/demo/.shellspan/sandboxes/0123456789abcdef0123456789abcdef/workspace",
+            Some(managed),
+        ));
+        // Sensitive files inside the workspace remain sensitive.
+        assert!(path_is_sensitive_for_managed_root(
+            "/Users/demo/.shellspan/sandboxes/0123456789abcdef0123456789abcdef/workspace/.env",
+            Some(managed),
+        ));
+        assert!(path_is_sensitive_for_managed_root(
+            "/Users/demo/.shellspan/sandboxes/0123456789abcdef0123456789abcdef/workspace/.shellspan/mcp.json",
+            Some(managed),
+        ));
+        // Escaping to sibling data/ or ShellSpan's root remains sensitive.
+        assert!(path_is_sensitive_for_managed_root(
+            "/Users/demo/.shellspan/sandboxes/0123456789abcdef0123456789abcdef/workspace/../data/identity",
+            Some(managed),
+        ));
+        assert!(path_is_sensitive_for_managed_root(
+            "/Users/demo/.shellspan/shellspan.db",
+            Some(managed),
+        ));
+        assert!(path_is_sensitive_for_managed_root(
+            "/Users/demo/.shellspan/sandboxes/0123456789abcdef0123456789abcdef/workspace/src/main.rs",
+            None,
+        ));
     }
 }

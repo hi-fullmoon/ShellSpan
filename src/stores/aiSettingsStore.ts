@@ -23,7 +23,31 @@ import llmCatalog from '../../protocol/llm/catalog.json';
 
 const logger = createLogger('aiSettingsStore');
 const AGENT_SANDBOX_ENABLED_KEY = 'ai.agentSandboxEnabled';
+const AGENT_SANDBOX_NETWORK_MODE_KEY = 'ai.agentSandboxNetworkMode';
+const AGENT_SANDBOX_NETWORK_ALLOWLIST_KEY = 'ai.agentSandboxNetworkAllowlist';
 const VIM_BRIDGE_AUTO_ATTACH_KEY = 'ai.vimBridgeAutoAttach';
+
+export type AgentSandboxNetworkMode = 'blocked' | 'devRegistries' | 'customAllowlist';
+
+function parseSandboxNetworkMode(raw: string | undefined): AgentSandboxNetworkMode {
+  const normalized = raw?.trim().replace(/^"|"$/gu, '');
+  if (normalized === 'devRegistries' || normalized === 'customAllowlist') return normalized;
+  return 'blocked';
+}
+
+function parseSandboxNetworkAllowlist(raw: string | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim().toLowerCase())
+      .filter((item) => item.length > 0);
+  } catch {
+    return [];
+  }
+}
 
 function catalogDefaultModel(
   profile: import('@/lib/ai/provider-contract').ProviderProfileId,
@@ -131,6 +155,9 @@ interface AiSettingsState extends AiPreferences {
   initialized: boolean;
   agentSandboxEnabled: boolean;
   agentSandboxSaving: boolean;
+  agentSandboxNetworkMode: AgentSandboxNetworkMode;
+  agentSandboxNetworkAllowlist: string[];
+  agentSandboxNetworkSaving: boolean;
   vimBridgeAutoAttach: boolean;
   vimBridgeAutoAttachSaving: boolean;
   persistenceStatus: 'idle' | 'pending' | 'saving' | 'saved' | 'error';
@@ -146,6 +173,8 @@ interface AiSettingsState extends AiPreferences {
   setAgentPermissionMode: (mode: AgentPermissionMode) => void;
   setAgentExecutionSurface: (surface: AgentExecutionSurface) => void;
   setAgentSandboxEnabled: (enabled: boolean) => Promise<void>;
+  setAgentSandboxNetworkPolicy: (mode: AgentSandboxNetworkMode, allowlist: string[]) => Promise<void>;
+  allowSandboxDomain: (domain: string) => Promise<void>;
   setVimBridgeAutoAttach: (enabled: boolean) => Promise<void>;
   getProviderConfig: (id?: string) => AiProviderConfig;
 }
@@ -264,12 +293,35 @@ function schedulePreferencesSave(preferences: AiPreferences): void {
   }, 400);
 }
 
+// Mirrors `DEV_REGISTRY_DOMAINS` in `src-tauri/src/agent_runtime/native/sandbox_proxy.rs`
+// so promoting from `devRegistries` to `customAllowlist` preserves existing package registries.
+const SANDBOX_DEV_REGISTRY_DOMAINS = [
+  'registry.npmjs.org',
+  'pypi.org',
+  'files.pythonhosted.org',
+  'crates.io',
+  'index.crates.io',
+  'static.crates.io',
+  'proxy.golang.org',
+  'sum.golang.org',
+  'github.com',
+  'api.github.com',
+  'objects.githubusercontent.com',
+  'raw.githubusercontent.com',
+  'codeload.github.com',
+  'rubygems.org',
+  'repo.maven.apache.org',
+] as const;
+
 export const useAiSettingsStore = create<AiSettingsState>()(
   subscribeWithSelector((set, get) => ({
     ...defaults,
     initialized: false,
     agentSandboxEnabled: false,
     agentSandboxSaving: false,
+    agentSandboxNetworkMode: 'blocked',
+    agentSandboxNetworkAllowlist: [],
+    agentSandboxNetworkSaving: false,
     vimBridgeAutoAttach: false,
     vimBridgeAutoAttachSaving: false,
     persistenceStatus: 'idle',
@@ -277,11 +329,15 @@ export const useAiSettingsStore = create<AiSettingsState>()(
       try {
         const entries = await invokeLoadPreferences();
         const preferences = parseAiPreferences(entries);
+        const networkModeRaw = entries.find(([key]) => key === AGENT_SANDBOX_NETWORK_MODE_KEY)?.[1];
+        const networkAllowlistRaw = entries.find(([key]) => key === AGENT_SANDBOX_NETWORK_ALLOWLIST_KEY)?.[1];
         // Keep initialization false while applying the loaded snapshot so the
         // persistence subscriber never rewrites unchanged preferences during hydration.
         set({
           ...preferences,
           agentSandboxEnabled: entries.some(([key, value]) => key === AGENT_SANDBOX_ENABLED_KEY && value === 'true'),
+          agentSandboxNetworkMode: parseSandboxNetworkMode(networkModeRaw),
+          agentSandboxNetworkAllowlist: parseSandboxNetworkAllowlist(networkAllowlistRaw),
           vimBridgeAutoAttach: entries.some(([key, value]) => key === VIM_BRIDGE_AUTO_ATTACH_KEY && value === 'true'),
         });
         set({ initialized: true });
@@ -343,6 +399,34 @@ export const useAiSettingsStore = create<AiSettingsState>()(
       } finally {
         set({ agentSandboxSaving: false });
       }
+    },
+    setAgentSandboxNetworkPolicy: async (agentSandboxNetworkMode, rawAllowlist) => {
+      if (get().agentSandboxNetworkSaving) return;
+      const cleaned = Array.from(
+        new Set(rawAllowlist.map((item) => item.trim().toLowerCase()).filter((item) => item.length > 0)),
+      );
+      set({ agentSandboxNetworkSaving: true });
+      try {
+        await invokeSavePreferences([
+          [AGENT_SANDBOX_NETWORK_MODE_KEY, agentSandboxNetworkMode],
+          [AGENT_SANDBOX_NETWORK_ALLOWLIST_KEY, JSON.stringify(cleaned)],
+        ]);
+        set({
+          agentSandboxNetworkMode,
+          agentSandboxNetworkAllowlist: cleaned,
+        });
+      } finally {
+        set({ agentSandboxNetworkSaving: false });
+      }
+    },
+    allowSandboxDomain: async (domain) => {
+      const normalized = domain.trim().toLowerCase().replace(/\.+$/, '');
+      if (!normalized || !normalized.includes('.') || /[\s/\\]/.test(normalized)) return;
+      const state = get();
+      const base = state.agentSandboxNetworkMode === 'devRegistries'
+        ? [...SANDBOX_DEV_REGISTRY_DOMAINS, ...state.agentSandboxNetworkAllowlist]
+        : state.agentSandboxNetworkAllowlist;
+      await state.setAgentSandboxNetworkPolicy('customAllowlist', [...base, normalized]);
     },
     setVimBridgeAutoAttach: async (vimBridgeAutoAttach) => {
       if (get().vimBridgeAutoAttachSaving) return;

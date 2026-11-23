@@ -49,11 +49,12 @@ export function aiErrorMessage(message: string, t: (key: LocaleKey, values?: Rec
   if (code === 'AGENT_CRITICAL_OPERATION_DENIED') return t('ai.error.criticalOperationDenied');
   if (code === 'AGENT_SANDBOX_DISABLED') return t('ai.error.sandboxDisabled');
   if (code === 'SANDBOX_DIRECT_REQUIRED') return t('ai.error.sandboxDirectRequired');
-  if (code === 'MAC_SANDBOX_PREVIEW_DIRECT_ONLY' || code === 'WINDOWS_SANDBOX_DIRECT_REQUIRED') return t('ai.error.localSandboxDirectRequired');
-  if (code === 'MAC_SANDBOX_PREVIEW_MANAGED_ROOT_REQUIRED' || code === 'WINDOWS_SANDBOX_MANAGED_ROOT_REQUIRED') return t('ai.error.localSandboxManagedRoot');
-  if (code === 'WINDOWS_SANDBOX_START_FAILED') return t('ai.error.localSandboxStartFailed');
-  if (code === 'WINDOWS_SANDBOX_UNAVAILABLE') return t('ai.error.localSandboxUnavailable');
+  if (code === 'MAC_SANDBOX_PREVIEW_DIRECT_ONLY' || code === 'MAC_SANDBOX_DIRECT_REQUIRED' || code === 'WINDOWS_SANDBOX_DIRECT_REQUIRED') return t('ai.error.localSandboxDirectRequired');
+  if (code === 'MAC_SANDBOX_PREVIEW_MANAGED_ROOT_REQUIRED' || code === 'MAC_SANDBOX_MANAGED_ROOT_REQUIRED' || code === 'WINDOWS_SANDBOX_MANAGED_ROOT_REQUIRED') return t('ai.error.localSandboxManagedRoot');
+  if (code === 'MAC_SANDBOX_START_FAILED' || code === 'WINDOWS_SANDBOX_START_FAILED') return t('ai.error.localSandboxStartFailed');
+  if (code === 'LOCAL_SANDBOX_UNAVAILABLE' || code === 'LOCAL_SANDBOX_LAUNCHER_UNAVAILABLE' || code === 'WINDOWS_SANDBOX_UNAVAILABLE') return t('ai.error.localSandboxUnavailable');
   if (code === 'LOCAL_SANDBOX_LAUNCHER_CHANGED') return t('ai.error.localSandboxLauncherChanged');
+  if (code === 'SANDBOX_SYNC_BUSY') return t('ai.error.sandboxSyncBusy');
   if (code === 'SANDBOX_SESSION_POLICY_CHANGED') return t('ai.error.sandboxSessionPolicyChanged');
   if (code === 'AUTO_REVIEW_CHANGED') return t('ai.error.autoReviewChanged');
   if (code === 'AGENT_UNSAFE_FILE_ROOT') return t('ai.error.unsafeFileRoot');

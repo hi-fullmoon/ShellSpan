@@ -160,6 +160,7 @@ impl NativeToolEngine {
                         data["sandbox"] =
                             json!(crate::agent_runtime::native::windows_sandbox::EXECUTOR);
                         data["started"] = json!(true);
+                        attach_sandbox_violation_diagnostic(&mut result);
                         if !termination_confirmed {
                             result.status = AgentToolResultStatusNative::Uncertain;
                             result.summary =
@@ -199,6 +200,18 @@ impl NativeToolEngine {
                         let journal =
                             runner_journal.ok_or("Missing macOS sandbox dispatch journal")?;
                         binding.revalidate()?;
+                        let proxy = if binding.network_policy.uses_proxy() {
+                            Some(
+                                crate::agent_runtime::native::sandbox_proxy::SandboxProxy::start(
+                                    binding.network_policy.clone(),
+                                )
+                                .map_err(|error| {
+                                    format!("MAC_SANDBOX_START_FAILED: failed to start sandbox proxy: {error}")
+                                })?,
+                            )
+                        } else {
+                            None
+                        };
                         let (process, receipt, mut gate) =
                             crate::agent_runtime::native::process::prepare_mac_sandbox_process(
                                 &context.request,
@@ -209,6 +222,7 @@ impl NativeToolEngine {
                                 &binding.launcher,
                                 timeout,
                                 &mut lease,
+                                proxy.as_ref(),
                             )?;
                         let mut registered = false;
                         let dispatched = journal(&mut || {
@@ -228,10 +242,10 @@ impl NativeToolEngine {
                             }
                             return Err(error);
                         }
-                        Ok((process, receipt))
+                        Ok((process, receipt, proxy))
                     })();
                     match admitted {
-                        Ok((process, receipt)) => Ok((process, receipt, lease)),
+                        Ok((process, receipt, proxy)) => Ok((process, receipt, lease, proxy)),
                         Err(error) => {
                             match lease.release() {
                                 Ok(true) => {}
@@ -247,8 +261,8 @@ impl NativeToolEngine {
                     }
                 });
                 match launch {
-                    Ok((process, receipt, lease)) => {
-                        mac_launch = Some((receipt, lease));
+                    Ok((process, receipt, lease, proxy)) => {
+                        mac_launch = Some((receipt, lease, proxy));
                         process
                     }
                     Err(error) => {
@@ -449,13 +463,17 @@ impl NativeToolEngine {
             target_os = "macos",
             target_arch = "aarch64"
         ))]
-        let process_registered = desktop_launch.is_some();
-        #[cfg(not(all(
-            feature = "native-input-acceptance",
-            debug_assertions,
+        let process_registered = mac_launch.is_some() || desktop_launch.is_some();
+        #[cfg(all(
             target_os = "macos",
-            target_arch = "aarch64"
-        )))]
+            not(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_arch = "aarch64"
+            ))
+        ))]
+        let process_registered = mac_launch.is_some();
+        #[cfg(not(target_os = "macos"))]
         let process_registered = false;
         if !process_registered {
             self.processes.insert(Arc::clone(&process))?;
@@ -491,8 +509,13 @@ impl NativeToolEngine {
         }
         let mut result = exec_process_result(&context.request, call, effect, snapshot, background);
         #[cfg(target_os = "macos")]
-        if let Some((receipt, mut lease)) = mac_launch {
+        if let Some((receipt, mut lease, proxy)) = mac_launch {
             use std::os::unix::fs::FileExt;
+            let blocked_domains = proxy
+                .as_ref()
+                .map(|p| p.blocked_domains())
+                .unwrap_or_default();
+            drop(proxy);
             let mut evidence = [0];
             let data = result.data.as_mut().expect("Direct result data");
             data["sandbox"] = json!(crate::agent_runtime::native::mac_sandbox::EXECUTOR);
@@ -525,6 +548,25 @@ impl NativeToolEngine {
                 result.summary =
                     format!("Managed sandbox directory retained its protection: {error}");
                 data["terminationConfirmed"] = json!(false);
+            }
+            attach_sandbox_violation_diagnostic(&mut result);
+            if !blocked_domains.is_empty() {
+                let data = result.data.as_mut().expect("Direct result data");
+                let hint = format!(
+                    "Sandbox network proxy blocked non-allowlisted domain(s): {}.",
+                    blocked_domains.join(", ")
+                );
+                data["sandboxViolation"] = json!({
+                    "category": "networkBlocked",
+                    "blockedDomains": blocked_domains,
+                    "hint": hint,
+                });
+                if !result.summary.contains(&hint) {
+                    if !result.summary.is_empty() && !result.summary.ends_with(' ') {
+                        result.summary.push(' ');
+                    }
+                    result.summary.push_str(&hint);
+                }
             }
         }
         #[cfg(all(
@@ -575,6 +617,7 @@ impl NativeToolEngine {
                     format!("Managed sandbox directory retained its protection: {error}");
                 data["terminationConfirmed"] = json!(false);
             }
+            attach_sandbox_violation_diagnostic(&mut result);
         }
         #[cfg(all(test, target_os = "linux"))]
         if local_sandbox.is_some() {
@@ -780,6 +823,7 @@ impl NativeToolEngine {
                 result.data = Some(
                     json!({"channel":"direct","sandbox":"bubblewrap","state":state,"exitCode":exit_code,"stdout":stdout,"stderr":stderr,"terminationConfirmed":true,"truncated":truncated}),
                 );
+                attach_sandbox_violation_diagnostic(&mut result);
             }
             CommandOutcome::NotStarted(error) => {
                 result.status = if cancellation.is_cancelled() {
@@ -842,13 +886,108 @@ impl NativeToolEngine {
         if !is_allowed_local_sandbox_native_tool(call) {
             return Err("MAC_SANDBOX_DIRECT_REQUIRED".into());
         }
-        let (home, resource_dir) = self.mac_sandbox_paths()?;
+        let (data_dir, resource_dir) = self.mac_sandbox_paths()?;
+        let network_policy = database.agent_sandbox_network_policy()?;
         crate::agent_runtime::native::mac_sandbox::Workspace::open(
-            &home,
+            &data_dir,
             Path::new(cwd),
             resource_dir.as_deref(),
+            network_policy,
         )
         .map(Some)
+    }
+}
+
+fn classify_sandbox_violation(
+    exit_code: i32,
+    stderr: &str,
+    stdout: &str,
+) -> Option<(&'static str, &'static str)> {
+    if exit_code == 0 {
+        return None;
+    }
+    let combined = format!("{stderr}\n{stdout}").to_ascii_lowercase();
+    if exit_code == 153
+        || combined.contains("file size limit exceeded")
+        || combined.contains("too many open files")
+        || combined.contains("no space left on device")
+        || combined.contains("sigxfsz")
+    {
+        return Some((
+            "resourceLimit",
+            "Sandbox resource limit was reached (file size, tmpfs quota, or open file descriptors).",
+        ));
+    }
+    let has_network_keyword = combined.contains("could not resolve host")
+        || combined.contains("temporary failure in name resolution")
+        || combined.contains("name or service not known")
+        || combined.contains("network is unreachable")
+        || combined.contains("eai_again")
+        || combined.contains("enotfound")
+        || combined.contains("wsaeacces")
+        || combined.contains("access a socket in a way forbidden")
+        || (combined.contains("operation not permitted")
+            && (combined.contains("socket")
+                || combined.contains("connect")
+                || combined.contains("network")
+                || combined.contains("curl")
+                || combined.contains("dns")));
+    if has_network_keyword {
+        return Some((
+            "networkBlocked",
+            "Outbound network access is blocked by the sandbox; do not retry network requests inside this sandbox.",
+        ));
+    }
+    if combined.contains("operation not permitted")
+        || combined.contains("read-only file system")
+        || combined.contains("permission denied")
+        || combined.contains("unauthorizedaccessexception")
+        || (combined.contains("access to the path") && combined.contains("is denied"))
+    {
+        return Some((
+            "filesystemDenied",
+            "The sandbox denied filesystem access outside the writable workspace or temporary directory.",
+        ));
+    }
+    None
+}
+
+fn attach_sandbox_violation_diagnostic(result: &mut AgentToolResultNative) {
+    if result.status != AgentToolResultStatusNative::Failed {
+        return;
+    }
+    let Some(data) = result.data.as_mut() else {
+        return;
+    };
+    if data.get("started").and_then(serde_json::Value::as_bool) == Some(false) {
+        return;
+    }
+    let Some(exit_code) = data
+        .get("exitCode")
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|code| i32::try_from(code).ok())
+    else {
+        return;
+    };
+    let stderr = data
+        .get("stderr")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let stdout = data
+        .get("stdout")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if let Some((category, hint)) = classify_sandbox_violation(exit_code, stderr, stdout) {
+        data["sandboxViolation"] = json!({
+            "category": category,
+            "hint": hint,
+        });
+        if !result.summary.contains(hint) {
+            if !result.summary.is_empty() && !result.summary.ends_with(' ') {
+                result.summary.push(' ');
+            }
+            result.summary.push_str(hint);
+        }
     }
 }
 
@@ -1083,5 +1222,32 @@ mod tests {
                 "expected {blocked} to be rejected in local sandbox"
             );
         }
+    }
+
+    #[test]
+    fn sandbox_violation_classifier_identifies_network_filesystem_and_resource_denials() {
+        use super::classify_sandbox_violation;
+        assert_eq!(
+            classify_sandbox_violation(0, "Operation not permitted", ""),
+            None
+        );
+        assert_eq!(
+            classify_sandbox_violation(1, "SyntaxError: unexpected token", ""),
+            None
+        );
+        assert_eq!(
+            classify_sandbox_violation(6, "curl: (6) Could not resolve host: example.com", "")
+                .map(|(cat, _)| cat),
+            Some("networkBlocked")
+        );
+        assert_eq!(
+            classify_sandbox_violation(1, "sh: /etc/hosts: Operation not permitted", "")
+                .map(|(cat, _)| cat),
+            Some("filesystemDenied")
+        );
+        assert_eq!(
+            classify_sandbox_violation(153, "", "").map(|(cat, _)| cat),
+            Some("resourceLimit")
+        );
     }
 }

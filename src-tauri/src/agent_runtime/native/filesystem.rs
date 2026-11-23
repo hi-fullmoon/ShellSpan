@@ -501,7 +501,8 @@ fn execute_read_file(
         FileEncodingNative::MetadataOnly => None,
     };
     let truncated = end < bytes.len();
-    let sensitive = path_is_sensitive(&path);
+    let managed_root = managed_sandbox_root(context.checkpoint_root, &context.call.target);
+    let sensitive = path_is_sensitive_in_root(&path, managed_root.as_deref());
     Ok(FileToolOutputNative {
         summary: "Read a bounded file through the native filesystem driver.".into(),
         data: json!({
@@ -532,10 +533,12 @@ fn execute_list_directory(
     let arguments: ListDirectoryArgumentsNative =
         serde_json::from_value(context.call.arguments.clone())
             .map_err(|error| format!("Invalid list_directory arguments: {error}"))?;
+    let managed_root = managed_sandbox_root(context.checkpoint_root, &context.call.target);
     let (path, mut entries) = list_target_directory(
         &context.call.target,
         &arguments.path,
         arguments.include_hidden.unwrap_or(false),
+        managed_root.as_deref(),
         context.database,
         context.credentials,
         context.known_hosts_path,
@@ -583,9 +586,11 @@ fn execute_search_text(
     let arguments: SearchTextArgumentsNative =
         serde_json::from_value(context.call.arguments.clone())
             .map_err(|error| format!("Invalid search_text arguments: {error}"))?;
+    let managed_root = managed_sandbox_root(context.checkpoint_root, &context.call.target);
     let (root, mut matches, bounds_hit) = search_target(
         &context.call.target,
         &arguments,
+        managed_root.as_deref(),
         context.database,
         context.credentials,
         context.known_hosts_path,
@@ -1344,6 +1349,7 @@ fn list_target_directory(
     target: &AgentToolTargetNative,
     requested_path: &str,
     include_hidden: bool,
+    managed_root: Option<&Path>,
     database: &Database,
     credentials: &CredentialManager,
     known_hosts_path: &Path,
@@ -1375,7 +1381,10 @@ fn list_target_directory(
                     path: entry_path.to_string_lossy().to_string(),
                     kind: file_kind(metadata.file_type()),
                     byte_length: metadata.is_file().then_some(metadata.len()),
-                    sensitive: path_is_sensitive(&entry_path.to_string_lossy()),
+                    sensitive: path_is_sensitive_in_root(
+                        &entry_path.to_string_lossy(),
+                        managed_root,
+                    ),
                 });
             }
             Ok((path.to_string_lossy().to_string(), entries))
@@ -1443,6 +1452,7 @@ struct SearchMatchNative {
 fn search_target(
     target: &AgentToolTargetNative,
     arguments: &SearchTextArgumentsNative,
+    managed_root: Option<&Path>,
     database: &Database,
     credentials: &CredentialManager,
     known_hosts_path: &Path,
@@ -1484,7 +1494,7 @@ fn search_target(
                         line: None,
                         column: None,
                         preview: None,
-                        sensitive: path_is_sensitive(&display),
+                        sensitive: path_is_sensitive_in_root(&display, managed_root),
                     });
                 }
                 if matches!(
@@ -1500,7 +1510,7 @@ fn search_target(
                     bytes_read = bytes_read.saturating_add(metadata.len());
                     let bytes =
                         read_local_bounded(&file, metadata.len().min(MAX_FILE_BYTES), operation)?;
-                    append_content_matches(&display, &bytes, arguments, &mut matches);
+                    append_content_matches(&display, &bytes, arguments, managed_root, &mut matches);
                 }
             }
             Ok((
@@ -1561,7 +1571,7 @@ fn search_target(
                     }
                     bytes_read = bytes_read.saturating_add(size);
                     let bytes = read_remote_bounded(&sftp, &file, size, operation)?;
-                    append_content_matches(&file, &bytes, arguments, &mut matches);
+                    append_content_matches(&file, &bytes, arguments, None, &mut matches);
                 }
             }
             Ok((search_root, matches, bounds_hit))
@@ -1574,6 +1584,7 @@ fn append_content_matches(
     path: &str,
     bytes: &[u8],
     arguments: &SearchTextArgumentsNative,
+    managed_root: Option<&Path>,
     matches: &mut Vec<SearchMatchNative>,
 ) {
     if detect_binary(bytes) {
@@ -1593,7 +1604,7 @@ fn append_content_matches(
             line: Some(index as u64 + 1),
             column: Some(column as u64 + 1),
             preview: Some(preview),
-            sensitive: path_is_sensitive(path),
+            sensitive: path_is_sensitive_in_root(path, managed_root),
         });
     }
 }
@@ -2238,6 +2249,67 @@ fn slash_path(path: &Path) -> String {
 
 fn detect_binary(bytes: &[u8]) -> bool {
     bytes.iter().take(8 * 1024).any(|byte| *byte == 0) || std::str::from_utf8(bytes).is_err()
+}
+
+fn managed_sandbox_root(checkpoint_root: &Path, target: &AgentToolTargetNative) -> Option<PathBuf> {
+    let AgentToolTargetNative::Local {
+        cwd: Some(root), ..
+    } = target
+    else {
+        return None;
+    };
+    let canonical_root = fs::canonicalize(root).ok()?;
+    let canonical_data = fs::canonicalize(checkpoint_root).ok()?;
+    let is_hex32 = |name: &str| {
+        name.len() == 32
+            && name
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    };
+    let mac_sandboxes = canonical_data.join("sandboxes");
+    if canonical_root.file_name().and_then(|n| n.to_str()) == Some("workspace") {
+        if let Some(anchor) = canonical_root.parent() {
+            if anchor.parent() == Some(mac_sandboxes.as_path())
+                && anchor
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(is_hex32)
+            {
+                return Some(canonical_root);
+            }
+        }
+    }
+    let win_sandboxes = canonical_data.join("windows-agent-workspaces");
+    if canonical_root.parent() == Some(win_sandboxes.as_path())
+        && canonical_root
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(is_hex32)
+    {
+        return Some(canonical_root);
+    }
+    None
+}
+
+fn path_is_sensitive_in_root(path: &str, managed_root: Option<&Path>) -> bool {
+    if super::path_is_sensitive_for_managed_root(path, managed_root) {
+        return true;
+    }
+    if let Some(root) = managed_root {
+        let normalized_path = path.replace('\\', "/");
+        let normalized_root = root.to_string_lossy().replace('\\', "/");
+        let trimmed_root = normalized_root.trim_end_matches('/');
+        if normalized_path == trimmed_root {
+            return false;
+        }
+        if let Some(rest) = normalized_path
+            .strip_prefix(trimmed_root)
+            .and_then(|s| s.strip_prefix('/'))
+        {
+            return path_is_sensitive(rest);
+        }
+    }
+    path_is_sensitive(path)
 }
 
 fn path_is_sensitive(path: &str) -> bool {

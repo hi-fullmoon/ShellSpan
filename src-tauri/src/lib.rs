@@ -328,13 +328,6 @@ pub fn run() {
                 }
             }
             let home_dir = app.path().home_dir()?;
-            #[cfg(target_os = "macos")]
-            {
-                let mac_home = home_dir.clone();
-                tauri::async_runtime::spawn_blocking(move || {
-                    agent_runtime::mac_sandbox::recover_all_on_startup(&mac_home);
-                });
-            }
             #[cfg(all(
                 feature = "native-input-acceptance",
                 debug_assertions,
@@ -415,7 +408,7 @@ pub fn run() {
             } else {
                 credentials
             };
-            let petdex = petdex::PetdexAdapter::new(home_dir);
+            let petdex = petdex::PetdexAdapter::new(home_dir.clone());
             let message_adapter = petdex.clone();
             let message_directory = shellspan_dir.clone();
             tauri::async_runtime::spawn_blocking(move || {
@@ -436,6 +429,15 @@ pub fn run() {
                 let data_dir = shellspan_dir.clone();
                 tauri::async_runtime::spawn_blocking(move || {
                     runtime_for_reclaim.reclaim_orphaned_windows_sandboxes(&data_dir);
+                });
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let runtime_for_reclaim = runtime.inner().clone();
+                let mac_data_dir = shellspan_dir.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    agent_runtime::mac_sandbox::recover_all_on_startup(&mac_data_dir);
+                    runtime_for_reclaim.reclaim_orphaned_mac_sandboxes(&mac_data_dir);
                 });
             }
             #[cfg(all(

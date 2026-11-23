@@ -15,6 +15,7 @@ mod mcp;
 mod process;
 mod registry;
 mod runtime;
+pub(crate) mod sandbox_proxy;
 pub(crate) mod sandbox_sync;
 pub(crate) mod scoped_read;
 mod shell_guard;
@@ -46,6 +47,7 @@ pub(crate) use mcp::*;
 pub(crate) use process::*;
 pub(crate) use registry::*;
 pub(crate) use runtime::*;
+pub(crate) use sandbox_proxy::{SandboxNetworkMode, SandboxNetworkPolicy};
 #[cfg(test)]
 pub(crate) use shell_guard::REMOTE_PRIVILEGE_DENIED;
 pub(crate) use shell_guard::{

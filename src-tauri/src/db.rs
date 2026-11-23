@@ -8,6 +8,8 @@ const TERMINAL_WORKSPACE_VERSION: u64 = 1;
 const MAX_TERMINAL_WORKSPACE_BYTES: usize = 1024 * 1024;
 const MAX_TERMINAL_WORKSPACE_SESSIONS: usize = 100;
 const AGENT_SANDBOX_ENABLED_KEY: &str = "ai.agentSandboxEnabled";
+const AGENT_SANDBOX_NETWORK_MODE_KEY: &str = "ai.agentSandboxNetworkMode";
+const AGENT_SANDBOX_NETWORK_ALLOWLIST_KEY: &str = "ai.agentSandboxNetworkAllowlist";
 const VIM_BRIDGE_AUTO_ATTACH_KEY: &str = "ai.vimBridgeAutoAttach";
 const AGENT_SANDBOX_DISABLED: &str = "AGENT_SANDBOX_DISABLED: enable Agent sandbox in AI Settings";
 
@@ -1024,6 +1026,52 @@ impl Database {
     pub(crate) fn agent_sandbox_enabled(&self) -> Result<bool, String> {
         let conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
         Self::read_agent_sandbox_enabled(&conn)
+    }
+
+    pub(crate) fn agent_sandbox_network_policy(
+        &self,
+    ) -> Result<crate::agent_runtime::SandboxNetworkPolicy, String> {
+        use crate::agent_runtime::{SandboxNetworkMode, SandboxNetworkPolicy};
+        let conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
+        let raw_mode = conn
+            .query_row(
+                "SELECT value FROM preferences WHERE key=?1",
+                [AGENT_SANDBOX_NETWORK_MODE_KEY],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        let mode_str = raw_mode
+            .as_deref()
+            .map(|raw| raw.trim().trim_matches('"'))
+            .unwrap_or("blocked");
+        let mode = match mode_str {
+            "devRegistries" => SandboxNetworkMode::DevRegistries,
+            "customAllowlist" => SandboxNetworkMode::CustomAllowlist,
+            _ => SandboxNetworkMode::Blocked,
+        };
+        if mode != SandboxNetworkMode::CustomAllowlist {
+            return Ok(SandboxNetworkPolicy {
+                mode,
+                custom_domains: Vec::new(),
+            });
+        }
+        let raw_list = conn
+            .query_row(
+                "SELECT value FROM preferences WHERE key=?1",
+                [AGENT_SANDBOX_NETWORK_ALLOWLIST_KEY],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        let custom_domains = raw_list
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
+            .unwrap_or_default();
+        Ok(SandboxNetworkPolicy {
+            mode,
+            custom_domains,
+        })
     }
 
     pub(crate) fn vim_bridge_auto_attach(&self) -> Result<bool, String> {

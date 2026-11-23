@@ -537,10 +537,42 @@ const MAX_JOB_MEMORY_BYTES: usize = 2 * 1024 * 1024 * 1024;
 fn windows_sandbox_path_env(system: &Path) -> String {
     let mut entries = vec![system.display().to_string()];
     if let Some(program_files) = std::env::var_os("ProgramFiles").map(PathBuf::from) {
-        for relative in ["Git\\cmd", "nodejs", "PowerShell\\7"] {
+        for relative in [
+            "Git\\cmd",
+            "Git\\usr\\bin",
+            "nodejs",
+            "PowerShell\\7",
+            "Go\\bin",
+            "LLVM\\bin",
+        ] {
             let candidate = program_files.join(relative);
             if candidate.is_dir() {
                 entries.push(candidate.display().to_string());
+            }
+        }
+        if let Ok(dir_entries) = fs::read_dir(&program_files) {
+            let mut python_dirs: Vec<PathBuf> = dir_entries
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    path.is_dir()
+                        && path
+                            .file_name()
+                            .and_then(OsStr::to_str)
+                            .is_some_and(|name| {
+                                name.starts_with("Python3")
+                                    && name[7..].bytes().all(|b| b.is_ascii_digit())
+                            })
+                })
+                .collect();
+            python_dirs.sort();
+            python_dirs.reverse();
+            if let Some(python_root) = python_dirs.into_iter().next() {
+                entries.push(python_root.display().to_string());
+                let scripts = python_root.join("Scripts");
+                if scripts.is_dir() {
+                    entries.push(scripts.display().to_string());
+                }
             }
         }
     }
