@@ -6,7 +6,20 @@ const schema = JSON.parse(fs.readFileSync(new URL('../../protocol/llm/catalog.sc
 const catalog = JSON.parse(fs.readFileSync(new URL('../../protocol/llm/catalog.json', import.meta.url)));
 const validate = new Ajv({ strict: false, allErrors: true }).compile(schema);
 assert(validate(catalog), JSON.stringify(validate.errors));
-for (const preset of Object.values(catalog.presets)) {
+for (const [presetId, preset] of Object.entries(catalog.presets)) {
+  const modelIds = Object.keys(preset.models);
+  if (modelIds.length > 0) {
+    assert(
+      typeof preset.defaultModel === 'string' && Object.hasOwn(preset.models, preset.defaultModel),
+      `preset "${presetId}" must declare a defaultModel present in its models`,
+    );
+  } else {
+    assert.equal(
+      preset.defaultModel,
+      undefined,
+      `preset "${presetId}" with no built-in models must not declare defaultModel`,
+    );
+  }
   for (const model of Object.values(preset.models)) {
     assert(model.maxOutputTokens <= model.contextWindow);
     assert(!model.vision || model.vision.reservedTokensPerImage <= model.contextWindow);
@@ -21,9 +34,10 @@ for (const mutate of [
   c => { c.presets.qwen.models.qwen3.compat.protocol = 'ollama'; },
   c => { c.presets.qwen.models.qwen3.maxOutputTokens = 0; },
   c => { c.presets.qwen.models.qwen3.reasoning[0].id = 'ultra'; },
+  c => { c.presets.qwen.defaultModel = ' '; },
 ]) {
   const invalid = structuredClone(catalog);
   mutate(invalid);
   assert(!validate(invalid), 'invalid catalog unexpectedly passed schema validation');
 }
-console.log(`LLM catalog schema: ${Object.values(catalog.presets).reduce((n, p) => n + Object.keys(p.models).length, 0)} exact models validated; 4 negative fixtures rejected.`);
+console.log(`LLM catalog schema: ${Object.values(catalog.presets).reduce((n, p) => n + Object.keys(p.models).length, 0)} exact models validated; 5 negative fixtures rejected.`);

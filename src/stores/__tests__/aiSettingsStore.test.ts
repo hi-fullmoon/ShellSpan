@@ -125,13 +125,21 @@ describe('aiSettingsStore', () => {
   it('keeps API version paths out of provider preset URLs', () => {
     const minimaxId = useAiSettingsStore.getState().addProvider('minimax');
     const kimiId = useAiSettingsStore.getState().addProvider('kimi');
+    const openaiId = useAiSettingsStore.getState().addProvider('openai');
+    const qwenId = useAiSettingsStore.getState().addProvider('qwen');
+    const glmId = useAiSettingsStore.getState().addProvider('glm');
 
-    expect(useAiSettingsStore.getState().getProviderConfig(minimaxId).baseUrl)
-      .toBe('https://api.minimaxi.com');
+    expect(useAiSettingsStore.getState().getProviderConfig(minimaxId)).toEqual(expect.objectContaining({
+      baseUrl: 'https://api.minimaxi.com',
+      model: 'MiniMax-M3',
+    }));
     expect(useAiSettingsStore.getState().getProviderConfig(kimiId)).toEqual(expect.objectContaining({
       baseUrl: 'https://api.kimi.com/coding',
       model: 'k3',
     }));
+    expect(useAiSettingsStore.getState().getProviderConfig(openaiId).model).toBe('gpt-5.6');
+    expect(useAiSettingsStore.getState().getProviderConfig(qwenId).model).toBe('qwen3.8-max');
+    expect(useAiSettingsStore.getState().getProviderConfig(glmId).model).toBe('glm-5.2');
     expect(useAiSettingsStore.getState().getProviderConfig(kimiId))
       .not.toHaveProperty('reasoningEffort');
   });

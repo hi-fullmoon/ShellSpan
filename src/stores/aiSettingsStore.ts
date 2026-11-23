@@ -19,10 +19,18 @@ import {
 import { isProviderProfile, resolveProviderProfile } from '@/lib/ai/provider-contract';
 import type { AgentPermissionMode } from '@/types/agent-approval';
 import type { AgentExecutionSurface } from '@/types/agent-session';
+import llmCatalog from '../../protocol/llm/catalog.json';
 
 const logger = createLogger('aiSettingsStore');
 const AGENT_SANDBOX_ENABLED_KEY = 'ai.agentSandboxEnabled';
 const VIM_BRIDGE_AUTO_ATTACH_KEY = 'ai.vimBridgeAutoAttach';
+
+function catalogDefaultModel(
+  profile: import('@/lib/ai/provider-contract').ProviderProfileId,
+): string {
+  const preset = llmCatalog.presets[profile] as { defaultModel?: string } | undefined;
+  return preset?.defaultModel ?? '';
+}
 
 export interface AiProviderPresetDefinition {
   preset: AiProviderPreset;
@@ -41,7 +49,7 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
     name: 'Ollama',
     kind: 'ollama',
     baseUrl: 'http://127.0.0.1:11434',
-    model: 'qwen3',
+    model: catalogDefaultModel('ollama'),
     requiresApiKey: false,
   },
   {
@@ -50,7 +58,7 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
     name: 'OpenAI',
     kind: 'openAi',
     baseUrl: 'https://api.openai.com',
-    model: 'gpt-5.4-mini',
+    model: catalogDefaultModel('openai'),
     requiresApiKey: true,
   },
   {
@@ -59,7 +67,7 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
     name: 'Anthropic',
     kind: 'anthropicMessages',
     baseUrl: 'https://api.anthropic.com',
-    model: 'claude-sonnet-5',
+    model: catalogDefaultModel('anthropic'),
     requiresApiKey: true,
   },
   {
@@ -68,7 +76,7 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
     name: 'DeepSeek',
     kind: 'openAiCompatible',
     baseUrl: 'https://api.deepseek.com',
-    model: 'deepseek-flash',
+    model: catalogDefaultModel('deepseek'),
     requiresApiKey: true,
   },
   {
@@ -77,7 +85,7 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
     name: 'MiniMax',
     kind: 'openAiCompatible',
     baseUrl: 'https://api.minimaxi.com',
-    model: 'MiniMax-M2.7',
+    model: catalogDefaultModel('minimax'),
     requiresApiKey: true,
   },
   {
@@ -86,18 +94,18 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
     name: 'Kimi Code',
     kind: 'openAiCompatible',
     baseUrl: 'https://api.kimi.com/coding',
-    model: 'k3',
+    model: catalogDefaultModel('kimi'),
     requiresApiKey: true,
   },
-  { preset: 'qwen', profile: 'qwen', name: 'Qwen', kind: 'openAiCompatible', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3', requiresApiKey: true },
-  { preset: 'glm', profile: 'glm', name: 'GLM', kind: 'openAiCompatible', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-5', requiresApiKey: true },
+  { preset: 'qwen', profile: 'qwen', name: 'Qwen', kind: 'openAiCompatible', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: catalogDefaultModel('qwen'), requiresApiKey: true },
+  { preset: 'glm', profile: 'glm', name: 'GLM', kind: 'openAiCompatible', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: catalogDefaultModel('glm'), requiresApiKey: true },
   {
     preset: 'openrouter',
     profile: 'openrouter',
     name: 'OpenRouter',
     kind: 'openAiCompatible',
     baseUrl: 'https://openrouter.ai/api/v1',
-    model: '',
+    model: catalogDefaultModel('openrouter'),
     requiresApiKey: true,
   },
   {
@@ -106,7 +114,7 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPresetDefinition[] = [
     name: 'Custom Provider',
     kind: 'openAiCompatible',
     baseUrl: '',
-    model: '',
+    model: catalogDefaultModel('generic'),
     requiresApiKey: true,
   },
 ] as const;

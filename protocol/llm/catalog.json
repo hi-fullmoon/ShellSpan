@@ -4,6 +4,7 @@
   "presets": {
     "anthropic": {
       "kind": "anthropicMessages",
+      "defaultModel": "claude-sonnet-5",
       "compat": {
         "cumulativeStream": false,
         "supportsStreamUsage": true,
@@ -129,6 +130,7 @@
     },
     "openai": {
       "kind": "openAi",
+      "defaultModel": "gpt-5.6",
       "compat": {
         "cumulativeStream": false,
         "supportsStreamUsage": true,
@@ -737,6 +739,7 @@
     },
     "ollama": {
       "kind": "ollama",
+      "defaultModel": "qwen3",
       "compat": {
         "cumulativeStream": false,
         "supportsStreamUsage": true,
@@ -905,6 +908,7 @@
     },
     "deepseek": {
       "kind": "openAiCompatible",
+      "defaultModel": "deepseek-flash",
       "compat": {
         "cumulativeStream": false,
         "supportsStreamUsage": true,
@@ -981,6 +985,7 @@
     },
     "minimax": {
       "kind": "openAiCompatible",
+      "defaultModel": "MiniMax-M3",
       "compat": {
         "cumulativeStream": true,
         "supportsStreamUsage": true,
@@ -1084,6 +1089,7 @@
     },
     "qwen": {
       "kind": "openAiCompatible",
+      "defaultModel": "qwen3.8-max",
       "compat": {
         "cumulativeStream": false,
         "supportsStreamUsage": true,
@@ -1243,6 +1249,7 @@
     },
     "glm": {
       "kind": "openAiCompatible",
+      "defaultModel": "glm-5.2",
       "compat": {
         "cumulativeStream": false,
         "supportsStreamUsage": true,
@@ -1415,6 +1422,7 @@
     },
     "kimi": {
       "kind": "openAiCompatible",
+      "defaultModel": "k3",
       "compat": {
         "cumulativeStream": false,
         "supportsStreamUsage": true,

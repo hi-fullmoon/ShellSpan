@@ -195,6 +195,8 @@ impl CatalogModelDefinition {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Preset {
     kind: AiProviderKind,
+    #[serde(default)]
+    default_model: Option<String>,
     compat: Compat,
     models: BTreeMap<String, CatalogModelDefinition>,
 }
@@ -212,6 +214,16 @@ static CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
     assert!(!value.policy.is_empty());
     for preset in value.presets.values() {
         assert_eq!(preset.kind, preset.compat.protocol);
+        match &preset.default_model {
+            Some(default_model) => assert!(
+                preset.models.contains_key(default_model),
+                "preset defaultModel must exist in preset models: {default_model}"
+            ),
+            None => assert!(
+                preset.models.is_empty(),
+                "preset with built-in models must declare defaultModel"
+            ),
+        }
         for (id, model) in &preset.models {
             validate_definition(id, &model.resolve(&preset.compat), preset.kind)
                 .expect("valid catalog model");

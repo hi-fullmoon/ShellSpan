@@ -258,6 +258,10 @@
             "anthropicMessages"
           ]
         },
+        "defaultModel": {
+          "type": "string",
+          "pattern": "^\\S(?:.*\\S)?$"
+        },
         "compat": {
           "$ref": "#/$defs/compat"
         },
