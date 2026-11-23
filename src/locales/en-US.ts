@@ -778,6 +778,7 @@ export default {
   'connection.sandbox.deployScriptHint': 'If the shellspan-bwrap-v1 executor is not yet configured on the server, review and run this root setup script:',
   'connection.sandbox.deployScriptSummary': 'View remote sandbox setup script',
   'connection.sandbox.copyDeployScript': 'Copy Setup Script',
+  'connection.sandbox.openTerminal': 'Open Host Terminal',
   'connection.sandbox.copied': 'Install command copied.',
   'connection.sandbox.copyFailed': 'Could not copy the install command.',
   'connection.sandbox.step.executorProtocol': 'Executor Protocol Version',

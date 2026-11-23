@@ -778,6 +778,7 @@ export default {
   'connection.sandbox.deployScriptHint': '如果远端尚未配置 shellspan-bwrap-v1 执行器，可审阅下方脚本并在远端以 root 身份部署：',
   'connection.sandbox.deployScriptSummary': '查看远端沙箱部署脚本',
   'connection.sandbox.copyDeployScript': '复制部署脚本',
+  'connection.sandbox.openTerminal': '打开主机终端',
   'connection.sandbox.copied': '已复制安装命令。',
   'connection.sandbox.copyFailed': '无法复制安装命令。',
   'connection.sandbox.step.executorProtocol': '执行器协议版本',

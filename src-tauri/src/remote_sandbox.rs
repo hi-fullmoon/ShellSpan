@@ -773,10 +773,20 @@ pub(crate) struct TestResult {
     deploy_script: Option<String>,
 }
 
+const BWRAP_EXECUTOR_SCRIPT: &str = include_str!("../../scripts/remote-sandbox/shellspan-bwrap-v1");
+
 pub(crate) fn deployment_script(policy: &Policy, install_cmd: Option<&str>) -> String {
+    use base64::Engine;
     let install_line = install_cmd
         .unwrap_or("apt-get update && apt-get install -y bubblewrap python3 libseccomp2");
     let workspace = &policy.workspace;
+    let executor_b64 = base64::engine::general_purpose::STANDARD.encode(BWRAP_EXECUTOR_SCRIPT);
+    let wrapped_b64 = executor_b64
+        .as_bytes()
+        .chunks(76)
+        .map(|chunk| std::str::from_utf8(chunk).unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join("\n");
     format!(
         "#!/usr/bin/env bash\n\
 set -euo pipefail\n\
@@ -785,7 +795,7 @@ set -euo pipefail\n\
 {install_line}\n\
 \n\
 # 2. Prepare trusted root-owned sandbox directories and witness file\n\
-install -d -o root -g root -m 0755 /var/lib/shellspan-sandbox /var/lib/shellspan-sandbox/rootfs /srv/shellspan-workspaces\n\
+install -d -o root -g root -m 0755 /var/lib/shellspan-sandbox /var/lib/shellspan-sandbox/rootfs /srv/shellspan-workspaces /usr/local/libexec\n\
 printf 'shellspan-host-boundary\\n' > /var/lib/shellspan-sandbox/outside-probe\n\
 chmod 0644 /var/lib/shellspan-sandbox/outside-probe\n\
 \n\
@@ -797,11 +807,17 @@ install -d -o root -g root -m 0755 '{workspace}'\n\
 # Example loopback ext4 mount (replace with your dedicated volume/partition in /etc/fstab):\n\
 # mount -o loop,nodev,nosuid /var/lib/shellspan-sandbox/workspace.img '{workspace}'\n\
 \n\
-# 5. Install scripts/remote-sandbox/shellspan-bwrap-v1 as /usr/local/libexec/shellspan-bwrap-v1 (chmod 0755)\n\
-#    and register it in /etc/ssh/sshd_config:\n\
-#      Subsystem shellspan-bwrap-v1 /usr/local/libexec/shellspan-bwrap-v1\n\
-#    then validate and reload OpenSSH:\n\
-#      sshd -t && systemctl reload sshd\n"
+# 5. Install bundled shellspan-bwrap-v1 executor and register SSH subsystem\n\
+base64 -d <<'SHELLSPAN_BWRAP_EOF' > /usr/local/libexec/shellspan-bwrap-v1\n\
+{wrapped_b64}\n\
+SHELLSPAN_BWRAP_EOF\n\
+chown root:root /usr/local/libexec/shellspan-bwrap-v1\n\
+chmod 0755 /usr/local/libexec/shellspan-bwrap-v1\n\
+\n\
+if ! grep -Eq '^[[:space:]]*Subsystem[[:space:]]+shellspan-bwrap-v1([[:space:]]|$)' /etc/ssh/sshd_config; then\n\
+  printf '\\nSubsystem shellspan-bwrap-v1 /usr/local/libexec/shellspan-bwrap-v1\\n' >> /etc/ssh/sshd_config\n\
+fi\n\
+sshd -t && (systemctl reload sshd || systemctl reload ssh)\n"
     )
 }
 

@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { TerminalIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -8,7 +9,9 @@ import { Dialog, DialogTrigger } from '@/components/ui/dialog';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useConnectSession } from '@/hooks/useConnectSession';
 import { useI18n } from '@/hooks/useI18n';
+import { useProfileStore } from '@/stores/profileStore';
 import { CopyButton } from '@/components/ui/copy-button';
 import { invokeCancelConnectionPreflight, invokeGetProfileSandbox, invokeSaveProfileSandbox, invokeTestProfileSandbox, invokeTrustHost } from '@/lib/ipc/tauri';
 import { createOperationId } from '@/lib/operation-id';
@@ -19,6 +22,8 @@ type Mode = SandboxMode | 'off';
 
 export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
   const { t } = useI18n();
+  const { connect } = useConnectSession();
+  const profile = useProfileStore((state) => state.profiles.find((item) => item.id === profileId));
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState<ProfileSandbox>();
   const [mode, setMode] = useState<Mode>('off');
@@ -178,15 +183,31 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
                       {report.deployScript}
                     </pre>
                   </details>
-                  <CopyButton
-                    key={report.deployScript}
-                    text={report.deployScript}
-                    variant="outline"
-                    size="sm"
-                    className="self-start"
-                    label={t('connection.sandbox.copyDeployScript')}
-                    errorLabel={t('connection.sandbox.copyFailed')}
-                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CopyButton
+                      key={report.deployScript}
+                      text={report.deployScript}
+                      variant="outline"
+                      size="sm"
+                      label={t('connection.sandbox.copyDeployScript')}
+                      errorLabel={t('connection.sandbox.copyFailed')}
+                    />
+                    {profile && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1"
+                        onClick={() => {
+                          setOpen(false);
+                          void connect(profile);
+                        }}
+                      >
+                        <TerminalIcon aria-hidden="true" className="size-3.5" />
+                        <span>{t('connection.sandbox.openTerminal')}</span>
+                      </Button>
+                    )}
+                  </div>
                 </AlertDescription>
               )}
             </Alert>

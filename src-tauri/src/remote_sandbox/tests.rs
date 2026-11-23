@@ -821,6 +821,9 @@ fn bubblewrap_deployment_script_contains_subsystem_and_workspace() {
     assert!(script.contains("dnf install bubblewrap"));
     assert!(script.contains("/srv/shellspan-workspaces/staging"));
     assert!(script.contains("Subsystem shellspan-bwrap-v1 /usr/local/libexec/shellspan-bwrap-v1"));
+    assert!(script
+        .contains("base64 -d <<'SHELLSPAN_BWRAP_EOF' > /usr/local/libexec/shellspan-bwrap-v1"));
+    assert!(script.contains("SHELLSPAN_BWRAP_EOF"));
     assert!(script.contains("/var/lib/shellspan-sandbox/outside-probe"));
     assert!(script.contains("nodev,nosuid"));
 }
