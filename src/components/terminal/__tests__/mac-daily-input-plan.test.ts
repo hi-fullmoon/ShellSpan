@@ -1,6 +1,6 @@
-import {expect,it} from 'vitest';
+import {afterAll,expect,it} from 'vitest';
 import {macDailyExpectedRecords,macDailyFullExpectedRecords,macDailyOutputPlan,macDailySingleOutputPlan,macDailyPasteValues,macDailyTailEditPlan,macDailyUnicodeEditPlan,macDailyCompletionPlan,macDailyPumpCompletionPlan} from './mac-daily-input-plan';
-import {mkdirSync,mkdtempSync,readFileSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
 const token='11111111-2222-4333-8444-555555555555';
@@ -64,3 +64,5 @@ it.runIf(process.platform==='darwin'&&process.arch==='arm64')('prints the exact 
   expect(Array.from(actual)).toEqual(Array.from(Buffer.from(plan.prefix+Buffer.from(value,'utf8').toString('hex')+':END\n','utf8')));
  }
 });
+
+afterAll(()=>{for(const dir of ['mac-daily-pump-plan','mac-daily-completion','mac-daily-output'])rmSync(resolve(import.meta.dirname,'../../../../artifacts/tests',dir),{recursive:true,force:true});});

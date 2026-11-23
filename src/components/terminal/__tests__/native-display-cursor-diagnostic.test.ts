@@ -1,4 +1,4 @@
-import {expect, it} from 'vitest';
+import {afterAll,expect, it} from 'vitest';
 import fs from 'node:fs';import path from 'node:path';import {randomUUID} from 'node:crypto';import {execFileSync} from 'node:child_process';
 import {nativeDisplayCursorDiagnostic} from './native-display-cursor-diagnostic';
 
@@ -14,3 +14,5 @@ it.skipIf(process.platform !== 'win32')('compiles the read-only sampler and writ
   const lines = fs.readFileSync(file,'utf8').trim().split(/\r?\n/);expect(lines.length).toBeGreaterThan(0);
   for(const line of lines){const record:Record<string,unknown>=JSON.parse(line);expect(Object.keys(record)).toEqual(['ticks','left','top','width','height','initialX','initialY','current','length','renderWidth','renderHeight']);expect(Object.values(record).every(value=>typeof value==='number')).toBe(true);}
 },45000);
+
+afterAll(() => { fs.rmSync(path.resolve('artifacts/tests/native-display-cursor'), { recursive: true, force: true }); });

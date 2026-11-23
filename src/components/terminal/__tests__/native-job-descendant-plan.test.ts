@@ -1,4 +1,4 @@
-import {expect,it} from 'vitest';
+import {afterAll,expect,it} from 'vitest';
 import {nativeJobDescendantPlan,nativeJobDescendantInitialGoal,nativeJobDescendantContinuationGoal} from './native-job-descendant-plan';
 import {nativeJobStdinPlan,matchesNativeJobStdinStep,nativeJobStdinArguments} from './native-job-stdin-plan';
 import fs from 'node:fs';import path from 'node:path';import {randomUUID} from 'node:crypto';import {execFile} from 'node:child_process';import {promisify} from 'node:util';
@@ -24,3 +24,5 @@ it.skipIf(process.platform!=='win32').each(['C:/Windows/System32/WindowsPowerShe
  const result=await promisify(execFile)(executable,['-NoLogo','-NoProfile','-NonInteractive','-File',parser,'-Source',source],{timeout:15000,windowsHide:true,env:{...process.env,HOME:home,USERPROFILE:home,PSModuleAnalysisCachePath:path.join(directory,'module.cache')}});
  expect(result.stderr).toBe('');expect(fs.existsSync(path.join(home,nativeJobDescendantPlan(marker).witnessName))).toBe(false);
 },20000);
+
+afterAll(()=>{fs.rmSync(path.resolve(import.meta.dirname,'../../../../artifacts/tests/native-job-descendant-parser'),{recursive:true,force:true});});

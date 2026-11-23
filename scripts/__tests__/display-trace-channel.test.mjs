@@ -1,3 +1,6 @@
+import { afterAll as __cleanupAfterAll } from 'vitest';
+import { rmSync as __cleanupRmSync } from 'node:fs';
+import { resolve as __cleanupResolve } from 'node:path';
 import assert from 'node:assert/strict';
 import {it} from 'vitest';
 import {readFile,mkdir,lstat} from 'node:fs/promises';
@@ -41,3 +44,4 @@ it.each([2,3])('keeps legacy display version %i bytes and admission unchanged',a
  const legacy=JSON.parse(captured);legacy.version=version;legacy.events=legacy.events.slice(0,2);const bytes=Buffer.from(JSON.stringify(legacy));
  await channel(undefined,async({url})=>{const response=await fetch(url,{method:'POST',body:bytes});assert.equal(response.status,200);assert((await readFile((await response.json()).file)).equals(bytes));});
 });
+__cleanupAfterAll(() => { for (const dir of ["artifacts/tests/display-trace-channel"]) __cleanupRmSync(__cleanupResolve(import.meta.dirname, '../..', dir), { recursive: true, force: true }); });

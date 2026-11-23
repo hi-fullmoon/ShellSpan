@@ -1,3 +1,6 @@
+import { afterAll as __cleanupAfterAll } from 'vitest';
+import { rmSync as __cleanupRmSync } from 'node:fs';
+import { resolve as __cleanupResolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { copyFile, mkdir, mkdtemp } from 'node:fs/promises';
 import { resolve, dirname, relative, sep } from 'node:path';
@@ -31,3 +34,4 @@ describe('Tailwind generated-source boundary in a frozen copy without Git metada
     expect(result.selectors).toContain('.gap-1');
   });
 });
+__cleanupAfterAll(() => { for (const dir of ["artifacts/tests/tailwind-source"]) __cleanupRmSync(__cleanupResolve(import.meta.dirname, '../..', dir), { recursive: true, force: true }); });

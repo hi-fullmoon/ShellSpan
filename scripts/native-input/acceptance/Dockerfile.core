@@ -1,4 +1,0 @@
-ARG P3_NODE_IMAGE=node@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
-FROM ${P3_NODE_IMAGE} AS node_tools
-FROM shellspan-native-input-p3:local
-COPY --from=node_tools /usr/local/bin/node /usr/local/bin/node

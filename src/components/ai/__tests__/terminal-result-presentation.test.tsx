@@ -1,9 +1,9 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync } from 'node:fs';
+import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { AiToolExpandedContent, AiToolRow, toolOutputForCopy } from '@/components/ai/workspace/ai-tool-presentation';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
@@ -360,4 +360,8 @@ describe('terminal result presentation', () => {
     rerender(<AiToolRow node={{ ...observation, state: 'uncertain' }} />);
     expect(container.querySelector('button')).not.toBeNull();
   });
+});
+
+afterAll(() => {
+  rmSync(join(process.cwd(), 'artifacts/tests/terminal-result-presentation'), { recursive: true, force: true });
 });

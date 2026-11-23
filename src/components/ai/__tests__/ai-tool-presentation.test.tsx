@@ -1,8 +1,8 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { hostname } from 'node:os';
 
@@ -721,4 +721,9 @@ describe('AI tool presentation', () => {
     expect(container.querySelector('.ai-disclosure-summary')).toHaveTextContent('/proc/net/tcp');
     expect(container.querySelector('.ai-tool-meta')).toHaveTextContent('失败');
   });
+});
+
+afterAll(() => {
+  rmSync(join(process.cwd(), 'artifacts/tests/ai-tool-presentation'), { recursive: true, force: true });
+  rmSync(join(process.cwd(), 'artifacts/tests/ai-tool-diff'), { recursive: true, force: true });
 });

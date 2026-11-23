@@ -1,6 +1,6 @@
-import {it,expect} from 'vitest';
+import {afterAll,it,expect} from 'vitest';
 import {execFileSync} from 'node:child_process';
-import {mkdirSync,mkdtempSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,rmSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {macHumanPlan,macHumanScope} from './mac-human-plan';
 import zhCN from '@/locales/zh-CN';
@@ -24,3 +24,5 @@ it.runIf(process.platform==='darwin'&&process.arch==='arm64')('prints exact inde
  expect(plan.unicodeRaw).toContain('\t');expect(plan.unicodeCopy).toContain('A        B  中文 e\u0301');expect(plan.nativeCopy).toContain('A        B  中文 e\u0301');
  expect(()=>macHumanPlan('unowned')).toThrow();
 });
+
+afterAll(()=>{rmSync(resolve(import.meta.dirname,'../../../../artifacts/tests/mac-human-plan'),{recursive:true,force:true});});
