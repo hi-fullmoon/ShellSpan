@@ -34,7 +34,7 @@ export function TerminalResizeIndicator({ terminal, boundary }: { terminal: Term
   if (!size) return null;
   return (
     <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center" data-testid="terminal-resize-indicator">
-      <span className="rounded-sm bg-app-surface/90 px-3 py-1.5 font-mono text-xs text-app-text-soft shadow-sm"
+      <span className="rounded-sm bg-app-surface/90 px-3 py-1.5 font-mono text-xs text-app-text-soft shadow-[var(--shadow-toast)]"
         role="status" aria-label={t('terminal.resize.dimensions', size)}>
         <span aria-hidden="true">{size.cols} × {size.rows}</span>
       </span>

@@ -447,6 +447,8 @@ describe('TerminalPane', () => {
       name: 'terminal.notice.reconnectingLabel',
     });
     expect(indicator).toHaveTextContent('terminal.notice.reconnectingLabel...');
+    expect(indicator.firstElementChild).toHaveClass('shadow-[var(--shadow-toast)]');
+    expect(indicator.firstElementChild).not.toHaveClass('shadow-sm');
     expect(indicator.querySelectorAll('.animate-pulse')).toHaveLength(3);
     expect(indicator.querySelector('svg')).not.toBeNull();
     expect(screen.queryByText('terminal.status.connecting...')).toBeNull();

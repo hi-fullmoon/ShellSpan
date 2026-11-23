@@ -218,7 +218,7 @@ const TerminalPromptIndicator: React.FC<{
     role="status"
     aria-label={label}
   >
-    <span className="inline-flex items-center gap-1 rounded-sm border border-border/60 bg-app-surface/95 px-3 py-1.5 font-mono text-sm text-app-text-soft shadow-sm">
+    <span className="inline-flex items-center gap-1 rounded-sm border border-border/60 bg-app-surface/95 px-3 py-1.5 font-mono text-sm text-app-text-soft shadow-[var(--shadow-toast)]">
       {animatedDots && (
         <Spinner className="size-3.5" role={undefined} aria-label={undefined} aria-hidden="true" />
       )}

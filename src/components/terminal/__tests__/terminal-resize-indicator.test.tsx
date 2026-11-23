@@ -18,7 +18,10 @@ describe('TerminalResizeIndicator', () => {
       render(<TerminalResizeIndicator terminal={terminal} />);
       expect(screen.queryByTestId('terminal-resize-indicator')).toBeNull();
       act(() => terminal.resize(107, 28));
-      expect(screen.getByRole('status', { name: '107 columns × 28 rows' })).toHaveTextContent('107 × 28');
+      const status = screen.getByRole('status', { name: '107 columns × 28 rows' });
+      expect(status).toHaveTextContent('107 × 28');
+      expect(status).toHaveClass('shadow-[var(--shadow-toast)]');
+      expect(status).not.toHaveClass('shadow-sm');
       act(() => terminal.resize(110, 32));
       expect(screen.getByRole('status', { name: '110 columns × 32 rows' })).toBeInTheDocument();
       await waitFor(() => expect(screen.queryByTestId('terminal-resize-indicator')).toBeNull(), { timeout: 1600 });
