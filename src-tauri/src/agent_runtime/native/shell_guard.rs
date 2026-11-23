@@ -9,7 +9,7 @@ struct Flow {
     failure: Cwds,
 }
 
-pub(super) fn reject_destructive(script: &str, cwd: Option<&str>) -> Result<(), String> {
+pub(crate) fn reject_destructive(script: &str, cwd: Option<&str>) -> Result<(), String> {
     if script.len() > 8192 {
         return Err("native command exceeds the inspection limit".into());
     }
@@ -45,24 +45,134 @@ fn subshell_script_argument<'a>(borrowed: &[&'a str], index: usize) -> Option<&'
         return None;
     }
     let args = &borrowed[index + 1..];
-    for (pos, arg) in args.iter().enumerate() {
-        if *arg == "--" {
+    let mut pos = 0;
+    let mut saw_c = false;
+    while let Some(arg) = args.get(pos) {
+        if *arg == "--" || *arg == "-" {
+            pos += 1;
             break;
         }
-        if arg.strip_prefix('-').is_some_and(|options| {
-            options.contains('c') && options.bytes().all(|byte| byte.is_ascii_alphabetic())
-        }) {
-            let mut script_pos = pos + 1;
-            if args.get(script_pos) == Some(&"--") {
-                script_pos += 1;
+        if matches!(*arg, "-o" | "+o" | "-O" | "+O" | "--rcfile" | "--init-file") {
+            pos += 2;
+            continue;
+        }
+        if arg.starts_with("--") {
+            pos += 1;
+            continue;
+        }
+        if (arg.starts_with('-') || arg.starts_with('+'))
+            && arg.len() > 1
+            && arg[1..].bytes().all(|byte| byte.is_ascii_alphabetic())
+        {
+            if arg.starts_with('-') && arg[1..].contains('c') {
+                saw_c = true;
             }
-            return args
-                .get(script_pos)
-                .copied()
-                .filter(|candidate| *candidate != "<dynamic>");
+            if arg.ends_with('o') || arg.ends_with('O') {
+                pos += 2;
+            } else {
+                pos += 1;
+            }
+            continue;
+        }
+        break;
+    }
+    if !saw_c {
+        return None;
+    }
+    args.get(pos)
+        .copied()
+        .filter(|candidate| *candidate != "<dynamic>")
+}
+
+fn env_split_string_scripts(borrowed: &[&str]) -> Vec<String> {
+    let mut scripts = Vec::new();
+    let mut pos = 0;
+    while pos < borrowed.len() {
+        let base = borrowed[pos].rsplit('/').next().unwrap_or_default();
+        if base == "env" {
+            let mut cursor = pos + 1;
+            while let Some(arg) = borrowed.get(cursor) {
+                if *arg == "--" {
+                    break;
+                }
+                if *arg == "-S" || arg.eq_ignore_ascii_case("--split-string") {
+                    if let Some(value) = borrowed
+                        .get(cursor + 1)
+                        .copied()
+                        .filter(|candidate| *candidate != "<dynamic>")
+                    {
+                        scripts.push(value.to_string());
+                    }
+                    cursor += 2;
+                } else if let Some(value) = arg
+                    .strip_prefix("-S")
+                    .filter(|rest| !rest.is_empty() && *rest != "<dynamic>")
+                {
+                    scripts.push(value.to_string());
+                    cursor += 1;
+                } else if let Some(value) = arg
+                    .strip_prefix("--split-string=")
+                    .filter(|rest| !rest.is_empty() && *rest != "<dynamic>")
+                {
+                    scripts.push(value.to_string());
+                    cursor += 1;
+                } else if matches!(*arg, "-C" | "-u")
+                    || arg.eq_ignore_ascii_case("--chdir")
+                    || arg.eq_ignore_ascii_case("--unset")
+                {
+                    cursor += 2;
+                } else if arg.starts_with('-') || arg.contains('=') {
+                    cursor += 1;
+                } else {
+                    break;
+                }
+            }
+            pos = cursor;
+        } else {
+            pos += 1;
         }
     }
-    None
+    scripts
+}
+
+fn nested_command_scripts(borrowed: &[&str], index: Option<usize>) -> Vec<String> {
+    let mut scripts = env_split_string_scripts(borrowed);
+    if let Some(index) = index {
+        if let Some(sub_script) = subshell_script_argument(borrowed, index) {
+            scripts.push(sub_script.to_string());
+        }
+        if borrowed
+            .get(index)
+            .is_some_and(|word| word.rsplit('/').next() == Some("eval"))
+        {
+            let mut args = &borrowed[index + 1..];
+            if args.first() == Some(&"--") {
+                args = &args[1..];
+            }
+            let joined = args
+                .iter()
+                .copied()
+                .filter(|arg| *arg != "<dynamic>")
+                .collect::<Vec<_>>()
+                .join(" ");
+            if !joined.trim().is_empty() {
+                scripts.push(joined);
+            }
+        }
+    }
+    scripts
+}
+
+fn redirect_references_sudo_policy(node: Node<'_>, script: &str) -> bool {
+    if static_word(node, script).is_some_and(|word| sudo_policy_reference(&word)) {
+        return true;
+    }
+    for child in node.named_children(&mut node.walk()) {
+        if redirect_references_sudo_policy(child, script) {
+            return true;
+        }
+    }
+    false
 }
 
 fn parse_shell(script: &str) -> Result<tree_sitter::Tree, String> {
@@ -108,7 +218,7 @@ pub(crate) fn literal_sudo_command(script: &str) -> Result<String, String> {
     Ok(canonical)
 }
 
-pub(super) const REMOTE_PRIVILEGE_DENIED: &str =
+pub(crate) const REMOTE_PRIVILEGE_DENIED: &str =
     "AGENT_REMOTE_PRIVILEGE_DENIED: use a sudoOperationId configured for this SSH profile; ordinary Agent shell calls and input cannot start privilege tools";
 
 fn privilege_program(word: &str) -> bool {
@@ -118,7 +228,7 @@ fn privilege_program(word: &str) -> bool {
     )
 }
 
-pub(super) fn reject_remote_privilege_command(script: &str) -> Result<(), String> {
+pub(crate) fn reject_remote_privilege_command(script: &str) -> Result<(), String> {
     fn inspect(node: Node<'_>, script: &str, depth: usize) -> Result<(), String> {
         check_depth(depth)?;
         if node.kind() == "command" {
@@ -131,8 +241,8 @@ pub(super) fn reject_remote_privilege_command(script: &str) -> Result<(), String
                 .iter()
                 .map(|word| word.as_deref().unwrap_or("<dynamic>"))
                 .collect();
-            let index =
-                super::effect::segment_executable_index(&borrowed).unwrap_or(borrowed.len());
+            let exec_index = super::effect::segment_executable_index(&borrowed);
+            let index = exec_index.unwrap_or(borrowed.len());
             if borrowed
                 .iter()
                 .take(index.saturating_add(1))
@@ -140,9 +250,9 @@ pub(super) fn reject_remote_privilege_command(script: &str) -> Result<(), String
             {
                 return Err(REMOTE_PRIVILEGE_DENIED.into());
             }
-            if let Some(sub_script) = subshell_script_argument(&borrowed, index) {
-                let tree = parse_shell(sub_script)?;
-                inspect(tree.root_node(), sub_script, depth + 1)?;
+            for sub_script in nested_command_scripts(&borrowed, exec_index) {
+                let tree = parse_shell(&sub_script)?;
+                inspect(tree.root_node(), &sub_script, depth + 1)?;
             }
         }
         for child in node.named_children(&mut node.walk()) {
@@ -162,7 +272,17 @@ fn inspect(node: Node<'_>, script: &str, input: Cwds, depth: usize) -> Result<Fl
             sequence(&children, script, input, depth + 1)
         }
         "redirected_statement" => {
-            if let Some(body) = node.child_by_field_name("body") {
+            let body = node.child_by_field_name("body");
+            for child in &children {
+                if body.is_some_and(|body| body.id() == child.id()) {
+                    continue;
+                }
+                if redirect_references_sudo_policy(*child, script) {
+                    return Err(SUDO_POLICY_DENIED.into());
+                }
+                inspect_nested(*child, script, &input, depth + 1)?;
+            }
+            if let Some(body) = body {
                 let result = inspect(body, script, input.clone(), depth + 1)?;
                 Ok(Flow {
                     success: result.success,
@@ -278,18 +398,19 @@ fn inspect(node: Node<'_>, script: &str, input: Cwds, depth: usize) -> Result<Fl
                 .iter()
                 .map(|word| word.as_deref().unwrap_or("<dynamic>"))
                 .collect();
-            if let Some(index) = super::effect::segment_executable_index(&borrowed) {
+            let exec_index = super::effect::segment_executable_index(&borrowed);
+            for sub_script in nested_command_scripts(&borrowed, exec_index) {
+                if sudo_policy_reference(&sub_script) {
+                    return Err(SUDO_POLICY_DENIED.into());
+                }
+                let tree = parse_shell(&sub_script)?;
+                inspect(tree.root_node(), &sub_script, input.clone(), depth + 1)?;
+            }
+            if let Some(index) = exec_index {
                 let executable = borrowed[index].rsplit('/').next().unwrap_or_default();
                 if executable == "mkfs" || executable.starts_with("mkfs.") || executable == "wipefs"
                 {
                     return Err("AGENT_CRITICAL_OPERATION_DENIED: disk formatting and filesystem wiping are not available to the Agent".into());
-                }
-                if let Some(sub_script) = subshell_script_argument(&borrowed, index) {
-                    if sudo_policy_reference(sub_script) {
-                        return Err(SUDO_POLICY_DENIED.into());
-                    }
-                    let tree = parse_shell(sub_script)?;
-                    inspect(tree.root_node(), sub_script, input.clone(), depth + 1)?;
                 }
                 if matches!(executable, "rm" | "rmdir" | "unlink") {
                     for path in words[index + 1..]
@@ -604,5 +725,51 @@ mod tests {
                 "{command}"
             );
         }
+    }
+
+    #[test]
+    fn wrapper_subshell_eval_env_and_redirect_bypasses_are_rejected() {
+        for command in [
+            "exec -a ls rm -rf /",
+            "sh -c -e 'rm -rf /'",
+            "bash -c -l 'mkfs.ext4 /dev/sda'",
+            "zsh -c -f 'rm -rf /etc'",
+            "bash -c -o errexit 'rm -rf /'",
+            "env -S 'rm -rf /'",
+            "env --split-string='rm -rf /etc'",
+            "eval 'rm -rf /'",
+            "builtin eval 'rm -rf /etc'",
+            "printf rule >> /etc/su\"do\"ers",
+            "echo ok > $(rm -rf /)",
+            "cat < <(mkfs.ext4 /dev/sda)",
+        ] {
+            assert!(
+                reject_destructive(command, Some("/workspace")).is_err(),
+                "{command}"
+            );
+        }
+        for command in [
+            "exec -a ls sudo id",
+            "sh -c -e 'sudo id'",
+            "bash -c -l 'doas id'",
+            "zsh -c -f 'sudo id'",
+            "env -S 'sudo id'",
+            "eval 'sudo id'",
+            "builtin eval 'sudo id'",
+        ] {
+            assert_eq!(
+                reject_remote_privilege_command(command).unwrap_err(),
+                REMOTE_PRIVILEGE_DENIED,
+                "{command}"
+            );
+        }
+        assert_eq!(
+            super::super::effect::classify_command_effect("exec -a ls rm -rf /"),
+            crate::agent_runtime::AgentEffectKindNative::Destructive
+        );
+        assert_eq!(
+            super::super::effect::classify_command_effect("env -S 'rm -rf /'"),
+            crate::agent_runtime::AgentEffectKindNative::Destructive
+        );
     }
 }

@@ -1127,6 +1127,23 @@ impl TerminalSessionBroker {
             .ok_or_else(|| "TERMINAL_SCREEN_UNAVAILABLE".to_string())
     }
 
+    pub(crate) fn credential_prompt_active(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<bool, String> {
+        let slot = {
+            let state = self.lock()?;
+            let attachment = current_attachment(&state, transport_session_id)?;
+            state
+                .sessions
+                .get(&attachment.terminal_session_id)
+                .cloned()
+                .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?
+        };
+        let record = slot.lock()?;
+        Ok(record.credential_prompt_active())
+    }
+
     pub(crate) fn execution_capabilities(
         &self,
         transport_session_id: &str,
@@ -1183,13 +1200,33 @@ impl TerminalSessionBroker {
         transport_session_id: &str,
         request: TerminalWaitRequest,
     ) -> Result<TerminalWaitResult, String> {
-        self.wait_terminal_observed(transport_session_id, request, || {})
+        self.wait_terminal_observed_inner(transport_session_id, request, true, || {})
     }
 
+    pub(crate) fn wait_terminal_slice(
+        &self,
+        transport_session_id: &str,
+        request: TerminalWaitRequest,
+        record_timeout: bool,
+    ) -> Result<TerminalWaitResult, String> {
+        self.wait_terminal_observed_inner(transport_session_id, request, record_timeout, || {})
+    }
+
+    #[cfg(test)]
     fn wait_terminal_observed(
         &self,
         transport_session_id: &str,
         request: TerminalWaitRequest,
+        on_attached: impl FnOnce(),
+    ) -> Result<TerminalWaitResult, String> {
+        self.wait_terminal_observed_inner(transport_session_id, request, true, on_attached)
+    }
+
+    fn wait_terminal_observed_inner(
+        &self,
+        transport_session_id: &str,
+        request: TerminalWaitRequest,
+        record_timeout: bool,
         on_attached: impl FnOnce(),
     ) -> Result<TerminalWaitResult, String> {
         let deadline = Instant::now() + request.timeout;
@@ -1267,7 +1304,9 @@ impl TerminalSessionBroker {
             if now >= deadline {
                 let snapshot = snapshot
                     .unwrap_or_else(|| screen.snapshot(&terminal_session_id, terminal_generation));
-                TerminalRolloutCounters::increment(&self.counters.timeout);
+                if record_timeout {
+                    TerminalRolloutCounters::increment(&self.counters.timeout);
+                }
                 return Ok(TerminalWaitResult {
                     reason: TerminalWaitReason::TimedOut,
                     lifecycle_sequence: record.integration_event_sequence,
@@ -2024,6 +2063,7 @@ impl TerminalSessionBroker {
                 if matches!(record.interactive_input, Some(InteractiveInput::Running { through }) if through == record.next_input_sequence)
                 {
                     record.interactive_input = None;
+                    record.interactive_guard_buffer.clear();
                 }
                 if let Some(command) = &record.active_command {
                     settle_command_from_integration(
@@ -2773,6 +2813,7 @@ impl TerminalSessionBroker {
                 record.native_recovery_required || record.native_clear_pending.is_some();
         }
         advance_integration_state_revision(record)?;
+        operation.finalize_capture(record.next_output_sequence.saturating_sub(1))?;
         drop(record_guard);
         notify_session(&state, &attachment.terminal_session_id);
         self.changed.notify_all();
@@ -3611,7 +3652,33 @@ impl TerminalSessionBroker {
                 data.revision = next_command_revision(data.revision)?;
             }
         }
+        let next_interactive_guard_buffer = if record.active_command.is_none()
+            && matches!(source, TerminalBrokerInputSource::Agent { .. })
+        {
+            let (inspected, next_buffer) =
+                next_interactive_guard_state(&record.interactive_guard_buffer, bytes, input_kind);
+            if !inspected.trim().is_empty() {
+                let slice = tail_utf8_slice(&inspected, 8192);
+                crate::agent_runtime::reject_destructive(slice, None)?;
+                if record.transport_kind == TerminalTransportKind::SshPty {
+                    crate::agent_runtime::reject_remote_privilege_command(slice)?;
+                }
+            }
+            Some(next_buffer)
+        } else {
+            None
+        };
         write()?;
+        if let Some(next_buffer) = next_interactive_guard_buffer {
+            record.interactive_guard_buffer = next_buffer;
+        } else if matches!(source, TerminalBrokerInputSource::User)
+            && (bytes.contains(&b'\r')
+                || bytes.contains(&b'\n')
+                || bytes.contains(&0x03)
+                || bytes.contains(&0x15))
+        {
+            record.interactive_guard_buffer.clear();
+        }
         if record.active_command.is_none()
             && matches!(source, TerminalBrokerInputSource::Agent { .. })
         {
@@ -4350,6 +4417,81 @@ fn current_record_mut<'a>(
         .get(&attachment.terminal_session_id)
         .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
     slot.lock_current(transport_session_id, attachment)
+}
+
+fn tail_utf8_slice(value: &str, max_bytes: usize) -> &str {
+    if value.len() <= max_bytes {
+        return value;
+    }
+    let mut start = value.len() - max_bytes;
+    while start < value.len() && !value.is_char_boundary(start) {
+        start += 1;
+    }
+    &value[start..]
+}
+
+fn next_interactive_guard_state(
+    existing: &str,
+    bytes: &[u8],
+    input_kind: TerminalInputKind,
+) -> (String, String) {
+    if input_kind == TerminalInputKind::Interrupt {
+        return (String::new(), String::new());
+    }
+    if input_kind == TerminalInputKind::Key {
+        if bytes == b"\r" || bytes == b"\n" {
+            return (existing.to_string(), String::new());
+        }
+        if bytes == b"\x7f" || bytes == b"\x08" {
+            let mut next = existing.to_string();
+            next.pop();
+            return (String::new(), next);
+        }
+        return (String::new(), existing.to_string());
+    }
+    if !matches!(
+        input_kind,
+        TerminalInputKind::Text | TerminalInputKind::Paste
+    ) {
+        return (String::new(), existing.to_string());
+    }
+    let Ok(mut text) = std::str::from_utf8(bytes) else {
+        return (String::new(), existing.to_string());
+    };
+    if input_kind == TerminalInputKind::Paste {
+        text = text
+            .strip_prefix("\u{1b}[200~")
+            .unwrap_or(text)
+            .strip_suffix("\u{1b}[201~")
+            .unwrap_or(text);
+    }
+    let mut current = existing.to_string();
+    let mut lines = Vec::new();
+    for ch in text.chars() {
+        match ch {
+            '\u{3}' | '\u{15}' => current.clear(),
+            '\u{7f}' | '\u{8}' => {
+                current.pop();
+            }
+            '\r' | '\n' => {
+                if !current.trim().is_empty() {
+                    lines.push(std::mem::take(&mut current));
+                } else {
+                    current.clear();
+                }
+            }
+            '\t' => current.push('\t'),
+            other if !other.is_control() => current.push(other),
+            _ => {}
+        }
+    }
+    if current.len() > 8192 {
+        current = tail_utf8_slice(&current, 8192).to_string();
+    }
+    if !current.trim().is_empty() {
+        lines.push(current.clone());
+    }
+    (lines.join("\n"), current)
 }
 
 mod framing;

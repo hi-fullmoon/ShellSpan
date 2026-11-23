@@ -133,6 +133,7 @@ export function TerminalSearch({ addon, onClose, active = true, initialQuery = '
       style={surfaceStyle}
       className="absolute right-2 top-2 z-20 flex max-h-[calc(100%-0.5rem)] min-h-8 w-[26rem] max-w-[calc(100%-1rem)] flex-wrap items-center gap-x-1 gap-y-0.5 overflow-y-auto rounded-lg border px-1 py-0.5 shadow-md [&_button]:size-5"
       onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
         const previous = eventMatchesShortcut(event.nativeEvent, 'mod+shift+g');
         if (previous || eventMatchesShortcut(event.nativeEvent, 'mod+g')) {
           event.preventDefault();
@@ -158,6 +159,7 @@ export function TerminalSearch({ addon, onClose, active = true, initialQuery = '
           className="h-5 min-w-[min(100%,6rem)] px-2 text-xs text-foreground"
           autoFocus
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
             if (event.key !== 'Enter') return;
             event.preventDefault();
             find(event.shiftKey);

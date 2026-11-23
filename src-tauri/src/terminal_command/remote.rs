@@ -672,10 +672,17 @@ impl RemoteNativeBash {
         self.active = false;
         let _ = self.control.send_eof();
         let _ = self.control.close();
+        let previous_timeout = session.timeout();
+        session.set_timeout(if previous_timeout == 0 {
+            1500
+        } else {
+            previous_timeout.min(1500)
+        });
         session.set_blocking(true);
         if let Ok(sftp) = session.sftp() {
             cleanup(&sftp, &self.root);
         }
+        session.set_timeout(previous_timeout);
     }
 }
 fn upload(sftp: &ssh2::Sftp, path: &str, bytes: &[u8], mode: u32) -> Result<(), String> {
@@ -812,6 +819,7 @@ fn parse_staging_parent(tag: &str, output: &[u8]) -> Option<(String, Option<u64>
 
 fn resolve_staging_parent(session: &Session) -> (String, Option<u64>) {
     let tag = format!("shellspan-stage-{}", Uuid::new_v4().simple());
+    let probe_id = Uuid::new_v4().simple().to_string();
     let probe = format!(
         r#"ss_try_dir() {{
   dir=$1
@@ -823,8 +831,8 @@ fn resolve_staging_parent(session: &Session) -> (String, Option<u64>) {
     command chmod 700 "$dir" 2>/dev/null || true
   fi
   [ -d "$dir" ] && [ -w "$dir" ] || return 1
-  p="$dir/.ss-probe-$$"
-  (umask 077 && printf '#!/bin/sh\nexit 0\n' > "$p" && command chmod 700 "$p" && "$p") 2>/dev/null
+  p="$dir/.ss-probe-{probe_id}"
+  (umask 077 && set -C && printf '#!/bin/sh\nexit 0\n' > "$p" && command chmod 700 "$p" && "$p") 2>/dev/null
   rc=$?
   command rm -f "$p" 2>/dev/null || true
   [ "$rc" -eq 0 ] || return 1
@@ -839,6 +847,7 @@ fi
 ss_try_dir "/tmp" 0 && exit 0
 exit 1"#,
         max_len = MAX_STAGING_PARENT_BYTES,
+        probe_id = probe_id,
         tag = tag,
     );
     read_ssh_setup_command(session, &probe)

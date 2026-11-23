@@ -2248,6 +2248,7 @@ impl SessionManager {
         guard.ssh_jump_hosts.remove(session_id);
         guard.native_inflight.remove(session_id);
         guard.worker_shutdowns.remove(session_id);
+        guard.vim_bridges.remove(session_id);
         Ok(())
     }
 

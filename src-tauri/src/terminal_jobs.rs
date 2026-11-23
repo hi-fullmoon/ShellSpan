@@ -76,7 +76,13 @@ pub(crate) fn shell_submission(
     ) {
         return Err("TERMINAL_BACKGROUND_UNSUPPORTED".into());
     }
-    let literal = source.replace('\'', "''");
+    let mut literal = String::with_capacity(source.len());
+    for ch in source.chars() {
+        literal.push(ch);
+        if matches!(ch, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+            literal.push(ch);
+        }
+    }
     let line = format!("{handle} '{literal}'");
     if line.len() > 32768 {
         return Err("TERMINAL_INPUT_UNSUPPORTED: native job submission exceeds 32768 bytes".into());
@@ -388,5 +394,16 @@ mod tests {
         ] {
             assert!(host.contains(required));
         }
+    }
+
+    #[test]
+    fn powershell_job_submission_escapes_unicode_smart_single_quotes() {
+        let handle = "job-0123456789abcdef0123456789abcdef";
+        let source = "Write-Output \u{2018}a\u{2019}\u{201A}\u{201B}'";
+        let line = shell_submission(source, handle, TerminalShellKind::PowerShell7).unwrap();
+        assert_eq!(
+            line,
+            format!("{handle} 'Write-Output \u{2018}\u{2018}a\u{2019}\u{2019}\u{201A}\u{201A}\u{201B}\u{201B}'''")
+        );
     }
 }

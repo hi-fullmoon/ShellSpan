@@ -1,7 +1,6 @@
 //! Independent authenticated display pipe; never dispatches NIP operations.
 use super::{DisplayOriginGeometry, DisplayOriginRegistry, DisplayOriginRequest};
 use std::fs::File;
-use std::io::Write;
 use std::os::windows::io::AsRawHandle;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -11,7 +10,7 @@ use tauri::{Emitter, Manager};
 use windows_sys::Win32::System::Pipes::PeekNamedPipe;
 #[path = "terminal_display_origin_transport.rs"]
 mod transport;
-use transport::{connect, read_exact, response};
+use transport::{connect, read_exact, response, write_all_nonblocking};
 
 pub(crate) struct DisplayOriginPipe {
     stopped: Arc<AtomicBool>,
@@ -139,8 +138,12 @@ fn serve(
             if stop.load(Ordering::Acquire) {
                 return Ok(());
             }
-            file.write_all(&response(index, widths))
-                .map_err(|_| "TERMINAL_DISPLAY_ORIGIN_CLOSED")?;
+            write_all_nonblocking(
+                &mut file,
+                &response(index, widths),
+                &stop,
+                Instant::now() + Duration::from_secs(2),
+            )?;
         }
     })();
     registry.unbind(&binding);

@@ -119,6 +119,7 @@ impl SessionRecord {
         .all(|flag| **flag);
         if !profile_matches || !complete {
             record.integration_state = TerminalIntegrationState::Unavailable;
+            record.integration_id = None;
             record.integration_reason = Some(
                 if profile_matches {
                     "nativeCapabilityMissing"
@@ -270,6 +271,7 @@ impl TerminalSessionBroker {
         let (attachment, slot) = self.lookup_session_slot(transport)?;
         let mut record = slot.lock_current(transport, &attachment)?;
         if record.input_mode != InputMode::NativeInline
+            || record.integration_state != TerminalIntegrationState::Ready
             || record.integration_id.as_ref() != Some(&message.connection.control_id)
             || record.terminal_session_id != message.connection.terminal_session_id
             || record.terminal_generation != message.connection.terminal_generation
@@ -1302,6 +1304,7 @@ impl NativeInputCoordinator {
         if !data.lifecycle.is_terminal() {
             data.lifecycle.apply(event)?;
         }
+        data.native_control_closed = true;
         if !data.lifecycle.may_have_submitted() {
             data.input_proof = None;
         }

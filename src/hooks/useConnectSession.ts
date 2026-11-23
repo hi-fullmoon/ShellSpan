@@ -5,6 +5,7 @@ import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import type { ConnectionProfile, LocalTerminalProfile } from '@/types';
 import {
   buildSessionCreateRequest,
+  invokeCloseSession,
   invokeCreateLocalSession,
 } from '@/lib/ipc/tauri';
 import { useToastStore } from '@/stores/toastStore';
@@ -223,6 +224,10 @@ export function useConnectSession(): {
       const summary = localProfile
         ? await invokeCreateLocalSession(dimensions?.cols, dimensions?.rows, undefined, undefined, localProfile)
         : await invokeCreateLocalSession(dimensions?.cols, dimensions?.rows);
+      if (!useTerminalStore.getState().sessions.some((session) => session.sessionId === connectionAttemptId)) {
+        void invokeCloseSession(summary.sessionId).catch(() => {});
+        return;
+      }
       resolveConnectionAttempt(connectionAttemptId, summary);
     } catch (error) {
       useToastStore.getState().addToast(getToastErrorMessage(error), 'error');

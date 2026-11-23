@@ -120,12 +120,20 @@ impl TerminalInteractiveRegistry {
                 TerminalLeaseReleaseReason::Failed,
             );
             if let Ok(mut state) = self.state.lock() {
-                state.active.remove(session_id);
+                if state
+                    .active
+                    .get(session_id)
+                    .is_some_and(|current| current.operation_id == registration.operation_id)
+                {
+                    state.active.remove(session_id);
+                }
             }
         };
         let result: Result<TerminalInteractiveWriteResult, String> = (|| {
             let snapshot = self.broker.screen_snapshot(session_id)?;
-            if screen_looks_credential_like(&snapshot) {
+            if screen_looks_credential_like(&snapshot)
+                || self.broker.credential_prompt_active(session_id)?
+            {
                 return Err("TERMINAL_CREDENTIAL_INPUT_FORBIDDEN".into());
             }
             let (data, broker_kind, wire_kind) = match input_kind {
@@ -146,10 +154,11 @@ impl TerminalInteractiveRegistry {
                 TerminalInteractiveInputKindNative::Paste => {
                     let text =
                         text.ok_or_else(|| "TERMINAL_INTERACTIVE_PASTE_REQUIRED".to_string())?;
+                    let sanitized = sanitize_bracketed_paste(text);
                     let data = if self.broker.bracketed_paste_enabled(session_id)? {
-                        format!("\u{1b}[200~{text}\u{1b}[201~")
+                        format!("\u{1b}[200~{sanitized}\u{1b}[201~")
                     } else {
-                        text.to_string()
+                        sanitized
                     };
                     (data, TerminalInputKind::Paste, "paste")
                 }
@@ -186,12 +195,23 @@ impl TerminalInteractiveRegistry {
         self.broker.screen_snapshot(session_id)
     }
 
+    #[cfg(test)]
     pub(crate) fn wait(
         &self,
         session_id: &str,
         request: TerminalWaitRequest,
     ) -> Result<TerminalWaitResult, String> {
         self.broker.wait_terminal(session_id, request)
+    }
+
+    pub(crate) fn wait_slice(
+        &self,
+        session_id: &str,
+        request: TerminalWaitRequest,
+        record_timeout: bool,
+    ) -> Result<TerminalWaitResult, String> {
+        self.broker
+            .wait_terminal_slice(session_id, request, record_timeout)
     }
 
     pub(crate) fn release_at_prompt(
@@ -277,7 +297,13 @@ impl TerminalInteractiveRegistry {
             .state
             .lock()
             .map_err(|_| "TERMINAL_INTERACTIVE_REGISTRY_UNAVAILABLE".to_string())?;
-        state.active.remove(session_id);
+        if state
+            .active
+            .get(session_id)
+            .is_some_and(|current| current.operation_id == registration.operation_id)
+        {
+            state.active.remove(session_id);
+        }
         state.taken_over.insert((
             registration.agent_session_id,
             registration.task_id,
@@ -488,8 +514,14 @@ impl TerminalInteractiveRegistry {
             .state
             .lock()
             .map_err(|_| "TERMINAL_INTERACTIVE_REGISTRY_UNAVAILABLE".to_string())?;
-        for (session_id, _) in &registrations {
-            state.active.remove(session_id);
+        for (session_id, registration) in &registrations {
+            if state
+                .active
+                .get(session_id)
+                .is_some_and(|current| current.operation_id == registration.operation_id)
+            {
+                state.active.remove(session_id);
+            }
         }
         Ok(registrations.len())
     }
@@ -536,6 +568,13 @@ fn screen_looks_credential_like(snapshot: &TerminalScreenSnapshot) -> bool {
     ]
     .iter()
     .any(|marker| visible.contains(marker))
+}
+
+fn sanitize_bracketed_paste(text: &str) -> String {
+    text.replace("\u{1b}[200~", "")
+        .replace("\u{1b}[201~", "")
+        .replace("\u{9b}200~", "")
+        .replace("\u{9b}201~", "")
 }
 
 fn key_sequence(key: TerminalKeyNative) -> &'static str {

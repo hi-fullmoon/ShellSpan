@@ -475,14 +475,36 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     const getTabId = (target: EventTarget | null): string | null =>
       getElement(target)?.closest('[data-session-tab]')?.getAttribute('data-session-tab') ?? null;
 
+    let outsidePointerOrigin: { x: number; y: number } | null = null;
+    let externalDragActive = false;
     const handlePointerDown = (event: PointerEvent): void => {
-      lastPointerDownTabRef.current = getTabId(event.target);
+      const tabId = getTabId(event.target);
+      lastPointerDownTabRef.current = tabId;
+      outsidePointerOrigin = tabId === null ? { x: event.clientX, y: event.clientY } : null;
+      externalDragActive = false;
+    };
+    const handlePointerMove = (event: PointerEvent): void => {
+      if (!outsidePointerOrigin || externalDragActive) return;
+      if ((event.buttons & 1) === 0) {
+        outsidePointerOrigin = null;
+        return;
+      }
+      if (Math.hypot(event.clientX - outsidePointerOrigin.x, event.clientY - outsidePointerOrigin.y) >= 4) {
+        externalDragActive = true;
+      }
+    };
+    const handlePointerCancel = (): void => {
+      outsidePointerOrigin = null;
+      externalDragActive = false;
     };
     const handlePointerUp = (event: PointerEvent): void => {
+      const wasExternalDrag = externalDragActive;
+      outsidePointerOrigin = null;
+      externalDragActive = false;
       if (event.button !== 0) return;
-      // A release that ends a reorder drag is not an activation: dropping a tab
-      // onto another one must stay a pure reorder.
-      if (document.body.classList.contains('tab-dragging')) return;
+      // A release that ends a reorder drag or an outside drag (e.g. terminal
+      // text selection) is not a tab activation.
+      if (wasExternalDrag || document.body.classList.contains('tab-dragging')) return;
       // Close/pin buttons stop their own pointerdown, but this fallback exists
       // for taps whose pointerdown was never delivered. Do not turn their
       // release into a tab activation before the button action runs.
@@ -497,10 +519,14 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     };
 
     document.addEventListener('pointerdown', handlePointerDown, true);
+    document.addEventListener('pointermove', handlePointerMove, true);
     document.addEventListener('pointerup', handlePointerUp, true);
+    document.addEventListener('pointercancel', handlePointerCancel, true);
     return () => {
       document.removeEventListener('pointerdown', handlePointerDown, true);
+      document.removeEventListener('pointermove', handlePointerMove, true);
       document.removeEventListener('pointerup', handlePointerUp, true);
+      document.removeEventListener('pointercancel', handlePointerCancel, true);
     };
   }, []);
 
@@ -711,6 +737,12 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
 
   const closingSession = closingSessionId ? (sessions.find((s) => s.sessionId === closingSessionId) ?? null) : null;
 
+  useEffect(() => {
+    if (closingSessionId && !closingSession) {
+      setClosingSessionId(null);
+    }
+  }, [closingSession, closingSessionId]);
+
   const visibleTabCount = sessions.length - (draggingSession ? 1 : 0);
   const displayedInsertIndex = externalInsertIndex !== null ? externalInsertIndex : draggingSessionId ? insertIndex : null;
   // Dropping back into the dragged tab's own slot is a no-op, so suppress the
@@ -762,9 +794,8 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
           >
             <div role="tablist" className="flex h-8 min-w-full items-center gap-0 p-0">
               {sessions.map((session, index) => {
-                const isDragging = draggingSessionId === session.sessionId;
-                const draggedIndex = draggingSessionId ? sessions.findIndex((s) => s.sessionId === draggingSessionId) : -1;
-                const visibleIndex = isDragging ? -1 : index - (draggedIndex >= 0 && draggedIndex < index ? 1 : 0);
+                const isDragging = effectiveDraggingSessionId === session.sessionId;
+                const visibleIndex = isDragging ? -1 : index - (draggedOriginalIndex >= 0 && draggedOriginalIndex < index ? 1 : 0);
                 const isLastVisible = visibleIndex === visibleTabCount - 1;
                 const isActive = activeSessionId === session.sessionId;
 
@@ -941,7 +972,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
         </div>
       )}
       <ConfirmationDialog
-        open={!!closingSessionId}
+        open={Boolean(closingSession)}
         onOpenChange={(open) => {
           if (!open) setClosingSessionId(null);
         }}

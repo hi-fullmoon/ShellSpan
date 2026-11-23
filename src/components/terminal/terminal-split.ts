@@ -178,6 +178,7 @@ export function updateTerminalSplitAtPath(
 ): TerminalLayoutNode {
   if (node.kind === 'group') return node;
   if (path.length === 0) {
+    if (!Number.isFinite(nextSplit)) return node;
     const split = Math.min(0.99, Math.max(0.01, nextSplit));
     return node.split === split ? node : { ...node, split };
   }
@@ -207,7 +208,7 @@ export function findAdjacentTerminalGroup(
 
   if (getRect) {
     const sourceRect = getRect(groupId);
-    if (sourceRect) {
+    if (sourceRect && sourceRect.width > 0 && sourceRect.height > 0) {
       const sourceCenterX = sourceRect.left + sourceRect.width / 2;
       const sourceCenterY = sourceRect.top + sourceRect.height / 2;
       const candidates = getTerminalGroups(node)
@@ -219,13 +220,12 @@ export function findAdjacentTerminalGroup(
           index: number;
         } => candidate.rect !== null)
         .filter(({ rect }) => {
-          const centerX = rect.left + rect.width / 2;
-          const centerY = rect.top + rect.height / 2;
+          const epsilon = 1;
           switch (direction) {
-            case 'left': return centerX < sourceCenterX;
-            case 'right': return centerX > sourceCenterX;
-            case 'top': return centerY < sourceCenterY;
-            case 'bottom': return centerY > sourceCenterY;
+            case 'left': return rect.right <= sourceRect.left + epsilon;
+            case 'right': return rect.left >= sourceRect.right - epsilon;
+            case 'top': return rect.bottom <= sourceRect.top + epsilon;
+            case 'bottom': return rect.top >= sourceRect.bottom - epsilon;
           }
         })
         .map(({ group, rect, index }) => {
@@ -259,16 +259,16 @@ export function findAdjacentTerminalGroup(
             crossDistance: Math.abs(crossCenter - sourceCrossCenter),
             primaryDistance: Math.abs(primaryCenter - sourcePrimaryCenter),
           };
-        });
+        })
+        .filter((candidate) => candidate.overlapsCrossAxis);
 
       candidates.sort((a, b) => (
-        Number(b.overlapsCrossAxis) - Number(a.overlapsCrossAxis)
-        || a.primaryGap - b.primaryGap
+        a.primaryGap - b.primaryGap
         || a.crossDistance - b.crossDistance
         || a.primaryDistance - b.primaryDistance
         || a.index - b.index
       ));
-      if (candidates[0]) return candidates[0].group;
+      return candidates[0]?.group ?? null;
     }
   }
 

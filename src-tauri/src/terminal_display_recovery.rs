@@ -6,6 +6,7 @@ const ALTERNATE_MODES: [u16; 3] = [47, 1047, 1049];
 const INPUT_MODES: [u16; 4] = [1, 25, 1004, 2004];
 const MOUSE_TRACKING: [u16; 4] = [9, 1000, 1002, 1003];
 const MOUSE_ENCODING: [u16; 2] = [1006, 1016];
+const MAX_TTY_REPLIES_PER_EPOCH: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Modes {
@@ -39,6 +40,7 @@ struct PromptBoundary {
     alternate: Option<u16>,
     live_jobs: Vec<u32>,
     command_epoch: u64,
+    epoch_tickets: Vec<u32>,
     application: Option<ForegroundApplication>,
     cleanup: String,
     tty_replies: Vec<TtyRecoveryReply>,
@@ -151,7 +153,7 @@ impl vte::Perform for PromptBoundary {
         let [kind, token, fields @ ..] = params else {
             return;
         };
-        if !bell_terminated || *token != self.token.as_bytes() {
+        if self.token.is_empty() || !bell_terminated || *token != self.token.as_bytes() {
             return;
         }
         if let (b"6975", [epoch, jobs]) = (*kind, fields) {
@@ -159,12 +161,16 @@ impl vte::Perform for PromptBoundary {
             if let (Some(epoch), Some(jobs)) = (epoch, parse_job_ids(jobs)) {
                 if epoch > self.command_epoch {
                     self.command_epoch = epoch;
+                    self.epoch_tickets.clear();
                     self.live_jobs = jobs;
                 }
             }
             return;
         }
         if let (b"6974", [ticket, stopped, jobs, suspended, epoch]) = (*kind, fields) {
+            if self.command_epoch == 0 {
+                return;
+            }
             let Some((stopped, jobs)) = parse_prompt_jobs(stopped, jobs) else {
                 return;
             };
@@ -183,6 +189,12 @@ impl vte::Perform for PromptBoundary {
             else {
                 return;
             };
+            if self.epoch_tickets.len() >= MAX_TTY_REPLIES_PER_EPOCH
+                || self.epoch_tickets.contains(&ticket)
+            {
+                return;
+            }
+            self.epoch_tickets.push(ticket);
             let decision = if self.application_job_is_live(stopped, &jobs, Some(&suspended)) {
                 TtyDecision::Defer
             } else if self.application.is_some() {
@@ -268,6 +280,7 @@ impl DisplayRecovery {
                 alternate: None,
                 live_jobs: Vec::new(),
                 command_epoch: 0,
+                epoch_tickets: Vec::new(),
                 application: None,
                 cleanup: String::new(),
                 tty_replies: Vec::new(),
@@ -290,6 +303,9 @@ impl DisplayRecovery {
                 copied = offset;
             }
         }
+        // Display-only callers never consume tty_replies; clear so OSC 6974
+        // sequences cannot accumulate unboundedly in screen models.
+        self.boundary.tty_replies.clear();
         if copied == 0 {
             Cow::Borrowed(bytes)
         } else {
@@ -471,5 +487,37 @@ mod tests {
         assert_eq!(replies.len(), 2);
         assert_eq!(replies[0].encode(), b"TTY-RECOVERY 1 0\n");
         assert_eq!(replies[1].encode(), b"TTY-RECOVERY 2 0\n");
+    }
+
+    #[test]
+    fn apply_drops_tty_replies_and_bounds_or_deduplicates_osc_6974() {
+        let mut empty = DisplayRecovery::new("");
+        assert!(empty
+            .tty_replies(b"\x1b]6975;;1; \x07\x1b]6974;;1;0; ; ;1\x07")
+            .is_empty());
+
+        let mut recovery = DisplayRecovery::new("pty-fixture");
+        // Epoch 0 (before any 6975) must not produce tty replies.
+        assert!(recovery
+            .tty_replies(b"\x1b]6974;pty-fixture;1;0; ; ;0\x07")
+            .is_empty());
+
+        let _ = recovery.apply(b"\x1b]6975;pty-fixture;1; \x07\x1b]6974;pty-fixture;1;0; ; ;1\x07");
+        assert!(recovery.boundary.tty_replies.is_empty());
+
+        // Duplicate ticket in same epoch is ignored, and replies per epoch are capped.
+        let mut flood = Vec::new();
+        flood.extend_from_slice(b"\x1b]6975;pty-fixture;2; \x07");
+        flood.extend_from_slice(b"\x1b]6974;pty-fixture;10;0; ; ;2\x07");
+        flood.extend_from_slice(b"\x1b]6974;pty-fixture;10;0; ; ;2\x07");
+        for ticket in 11..40 {
+            flood.extend_from_slice(
+                format!("\x1b]6974;pty-fixture;{ticket};0; ; ;2\x07").as_bytes(),
+            );
+        }
+        let replies = recovery.tty_replies(&flood);
+        assert_eq!(replies.len(), MAX_TTY_REPLIES_PER_EPOCH);
+        assert_eq!(replies[0].ticket, 10);
+        assert_eq!(replies[1].ticket, 11);
     }
 }

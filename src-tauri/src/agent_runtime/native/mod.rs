@@ -46,7 +46,12 @@ pub(crate) use mcp::*;
 pub(crate) use process::*;
 pub(crate) use registry::*;
 pub(crate) use runtime::*;
-pub(crate) use shell_guard::{literal_sudo_command, sudo_policy_reference, SUDO_POLICY_DENIED};
+#[cfg(test)]
+pub(crate) use shell_guard::REMOTE_PRIVILEGE_DENIED;
+pub(crate) use shell_guard::{
+    literal_sudo_command, reject_destructive, reject_remote_privilege_command,
+    sudo_policy_reference, SUDO_POLICY_DENIED,
+};
 pub(crate) use sudo::{SudoPrompts, AGENT_SUDO_PROMPT_EVENT};
 pub(crate) use terminal_execute::*;
 pub(crate) use terminal_interactive::*;

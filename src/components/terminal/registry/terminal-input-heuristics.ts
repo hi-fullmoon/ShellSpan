@@ -16,7 +16,7 @@ export function hasKnownCredentialPrompt(recentOutputTail: string): boolean {
 export function inputLineNeedsContinuation(value: string): boolean {
   const trimmed = value.trimEnd();
   if (!trimmed) return false;
-  if (/(?:\\|`)\s*$/.test(value) || /(?:\||&&|\|\|)\s*$/.test(value)) return true;
+  if (/(?:^|[^\\])(?:\\\\)*\\\s*$/.test(value) || /`\s*$/.test(value) || /(?:\||&&|\|\|)\s*$/.test(value)) return true;
   const heredoc = /<<(?!<)-?\s*(?:'([^']+)'|"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))/g;
   const delimiters: Array<{ delimiter: string; stripTabs: boolean }> = [];
   const openingLine = value.split('\n', 1)[0];
@@ -66,6 +66,8 @@ export function inputLineNeedsContinuation(value: string): boolean {
     } else if (quote) {
       if (character === '\\' && quote === '"') escaped = true;
       else if (character === quote) quote = null;
+    } else if (character === '\\') {
+      escaped = true;
     } else if (character === "'" || character === '"') {
       quote = character;
     } else if (matchingCloser[character]) {
@@ -119,6 +121,8 @@ export function applyTrackedUserInput(state: TrackedUserInputState, data: string
       if (data[index + 1] === '[') {
         index += 2;
         while (index < data.length && !/[A-Za-z~]/.test(data[index])) index += 1;
+      } else if (data[index + 1] === 'O') {
+        index = Math.min(data.length - 1, index + 2);
       }
       continue;
     }

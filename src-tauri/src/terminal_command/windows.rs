@@ -345,7 +345,7 @@ impl PreparedNativePowerShell {
         let worker_bootstrap = Arc::clone(&bootstrap);
         let worker = thread::spawn(move || {
             let _bootstrap = worker_bootstrap;
-            let _result = (|| -> Result<(), String> {
+            let result = (|| -> Result<(), String> {
                 let deadline = Instant::now() + Duration::from_secs(30);
                 let mut file = loop {
                     if done.load(Ordering::Acquire) || Instant::now() >= deadline {
@@ -380,12 +380,15 @@ impl PreparedNativePowerShell {
                 {
                     return Err("TERMINAL_NATIVE_CONTROL_UNAVAILABLE".into());
                 }
-                file.write_all(
-                    &probe
-                        .encode()
-                        .map_err(|_| "TERMINAL_NATIVE_PROTOCOL_INVALID")?,
-                )
-                .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
+                let probe_bytes = probe
+                    .encode()
+                    .map_err(|_| "TERMINAL_NATIVE_PROTOCOL_INVALID")?;
+                write_all_nonblocking_pipe(
+                    &mut file,
+                    &probe_bytes,
+                    &done,
+                    Instant::now() + Duration::from_secs(5),
+                )?;
                 *writer
                     .lock()
                     .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")? = Some(
@@ -432,6 +435,11 @@ impl PreparedNativePowerShell {
                 }
                 Ok(())
             })();
+            if let Err(error) = result {
+                if !done.load(Ordering::Acquire) {
+                    log::warn!("Windows native control worker exited: {error}");
+                }
+            }
             done.store(true, Ordering::Release);
             if let Ok(mut file) = writer.lock() {
                 file.take();
@@ -446,6 +454,31 @@ impl PreparedNativePowerShell {
         }
     }
 }
+
+fn write_all_nonblocking_pipe(
+    file: &mut File,
+    bytes: &[u8],
+    stopped: &AtomicBool,
+    deadline: Instant,
+) -> Result<(), String> {
+    let mut offset = 0;
+    while offset < bytes.len() {
+        if stopped.load(Ordering::Acquire) || Instant::now() >= deadline {
+            return Err("TERMINAL_NATIVE_CONTROL_UNAVAILABLE".into());
+        }
+        match file.write(&bytes[offset..]) {
+            Ok(0) => thread::sleep(Duration::from_millis(5)),
+            Ok(written) => offset += written,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return Err("TERMINAL_NATIVE_CONTROL_UNAVAILABLE".into()),
+        }
+    }
+    Ok(())
+}
+
 pub(crate) struct NativeControlHandle {
     socket: Arc<Mutex<Option<File>>>,
     stopped: Arc<AtomicBool>,
@@ -460,13 +493,19 @@ impl NativeControlHandle {
         if self.stopped.load(Ordering::Acquire) || bytes.len() > nip::MAX_MESSAGE_BYTES {
             return Err("TERMINAL_NATIVE_CONTROL_UNAVAILABLE".into());
         }
-        self.socket
+        let mut guard = self
+            .socket
             .lock()
-            .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?
+            .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
+        let file = guard
             .as_mut()
-            .ok_or("TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?
-            .write_all(bytes)
-            .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE".into())
+            .ok_or("TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
+        write_all_nonblocking_pipe(
+            file,
+            bytes,
+            &self.stopped,
+            Instant::now() + Duration::from_secs(1),
+        )
     }
 }
 

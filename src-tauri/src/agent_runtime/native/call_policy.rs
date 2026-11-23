@@ -338,14 +338,15 @@ pub(crate) fn enforce_native_call_policy_native(
     }) {
         return Err(super::shell_guard::SUDO_POLICY_DENIED.into());
     }
-    if call.tool_name == "write_terminal_input"
-        && matches!(
-            call.target,
-            crate::agent_runtime::AgentToolTargetNative::Remote { .. }
-        )
-    {
+    if call.tool_name == "write_terminal_input" {
         if let Some(text) = call.arguments.get("text").and_then(Value::as_str) {
-            super::shell_guard::reject_remote_privilege_command(text)?;
+            super::shell_guard::reject_destructive(text, None)?;
+            if matches!(
+                call.target,
+                crate::agent_runtime::AgentToolTargetNative::Remote { .. }
+            ) {
+                super::shell_guard::reject_remote_privilege_command(text)?;
+            }
         }
     }
     let critical_write = if call.tool_name == "transfer_file" {

@@ -166,11 +166,10 @@ impl PreparedNativeBash {
             .editor_sha256
             .as_ref()
             .ok_or("TERMINAL_NATIVE_SCOPED_CORE_UNAVAILABLE")?;
-        if !cfg!(target_os = "macos")
-            || fs::symlink_metadata(&core_source)
-                .map_err(|_| "TERMINAL_NATIVE_SCOPED_CORE_UNAVAILABLE")?
-                .file_type()
-                .is_symlink()
+        if fs::symlink_metadata(&core_source)
+            .map_err(|_| "TERMINAL_NATIVE_SCOPED_CORE_UNAVAILABLE")?
+            .file_type()
+            .is_symlink()
             || file_sha(&core_source)? != *core_sha
         {
             return Err("TERMINAL_NATIVE_SCOPED_CORE_MISMATCH".into());

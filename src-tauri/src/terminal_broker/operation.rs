@@ -29,6 +29,8 @@ pub(super) struct TerminalCommandData {
     )]
     pub(super) native_editor_ready_confirmed: bool,
     pub(super) native_prepare_rejected: bool,
+    pub(crate) native_control_closed: bool,
+    pub(crate) retained_for_late_receipts: bool,
     pub(super) native_empty_confirmed: bool,
     pub(super) native_checkpoint: Option<(String, bool)>,
     pub(super) native_private_checkpoint: Option<(String, String, bool)>,
@@ -164,6 +166,8 @@ impl TerminalCommandOperation {
                 native_coordinator_claimed: false,
                 native_editor_ready_confirmed: false,
                 native_prepare_rejected: false,
+                native_control_closed: false,
+                retained_for_late_receipts: false,
                 native_empty_confirmed: false,
                 native_checkpoint: None,
                 native_private_checkpoint: None,
@@ -278,10 +282,10 @@ impl TerminalCommandOperation {
         // Caller owns the executor's serial gate; no Broker/operation lock spans fsync.
         journal.record(&identity)?;
         let mut data = self.lock()?;
+        data.submission_intent_recorded = true;
         if !data.lifecycle.can_edit() {
             return Err("TERMINAL_COMMAND_EVENT_REJECTED".into());
         }
-        data.submission_intent_recorded = true;
         #[cfg(all(
             feature = "native-input-acceptance",
             debug_assertions,
@@ -555,7 +559,12 @@ impl TerminalCommandOperation {
 
     pub(crate) fn native_observation_pending(&self) -> Result<bool, String> {
         let data = self.lock()?;
-        Ok(data.native_protocol
+        Ok(Self::native_observation_pending_locked(&data))
+    }
+
+    fn native_observation_pending_locked(data: &TerminalCommandData) -> bool {
+        data.native_protocol
+            && !data.native_control_closed
             && ((matches!(
                 data.lifecycle.phase(),
                 CommandPhase::Uncertain | CommandPhase::RecoveryRequired
@@ -564,7 +573,17 @@ impl TerminalCommandOperation {
                 && (data.lifecycle.may_have_submitted() || data.source_may_be_enqueued))
                 || (data.native_prepare_rejected
                     && !data.native_editor_ready_confirmed
-                    && data.source_may_be_enqueued)))
+                    && data.source_may_be_enqueued))
+    }
+
+    pub(crate) fn mark_retained_for_late_receipts(&self) -> Result<(), String> {
+        self.lock()?.retained_for_late_receipts = true;
+        Ok(())
+    }
+
+    pub(crate) fn retained_and_settled(&self) -> Result<bool, String> {
+        let data = self.lock()?;
+        Ok(data.retained_for_late_receipts && !Self::native_observation_pending_locked(&data))
     }
 
     pub(crate) fn native_capture_complete(&self) -> Result<bool, String> {

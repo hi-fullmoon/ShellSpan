@@ -641,7 +641,10 @@ const Terminal: React.FC = () => {
   }, [activateTab, split]);
 
   const droppedPathText = (session: TerminalSession, paths: string[]): string | null =>
-    quoteTerminalDropPaths(paths, session.ptyInfo?.transportKind === 'windowsConPty');
+    quoteTerminalDropPaths(
+      paths,
+      session.ptyInfo?.transportKind === 'windowsConPty' && session.ptyInfo?.localProfile !== 'shellSpanBash',
+    );
 
   const insertDroppedPaths = (sessionId: string, paths: string[]): void => {
     const target = useTerminalStore.getState().sessions.find((session) => session.sessionId === sessionId);
@@ -758,11 +761,17 @@ const Terminal: React.FC = () => {
     const pruned = pruneEmptyTerminalGroups(nextLayout);
     if (!pruned || pruned.kind === 'group') {
       setSplit(null);
-      useTerminalStore.setState((state) => ({
-        sessions: orderedTargetIds
-          .map((id) => state.sessions.find((session) => session.sessionId === id))
-          .filter((session): session is TerminalSession => Boolean(session)),
-      }));
+      useTerminalStore.setState((state) => {
+        const orderedSet = new Set(orderedTargetIds);
+        return {
+          sessions: [
+            ...orderedTargetIds
+              .map((id) => state.sessions.find((session) => session.sessionId === id))
+              .filter((session): session is TerminalSession => Boolean(session)),
+            ...state.sessions.filter((session) => !orderedSet.has(session.sessionId)),
+          ],
+        };
+      });
     } else {
       setSplit(pruned);
     }

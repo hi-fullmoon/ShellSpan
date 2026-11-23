@@ -705,6 +705,22 @@ impl PreparedLocalShellIntegration {
                 .map(PathBuf::from)
                 .filter(|path| path.is_absolute())
                 .and_then(|path| fs::canonicalize(path).ok());
+            let original_zdotdir = command
+                .get_env("ZDOTDIR")
+                .and_then(|value| value.to_str())
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned);
+            if let Some(dir) = original_zdotdir.as_deref() {
+                let quoted_dir = quote_posix(dir);
+                for name in [".zshenv", ".zprofile", ".zlogin"] {
+                    let source = format!("{quoted_dir}/{name}");
+                    fs::write(
+                        self.bootstrap_root.path().join(name),
+                        format!("[[ -r {source} ]] && source {source}\n"),
+                    )
+                    .map_err(|error| format!("failed to write zsh startup passthrough: {error}"))?;
+                }
+            }
             fs::write(
                 &self.bootstrap_path,
                 zsh_bootstrap(
@@ -712,6 +728,7 @@ impl PreparedLocalShellIntegration {
                     true,
                     false,
                     executable.as_deref().and_then(Path::to_str),
+                    original_zdotdir.as_deref(),
                 ),
             )
             .map_err(|error| format!("failed to bind native zsh parser: {error}"))?;
@@ -790,6 +807,13 @@ impl PreparedLocalShellIntegration {
                 ControlEndpoint::Windows { pipe_path } => {
                     match open_windows_pipe(&pipe_path, &reader_stopped) {
                         Ok(mut reader) => {
+                            #[cfg(windows)]
+                            let result = read_windows_control_events(
+                                &mut reader,
+                                &reader_stopped,
+                                &mut on_event,
+                            );
+                            #[cfg(not(windows))]
                             let result = read_control_events(&mut reader, &mut on_event);
                             let failed = result.is_err();
                             on_closed(if reader_stopped.load(Ordering::Acquire) {
@@ -798,6 +822,9 @@ impl PreparedLocalShellIntegration {
                                 result.err()
                             });
                             if failed {
+                                #[cfg(windows)]
+                                drain_failed_windows_control_channel(&mut reader, &reader_stopped);
+                                #[cfg(not(windows))]
                                 drain_failed_control_channel(&mut reader, &reader_stopped);
                             }
                         }
@@ -861,7 +888,7 @@ fn write_posix_bootstrap(
                 .map_err(|error| format!("failed to write zsh startup passthrough: {error}"))?;
             }
             let path = root.join(".zshrc");
-            fs::write(&path, zsh_bootstrap(fifo_path, true, false, None))
+            fs::write(&path, zsh_bootstrap(fifo_path, true, false, None, None))
                 .map_err(|error| format!("failed to write zsh integration: {error}"))?;
             Ok(path)
         }
@@ -909,7 +936,10 @@ __shellspan_pending_line=
 __shellspan_native_source=
 __shellspan_native_status=0
 __shellspan_clear_sequence=0
-__shellspan_previous_prompt_command=${{PROMPT_COMMAND-}}
+__shellspan_previous_prompt_command=()
+if [[ -n ${{PROMPT_COMMAND+x}} ]]; then
+  __shellspan_previous_prompt_command=("${{PROMPT_COMMAND[@]}}")
+fi
 __shellspan_prompt_tty_state=()
 __shellspan_prompt_echo_control=0
 __shellspan_receiver_tty=
@@ -1112,9 +1142,12 @@ __shellspan_prompt_cycle() {{
     __shellspan_emit E "$__shellspan_status" "$PWD"
     __shellspan_command_active=0
   fi
-  if [[ -n "$__shellspan_previous_prompt_command" ]]; then
-    builtin eval -- "$__shellspan_previous_prompt_command"
-  fi
+  local __shellspan_prompt_entry
+  for __shellspan_prompt_entry in "${{__shellspan_previous_prompt_command[@]}}"; do
+    if [[ -n "$__shellspan_prompt_entry" ]]; then
+      builtin eval -- "$__shellspan_prompt_entry"
+    fi
+  done
   __shellspan_guard_prompt_tty
   __shellspan_emit P "$PWD"
   # Bash 4.x executes bind-x's command string in place. Rebinding the active
@@ -1414,14 +1447,38 @@ fn zsh_bootstrap(
     source_user_rc: bool,
     prompt_end_via_prompt_expansion: bool,
     parser_executable: Option<&str>,
+    original_zdotdir: Option<&str>,
 ) -> String {
     let fifo_path = quote_posix(fifo_path.to_string_lossy().as_ref());
     let parser_executable = quote_posix(parser_executable.unwrap_or(""));
-    let user_rc = if source_user_rc {
-        r#"[[ -r "$HOME/.zshrc" ]] && source "$HOME/.zshrc"
-"#
-    } else {
-        ""
+    let (user_rc, restore_zdotdir, history_fallback) = match original_zdotdir {
+        Some(dir) => {
+            let quoted_dir = quote_posix(dir);
+            let rc = if source_user_rc {
+                format!(
+                    "ZDOTDIR={quoted_dir}\nexport ZDOTDIR\n[[ -r {quoted_dir}/.zshrc ]] && source {quoted_dir}/.zshrc\n"
+                )
+            } else {
+                String::new()
+            };
+            (
+                rc,
+                format!("ZDOTDIR={quoted_dir}\nexport ZDOTDIR"),
+                format!("{quoted_dir}/.zsh_history"),
+            )
+        }
+        None => {
+            let rc = if source_user_rc {
+                "[[ -r \"$HOME/.zshrc\" ]] && source \"$HOME/.zshrc\"\n".to_string()
+            } else {
+                String::new()
+            };
+            (
+                rc,
+                "unset ZDOTDIR".to_string(),
+                "\"$HOME/.zsh_history\"".to_string(),
+            )
+        }
     };
     let prompt_end_hook = if prompt_end_via_prompt_expansion {
         r#"__shellspan_prompt_end() {
@@ -1800,9 +1857,9 @@ add-zsh-hook chpwd __shellspan_chpwd
 # in the user's home when that default would outlive the control directory.
 # Preserve all explicitly configured history paths outside the bootstrap root.
 if [[ ${{HISTFILE-}} == "${{__shellspan_control_path:h}}/.zsh_history" ]]; then
-  HISTFILE="$HOME/.zsh_history"
+  HISTFILE={history_fallback}
 fi
-unset ZDOTDIR
+{restore_zdotdir}
 __shellspan_emit R zsh
 "#
     )
@@ -1821,7 +1878,13 @@ pub(crate) fn remote_posix_bootstrap(
             quote_posix(home_directory),
             bash_bootstrap(path, false, true)
         )),
-        TerminalShellKind::Zsh => Ok(zsh_bootstrap(path, true, true, Some(shell_executable))),
+        TerminalShellKind::Zsh => Ok(zsh_bootstrap(
+            path,
+            true,
+            true,
+            Some(shell_executable),
+            None,
+        )),
         _ => Err("TERMINAL_INTEGRATION_UNSUPPORTED_REMOTE_SHELL".into()),
     }
 }
@@ -1927,7 +1990,8 @@ fn powershell_bootstrap(pipe_name: &str, shell: TerminalShellKind) -> String {
     format!(
         r#"$__shellspanModule = New-Module -Name ShellSpanTerminalIntegration -ArgumentList '{pipe_name}','{shell_name}' -ScriptBlock {{
   param([string]$PipeName, [string]$ShellKind)
-  $script:Pipe = [System.IO.Pipes.NamedPipeServerStream]::new($PipeName,[System.IO.Pipes.PipeDirection]::Out,1,[System.IO.Pipes.PipeTransmissionMode]::Byte,[System.IO.Pipes.PipeOptions]::None,0,4096)
+  $script:PipeOptions = if ([Enum]::IsDefined([System.IO.Pipes.PipeOptions], 'CurrentUserOnly')) {{ [System.IO.Pipes.PipeOptions]::CurrentUserOnly }} else {{ [System.IO.Pipes.PipeOptions]::None }}
+  $script:Pipe = [System.IO.Pipes.NamedPipeServerStream]::new($PipeName,[System.IO.Pipes.PipeDirection]::Out,1,[System.IO.Pipes.PipeTransmissionMode]::Byte,$script:PipeOptions,0,4096)
   $script:Pipe.WaitForConnection()
   $script:Utf8 = [System.Text.UTF8Encoding]::new($false,$true)
   $script:ConsoleSignalSource = @'
@@ -2182,6 +2246,86 @@ fn powershell_bootstrap(pipe_name: &str, shell: TerminalShellKind) -> String {
 }}
 "#
     )
+}
+
+#[cfg(windows)]
+fn read_windows_control_events(
+    reader: &mut File,
+    stopped: &AtomicBool,
+    on_event: &mut impl FnMut(TerminalIntegrationControlEvent) -> Result<(), String>,
+) -> Result<(), String> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::Pipes::PeekNamedPipe;
+
+    let mut decoder = TerminalIntegrationStreamDecoder::default();
+    let mut buffer = [0_u8; 4096];
+    while !stopped.load(Ordering::Acquire) {
+        let mut available = 0_u32;
+        let peeked = unsafe {
+            PeekNamedPipe(
+                reader.as_raw_handle(),
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                &mut available,
+                std::ptr::null_mut(),
+            )
+        };
+        if peeked == 0 {
+            return decoder.finish();
+        }
+        if available == 0 {
+            thread::sleep(Duration::from_millis(5));
+            continue;
+        }
+        let limit = buffer.len().min(available as usize);
+        match reader.read(&mut buffer[..limit]) {
+            Ok(0) => return decoder.finish(),
+            Ok(count) => {
+                for event in decoder.push(&buffer[..count])? {
+                    on_event(event)?;
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(format!("terminal integration control read failed: {error}")),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn drain_failed_windows_control_channel(reader: &mut File, stopped: &AtomicBool) {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::Pipes::PeekNamedPipe;
+
+    let mut buffer = [0_u8; 1024];
+    while !stopped.load(Ordering::Acquire) {
+        let mut available = 0_u32;
+        let peeked = unsafe {
+            PeekNamedPipe(
+                reader.as_raw_handle(),
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                &mut available,
+                std::ptr::null_mut(),
+            )
+        };
+        if peeked == 0 {
+            return;
+        }
+        if available == 0 {
+            thread::sleep(Duration::from_millis(5));
+            continue;
+        }
+        let limit = buffer.len().min(available as usize);
+        match reader.read(&mut buffer[..limit]) {
+            Ok(0) => return,
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(_) => return,
+        }
+    }
 }
 
 #[cfg(any(windows, test))]

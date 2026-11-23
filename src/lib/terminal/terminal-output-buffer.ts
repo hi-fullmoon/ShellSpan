@@ -127,17 +127,8 @@ export function appendTerminalOutput(sessionId: string, chunk: string): void {
   buffer.byteLength += bytes;
   const trimmed = trimBufferHead(buffer, MAX_BUFFER_BYTES);
   buffer.version += 1;
-  // Keep incremental context cache across ring-buffer head trims when the
-  // cache already holds a full maxLines window and its cursor is still at or
-  // ahead of the retained head.
   if (trimmed && buffer.contextCache) {
-    const firstRetainedChunkIndex = buffer.baseChunkIndex + buffer.head;
-    if (
-      buffer.contextCache.nextChunkIndex < firstRetainedChunkIndex
-      || buffer.contextCache.redactedLines.length < buffer.contextCache.maxLines
-    ) {
-      buffer.contextCache = undefined;
-    }
+    buffer.contextCache = undefined;
   }
   buffers.set(sessionId, buffer);
   notifyOutputChanged(sessionId);
@@ -238,7 +229,7 @@ export function truncateAiContext(
 
 export function stripAnsi(value: string): string {
   return value
-    .replace(/\u001b\][\s\S]*?(?:\u0007|\u001b\\)/g, '')
+    .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, '')
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/\u001b[@-_]/g, '');
 }
@@ -288,25 +279,47 @@ function renderTerminalLines(value: string): string[] {
   return lines;
 }
 
+const SENSITIVE_KEY_PATTERN = '(?:api[_-]?key|access[_-]?(?:key|token)|auth[_-]?token|client[_-]?secret|private[_-]?key|aws[_-]?secret[_-]?access[_-]?key|openai[_-]?api[_-]?key|anthropic[_-]?api[_-]?key|google[_-]?api[_-]?key|secret|token|password|passwd|passphrase|pwd)';
+const SENSITIVE_FLAG_PATTERN = '(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|secret|token|password|passwd|passphrase)';
+const SENSITIVE_KEY_VALUE_REGEX = new RegExp(
+  `\\b(${SENSITIVE_KEY_PATTERN}\\s*[:=]\\s*)(?:"(?:\\\\.|[^"\\\\\\r\\n])*"|'(?:\\\\.|[^'\\\\\\r\\n])*'|[^\\s"']+)`,
+  'gi',
+);
+const SENSITIVE_FLAG_VALUE_REGEX = new RegExp(
+  `(--${SENSITIVE_FLAG_PATTERN})(?:=|\\s+)(?:"(?:\\\\.|[^"\\\\\\r\\n])*"|'(?:\\\\.|[^'\\\\\\r\\n])*'|\\S+)`,
+  'gi',
+);
+const PENDING_SENSITIVE_KEY_REGEX = new RegExp(
+  `\\b${SENSITIVE_KEY_PATTERN}\\s*(?::|=)?\\s*["']?$`,
+  'i',
+);
+const PENDING_SENSITIVE_FLAG_REGEX = new RegExp(
+  `--${SENSITIVE_FLAG_PATTERN}(?:=|\\s)*$`,
+  'i',
+);
+
+function redactUrlCredentials(value: string): string {
+  if (!value.includes('://')) return value;
+  return value.replace(
+    /(^|[^a-z0-9+.-])([a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]+:)[^\s@/]+@/gi,
+    '$1$2[REDACTED]@',
+  );
+}
+
 export function redactTerminalSecrets(value: string): string {
-  return value
-    .replace(
-      /-----BEGIN (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----|$)/gi,
-      '[REDACTED PRIVATE KEY]',
-    )
-    .replace(
-      /\b(authorization\s*:\s*(?:bearer|basic)\s+)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|\S+)/gi,
-      '$1[REDACTED]',
-    )
-    .replace(
-      /\b((?:api[_-]?key|access[_-]?(?:key|token)|auth[_-]?token|client[_-]?secret|private[_-]?key|aws[_-]?secret[_-]?access[_-]?key|openai[_-]?api[_-]?key|anthropic[_-]?api[_-]?key|google[_-]?api[_-]?key|secret|token|password|passwd|passphrase|pwd)\s*[:=]\s*)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|[^\s"']+)/gi,
-      '$1[REDACTED]',
-    )
-    .replace(
-      /(--(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|secret|token|password|passwd|passphrase))(?:=|\s+)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|\S+)/gi,
-      '$1=[REDACTED]',
-    )
-    .replace(/\b([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+@/gi, '$1[REDACTED]@')
+  return redactUrlCredentials(
+    value
+      .replace(
+        /-----BEGIN (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----|$)/gi,
+        '[REDACTED PRIVATE KEY]',
+      )
+      .replace(
+        /\b(authorization\s*:\s*(?:bearer|basic)\s+)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|\S+)/gi,
+        '$1[REDACTED]',
+      )
+      .replace(SENSITIVE_KEY_VALUE_REGEX, '$1[REDACTED]')
+      .replace(SENSITIVE_FLAG_VALUE_REGEX, '$1=[REDACTED]'),
+  )
     .replace(/\bAKIA[0-9A-Z]{16}\b/g, '[REDACTED AWS ACCESS KEY]')
     .replace(/\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, '[REDACTED GITHUB TOKEN]')
     .replace(/\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}\b/g, '[REDACTED PROVIDER TOKEN]')
@@ -499,6 +512,7 @@ function hasPendingSensitiveSequence(value: string): boolean {
   if (privateKeyOpen) return true;
 
   return /\bauthorization\s*:\s*(?:(?:bearer|basic)\s*)?$/i.test(value)
-    || /\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|secret|password|passwd|pwd)\s*(?::|=)?\s*["']?$/i.test(value)
-    || /--(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|secret|password|passwd)(?:=|\s)*$/i.test(value);
+    || PENDING_SENSITIVE_KEY_REGEX.test(value)
+    || PENDING_SENSITIVE_FLAG_REGEX.test(value)
+    || /(?:^|[^a-z0-9+.-])[a-z][a-z0-9+.-]{0,31}:\/\/[^\s@]*$/i.test(value);
 }

@@ -46,7 +46,15 @@ pub(crate) fn prepare(data: &Path) -> Result<PathBuf, String> {
                 .and_then(|()| fs::write(path, bytes))
                 .map_err(|_| "TERMINAL_NATIVE_CONPTY_UNAVAILABLE")?;
         }
-        if fs::rename(staging.path(), &root).is_err() && !root.exists() {
+        #[cfg(windows)]
+        let installed = install_private_conpty_cache(
+            staging.path(),
+            &root,
+            std::time::Duration::from_millis(500),
+        );
+        #[cfg(not(windows))]
+        let installed = fs::rename(staging.path(), &root);
+        if installed.is_err() && !root.exists() {
             return Err("TERMINAL_NATIVE_CONPTY_UNAVAILABLE".into());
         }
     }
@@ -59,6 +67,35 @@ pub(crate) fn prepare(data: &Path) -> Result<PathBuf, String> {
     }
     fs::canonicalize(root.join("conpty.dll"))
         .map_err(|_| "TERMINAL_NATIVE_CONPTY_UNAVAILABLE".into())
+}
+
+#[cfg(windows)]
+fn install_private_conpty_cache(
+    staging: &Path,
+    root: &Path,
+    budget: std::time::Duration,
+) -> std::io::Result<()> {
+    let deadline = std::time::Instant::now() + budget;
+    loop {
+        match fs::rename(staging, root) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                // Transient antivirus/scanner handles without FILE_SHARE_DELETE
+                // can briefly fail directory/file renames with ERROR_ACCESS_DENIED (5)
+                // or ERROR_SHARING_VIOLATION (32).
+                if root.exists()
+                    || !matches!(error.raw_os_error(), Some(5 | 32))
+                    || std::time::Instant::now() >= deadline
+                {
+                    return Err(error);
+                }
+                std::thread::sleep(
+                    std::time::Duration::from_millis(10)
+                        .min(deadline.saturating_duration_since(std::time::Instant::now())),
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]

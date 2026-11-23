@@ -7,8 +7,21 @@ import { parsePosixPath, parentPosixPath } from '@/lib/path-utils';
 
 const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
 const ABSOLUTE_PATH = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/;
+const UNC_PATH = /^(?:\\\\|\/\/)/;
 const PATH_PATTERN = /(?:^|[\s("'\x60[=])((?:(?:[A-Za-z]:[\\/]|\/|\\\\)[^\s"'\x60<>()\[\]]+|[^\s"'\x60<>()\[\]:]+:\d+(?::\d+)?))/g;
 const PATH_POSITION = /^(.*?):([1-9]\d*)(?::([1-9]\d*))?$/;
+const MAX_WRAPPED_SCAN_ROWS = 32;
+const MAX_WRAPPED_SCAN_CHARS = 8192;
+
+function normalizePosixRelativeJoin(cwd: string, relative: string): string {
+  const stack: string[] = [];
+  for (const segment of `${cwd}/${relative}`.replace(/\\/g, '/').split('/')) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') stack.pop();
+    else stack.push(segment);
+  }
+  return `/${stack.join('/')}`;
+}
 
 interface DetectedLink {
   text: string;
@@ -71,16 +84,19 @@ export function findLinksInTerminalBuffer(
   const targetIndex = bufferLineNumber - 1;
   if (!buffer.getLine(targetIndex)) return [];
   let firstLineIndex = targetIndex;
-  while (firstLineIndex > 0 && buffer.getLine(firstLineIndex)?.isWrapped) firstLineIndex--;
+  const minLineIndex = Math.max(0, targetIndex - MAX_WRAPPED_SCAN_ROWS);
+  while (firstLineIndex > minLineIndex && buffer.getLine(firstLineIndex)?.isWrapped) firstLineIndex--;
 
   let text = '';
   const starts: IBufferCellPosition[] = [];
   const ends: IBufferCellPosition[] = [];
   const reusableCell = buffer.getNullCell();
-  for (let lineIndex = firstLineIndex; lineIndex < buffer.length; lineIndex++) {
+  const maxLineIndex = Math.min(buffer.length, targetIndex + MAX_WRAPPED_SCAN_ROWS + 1);
+  for (let lineIndex = firstLineIndex; lineIndex < maxLineIndex; lineIndex++) {
     const line = buffer.getLine(lineIndex);
     if (!line) break;
     for (let column = 0; column < Math.min(columns, line.length); column++) {
+      if (text.length >= MAX_WRAPPED_SCAN_CHARS) break;
       const cell = line.getCell(column, reusableCell);
       if (!cell || cell.getWidth() === 0) continue;
       const chars = cell.getChars() || ' ';
@@ -92,7 +108,7 @@ export function findLinksInTerminalBuffer(
         ends.push(end);
       }
     }
-    if (!buffer.getLine(lineIndex + 1)?.isWrapped) break;
+    if (text.length >= MAX_WRAPPED_SCAN_CHARS || !buffer.getLine(lineIndex + 1)?.isWrapped) break;
   }
   return detect(text).flatMap((link) => {
     const start = starts[link.start - 1];
@@ -110,15 +126,17 @@ export async function openTerminalFileLink(session: TerminalSession, text: strin
   const link = parseTerminalFileLink(text);
   if (!link) return false;
   let path = link.path;
+  if (UNC_PATH.test(path)) return false;
   if (!isAbsoluteTerminalPath(session, path)) {
     const cwd = session.currentDirectory;
-    if (!cwd || !isAbsoluteTerminalPath(session, cwd) || ABSOLUTE_PATH.test(path)) return false;
-    path = cwd + '/' + path;
+    if (!cwd || UNC_PATH.test(cwd) || !isAbsoluteTerminalPath(session, cwd) || ABSOLUTE_PATH.test(path)) return false;
+    path = cwd.startsWith('/') ? normalizePosixRelativeJoin(cwd, path) : `${cwd}/${path}`;
   }
   if (session.host === 'local' && session.port === 0) {
     await invokeRevealPath(path);
     return true;
   }
-  const { segments } = parsePosixPath(path);
-  return openTerminalSftpPath(session, parentPosixPath(path), { entryName: segments[segments.length - 1]?.name });
+  const normalized = normalizePosixRelativeJoin('', path);
+  const { segments } = parsePosixPath(normalized);
+  return openTerminalSftpPath(session, parentPosixPath(normalized), { entryName: segments[segments.length - 1]?.name });
 }

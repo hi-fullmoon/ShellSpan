@@ -530,7 +530,9 @@ impl NativeToolEngine {
             let slice = remaining.min(Duration::from_millis(100));
             let mut request = base_request.clone();
             request.timeout = slice;
-            let result = self.terminal_interactive.wait(&session_id, request)?;
+            let result =
+                self.terminal_interactive
+                    .wait_slice(&session_id, request, slice == remaining)?;
             if result.reason != TerminalWaitReason::TimedOut || slice == remaining {
                 break result;
             }

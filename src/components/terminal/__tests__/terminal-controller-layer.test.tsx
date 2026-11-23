@@ -1081,4 +1081,172 @@ describe('TerminalControllerLayer', () => {
     coordinator.dispose();
   });
 
+  it('re-arms user input suppression after waitingForUserAction and honors foregroundHandoffActive', async () => {
+    const { invokeGetAgentRuntimeSession } = await import('@/lib/ipc/tauri');
+    useTerminalStore.getState().addSession({ sessionId: 's1', title: 's1', host: 'local', port: 0, username: 'u' });
+    useTerminalStore.getState().setStatus('s1', { sessionId: 's1', status: 'connected' });
+    const suppressSpy = vi.fn((_onBlocked?: () => void, shouldBlock?: () => boolean) => {
+      suppressSpy.mock.calls;
+      return vi.fn();
+    });
+    const controller = {
+      sessionId: 's1',
+      terminal: { textarea: null },
+      suppressUserInput: suppressSpy,
+      subscribeLifecycle: vi.fn(() => vi.fn()),
+      whenOutputReady: vi.fn().mockResolvedValue(undefined),
+      fit: vi.fn(),
+      focus: vi.fn(),
+      hasPendingUserInput: () => false,
+      hasUnconfirmedLineBreak: () => false,
+      hasUnverifiedUserSubmission: () => false,
+      hasKnownCredentialPrompt: () => false,
+    };
+    const getSpy = vi.spyOn(terminalRegistry, 'get').mockImplementation((id) => (
+      id === 's1' ? controller as never : undefined
+    ));
+    vi.mocked(invokeGetAgentRuntimeSession).mockResolvedValue({
+      header: {
+        sessionId: 'agent-1',
+        taskId: 'task-1',
+        executionSurface: 'boundTerminal',
+        target: { sessionId: 's1' },
+      },
+    } as unknown as AgentSessionSnapshot);
+
+    const coordinator = createAgentTerminalLeaseCoordinator();
+    try {
+      coordinator.handleSession({ ...turnEvent('turn/start', 'turn-1'), sessionId: 'agent-1', timeUnixMs: 1000 });
+      await vi.waitFor(() => expect(agentTerminalLeaseState.get('s1')?.agentSessionId).toBe('agent-1'));
+      expect(suppressSpy).toHaveBeenCalledTimes(1);
+
+      // Enter waitingForUserAction -> input unlocked (no suppression installed).
+      coordinator.handleSession({
+        ...turnEvent('turn/start', 'turn-1'),
+        type: 'agent/status',
+        sessionId: 'agent-1',
+        data: { reason: 'waitingForUserAction' },
+      } as unknown as AgentSessionEvent);
+      expect(agentTerminalLeaseState.get('s1')?.waitingForUserAction).toBe(true);
+
+      // Next lease acquired directly must re-install suppression (not inherit a no-op)
+      // and must pass the foregroundHandoffActive predicate.
+      await coordinator.handle(leaseEvent('op-next', 'acquired', {
+        sessionId: 's1',
+        agentSessionId: 'agent-1',
+        taskId: 'task-1',
+      }).payload);
+      expect(suppressSpy).toHaveBeenCalledTimes(2);
+      const shouldBlock = suppressSpy.mock.calls[1][1];
+      expect(typeof shouldBlock).toBe('function');
+      expect(shouldBlock?.()).toBe(true);
+      useTerminalStore.setState((state) => ({
+        sessions: state.sessions.map((s) => s.sessionId === 's1' ? { ...s, foregroundHandoffActive: true } : s),
+      }));
+      expect(shouldBlock?.()).toBe(false);
+    } finally {
+      coordinator.dispose();
+      getSpy.mockRestore();
+    }
+  });
+
+  it('clears takeoverRequested on the active operation when takeover fails after operationId changes', async () => {
+    const { invokeTakeoverAgentTerminal, invokeInterruptAgentRuntime } = await import('@/lib/ipc/tauri');
+    useTerminalStore.getState().addSession({ sessionId: 's1', title: 's1', host: 'local', port: 0, username: 'u' });
+    useTerminalStore.getState().setStatus('s1', { sessionId: 's1', status: 'connected' });
+    let rejectInterrupt!: (error: Error) => void;
+    vi.mocked(invokeTakeoverAgentTerminal).mockResolvedValue(false);
+    vi.mocked(invokeInterruptAgentRuntime).mockImplementationOnce(
+      () => new Promise<AgentSessionSnapshot>((_, reject) => { rejectInterrupt = reject; }),
+    );
+
+    const coordinator = createAgentTerminalLeaseCoordinator();
+    try {
+      await coordinator.handle(leaseEvent('op-1', 'acquired', {
+        sessionId: 's1',
+        agentSessionId: 'agent-1',
+        taskId: 'task-1',
+      }).payload);
+      agentTerminalLeaseState.get('s1')?.requestTakeover();
+      expect(agentTerminalLeaseState.get('s1')?.takeoverRequested).toBe(true);
+
+      // A newer command starts before interrupt settles and inherits takeoverRequested: true.
+      await coordinator.handle(leaseEvent('op-2', 'acquired', {
+        sessionId: 's1',
+        agentSessionId: 'agent-1',
+        taskId: 'task-1',
+      }).payload);
+      expect(agentTerminalLeaseState.get('s1')?.operationId).toBe('op-2');
+      expect(agentTerminalLeaseState.get('s1')?.takeoverRequested).toBe(true);
+
+      rejectInterrupt(new Error('interrupt failed'));
+      await vi.waitFor(() => {
+        expect(agentTerminalLeaseState.get('s1')?.takeoverFailed).toBe(true);
+      });
+      expect(agentTerminalLeaseState.get('s1')?.takeoverRequested).toBe(false);
+    } finally {
+      coordinator.dispose();
+    }
+  });
+
+  it('restores suspended parent turn after child enters waitingForUserAction and completes', async () => {
+    const { invokeGetAgentRuntimeSession } = await import('@/lib/ipc/tauri');
+    useTerminalStore.getState().addSession({ sessionId: 's1', title: 's1', host: 'local', port: 0, username: 'u' });
+    useTerminalStore.getState().setStatus('s1', { sessionId: 's1', status: 'connected' });
+    const suppressSpy = vi.fn(() => vi.fn());
+    const controller = {
+      sessionId: 's1',
+      terminal: { textarea: null },
+      suppressUserInput: suppressSpy,
+      subscribeLifecycle: vi.fn(() => vi.fn()),
+      whenOutputReady: vi.fn().mockResolvedValue(undefined),
+      fit: vi.fn(),
+      focus: vi.fn(),
+      hasPendingUserInput: () => false,
+      hasUnconfirmedLineBreak: () => false,
+      hasUnverifiedUserSubmission: () => false,
+      hasKnownCredentialPrompt: () => false,
+    };
+    const getSpy = vi.spyOn(terminalRegistry, 'get').mockImplementation((id) => (
+      id === 's1' ? controller as never : undefined
+    ));
+    vi.mocked(invokeGetAgentRuntimeSession).mockImplementation(async ({ sessionId }) => ({
+      header: {
+        sessionId,
+        parentSessionId: sessionId === 'subagent-child' ? 'agent-parent' : undefined,
+        taskId: sessionId === 'subagent-child' ? 'task-child' : 'task-parent',
+        executionSurface: 'boundTerminal',
+        target: { sessionId: 's1' },
+      },
+    } as unknown as AgentSessionSnapshot));
+
+    const coordinator = createAgentTerminalLeaseCoordinator();
+    try {
+      coordinator.handleSession({ ...turnEvent('turn/start', 'turn-parent'), sessionId: 'agent-parent', timeUnixMs: 1000 });
+      await vi.waitFor(() => expect(agentTerminalLeaseState.get('s1')?.agentSessionId).toBe('agent-parent'));
+
+      await coordinator.handle(leaseEvent('op-child', 'acquired', {
+        sessionId: 's1',
+        agentSessionId: 'subagent-child',
+        taskId: 'task-child',
+      }).payload);
+      coordinator.handleSession({ ...turnEvent('turn/start', 'turn-child'), sessionId: 'subagent-child', timeUnixMs: 1100 });
+      await vi.waitFor(() => expect(invokeGetAgentRuntimeSession).toHaveBeenCalledWith({ sessionId: 'subagent-child' }));
+
+      // Child enters waitingForUserAction, then finishes its turn.
+      coordinator.handleSession({
+        ...turnEvent('turn/start', 'turn-child'),
+        type: 'agent/status',
+        sessionId: 'subagent-child',
+        data: { reason: 'waitingForUserAction' },
+      } as unknown as AgentSessionEvent);
+      coordinator.handleSession({ ...turnEvent('turn/end', 'turn-child'), sessionId: 'subagent-child', timeUnixMs: 1200 });
+
+      expect(agentTerminalLeaseState.get('s1')?.agentSessionId).toBe('agent-parent');
+    } finally {
+      coordinator.dispose();
+      getSpy.mockRestore();
+    }
+  });
+
 });

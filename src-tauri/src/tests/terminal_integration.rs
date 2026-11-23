@@ -489,9 +489,16 @@ fn explicit_powershell_history_path_preserves_user_history_policy() {
 #[test]
 fn posix_bootstraps_use_shell_hooks_and_a_non_inherited_fifo() {
     let bash = bash_bootstrap(Path::new("/private/control"), true, true);
-    let zsh = zsh_bootstrap(Path::new("/private/control"), true, false, Some("/bin/zsh"));
+    let zsh = zsh_bootstrap(
+        Path::new("/private/control"),
+        true,
+        false,
+        Some("/bin/zsh"),
+        None,
+    );
     assert!(bash.contains("trap '__shellspan_preexec' DEBUG"));
     assert!(bash.contains("READLINE_LINE"));
+    assert!(bash.contains("__shellspan_previous_prompt_command=(\"${PROMPT_COMMAND[@]}\")"));
     assert!(zsh.contains("add-zsh-hook preexec"));
     assert!(zsh.contains("add-zle-hook-widget line-init"));
     for script in [bash, zsh] {
@@ -501,6 +508,31 @@ fn posix_bootstraps_use_shell_hooks_and_a_non_inherited_fifo() {
         assert!(!script.contains("[Agent]"));
         assert!(!script.contains("/bin/sh -c"));
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn local_zsh_configure_preserves_existing_zdotdir() {
+    let (_fixture, integration) = prepare_test_integration(TerminalShellKind::Zsh);
+    let mut command = CommandBuilder::new("/bin/zsh");
+    command.env("ZDOTDIR", "/tmp/custom zdot'dir");
+    integration.configure_command(&mut command).unwrap();
+
+    let quoted = "'/tmp/custom zdot'\"'\"'dir'";
+    let zshenv = fs::read_to_string(integration.bootstrap_root.path().join(".zshenv")).unwrap();
+    let zshrc = fs::read_to_string(integration.bootstrap_root.path().join(".zshrc")).unwrap();
+    assert!(zshenv.contains(&format!("source {quoted}/.zshenv")));
+    assert!(zshrc.contains(&format!("ZDOTDIR={quoted}\nexport ZDOTDIR")));
+    assert!(zshrc.contains(&format!("source {quoted}/.zshrc")));
+    assert!(!zshrc.contains("unset ZDOTDIR"));
+}
+
+#[cfg(any(windows, test))]
+#[test]
+fn powershell_bootstrap_prefers_current_user_only_pipe_option() {
+    let script = powershell_bootstrap("shellspan-test-pipe", TerminalShellKind::PowerShell7);
+    assert!(script.contains("[System.IO.Pipes.PipeOptions]::CurrentUserOnly"));
+    assert!(script.contains("[System.IO.Pipes.PipeOptions]::None"));
 }
 
 #[test]

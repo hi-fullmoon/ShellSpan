@@ -5,7 +5,11 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { useActiveController } from '@/components/terminal/hooks/use-active-controller';
-import { resolveTerminalTheme, terminalRegistry } from '@/components/terminal/registry/terminal-registry';
+import {
+  resolveTerminalTheme,
+  sanitizeBracketedPasteText,
+  terminalRegistry,
+} from '@/components/terminal/registry/terminal-registry';
 import { handleTerminalLeaderKeydown } from '@/components/terminal/terminal-leader';
 import { installTerminalSelectionGuard } from '@/components/terminal/terminal-selection-guard';
 import { useTerminalStore, type TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
@@ -399,7 +403,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       return;
     }
     if (targets.length) controller.pasteUserText(text, true);
-    else terminal.paste(text);
+    else terminal.paste(sanitizeBracketedPasteText(text));
   }, [activeSessionId, terminal, multiLinePasteWarning, largePasteWarning, showError, t]);
 
   useEffect(() => {
@@ -554,14 +558,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       return true;
     });
 
-    const disposePaste = installTerminalPasteHandler(
-      terminal,
-      (text) => keyPasteHandlersRef.current.pasteText(text),
-      () => keyPasteHandlersRef.current.showError(keyPasteHandlersRef.current.t('terminal.feedback.pasteFailed')),
-    );
-
     return () => {
-      disposePaste?.();
       // Reset key handler to avoid stale closures when terminal changes.
       terminal.attachCustomKeyEventHandler(() => true);
     };
@@ -596,7 +593,16 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   // Install after that effect, including the first hidden -> visible transition.
   useLayoutEffect(() => {
     if (!terminal || !isVisible) return;
-    return installTerminalSelectionGuard(terminal);
+    const disposeSelection = installTerminalSelectionGuard(terminal);
+    const disposePaste = installTerminalPasteHandler(
+      terminal,
+      (text) => keyPasteHandlersRef.current.pasteText(text),
+      () => keyPasteHandlersRef.current.showError(keyPasteHandlersRef.current.t('terminal.feedback.pasteFailed')),
+    );
+    return () => {
+      disposePaste?.();
+      disposeSelection();
+    };
   }, [terminal, isVisible]);
 
   return (
@@ -698,7 +704,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
             if (current.length !== pending.targets.length || current.some((id) => !pending.targets.includes(id))) {
               showError(t('terminal.broadcast.targetsChanged'));
             } else target.pasteUserText(pending.text, true);
-          } else target.terminal.paste(pending.text);
+          } else target.terminal.paste(sanitizeBracketedPasteText(pending.text));
         }}
       >
         {Boolean(pendingPaste?.targets.length) && (

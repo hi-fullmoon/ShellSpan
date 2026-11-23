@@ -91,7 +91,21 @@ impl Recording {
 #[derive(Clone, Default)]
 pub(crate) struct TerminalRecorder {
     sessions: Arc<RwLock<HashMap<String, Recording>>>,
+    starting: Arc<std::sync::Mutex<HashMap<String, String>>>,
     active_count: Arc<AtomicUsize>,
+}
+
+struct StartReservation<'a> {
+    starting: &'a std::sync::Mutex<HashMap<String, String>>,
+    id: String,
+}
+
+impl Drop for StartReservation<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut starting) = self.starting.lock() {
+            starting.remove(&self.id);
+        }
+    }
 }
 
 impl TerminalRecorder {
@@ -113,21 +127,31 @@ impl TerminalRecorder {
         }
         .map_err(|error| error.to_string())?;
         let portable_path = crate::portable_local_path(&path);
-        {
+        let _reservation = {
+            let mut starting = self
+                .starting
+                .lock()
+                .map_err(|_| "terminal recorder unavailable")?;
             let sessions = self
                 .sessions
                 .read()
                 .map_err(|_| "terminal recorder unavailable")?;
-            if sessions.contains_key(&id) {
+            if sessions.contains_key(&id) || starting.contains_key(&id) {
                 return Err("a recording already exists for this session".into());
             }
             if sessions
                 .values()
                 .any(|recording| recording.path == portable_path)
+                || starting.values().any(|pending| pending == &portable_path)
             {
                 return Err("the selected file is already recording a terminal".into());
             }
-        }
+            starting.insert(id.clone(), portable_path.clone());
+            StartReservation {
+                starting: &self.starting,
+                id: id.clone(),
+            }
+        };
         let mut file = BufWriter::new(open_output_file(&path).map_err(|error| error.to_string())?);
         if matches!(format, RecordingFormat::AsciinemaV2) {
             let timestamp = SystemTime::now()
@@ -239,26 +263,98 @@ fn open_output_file(path: &Path) -> io::Result<File> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    options.open(path)
+    let file = options.open(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(file)
 }
 
 #[derive(Default)]
 struct SanitizedOutput {
     text: String,
     styled: String,
+    boundary_tail: String,
     ready: String,
     ansi: bool,
     inside_private_key: bool,
     omit_line: bool,
 }
 
+fn render_terminal_line(raw: &str) -> String {
+    let mut cells: Vec<char> = Vec::new();
+    let mut cursor = 0usize;
+    for ch in raw.chars() {
+        match ch {
+            '\r' => cursor = 0,
+            '\x08' => cursor = cursor.saturating_sub(1),
+            other => {
+                if cursor < cells.len() {
+                    cells[cursor] = other;
+                } else {
+                    cells.push(other);
+                }
+                cursor += 1;
+            }
+        }
+    }
+    cells.into_iter().collect()
+}
+
+fn detect_private_key_boundary(line: &str) -> Option<PrivateKeyBoundary> {
+    if !line.contains("-----") {
+        return None;
+    }
+    let compact: String = line
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace())
+        .collect::<String>()
+        .to_ascii_uppercase();
+    const KINDS: [&str; 6] = ["", "OPENSSH", "RSA", "EC", "DSA", "ENCRYPTED"];
+    let mut last: Option<(usize, PrivateKeyBoundary)> = None;
+    for kind in KINDS {
+        let begin = format!("-----BEGIN{kind}PRIVATEKEY-----");
+        if let Some(pos) = compact.rfind(&begin) {
+            if last.as_ref().is_none_or(|(prev, _)| pos >= *prev) {
+                last = Some((pos, PrivateKeyBoundary::Begin));
+            }
+        }
+        let end = format!("-----END{kind}PRIVATEKEY-----");
+        if let Some(pos) = compact.rfind(&end) {
+            if last.as_ref().is_none_or(|(prev, _)| pos >= *prev) {
+                last = Some((pos, PrivateKeyBoundary::End));
+            }
+        }
+    }
+    last.map(|(_, boundary)| boundary)
+}
+
 impl SanitizedOutput {
+    fn push_boundary_char(&mut self, ch: char) {
+        self.boundary_tail.push(ch);
+        if self.boundary_tail.len() > 128 {
+            let mut trim = self.boundary_tail.len() - 96;
+            while trim < self.boundary_tail.len() && !self.boundary_tail.is_char_boundary(trim) {
+                trim += 1;
+            }
+            self.boundary_tail.drain(..trim);
+        }
+    }
+
     fn finish_line(&mut self, newline: bool) {
-        let private_key = if self.text.contains("-----") {
-            terminal_private_key_boundary(&self.text.replace(' ', ""))
-        } else {
-            None
-        };
+        let rendered = render_terminal_line(&self.text);
+        let private_key = detect_private_key_boundary(&rendered)
+            .or_else(|| detect_private_key_boundary(&self.text))
+            .or_else(|| detect_private_key_boundary(&self.boundary_tail))
+            .or_else(|| {
+                if rendered.contains("-----") {
+                    terminal_private_key_boundary(&rendered.replace(' ', ""))
+                } else {
+                    None
+                }
+            });
         let was_private_key = self.inside_private_key;
         self.inside_private_key = match private_key {
             Some(PrivateKeyBoundary::Begin) => true,
@@ -272,11 +368,15 @@ impl SanitizedOutput {
                 self.ready.push_str("[REDACTED PRIVATE KEY]");
             }
         } else {
-            let redacted = redact_model_output_text(&self.text);
-            if self.ansi && redacted == self.text {
+            let redacted_rendered = redact_model_output_text(&rendered);
+            let raw_segments = self.text.replace('\r', " ").replace('\x08', "");
+            let redacted_segments = redact_model_output_text(&raw_segments);
+            let redacted_changed =
+                redacted_rendered != rendered || redacted_segments != raw_segments;
+            if self.ansi && !redacted_changed {
                 self.ready.push_str(&self.styled);
             } else {
-                self.ready.push_str(&redacted);
+                self.ready.push_str(&redacted_rendered);
             }
         }
         if newline {
@@ -287,12 +387,14 @@ impl SanitizedOutput {
         }
         self.text.clear();
         self.styled.clear();
+        self.boundary_tail.clear();
         self.omit_line = false;
     }
 
     fn mark_gap(&mut self) {
         self.text.clear();
         self.styled.clear();
+        self.boundary_tail.clear();
         self.omit_line = true;
     }
 
@@ -307,6 +409,7 @@ impl SanitizedOutput {
 impl Perform for SanitizedOutput {
     fn print(&mut self, character: char) {
         if self.limited() {
+            self.push_boundary_char(character);
             return;
         }
         self.text.push(character);
@@ -319,8 +422,8 @@ impl Perform for SanitizedOutput {
         if byte == b'\n' {
             self.finish_line(true);
         } else if !self.limited() {
-            if byte == b'\t' {
-                self.text.push('\t');
+            if matches!(byte, b'\r' | b'\t' | 8) {
+                self.text.push(char::from(byte));
             }
             if self.ansi && matches!(byte, b'\r' | b'\t' | 8) {
                 self.styled.push(char::from(byte));
@@ -614,5 +717,57 @@ mod tests {
         barrier.wait();
         recording.stop().unwrap();
         assert_eq!(frames, 1);
+    }
+
+    #[test]
+    fn redacts_cr_backspace_obfuscated_secrets_and_bordered_or_long_private_keys() {
+        let mut clean = SanitizedOutput {
+            ansi: true,
+            ..Default::default()
+        };
+        let mut parser = Parser::new();
+        parser.advance(
+            &mut clean,
+            b"foo\rpassword=cr-secret\npasswX\x08ord=bs-secret\npassword=hidden-secret\roverwritten---------\n",
+        );
+        parser.advance(
+            &mut clean,
+            "-----BEGIN OPENSSH PRIVATE KEY-----\t│\nsecret-key-line-1\n-----END OPENSSH PRIVATE KEY-----\t│\n"
+                .as_bytes(),
+        );
+        let mut long_begin = vec![b'a'; MAX_LINE_BYTES + 16];
+        long_begin.extend_from_slice(b"-----BEGIN RSA PRIVATE KEY-----\nsecret-key-line-2\n-----END RSA PRIVATE KEY-----\nafter\n");
+        parser.advance(&mut clean, &long_begin);
+        clean.finish_line(false);
+
+        for leaked in [
+            "cr-secret",
+            "bs-secret",
+            "hidden-secret",
+            "secret-key-line-1",
+            "secret-key-line-2",
+        ] {
+            assert!(
+                !clean.ready.contains(leaked),
+                "unexpected secret leak `{leaked}` in `{}`",
+                clean.ready
+            );
+        }
+        assert!(clean.ready.contains("[REDACTED]"));
+        assert!(clean.ready.contains("[REDACTED PRIVATE KEY]"));
+        assert!(clean.ready.contains("after"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_output_file_tightens_existing_file_permissions_to_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("existing.cast");
+        std::fs::write(&file, b"old").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let _opened = open_output_file(&file).unwrap();
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
     }
 }

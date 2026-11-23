@@ -1,7 +1,7 @@
 //! A connection-scoped Vim/Neovim channel. The SSH worker owns both the PTY
 //! and this channel, including the libssh2 write retry ordering.
 use std::{
-    io::{BufRead, BufReader, ErrorKind, Read, Write},
+    io::{ErrorKind, Read, Write},
     path::Path,
     sync::{
         atomic::{AtomicBool, AtomicU8, Ordering},
@@ -419,7 +419,7 @@ impl RemoteVimBridge {
         let sftp = session.sftp().map_err(|error| error.to_string())?;
         sftp.mkdir(Path::new(&root), 0o700)
             .map_err(|error| error.to_string())?;
-        let start = || -> Result<Channel, String> {
+        let start = || -> Result<(Channel, BytesMut), String> {
             for (name, content) in [("bridge.vim", ADAPTER), ("relay.sh", RELAY)] {
                 let mut file = sftp
                     .open_mode(
@@ -436,6 +436,9 @@ impl RemoteVimBridge {
             let mut channel = session
                 .channel_session()
                 .map_err(|error| error.to_string())?;
+            channel
+                .handle_extended_data(ssh2::ExtendedData::Ignore)
+                .map_err(|error| error.to_string())?;
             let marker = format!("shellspan-vim-ready-{}", Uuid::new_v4().simple());
             channel
                 .exec(&format!(
@@ -444,17 +447,37 @@ impl RemoteVimBridge {
                     quote_remote_posix(&root)
                 ))
                 .map_err(|error| error.to_string())?;
-            let ready = BufReader::new((&mut channel).take(8192))
-                .lines()
-                .map_while(Result::ok)
-                .any(|line| line == marker);
+            let mut input = BytesMut::new();
+            let mut decoder = LinesCodec::new_with_max_length(8192);
+            let mut chunk = [0u8; 1024];
+            let mut total_read = 0usize;
+            let mut ready = false;
+            while total_read < 8192 {
+                let to_read = chunk.len().min(8192 - total_read);
+                let count = match channel.read(&mut chunk[..to_read]) {
+                    Ok(0) => break,
+                    Ok(count) => count,
+                    Err(_) => break,
+                };
+                total_read += count;
+                input.extend_from_slice(&chunk[..count]);
+                while let Ok(Some(line)) = decoder.decode(&mut input) {
+                    if line == marker {
+                        ready = true;
+                        break;
+                    }
+                }
+                if ready {
+                    break;
+                }
+            }
             if !ready {
                 return Err("Unexpected SSH editor relay startup".into());
             }
-            Ok(channel)
+            Ok((channel, input))
         };
-        let channel = match start() {
-            Ok(channel) => channel,
+        let (channel, input) = match start() {
+            Ok(started) => started,
             Err(error) => {
                 for name in ["bridge.vim", "relay.sh", "request", "response", "uid"] {
                     let _ = sftp.unlink(Path::new(&format!("{root}/{name}")));
@@ -475,7 +498,7 @@ impl RemoteVimBridge {
             requests,
             instance: None,
             pending: None,
-            input: BytesMut::new(),
+            input,
             decoder: LinesCodec::new_with_max_length(MAX_FRAME_BYTES),
         })
     }
@@ -626,6 +649,8 @@ impl Drop for RemoteVimBridge {
         self.client.active.store(false, Ordering::Release);
         self.client.attached.store(false, Ordering::Release);
         self.finish_pending(BridgeFailure::Unavailable);
+        let _ = self.channel.send_eof();
+        let _ = self.channel.close();
     }
 }
 

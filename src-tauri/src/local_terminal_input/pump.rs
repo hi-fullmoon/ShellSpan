@@ -85,8 +85,8 @@ impl LocalInputPump {
                     }
                     SessionCommand::Resize { cols, rows } => {
                         if let Err(error) = master.resize(PtySize {
-                            rows: rows.max(1) as u16,
-                            cols: cols.max(1) as u16,
+                            rows: rows.clamp(1, u16::MAX as u32) as u16,
+                            cols: cols.clamp(1, u16::MAX as u32) as u16,
                             pixel_width: 0,
                             pixel_height: 0,
                         }) {

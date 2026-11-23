@@ -18,7 +18,7 @@ export function useActiveController(
   searchPrevious: (query: string, options?: SearchOptions) => void;
   clearSearch: () => void;
 } {
-  const attachedIdRef = useRef<string | null>(null);
+  const attachedRef = useRef<{ controller: { host: HTMLElement | null; detach(): void }; host: HTMLElement } | null>(null);
   const focusEnabled = useFocusStore(state => state.enabled);
   const terminalOpen = useFocusStore(state => state.terminalOpen);
   const autoFocus = shouldFocus && shouldAttach && (!focusEnabled || terminalOpen);
@@ -31,14 +31,16 @@ export function useActiveController(
   // Attach only when the pane can be measured, in a layout effect so xterm
   // opens and fits its grid before the browser paints.
   useLayoutEffect(() => {
-    const attachedId = attachedIdRef.current;
-    if (attachedId !== null) {
-      const previous = terminalRegistry.get(attachedId);
-      previous?.detach();
-      attachedIdRef.current = null;
+    const previous = attachedRef.current;
+    if (previous !== null) {
+      if (previous.controller.host === undefined || previous.controller.host === previous.host) {
+        previous.controller.detach();
+      }
+      attachedRef.current = null;
     }
 
-    if (!shouldAttach || activeSessionId === null || paneRef.current === null) {
+    const host = paneRef.current;
+    if (!shouldAttach || activeSessionId === null || host === null) {
       return;
     }
 
@@ -46,15 +48,16 @@ export function useActiveController(
       return;
     }
 
-    controller.attach(paneRef.current);
-    attachedIdRef.current = activeSessionId;
+    controller.attach(host);
+    attachedRef.current = { controller, host };
 
     return () => {
-      const current = attachedIdRef.current;
-      if (current === null) return;
-      const c = terminalRegistry.get(current);
-      c?.detach();
-      attachedIdRef.current = null;
+      if (controller.host === undefined || controller.host === host) {
+        controller.detach();
+      }
+      if (attachedRef.current?.controller === controller && attachedRef.current.host === host) {
+        attachedRef.current = null;
+      }
     };
   }, [activeSessionId, controller, paneRef, shouldAttach]);
 

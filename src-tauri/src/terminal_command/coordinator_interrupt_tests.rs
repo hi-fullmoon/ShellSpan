@@ -381,3 +381,16 @@ fn only_a_matching_started_receipt_enables_follow_up() {
         .interrupt_after_started(|| panic!("duplicate Started"))
         .unwrap());
 }
+
+#[test]
+fn control_closed_finalizes_capture_and_clears_native_observation_pending() {
+    let coordinator = submitted();
+    coordinator
+        .operation
+        .mark_retained_for_late_receipts()
+        .unwrap();
+    coordinator.control_closed().unwrap();
+    assert!(coordinator.operation.native_capture_complete().unwrap());
+    assert!(!coordinator.operation.native_observation_pending().unwrap());
+    assert!(coordinator.operation.retained_and_settled().unwrap());
+}

@@ -692,13 +692,22 @@ async fn create_remote_terminal_session(
                     });
                 }
             }
-            if let Some(session) = runtime
-                .terminal_broker_snapshot(Some(&session_id))
-                .map_err(|message| CreateSessionError::Other { message })?
-                .session
-            {
-                summary.pty_info.input_mode = Some(session.input_mode);
-                summary.pty_info.native_display_binding = session.native_display_binding;
+            match runtime.terminal_broker_snapshot(Some(&session_id)) {
+                Ok(snapshot) => {
+                    if let Some(session) = snapshot.session {
+                        summary.pty_info.input_mode = Some(session.input_mode);
+                        summary.pty_info.native_display_binding = session.native_display_binding;
+                    }
+                }
+                Err(error) => {
+                    let cleanup_error = state.close(&session_id).err();
+                    return Err(CreateSessionError::Other {
+                        message: attachment_failure_message(
+                            &error,
+                            cleanup_error.into_iter().collect(),
+                        ),
+                    });
+                }
             }
             Ok(summary)
         }
@@ -1090,10 +1099,21 @@ fn create_local_session_blocking(
         native.bind_process(child.process_id());
     }
     drop(pair.slave);
-    let mut reader = pair.master.try_clone_reader().map_err(|error| {
-        error!("Failed to clone local terminal reader session_id={session_id}: {error}");
-        format!("failed to read local terminal: {error}")
-    })?;
+    let mut reader = match pair.master.try_clone_reader() {
+        Ok(reader) => reader,
+        Err(error) => {
+            error!("Failed to clone local terminal reader session_id={session_id}: {error}");
+            let master = pair.master;
+            let cleanup_errors = terminate_failed_local_child(child.as_mut(), move || {
+                drop(writer);
+                drop(master);
+            });
+            return Err(attachment_failure_message(
+                &format!("failed to read local terminal: {error}"),
+                cleanup_errors,
+            ));
+        }
+    };
     let master = pair.master;
     let (tx, rx) = unbounded::<SessionCommand>();
     let (output_state_tx, output_state_rx) = bounded::<()>(1);
@@ -1596,8 +1616,8 @@ fn create_local_session_blocking(
                 #[cfg(not(target_os = "macos"))]
                 LocalWorkerActivity::Command(Ok(SessionCommand::Resize { cols, rows })) => {
                     if let Err(error) = master.resize(PtySize {
-                        rows: rows.max(1) as u16,
-                        cols: cols.max(1) as u16,
+                        rows: rows.clamp(1, u16::MAX as u32) as u16,
+                        cols: cols.clamp(1, u16::MAX as u32) as u16,
                         pixel_width: 0,
                         pixel_height: 0,
                     }) {
@@ -1682,7 +1702,15 @@ fn create_local_session_blocking(
                     child_exited = true;
                     break;
                 }
-                LocalWorkerActivity::OutputStateChanged | LocalWorkerActivity::StartupTimeout => {}
+                LocalWorkerActivity::OutputStateChanged => {}
+                LocalWorkerActivity::StartupTimeout => {
+                    #[cfg(windows)]
+                    if let Err(error) = child_killer.resume_startup() {
+                        warn!(
+                            "Failed to resume local startup on timeout session_id={worker_id}: {error}"
+                        );
+                    }
+                }
             }
         }
         // Wait for the reader thread to finish so output still in flight
@@ -1905,7 +1933,16 @@ fn create_local_session_blocking(
         if let Some(runtime) = initialization_app.try_state::<crate::agent_runtime::AgentRuntime>()
         {
             summary.pty_info.native_display_binding =
-                runtime.wait_native_initialization(&session_id, Duration::from_secs(5))?;
+                match runtime.wait_native_initialization(&session_id, Duration::from_secs(5)) {
+                    Ok(binding) => binding,
+                    Err(error) => {
+                        let cleanup_error = state.close(&session_id).err();
+                        return Err(attachment_failure_message(
+                            &error,
+                            cleanup_error.into_iter().collect(),
+                        ));
+                    }
+                };
         }
     }
     Ok(summary)
@@ -2012,6 +2049,8 @@ pub(crate) fn resize_session(
     cols: u32,
     rows: u32,
 ) -> Result<(), String> {
+    let geometry = crate::terminal_broker::TerminalGeometry::new(cols, rows);
+    let (cols, rows) = (geometry.columns, geometry.rows);
     let result = state.resize(&session_id, cols, rows);
     if let Err(error) = &result {
         warn!(

@@ -15,7 +15,7 @@ export function useCloseTerminal(): (sessionId: string) => Promise<void> {
     if (pending) return pending;
     const session = useTerminalStore.getState().sessions.find(item => item.sessionId === sessionId);
     cancelSshConnection(sessionId);
-    if (session?.pendingConnection && session.profileId) {
+    if (session?.pendingConnection) {
       useTerminalStore.getState().endConnectionAttempt(sessionId);
       return Promise.resolve();
     }

@@ -1,6 +1,7 @@
 import React, {
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import {
@@ -85,13 +86,25 @@ export const TerminalTabSwitcher: React.FC<TerminalTabSwitcherProps> = ({
   const shortcutLabel = getShortcutKeys(shortcut, platform).join(' ');
   const selectedSession = filteredSessions[activeIndex];
 
+  const filteredSessionsRef = useRef(filteredSessions);
+  filteredSessionsRef.current = filteredSessions;
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
+
   useEffect(() => {
     if (!open) return;
-    const currentIndex = filteredSessions.findIndex(
-      (session) => session.sessionId === activeSessionId,
+    const currentIndex = filteredSessionsRef.current.findIndex(
+      (session) => session.sessionId === activeSessionIdRef.current,
     );
     setActiveIndex(currentIndex >= 0 ? currentIndex : 0);
-  }, [activeSessionId, filteredSessions, open, query]);
+  }, [open, query]);
+
+  useEffect(() => {
+    if (!open) return;
+    setActiveIndex((index) => (
+      filteredSessions.length === 0 ? 0 : Math.min(index, filteredSessions.length - 1)
+    ));
+  }, [filteredSessions.length, open]);
 
   const moveSelection = (direction: 1 | -1): void => {
     if (filteredSessions.length === 0) return;
@@ -133,6 +146,7 @@ export const TerminalTabSwitcher: React.FC<TerminalTabSwitcherProps> = ({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                 const key = event.key.toLocaleLowerCase();
                 const isNext = event.key === 'ArrowDown'
                   || (event.key === 'Tab' && !event.shiftKey)

@@ -491,6 +491,9 @@ impl TerminalExecuteRegistry {
                 }
             }
         }
+        if result.is_ok() {
+            let _ = self.retire_foreground_handoff(session);
+        }
         match result {
             Err(error)
                 if error == "TERMINAL_NATIVE_IDENTITY_MISMATCH"
@@ -516,6 +519,7 @@ impl TerminalExecuteRegistry {
                 .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?
                 .control_closed()?;
         }
+        let _ = self.retire_foreground_handoff(session);
         Ok(())
     }
 
@@ -528,12 +532,27 @@ impl TerminalExecuteRegistry {
             .cloned();
         if let Some(registration) = registration {
             if registration.operation.handed_off_and_ready()? {
+                let _ = self.broker.settle_submission(&registration.operation);
                 self.finish_registration(
                     session,
                     &registration.agent_session_id,
                     &registration.task_id,
                     &registration.operation_id,
                     TerminalLeaseReleaseReason::Completed,
+                )?;
+            } else if registration.operation.retained_and_settled()? {
+                let _ = self.broker.settle_submission(&registration.operation);
+                let reason = registration
+                    .operation
+                    .snapshot()
+                    .map(|snapshot| release_reason(snapshot.state))
+                    .unwrap_or(TerminalLeaseReleaseReason::Failed);
+                self.finish_registration(
+                    session,
+                    &registration.agent_session_id,
+                    &registration.task_id,
+                    &registration.operation_id,
+                    reason,
                 )?;
             }
         }
@@ -1145,6 +1164,7 @@ impl TerminalExecuteRegistry {
     ) -> Result<TerminalCommandSnapshot, String> {
         let deadline = Instant::now() + timeout;
         let mut interrupt_deadline = None;
+        let mut capture_drain_deadline = None;
         let mut last_revision = 0u64;
         loop {
             let slice = if hard_deadline {
@@ -1163,12 +1183,34 @@ impl TerminalExecuteRegistry {
                 }
             }
             if snapshot.phase.is_terminal() {
-                operation.wait_native_capture(slice)?;
+                let drain_until = *capture_drain_deadline
+                    .get_or_insert_with(|| Instant::now() + INTERRUPT_SETTLEMENT_TIMEOUT);
+                let remaining = drain_until.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    break;
+                }
+                operation.wait_native_capture(slice.min(remaining))?;
+                continue;
             }
             if snapshot.state == TerminalCommandState::CancelRequested
                 && interrupt_deadline.is_none()
             {
                 interrupt_deadline = Some(Instant::now() + INTERRUPT_SETTLEMENT_TIMEOUT);
+            }
+            if interrupt_deadline.is_some() && operation.is_native_protocol()? {
+                let coordinator = self.operations.lock().ok().and_then(|operations| {
+                    operations
+                        .get(session_id)
+                        .filter(|entry| Arc::ptr_eq(&entry.operation, operation))
+                        .map(|entry| entry.native.clone())
+                });
+                if let Some(coordinator) = coordinator {
+                    if let Ok(mut coordinator) = coordinator.lock() {
+                        let _ = coordinator.interrupt_after_started(|| {
+                            sessions.write_session_input(session_id, "\u{3}".to_string())
+                        });
+                    }
+                }
             }
             if interrupt_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                 let _ = self
@@ -1177,19 +1219,57 @@ impl TerminalExecuteRegistry {
                 break;
             }
             if Instant::now() >= deadline && interrupt_deadline.is_none() {
-                let send =
-                    operation.request_settlement(TerminalCommandRequestedSettlement::TimedOut)?;
-                if send {
-                    let _ = self.leases.write(
-                        sessions,
-                        session_id,
-                        "\u{3}".to_string(),
-                        TerminalInputSource::System {
-                            operation_id: Some(&snapshot.operation_id),
-                        },
-                    );
+                let stop_deadline = Instant::now() + INTERRUPT_SETTLEMENT_TIMEOUT;
+                let routed_native = if operation.is_native_protocol()? {
+                    let coordinator = self.operations.lock().ok().and_then(|operations| {
+                        operations
+                            .get(session_id)
+                            .filter(|entry| Arc::ptr_eq(&entry.operation, operation))
+                            .map(|entry| entry.native.clone())
+                    });
+                    if let Some(coordinator) = coordinator {
+                        let mut coordinator = coordinator
+                            .lock()
+                            .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?;
+                        if !operation.handed_off()? {
+                            if operation.submission_may_have_occurred()? {
+                                let _ = coordinator.interrupt(
+                                    TerminalCommandRequestedSettlement::TimedOut,
+                                    stop_deadline,
+                                    || {
+                                        sessions
+                                            .write_session_input(session_id, "\u{3}".to_string())
+                                    },
+                                );
+                            } else {
+                                let _ = coordinator.cancel_draft_for(
+                                    TerminalCommandRequestedSettlement::TimedOut,
+                                    |bytes| sessions.write_native_control(session_id, bytes, true),
+                                );
+                            }
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if !routed_native {
+                    let send = operation
+                        .request_settlement(TerminalCommandRequestedSettlement::TimedOut)?;
+                    if send {
+                        let _ = self.leases.write(
+                            sessions,
+                            session_id,
+                            "\u{3}".to_string(),
+                            TerminalInputSource::System {
+                                operation_id: Some(&snapshot.operation_id),
+                            },
+                        );
+                    }
                 }
-                interrupt_deadline = Some(Instant::now() + INTERRUPT_SETTLEMENT_TIMEOUT);
+                interrupt_deadline = Some(stop_deadline);
             }
             if hard_deadline && Instant::now() >= deadline {
                 let _ = self
@@ -1206,6 +1286,7 @@ impl TerminalExecuteRegistry {
         if operation.native_observation_pending()? {
             // Unknown is a completed wait, not a completed operation. Keep its
             // capture fence, coordinator and revoking lease for late receipts.
+            let _ = operation.mark_retained_for_late_receipts();
             return Ok(snapshot);
         }
         self.broker.settle_submission(operation)?;
@@ -1561,6 +1642,7 @@ impl TerminalExecuteRegistry {
                 .cloned();
             if let Some(registration) = registration {
                 if registration.operation.native_observation_pending()? {
+                    let _ = registration.operation.mark_retained_for_late_receipts();
                     return Ok(());
                 }
             }

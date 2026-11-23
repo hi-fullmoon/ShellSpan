@@ -2896,6 +2896,40 @@ fn interactive_wait_observes_idle_and_terminal_closure_without_replay() {
 }
 
 #[test]
+fn wait_terminal_slice_only_records_timeout_counter_when_requested() {
+    let broker = TerminalSessionBroker::phase5_enabled_for_test(4_096);
+    broker
+        .attach_transport(
+            "wait-slice-counter",
+            None,
+            TerminalTransportKind::LocalPty,
+            TerminalGeometry::new(80, 24),
+        )
+        .unwrap()
+        .unwrap();
+    let request = TerminalWaitRequest {
+        after_screen_version: Some(u64::MAX - 1),
+        after_output_sequence: None,
+        after_lifecycle_sequence: None,
+        text: None,
+        case_sensitive: false,
+        idle: None,
+        timeout: Duration::from_millis(1),
+    };
+    let intermediate = broker
+        .wait_terminal_slice("wait-slice-counter", request.clone(), false)
+        .unwrap();
+    assert_eq!(intermediate.reason, TerminalWaitReason::TimedOut);
+    assert_eq!(broker.counters.timeout.load(Ordering::Relaxed), 0);
+
+    let final_slice = broker
+        .wait_terminal_slice("wait-slice-counter", request, true)
+        .unwrap();
+    assert_eq!(final_slice.reason, TerminalWaitReason::TimedOut);
+    assert_eq!(broker.counters.timeout.load(Ordering::Relaxed), 1);
+}
+
+#[test]
 fn drain_decoded_output_handles_invalid_bytes_and_trailing_incomplete_utf8() {
     let mut pending = vec![b'a', 0xff, 0xfe, b'b', 0xe2, 0x82];
     let mut output = String::new();
@@ -2990,4 +3024,111 @@ fn integration_channel_closed_wakes_waiting_prompt_observers_and_close_frees_buf
     let record = slot.lock().unwrap();
     assert_eq!(record.replay.capacity(), 0);
     assert_eq!(record.capture.capacity(), 0);
+}
+
+#[test]
+fn interactive_agent_input_rejects_chunk_split_destructive_and_remote_privilege_commands() {
+    let broker = TerminalSessionBroker::phase5_enabled_for_test(4096);
+    broker
+        .apply_trusted_rollout(
+            true,
+            TerminalBrokerRolloutSource::Test,
+            true,
+            TerminalBrokerRolloutSource::Test,
+            true,
+            TerminalBrokerRolloutSource::Test,
+            true,
+            TerminalBrokerRolloutSource::Test,
+            true,
+            TerminalBrokerRolloutSource::Test,
+            true,
+            TerminalBrokerRolloutSource::Test,
+        )
+        .unwrap();
+    broker
+        .attach_transport(
+            "ssh-guard-transport",
+            None,
+            TerminalTransportKind::SshPty,
+            TerminalGeometry::new(80, 24),
+        )
+        .unwrap();
+    broker
+        .register_integration_channel("ssh-guard-transport", "int-ssh", TerminalShellKind::Bash)
+        .unwrap();
+    broker
+        .accept_integration_event(
+            "ssh-guard-transport",
+            "int-ssh",
+            TerminalIntegrationControlEvent::Ready {
+                shell: TerminalShellKind::Bash,
+            },
+        )
+        .unwrap();
+    broker
+        .acquire_agent_interactive_lease("ssh-guard-transport", "agent-1", "task-1", "op-guard")
+        .unwrap();
+    let source = TerminalBrokerInputSource::Agent {
+        agent_session_id: "agent-1".into(),
+        task_id: "task-1".into(),
+        operation_id: "op-guard".into(),
+    };
+    broker
+        .admit_terminal_input(
+            "ssh-guard-transport",
+            source.clone(),
+            TerminalInputKind::Text,
+            b"rm ",
+            || Ok(()),
+        )
+        .unwrap();
+    broker
+        .admit_terminal_input(
+            "ssh-guard-transport",
+            source.clone(),
+            TerminalInputKind::Text,
+            b"-rf ",
+            || Ok(()),
+        )
+        .unwrap();
+    let err = broker
+        .admit_terminal_input(
+            "ssh-guard-transport",
+            source.clone(),
+            TerminalInputKind::Text,
+            b"/",
+            || Ok(()),
+        )
+        .unwrap_err();
+    assert!(err.contains("AGENT_CRITICAL_OPERATION_DENIED"), "{err}");
+
+    // Ctrl-C clears the guard buffer, then split `s` + `udo id` is rejected on SSH.
+    broker
+        .admit_terminal_input(
+            "ssh-guard-transport",
+            source.clone(),
+            TerminalInputKind::Interrupt,
+            b"\x03",
+            || Ok(()),
+        )
+        .unwrap();
+    broker
+        .admit_terminal_input(
+            "ssh-guard-transport",
+            source.clone(),
+            TerminalInputKind::Text,
+            b"s",
+            || Ok(()),
+        )
+        .unwrap();
+    let err = broker
+        .admit_terminal_input(
+            "ssh-guard-transport",
+            source,
+            TerminalInputKind::Text,
+            b"udo id",
+            || Ok(()),
+        )
+        .unwrap_err();
+    assert_eq!(err, crate::agent_runtime::REMOTE_PRIVILEGE_DENIED);
 }

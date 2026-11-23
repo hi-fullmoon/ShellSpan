@@ -67,16 +67,21 @@ export function createTerminalCommandBlocks(terminal: Terminal) {
     if (!match) return false;
     const id = Number(match[2]);
     if (!Number.isSafeInteger(id)) return false;
-    const block = get(id);
-    if (match[1] === 'C' && !block.output) {
-      block.prompt = pendingPrompt && !pendingPrompt.isDisposed ? pendingPrompt : terminal.registerMarker(0);
-      pendingPrompt = undefined;
-      block.prompt?.onDispose(() => remove(id));
-      block.output = register(id);
-      publish();
-    } else if (match[1] !== 'C' && block.output && !block.end) {
-      block.end = register(id);
-      publish();
+    if (match[1] === 'C') {
+      const block = get(id);
+      if (!block.output) {
+        block.prompt = pendingPrompt && !pendingPrompt.isDisposed ? pendingPrompt : terminal.registerMarker(0);
+        pendingPrompt = undefined;
+        block.prompt?.onDispose(() => remove(id));
+        block.output = register(id);
+        publish();
+      }
+    } else {
+      const block = blocks.get(id);
+      if (block?.output && !block.end) {
+        block.end = register(id);
+        publish();
+      }
     }
     return false;
   });

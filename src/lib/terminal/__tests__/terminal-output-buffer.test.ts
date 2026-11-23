@@ -283,4 +283,32 @@ describe('terminal output buffer', () => {
     expect(listener).toHaveBeenCalledTimes(1);
     expect(listener).toHaveBeenCalledWith();
   });
+
+  it('redacts token and provider key splits across chunks and drops evicted cached lines', () => {
+    appendTerminalOutput('session-1', 'OPENAI_API_KEY=\n');
+    expect(getRecentTerminalOutputSnapshot('session-1', 10).content).toContain('OPENAI_API_KEY=');
+    appendTerminalOutput('session-1', 'very-secret-openai-value\ntoken:\n');
+    const first = getRecentTerminalOutputSnapshot('session-1', 10);
+    expect(first.content).not.toContain('very-secret-openai-value');
+    appendTerminalOutput('session-1', 'split-token-value\n');
+    const second = getRecentTerminalOutputSnapshot('session-1', 10);
+    expect(second.content).not.toContain('split-token-value');
+
+    // Fill cache to maxLines, then evict the earlier chunks with a large single line.
+    clearTerminalOutput('session-1');
+    appendTerminalOutput('session-1', 'evict-a\nevict-b\nevict-c\n');
+    expect(getRecentTerminalOutputSnapshot('session-1', 3).content).toBe('evict-a\nevict-b\nevict-c');
+    appendTerminalOutput('session-1', `${'x'.repeat(270_000)}\n`);
+    const afterEvict = getRecentTerminalOutputSnapshot('session-1', 3);
+    expect(afterEvict.content).not.toContain('evict-a');
+  });
+
+  it('handles pathological dotted tokens and unterminated OSC sequences in linear time', () => {
+    const dotted = 'a.'.repeat(50_000);
+    const oscFlood = `keep${'\u001b]'.repeat(10_000)}`;
+    const start = performance.now();
+    expect(redactTerminalSecrets(dotted)).toBe(dotted);
+    expect(stripAnsi(oscFlood)).toBe('keep');
+    expect(performance.now() - start).toBeLessThan(1000);
+  });
 });

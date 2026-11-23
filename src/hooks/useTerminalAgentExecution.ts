@@ -22,20 +22,27 @@ interface SandboxCheck {
 interface LocalStatusState {
   readonly status: LocalSandboxStatus | null;
   readonly checking: boolean;
+  readonly generation: number;
 }
 
 const useSandboxChecks = create<{ checks: Readonly<Partial<Record<string, SandboxCheck>>> }>()(() => ({ checks: {} }));
-const useLocalSandboxStatusStore = create<LocalStatusState>()(() => ({ status: null, checking: false }));
+const useLocalSandboxStatusStore = create<LocalStatusState>()(() => ({ status: null, checking: false, generation: 0 }));
 const localSandboxKey = 'local';
 const profileSandboxKey = (profileId: string): string => `profile:${profileId}`;
 
 function checkLocalSandboxStatus(): void {
   const current = useLocalSandboxStatusStore.getState();
   if (current.checking || current.status !== null) return;
-  useLocalSandboxStatusStore.setState({ status: null, checking: true });
+  const generation = current.generation + 1;
+  useLocalSandboxStatusStore.setState({ status: null, checking: true, generation });
+  const finish = (status: LocalSandboxStatus): void => {
+    if (useLocalSandboxStatusStore.getState().generation === generation) {
+      useLocalSandboxStatusStore.setState({ status, checking: false, generation });
+    }
+  };
   void invokeLocalSandboxStatus().then(
-    status => useLocalSandboxStatusStore.setState({ status, checking: false }),
-    () => useLocalSandboxStatusStore.setState({ status: { supported: false }, checking: false }),
+    finish,
+    () => finish({ supported: false }),
   );
 }
 
@@ -66,8 +73,13 @@ function checkProfileSandbox(profileId: string, refresh = false): void {
 const unsubscribeTerminals = useTerminalStore.subscribe(({ sessions }, previous) => {
   if (sessions === previous.sessions) return;
   const hasLocal = sessions.some(isLocal);
-  if (!hasLocal && useLocalSandboxStatusStore.getState().status !== null) {
-    useLocalSandboxStatusStore.setState({ status: null, checking: false });
+  const localState = useLocalSandboxStatusStore.getState();
+  if (!hasLocal && (localState.status !== null || localState.checking)) {
+    useLocalSandboxStatusStore.setState({
+      status: null,
+      checking: false,
+      generation: localState.generation + 1,
+    });
   }
   const entries = Object.entries(useSandboxChecks.getState().checks);
   if (entries.length === 0) return;

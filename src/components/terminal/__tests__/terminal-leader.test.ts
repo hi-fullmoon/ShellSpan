@@ -162,4 +162,20 @@ describe('terminal-leader', () => {
       handleTerminalLeaderKeydown(new KeyboardEvent('keyup', { key: 'b', ctrlKey: true })),
     ).toBe(false);
   });
+
+  it('stays armed through bare Shift keydowns so shifted sub-keys like } work and ignores IME composition', () => {
+    const arrange = vi.fn();
+    document.addEventListener('shellspan:arrange-terminal-panes', arrange);
+
+    expect(handleTerminalLeaderKeydown(keydown({ key: 'b', ctrlKey: true }))).toBe(true);
+    expect(handleTerminalLeaderKeydown(keydown({ key: 'Shift', shiftKey: true }))).toBe(false);
+    expect(handleTerminalLeaderKeydown(keydown({ key: '}', shiftKey: true }))).toBe(true);
+    expect(arrange).toHaveBeenCalledTimes(1);
+    expect((arrange.mock.calls[0][0] as CustomEvent).detail).toBe('terminalSwapPane');
+
+    expect(handleTerminalLeaderKeydown(keydown({ key: 'b', ctrlKey: true }))).toBe(true);
+    expect(handleTerminalLeaderKeydown(keydown({ key: 'Process', isComposing: true }))).toBe(false);
+
+    document.removeEventListener('shellspan:arrange-terminal-panes', arrange);
+  });
 });

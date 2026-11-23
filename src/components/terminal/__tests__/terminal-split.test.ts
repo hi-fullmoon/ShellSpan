@@ -253,3 +253,38 @@ describe('repartitionTerminalLayoutPinnedFirst', () => {
     expect(repartitionTerminalLayoutPinnedFirst(layout, (id) => id === 'b')).toBe(layout);
   });
 });
+
+describe('findAdjacentTerminalGroup asymmetric geometry & NaN split guard', () => {
+  it('does not jump diagonally to non-adjacent panes when getRect is supplied', () => {
+    // a (left full height) | (b top-right / c bottom-right)
+    const layout: TerminalLayoutNode = {
+      kind: 'split',
+      orientation: 'horizontal',
+      first: group('a'),
+      second: { kind: 'split', orientation: 'vertical', first: group('b'), second: group('c') },
+    };
+    const rects = new Map([
+      ['a', { left: 0, right: 400, top: 0, bottom: 600, width: 400, height: 600 }],
+      ['b', { left: 400, right: 800, top: 0, bottom: 300, width: 400, height: 300 }],
+      ['c', { left: 400, right: 800, top: 300, bottom: 600, width: 400, height: 300 }],
+    ]);
+    const getRect = (id: string) => rects.get(id) ?? null;
+
+    expect(findAdjacentTerminalGroup(layout, 'a', 'bottom', getRect)).toBeNull();
+    expect(findAdjacentTerminalGroup(layout, 'a', 'top', getRect)).toBeNull();
+    expect(findAdjacentTerminalGroup(layout, 'a', 'right', getRect)?.id).toBe('b');
+    expect(findAdjacentTerminalGroup(layout, 'b', 'bottom', getRect)?.id).toBe('c');
+    expect(findAdjacentTerminalGroup(layout, 'c', 'left', getRect)?.id).toBe('a');
+  });
+
+  it('ignores NaN split weights in updateTerminalSplitAtPath', () => {
+    const layout: TerminalLayoutNode = {
+      kind: 'split',
+      orientation: 'horizontal',
+      split: 0.5,
+      first: group('a'),
+      second: group('b'),
+    };
+    expect(updateTerminalSplitAtPath(layout, [], Number.NaN)).toBe(layout);
+  });
+});

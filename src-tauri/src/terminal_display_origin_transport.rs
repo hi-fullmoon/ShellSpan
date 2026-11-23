@@ -1,7 +1,7 @@
 //! Authenticated numeric display I/O shared by the app and real editor fixtures.
 //! This module has no NIP, input writer, command, lease or execution state.
 use std::fs::{File, OpenOptions};
-use std::io::Read;
+use std::io::{ErrorKind, Read, Write};
 use std::os::windows::io::AsRawHandle;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -47,6 +47,30 @@ pub(crate) fn read_exact(
             return Err("TERMINAL_DISPLAY_ORIGIN_CLOSED".into());
         }
         offset += read;
+    }
+    Ok(())
+}
+
+pub(crate) fn write_all_nonblocking(
+    file: &mut File,
+    bytes: &[u8],
+    stopped: &AtomicBool,
+    deadline: Instant,
+) -> Result<(), String> {
+    let mut offset = 0;
+    while offset < bytes.len() {
+        if stopped.load(Ordering::Acquire) || Instant::now() >= deadline {
+            return Err("TERMINAL_DISPLAY_ORIGIN_CLOSED".into());
+        }
+        match file.write(&bytes[offset..]) {
+            Ok(0) => thread::sleep(Duration::from_millis(5)),
+            Ok(written) => offset += written,
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+            Err(_) => return Err("TERMINAL_DISPLAY_ORIGIN_CLOSED".into()),
+        }
     }
     Ok(())
 }

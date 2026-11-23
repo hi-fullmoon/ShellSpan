@@ -88,7 +88,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
   const retainedInputs = new Map<string, {
     sessionId: string;
     controller: TerminalController;
-    release: () => void;
+    release?: () => void;
     removeLifecycle: () => void;
   }>();
   const turnSurfaces = new Map<string, { sessionId: string; operationId: string; turnId?: string }>();
@@ -139,9 +139,23 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
     return true;
   };
 
+  const suppressTerminalInput = (
+    agentSessionId: string,
+    sessionId: string,
+    controller: TerminalController,
+  ): (() => void) => controller.suppressUserInput(() => {
+    const current = agentTerminalLeaseState.get(sessionId);
+    if (current?.agentSessionId === agentSessionId) {
+      agentTerminalLeaseState.update(sessionId, current.operationId, (view) => ({
+        ...view,
+        inputBlocked: true,
+      }));
+    }
+  }, () => !useTerminalStore.getState().sessions.find((session) => session.sessionId === sessionId)?.foregroundHandoffActive);
+
   const releaseRetainedInput = (agentSessionId: string): void => {
     const retained = retainedInputs.get(agentSessionId);
-    retained?.release();
+    retained?.release?.();
     retained?.removeLifecycle();
     retainedInputs.delete(agentSessionId);
   };
@@ -151,15 +165,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
     retainedInputs.set(agentSessionId, {
       sessionId,
       controller,
-      release: suppress ? controller.suppressUserInput(() => {
-        const current = agentTerminalLeaseState.get(sessionId);
-        if (current?.agentSessionId === agentSessionId) {
-          agentTerminalLeaseState.update(sessionId, current.operationId, (view) => ({
-            ...view,
-            inputBlocked: true,
-          }));
-        }
-      }, () => !useTerminalStore.getState().sessions.find((session) => session.sessionId === sessionId)?.foregroundHandoffActive) : () => {},
+      release: suppress ? suppressTerminalInput(agentSessionId, sessionId, controller) : undefined,
       removeLifecycle: controller.subscribeLifecycle((lifecycle) => {
         if (lifecycle.type === 'rebound' || lifecycle.type === 'disposed') clearTurn(agentSessionId);
       }),
@@ -186,11 +192,15 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
     for (const view of [...suspendedTurnViews.values()].reverse()) {
       const owner = turnSurfaces.get(view.agentSessionId);
       const retained = retainedInputs.get(view.agentSessionId);
+      const liveController = terminalRegistry.get(view.sessionId);
       if (view.sessionId !== surface.sessionId
         || owner?.sessionId !== view.sessionId || owner.operationId !== view.operationId
         || !currentTurns.has(view.agentSessionId) || fencedTurns.has(view.agentSessionId)
-        || !retained || terminalRegistry.get(view.sessionId) !== retained.controller) continue;
+        || !retained || liveController !== retained.controller) continue;
       suspendedTurnViews.delete(view.agentSessionId);
+      if (!retained.release && !waitingForUserAction.has(view.agentSessionId) && liveController) {
+        retainTurnInput(view.agentSessionId, view.sessionId, liveController, true);
+      }
       agentTerminalLeaseState.set(view);
       break;
     }
@@ -246,7 +256,13 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       const active = activeLeases.get(sessionId);
       if (active) cleanup(active, false, true);
       for (const [owner, retained] of retainedInputs) {
-        if (retained.sessionId === sessionId) releaseRetainedInput(owner);
+        if (retained.sessionId !== sessionId) continue;
+        if (owner !== agentSessionId && suspendedTurnViews.has(owner)) {
+          retained.release?.();
+          retained.release = undefined;
+        } else {
+          releaseRetainedInput(owner);
+        }
       }
       if (controller) retainTurnInput(agentSessionId, sessionId, controller, false);
       const displayed = agentTerminalLeaseState.get(sessionId);
@@ -329,15 +345,20 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       takeoverRequested: true,
       takeoverFailed: false,
     }));
+    const markTakeoverFailed = (): void => {
+      const current = agentTerminalLeaseState.get(sessionId);
+      if (current?.agentSessionId !== agentSessionId) return;
+      agentTerminalLeaseState.update(sessionId, current.operationId, (activeView) => ({
+        ...activeView,
+        takeoverRequested: false,
+        takeoverFailed: true,
+      }));
+    };
     let pendingStop: PendingTurnStop;
     const timer = setTimeout(() => {
       if (pendingTurnStops.get(agentSessionId) !== pendingStop) return;
       pendingTurnStops.delete(agentSessionId);
-      agentTerminalLeaseState.update(sessionId, operationId, (current) => ({
-        ...current,
-        takeoverRequested: false,
-        takeoverFailed: true,
-      }));
+      markTakeoverFailed();
       logger.warn(`Timed out waiting for Agent turn cancellation ${agentSessionId}`);
     }, TAKEOVER_CONFIRMATION_TIMEOUT_MS);
     pendingStop = { timer, focusTerminal };
@@ -376,11 +397,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         if (pendingTurnStops.get(agentSessionId) !== pendingStop) return;
         clearTimeout(pendingStop.timer);
         pendingTurnStops.delete(agentSessionId);
-        agentTerminalLeaseState.update(sessionId, operationId, (current) => ({
-          ...current,
-          takeoverRequested: false,
-          takeoverFailed: true,
-        }));
+        markTakeoverFailed();
         logger.warn(`Failed to cancel Agent turn ${agentSessionId}`, error);
       }
     })();
@@ -403,6 +420,19 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
     }
     return true;
   };
+
+  const unsubscribeRegistry = terminalRegistry.subscribe(() => {
+    if (disposed) return;
+    for (const [agentSessionId, surface] of turnSurfaces) {
+      if (activeLeases.get(surface.sessionId)?.lease.agentSessionId === agentSessionId) continue;
+      const controller = terminalRegistry.get(surface.sessionId);
+      if (!controller || retainedInputs.get(agentSessionId)?.controller === controller) continue;
+      const waitingOnSession = waitingForUserAction.has(agentSessionId)
+        || [...waitingForUserAction].some((owner) => turnSurfaces.get(owner)?.sessionId === surface.sessionId);
+      const suspended = suspendedTurnViews.has(agentSessionId);
+      retainTurnInput(agentSessionId, surface.sessionId, controller, !waitingOnSession && !suspended);
+    }
+  });
 
   return {
     restoreLiveManualHandoffs(handoffs) {
@@ -537,6 +567,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       if (previous) releaseResources(previous, false);
 
       const acquiredLease = { ...lease, state: 'acquired' as const };
+      waitingForUserAction.delete(lease.agentSessionId);
       const retained = retainedInputs.get(lease.agentSessionId);
       if (retained) {
         retainedInputs.delete(lease.agentSessionId);
@@ -544,7 +575,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         if (retained.sessionId === lease.sessionId && retained.controller === controller) {
           inheritedInput = retained.release;
         } else {
-          retained.release();
+          retained.release?.();
         }
       }
       const previousView = agentTerminalLeaseState.get(lease.sessionId);
@@ -595,15 +626,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
           : {}),
       });
       if (controller) {
-        active.releaseInput ??= controller.suppressUserInput(() => {
-          const current = agentTerminalLeaseState.get(lease.sessionId);
-          if (current?.agentSessionId === lease.agentSessionId) {
-            agentTerminalLeaseState.update(lease.sessionId, current.operationId, (view) => ({
-              ...view,
-              inputBlocked: true,
-            }));
-          }
-        });
+        active.releaseInput ??= suppressTerminalInput(lease.agentSessionId, lease.sessionId, controller);
         active.removeLifecycle = controller.subscribeLifecycle((lifecycle) => {
           if (lifecycle.type === 'rebound' || lifecycle.type === 'disposed') {
             cleanup(active, false);
@@ -798,11 +821,12 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
     dispose() {
       if (disposed) return;
       disposed = true;
+      unsubscribeRegistry();
       for (const active of [...activeLeases.values()]) cleanup(active, false);
       activeLeases.clear();
       for (const agentSessionId of [...turnSurfaces.keys()]) clearTurn(agentSessionId);
       for (const retained of retainedInputs.values()) {
-        retained.release();
+        retained.release?.();
         retained.removeLifecycle();
       }
       retainedInputs.clear();

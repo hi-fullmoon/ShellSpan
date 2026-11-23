@@ -87,15 +87,19 @@ function dispatchLeaderCommand(action: ShortcutAction): void {
   }
 }
 
+const BARE_MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'AltGraph']);
+
 // Returns true when the keypress is consumed by the leader machine and
 // must not reach the pty.
 export function handleTerminalLeaderKeydown(event: KeyboardEvent): boolean {
   if (event.type !== 'keydown') return false;
+  if (event.isComposing || event.keyCode === 229 || event.key === 'Process') return false;
   if (event.repeat) return armed;
 
   const shortcuts = effectiveShortcuts();
 
   if (armed) {
+    if (BARE_MODIFIER_KEYS.has(event.key)) return false;
     disarm();
     // Modifier combos belong to app shortcuts, not the leader namespace.
     if (event.altKey || event.metaKey) return false;

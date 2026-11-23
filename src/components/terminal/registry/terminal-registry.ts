@@ -75,8 +75,16 @@ function resolveWindowsPty(ptyInfo?: SessionPtyInfo): { backend: 'conpty'; build
     : { backend: 'conpty' };
 }
 
+const BRACKETED_PASTE_CONTROL_PATTERN = /(?:\u001b\[|\u009b)20[01]~/g;
+const OSC52_RATE_WINDOW_MS = 2000;
+const OSC52_MAX_WRITES_PER_WINDOW = 4;
+
+export function sanitizeBracketedPasteText(text: string): string {
+  return text.replace(BRACKETED_PASTE_CONTROL_PATTERN, '');
+}
+
 function formatTerminalPasteData(terminal: Terminal, text: string): string {
-  const normalized = text.replace(/\r?\n/g, '\r');
+  const normalized = sanitizeBracketedPasteText(text).replace(/\r?\n/g, '\r');
   if (terminal.modes?.bracketedPasteMode && !terminal.options?.ignoreBracketedPasteMode) {
     return `\u001b[200~${normalized}\u001b[201~`;
   }
@@ -234,6 +242,7 @@ class TerminalControllerImpl implements TerminalController {
   private reconnectRequestedRef = false;
   private listenerGeneration = 0;
   private restoringDisplay = false;
+  private readonly osc52WriteTimestamps: number[] = [];
   private preferences: TerminalDisplayPreferences;
   private linkProviderDisposable?: IDisposable;
   private resizeHandler?: ReturnType<typeof createTerminalResizeHandler>;
@@ -375,6 +384,7 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal.onTitleChange((title) => useTerminalStore.getState().setOscTitle(this.sessionId, title));
     this.terminal.parser.registerOscHandler(52, (payload) => {
       if (this.restoringDisplay || this.getStatus(this.sessionId) !== 'connected') return true;
+      if (!this.canWriteOsc52Clipboard()) return true;
       const text = decodeTerminalClipboardWrite(payload, useAppStore.getState().terminalOsc52Policy);
       if (text !== null) void writeClipboardText(text).catch(() => {
         useToastStore.getState().addToast(t('terminal.feedback.copyFailed'), 'error');
@@ -585,6 +595,20 @@ class TerminalControllerImpl implements TerminalController {
     }
   }
 
+  private canWriteOsc52Clipboard(): boolean {
+    if (this.disposed || this.host === null) return false;
+    if (useAppStore.getState().activeSection !== 'terminal') return false;
+    if (useTerminalStore.getState().activeSessionId !== this.sessionId) return false;
+    if (typeof document.hasFocus === 'function' && !document.hasFocus()) return false;
+    const now = Date.now();
+    while (this.osc52WriteTimestamps.length > 0 && now - this.osc52WriteTimestamps[0] > OSC52_RATE_WINDOW_MS) {
+      this.osc52WriteTimestamps.shift();
+    }
+    if (this.osc52WriteTimestamps.length >= OSC52_MAX_WRITES_PER_WINDOW) return false;
+    this.osc52WriteTimestamps.push(now);
+    return true;
+  }
+
   private activateUrl(text: string): void {
     const url = this.preferences.urlDetection ? terminalHttpUrl(text) : null;
     if (url) void invokeOpenUrl(url).catch(() => useToastStore.getState().addToast(t('ai.link.openFailed'), 'error'));
@@ -716,7 +740,10 @@ class TerminalControllerImpl implements TerminalController {
           replay.apply(snapshot);
           await new Promise<void>((resolve) => this.terminal.write('', resolve));
         } while (isCurrent() && !recoveryFailed && snapshotNeeded);
-        if (isCurrent() && !recoveryFailed && replay.ready()) this.restoringDisplay = false;
+        if (isCurrent() && !recoveryFailed && replay.ready()) {
+          this.restoringDisplay = false;
+          if (this.host) this.fit(true);
+        }
       })().finally(() => { recovery = undefined; });
       return recovery;
     };
@@ -820,13 +847,25 @@ class TerminalControllerImpl implements TerminalController {
         cols: this.terminal.cols, rows: this.terminal.rows,
       };
       while (dimensions) {
+        if (this.sendingDimensions) {
+          this.queuedResizeDimensions = dimensions;
+          break;
+        }
         this.sendingDimensions = dimensions;
+        let failed = false;
         try {
           await invokeResizeSession(sessionId, dimensions.cols, dimensions.rows);
+        } catch (error) {
+          failed = true;
+          logger.warn(`Failed to synchronize initial resize for session ${sessionId}`, error);
         } finally {
           if (this.sendingDimensions === dimensions) this.sendingDimensions = null;
         }
         if (this.disposed || generation !== this.listenerGeneration || sessionId !== this.sessionId) return;
+        if (failed) {
+          this.sendResize(dimensions.cols, dimensions.rows);
+          break;
+        }
         this.lastSentDimensions = dimensions;
         const queued = this.queuedResizeDimensions;
         this.queuedResizeDimensions = null;
@@ -968,6 +1007,7 @@ class TerminalControllerImpl implements TerminalController {
     }
 
     host.appendChild(this.container);
+    this.host = host;
 
     if (!this.opened) {
       try {
@@ -1289,17 +1329,18 @@ class TerminalControllerImpl implements TerminalController {
 
   pasteUserText(text: string, broadcast = false): void {
     if (this.disposed || this.getStatus(this.sessionId) !== 'connected' || !this.canWriteUserInput()) return;
+    const sanitized = sanitizeBracketedPasteText(text);
     this.clearBroadcastOrigin();
     if (this.opened && this.terminal.textarea) {
-      this.terminal.paste(text);
+      this.terminal.paste(sanitized);
     } else {
-      void this.writeUserInput(formatTerminalPasteData(this.terminal, text), false).catch((error) => {
+      void this.writeUserInput(formatTerminalPasteData(this.terminal, sanitized), false).catch((error) => {
         logger.error(`Failed to write paste input to session ${this.sessionId}`, error);
         this.showWriteFailure();
       });
     }
     if (!broadcast) return;
-    this.broadcastInput((target) => target.writeUserInput(formatTerminalPasteData(target.terminal, text)));
+    this.broadcastInput((target) => target.writeUserInput(formatTerminalPasteData(target.terminal, sanitized)));
   }
 
   writeUserInput(data: string, broadcast = false): Promise<boolean> {
@@ -1479,6 +1520,7 @@ class TerminalControllerImpl implements TerminalController {
     this.unverifiedUserSubmission = false;
     this.recentOutputTail = '';
     this.userInputSuppressions.clear();
+    this.outputFilters.clear();
     this.agentInputBlockedFeedbackRef = false;
     this.outputGeneration += 1;
     this.commandDecorations.rebind();
@@ -1582,14 +1624,14 @@ class TerminalControllerImpl implements TerminalController {
   private syncWebglRenderer(enabled: boolean): void {
     this.webglLoadToken += 1;
     const token = this.webglLoadToken;
-    if (!enabled || !this.opened || this.disposed) {
+    if (!enabled || !this.opened || !this.host || this.disposed) {
       this.webglAddon?.dispose();
       this.webglAddon = undefined;
       return;
     }
     if (this.webglAddon) return;
     void import('@xterm/addon-webgl').then(({ WebglAddon }) => {
-      if (this.disposed || !this.opened || token !== this.webglLoadToken || !this.preferences.webglRenderer || this.webglAddon) {
+      if (this.disposed || !this.opened || !this.host || token !== this.webglLoadToken || !this.preferences.webglRenderer || this.webglAddon) {
         return;
       }
       try {

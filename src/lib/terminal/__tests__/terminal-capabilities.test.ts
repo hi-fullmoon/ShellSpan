@@ -324,4 +324,18 @@ describe('terminal capabilities', () => {
       terminal.dispose();
     }
   });
+
+  it('ignores orphan OSC 133;D markers without creating empty blocks', async () => {
+    const terminal = new Terminal({ cols: 32, rows: 6, allowProposedApi: true });
+    const tracker = createTerminalCommandBlocks(terminal);
+    try {
+      await new Promise<void>((resolve) => terminal.write(
+        '\x1b]133;D;0;ShellSpan=99\x07$ ', resolve,
+      ));
+      expect(tracker.list()).toEqual([]);
+    } finally {
+      tracker.dispose();
+      terminal.dispose();
+    }
+  });
 });

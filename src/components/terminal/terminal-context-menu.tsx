@@ -132,6 +132,39 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   }, [reconnectConfirmTarget, sessions]);
 
   const target = session ?? renameTarget ?? confirmationTarget ?? reconnectConfirmTarget;
+  const orderedIds = confirmationOrder ?? orderedSessionIds ?? sessions.map((s) => s.sessionId);
+  const isUnpinned = (sessionId: string): boolean => {
+    const found = sessions.find((s) => s.sessionId === sessionId);
+    return Boolean(found && !found.pinned);
+  };
+
+  const closeOthersIds = target
+    ? orderedIds.filter((id) => id !== target.sessionId && isUnpinned(id))
+    : [];
+
+  const closeToRightIds = (() => {
+    if (!target) return [];
+    const idx = orderedIds.indexOf(target.sessionId);
+    if (idx === -1) return [];
+    return orderedIds.slice(idx + 1).filter(isUnpinned);
+  })();
+
+  useEffect(() => {
+    if (closeOthersConfirm && closeOthersIds.length === 0) {
+      setCloseOthersConfirm(false);
+      setConfirmationTarget(null);
+      setConfirmationOrder(null);
+    }
+  }, [closeOthersConfirm, closeOthersIds.length]);
+
+  useEffect(() => {
+    if (closeToRightConfirm && closeToRightIds.length === 0) {
+      setCloseToRightConfirm(false);
+      setConfirmationTarget(null);
+      setConfirmationOrder(null);
+    }
+  }, [closeToRightConfirm, closeToRightIds.length]);
+
   if (!target) return null;
 
   const liveSession = sessions.find((s) => s.sessionId === target.sessionId) ?? target;
@@ -139,20 +172,6 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
     && !liveSession.pendingConnection
     && liveSession.status !== 'connecting'
     && (!liveSession.profileId || profiles.some((p) => p.id === liveSession.profileId));
-
-  const orderedIds = confirmationOrder ?? orderedSessionIds ?? sessions.map((s) => s.sessionId);
-  const isUnpinned = (sessionId: string): boolean =>
-    !sessions.find((s) => s.sessionId === sessionId)?.pinned;
-
-  const closeOthersIds = orderedIds.filter(
-    (id) => id !== target.sessionId && isUnpinned(id),
-  );
-
-  const closeToRightIds = (() => {
-    const idx = orderedIds.indexOf(target.sessionId);
-    if (idx === -1) return [];
-    return orderedIds.slice(idx + 1).filter(isUnpinned);
-  })();
 
   const closeSession = (sessionId: string): void => {
     void closeTerminal(sessionId);
@@ -374,10 +393,10 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         <MenuItem onClick={handleClose}>
           {t('common.close')}
         </MenuItem>
-        <MenuItem onClick={handleCloseOthers}>
+        <MenuItem onClick={handleCloseOthers} disabled={closeOthersIds.length === 0}>
           {t('terminal.tab.closeOthers')}
         </MenuItem>
-        <MenuItem onClick={handleCloseToRight}>
+        <MenuItem onClick={handleCloseToRight} disabled={closeToRightIds.length === 0}>
           {t('terminal.tab.closeToRight')}
         </MenuItem>
         <Separator className="my-0.5" />

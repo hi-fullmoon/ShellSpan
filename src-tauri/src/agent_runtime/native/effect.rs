@@ -84,7 +84,7 @@ pub(crate) fn assess_effect_native(
     })
 }
 
-fn classify_command_effect(command: &str) -> AgentEffectKindNative {
+pub(super) fn classify_command_effect(command: &str) -> AgentEffectKindNative {
     if let Some(commands) = super::shell_policy::literal_command_chain(command) {
         return commands
             .into_iter()
@@ -310,22 +310,52 @@ fn command_executable_names(command: &str) -> Vec<String> {
         }
         for (index, word) in words.iter().enumerate() {
             let marker = word.to_ascii_lowercase();
-            let nested = if marker == "-exec"
-                || marker == "-execdir"
-                || (marker == "-c"
-                    && index > 0
-                    && matches!(
-                        command_word_name(words[index - 1]).as_str(),
-                        "sh" | "bash" | "zsh" | "dash" | "ksh" | "cmd" | "powershell" | "pwsh"
-                    )) {
-                words.get(index + 1)
+            let nested = if marker == "-exec" || marker == "-execdir" {
+                words.get(index + 1).copied()
+            } else if index > 0
+                && matches!(
+                    command_word_name(words[index - 1]).as_str(),
+                    "sh" | "bash" | "zsh" | "dash" | "ksh" | "cmd" | "powershell" | "pwsh"
+                )
+                && marker.strip_prefix('-').is_some_and(|opts| {
+                    opts.contains('c') && opts.bytes().all(|b| b.is_ascii_alphabetic())
+                })
+            {
+                let mut pos = index + 1;
+                while let Some(candidate) = words.get(pos) {
+                    if *candidate == "--" || *candidate == "-" {
+                        pos += 1;
+                        break;
+                    }
+                    if matches!(*candidate, "-o" | "+o" | "-O" | "+O") {
+                        pos += 2;
+                    } else if candidate.starts_with('-') || candidate.starts_with('+') {
+                        pos += 1;
+                    } else {
+                        break;
+                    }
+                }
+                words.get(pos).copied()
+            } else if marker == "eval" {
+                let mut pos = index + 1;
+                if words.get(pos) == Some(&"--") {
+                    pos += 1;
+                }
+                words.get(pos).copied()
+            } else if index > 0
+                && command_word_name(words[index - 1]) == "env"
+                && (word == &"-S" || marker == "--split-string")
+            {
+                words.get(index + 1).copied()
             } else {
                 None
             };
             if let Some(nested) = nested {
-                let name = command_word_name(nested);
-                if !name.is_empty() {
-                    names.push(name);
+                if let Some(first) = nested.split_ascii_whitespace().next() {
+                    let name = command_word_name(first);
+                    if !name.is_empty() {
+                        names.push(name);
+                    }
                 }
             }
         }
@@ -335,7 +365,19 @@ fn command_executable_names(command: &str) -> Vec<String> {
 
 pub(super) fn segment_executable_index(words: &[&str]) -> Option<usize> {
     const WRAPPERS: &[&str] = &[
-        "command", "doas", "env", "exec", "nice", "nohup", "sudo", "time", "timeout", "watch",
+        "builtin",
+        "command",
+        "doas",
+        "env",
+        "exec",
+        "nice",
+        "nocorrect",
+        "noglob",
+        "nohup",
+        "sudo",
+        "time",
+        "timeout",
+        "watch",
         "xargs",
     ];
     const SHELL_KEYWORDS: &[&str] = &["do", "else", "then"];
@@ -371,6 +413,15 @@ pub(super) fn segment_executable_index(words: &[&str]) -> Option<usize> {
 fn wrapper_option_takes_value(wrapper: &str, option: &str) -> bool {
     let long = option.to_ascii_lowercase();
     match wrapper {
+        "exec" => {
+            option == "-a"
+                || (option.starts_with('-')
+                    && !option.starts_with("--")
+                    && option[1..]
+                        .bytes()
+                        .all(|byte| matches!(byte, b'c' | b'l' | b'a'))
+                    && option.ends_with('a'))
+        }
         "sudo" | "doas" => matches!(
             long.as_str(),
             "-c" | "--chdir"

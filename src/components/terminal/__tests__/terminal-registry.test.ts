@@ -1306,10 +1306,95 @@ describe('terminalRegistry', () => {
       expect(invokeWriteSession).toHaveBeenCalledWith('s1', 'echo 1\recho 2');
       expect(invokeWriteSession).toHaveBeenCalledWith('s2', '\u001b[200~echo 1\recho 2\u001b[201~');
       expect(invokeWriteSession).toHaveBeenCalledWith('s3', 'echo 1\recho 2');
+
+      vi.mocked(invokeWriteSession).mockClear();
+      c1.pasteUserText('safe\u001b[201~evil\u009b201~tail', true);
+      await act(async () => { await Promise.resolve(); });
+      expect(invokeWriteSession).toHaveBeenCalledWith('s1', 'safeeviltail');
+      expect(invokeWriteSession).toHaveBeenCalledWith('s2', '\u001b[200~safeeviltail\u001b[201~');
     } finally {
       useTerminalBroadcastStore.getState().configure('off');
       host.remove();
     }
+  });
+
+  it('restricts OSC 52 clipboard writes to attached active focused terminal and rate limits them', async () => {
+    const writeSpy = vi.fn().mockResolvedValue(undefined);
+    const originalClipboard = navigator.clipboard;
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: writeSpy, readText: vi.fn().mockResolvedValue('') },
+    });
+
+    const store = useTerminalStore.getState();
+    store.addSession({ sessionId: 'osc-active', title: 'osc-active', host: 'h', port: 22, username: 'u' });
+    store.setStatus('osc-active', { sessionId: 'osc-active', status: 'connected' });
+    store.setActiveSession('osc-active');
+    useAppStore.setState({ activeSection: 'terminal', terminalOsc52Policy: 'writeOnly' });
+
+    const controller = createController('osc-active');
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const hasFocusSpy = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    try {
+      await controller.whenOutputReady();
+      // Detached controller must not write clipboard.
+      await new Promise<void>((resolve) => controller.terminal.write('\u001b]52;c;aGVsbG8=\u0007', resolve));
+      expect(writeSpy).not.toHaveBeenCalled();
+
+      controller.attach(host);
+      // Hidden section must not write clipboard.
+      useAppStore.setState({ activeSection: 'workbench' });
+      await new Promise<void>((resolve) => controller.terminal.write('\u001b]52;c;aGVsbG8=\u0007', resolve));
+      expect(writeSpy).not.toHaveBeenCalled();
+
+      // Active visible focused terminal may write up to rate limit.
+      useAppStore.setState({ activeSection: 'terminal' });
+      for (let i = 0; i < 6; i += 1) {
+        await new Promise<void>((resolve) => controller.terminal.write('\u001b]52;c;aGVsbG8=\u0007', resolve));
+      }
+      expect(writeSpy).toHaveBeenCalledTimes(4);
+      expect(writeSpy).toHaveBeenCalledWith('hello');
+    } finally {
+      hasFocusSpy.mockRestore();
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard });
+      host.remove();
+    }
+  });
+
+  it('still marks rebound session ready after transient resize failure and drops stale outputFilters', async () => {
+    const { invokeMarkSessionReady, invokeResizeSession, listenToSshData } = await import('@/lib/ipc/tauri');
+    const dataCallbacks = new Map<string, (event: TauriEvent<string>) => void>();
+    vi.mocked(listenToSshData).mockImplementation(async (sessionId, callback) => {
+      dataCallbacks.set(sessionId, callback);
+      return () => { dataCallbacks.delete(sessionId); };
+    });
+    const store = useTerminalStore.getState();
+    store.addSession({ sessionId: 'rebind-old', title: 'old', host: 'h', port: 22, username: 'u' });
+    store.setStatus('rebind-old', { sessionId: 'rebind-old', status: 'connected' });
+    store.addSession({ sessionId: 'rebind-new', title: 'new', host: 'h', port: 22, username: 'u' });
+    store.setStatus('rebind-new', { sessionId: 'rebind-new', status: 'connected' });
+
+    const controller = createController('rebind-old');
+    await controller.whenOutputReady();
+    // Install a filter that swallows everything on the old session.
+    controller.subscribeOutputFilter({ push: () => '', finish: () => '' });
+
+    vi.mocked(invokeMarkSessionReady).mockClear();
+    vi.mocked(invokeResizeSession).mockRejectedValueOnce(new Error('transient resize failure'));
+
+    terminalRegistry.rebindSession('rebind-old', 'rebind-new');
+    await controller.whenOutputReady();
+
+    expect(invokeMarkSessionReady).toHaveBeenCalledWith('rebind-new');
+
+    // Replacement session output must not be swallowed by the old outputFilter.
+    const received: string[] = [];
+    controller.subscribeDisplayOutput(({ source, data }) => {
+      if (source === 'session') received.push(data);
+    });
+    dataCallbacks.get('rebind-new')?.({ payload: 'fresh-output' } as TauriEvent<string>);
+    expect(received.join('')).toContain('fresh-output');
   });
 
   it('deduplicates broadcast write failure toasts and alerts when a target rejects input', async () => {

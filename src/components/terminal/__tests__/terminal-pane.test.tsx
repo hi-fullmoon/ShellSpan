@@ -38,16 +38,20 @@ vi.mock('@/hooks/useToast', () => ({
   }),
 }));
 
-vi.mock('@/components/terminal/registry/terminal-registry', async (importOriginal) => ({
-  resolveTerminalTheme: (await importOriginal<typeof import('@/components/terminal/registry/terminal-registry')>()).resolveTerminalTheme,
-  terminalRegistry: {
-    get: vi.fn(),
-    create: vi.fn(),
-    dispose: vi.fn(),
-    disposeAll: vi.fn(),
-    subscribe: vi.fn(() => () => {}),
-  },
-}));
+vi.mock('@/components/terminal/registry/terminal-registry', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/terminal/registry/terminal-registry')>();
+  return {
+    resolveTerminalTheme: actual.resolveTerminalTheme,
+    sanitizeBracketedPasteText: actual.sanitizeBracketedPasteText,
+    terminalRegistry: {
+      get: vi.fn(),
+      create: vi.fn(),
+      dispose: vi.fn(),
+      disposeAll: vi.fn(),
+      subscribe: vi.fn(() => () => {}),
+    },
+  };
+});
 
 function makeSession(
   overrides: Partial<TerminalSessionState> = {},
@@ -483,6 +487,34 @@ describe('TerminalPane', () => {
     expect(screen.getByRole('button', { name: 'common.cancel' })).toHaveClass('h-8');
     await userEvent.click(pasteConfirm);
     expect(terminal.paste).toHaveBeenCalledWith('echo one\necho two');
+  });
+
+  it('visualizes escape and control characters in the multiline paste preview', async () => {
+    const terminal = makeMockTerminal();
+    render(<TerminalPane activeSession={makeSession()} />);
+
+    terminal.element?.querySelector('textarea')?.focus();
+    await userEvent.paste('safe\u001b[201~evil\nnext');
+
+    expect(await screen.findByText('terminal.pasteWarning.title')).toBeInTheDocument();
+    expect(screen.getByText(/safe␛\[201~evil/)).toBeInTheDocument();
+  });
+
+  it('installs paste safety handler when a hidden terminal becomes visible', async () => {
+    const terminal = makeMockTerminal();
+    const element = terminal.element;
+    (terminal as { element: HTMLElement | undefined }).element = undefined;
+
+    const { rerender } = render(<TerminalPane activeSession={makeSession()} isVisible={false} />);
+
+    (terminal as { element: HTMLElement | undefined }).element = element;
+    rerender(<TerminalPane activeSession={makeSession()} isVisible />);
+
+    element?.querySelector('textarea')?.focus();
+    await userEvent.paste('line one\nline two');
+
+    expect(await screen.findByText('terminal.pasteWarning.title')).toBeInTheDocument();
+    expect(terminal.paste).not.toHaveBeenCalled();
   });
 
   it('confirms a pending paste into the session where it started', async () => {

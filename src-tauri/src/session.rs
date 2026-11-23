@@ -180,6 +180,11 @@ impl RemoteSshShellIntegration {
             let mut control = session
                 .channel_session()
                 .map_err(|error| format!("failed to open remote integration channel: {error}"))?;
+            control
+                .handle_extended_data(ExtendedData::Ignore)
+                .map_err(|error| {
+                    format!("failed to configure remote integration channel: {error}")
+                })?;
             let command = format!(
                 "exec /bin/sh -c {} shellspan-control {}",
                 quote_remote_posix(include_str!("terminal-ssh-control.sh")),
@@ -224,6 +229,12 @@ impl RemoteSshShellIntegration {
     }
 
     fn cleanup_files(&mut self, session: &Session) {
+        let previous_timeout = session.timeout();
+        session.set_timeout(if previous_timeout == 0 {
+            1500
+        } else {
+            previous_timeout.min(1500)
+        });
         session.set_blocking(true);
         if let Ok(sftp) = session.sftp() {
             cleanup_remote_integration_files(
@@ -233,6 +244,7 @@ impl RemoteSshShellIntegration {
                 &self.fifo_path,
             );
         }
+        session.set_timeout(previous_timeout);
     }
 
     fn disable_after_control_failure(&mut self, _session: &Session) {
@@ -2095,11 +2107,15 @@ fn session_loop_inner(
             continue;
         }
 
-        let keepalive_due_in = next_keepalive_at.saturating_duration_since(now);
+        let mut wait_timeout = next_keepalive_at.saturating_duration_since(now);
+        if !*output_live {
+            wait_timeout = wait_timeout
+                .min(SSH_OUTPUT_READY_TIMEOUT.saturating_sub(output_wait_started.elapsed()));
+        }
         if output_paused.load(AtomicOrdering::Relaxed) {
             poll_wake_only(
                 wake,
-                keepalive_due_in.min(Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS)),
+                wait_timeout.min(Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS)),
             );
             continue;
         }
@@ -2125,7 +2141,7 @@ fn session_loop_inner(
                 }),
             wake,
             !writes.is_empty(),
-            keepalive_due_in,
+            wait_timeout,
         )?;
     }
 }
@@ -2212,15 +2228,38 @@ fn format_transport_error(context: &str, raw_error: &str) -> String {
     }
 }
 
+const SSH_NONBLOCKING_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+
 fn write_all_nonblocking(
     session: &Session,
     channel: &mut Channel,
     bytes: &[u8],
 ) -> Result<(), String> {
+    write_all_nonblocking_with_deadline(
+        session,
+        channel,
+        bytes,
+        Instant::now() + SSH_NONBLOCKING_WRITE_TIMEOUT,
+    )
+}
+
+fn write_all_nonblocking_with_deadline(
+    session: &Session,
+    channel: &mut Channel,
+    bytes: &[u8],
+    deadline: Instant,
+) -> Result<(), String> {
     let mut offset = 0usize;
     let wait_timeout = Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS);
 
     while offset < bytes.len() {
+        if let Some(reason) = crate::connection::terminal_deadline::failure_reason() {
+            return Err(reason);
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return Err("remote channel write timed out".to_string());
+        }
         match channel.write(&bytes[offset..]) {
             Ok(0) => return Err("remote channel accepted zero bytes".to_string()),
             Ok(written) => offset += written,
@@ -2228,7 +2267,22 @@ fn write_all_nonblocking(
                 if error.kind() == ErrorKind::Interrupted {
                     continue;
                 }
-                wait_for_session_socket(session, wait_timeout)?;
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err("remote channel write timed out".to_string());
+                }
+                let slice = wait_timeout.min(remaining);
+                let poll_started = Instant::now();
+                wait_for_session_socket(session, slice)?;
+                // Avoid a 100% CPU spin when the socket is readable for another
+                // channel while this channel's send window is full.
+                if poll_started.elapsed() < Duration::from_millis(2) {
+                    let backoff = Duration::from_millis(5)
+                        .min(deadline.saturating_duration_since(Instant::now()));
+                    if !backoff.is_zero() {
+                        thread::sleep(backoff);
+                    }
+                }
             }
             Err(error) => {
                 warn!(
