@@ -673,6 +673,90 @@ describe('AiConversationNodeList', () => {
     expect(diff.querySelector('.ai-diff-content')).toHaveClass('max-h-65');
   });
 
+  it('previews running native edit_file camelCase strings as a diff without fake line numbers, then upgrades to real unified diff lines', async () => {
+    const user = userEvent.setup();
+    const runningEdit = toolNode({
+      key: 'tool:running-edit',
+      callId: 'call-running-edit',
+      name: 'edit_file',
+      nativeName: 'edit_file',
+      state: 'running',
+      input: {
+        path: 'shellspan_diff_demo_edit/app.ts',
+        connectionPolicyBinding: 'b'.repeat(64),
+        oldString: 'if (value < min) {\n  return min;\n}',
+        newString: 'if (value < min) {\n  return Math.round(min);\n}',
+        precondition: { sha256: 'a'.repeat(64) },
+      },
+      output: null,
+    });
+    const { container, rerender } = render(<AiConversationNodeList nodes={[runningEdit]} />);
+    const row = screen.getByRole('button', { name: 'Edit: shellspan_diff_demo_edit/app.ts' });
+    expect(row.querySelector('.ai-tool-diff-stat')).toBeNull();
+    await user.click(row);
+
+    const preview = container.querySelector('[data-ai-tool-view="diff"]') as HTMLElement;
+    expect(preview).toBeInTheDocument();
+    expect(container.querySelector('[data-ai-tool-view="generic"]')).toBeNull();
+    expect(preview).not.toHaveTextContent('connectionPolicyBinding');
+    expect(preview.querySelector('[data-diff-count="added"]')).toBeNull();
+    expect(Array.from(preview.querySelectorAll('.ai-diff-line-number'), (el) => el.textContent)).toEqual([
+      '\u00a0', '-', '+', '\u00a0',
+    ]);
+    expect(Array.from(preview.querySelectorAll('[data-diff]'), (line) => [
+      line.getAttribute('data-diff'), line.querySelector('.ai-diff-code')?.textContent,
+    ])).toEqual([
+      ['context', 'if (value < min) {'],
+      ['removed', '  return min;'],
+      ['added', '  return Math.round(min);'],
+      ['context', '}'],
+    ]);
+
+    const unified = [
+      '--- a/shellspan_diff_demo_edit/app.ts',
+      '+++ b/shellspan_diff_demo_edit/app.ts',
+      '@@ -11,3 +11,3 @@',
+      ' if (value < min) {',
+      '-  return min;',
+      '+  return Math.round(min);',
+      ' }',
+      '',
+    ].join('\n');
+    rerender(<AiConversationNodeList nodes={[{
+      ...runningEdit,
+      state: 'succeeded',
+      durationMs: 6100,
+      output: { applied: true, diff: unified },
+    }]} />);
+
+    const completed = container.querySelector('[data-ai-tool-view="diff"]') as HTMLElement;
+    expect(completed.querySelector('[data-diff-count="added"]')).toHaveTextContent('+1');
+    expect(completed.querySelector('[data-diff-count="removed"]')).toHaveTextContent('-1');
+    expect(Array.from(completed.querySelectorAll('.ai-diff-line-number'), (el) => el.textContent)).toEqual([
+      '11', '12', '12', '13',
+    ]);
+  });
+
+  it('shows a pending diff surface instead of raw JSON while edit_file arguments are still preparing', async () => {
+    const user = userEvent.setup();
+    const preparingEdit = toolNode({
+      key: 'tool:preparing-edit',
+      callId: 'call-preparing-edit',
+      name: 'edit_file',
+      nativeName: 'edit_file',
+      state: 'preparing',
+      input: { path: 'src/app.ts' },
+      output: null,
+    });
+    const { container } = render(<AiConversationNodeList nodes={[preparingEdit]} />);
+    await user.click(screen.getByRole('button', { name: 'Edit: src/app.ts' }));
+
+    const diff = container.querySelector('[data-ai-tool-view="diff"]') as HTMLElement;
+    expect(diff).toBeInTheDocument();
+    expect(container.querySelector('[data-ai-tool-view="generic"]')).toBeNull();
+    expect(diff.querySelector('[data-diff-pending]')).toHaveTextContent('Preparing');
+  });
+
   it('expands running commands inline and renders completed and failed tool rows', async () => {
     const user = userEvent.setup();
     const openTool = vi.fn();
