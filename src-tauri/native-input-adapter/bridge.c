@@ -167,10 +167,14 @@ void ss_native_control_after_fork(void) {
   finish_control_redraw();
 }
 static void handoff_display(void) {}
-static void finish_handoff_display(void) {
-  if (handoff_display_active && rl_redisplay_function == handoff_display)
+static int finish_handoff_display(void) {
+  int restored = 0;
+  if (handoff_display_active && rl_redisplay_function == handoff_display) {
     rl_redisplay_function = handoff_saved_redisplay;
+    restored = 1;
+  }
   handoff_display_active = 0;
+  return restored;
 }
 static int exit_registered;
 static pid_t display_owner;
@@ -392,8 +396,9 @@ int p0_at_primary_prompt(void) {
 }
 static int editor_ready(void) {
   /* A fresh native input line is also a safe fallback restoration boundary. */
-  finish_handoff_display();
+  int restored_handoff = finish_handoff_display();
   finish_control_redraw();
+  if (restored_handoff && rl_redisplay_function) (*rl_redisplay_function)();
   if (saved_pre_input) saved_pre_input();
   /* Bash may finish initializing Readline after rc loading. Only reattach a
    * genuinely empty private binding; a configured user binding wins. */
@@ -585,6 +590,7 @@ static int native_display_abi_builtin(WORD_LIST *args) {
   return args ? 2 : (native_display_abi_available() ? 0 : 1);
 }
 static int p0_result_builtin(WORD_LIST *args) {
+  finish_handoff_display();
   if (!args || !args->next) return 2;
   return p0_status(atoi(args->word->word), args->next->word->word);
 }
