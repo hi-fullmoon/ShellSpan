@@ -246,7 +246,10 @@
         assert!(!headers.to_ascii_lowercase().contains("anthropic-beta"));
         assert!(!headers.to_ascii_lowercase().contains("authorization:"));
         let body: Value = serde_json::from_str(body).unwrap();
-        assert_eq!(body["system"], "system");
+        assert_eq!(
+            body["system"],
+            json!([{"type": "text", "text": "system", "cache_control": {"type": "ephemeral"}}])
+        );
         assert_eq!(body["max_tokens"], 16384);
         assert_eq!(body["thinking"]["type"], "adaptive");
         assert_eq!(body["output_config"]["effort"], "high");
@@ -553,6 +556,18 @@
         let body: Value = serde_json::from_str(body).unwrap();
         assert_eq!(body["tools"].as_array().map(Vec::len), Some(1));
         assert_eq!(body["tool_choice"], json!({"type": "none"}));
+        assert_eq!(
+            body["system"][0]["cache_control"],
+            json!({"type": "ephemeral"})
+        );
+        assert_eq!(
+            body["tools"][0]["cache_control"],
+            json!({"type": "ephemeral"})
+        );
+        assert_eq!(
+            body["messages"][0]["content"][0]["cache_control"],
+            json!({"type": "ephemeral"})
+        );
         assert_eq!(
             response.content,
             vec![ModelContentBlock::Text {

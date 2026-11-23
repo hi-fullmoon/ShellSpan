@@ -1445,25 +1445,48 @@ function createChatProjection() {
         ? 'partial'
         : turn.status ?? (turn.endSeq === undefined ? 'running' : 'completed');
       const answerGeneration = [...turn.requestIds].reverse()[0] ?? `turn:${turn.id}`;
-      const process: AiTurnProcessNode = {
-        kind: 'turnProcess',
-        key: `turn-process:${turn.id}`,
-        sourceKind: 'agent',
-        sessionId: turn.sessionId,
-        turnId: turn.id,
-        stepId: null,
-        firstSeq: turn.startSeq ?? turn.firstSeq,
-        lastSeq: turn.lastSeq,
-        timestamp: turn.timestamp,
-        startedAtUnixMs: turn.startedAt,
-        status,
-        answerGeneration,
-        hasStartBoundary: turn.startSeq !== undefined,
-        hasEndBoundary: turn.endSeq !== undefined,
-        hasFinalAnswer: closing?.state === 'completed',
-        childKeys: children.map((child) => child.key),
-        children,
-      };
+      const hasStartBoundary = turn.startSeq !== undefined;
+      const hasEndBoundary = turn.endSeq !== undefined;
+      const hasFinalAnswer = closing?.state === 'completed';
+      const reuseCachedChildren = cached !== undefined
+        && cached.process.children.length === children.length
+        && cached.process.children.every((child, index) => child === children[index]);
+      const stableChildren = reuseCachedChildren ? cached.process.children : children;
+      const stableChildKeys = reuseCachedChildren
+        ? cached.process.childKeys
+        : children.map((child) => child.key);
+      const firstSeq = turn.startSeq ?? turn.firstSeq;
+      const reuseCachedProcess = reuseCachedChildren
+        && cached.process.firstSeq === firstSeq
+        && cached.process.lastSeq === turn.lastSeq
+        && cached.process.timestamp === turn.timestamp
+        && cached.process.startedAtUnixMs === turn.startedAt
+        && cached.process.status === status
+        && cached.process.answerGeneration === answerGeneration
+        && cached.process.hasStartBoundary === hasStartBoundary
+        && cached.process.hasEndBoundary === hasEndBoundary
+        && cached.process.hasFinalAnswer === hasFinalAnswer;
+      const process: AiTurnProcessNode = reuseCachedProcess
+        ? cached.process
+        : {
+            kind: 'turnProcess',
+            key: `turn-process:${turn.id}`,
+            sourceKind: 'agent',
+            sessionId: turn.sessionId,
+            turnId: turn.id,
+            stepId: null,
+            firstSeq,
+            lastSeq: turn.lastSeq,
+            timestamp: turn.timestamp,
+            startedAtUnixMs: turn.startedAt,
+            status,
+            answerGeneration,
+            hasStartBoundary,
+            hasEndBoundary,
+            hasFinalAnswer,
+            childKeys: stableChildKeys,
+            children: stableChildren,
+          };
       const hasTurnTail = turn.startSeq !== undefined && turn.endSeq !== undefined
         && Boolean(turn.endReason && turn.endTimestamp);
       if (closing?.state === 'completed' && hasTurnTail) {

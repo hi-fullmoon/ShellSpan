@@ -143,6 +143,9 @@ pub(crate) async fn agent_runtime_image_preview(
 }
 
 pub(crate) fn configure_runtime(app: &AppHandle, runtime: &AgentRuntime) -> Result<(), String> {
+    if runtime.is_app_configured() {
+        return Ok(());
+    }
     let home = app
         .path()
         .home_dir()
@@ -160,7 +163,9 @@ pub(crate) fn configure_runtime(app: &AppHandle, runtime: &AgentRuntime) -> Resu
         if let Err(error) = emitter.emit(AGENT_RUNTIME_SESSION_EVENT, event) {
             log::warn!("Failed to publish committed Agent Session event: {error}");
         }
-    }))
+    }))?;
+    runtime.mark_app_configured();
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]

@@ -368,12 +368,13 @@ impl SubAgentManager {
         &self,
         request: AgentFleetControlRequest,
     ) -> Result<AgentFleetInspection, String> {
-        self.run_fleet(
-            &request.parent_session_id,
-            &request.fleet_id,
-            CancellationToken::new(),
-        )
-        .await
+        let cancellation = self
+            .agents
+            .get(&request.parent_session_id)?
+            .map(|entry| entry.cancellation().child_token())
+            .unwrap_or_else(CancellationToken::new);
+        self.run_fleet(&request.parent_session_id, &request.fleet_id, cancellation)
+            .await
     }
 
     pub(crate) fn pause_fleet(
@@ -704,7 +705,7 @@ impl SubAgentManager {
                     self.dispatch_fleet_child(fleet, index, role)?
                 };
                 let settlement = self
-                    .settle_fleet_child(parent_session_id, &child, cancellation.clone())
+                    .settle_fleet_child(parent_session_id, fleet_id, &child, cancellation.clone())
                     .await;
                 let mut fleets = self
                     .fleets
@@ -806,11 +807,12 @@ impl SubAgentManager {
     async fn settle_fleet_child(
         &self,
         parent_session_id: &str,
+        fleet_id: &str,
         child_session_id: &str,
         cancellation: CancellationToken,
     ) -> Result<AgentSessionSnapshot, String> {
         let settlement = self
-            .await_settlement(child_session_id, cancellation)
+            .await_settlement(child_session_id, cancellation.clone())
             .await?;
         let mut snapshot = settlement.snapshot;
         if snapshot.status == AgentSessionStatus::Idle {
@@ -841,17 +843,29 @@ impl SubAgentManager {
             .or_else(|| child_stop_reason(&events).map(str::to_string))
             .or_else(|| assistant_summary(&events))
             .unwrap_or_else(|| format!("Fleet child settled as {:?}", snapshot.status));
-        self.sessions.commit_subagent_settlement(
-            parent_session_id,
-            &subagent.descriptor_id,
-            &format!("settlement-{}", Uuid::new_v4().simple()),
-            child_session_id,
-            snapshot.status,
-            summary,
-            Vec::new(),
-            false,
-            None,
-        )?;
+        let fleet_aborted = self
+            .fleets
+            .lock()
+            .ok()
+            .and_then(|fleets| fleets.get(fleet_id).map(|fleet| fleet.status == "aborted"))
+            .unwrap_or(false);
+        let parent_ended = self
+            .sessions
+            .snapshot(parent_session_id)
+            .is_ok_and(|parent| parent.ended);
+        if !fleet_aborted && !cancellation.is_cancelled() && !parent_ended {
+            self.sessions.commit_subagent_settlement(
+                parent_session_id,
+                &subagent.descriptor_id,
+                &format!("settlement-{}", Uuid::new_v4().simple()),
+                child_session_id,
+                snapshot.status,
+                summary,
+                Vec::new(),
+                false,
+                None,
+            )?;
+        }
         let handle = self
             .handles
             .lock()
@@ -1028,6 +1042,17 @@ impl SubAgentManager {
             .map_or(1, |subagent| subagent.depth.saturating_add(1));
         if depth > 16 {
             return Err("subagent nesting depth exceeds the native limit".into());
+        }
+        const MAX_CONCURRENT_SUBAGENTS: usize = 16;
+        let active_children = self
+            .handles
+            .lock()
+            .map_err(|_| "subagent handle registry is unavailable".to_string())?
+            .len();
+        if active_children >= MAX_CONCURRENT_SUBAGENTS {
+            return Err(format!(
+                "concurrent subagent limit ({MAX_CONCURRENT_SUBAGENTS}) reached; wait for an active child to settle before spawning another"
+            ));
         }
         let capability_scope = delegated_scope(&parent, role, &target_ids)?;
         let target_scope = target_ids

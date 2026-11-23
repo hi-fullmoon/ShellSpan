@@ -222,6 +222,7 @@ impl AgentRuntimeBuilder {
             agents,
             handles: Arc::new(Mutex::new(HashMap::new())),
             configured_root: Arc::new(Mutex::new(None)),
+            app_configured: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             terminal_submission_gate: Arc::new(Mutex::new(())),
             stopping_sessions: Arc::new(Mutex::new(HashSet::new())),
             closing_terminals: Arc::new(Mutex::new(HashSet::new())),
@@ -245,6 +246,7 @@ pub(crate) struct AgentRuntime {
     agents: AgentRegistry,
     handles: Arc<Mutex<HashMap<String, super::AgentHandle>>>,
     configured_root: Arc<Mutex<Option<PathBuf>>>,
+    app_configured: Arc<std::sync::atomic::AtomicBool>,
     terminal_submission_gate: Arc<Mutex<()>>,
     stopping_sessions: Arc<Mutex<HashSet<String>>>,
     closing_terminals: Arc<Mutex<HashSet<String>>>,
@@ -474,6 +476,7 @@ impl AgentRuntime {
                 }
             }
             drop(reservation);
+            drop(_terminal_gate);
             Ok(snapshot)
         })
     }
@@ -772,6 +775,16 @@ impl AgentRuntime {
         credentials: crate::keychain::CredentialManager,
     ) -> Result<(), String> {
         self.subagents.set_credentials(credentials)
+    }
+
+    pub(crate) fn is_app_configured(&self) -> bool {
+        self.app_configured
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub(crate) fn mark_app_configured(&self) {
+        self.app_configured
+            .store(true, std::sync::atomic::Ordering::Release);
     }
 
     pub(crate) fn configure_native(&self, app: tauri::AppHandle) -> Result<(), String> {
@@ -2186,6 +2199,18 @@ impl AgentRuntime {
         // instances can still acknowledge an earlier successful operation.
         let resume = matches!(input.mutation, super::AgentInboxMutation::Resume { .. });
         let session_id = input.session_id.clone();
+        let (_terminal_gate, mut reservation) = if resume {
+            let terminal_gate = self
+                .terminal_submission_gate
+                .lock()
+                .map_err(|_| "Agent terminal submission gate is unavailable".to_string())?;
+            self.require_session_not_stopping(&session_id)?;
+            let reservation =
+                self.reserve_terminal_submission(&session_id, &input.client_operation_id, false)?;
+            (Some(terminal_gate), reservation)
+        } else {
+            (None, None)
+        };
         let writes_images = matches!(&input.mutation, super::AgentInboxMutation::UpdateWithImages { images, .. } if !images.added.is_empty());
         let mutate = || {
             self.sessions.mutate_inbox_preparing_images(
@@ -2231,9 +2256,19 @@ impl AgentRuntime {
         } else {
             mutate()
         }?;
-        if resume {
-            self.wake(&session_id)?;
+        if let Some(guard) = reservation.as_mut() {
+            guard.committed = !snapshot.ended;
         }
+        if resume {
+            if let Err(error) = self.wake(&session_id) {
+                if let Some(guard) = reservation.as_mut() {
+                    guard.committed = false;
+                }
+                return Err(error);
+            }
+        }
+        drop(reservation);
+        drop(_terminal_gate);
         Ok(snapshot)
     }
 

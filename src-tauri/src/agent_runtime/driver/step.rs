@@ -697,6 +697,7 @@ async fn execute_model_stream(
         collected: Arc::clone(&collected),
         cancellation: stream_cancellation.clone(),
         pending: Mutex::new(StreamBatch::default()),
+        dirty: std::sync::atomic::AtomicBool::new(false),
         writer: StreamWriter::new(ctx.sessions.clone(), ctx.entry.session_id.clone())?,
     });
     let remaining_active_ms = ctx.config.max_active_duration_ms.saturating_sub(

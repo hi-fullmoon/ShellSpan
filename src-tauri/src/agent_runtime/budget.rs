@@ -71,21 +71,23 @@ pub(crate) fn request_budget_breakdown(
     budget: &ModelSurfaceBudget,
 ) -> serde_json::Value {
     let mut categories = std::collections::BTreeMap::<&str, (u64, u64, u64)>::new();
+    let mut tool_results = Vec::new();
     for message in &request.messages {
+        let (tokens, bytes) = model_message_measurement(message, budget.reserved_tokens_per_image);
         let category = match message {
             ModelMessage::User { .. } | ModelMessage::UserImages { .. } => "userAndRuntimeContext",
             ModelMessage::Assistant { .. } => "assistantAndToolCalls",
-            ModelMessage::Tool { .. } => "toolResults",
+            ModelMessage::Tool { name, .. } => {
+                tool_results
+                    .push(serde_json::json!({"name": name, "tokens": tokens, "bytes": bytes}));
+                "toolResults"
+            }
         };
         let entry = categories.entry(category).or_default();
         entry.0 += 1;
-        entry.1 += model_message_tokens(message, budget.reserved_tokens_per_image);
-        entry.2 += model_message_bytes(message);
+        entry.1 += tokens;
+        entry.2 += bytes;
     }
-    let tool_results = request.messages.iter().filter_map(|message| match message {
-        ModelMessage::Tool { name, .. } => Some(serde_json::json!({"name": name, "tokens": model_message_tokens(message, budget.reserved_tokens_per_image), "bytes": model_message_bytes(message)})),
-        _ => None,
-    }).collect::<Vec<_>>();
     serde_json::json!({"budget": budget, "messageCategories": categories, "toolResults": tool_results})
 }
 
@@ -110,21 +112,32 @@ pub(crate) fn estimate_model_surface_budget(
     let tool_schema_bytes = serde_json::to_vec(&request.tools)
         .map(|value| value.len() as u64)
         .unwrap_or(u64::MAX / 8);
-    let message_bytes = request
-        .messages
-        .iter()
-        .map(model_message_bytes)
-        .sum::<u64>();
     let system_tokens = estimate_tokens(system_bytes);
     let tool_schema_tokens = estimate_tokens(tool_schema_bytes);
     if system_tokens.saturating_add(tool_schema_tokens) >= usable_input_tokens {
         return Err(format!("INVALID_MODEL_TOKEN_BUDGET: input budget {usable_input_tokens} cannot hold fixed system and tool instructions ({} tokens); reduce the request output budget or increase the context window", system_tokens.saturating_add(tool_schema_tokens)));
     }
-    let message_tokens = request
-        .messages
-        .iter()
-        .map(|message| model_message_tokens(message, image_reserve))
-        .sum::<u64>();
+    let mut message_bytes = 0u64;
+    let mut message_tokens = 0u64;
+    let mut tool_message_sizes = std::collections::BTreeMap::<String, Vec<(u64, u64)>>::new();
+    let mut assistant_message_sizes = Vec::new();
+    for message in &request.messages {
+        let (tokens, bytes) = model_message_measurement(message, image_reserve);
+        message_bytes = message_bytes.saturating_add(bytes);
+        message_tokens = message_tokens.saturating_add(tokens);
+        match message {
+            ModelMessage::Tool { call_id, .. } => {
+                tool_message_sizes
+                    .entry(call_id.clone())
+                    .or_default()
+                    .push((tokens, bytes));
+            }
+            ModelMessage::Assistant { .. } => {
+                assistant_message_sizes.push((tokens, bytes));
+            }
+            _ => {}
+        }
+    }
     let estimated_input_tokens = system_tokens
         .saturating_add(tool_schema_tokens)
         .saturating_add(message_tokens);
@@ -147,29 +160,8 @@ pub(crate) fn estimate_model_surface_budget(
         estimated_input_bytes,
         maximum_input_bytes: usable_input_tokens.saturating_mul(4),
         input_measurement: None,
-        tool_message_sizes: request.messages.iter().fold(
-            std::collections::BTreeMap::<String, Vec<(u64, u64)>>::new(),
-            |mut sizes, message| {
-                if let ModelMessage::Tool { call_id, .. } = message {
-                    sizes.entry(call_id.clone()).or_default().push((
-                        model_message_tokens(message, image_reserve),
-                        model_message_bytes(message),
-                    ));
-                }
-                sizes
-            },
-        ),
-        assistant_message_sizes: request
-            .messages
-            .iter()
-            .filter(|message| matches!(message, ModelMessage::Assistant { .. }))
-            .map(|message| {
-                (
-                    model_message_tokens(message, image_reserve),
-                    model_message_bytes(message),
-                )
-            })
-            .collect(),
+        tool_message_sizes,
+        assistant_message_sizes,
     })
 }
 
@@ -192,19 +184,8 @@ fn model_message_bytes(message: &ModelMessage) -> u64 {
     }
 }
 
-pub(crate) fn measure_model_messages(
-    messages: &[ModelMessage],
-    reserved_tokens_per_image: u64,
-) -> (u64, u64) {
-    messages.iter().fold((0, 0), |(tokens, bytes), message| {
-        (
-            tokens.saturating_add(model_message_tokens(message, reserved_tokens_per_image)),
-            bytes.saturating_add(model_message_bytes(message)),
-        )
-    })
-}
-
-fn model_message_tokens(message: &ModelMessage, reserved_tokens_per_image: u64) -> u64 {
+fn model_message_measurement(message: &ModelMessage, reserved_tokens_per_image: u64) -> (u64, u64) {
+    let bytes = model_message_bytes(message);
     let image_reserve = match message {
         // Admission estimate from the selected model; never provider-reported usage.
         ModelMessage::UserImages { images, .. } => images.len() as u64 * reserved_tokens_per_image,
@@ -213,9 +194,24 @@ fn model_message_tokens(message: &ModelMessage, reserved_tokens_per_image: u64) 
     // Four bytes per token is deliberately conservative for mixed prose,
     // paths, JSON arguments and tool output. The per-message framing reserve
     // covers provider role/name/call identifiers that are not literal text.
-    estimate_tokens(model_message_bytes(message))
+    let tokens = estimate_tokens(bytes)
         .saturating_add(8)
-        .saturating_add(image_reserve)
+        .saturating_add(image_reserve);
+    (tokens, bytes)
+}
+
+pub(crate) fn measure_model_messages(
+    messages: &[ModelMessage],
+    reserved_tokens_per_image: u64,
+) -> (u64, u64) {
+    messages.iter().fold((0, 0), |(tokens, bytes), message| {
+        let (message_tokens, message_bytes) =
+            model_message_measurement(message, reserved_tokens_per_image);
+        (
+            tokens.saturating_add(message_tokens),
+            bytes.saturating_add(message_bytes),
+        )
+    })
 }
 
 fn estimate_tokens(bytes: u64) -> u64 {

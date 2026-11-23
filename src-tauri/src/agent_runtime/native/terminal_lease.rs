@@ -632,8 +632,14 @@ impl TerminalLeaseManager {
                 return Ok(false);
             };
             validate_owner(&record.lease, agent_session_id, Some(task_id), operation_id)?;
-            self.broker
-                .release_agent_lease(session_id, agent_session_id, task_id, operation_id)?;
+            if let Err(error) =
+                self.broker
+                    .release_agent_lease(session_id, agent_session_id, task_id, operation_id)
+            {
+                log::warn!(
+                    "Terminal broker lease was already unavailable while releasing lease after takeover session_id={session_id}: {error}"
+                );
+            }
             let lease = leases.remove(session_id).map(|record| record.lease);
             if turn_guards
                 .get(session_id)

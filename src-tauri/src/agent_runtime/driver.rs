@@ -2236,6 +2236,7 @@ struct DurableModelStreamSink {
     collected: Arc<Mutex<PartialContentAccumulator>>,
     cancellation: tokio_util::sync::CancellationToken,
     pending: Mutex<StreamBatch>,
+    dirty: std::sync::atomic::AtomicBool,
     writer: super::stream_writer::StreamWriter,
 }
 
@@ -2277,6 +2278,9 @@ impl DurableModelStreamSink {
     }
 
     async fn flush_async(self: &Arc<Self>, close: bool) -> Result<(), String> {
+        if !close && !self.dirty.swap(false, std::sync::atomic::Ordering::AcqRel) {
+            return self.writer.check();
+        }
         let sink = Arc::clone(self);
         tokio::task::spawn_blocking(move || {
             let mut batch = sink
@@ -2356,6 +2360,7 @@ impl DurableModelStreamSink {
             payload,
         });
         batch.bytes = batch.bytes.saturating_add(bytes);
+        self.dirty.store(true, std::sync::atomic::Ordering::Release);
         Ok(())
     }
 
@@ -2373,6 +2378,7 @@ impl DurableModelStreamSink {
                 batch.text.push(chunk);
             }
             batch.undrained_bytes += chunk.len();
+            self.dirty.store(true, std::sync::atomic::Ordering::Release);
             if batch.undrained_bytes >= MAX_AGENT_STREAM_DELTA_BYTES {
                 self.drain_text_locked(&mut batch, false)
                     .map_err(stream_storage_error)?;

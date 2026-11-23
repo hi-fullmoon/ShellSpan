@@ -1920,24 +1920,27 @@ export function useAiSessionController({
   }, [adapter, approvalGuard]);
 
   const loadOlder = useCallback((): void => {
-    const current = viewRef.current;
-    if (!current?.canLoadOlder || loadingOlder) return;
+    const initial = viewRef.current;
+    if (!initial?.canLoadOlder || loadingOlder) return;
     setLoadingOlder(true);
-    const firstSeq = current.nodes[0]?.firstSeq ?? 0;
-    void adapter.loadOlder(current.summary.id, String(firstSeq)).then(
+    const firstSeq = initial.nodes[0]?.firstSeq ?? 0;
+    void adapter.loadOlder(initial.summary.id, String(firstSeq)).then(
       (older) => {
-        if (older.length === 0 || viewRef.current?.summary.id !== current.summary.id) return;
-        const keys = new Set(current.nodes.map((node) => node.key));
-        const next = { ...current, nodes: [...older.filter((node) => !keys.has(node.key)), ...current.nodes] };
+        const latest = viewRef.current;
+        if (!mountedRef.current || older.length === 0 || latest?.summary.id !== initial.summary.id) return;
+        const keys = new Set(latest.nodes.map((node) => node.key));
+        const next = { ...latest, nodes: [...older.filter((node) => !keys.has(node.key)), ...latest.nodes] };
         viewRef.current = next;
         setView(next);
       },
       (error: unknown) => {
-        if (mountedRef.current && viewRef.current?.summary.id === current.summary.id) {
+        if (mountedRef.current && viewRef.current?.summary.id === initial.summary.id) {
           dispatch({ type: 'error.reported', error: normalizeAiSessionError(error) });
         }
       },
-    ).finally(() => setLoadingOlder(false));
+    ).finally(() => {
+      if (mountedRef.current) setLoadingOlder(false);
+    });
   }, [adapter, dispatch, loadingOlder]);
 
   const loadArtifact = useCallback<AiSessionAdapter['loadArtifact']>((sessionId, artifactId, maxBytes) => (

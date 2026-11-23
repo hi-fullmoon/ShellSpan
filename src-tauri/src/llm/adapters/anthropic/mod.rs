@@ -195,37 +195,19 @@ impl ModelAdapter for AnthropicMessagesAdapter {
                 )
             })?;
         let messages = encode_messages(&request.messages)?;
-        let mut body = json!({
-            "model": self.http.provider.model,
-            "max_tokens": resolved.output_token_budget(),
-            "stream": true,
-            "system": request.system_prompt,
-            "messages": messages,
-        });
+        let mut body = build_anthropic_request_body(
+            &self.http.provider.model,
+            resolved.output_token_budget(),
+            &request.system_prompt,
+            messages,
+            &request.tools,
+            request.tool_choice,
+        );
         crate::llm::catalog::apply_reasoning(
             &mut body,
             &resolved,
             self.http.provider.reasoning_effort.clone(),
         );
-        if !request.tools.is_empty() {
-            body["tools"] = Value::Array(
-                request
-                    .tools
-                    .iter()
-                    .map(|tool| {
-                        json!({
-                            "name": tool.name,
-                            "description": tool.description,
-                            "input_schema": tool.input_schema,
-                        })
-                    })
-                    .collect(),
-            );
-            body["tool_choice"] = match request.tool_choice {
-                ModelToolChoice::Auto => json!({"type":"auto"}),
-                ModelToolChoice::None => json!({"type":"none"}),
-            };
-        }
         let response = send_request(
             self.http
                 .client
@@ -290,6 +272,82 @@ fn parse_image_data_url(value: &str) -> Result<Value, NormalizedModelError> {
         ));
     }
     Ok(json!({"type":"image","source":{"type":"base64","media_type":media_type,"data":data}}))
+}
+
+fn attach_message_cache_breakpoint(messages: &mut [Value]) {
+    for message in messages.iter_mut().rev() {
+        if message.get("role").and_then(Value::as_str) != Some("user") {
+            continue;
+        }
+        let Some(blocks) = message.get_mut("content").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for block in blocks.iter_mut().rev() {
+            let cacheable = match block.get("type").and_then(Value::as_str) {
+                Some("text") => block
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .is_some_and(|text| !text.is_empty()),
+                Some("tool_result" | "image" | "document") => true,
+                _ => false,
+            };
+            if cacheable {
+                if let Some(object) = block.as_object_mut() {
+                    object.insert("cache_control".into(), json!({"type": "ephemeral"}));
+                }
+                return;
+            }
+        }
+    }
+}
+
+fn build_anthropic_request_body(
+    model: &str,
+    max_tokens: u64,
+    system_prompt: &str,
+    mut messages: Vec<Value>,
+    tools: &[ModelToolDefinition],
+    tool_choice: ModelToolChoice,
+) -> Value {
+    attach_message_cache_breakpoint(&mut messages);
+    let mut body = json!({
+        "model": model,
+        "max_tokens": max_tokens,
+        "stream": true,
+        "messages": messages,
+    });
+    if !system_prompt.is_empty() {
+        body["system"] = json!([{
+            "type": "text",
+            "text": system_prompt,
+            "cache_control": { "type": "ephemeral" },
+        }]);
+    }
+    if !tools.is_empty() {
+        let last_index = tools.len().saturating_sub(1);
+        body["tools"] = Value::Array(
+            tools
+                .iter()
+                .enumerate()
+                .map(|(index, tool)| {
+                    let mut entry = json!({
+                        "name": tool.name,
+                        "description": tool.description,
+                        "input_schema": tool.input_schema,
+                    });
+                    if index == last_index {
+                        entry["cache_control"] = json!({"type": "ephemeral"});
+                    }
+                    entry
+                })
+                .collect(),
+        );
+        body["tool_choice"] = match tool_choice {
+            ModelToolChoice::Auto => json!({"type":"auto"}),
+            ModelToolChoice::None => json!({"type":"none"}),
+        };
+    }
+    body
 }
 
 fn append_message(output: &mut Vec<Value>, role: &str, mut blocks: Vec<Value>) {

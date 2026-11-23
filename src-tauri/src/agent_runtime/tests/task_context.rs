@@ -92,12 +92,23 @@ fn assembled_task_context(sessions: &AgentSessionStore) -> super::super::ModelIn
     assembly
 }
 
+fn current_task_injection(assembly: &super::super::ModelInputAssembly) -> &str {
+    assembly
+        .context
+        .iter()
+        .rev()
+        .find(|injection| injection.source.label == "Current task request")
+        .map(|injection| injection.content.as_str())
+        .expect("current task request context injection")
+}
+
 #[test]
 fn subsequent_task_ignores_old_acknowledgement_and_preserves_steering_after_restart() {
     let (root, sessions) = request_context_store();
     request_context_turn(&sessions, "ack", ACK_REQUEST);
     let initial = assembled_task_context(&sessions);
-    assert!(initial.system_prompt.contains(ACK_REQUEST));
+    assert!(current_task_injection(&initial).contains(ACK_REQUEST));
+    assert!(!initial.system_prompt.contains(ACK_REQUEST));
     // Persist the old runtime injection to cover already-existing session logs.
     request_context_input(
         &sessions,
@@ -131,7 +142,9 @@ fn subsequent_task_ignores_old_acknowledgement_and_preserves_steering_after_rest
         AgentMessageSource::session_reference("unrelated-session".into()),
     );
     let assembly = assembled_task_context(&sessions);
-    assert!(assembly.system_prompt.contains(REVIEW_REQUEST));
+    assert_eq!(assembly.system_prompt, initial.system_prompt);
+    let task_text = current_task_injection(&assembly);
+    assert!(task_text.contains(REVIEW_REQUEST));
     let header = sessions.snapshot("request-context").unwrap().header;
     let task = sessions
         .read_events("request-context", |events| {
@@ -143,13 +156,11 @@ fn subsequent_task_ignores_old_acknowledgement_and_preserves_steering_after_rest
         .iter()
         .find(|input| input.contains(&source))
         .unwrap();
-    assert!(assembly.system_prompt.contains(source_input));
-    assert!(!assembly
-        .system_prompt
-        .contains(&serde_json::to_string(source_input).unwrap()));
-    assert!(assembly.system_prompt.contains("最终报告最多 8 条。"));
-    assert!(!assembly.system_prompt.contains("现在只回复"));
-    assert!(assembly.system_prompt.contains("\"successCriteria\":[]"));
+    assert!(task_text.contains(source_input));
+    assert!(!task_text.contains(&serde_json::to_string(source_input).unwrap()));
+    assert!(task_text.contains("最终报告最多 8 条。"));
+    assert!(!task_text.contains("现在只回复"));
+    assert!(task_text.contains("\"successCriteria\":[]"));
     for injection in &assembly.context {
         request_context_input(
             &sessions,
@@ -175,15 +186,20 @@ fn subsequent_task_ignores_old_acknowledgement_and_preserves_steering_after_rest
         "Continue unfinished work",
         AgentMessageSource::runtime("output-limit-continuation".into()),
     );
-    let before = assembled_task_context(&sessions).system_prompt;
+    let before_assembly = assembled_task_context(&sessions);
+    let before = current_task_injection(&before_assembly).to_string();
     let reopened = AgentSessionStore::default();
     reopened.configure(root.path().to_path_buf()).unwrap();
-    assert_eq!(assembled_task_context(&reopened).system_prompt, before);
+    let reopened_assembly = assembled_task_context(&reopened);
+    assert_eq!(current_task_injection(&reopened_assembly), before);
+    assert_eq!(reopened_assembly.system_prompt, initial.system_prompt);
     assert!(!before.contains("现在只回复"));
     request_context_turn(&reopened, "continue", "继续");
     let continued = assembled_task_context(&reopened);
-    assert!(continued.system_prompt.contains("继续"));
-    assert!(!continued.system_prompt.contains("现在只回复"));
+    let continued_task = current_task_injection(&continued);
+    assert!(continued_task.contains("继续"));
+    assert!(!continued_task.contains("现在只回复"));
+    assert_eq!(continued.system_prompt, initial.system_prompt);
     let request = ModelRequest::from_surface(
         "continued".into(),
         &reopened.model_surface("request-context").unwrap(),
@@ -206,7 +222,8 @@ fn current_task_preserves_original_json_paths_controls_and_unicode_after_restart
         })
         .unwrap();
     let request = &task.requests[0];
-    let prompt = assembled_task_context(&sessions).system_prompt;
+    let assembly = assembled_task_context(&sessions);
+    let prompt = current_task_injection(&assembly).to_string();
     assert!(prompt.contains(input));
     assert!(prompt.contains(request));
     assert!(!prompt.contains(&serde_json::to_string(request).unwrap()));
@@ -217,7 +234,10 @@ fn current_task_preserves_original_json_paths_controls_and_unicode_after_restart
     assert_eq!(&body.as_bytes()[..request.len()], request.as_bytes());
     let reopened = AgentSessionStore::default();
     reopened.configure(root.path().to_path_buf()).unwrap();
-    assert_eq!(assembled_task_context(&reopened).system_prompt, prompt);
+    assert_eq!(
+        current_task_injection(&assembled_task_context(&reopened)),
+        prompt
+    );
 }
 
 #[test]
@@ -233,8 +253,8 @@ fn committed_request_framing_cannot_be_closed_by_embedded_code_fences() {
         .unwrap();
     let request = &task.requests[0];
     let assembly = assembled_task_context(&sessions);
-    let block = assembly
-        .system_prompt
+    assert!(!assembly.system_prompt.contains(input));
+    let block = current_task_injection(&assembly)
         .split_once("\nCommitted request 0:\n")
         .unwrap()
         .1;
@@ -245,7 +265,6 @@ fn committed_request_framing_cannot_be_closed_by_embedded_code_fences() {
     let body = &block[opening_end + 1..];
     assert_eq!(&body.as_bytes()[..request.len()], request.as_bytes());
     assert!(body[request.len()..].starts_with(&format!("\n{fence}\n")));
-    assert!(!assembly.context.last().unwrap().content.contains(input));
 }
 
 #[test]
@@ -337,8 +356,10 @@ async fn repeated_compaction_and_replay_keep_the_review_as_current_task() {
             generation
         );
         let assembly = assembled_task_context(&reopened);
-        assert!(assembly.system_prompt.contains(REVIEW_REQUEST));
-        assert!(!assembly.system_prompt.contains("现在只回复"));
+        let task_text = current_task_injection(&assembly);
+        assert!(task_text.contains(REVIEW_REQUEST));
+        assert!(!task_text.contains("现在只回复"));
+        assert!(!assembly.system_prompt.contains(REVIEW_REQUEST));
         if generation == 1 {
             request_context_append(&sessions, "recovery", AgentSessionEventPayload::TurnStart);
             request_context_append(&sessions, "recovery", AgentSessionEventPayload::StepStart);

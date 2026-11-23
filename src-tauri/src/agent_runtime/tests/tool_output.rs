@@ -479,14 +479,14 @@ fn real_repository_output_is_bounded_and_fully_retrievable_without_duplicate_art
             &sessions,
             &artifacts,
             "source",
-            json!({"artifactId":artifact_id,"offset":0,"maxBytes":2049})
+            json!({"artifactId":artifact_id,"offset":0,"maxBytes":READ_TOOL_RESULT_PAGE_BYTES + 1})
         )
         .unwrap(),
         read_result(
             &sessions,
             &artifacts,
             "source",
-            json!({"artifactId":artifact_id,"offset":0,"maxBytes":2048})
+            json!({"artifactId":artifact_id,"offset":0,"maxBytes":READ_TOOL_RESULT_PAGE_BYTES})
         )
         .unwrap()
     );
@@ -527,8 +527,17 @@ fn tool_result_pages_default_and_cap_sizes_without_losing_bytes() {
     let (_root, sessions, artifacts) = stores();
     let (metadata, original) = stored_repository_output(&sessions, &artifacts);
     assert!(original.len() > 2048);
-    for requested in [None, Some(17), Some(2048), Some(2049), Some(usize::MAX)] {
-        let applied = requested.unwrap_or(2048).min(2048);
+    for requested in [
+        None,
+        Some(17),
+        Some(2048),
+        Some(8192),
+        Some(8193),
+        Some(usize::MAX),
+    ] {
+        let applied = requested
+            .unwrap_or(READ_TOOL_RESULT_PAGE_BYTES)
+            .min(READ_TOOL_RESULT_PAGE_BYTES);
         let mut offset = 0;
         let mut recovered = String::new();
         loop {
@@ -670,7 +679,10 @@ fn tool_result_schema_allows_default_paging_and_oversized_requests() {
     let schema = tool.input_schema;
     assert_eq!(schema["required"], json!(["artifactId"]));
     assert_eq!(schema["properties"]["offset"]["default"], 0);
-    assert_eq!(schema["properties"]["maxBytes"]["default"], 2048);
+    assert_eq!(
+        schema["properties"]["maxBytes"]["default"],
+        READ_TOOL_RESULT_PAGE_BYTES
+    );
     assert_eq!(schema["properties"]["maxBytes"]["minimum"], 1);
     assert!(schema["properties"]["maxBytes"].get("maximum").is_none());
 }

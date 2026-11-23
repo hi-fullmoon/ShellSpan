@@ -59,6 +59,7 @@ pub(crate) fn build_streaming_client() -> Result<Client, String> {
     Client::builder()
         .user_agent(concat!("ShellSpan/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(10))
+        .tcp_keepalive(Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|error| format!("failed to create streaming AI HTTP client: {error}"))

@@ -170,7 +170,10 @@ impl ToolRegistryNative {
             || descriptor.max_concurrency == 0
             || descriptor.parallel
                 && (descriptor.idempotency != ToolIdempotencyNative::Yes
-                    || descriptor.allowed_effects.as_slice() != [AgentEffectKindNative::ReadOnly])
+                    || !matches!(
+                        descriptor.allowed_effects.as_slice(),
+                        [AgentEffectKindNative::ReadOnly] | [AgentEffectKindNative::SensitiveRead]
+                    ))
             || descriptor.required_capabilities.is_empty()
             || descriptor
                 .required_capabilities
@@ -241,6 +244,17 @@ mod tests {
             .map(|tool| tool.descriptor.name.as_str())
             .collect::<Vec<_>>();
         parallel.sort_unstable();
-        assert_eq!(parallel, ["list_directory", "wait_process"]);
+        assert_eq!(
+            parallel,
+            [
+                "inspect_host",
+                "inspect_service",
+                "list_directory",
+                "query_logs",
+                "read_file",
+                "search_text",
+                "wait_process"
+            ]
+        );
     }
 }

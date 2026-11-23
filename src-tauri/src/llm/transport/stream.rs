@@ -20,8 +20,8 @@ pub(in crate::llm) struct ModelTimeoutPolicy {
 impl Default for ModelTimeoutPolicy {
     fn default() -> Self {
         Self {
-            request_headers: Duration::from_secs(30),
-            first_byte: Duration::from_secs(30),
+            request_headers: Duration::from_secs(90),
+            first_byte: Duration::from_secs(90),
             stream_idle: Duration::from_secs(300),
         }
     }

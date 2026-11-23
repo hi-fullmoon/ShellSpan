@@ -31,9 +31,14 @@ export function isGroupableReadOnlyTool(node: AiConversationNode): node is AiCon
   return variant === 'read' || variant === 'search';
 }
 
+const groupedChildrenCache = new WeakMap<readonly AiTurnProcessChildNode[], AiGroupedTurnProcessEntry[]>();
+const processChildKeysCache = new WeakMap<readonly AiGroupedTurnProcessEntry[], readonly string[]>();
+
 export function groupTurnProcessChildren(
   children: readonly AiTurnProcessChildNode[],
 ): AiGroupedTurnProcessEntry[] {
+  const cached = groupedChildrenCache.get(children);
+  if (cached) return cached;
   const entries: AiGroupedTurnProcessEntry[] = [];
   let run: AiConversationNodeOf<'tool'>[] = [];
   const flushRun = (): void => {
@@ -54,6 +59,7 @@ export function groupTurnProcessChildren(
     }
   }
   flushRun();
+  groupedChildrenCache.set(children, entries);
   return entries;
 }
 
@@ -67,10 +73,15 @@ export function conversationRows(nodes: readonly AiConversationNode[]): AiConver
       process = node;
       controlIndex = rows.length;
       const entries = groupTurnProcessChildren(node.children);
+      let processChildKeys = processChildKeysCache.get(entries);
+      if (!processChildKeys) {
+        processChildKeys = entries.map((entry) => entry.node.key);
+        processChildKeysCache.set(entries, processChildKeys);
+      }
       rows.push({
         node,
         process,
-        processChildKeys: entries.map((entry) => entry.node.key),
+        processChildKeys,
       });
       for (const entry of entries) {
         rows.push({

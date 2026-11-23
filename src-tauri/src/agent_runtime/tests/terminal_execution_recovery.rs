@@ -114,11 +114,10 @@ fn terminal_execution_capabilities_follow_recovery_and_new_generation() {
     };
     let before = broker.execution_capabilities("terminal").unwrap();
     assert!(build(Some(&before))
-        .tools
-        .iter()
-        .find(|tool| tool.name == "run_terminal_command")
+        .context
+        .last()
         .unwrap()
-        .description
+        .content
         .contains("nativeScriptInput=true; nativeJobControl=true; boundCommandReady=true"));
     broker
         .acquire_agent_lease("terminal", "agent", "task", "operation")

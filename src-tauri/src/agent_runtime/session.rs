@@ -379,8 +379,11 @@ impl AgentSessionRecord {
     }
 
     fn snapshot(&self) -> Result<AgentSessionSnapshot, String> {
-        if let Some(snapshot) = self.snapshot_cache.get() {
-            return Ok(snapshot.clone());
+        if let Some(cached) = self.snapshot_cache.get() {
+            let mut snapshot = cached.clone();
+            snapshot.event_count = self.events.len() as u64;
+            snapshot.recovery.last_committed_seq = self.events.last().map_or(0, |event| event.seq);
+            return Ok(snapshot);
         }
         let snapshot = AgentSessionSnapshot {
             header: self.header.clone(),
@@ -4985,7 +4988,14 @@ fn retains_paused_inputs(record: &AgentSessionRecord, status: AgentSessionStatus
 }
 
 fn observe_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) {
-    record.snapshot_cache = Arc::new(OnceLock::new());
+    if !(record.header.subagent.is_none()
+        && matches!(
+            event.payload,
+            AgentSessionEventPayload::AssistantChunk { usage: None, .. }
+        ))
+    {
+        record.snapshot_cache = Arc::new(OnceLock::new());
+    }
     record.driver_metrics.observe(event);
     record.loop_progress.observe(event);
 }

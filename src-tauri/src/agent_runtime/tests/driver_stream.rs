@@ -353,6 +353,7 @@ fn persisted_stream() -> (tempfile::TempDir, Arc<DurableModelStreamSink>) {
             collected: Arc::new(Mutex::new(PartialContentAccumulator::default())),
             cancellation: tokio_util::sync::CancellationToken::new(),
             pending: Mutex::new(StreamBatch::default()),
+            dirty: std::sync::atomic::AtomicBool::new(false),
         }),
     )
 }

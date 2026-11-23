@@ -10,7 +10,7 @@ use super::{
 };
 
 pub(crate) const READ_TOOL_RESULT: &str = "read_tool_result";
-pub(crate) const READ_TOOL_RESULT_PAGE_BYTES: usize = 2048;
+pub(crate) const READ_TOOL_RESULT_PAGE_BYTES: usize = 8192;
 
 static ARTIFACT_REFERENCES: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"(?-u:\b)artifact-[0-9a-f]{32}(?-u:\b)")
@@ -164,11 +164,26 @@ pub(crate) fn bounded_text(text: &str, maximum: usize) -> String {
     if text.len() <= maximum {
         return text.to_string();
     }
-    let mut end = maximum.saturating_sub(32).min(text.len());
-    while !text.is_char_boundary(end) {
-        end -= 1;
+    const MARKER: &str = " …[truncated; read_tool_result] ";
+    if maximum <= MARKER.len() + 32 {
+        let mut end = maximum.saturating_sub(32).min(text.len());
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        return format!("{} …[truncated; read_tool_result]", &text[..end]);
     }
-    format!("{} …[truncated; read_tool_result]", &text[..end])
+    let available = maximum - MARKER.len();
+    let head_budget = (available / 3).max(24).min(available);
+    let tail_budget = available.saturating_sub(head_budget);
+    let mut head_end = head_budget.min(text.len());
+    while !text.is_char_boundary(head_end) {
+        head_end -= 1;
+    }
+    let mut tail_start = text.len().saturating_sub(tail_budget).max(head_end);
+    while tail_start < text.len() && !text.is_char_boundary(tail_start) {
+        tail_start += 1;
+    }
+    format!("{}{}{}", &text[..head_end], MARKER, &text[tail_start..])
 }
 
 pub(crate) fn bound_request_results(
@@ -252,6 +267,20 @@ pub(crate) fn result_reference(
                     | "state"
                     | "channel"
                     | "execution"
+                    | "path"
+                    | "totalLines"
+                    | "lineCount"
+                    | "matchCount"
+                    | "entryCount"
+                    | "httpStatus"
+                    | "statusCode"
+                    | "method"
+                    | "url"
+                    | "service"
+                    | "unit"
+                    | "count"
+                    | "hasMore"
+                    | "nextOffset"
             ) && (value.is_null()
                 || value.is_boolean()
                 || value.is_number()
@@ -260,7 +289,14 @@ pub(crate) fn result_reference(
                 data.insert(key.clone(), value.clone());
             }
         }
-        for field in ["stdout", "stderr", "combinedOutput"] {
+        for field in [
+            "stdout",
+            "stderr",
+            "combinedOutput",
+            "content",
+            "body",
+            "detail",
+        ] {
             if let Some(text) = original.get(field).and_then(Value::as_str) {
                 data.insert(field.into(), json!(bounded_text(text, preview_bytes)));
             }

@@ -513,33 +513,55 @@ impl SkillRuntime {
         if cancellation.is_cancelled() {
             return Err("Skills cancelled".into());
         }
-        self.sessions.append(
-            session_id,
-            None,
-            None,
-            AgentSessionEventPayload::SkillCatalogObserved {
-                observation: result.observation.clone(),
-            },
-        )?;
+        let unchanged = self.sessions.read_events(session_id, |events| {
+            for event in events.iter().rev() {
+                if matches!(
+                    event.payload,
+                    AgentSessionEventPayload::SessionTerminalReconnected { .. }
+                ) {
+                    return false;
+                }
+                if let AgentSessionEventPayload::SkillCatalogObserved { observation } =
+                    &event.payload
+                {
+                    return observation == &result.observation;
+                }
+            }
+            false
+        })?;
+        if !unchanged {
+            self.sessions.append(
+                session_id,
+                None,
+                None,
+                AgentSessionEventPayload::SkillCatalogObserved {
+                    observation: result.observation.clone(),
+                },
+            )?;
+        }
         Ok(result)
     }
     fn last_good(&self, session_id: &str) -> Result<Option<SkillSnapshot>, String> {
-        for event in self.sessions.all_events(session_id)?.iter().rev() {
-            if matches!(
-                event.payload,
-                AgentSessionEventPayload::SessionTerminalReconnected { .. }
-            ) {
-                return Ok(None);
-            }
-            if let AgentSessionEventPayload::SkillCatalogObserved { observation } = &event.payload {
-                match observation.status {
-                    SkillObservationStatus::Complete => return Ok(observation.snapshot.clone()),
-                    SkillObservationStatus::Unavailable => return Ok(None),
-                    SkillObservationStatus::Incomplete => {}
+        self.sessions.read_events(session_id, |events| {
+            for event in events.iter().rev() {
+                if matches!(
+                    event.payload,
+                    AgentSessionEventPayload::SessionTerminalReconnected { .. }
+                ) {
+                    return None;
+                }
+                if let AgentSessionEventPayload::SkillCatalogObserved { observation } =
+                    &event.payload
+                {
+                    match observation.status {
+                        SkillObservationStatus::Complete => return observation.snapshot.clone(),
+                        SkillObservationStatus::Unavailable => return None,
+                        SkillObservationStatus::Incomplete => {}
+                    }
                 }
             }
-        }
-        Ok(None)
+            None
+        })
     }
     pub(crate) async fn list(
         &self,

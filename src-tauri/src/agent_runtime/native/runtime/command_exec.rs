@@ -371,6 +371,9 @@ impl NativeToolEngine {
         if !process_registered {
             self.processes.insert(Arc::clone(&process))?;
         }
+        if cancellation.is_cancelled() {
+            let _ = self.processes.cancel_task(&context.request.task_id);
+        }
         let background = arguments.background.unwrap_or(false);
         let snapshot = if background {
             process.snapshot()?

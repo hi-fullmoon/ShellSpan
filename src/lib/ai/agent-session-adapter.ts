@@ -445,20 +445,24 @@ function settleProcessOutput<Node extends AiConversationNode>(node: Node): Node 
   return node;
 }
 
-export function agentSessionView(state: AgentSessionStreamState, projected?: {
-  readonly activity: ReturnType<typeof projectAgentActivity>;
-  readonly nodes: readonly AiConversationNode[];
-  readonly metadataEvents: readonly AgentSessionEvent[];
-}): AiSessionView {
-  if (!state.snapshot) throw new Error('Agent Session snapshot is unavailable');
-  const events = projected?.metadataEvents ?? state.events;
-  const activity = projected?.activity ?? projectAgentActivity(state.events);
-  const committedNodes = projected?.nodes ?? projectAgentChatNodes(state.events);
-  const storageFault = state.storageFaultAtSeq !== undefined && !state.hasTerminalEvent;
-  const status = storageFault ? 'failed' : activity.status;
-  const nodes = storageFault ? committedNodes.map(settleUnsavedOutput) : committedNodes;
-  const header = { ...state.snapshot.header };
-  let recovery: import('@/types/agent-session').AgentSessionRecoveryState = state.snapshot.recovery;
+interface DerivedSessionMetadata {
+  readonly header: AgentSessionSnapshot['header'];
+  readonly recovery: import('@/types/agent-session').AgentSessionRecoveryState;
+  readonly ended: boolean;
+  readonly inbox: ReturnType<typeof projectAgentInbox>;
+  readonly pendingQuestion: ReturnType<typeof projectQuestions>[number] | null;
+  readonly pendingSkillProposal: ReturnType<typeof projectSkillProposals>[number] | null;
+  readonly committedOperationIds: readonly string[];
+  readonly contextUsage: ReturnType<typeof projectContextUsage>;
+}
+
+function deriveSessionMetadata(
+  snapshot: AgentSessionSnapshot,
+  events: readonly AgentSessionEvent[],
+): DerivedSessionMetadata {
+  const header = { ...snapshot.header };
+  let recovery: import('@/types/agent-session').AgentSessionRecoveryState = snapshot.recovery;
+  let ended = false;
   for (const event of events) {
     if (event.type === 'task/state' && event.data.recovery) recovery = event.data.recovery;
     if (event.type === 'session/model_selected') header.modelSelection = event.data.provider;
@@ -469,53 +473,16 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
       header.permissionMode = 'requestApproval';
       recovery = { status: 'none' };
     }
+    if (event.type === 'session/ended') ended = true;
+    else if (event.type === 'session/resumed' || event.type === 'subagent/recovery_started') ended = false;
   }
-  const task = activity.plan === undefined
-    ? state.snapshot.task
-    : activity.plan === null
-      ? (({ plan: _plan, ...rest }) => rest)(state.snapshot.task)
-      : { ...state.snapshot.task, plan: activity.plan };
   return {
-    summary: sessionSummary({ ...state.snapshot, header }, state.events, status, events),
-    snapshot: {
-      kind: 'agent',
-      value: {
-        ...state.snapshot,
-        status: activity.status,
-        ended: [...events].reverse().find(event => event.type === 'session/ended' || event.type === 'session/resumed'
-          || event.type === 'subagent/recovery_started')?.type === 'session/ended',
-        header,
-        task,
-      },
-    },
-    nodes,
-    activityNodes: activity.nodes,
-    taskPlanActive: activity.planActive,
-    subagents: activity.agents.filter((agent) => (
-      agent.descriptorId !== undefined
-      && agent.parentSessionId === state.snapshot?.header.sessionId
-    )),
-    inbox: projectAgentInbox(events),
-    pendingApproval: storageFault || state.snapshot.archived || status === 'completed'
-      || status === 'failed' || status === 'cancelled' ? null : pendingApproval(nodes),
-    pendingQuestion: storageFault || state.snapshot.archived || status === 'completed'
-      || status === 'failed' || status === 'cancelled'
-      ? null
-      : projectQuestions(events).find((q) => q.status === 'pending') ?? null,
-    pendingSkillProposal: storageFault || state.snapshot.archived || status === 'completed'
-      || status === 'failed' || status === 'cancelled'
-      ? null
-      : projectSkillProposals(events).find((p) => p.status === 'pending') ?? null,
-    status,
-    statusReason: storageFault ? 'journalWriteFailed' : activity.statusReason,
+    header,
     recovery,
-    error: storageFault ? { kind: 'terminal', message: 'journalWriteFailed', retryable: false }
-      : status === 'failed' || status === 'cancelled' ? terminalError(nodes) : null,
-    syncError: state.syncError ? normalizeAiSessionError(state.syncError) : undefined,
-    syncRecovery: state.syncRecovery,
-    storageFaultAtSeq: storageFault ? state.storageFaultAtSeq : undefined,
-    throughSeq: state.lastCommittedSeq ?? null,
-    revision: state.lastCommittedSeq === undefined ? state.snapshot.eventCount : state.lastCommittedSeq + 1,
+    ended,
+    inbox: projectAgentInbox(events),
+    pendingQuestion: projectQuestions(events).find((q) => q.status === 'pending') ?? null,
+    pendingSkillProposal: projectSkillProposals(events).find((p) => p.status === 'pending') ?? null,
     committedOperationIds: events.flatMap((event) => {
       switch (event.type) {
         case 'subagent/recovery_started':
@@ -539,8 +506,68 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
           return [];
       }
     }),
-    canLoadOlder: false,
     contextUsage: projectContextUsage(events),
+  };
+}
+
+export function agentSessionView(state: AgentSessionStreamState, projected?: {
+  readonly activity: ReturnType<typeof projectAgentActivity>;
+  readonly nodes: readonly AiConversationNode[];
+  readonly metadataEvents: readonly AgentSessionEvent[];
+  readonly derivedMetadata?: DerivedSessionMetadata;
+}): AiSessionView {
+  if (!state.snapshot) throw new Error('Agent Session snapshot is unavailable');
+  const events = projected?.metadataEvents ?? state.events;
+  const activity = projected?.activity ?? projectAgentActivity(state.events);
+  const committedNodes = projected?.nodes ?? projectAgentChatNodes(state.events);
+  const storageFault = state.storageFaultAtSeq !== undefined && !state.hasTerminalEvent;
+  const status = storageFault ? 'failed' : activity.status;
+  const nodes = storageFault ? committedNodes.map(settleUnsavedOutput) : committedNodes;
+  const derived = projected?.derivedMetadata ?? deriveSessionMetadata(state.snapshot, events);
+  const { header, recovery } = derived;
+  const task = activity.plan === undefined
+    ? state.snapshot.task
+    : activity.plan === null
+      ? (({ plan: _plan, ...rest }) => rest)(state.snapshot.task)
+      : { ...state.snapshot.task, plan: activity.plan };
+  const terminalOrArchived = storageFault || state.snapshot.archived || status === 'completed'
+    || status === 'failed' || status === 'cancelled';
+  return {
+    summary: sessionSummary({ ...state.snapshot, header }, state.events, status, events),
+    snapshot: {
+      kind: 'agent',
+      value: {
+        ...state.snapshot,
+        status: activity.status,
+        ended: derived.ended,
+        header,
+        task,
+      },
+    },
+    nodes,
+    activityNodes: activity.nodes,
+    taskPlanActive: activity.planActive,
+    subagents: activity.agents.filter((agent) => (
+      agent.descriptorId !== undefined
+      && agent.parentSessionId === state.snapshot?.header.sessionId
+    )),
+    inbox: derived.inbox,
+    pendingApproval: terminalOrArchived ? null : pendingApproval(nodes),
+    pendingQuestion: terminalOrArchived ? null : derived.pendingQuestion,
+    pendingSkillProposal: terminalOrArchived ? null : derived.pendingSkillProposal,
+    status,
+    statusReason: storageFault ? 'journalWriteFailed' : activity.statusReason,
+    recovery,
+    error: storageFault ? { kind: 'terminal', message: 'journalWriteFailed', retryable: false }
+      : status === 'failed' || status === 'cancelled' ? terminalError(nodes) : null,
+    syncError: state.syncError ? normalizeAiSessionError(state.syncError) : undefined,
+    syncRecovery: state.syncRecovery,
+    storageFaultAtSeq: storageFault ? state.storageFaultAtSeq : undefined,
+    throughSeq: state.lastCommittedSeq ?? null,
+    revision: state.lastCommittedSeq === undefined ? state.snapshot.eventCount : state.lastCommittedSeq + 1,
+    committedOperationIds: derived.committedOperationIds,
+    canLoadOlder: false,
+    contextUsage: derived.contextUsage,
   };
 }
 
@@ -548,6 +575,10 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
 export function createAgentSessionViewProjector(): (state: AgentSessionStreamState) => AiSessionView {
   let previous: AgentSessionStreamState | undefined;
   let view: AiSessionView | undefined;
+  let cachedMetadataSnapshot: AgentSessionSnapshot | null = null;
+  let cachedMetadataEvents: readonly AgentSessionEvent[] | null = null;
+  let cachedMetadataLength = -1;
+  let cachedDerivedMetadata: DerivedSessionMetadata | undefined;
   const chat = createAgentChatProjector();
   const activity = createAgentActivityProjector();
   // Chunks affect chat and Activity, but never inbox/configuration/question state.
@@ -567,8 +598,23 @@ export function createAgentSessionViewProjector(): (state: AgentSessionStreamSta
       && previous.syncRecovery === state.syncRecovery
       && previous.storageFaultAtSeq === state.storageFaultAtSeq
       && previous.hasTerminalEvent === state.hasTerminalEvent) return view;
+    const metadataEvents = metadata(state.events);
+    if (
+      state.snapshot
+      && (cachedMetadataSnapshot !== state.snapshot
+        || cachedMetadataEvents !== metadataEvents
+        || cachedMetadataLength !== metadataEvents.length)
+    ) {
+      cachedDerivedMetadata = deriveSessionMetadata(state.snapshot, metadataEvents);
+      cachedMetadataSnapshot = state.snapshot;
+      cachedMetadataEvents = metadataEvents;
+      cachedMetadataLength = metadataEvents.length;
+    }
     view = agentSessionView(state, {
-      activity: activity(state.events), nodes: chat(state.events), metadataEvents: metadata(state.events),
+      activity: activity(state.events),
+      nodes: chat(state.events),
+      metadataEvents,
+      derivedMetadata: state.snapshot ? cachedDerivedMetadata : undefined,
     });
     previous = state;
     return view;

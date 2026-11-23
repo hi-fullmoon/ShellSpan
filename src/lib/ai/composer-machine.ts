@@ -210,13 +210,14 @@ export function reduceAiComposer(
         && event.sessionId !== null
         && state.pendingSubmissions.some((item) => item.sessionId === null);
       const sessionChanged = state.sessionId !== event.sessionId && !adoptsCreatedSession;
+      const nextWaitingQuestion = event.waitingQuestion ?? false;
       const next = {
         ...state,
         sessionId: event.sessionId,
         runtimeStatus: event.status,
         terminal: event.terminal,
         waitingApproval: event.waitingApproval,
-        waitingQuestion: event.waitingQuestion ?? false,
+        waitingQuestion: nextWaitingQuestion,
         ...(adoptsCreatedSession ? {
           pendingSubmissions: state.pendingSubmissions.map((item) => (
             item.sessionId === null ? { ...item, sessionId: event.sessionId } : item
@@ -230,14 +231,27 @@ export function reduceAiComposer(
           lastError: null,
         } : {}),
       };
+      const nextPhase = (state.phase === 'submitting' || state.phase === 'stopping') && !sessionChanged
+        ? state.phase
+        : state.phase === 'error' && !sessionChanged
+          ? 'error'
+          : runtimePhase(next);
+      if (
+        !adoptsCreatedSession
+        && !sessionChanged
+        && state.sessionId === event.sessionId
+        && state.runtimeStatus === event.status
+        && state.terminal === event.terminal
+        && state.waitingApproval === event.waitingApproval
+        && state.waitingQuestion === nextWaitingQuestion
+        && state.phase === nextPhase
+      ) {
+        return { state, effects: [] };
+      }
       return {
         state: {
           ...next,
-          phase: (state.phase === 'submitting' || state.phase === 'stopping') && !sessionChanged
-            ? state.phase
-            : state.phase === 'error' && !sessionChanged
-              ? 'error'
-              : runtimePhase(next),
+          phase: nextPhase,
         },
         effects: [],
       };

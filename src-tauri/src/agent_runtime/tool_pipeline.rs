@@ -1056,7 +1056,6 @@ impl AgentToolPipeline {
                         next += 1; committed += 1; continue;
                     }
                     if call.name == super::tool_output::READ_TOOL_RESULT {
-                        if !running.is_empty() { draining_barrier = true; continue; }
                         self.process_result_read(entry, turn_id, step_id, request_id, target.clone(), call.clone()).await?;
                         next += 1; committed += 1; continue;
                     }
@@ -2394,8 +2393,10 @@ impl AgentToolPipeline {
             || call.effect.is_none()
             || preparation.expires_at_unix_ms <= current_unix_ms()
             || preparation.parallel
-                && (call.effect != Some(AgentSessionEffect::ReadOnly)
-                    || preparation.idempotency != NativeToolIdempotency::Yes
+                && (!matches!(
+                    call.effect,
+                    Some(AgentSessionEffect::ReadOnly | AgentSessionEffect::SensitiveRead)
+                ) || preparation.idempotency != NativeToolIdempotency::Yes
                     || preparation.exclusive)
         {
             return Err("Native tool preparation violated its frozen contract".into());
