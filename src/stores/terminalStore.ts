@@ -30,6 +30,8 @@ export interface TerminalSession {
   promptReady?: boolean;
   promptReadyRevision?: number;
   foregroundHandoffActive?: boolean;
+  vimAttached?: boolean;
+  vimEditor?: 'vim' | 'neovim';
   credentialPromptActive?: boolean;
   nativeRecoveryRequired?: boolean;
   currentDirectory?: string;
@@ -515,6 +517,8 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
           closed: event,
           status: event.reasonKind === 'error' ? 'error' : 'disconnected',
           recording: undefined,
+          vimAttached: false,
+          vimEditor: undefined,
         };
       });
       return changed ? { sessions } : state;
@@ -544,6 +548,8 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
           && session.promptReadyRevision === event.promptReadyRevision
           && session.currentDirectory === event.currentDirectory
           && session.foregroundHandoffActive === event.inputObservation?.foregroundHandoffActive
+          && session.vimAttached === event.inputObservation?.vimAttached
+          && session.vimEditor === event.inputObservation?.vimEditor
           && session.credentialPromptActive === event.inputObservation?.credentialPromptActive
           && session.nativeRecoveryRequired === event.inputObservation?.nativeRecoveryRequired
         ) return session;
@@ -559,6 +565,8 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
           promptReadyRevision: event.promptReadyRevision,
           currentDirectory: event.currentDirectory,
           foregroundHandoffActive: event.inputObservation?.foregroundHandoffActive,
+          vimAttached: event.inputObservation?.vimAttached,
+          vimEditor: event.inputObservation?.vimEditor,
           credentialPromptActive: event.inputObservation?.credentialPromptActive,
           nativeRecoveryRequired: event.inputObservation?.nativeRecoveryRequired,
         };

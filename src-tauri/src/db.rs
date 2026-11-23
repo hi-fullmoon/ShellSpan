@@ -8,6 +8,7 @@ const TERMINAL_WORKSPACE_VERSION: u64 = 1;
 const MAX_TERMINAL_WORKSPACE_BYTES: usize = 1024 * 1024;
 const MAX_TERMINAL_WORKSPACE_SESSIONS: usize = 100;
 const AGENT_SANDBOX_ENABLED_KEY: &str = "ai.agentSandboxEnabled";
+const VIM_BRIDGE_AUTO_ATTACH_KEY: &str = "ai.vimBridgeAutoAttach";
 const AGENT_SANDBOX_DISABLED: &str = "AGENT_SANDBOX_DISABLED: enable Agent sandbox in AI Settings";
 
 fn validate_terminal_workspace(workspace_json: &str) -> Result<(), String> {
@@ -1023,6 +1024,19 @@ impl Database {
     pub(crate) fn agent_sandbox_enabled(&self) -> Result<bool, String> {
         let conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
         Self::read_agent_sandbox_enabled(&conn)
+    }
+
+    pub(crate) fn vim_bridge_auto_attach(&self) -> Result<bool, String> {
+        let conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
+        let preference = conn
+            .query_row(
+                "SELECT value FROM preferences WHERE key=?1",
+                [VIM_BRIDGE_AUTO_ATTACH_KEY],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        Ok(preference.as_deref() == Some("true"))
     }
 
     pub(crate) fn require_agent_sandbox_enabled(&self) -> Result<(), String> {

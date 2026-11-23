@@ -35,6 +35,10 @@
   line-height: 22px;
 }
 
+.ai-approval-panel-title h3:focus-visible {
+  outline: none;
+}
+
 .ai-question-panel-header [data-slot='card-description'],
 .ai-approval-panel-header [data-slot='card-description'] {
   color: var(--ai-text-secondary);

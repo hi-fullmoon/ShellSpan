@@ -449,6 +449,11 @@ fn specialize_tools_for_target(tools: &mut [AgentRequestToolSchema], header: &Ag
             && header.parent_session_id.is_none()
         {
             command.description.push_str(" Use handoffToUser=true when the user asks to open Vim or another full-screen interactive program for their own use. On a confirmed handoff, tell the user the terminal is theirs and finish the turn.");
+            if header.target.as_ref().is_some_and(|target| {
+                target.kind == "remote" && target.remote_sandbox_required != Some(true)
+            }) {
+                command.description.push_str(" On a bound SSH terminal, when opening Vim or Neovim for the user without clean or debugging flags (such as --clean or -u), pass -S \"$SHELLSPAN_VIM_BRIDGE\" before file paths so the editor attaches automatically.");
+            }
         } else if let Some(properties) = command.input_schema["properties"].as_object_mut() {
             properties.remove("handoffToUser");
         }
@@ -1290,6 +1295,10 @@ mod tests {
         assert!(bound.contains("keep terminal stdin even for scripted keystrokes"));
         assert!(bound.contains("Never pipe stdin or redirect it to /dev/null"));
         assert!(bound.contains("use < /dev/tty"));
+        assert!(bound.contains("-S \"$SHELLSPAN_VIM_BRIDGE\""));
+
+        session.target.as_mut().unwrap().kind = "local".into();
+        assert!(!description(&session).contains("-S \"$SHELLSPAN_VIM_BRIDGE\""));
     }
 
     #[test]

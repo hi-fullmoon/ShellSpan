@@ -741,7 +741,13 @@
                 .handle_extended_data(ExtendedData::Merge)
                 .expect("merge SSH PTY stderr");
             integration
-                .start_shell(&mut shell_channel, vim_source)
+                .start_shell(
+                    &mut shell_channel,
+                    vim_source.map(|source_path| crate::terminal_vim_bridge::VimBridgeShellConfig {
+                        source_path,
+                        auto_attach: false,
+                    }),
+                )
                 .expect("start integrated interactive SSH shell");
             broker
                 .attach_transport(

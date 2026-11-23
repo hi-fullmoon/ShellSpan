@@ -32,6 +32,7 @@ export interface AiSessionHeaderProps {
   readonly status: AiSessionStatus;
   readonly mode?: 'ask' | 'agent';
   readonly lineage?: React.ReactNode;
+  readonly editorBadge?: React.ReactNode;
   readonly subagentNav?: AiSessionHeaderSubagentNav;
   readonly extraActions?: React.ReactNode;
   readonly onClose?: () => void;
@@ -49,6 +50,7 @@ export function AiSessionHeader({
   status,
   mode = 'agent',
   lineage,
+  editorBadge,
   subagentNav,
   extraActions,
   onClose,
@@ -123,6 +125,7 @@ export function AiSessionHeader({
           <span className="ai-session-heading flex min-w-0 flex-1 flex-col">
             <span className="flex min-w-0 items-center gap-1">
               <h2 className="ai-session-title min-w-0 truncate text-sm font-medium leading-5 text-foreground">{title}</h2>
+              {editorBadge}
             </span>
             <Tooltip>
               <TooltipTrigger render={<span tabIndex={0} className="ai-session-context w-fit max-w-full truncate text-[11px] leading-[15px] text-muted-foreground" />}>

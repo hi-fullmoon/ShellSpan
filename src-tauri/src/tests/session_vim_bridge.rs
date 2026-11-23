@@ -231,7 +231,7 @@ fn pump_editor(terminal: &mut RemoteFixtureTerminal, bridge: &mut RemoteVimBridg
     if bridge.drain().expect("read the private SSH editor relay") {
         terminal
             .broker
-            .set_vim_attached(&terminal.transport_id, bridge.attached())
+            .set_vim_attached(&terminal.transport_id, bridge.attached_editor())
             .unwrap();
     }
 }

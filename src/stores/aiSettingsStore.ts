@@ -22,6 +22,7 @@ import type { AgentExecutionSurface } from '@/types/agent-session';
 
 const logger = createLogger('aiSettingsStore');
 const AGENT_SANDBOX_ENABLED_KEY = 'ai.agentSandboxEnabled';
+const VIM_BRIDGE_AUTO_ATTACH_KEY = 'ai.vimBridgeAutoAttach';
 
 export interface AiProviderPresetDefinition {
   preset: AiProviderPreset;
@@ -122,6 +123,8 @@ interface AiSettingsState extends AiPreferences {
   initialized: boolean;
   agentSandboxEnabled: boolean;
   agentSandboxSaving: boolean;
+  vimBridgeAutoAttach: boolean;
+  vimBridgeAutoAttachSaving: boolean;
   persistenceStatus: 'idle' | 'pending' | 'saving' | 'saved' | 'error';
   hydrateFromDb: () => Promise<void>;
   addProvider: (
@@ -135,6 +138,7 @@ interface AiSettingsState extends AiPreferences {
   setAgentPermissionMode: (mode: AgentPermissionMode) => void;
   setAgentExecutionSurface: (surface: AgentExecutionSurface) => void;
   setAgentSandboxEnabled: (enabled: boolean) => Promise<void>;
+  setVimBridgeAutoAttach: (enabled: boolean) => Promise<void>;
   getProviderConfig: (id?: string) => AiProviderConfig;
 }
 
@@ -258,6 +262,8 @@ export const useAiSettingsStore = create<AiSettingsState>()(
     initialized: false,
     agentSandboxEnabled: false,
     agentSandboxSaving: false,
+    vimBridgeAutoAttach: false,
+    vimBridgeAutoAttachSaving: false,
     persistenceStatus: 'idle',
     hydrateFromDb: async () => {
       try {
@@ -268,6 +274,7 @@ export const useAiSettingsStore = create<AiSettingsState>()(
         set({
           ...preferences,
           agentSandboxEnabled: entries.some(([key, value]) => key === AGENT_SANDBOX_ENABLED_KEY && value === 'true'),
+          vimBridgeAutoAttach: entries.some(([key, value]) => key === VIM_BRIDGE_AUTO_ATTACH_KEY && value === 'true'),
         });
         set({ initialized: true });
       } catch (error) {
@@ -327,6 +334,16 @@ export const useAiSettingsStore = create<AiSettingsState>()(
         set({ agentSandboxEnabled });
       } finally {
         set({ agentSandboxSaving: false });
+      }
+    },
+    setVimBridgeAutoAttach: async (vimBridgeAutoAttach) => {
+      if (get().vimBridgeAutoAttachSaving) return;
+      set({ vimBridgeAutoAttachSaving: true });
+      try {
+        await invokeSavePreferences([[VIM_BRIDGE_AUTO_ATTACH_KEY, String(vimBridgeAutoAttach)]]);
+        set({ vimBridgeAutoAttach });
+      } finally {
+        set({ vimBridgeAutoAttachSaving: false });
       }
     },
     getProviderConfig: (id) => {

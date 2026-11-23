@@ -32,6 +32,7 @@ use crate::{
         terminal_deadline::{self, PlainSshRetryReason, TerminalStartupMode},
         SSH_SESSION_KEEPALIVE_INTERVAL_SECS,
     },
+    db::Database,
     drain_decoded_output, emit_data, emit_session_error, emit_status, flush_pending_output,
     known_hosts::known_hosts_path,
     models::{
@@ -46,7 +47,7 @@ use crate::{
         quote_remote_posix, remote_posix_bootstrap, TerminalIntegrationStreamDecoder,
         TerminalShellKind,
     },
-    terminal_vim_bridge::{EditorWrite, RemoteVimBridge},
+    terminal_vim_bridge::{EditorWrite, RemoteVimBridge, VimBridgeShellConfig},
 };
 
 const SSH_IDLE_WAIT_SLICE_MS: u64 = 20;
@@ -98,12 +99,16 @@ impl RemoteSshShellIntegration {
         sftp.mkdir(Path::new(&remote_root), 0o700)
             .map_err(|error| format!("failed to create remote integration root: {error}"))?;
         let setup = (|| {
-            let source = remote_posix_bootstrap(
-                shell,
-                &fifo_path,
-                &identity.home_directory,
-                &identity.executable,
-            )?;
+            let source = format!(
+                "{}\n{}",
+                remote_posix_bootstrap(
+                    shell,
+                    &fifo_path,
+                    &identity.home_directory,
+                    &identity.executable,
+                )?,
+                crate::terminal_vim_bridge::SHELL_AUTO_ATTACH_SNIPPET,
+            );
             let mut remote = sftp
                 .create(Path::new(&bootstrap_path))
                 .map_err(|error| format!("failed to create remote integration script: {error}"))?;
@@ -210,7 +215,11 @@ impl RemoteSshShellIntegration {
         })
     }
 
-    fn start_shell(&self, shell_channel: &mut Channel, bridge: Option<&str>) -> Result<(), String> {
+    fn start_shell(
+        &self,
+        shell_channel: &mut Channel,
+        bridge: Option<VimBridgeShellConfig<'_>>,
+    ) -> Result<(), String> {
         let command =
             remote_integrated_shell_command(self.shell, &self.shell_executable, &self.remote_root)?;
         shell_channel
@@ -248,11 +257,15 @@ impl RemoteSshShellIntegration {
     }
 }
 
-fn with_vim_bridge(bridge: Option<&str>, command: String) -> String {
+fn with_vim_bridge(bridge: Option<VimBridgeShellConfig<'_>>, command: String) -> String {
     match bridge {
-        Some(path) => format!(
+        Some(config) if config.auto_attach => format!(
+            "export SHELLSPAN_VIM_BRIDGE={} SHELLSPAN_VIM_BRIDGE_AUTO=1\n{command}",
+            quote_remote_posix(config.source_path)
+        ),
+        Some(config) => format!(
             "export SHELLSPAN_VIM_BRIDGE={}\n{command}",
-            quote_remote_posix(path)
+            quote_remote_posix(config.source_path)
         ),
         None => command,
     }
@@ -678,7 +691,7 @@ fn start_ssh_native_or_fallback(
     session_id: &str,
     initial_output: &mut Vec<u8>,
     initial_input: Option<&str>,
-    vim_source: Option<&str>,
+    vim_bridge_config: Option<VimBridgeShellConfig<'_>>,
 ) -> Result<Option<SshNativeStartup>, ConnectionError> {
     let prepared = native.as_mut().expect("native resources prepared");
     let private_bash = prepared.uses_private_bash();
@@ -690,18 +703,20 @@ fn start_ssh_native_or_fallback(
         )
         .map_err(|message| ConnectionError::Other { message })?;
     let started = Instant::now();
-    let startup = prepared.start_shell(channel, vim_source).and_then(|()| {
-        session.set_blocking(false);
-        queue_initial_ssh_directory(session, channel, initial_input)?;
-        wait_for_native_ssh_startup(
-            session,
-            channel,
-            prepared,
-            &mut pending,
-            session_id,
-            initial_output,
-        )
-    });
+    let startup = prepared
+        .start_shell(channel, vim_bridge_config)
+        .and_then(|()| {
+            session.set_blocking(false);
+            queue_initial_ssh_directory(session, channel, initial_input)?;
+            wait_for_native_ssh_startup(
+                session,
+                channel,
+                prepared,
+                &mut pending,
+                session_id,
+                initial_output,
+            )
+        });
     let outcome = match &startup {
         Ok(Some(_)) => "ready",
         Ok(None) => "unavailable",
@@ -1016,6 +1031,16 @@ pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
         None
     };
     let vim_source = vim_bridge.as_ref().map(RemoteVimBridge::source_path);
+    let vim_auto_attach = app
+        .try_state::<Database>()
+        .and_then(|db| db.vim_bridge_auto_attach().ok())
+        .unwrap_or(false);
+    let vim_bridge_config = vim_source
+        .as_deref()
+        .map(|source_path| VimBridgeShellConfig {
+            source_path,
+            auto_attach: vim_auto_attach,
+        });
 
     let aborted = Cell::new(false);
     let result = with_remote_integration_cleanup(
@@ -1061,15 +1086,13 @@ pub(crate) fn run_ssh_session<C: FnOnce() -> Result<(), String> + Send>(
                             session_id,
                             &mut initial_output,
                             initial_input.as_deref(),
-                            vim_source.as_deref(),
+                            vim_bridge_config,
                         )?;
                         if startup.is_none() {
                             native_failure = Some("TERMINAL_NATIVE_SHELL_START_FAILED".into());
                         }
                     } else if let Some(integration) = remote_integration.as_ref() {
-                        if let Err(message) =
-                            integration.start_shell(channel, vim_source.as_deref())
-                        {
+                        if let Err(message) = integration.start_shell(channel, vim_bridge_config) {
                             warn!(
                             "Integrated remote shell startup failed; using ordinary SSH shell session_id={session_id}"
                         );
@@ -1947,10 +1970,14 @@ fn session_loop_inner(
                 let result = bridge.drain();
                 if result != Ok(false) {
                     if let Some(runtime) = app.try_state::<crate::agent_runtime::AgentRuntime>() {
-                        if runtime
-                            .terminal_broker()
-                            .set_vim_attached(session_id, result.is_ok() && bridge.attached())
-                            == Ok(true)
+                        if runtime.terminal_broker().set_vim_attached(
+                            session_id,
+                            if result.is_ok() {
+                                bridge.attached_editor()
+                            } else {
+                                None
+                            },
+                        ) == Ok(true)
                         {
                             crate::commands::emit_terminal_integration_state(app, session_id);
                         }

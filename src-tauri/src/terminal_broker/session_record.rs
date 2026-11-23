@@ -201,6 +201,7 @@ pub(super) struct SessionRecord {
     pub(super) prompt_start_input_sequence: u64,
     pub(super) prompt_next_input_sequence: u64,
     pub(super) vim_attached: bool,
+    pub(super) vim_editor: Option<crate::terminal_vim_bridge::EditorKind>,
     pub(super) interactive_input: Option<InteractiveInput>,
     pub(super) native_input: bool,
     pub(super) native_checkpoints: bool,
@@ -351,6 +352,7 @@ impl SessionRecord {
             prompt_start_input_sequence: 0,
             prompt_next_input_sequence: 0,
             vim_attached: false,
+            vim_editor: None,
             interactive_input: None,
             native_input: false,
             native_checkpoints: false,
@@ -516,6 +518,12 @@ impl SessionRecord {
                 native_clear_pending: self.native_clear_pending.is_some(),
                 command_observation_unavailable,
                 foreground_handoff_active: self.user_controls_foreground(),
+                vim_attached: self.vim_attached && !self.prompt_ready,
+                vim_editor: if self.vim_attached && !self.prompt_ready {
+                    self.vim_editor
+                } else {
+                    None
+                },
                 credential_prompt_active: self.credential_prompt_active(),
                 active_command: command_observation.ok().flatten(),
             },

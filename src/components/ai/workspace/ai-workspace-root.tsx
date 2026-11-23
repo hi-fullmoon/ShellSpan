@@ -15,6 +15,7 @@ import { conversationArtifacts } from '@/lib/ai/conversation-artifact';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
 import { taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { findConversationTool, storedToolOutputId } from '@/lib/ai/conversation-tool';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
 import type { AiInboxItem, AiSessionView } from '@/lib/ai/session-adapter';
@@ -64,7 +65,13 @@ import { AiFailedDraftRecoveryContext } from './ai-failed-draft-recovery';
 import { AiNoticeTransition } from './ai-notice-transition';
 import { AiNoticeAction } from './ai-notice-action';
 import { AiMarkdownTargetContext, AiTerminalInsertContext } from '@/components/ai/assistant-message-content';
-import { insertCommandIntoTerminal, useTerminalInsertTarget } from './ai-terminal-insert';
+import {
+  activateVimBridgeInTerminal,
+  insertCommandIntoTerminal,
+  useTerminalInsertTarget,
+  useTerminalVimBridgeState,
+  VIM_BRIDGE_ACTIVATION_COMMAND,
+} from './ai-terminal-insert';
 import { toolLiveOutputStore } from './use-tool-live-output';
 
 export interface AiWorkspaceSubmitInput {
@@ -125,6 +132,43 @@ function omitApprovedMarkers(nodes: readonly AiConversationNode[]): readonly AiC
 
 function omitSystemPrompts(nodes: readonly AiConversationNode[]): readonly AiConversationNode[] {
   return nodes.filter((node) => node.kind !== 'systemPrompt');
+}
+
+const VIM_TOOL_NAMES = new Set([
+  'inspect_vim_buffer',
+  'insert_vim_text',
+  'save_vim_buffer',
+  'close_vim_editor',
+]);
+
+function isVimNotAttachedOutput(output: unknown): boolean {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return false;
+  const record = output as Record<string, unknown>;
+  return record.reason === 'editorNotAttached'
+    && record.activationCommand === VIM_BRIDGE_ACTIVATION_COMMAND;
+}
+
+function latestTurnNeedsVimBridgeActivation(nodes: readonly AiConversationNode[]): boolean {
+  const flat: AiConversationNode[] = [];
+  for (let index = nodes.length - 1; index >= 0; index -= 1) {
+    const node = nodes[index];
+    if (node.kind === 'userMessage') break;
+    if (node.kind === 'turnProcess') {
+      for (let childIndex = node.children.length - 1; childIndex >= 0; childIndex -= 1) {
+        flat.push(node.children[childIndex]);
+      }
+    } else {
+      flat.push(node);
+    }
+  }
+  for (const node of flat) {
+    if (node.kind !== 'tool') continue;
+    const name = node.nativeName ?? node.name;
+    if (!VIM_TOOL_NAMES.has(name)) continue;
+    if (node.state === 'succeeded') return false;
+    if (node.state === 'rejected' && isVimNotAttachedOutput(node.output)) return true;
+  }
+  return false;
 }
 
 function historicalOutput<Node extends AiConversationNode>(node: Node): Node {
@@ -402,6 +446,19 @@ export function AiWorkspaceRoot({
   const terminalRecovery = surfaceMode === 'agent' && !readOnlySession && !historicalTargetUnavailable
     ? terminalExecutionRecovery(view) : null;
   const sessionTarget = view?.snapshot.value.header.target;
+  const boundRemoteTerminalSessionId = !readOnlySession
+    && !historicalTargetUnavailable
+    && !subagent
+    && surfaceMode === 'agent'
+    && sessionTarget?.kind === 'remote'
+    ? sessionTarget.sessionId
+    : null;
+  const vimBridgeState = useTerminalVimBridgeState(boundRemoteTerminalSessionId);
+  const [vimCommandCopied, setVimCommandCopied] = useState(false);
+  const vimCopyTimerRef = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (vimCopyTimerRef.current !== null) window.clearTimeout(vimCopyTimerRef.current);
+  }, []);
   const terminalInsertTarget = useTerminalInsertTarget(
     !readOnlySession && !historicalTargetUnavailable ? sessionTarget?.sessionId : null,
   );
@@ -702,6 +759,61 @@ export function AiWorkspaceRoot({
     }
   };
 
+  const showVimBridgeAttachNotice = useMemo(
+    () => Boolean(
+      boundRemoteTerminalSessionId
+      && !vimBridgeState.vimAttached
+      && !activeBlockingApproval
+      && !activeBlockingQuestion
+      && status !== 'running'
+      && status !== 'waiting'
+      && latestTurnNeedsVimBridgeActivation(conversationNodes),
+    ),
+    [
+      activeBlockingApproval,
+      activeBlockingQuestion,
+      boundRemoteTerminalSessionId,
+      conversationNodes,
+      status,
+      vimBridgeState.vimAttached,
+    ],
+  );
+  const handleActivateVimBridge = (): void => {
+    if (!boundRemoteTerminalSessionId) return;
+    void activateVimBridgeInTerminal(boundRemoteTerminalSessionId).then((sent) => {
+      if (!sent) toast.error(t('ai.workspace.vimBridge.attachFailed'));
+    }).catch(() => {
+      toast.error(t('ai.workspace.vimBridge.attachFailed'));
+    });
+  };
+  const handleCopyVimBridgeCommand = (): void => {
+    void navigator.clipboard.writeText(VIM_BRIDGE_ACTIVATION_COMMAND).then(() => {
+      setVimCommandCopied(true);
+      if (vimCopyTimerRef.current !== null) window.clearTimeout(vimCopyTimerRef.current);
+      vimCopyTimerRef.current = window.setTimeout(() => {
+        vimCopyTimerRef.current = null;
+        setVimCommandCopied(false);
+      }, 1500);
+    }).catch(() => {
+      toast.error(t('ai.workspace.question.actionCopyFailed'));
+    });
+  };
+  const editorAttachedBadge = vimBridgeState.vimAttached ? (
+    <Badge
+      variant="outline"
+      size="sm"
+      className="shrink-0 gap-1"
+      data-slot="ai-editor-attached-badge"
+    >
+      <span className="size-1.5 shrink-0 rounded-full bg-app-success" aria-hidden="true" />
+      {t(
+        vimBridgeState.vimEditor === 'neovim'
+          ? 'ai.workspace.vimBridge.attachedNeovim'
+          : 'ai.workspace.vimBridge.attachedVim',
+      )}
+    </Badge>
+  ) : undefined;
+
   return (
     <section
       ref={rootRef}
@@ -734,6 +846,7 @@ export function AiWorkspaceRoot({
       <Activity mode={route.kind === 'toolDetails' || route.kind === 'artifactDetails' ? 'hidden' : 'visible'}>
       <AiSessionHeader
         extraActions={headerActions}
+        editorBadge={editorAttachedBadge}
         title={resolvedTitle}
         context={headerContext}
         status={status}
@@ -872,6 +985,28 @@ export function AiWorkspaceRoot({
                   <Alert variant="destructiveSubtle" size="sm" className="items-center">
                     <CircleAlertIcon aria-hidden="true" />
                     <AlertDescription>{aiErrorMessage(historicalContinuationError, t)}</AlertDescription>
+                  </Alert>
+                )}
+                {showVimBridgeAttachNotice && (
+                  <Alert
+                    variant="info"
+                    size="sm"
+                    role="status"
+                    data-vim-bridge-attach-notice=""
+                    className="[--alert-icon-inset:--spacing(1)]"
+                  >
+                    <InfoIcon aria-hidden="true" />
+                    <AlertDescription className="flex min-w-0 flex-wrap items-center gap-1.5 break-words">
+                      <span className="min-w-0 flex-1 basis-48 py-1">{t('ai.workspace.vimBridge.attachHint')}</span>
+                      <span className="flex shrink-0 items-center gap-2.5">
+                        <AiNoticeAction disabled={!terminalInsertTarget} onClick={handleActivateVimBridge}>
+                          {t('ai.workspace.vimBridge.attachAction')}
+                        </AiNoticeAction>
+                        <AiNoticeAction className="text-muted-foreground hover:text-foreground" onClick={handleCopyVimBridgeCommand}>
+                          {t(vimCommandCopied ? 'common.copied' : 'ai.workspace.vimBridge.copyAction')}
+                        </AiNoticeAction>
+                      </span>
+                    </AlertDescription>
                   </Alert>
                 )}
                 <AiNoticeTransition key={subagent ? selectedSessionId : undefined}>

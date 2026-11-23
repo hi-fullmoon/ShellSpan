@@ -557,6 +557,10 @@ pub(crate) struct TerminalInputObservation {
     pub(crate) command_observation_unavailable: bool,
     pub(crate) foreground_handoff_active: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) vim_attached: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) vim_editor: Option<crate::terminal_vim_bridge::EditorKind>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub(crate) credential_prompt_active: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) active_command: Option<TerminalCommandObservation>,

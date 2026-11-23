@@ -708,4 +708,48 @@ describe('terminalStore', () => {
     store.setRecording('s1', undefined);
     expect(useTerminalStore.getState().sessions).toBe(sessionsBeforeReset);
   });
+
+  it('syncs vimAttached and vimEditor from integration state and clears them on close', () => {
+    const store = useTerminalStore.getState();
+    store.addSession({
+      sessionId: 's1',
+      terminalSessionId: 'term-1',
+      terminalGeneration: 1,
+      title: 'remote',
+      host: '10.0.0.1',
+      port: 22,
+      username: 'root',
+    });
+
+    store.setIntegrationState({
+      sessionId: 's1',
+      terminalSessionId: 'term-1',
+      terminalGeneration: 1,
+      state: 'ready',
+      integrationStateRevision: 1,
+      promptReady: false,
+      promptReadyRevision: 1,
+      inputObservation: {
+        snapshotSequence: 1,
+        commandInputPending: false,
+        nativeRecoveryRequired: false,
+        nativeClearPending: false,
+        commandObservationUnavailable: false,
+        foregroundHandoffActive: true,
+        vimAttached: true,
+        vimEditor: 'neovim',
+      },
+    });
+    expect(useTerminalStore.getState().sessions[0]?.vimAttached).toBe(true);
+    expect(useTerminalStore.getState().sessions[0]?.vimEditor).toBe('neovim');
+
+    store.setClosed('s1', {
+      sessionId: 's1',
+      reason: 'closed',
+      reasonKind: 'remote_exit',
+      retryable: false,
+    });
+    expect(useTerminalStore.getState().sessions[0]?.vimAttached).toBe(false);
+    expect(useTerminalStore.getState().sessions[0]?.vimEditor).toBeUndefined();
+  });
 });

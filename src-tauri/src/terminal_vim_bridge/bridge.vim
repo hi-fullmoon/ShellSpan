@@ -501,10 +501,13 @@ endfunction
 if exists('s:timer')
     finish
 endif
+let s:quiet = !empty($SHELLSPAN_VIM_BRIDGE_AUTO) || !empty(get(g:, 'shellspan_vim_bridge_quiet', 0))
 if expand('<sfile>:p') !=# $SHELLSPAN_VIM_BRIDGE || !exists('*sha256')
             \ || !exists('*timer_start') || (!has('nvim') && !has('job'))
             \ || !filereadable(s:root . '/uid') || !s:foreground()
-    echoerr 'ShellSpan Vim bridge is unavailable in this editor or SSH terminal'
+    if !s:quiet
+        echoerr 'ShellSpan Vim bridge is unavailable in this editor or SSH terminal'
+    endif
     finish
 endif
 let s:sequence = 0
@@ -527,7 +530,9 @@ else
     let s:started = job_status(s:job) ==# 'run'
 endif
 if !s:started
-    echoerr 'ShellSpan could not attach its editor bridge'
+    if !s:quiet
+        echoerr 'ShellSpan could not attach its editor bridge'
+    endif
     finish
 endif
 let s:timer = timer_start(200, function('s:announce'), {'repeat': -1})

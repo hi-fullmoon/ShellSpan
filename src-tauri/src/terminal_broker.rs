@@ -1026,16 +1026,18 @@ impl TerminalSessionBroker {
     pub(crate) fn set_vim_attached(
         &self,
         transport_session_id: &str,
-        attached: bool,
+        editor: Option<crate::terminal_vim_bridge::EditorKind>,
     ) -> Result<bool, String> {
         let (attachment, slot) = self.lookup_session_slot(transport_session_id)?;
         let mut record = slot.lock_current(transport_session_id, &attachment)?;
         if record.transport_kind != TerminalTransportKind::SshPty {
             return Err("Vim bridge requires an SSH PTY".into());
         }
-        let attached = attached && !record.prompt_ready;
-        if record.vim_attached != attached {
+        let editor = if record.prompt_ready { None } else { editor };
+        let attached = editor.is_some();
+        if record.vim_attached != attached || record.vim_editor != editor {
             record.vim_attached = attached;
+            record.vim_editor = editor;
             advance_integration_state_revision(&mut record)?;
             drop(record);
             slot.notify();
@@ -1937,6 +1939,7 @@ impl TerminalSessionBroker {
                 record.prompt_started = false;
                 record.prompt_ready = true;
                 record.vim_attached = false;
+                record.vim_editor = None;
                 record.prompt_next_input_sequence = record.prompt_start_input_sequence;
                 record.command_input_pending =
                     record.native_recovery_required || record.native_clear_pending.is_some();

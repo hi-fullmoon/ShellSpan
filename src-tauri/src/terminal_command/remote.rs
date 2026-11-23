@@ -316,10 +316,14 @@ impl RemoteNativeBash {
                 &module_readback.0,
             )?;
             let socket = format!("{root}/control");
-            let bootstrap = crate::terminal_command::bash::bootstrap_source(
-                Path::new(&module_path),
-                Path::new(&socket),
-            )?;
+            let bootstrap = format!(
+                "{}\n{}",
+                crate::terminal_command::bash::bootstrap_source(
+                    Path::new(&module_path),
+                    Path::new(&socket),
+                )?,
+                crate::terminal_vim_bridge::SHELL_AUTO_ATTACH_SNIPPET,
+            );
             timings.upload(
                 &sftp,
                 &format!("{root}/native-init"),
@@ -392,7 +396,7 @@ impl RemoteNativeBash {
     pub fn start_shell(
         &self,
         channel: &mut Channel,
-        vim_bridge: Option<&str>,
+        vim_bridge: Option<crate::terminal_vim_bridge::VimBridgeShellConfig<'_>>,
     ) -> Result<(), String> {
         if matches!(self.startup, RemoteShellStartup::Zle) {
             return channel
@@ -538,12 +542,16 @@ impl RemoteNativeBash {
                     )?;
                 }
             }
-            let startup = editors::zle_bootstrap(
-                Path::new(&format!("{root}/ss_nip.so")),
-                Path::new(&format!("{root}/control")),
-                Path::new(&identity.executable),
-                &artifact.profile,
-            )?;
+            let startup = format!(
+                "{}\n{}",
+                editors::zle_bootstrap(
+                    Path::new(&format!("{root}/ss_nip.so")),
+                    Path::new(&format!("{root}/control")),
+                    Path::new(&identity.executable),
+                    &artifact.profile,
+                )?,
+                crate::terminal_vim_bridge::SHELL_AUTO_ATTACH_SNIPPET,
+            );
             timings.upload(
                 &sftp,
                 &format!("{root}/native-init"),

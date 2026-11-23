@@ -240,7 +240,18 @@ approval or recovery checks.
 ### Editing the live Vim or Neovim buffer over SSH
 
 On an integrated Linux SSH terminal, load the connection-scoped adapter once
-in the current editor with `:source $SHELLSPAN_VIM_BRIDGE`. The editor stays open
+in the current editor with `:source $SHELLSPAN_VIM_BRIDGE` (or pass
+`-S "$SHELLSPAN_VIM_BRIDGE"` when opening Vim or Neovim, including when the
+Agent opens the editor with `handoffToUser: true`, or use the UI's explicit
+user-clicked attach action when `editorNotAttached` is returned). An optional
+local preference (`ai.vimBridgeAutoAttach`, off by default) can export
+`SHELLSPAN_VIM_BRIDGE_AUTO=1` for new SSH sessions so session-scoped Bash/Zsh
+wrappers attach interactive `vim`/`nvim` launches automatically without
+modifying remote configuration files, while bypassing clean/non-interactive
+flags and silently skipping unsupported editors. Attachment state and editor
+kind (`vim` / `neovim`) are published in `TerminalInputObservation` for UI
+status indicators; attachment alone never reads file contents or bypasses
+workspace, sensitive-path, or approval policies. The editor stays open
 and retains its unsaved changes. A new editor instance or SSH connection needs
 its own activation. Bash or Zsh continues to use its existing visible command
 lifecycle independently of the editor.

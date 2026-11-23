@@ -15,6 +15,7 @@ import type { AiSessionView } from '@/lib/ai/session-adapter';
 import { initI18n, t } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
+import { useTerminalStore } from '@/stores/terminalStore';
 import { agentSessionEventFixture, agentSessionWaitingApprovalEventFixture } from '@/tests/fixtures/agent-session';
 import { agentSessionBaselineScenarios } from '@/tests/fixtures/agent-session-baseline';
 import { taskTokenBudgetView } from '@/tests/fixtures/task-token-budget';
@@ -1880,5 +1881,126 @@ describe('AiWorkspaceRoot conversation structure', () => {
     const { container } = render(<AiWorkspaceRoot view={actionView} scope="terminal" />);
     expect(container.querySelector('[data-slot="ai-question-panel"]')).toBeInTheDocument();
     expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+  });
+
+  it('shows the attached editor badge and one-click attach notice for remote Vim bridge sessions', () => {
+    const base = agentView();
+    const remoteSessionId = 'ssh-vim-session';
+    useTerminalStore.getState().addSession({
+      sessionId: remoteSessionId,
+      title: 'prod',
+      host: '10.0.0.2',
+      port: 22,
+      username: 'root',
+    });
+    useTerminalStore.getState().setStatus(remoteSessionId, { sessionId: remoteSessionId, status: 'connected' });
+
+    const remoteView: AiSessionView = {
+      ...base,
+      status: 'completed',
+      summary: { ...base.summary, status: 'completed' },
+      snapshot: {
+        kind: 'agent',
+        value: {
+          ...base.snapshot.value,
+          header: {
+            ...base.snapshot.value.header,
+            executionSurface: 'boundTerminal',
+            target: {
+              kind: 'remote',
+              targetId: 'remote-1',
+              sessionId: remoteSessionId,
+              host: '10.0.0.2',
+              port: 22,
+              username: 'root',
+            },
+          },
+        },
+      },
+      nodes: [
+        {
+          kind: 'userMessage',
+          sourceKind: 'agent',
+          key: 'u1',
+          sessionId: base.summary.id,
+          turnId: 'turn-1',
+          stepId: null,
+          messageId: 'm1',
+          content: 'Inspect vim',
+          delivery: 'committed',
+          firstSeq: 1,
+          lastSeq: 1,
+          timestamp: '2026-11-23T00:00:00Z',
+        },
+        {
+          kind: 'tool',
+          key: 't1',
+          sessionId: base.summary.id,
+          turnId: 'turn-1',
+          stepId: 'step-1',
+          callId: 'call-1',
+          name: 'inspect_vim_buffer',
+          nativeName: 'inspect_vim_buffer',
+          sourceKind: 'agent',
+          title: null,
+          effect: 'sensitiveRead',
+          detailRef: {
+            kind: 'agentTool',
+            sessionId: base.summary.id,
+            callId: 'call-1',
+            turnId: 'turn-1',
+            stepId: 'step-1',
+          },
+          evidenceRefs: [],
+          input: {},
+          output: {
+            reason: 'editorNotAttached',
+            activationCommand: ':source $SHELLSPAN_VIM_BRIDGE',
+          },
+          error: null,
+          target: null,
+          idempotency: 'yes',
+          approval: null,
+          summary: 'Activate the bridge in the current Vim or Neovim from Normal mode.',
+          state: 'rejected',
+          durationMs: 12,
+          firstSeq: 2,
+          lastSeq: 3,
+          timestamp: '2026-11-23T00:00:01Z',
+        },
+      ],
+    };
+
+    const { container, rerender } = render(<AiWorkspaceRoot view={remoteView} scope="terminal" />);
+    expect(container.querySelector('[data-vim-bridge-attach-notice]')).toBeInTheDocument();
+    expect(container.querySelector('[data-slot="ai-editor-attached-badge"]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Attach editor' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
+
+    act(() => {
+      useTerminalStore.getState().setIntegrationState({
+        sessionId: remoteSessionId,
+        terminalSessionId: 'term-vim-1',
+        terminalGeneration: 1,
+        state: 'ready',
+        integrationStateRevision: 1,
+        promptReady: false,
+        promptReadyRevision: 1,
+        inputObservation: {
+          snapshotSequence: 1,
+          commandInputPending: false,
+          nativeRecoveryRequired: false,
+          nativeClearPending: false,
+          commandObservationUnavailable: false,
+          foregroundHandoffActive: true,
+          vimAttached: true,
+          vimEditor: 'neovim',
+        },
+      });
+    });
+    rerender(<AiWorkspaceRoot view={remoteView} scope="terminal" />);
+    expect(container.querySelector('[data-vim-bridge-attach-notice]')).toBeNull();
+    expect(container.querySelector('[data-slot="ai-editor-attached-badge"]')).toHaveTextContent('Neovim attached');
+    useTerminalStore.getState().removeSession(remoteSessionId);
   });
 });

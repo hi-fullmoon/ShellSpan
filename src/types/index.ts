@@ -341,6 +341,8 @@ export interface TerminalInputObservation {
   nativeClearPending: boolean;
   commandObservationUnavailable: boolean;
   foregroundHandoffActive?: boolean;
+  vimAttached?: boolean;
+  vimEditor?: 'vim' | 'neovim';
   credentialPromptActive?: boolean;
   activeCommand?: TerminalCommandObservation;
 }

@@ -89,10 +89,14 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const contextLines = useAiSettingsStore((state) => state.contextLines);
   const setContextLines = useAiSettingsStore((state) => state.setContextLines);
   const sandboxControlId = React.useId();
+  const vimAutoAttachControlId = React.useId();
   const preferencesReady = useAiSettingsStore((state) => state.initialized);
   const agentSandboxEnabled = useAiSettingsStore((state) => state.agentSandboxEnabled);
   const agentSandboxSaving = useAiSettingsStore((state) => state.agentSandboxSaving);
   const setAgentSandboxEnabled = useAiSettingsStore((state) => state.setAgentSandboxEnabled);
+  const vimBridgeAutoAttach = useAiSettingsStore((state) => state.vimBridgeAutoAttach);
+  const vimBridgeAutoAttachSaving = useAiSettingsStore((state) => state.vimBridgeAutoAttachSaving);
+  const setVimBridgeAutoAttach = useAiSettingsStore((state) => state.setVimBridgeAutoAttach);
   const [selectedProviderId, setSelectedProviderId] = useState(defaultProviderId);
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -322,6 +326,23 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
               disabled={!preferencesReady || agentSandboxSaving}
               onCheckedChange={(enabled) => {
                 void setAgentSandboxEnabled(enabled).catch(() => showError(t('settings.ai.agent.sandboxSaveFailed')));
+              }}
+            />
+          </SettingRow>
+          <SettingRow
+            controlId={vimAutoAttachControlId}
+            label={t('ai.settings.vimBridgeAutoAttach.title')}
+            description={t('ai.settings.vimBridgeAutoAttach.description')}
+            descriptionId={`${vimAutoAttachControlId}-description`}
+          >
+            <Switch
+              id={vimAutoAttachControlId}
+              aria-label={t('ai.settings.vimBridgeAutoAttach.title')}
+              aria-describedby={`${vimAutoAttachControlId}-description`}
+              checked={vimBridgeAutoAttach}
+              disabled={!preferencesReady || vimBridgeAutoAttachSaving}
+              onCheckedChange={(enabled) => {
+                void setVimBridgeAutoAttach(enabled).catch(() => showError(t('settings.ai.agent.sandboxSaveFailed')));
               }}
             />
           </SettingRow>

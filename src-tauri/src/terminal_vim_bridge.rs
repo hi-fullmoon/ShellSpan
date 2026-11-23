@@ -35,6 +35,53 @@ const QUEUED: u8 = 0;
 const ATTEMPTED: u8 = 1;
 const REVOKED: u8 = 2;
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct VimBridgeShellConfig<'a> {
+    pub(crate) source_path: &'a str,
+    pub(crate) auto_attach: bool,
+}
+
+/// Optional session-scoped Bash/Zsh wrappers that attach the SSH Vim/Neovim
+/// bridge only when `SHELLSPAN_VIM_BRIDGE_AUTO=1`, stdio is a TTY, no user
+/// alias or function overrides `vim`/`nvim`, and no clean/non-interactive flags
+/// are passed. Never modifies remote config files.
+pub(crate) const SHELL_AUTO_ATTACH_SNIPPET: &str = r#"__shellspan_vim_should_attach() {
+  [ "${SHELLSPAN_VIM_BRIDGE_AUTO:-}" = "1" ] || return 1
+  [ -n "${SHELLSPAN_VIM_BRIDGE:-}" ] && [ -r "$SHELLSPAN_VIM_BRIDGE" ] || return 1
+  [ -t 0 ] && [ -t 1 ] || return 1
+  local __ss_arg
+  for __ss_arg in "$@"; do
+    case "$__ss_arg" in
+      --) break ;;
+      -|-[hveEsSrLb]|-es|-u|-u*|-U|-U*|-Nu|-Nu*|-S|-S*|-s|-s*|--help|--version|--clean|--headless|--embed)
+        return 1 ;;
+    esac
+  done
+  return 0
+}
+__shellspan_install_vim_wrappers() {
+  [ "${SHELLSPAN_VIM_BRIDGE_AUTO:-}" = "1" ] || return 0
+  if ! alias vim >/dev/null 2>&1 && ! typeset -f vim >/dev/null 2>&1; then
+    vim() {
+      if __shellspan_vim_should_attach "$@"; then
+        command vim -S "$SHELLSPAN_VIM_BRIDGE" "$@"
+      else
+        command vim "$@"
+      fi
+    }
+  fi
+  if ! alias nvim >/dev/null 2>&1 && ! typeset -f nvim >/dev/null 2>&1; then
+    nvim() {
+      if __shellspan_vim_should_attach "$@"; then
+        command nvim -S "$SHELLSPAN_VIM_BRIDGE" "$@"
+      else
+        command nvim "$@"
+      fi
+    }
+  fi
+}
+__shellspan_install_vim_wrappers"#;
+
 const ADAPTER: &str = include_str!("terminal_vim_bridge/bridge.vim");
 const RELAY: &str = include_str!("terminal_vim_bridge/relay.sh");
 
@@ -144,7 +191,7 @@ pub(crate) struct EditorSnapshot {
     pub(crate) read_only: bool,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum EditorKind {
     Vim,
@@ -445,6 +492,10 @@ impl RemoteVimBridge {
         self.instance.is_some()
     }
 
+    pub(crate) fn attached_editor(&self) -> Option<EditorKind> {
+        self.instance.as_ref().map(|(_, editor)| *editor)
+    }
+
     pub(crate) fn next_write(&mut self) -> Option<EditorWrite> {
         if self
             .pending
@@ -575,5 +626,88 @@ impl Drop for RemoteVimBridge {
         self.client.active.store(false, Ordering::Release);
         self.client.attached.store(false, Ordering::Release);
         self.finish_pending(BridgeFailure::Unavailable);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::SHELL_AUTO_ATTACH_SNIPPET;
+    use std::process::Command;
+
+    #[test]
+    fn shell_auto_attach_snippet_respects_toggle_aliases_and_non_tty_safety() {
+        let bridge = tempfile::NamedTempFile::new().expect("temp bridge file");
+        let bridge_path = bridge.path().to_str().expect("utf-8 temp path");
+
+        for shell in ["/bin/bash", "/bin/zsh"] {
+            if !std::path::Path::new(shell).exists() {
+                continue;
+            }
+            // Off by default: wrappers must not be defined.
+            let off = Command::new(shell)
+                .env("SHELLSPAN_VIM_BRIDGE", bridge_path)
+                .env_remove("SHELLSPAN_VIM_BRIDGE_AUTO")
+                .arg("-c")
+                .arg(format!(
+                    "{SHELL_AUTO_ATTACH_SNIPPET}\ntypeset -f vim >/dev/null 2>&1 && echo VIM_FN; typeset -f nvim >/dev/null 2>&1 && echo NVIM_FN; true"
+                ))
+                .output()
+                .expect("run shell with auto attach disabled");
+            assert!(off.status.success(), "{shell}: {:?}", off);
+            assert_eq!(String::from_utf8_lossy(&off.stdout).trim(), "");
+
+            // On, with user alias `vim=nvim` and non-TTY stdio: preserve alias, define nvim wrapper,
+            // and verify non-TTY returns false for attach.
+            let on = Command::new(shell)
+                .env("SHELLSPAN_VIM_BRIDGE", bridge_path)
+                .env("SHELLSPAN_VIM_BRIDGE_AUTO", "1")
+                .arg("-c")
+                .arg(format!(
+                    "alias vim='nvim'\n{SHELL_AUTO_ATTACH_SNIPPET}\n\
+                     typeset -f vim >/dev/null 2>&1 && echo VIM_FN || echo NO_VIM_FN\n\
+                     typeset -f nvim >/dev/null 2>&1 && echo NVIM_FN || echo NO_NVIM_FN\n\
+                     __shellspan_vim_should_attach file.txt && echo ATTACH_NON_TTY || echo SKIP_NON_TTY"
+                ))
+                .output()
+                .expect("run shell with auto attach enabled");
+            assert!(on.status.success(), "{shell}: {:?}", on);
+            assert_eq!(
+                String::from_utf8_lossy(&on.stdout).trim(),
+                "NO_VIM_FN\nNVIM_FN\nSKIP_NON_TTY",
+                "{shell} output mismatch"
+            );
+
+            // Flag filter check (bypassing only the -t check via a wrapper around the case loop):
+            let flag_script = format!(
+                "{}\n\
+                 check_flags() {{\n\
+                   local __ss_arg\n\
+                   for __ss_arg in \"$@\"; do\n\
+                     case \"$__ss_arg\" in\n\
+                       --) break ;;\n\
+                       -|-[hveEsSrLb]|-es|-u|-u*|-U|-U*|-Nu|-Nu*|-S|-S*|-s|-s*|--help|--version|--clean|--headless|--embed)\n\
+                         return 1 ;;\n\
+                     esac\n\
+                   done\n\
+                   return 0\n\
+                 }}\n\
+                 check_flags file.txt && check_flags -n +10 file.txt && check_flags -- -weird && echo ALLOW_OK\n\
+                 ! check_flags --version && ! check_flags --clean && ! check_flags -u NONE && ! check_flags -Nu NONE && ! check_flags -S s.vim && ! check_flags - && ! check_flags --headless && echo BLOCK_OK",
+                SHELL_AUTO_ATTACH_SNIPPET
+            );
+            let flags = Command::new(shell)
+                .env("SHELLSPAN_VIM_BRIDGE", bridge_path)
+                .env("SHELLSPAN_VIM_BRIDGE_AUTO", "1")
+                .arg("-c")
+                .arg(&flag_script)
+                .output()
+                .expect("run flag filter check");
+            assert!(flags.status.success(), "{shell}: {:?}", flags);
+            assert_eq!(
+                String::from_utf8_lossy(&flags.stdout).trim(),
+                "ALLOW_OK\nBLOCK_OK",
+                "{shell} flag filtering mismatch"
+            );
+        }
     }
 }
