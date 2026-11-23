@@ -4,45 +4,99 @@ import { ArrowLeftIcon, ChevronDownIcon, ChevronRightIcon, FileCodeIcon, FileCog
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { cn } from '@/lib/utils';
+import { AiHeaderIconButton } from './ai-header-icon-button';
 import {
   AiToolExpandedContent,
   AiTrashRecoveryNotice,
+  buildTurnFileDiffPreview,
   extractToolFileChanges,
-  toolDiffPreview,
   type ToolFileChangeEntry,
 } from './ai-tool-presentation';
 
+export interface TurnChangedFileEntry extends ToolFileChangeEntry {
+  readonly tools: readonly ToolFileChangeEntry['tool'][];
+  readonly baseText: string | null;
+}
+
 export interface TurnFileChangesSummary {
-  readonly files: readonly ToolFileChangeEntry[];
+  readonly files: readonly TurnChangedFileEntry[];
   readonly totalAdded: number | null;
   readonly totalRemoved: number | null;
+}
+
+function extractFullReadFileContent(
+  tool: AiConversationNodeOf<'tool'>,
+): { readonly path: string; readonly content: string } | null {
+  if (tool.state !== 'succeeded') return null;
+  if (tool.name !== 'read_file' && tool.nativeName !== 'read_file') return null;
+  if (!tool.output || typeof tool.output !== 'object' || Array.isArray(tool.output)) return null;
+  const output = tool.output as Record<string, unknown>;
+  const input = tool.input && typeof tool.input === 'object' && !Array.isArray(tool.input)
+    ? tool.input as Record<string, unknown>
+    : null;
+  const path = typeof output.path === 'string' && output.path.length > 0
+    ? output.path
+    : typeof input?.path === 'string' && input.path.length > 0
+      ? input.path
+      : typeof input?.file_path === 'string' && input.file_path.length > 0
+        ? input.file_path
+        : null;
+  if (!path) return null;
+  if (typeof output.content !== 'string') return null;
+  if (output.truncated === true) return null;
+  if (output.encoding === 'base64' || output.encoding === 'metadataOnly') return null;
+  const offset = typeof output.offset === 'number'
+    ? output.offset
+    : typeof input?.offset === 'number'
+      ? input.offset
+      : 0;
+  if (offset !== 0) return null;
+  return { path, content: output.content };
 }
 
 export function summarizeTurnFileChanges(
   process: AiConversationNodeOf<'turnProcess'> | undefined,
 ): TurnFileChangesSummary | null {
   if (!process || process.status === 'running' || !process.hasEndBoundary) return null;
-  const merged = new Map<string, ToolFileChangeEntry>();
+  const merged = new Map<string, TurnChangedFileEntry>();
+  const baselineByPath = new Map<string, string>();
   for (const child of process.children) {
     if (child.kind !== 'tool') continue;
+    const readSnapshot = extractFullReadFileContent(child);
+    if (readSnapshot && !merged.has(readSnapshot.path)) {
+      baselineByPath.set(readSnapshot.path, readSnapshot.content);
+      continue;
+    }
     for (const entry of extractToolFileChanges(child)) {
       const existing = merged.get(entry.path);
       if (!existing) {
-        merged.set(entry.path, entry);
+        merged.set(entry.path, {
+          ...entry,
+          tools: [entry.tool],
+          baseText: entry.kind === 'deleted' ? null : (baselineByPath.get(entry.path) ?? null),
+        });
         continue;
       }
       const exact = existing.added !== null && existing.removed !== null
         && entry.added !== null && entry.removed !== null
         && entry.kind !== 'deleted' && existing.kind !== 'deleted';
+      const tools = entry.kind === 'deleted'
+        ? [entry.tool]
+        : existing.tools[existing.tools.length - 1] === entry.tool
+          ? existing.tools
+          : [...existing.tools, entry.tool];
       merged.set(entry.path, {
         path: entry.path,
         added: exact ? (existing.added ?? 0) + (entry.added ?? 0) : null,
         removed: exact ? (existing.removed ?? 0) + (entry.removed ?? 0) : null,
         kind: entry.kind,
         tool: entry.tool,
+        tools,
+        baseText: entry.kind === 'deleted' ? null : existing.baseText,
       });
     }
   }
@@ -124,8 +178,8 @@ function TurnChangedFileItem({
   file,
   onSelect,
 }: {
-  readonly file: ToolFileChangeEntry;
-  readonly onSelect: (file: ToolFileChangeEntry) => void;
+  readonly file: TurnChangedFileEntry;
+  readonly onSelect: (file: TurnChangedFileEntry) => void;
 }) {
   const { t } = useI18n();
   const { basename, directory } = useMemo(() => splitFilePath(file.path), [file.path]);
@@ -169,7 +223,7 @@ function TurnReviewFileSection({
   autoScroll,
   onExpandedChange,
 }: {
-  readonly file: ToolFileChangeEntry;
+  readonly file: TurnChangedFileEntry;
   readonly expanded: boolean;
   readonly autoScroll: boolean;
   readonly onExpandedChange: (open: boolean) => void;
@@ -180,11 +234,7 @@ function TurnReviewFileSection({
 
   const fileDiff = useMemo(() => {
     if (file.kind === 'deleted') return null;
-    const preview = toolDiffPreview(file.tool);
-    if (!preview) return null;
-    const matchingHunks = preview.hunks.filter((hunk) => hunk.path === file.path);
-    if (matchingHunks.length === 0) return preview;
-    return { ...preview, hunks: matchingHunks };
+    return buildTurnFileDiffPreview(file.path, file.tools, file.baseText);
   }, [file]);
 
   const savedLineCount = useMemo(
@@ -329,19 +379,24 @@ function TurnChangedFilesOverlay({
         scopedToPanel ? 'absolute inset-0 z-[15]' : 'fixed inset-0 z-50',
       )}
     >
-      <div className="ai-turn-changes-dialog-header flex h-10 min-h-10 shrink-0 items-center justify-between gap-2 border-b border-app-border/50 pl-2.5 pr-3.5">
+      <div className="ai-turn-changes-dialog-header flex h-10 min-h-10 shrink-0 items-center justify-between gap-2 border-b border-app-border/50 pl-2 pr-3.5">
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <Button
-            ref={closeButtonRef}
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            aria-label={t('common.close')}
-            onClick={onClose}
-          >
-            <ArrowLeftIcon className="size-3.5" aria-hidden="true" />
-          </Button>
-          <h2 id={titleId} className="ai-turn-changes-title m-0 min-w-0 truncate text-[13px]">{title}</h2>
+          <Tooltip>
+            <TooltipTrigger
+              render={(
+                <AiHeaderIconButton
+                  ref={closeButtonRef}
+                  type="button"
+                  aria-label={t('common.back')}
+                  onClick={onClose}
+                />
+              )}
+            >
+              <ArrowLeftIcon data-icon="inline-start" aria-hidden="true" />
+            </TooltipTrigger>
+            <TooltipContent>{t('common.back')}</TooltipContent>
+          </Tooltip>
+          <h2 id={titleId} className="ai-turn-changes-title m-0 min-w-0 truncate text-sm">{title}</h2>
         </div>
         {summary.totalAdded !== null && summary.totalRemoved !== null && (
           <span className="ai-turn-changes-counts inline-flex shrink-0 items-center gap-1 tabular-nums">
@@ -392,7 +447,7 @@ export function AiTurnChangesSummary({
     ? t('ai.workspace.turnChanges.summarySingle')
     : t('ai.workspace.turnChanges.summary', { count: summary.files.length });
 
-  const handleSelectFile = (file: ToolFileChangeEntry) => {
+  const handleSelectFile = (file: TurnChangedFileEntry) => {
     setPortalContainer(rootRef.current?.closest<HTMLElement>('.ai-panel-shell') ?? null);
     setSelectedFilePath(file.path);
   };

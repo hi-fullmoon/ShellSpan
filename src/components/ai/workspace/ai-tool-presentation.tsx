@@ -1,6 +1,6 @@
 import { use, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type ReactNode, type RefObject } from 'react';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
-import { diffLines, parsePatch } from 'diff';
+import { applyPatch, diffLines, parsePatch } from 'diff';
 import hljs from 'highlight.js/lib/common';
 import {
   BotIcon,
@@ -8,7 +8,6 @@ import {
   CheckCircle2Icon,
   CheckIcon,
   ChevronDownIcon,
-  ChevronsUpDownIcon,
   CircleDashedIcon,
   CircleHelpIcon,
   Code2Icon,
@@ -903,6 +902,7 @@ interface DiffHunk {
   readonly path: string;
   readonly lines: readonly DiffLine[];
   readonly exact: boolean;
+  readonly lineNumbersKnown?: boolean;
 }
 
 interface DiffLine {
@@ -1045,8 +1045,8 @@ function structuredDiffHunks(node: ToolNode): readonly DiffHunk[] {
   return diffs.flatMap((value) => {
     const hunk = asRecord(value);
     const path = firstString(hunk, ['path', 'file_path']);
-    const oldText = hunk?.oldText ?? hunk?.old_string ?? null;
-    const newText = hunk?.newText ?? hunk?.new_string;
+    const oldText = hunk?.oldText ?? hunk?.old_string ?? hunk?.oldString ?? null;
+    const newText = hunk?.newText ?? hunk?.new_string ?? hunk?.newString;
     return path && (oldText === null || typeof oldText === 'string') && typeof newText === 'string'
       ? [{ path, ...textDiffLines(oldText, newText) }]
       : [];
@@ -1081,10 +1081,10 @@ function unifiedDiffHunks(node: ToolNode): readonly DiffHunk[] {
 function directDiffHunks(node: ToolNode): readonly DiffHunk[] {
   const input = asRecord(node.input);
   const path = toolFilePath(node);
-  const oldText = input?.old_string ?? input?.oldText ?? null;
-  const newText = input?.new_string ?? input?.newText ?? input?.content;
+  const oldText = input?.old_string ?? input?.oldString ?? input?.oldText ?? null;
+  const newText = input?.new_string ?? input?.newString ?? input?.newText ?? input?.content;
   return path && (oldText === null || typeof oldText === 'string') && typeof newText === 'string'
-    ? [{ path, ...textDiffLines(oldText, newText) }]
+    ? [{ path, ...textDiffLines(oldText, newText), ...(oldText === null ? {} : { lineNumbersKnown: false }) }]
     : [];
 }
 
@@ -1111,20 +1111,112 @@ export function toolDiffPreview(node: ToolNode): DiffModel | null {
   return model.hunks.length > 0 ? model : null;
 }
 
+const MAX_FULL_DIFF_BASE_BYTES = 200_000;
+
+function normalizePatchFileName(fileName: string | undefined): string | null {
+  if (!fileName || fileName === '/dev/null') return null;
+  return fileName.replace(/^[ab]\//, '');
+}
+
+function applyToolEditToText(text: string, path: string, node: ToolNode): string | null {
+  const input = asRecord(node.input);
+  const output = asRecord(node.output);
+  const unifiedDiff = firstString(output, ['diff']) ?? firstString(input, ['patch']);
+  if (unifiedDiff) {
+    try {
+      const patches = parsePatch(unifiedDiff);
+      const matched = patches.length === 1
+        ? patches[0]
+        : patches.find((patch) => (
+          normalizePatchFileName(patch.newFileName) === path
+          || normalizePatchFileName(patch.oldFileName) === path
+        ));
+      if (matched) {
+        const patched = applyPatch(text, matched);
+        if (patched !== false) return patched;
+      }
+    } catch {
+      // Fall through to direct string replacement if patch parsing fails.
+    }
+  }
+  const oldStr = firstString(input, ['old_string', 'oldString', 'oldText']);
+  const newStr = firstString(input, ['new_string', 'newString', 'newText']);
+  if (oldStr !== null && newStr !== null) {
+    const idx = text.indexOf(oldStr);
+    if (idx < 0) return null;
+    return `${text.slice(0, idx)}${newStr}${text.slice(idx + oldStr.length)}`;
+  }
+  const content = firstString(input, ['content']);
+  if (content !== null && classifyAiTool(node.name, node.nativeName) === 'write') {
+    return content;
+  }
+  return null;
+}
+
+export function buildTurnFileDiffPreview(
+  path: string,
+  tools: readonly ToolNode[],
+  baseText?: string | null,
+): DiffModel | null {
+  if (typeof baseText === 'string' && baseText.length <= MAX_FULL_DIFF_BASE_BYTES && tools.length > 0) {
+    let current: string | null = baseText;
+    for (const tool of tools) {
+      current = applyToolEditToText(current, path, tool);
+      if (current === null) break;
+    }
+    if (current !== null && current !== baseText) {
+      const diff = textDiffLines(baseText, current);
+      if (diff.lines.length > 0) {
+        return {
+          hunks: [{ path, oldStart: 1, newStart: 1, ...diff }],
+          totalsKnown: diff.exact,
+        };
+      }
+    }
+  }
+  const collectedHunks: DiffHunk[] = [];
+  let totalsKnown = true;
+  for (const tool of tools) {
+    const preview = toolDiffPreview(tool);
+    if (!preview) continue;
+    totalsKnown = totalsKnown && preview.totalsKnown;
+    const matchingHunks = preview.hunks.filter((hunk) => hunk.path === path);
+    collectedHunks.push(...(matchingHunks.length > 0 ? matchingHunks : preview.hunks));
+  }
+  if (collectedHunks.length === 0) return null;
+  const hunks = collectedHunks.every((hunk) => typeof (hunk.newStart ?? hunk.oldStart) === 'number')
+    ? [...collectedHunks].sort((a, b) => (a.newStart ?? a.oldStart ?? 0) - (b.newStart ?? b.oldStart ?? 0))
+    : collectedHunks;
+  return { hunks, totalsKnown };
+}
+
 const DIFF_CONTEXT_RADIUS = 3;
 const DIFF_MIN_FOLD_LINES = 4;
+const DIFF_EXPAND_STEP = 10;
 
-type NumberedDiffLine = DiffLine & { readonly number: number };
+interface FoldRevealState {
+  readonly top: number;
+  readonly bottom: number;
+  readonly all?: boolean;
+}
+
+type NumberedDiffLine = Omit<DiffLine, 'number'> & { readonly number: number | null };
 
 type DiffRowItem =
   | { readonly type: 'line'; readonly line: NumberedDiffLine }
   | { readonly type: 'gap'; readonly hiddenCount: number }
-  | { readonly type: 'fold'; readonly id: string; readonly lines: readonly NumberedDiffLine[] };
+  | {
+    readonly type: 'fold';
+    readonly id: string;
+    readonly remainingCount: number;
+    readonly canExpandDown: boolean;
+    readonly canExpandUp: boolean;
+  };
 
 function foldSegmentLines(
   segmentKey: string,
   lines: readonly NumberedDiffLine[],
-  expandedIds: ReadonlySet<string>,
+  foldReveals: Readonly<Record<string, FoldRevealState>>,
 ): readonly DiffRowItem[] {
   const hasChanges = lines.some((line) => line.kind !== 'context');
   if (!hasChanges || lines.length < DIFF_MIN_FOLD_LINES) {
@@ -1149,10 +1241,29 @@ function foldSegmentLines(
     while (end < lines.length && !visible[end]) end += 1;
     const hidden = lines.slice(cursor, end);
     const foldId = `${segmentKey}:${cursor}-${end}`;
-    if (hidden.length >= DIFF_MIN_FOLD_LINES && !expandedIds.has(foldId)) {
-      rows.push({ type: 'fold', id: foldId, lines: hidden });
-    } else {
+    const reveal = foldReveals[foldId];
+    if (hidden.length < DIFF_MIN_FOLD_LINES || reveal?.all) {
       for (const line of hidden) rows.push({ type: 'line', line });
+      cursor = end;
+      continue;
+    }
+    const topCount = Math.min(reveal?.top ?? 0, hidden.length);
+    const bottomCount = Math.min(reveal?.bottom ?? 0, hidden.length - topCount);
+    const remainingCount = hidden.length - topCount - bottomCount;
+    for (let i = 0; i < topCount; i += 1) {
+      rows.push({ type: 'line', line: hidden[i] });
+    }
+    if (remainingCount > 0) {
+      rows.push({
+        type: 'fold',
+        id: foldId,
+        remainingCount,
+        canExpandDown: cursor > 0,
+        canExpandUp: end < lines.length,
+      });
+    }
+    for (let i = hidden.length - bottomCount; i < hidden.length; i += 1) {
+      rows.push({ type: 'line', line: hidden[i] });
     }
     cursor = end;
   }
@@ -1162,7 +1273,7 @@ function foldSegmentLines(
 function buildDiffRows(
   fileKey: string,
   segments: readonly (readonly NumberedDiffLine[])[],
-  expandedIds: ReadonlySet<string>,
+  foldReveals: Readonly<Record<string, FoldRevealState>>,
 ): readonly DiffRowItem[] {
   const rows: DiffRowItem[] = [];
   for (let segIndex = 0; segIndex < segments.length; segIndex += 1) {
@@ -1175,19 +1286,25 @@ function buildDiffRows(
         rows.push({ type: 'gap', hiddenCount: nextStart - prevEnd - 1 });
       }
     }
-    rows.push(...foldSegmentLines(`${fileKey}:${segIndex}`, segment, expandedIds));
+    rows.push(...foldSegmentLines(`${fileKey}:${segIndex}`, segment, foldReveals));
   }
   return rows;
 }
 
 function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAction, showInput, hideHeader = false, foldContext = false, headerAction }: { node: ToolNode; compact: boolean; model?: DiffModel; showCopyActions: boolean; scrollable: boolean; copyAction?: ReactNode; showInput: boolean; hideHeader?: boolean; foldContext?: boolean; headerAction?: ReactNode }) {
   const { t } = useI18n();
-  const [expandedFolds, setExpandedFolds] = useState<ReadonlySet<string>>(() => new Set());
+  const [foldReveals, setFoldReveals] = useState<Readonly<Record<string, FoldRevealState>>>(() => ({}));
   const currentModel = useMemo(() => model ?? diffModel(node), [model, node]);
   const hunks = useMemo(() => currentModel.hunks.map((hunk) => {
+    if (hunk.lineNumbersKnown === false) {
+      return {
+        ...hunk,
+        lines: hunk.lines.map((line): NumberedDiffLine => ({ ...line, number: null })),
+      };
+    }
     let oldNumber = hunk.oldStart ?? 1;
     let newNumber = hunk.newStart ?? 1;
-    return { ...hunk, lines: hunk.lines.map((line) => {
+    return { ...hunk, lines: hunk.lines.map((line): NumberedDiffLine => {
       const number = line.kind === 'removed' ? oldNumber : newNumber;
       if (line.kind !== 'added') oldNumber += 1;
       if (line.kind !== 'removed') newNumber += 1;
@@ -1226,7 +1343,34 @@ function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAc
   const copyText = firstString(asRecord(node.output), ['diff', 'patch', 'unified_diff'])
     ?? firstString(asRecord(node.input), ['patch', 'diff'])
     ?? outputText(node);
-  if (hunks.length === 0) return <IoSurface node={node} compact={compact} showCopyActions={showCopyActions} scrollable={scrollable} showInput={showInput} headerAction={headerAction} />;
+  if (hunks.length === 0) {
+    if (node.output === null && (node.state === 'preparing' || node.state === 'running')) {
+      const pendingPath = toolFilePath(node);
+      const hasPendingHeader = !hideHeader && (Boolean(pendingPath) || Boolean(headerAction));
+      return (
+        <div
+          className={cn(
+            'ai-diff-block flex min-w-0 flex-col gap-px overflow-hidden',
+            hideHeader ? 'w-full max-w-full' : 'my-1 ml-1 max-w-[calc(100%-4px)]',
+          )}
+          data-ai-tool-view="diff"
+          data-embedded={hideHeader || undefined}
+        >
+          <section className="min-w-0 max-w-full shrink-0">
+            {hasPendingHeader && (
+              <ToolSurfaceHeader title={pendingPath ?? node.name} className={showInput ? undefined : 'min-h-8'}>
+                {headerAction}
+              </ToolSurfaceHeader>
+            )}
+            <div className={cn(hasPendingHeader ? 'px-3.5 pt-1 pb-3' : 'px-3.5 py-2.5', 'text-xs text-muted-foreground')} data-diff-pending="">
+              {t(node.state === 'preparing' ? 'ai.workspace.tool.preparing' : 'ai.workspace.tool.running')}
+            </div>
+          </section>
+        </div>
+      );
+    }
+    return <IoSurface node={node} compact={compact} showCopyActions={showCopyActions} scrollable={scrollable} showInput={showInput} headerAction={headerAction} />;
+  }
   return (
     <div
       className={cn(
@@ -1238,7 +1382,7 @@ function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAc
     >
       {files.map((hunk, index) => {
         const rows = foldContext
-          ? buildDiffRows(`${hunk.path}:${index}`, hunk.segments, expandedFolds)
+          ? buildDiffRows(`${hunk.path}:${index}`, hunk.segments, foldReveals)
           : hunk.segments.flatMap((segment) => segment.map((line): DiffRowItem => ({ type: 'line', line })));
         return (
           <section key={`${hunk.path}:${index}`} className="min-w-0 max-w-full shrink-0">
@@ -1260,24 +1404,60 @@ function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAc
                   <code className="ai-diff-lines">
                     {rows.map((row, rowIndex) => {
                       if (row.type === 'fold') {
-                        const expand = () => setExpandedFolds((prev) => new Set(prev).add(row.id));
+                        const expandAll = () => setFoldReveals((prev) => ({
+                          ...prev,
+                          [row.id]: { top: 0, bottom: 0, all: true },
+                        }));
+                        const expandDown = () => setFoldReveals((prev) => {
+                          const cur = prev[row.id] ?? { top: 0, bottom: 0 };
+                          return { ...prev, [row.id]: { ...cur, top: cur.top + DIFF_EXPAND_STEP } };
+                        });
+                        const expandUp = () => setFoldReveals((prev) => {
+                          const cur = prev[row.id] ?? { top: 0, bottom: 0 };
+                          return { ...prev, [row.id]: { ...cur, bottom: cur.bottom + DIFF_EXPAND_STEP } };
+                        });
+                        const showStepper = row.remainingCount > DIFF_EXPAND_STEP && (row.canExpandDown || row.canExpandUp);
                         return (
                           <span key={row.id} data-diff="fold" className="ai-diff-fold-row">
-                            <span
-                              className="ai-diff-fold-gutter"
-                              aria-hidden="true"
-                              onClick={expand}
-                            >
-                              <ChevronsUpDownIcon className="inline-block size-3 align-[-2px]" />
-                            </span>
+                            <span className="ai-diff-fold-gutter" aria-hidden="true" />
                             <span className="ai-diff-fold-cell table-cell">
-                              <button
-                                type="button"
-                                className="ai-diff-fold-button flex w-full items-center gap-1 px-3 py-1 text-left"
-                                onClick={expand}
-                              >
-                                <span>{t('ai.workspace.tool.diffExpandLines', { count: row.lines.length })}</span>
-                              </button>
+                              <span className="ai-diff-fold-bar flex w-full items-center justify-center py-1.5">
+                                <span className="ai-diff-fold-controls sticky left-4 right-4 inline-flex items-center gap-1.5 px-2">
+                                  <button
+                                    type="button"
+                                    className="ai-diff-fold-pill inline-flex h-6 items-center px-2.5"
+                                    onClick={expandAll}
+                                  >
+                                    {t('ai.workspace.tool.diffExpandLines', { count: row.remainingCount })}
+                                  </button>
+                                  {showStepper && (
+                                    <span className="ai-diff-fold-stepper inline-flex flex-col overflow-hidden">
+                                      {row.canExpandDown && (
+                                        <button
+                                          type="button"
+                                          className="ai-diff-fold-step inline-flex h-5 items-center justify-center px-1.5 tabular-nums"
+                                          aria-label={t('ai.workspace.tool.diffExpandDown', { count: DIFF_EXPAND_STEP })}
+                                          title={t('ai.workspace.tool.diffExpandDown', { count: DIFF_EXPAND_STEP })}
+                                          onClick={expandDown}
+                                        >
+                                          +{DIFF_EXPAND_STEP}
+                                        </button>
+                                      )}
+                                      {row.canExpandUp && (
+                                        <button
+                                          type="button"
+                                          className="ai-diff-fold-step inline-flex h-5 items-center justify-center px-1.5 tabular-nums"
+                                          aria-label={t('ai.workspace.tool.diffExpandUp', { count: DIFF_EXPAND_STEP })}
+                                          title={t('ai.workspace.tool.diffExpandUp', { count: DIFF_EXPAND_STEP })}
+                                          onClick={expandUp}
+                                        >
+                                          +{DIFF_EXPAND_STEP}
+                                        </button>
+                                      )}
+                                    </span>
+                                  )}
+                                </span>
+                              </span>
                             </span>
                           </span>
                         );
@@ -1285,16 +1465,22 @@ function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAc
                       if (row.type === 'gap') {
                         return (
                           <span key={`gap:${rowIndex}`} data-diff="gap" className="ai-diff-gap-row">
-                            <span className="ai-diff-fold-gutter" aria-hidden="true">⋯</span>
-                            <span className="ai-diff-gap-cell table-cell px-3 py-1">
-                              {t('ai.workspace.tool.diffOmittedLines', { count: row.hiddenCount })}
+                            <span className="ai-diff-fold-gutter" aria-hidden="true" />
+                            <span className="ai-diff-gap-cell table-cell">
+                              <span className="ai-diff-fold-bar flex w-full items-center justify-center py-1.5">
+                                <span className="ai-diff-gap-pill sticky left-4 right-4 inline-flex h-6 items-center px-2.5">
+                                  {t('ai.workspace.tool.diffOmittedLines', { count: row.hiddenCount })}
+                                </span>
+                              </span>
                             </span>
                           </span>
                         );
                       }
                       return (
                         <span key={rowIndex} data-diff={row.line.kind}>
-                          <span className="ai-diff-line-number" aria-hidden="true">{row.line.number}</span>
+                          <span className="ai-diff-line-number" aria-hidden="true">
+                            {row.line.number ?? (row.line.kind === 'removed' ? '-' : row.line.kind === 'added' ? '+' : '\u00a0')}
+                          </span>
                           <DiffCode text={row.line.text} path={hunk.path} />
                         </span>
                       );

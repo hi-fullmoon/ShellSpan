@@ -194,16 +194,11 @@
 
 .ai-diff-fold-row,
 .ai-diff-gap-row {
-  background: color-mix(in srgb, var(--ai-text) 3%, transparent);
+  background: transparent;
   color: var(--ai-text-muted);
   font-family: var(--ai-font-family);
   font-size: 11.5px;
-  line-height: 20px;
-}
-
-.ai-diff-fold-row:hover {
-  background: var(--ai-action-hover);
-  color: var(--ai-text);
+  line-height: 18px;
 }
 
 .ai-diff-fold-gutter {
@@ -211,34 +206,81 @@
   width: 1%;
   min-width: 4ch;
   padding: 0 8px;
-  border-top: 1px solid var(--ai-border-subtle);
-  border-bottom: 1px solid var(--ai-border-subtle);
   border-right: 4px solid var(--ai-code-block);
-  text-align: right;
-  color: inherit;
+  background: linear-gradient(
+    to bottom,
+    transparent calc(50% - 0.5px),
+    var(--ai-border-soft) calc(50% - 0.5px),
+    var(--ai-border-soft) calc(50% + 0.5px),
+    transparent calc(50% + 0.5px)
+  );
   user-select: none;
-}
-
-.ai-diff-fold-row .ai-diff-fold-gutter {
-  cursor: pointer;
 }
 
 .ai-diff-fold-cell,
 .ai-diff-gap-cell {
-  border-top: 1px solid var(--ai-border-subtle);
-  border-bottom: 1px solid var(--ai-border-subtle);
+  background: linear-gradient(
+    to bottom,
+    transparent calc(50% - 0.5px),
+    var(--ai-border-soft) calc(50% - 0.5px),
+    var(--ai-border-soft) calc(50% + 0.5px),
+    transparent calc(50% + 0.5px)
+  );
   color: inherit;
 }
 
-.ai-diff-fold-button {
+.ai-diff-fold-controls {
+  background: var(--ai-code-block);
+}
+
+.ai-diff-fold-pill,
+.ai-diff-gap-pill {
+  border: 1px solid var(--ai-border-soft);
+  border-radius: 6px;
+  background: var(--ai-code-block);
+  color: var(--ai-text-secondary);
+  font: inherit;
+  font-weight: 500;
+}
+
+.ai-diff-fold-pill {
+  cursor: pointer;
+  transition: background-color var(--ai-transition-duration-fast) var(--ai-ease-in-out),
+    color var(--ai-transition-duration-fast) var(--ai-ease-in-out),
+    border-color var(--ai-transition-duration-fast) var(--ai-ease-in-out);
+}
+
+.ai-diff-fold-pill:hover,
+.ai-diff-fold-step:hover {
+  background: var(--ai-action-hover);
+  color: var(--ai-text);
+}
+
+.ai-diff-fold-stepper {
+  border: 1px solid var(--ai-border-soft);
+  border-radius: 6px;
+  background: var(--ai-code-block);
+}
+
+.ai-diff-fold-step {
   border: 0;
   background: transparent;
-  color: inherit;
+  color: var(--ai-text-secondary);
   font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
   cursor: pointer;
+  transition: background-color var(--ai-transition-duration-fast) var(--ai-ease-in-out),
+    color var(--ai-transition-duration-fast) var(--ai-ease-in-out);
 }
 
-.ai-diff-fold-button:focus-visible {
+.ai-diff-fold-step + .ai-diff-fold-step {
+  border-top: 1px solid var(--ai-border-soft);
+}
+
+.ai-diff-fold-pill:focus-visible,
+.ai-diff-fold-step:focus-visible {
   outline: 1.5px solid var(--ai-accent);
   outline-offset: -1.5px;
 }

@@ -153,6 +153,7 @@ describe('AiTurnChangesSummary', () => {
     expect(embeddedDiff).toHaveAttribute('data-embedded');
     expect(embeddedDiff?.querySelector('.ai-tool-surface-header')).toBeNull();
     expect(embeddedDiff?.querySelector('.ai-diff-counts')).toBeNull();
+    expect(dialog.textContent).toContain('worker_processes auto;');
     expect(dialog.textContent).toContain('keepalive_timeout 30;');
 
     fireEvent.click(oldReviewSection.querySelector<HTMLButtonElement>('.ai-turn-changes-review-trigger')!);
@@ -231,9 +232,9 @@ describe('AiTurnChangesSummary', () => {
     expect(titles).toEqual(['src/a.ts', 'src/b.ts']);
   });
 
-  it('folds long unchanged context runs with an expandable bar and separates disjoint hunks with an omitted-lines row', () => {
-    const contextBefore = Array.from({ length: 12 }, (_, idx) => `line-${String(idx + 1).padStart(2, '0')}`).join('\n');
-    const contextAfter = Array.from({ length: 12 }, (_, idx) => `tail-${String(idx + 1).padStart(2, '0')}`).join('\n');
+  it('folds long unchanged context runs with +N more lines and +10 steppers, and reconstructs expandable gaps from read_file baselines', () => {
+    const contextBefore = Array.from({ length: 20 }, (_, idx) => `line-${String(idx + 1).padStart(2, '0')}`).join('\n');
+    const contextAfter = Array.from({ length: 20 }, (_, idx) => `tail-${String(idx + 1).padStart(2, '0')}`).join('\n');
     const editTool = makeTool({
       key: 'tool:long-context',
       callId: 'call-long-context',
@@ -255,17 +256,69 @@ describe('AiTurnChangesSummary', () => {
       />,
     );
 
-    const foldButtons = container.querySelectorAll<HTMLButtonElement>('.ai-diff-fold-button');
-    expect(foldButtons).toHaveLength(2);
-    expect(foldButtons[0]).toHaveTextContent('Show 9 unchanged lines');
-    expect(foldButtons[1]).toHaveTextContent('Show 9 unchanged lines');
+    const foldPills = container.querySelectorAll<HTMLButtonElement>('.ai-diff-fold-pill');
+    expect(foldPills).toHaveLength(2);
+    expect(foldPills[0]).toHaveTextContent('+17 more lines');
+    expect(foldPills[1]).toHaveTextContent('+17 more lines');
     expect(container.textContent).not.toContain('line-01');
-    expect(container.textContent).toContain('line-10');
+    expect(container.textContent).toContain('line-18');
     expect(container.textContent).toContain('new-target');
 
-    fireEvent.click(foldButtons[0]);
-    expect(container.querySelectorAll('.ai-diff-fold-button')).toHaveLength(1);
+    const expandUpBtn = screen.getByRole('button', { name: 'Expand 10 lines up' });
+    fireEvent.click(expandUpBtn);
+    expect(container.querySelectorAll('.ai-diff-fold-pill')[0]).toHaveTextContent('+7 more lines');
+    expect(container.textContent).toContain('line-08');
+    expect(container.textContent).not.toContain('line-01');
+
+    fireEvent.click(container.querySelectorAll<HTMLButtonElement>('.ai-diff-fold-pill')[0]);
+    expect(container.querySelectorAll('.ai-diff-fold-pill')).toHaveLength(1);
     expect(container.textContent).toContain('line-01');
+
+    const baseLines = Array.from({ length: 40 }, (_, idx) => `row-${String(idx + 1).padStart(2, '0')}`);
+    const baseText = `${baseLines.join('\n')}\n`;
+    const readTool = makeTool({
+      key: 'tool:read-base',
+      callId: 'call-read-base',
+      name: 'read_file',
+      nativeName: 'read_file',
+      input: { path: 'src/app.ts' },
+      output: { path: 'src/app.ts', content: baseText, offset: 0, truncated: false, encoding: 'utf8' },
+    });
+    const firstPatch = makeTool({
+      key: 'tool:edit-1',
+      callId: 'call-edit-1',
+      name: 'edit_file',
+      nativeName: 'edit_file',
+      input: { path: 'src/app.ts', old_string: 'row-04', new_string: 'row-04-updated' },
+      output: { diff: '--- a/src/app.ts\n+++ b/src/app.ts\n@@ -3,3 +3,3 @@\n row-03\n-row-04\n+row-04-updated\n row-05\n' },
+    });
+    const secondPatch = makeTool({
+      key: 'tool:edit-2',
+      callId: 'call-edit-2',
+      name: 'edit_file',
+      nativeName: 'edit_file',
+      input: { path: 'src/app.ts', old_string: 'row-36', new_string: 'row-36-updated' },
+      output: { diff: '--- a/src/app.ts\n+++ b/src/app.ts\n@@ -35,3 +35,3 @@\n row-35\n-row-36\n+row-36-updated\n row-37\n' },
+    });
+    const turnWithRead = makeProcess({
+      children: [readTool, firstPatch, secondPatch],
+      childKeys: [readTool.key, firstPatch.key, secondPatch.key],
+    });
+    const { container: reviewContainer } = render(
+      <div className="ai-panel-shell relative">
+        <AiTurnChangesSummary process={turnWithRead} />
+      </div>,
+    );
+    fireEvent.click(reviewContainer.querySelector<HTMLButtonElement>('.ai-turn-changes-trigger')!);
+    fireEvent.click(screen.getByRole('button', { name: 'View changes in src/app.ts' }));
+    const reviewDialog = screen.getByRole('dialog');
+    const middlePill = reviewDialog.querySelector<HTMLButtonElement>('.ai-diff-fold-pill')!;
+    expect(middlePill).toHaveTextContent('+25 more lines');
+    expect(reviewDialog.textContent).toContain('row-04-updated');
+    expect(reviewDialog.textContent).toContain('row-36-updated');
+    expect(reviewDialog.textContent).not.toContain('row-15');
+    fireEvent.click(reviewDialog.querySelector<HTMLButtonElement>('button[aria-label="Expand 10 lines down"]')!);
+    expect(reviewDialog.textContent).toContain('row-15');
 
     const disjointTool = makeTool({
       key: 'tool:disjoint-hunks',
@@ -291,8 +344,29 @@ describe('AiTurnChangesSummary', () => {
       />,
     );
 
-    const gapCell = disjointContainer.querySelector('.ai-diff-gap-cell');
-    expect(gapCell).toBeInTheDocument();
-    expect(gapCell).toHaveTextContent('89 lines omitted');
+    const gapPill = disjointContainer.querySelector('.ai-diff-gap-pill');
+    expect(gapPill).toBeInTheDocument();
+    expect(gapPill).toHaveTextContent('89 lines omitted');
+
+    const pagedRead = makeTool({
+      key: 'tool:read-paged',
+      callId: 'call-read-paged',
+      name: 'read_file',
+      nativeName: 'read_file',
+      input: { path: 'src/paged.ts', offset: 120 },
+      output: { path: 'src/paged.ts', content: 'tail-only\n', truncated: false, encoding: 'utf8' },
+    });
+    const pagedEdit = makeTool({
+      key: 'tool:edit-paged',
+      callId: 'call-edit-paged',
+      name: 'edit_file',
+      nativeName: 'edit_file',
+      input: { path: 'src/paged.ts', oldString: 'a', newString: 'b' },
+    });
+    const pagedSummary = summarizeTurnFileChanges(makeProcess({
+      children: [pagedRead, pagedEdit],
+      childKeys: [pagedRead.key, pagedEdit.key],
+    }));
+    expect(pagedSummary?.files[0]?.baseText).toBeNull();
   });
 });

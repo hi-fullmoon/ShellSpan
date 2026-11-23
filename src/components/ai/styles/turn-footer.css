@@ -194,6 +194,7 @@
 
 .ai-turn-changes-dialog .ai-diff-content {
   max-height: none;
+  overflow-x: auto;
 }
 
 .ai-turn-changes-dialog .ai-diff-body {
@@ -214,6 +215,10 @@
   color: var(--ai-text-muted);
 }
 
+.ai-turn-changes-dialog .ai-diff-body [data-diff] .ai-diff-line-number {
+  color: var(--ai-text-muted);
+}
+
 .ai-turn-changes-dialog .ai-diff-code {
   border-left: 3px solid transparent;
   padding-inline: 12px 16px;
@@ -224,8 +229,14 @@
   border-left: 3px solid transparent;
 }
 
-.ai-turn-changes-dialog .ai-diff-fold-row:hover .ai-diff-fold-gutter {
-  color: var(--ai-text);
+.ai-turn-changes-dialog .ai-diff-fold-controls {
+  background: var(--ai-canvas);
+}
+
+.ai-turn-changes-dialog .ai-diff-fold-pill,
+.ai-turn-changes-dialog .ai-diff-gap-pill,
+.ai-turn-changes-dialog .ai-diff-fold-stepper {
+  background: var(--ai-code-block);
 }
 
 .ai-turn-changes-dialog .ai-diff-body [data-diff='removed'] .ai-diff-code {
