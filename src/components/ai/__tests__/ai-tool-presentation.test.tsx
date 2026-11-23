@@ -7,7 +7,6 @@ import { join } from 'node:path';
 import { hostname } from 'node:os';
 
 import { AiToolExpandedContent, AiToolRow, classifyAiTool } from '@/components/ai/workspace/ai-tool-presentation';
-import { AiToolDetails } from '@/components/ai/workspace/ai-tool-details';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
@@ -45,24 +44,14 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('AI tool presentation', () => {
-  it.each(['zh-CN', 'en-US'] as const)('shows only the recorded plan result in the output detail section in %s', async locale => {
+  it.each(['zh-CN', 'en-US'] as const)('shows the recorded plan input and result inline in %s', async locale => {
     useAppStore.setState({ locale });
     await initI18n(locale);
     const plan = projectAgentChatNodes(conversationFoldRecording.completed.events)
       .flatMap(item => item.kind === 'turnProcess' ? item.children : [])
       .find((item): item is AiConversationNodeOf<'tool'> => item.kind === 'tool' && item.name === 'update_plan');
     expect(plan).toBeDefined();
-    const { container, rerender } = render(<AiToolDetails node={plan!} onBack={() => undefined} />);
-    const sections = container.querySelectorAll('.ai-detail-section');
-    expect(sections[0].querySelector('code')?.textContent).toBe(JSON.stringify(plan!.input, null, 2));
-    expect(sections[1].querySelector('pre')?.textContent).toBe(JSON.stringify(plan!.output, null, 2));
-    expect(sections[1].querySelectorAll('.ai-io-section')).toHaveLength(1);
-    expect(sections[1].querySelector('.ai-io-label')).toBeNull();
-    expect(sections[1].querySelectorAll('.ai-tool-copy-button')).toHaveLength(1);
-    expect(screen.getByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy Output' })).toBeVisible();
-
-    const opened: AiConversationNodeOf<'tool'>[] = [];
-    rerender(<AiToolRow node={plan!} onInspect={(tool) => opened.push(tool)} />);
+    const { container } = render(<AiToolRow node={plan!} />);
     await userEvent.setup().click(screen.getByRole('button'));
     const inline = container.querySelectorAll('.ai-io-section');
     expect(inline).toHaveLength(2);
@@ -71,20 +60,7 @@ describe('AI tool presentation', () => {
     expect(screen.queryByText(locale === 'zh-CN' ? '查看详情' : 'View details')).not.toBeInTheDocument();
   });
 
-  it('shows a real generic tool result without repeating its input in the details output', () => {
-    const execution = spawnSync('git', ['log', '--oneline', '-3'], { encoding: 'utf8' });
-    expect(execution.status).toBe(0);
-    const input = { command: 'git log --oneline -3' };
-    const { container } = render(<AiToolDetails node={{
-      ...node, name: 'git', input, output: execution.stdout,
-    }} onBack={() => undefined} />);
-    const sections = container.querySelectorAll('.ai-detail-section');
-    expect(sections[0].querySelector('code')?.textContent).toBe(JSON.stringify(input, null, 2));
-    expect(sections[1].querySelector('pre')?.textContent).toBe(execution.stdout);
-    expect(sections[1].querySelectorAll('.ai-io-section')).toHaveLength(1);
-  });
-
-  it.each(['zh-CN', 'en-US'] as const)('keeps input out of every specialized output surface in %s', async locale => {
+  it.each(['zh-CN', 'en-US'] as const)('renders every specialized inline tool surface in %s', async locale => {
     useAppStore.setState({ locale });
     await initI18n(locale);
     const path = `${process.cwd()}/package.json`;
@@ -103,24 +79,10 @@ describe('AI tool presentation', () => {
       { name: 'web_fetch', input: { url: new URL(`file://${path}`).href }, output: file, result: file, selector: '.ai-web-content pre' },
       { name: 'trash_file', input: { path }, state: 'uncertain' as const, output: { path }, result: JSON.stringify({ path }, null, 2), selector: '.ai-io-output pre' },
     ];
-    const opened: AiConversationNodeOf<'tool'>[] = [];
     const user = userEvent.setup();
     for (const entry of cases) {
       const tool = { ...node, ...entry };
-      const { container, rerender, unmount } = render(<AiToolDetails node={tool} onBack={() => undefined} />);
-      const sections = container.querySelectorAll('.ai-detail-section');
-      expect(sections[0].querySelector('code')?.textContent, entry.name).toBe(JSON.stringify(entry.input, null, 2));
-      const output = sections[1];
-      expect(output.querySelector('.ai-terminal-command-row, .ai-code-content, .ai-io-input'), entry.name).toBeNull();
-      if (entry.name !== 'run_terminal_command') expect(output.querySelector('.ai-tool-surface-header'), entry.name).toBeNull();
-      const result = output.querySelector(entry.selector);
-      expect(result, entry.name).not.toBeNull();
-      if (entry.name === 'read_file') {
-        expect([...output.querySelectorAll('.ai-read-line > span:last-child')].map(line => line.textContent === '\u00a0' ? '' : line.textContent).join('\n'), entry.name).toBe(file);
-      } else expect(result?.textContent, entry.name).toBe(entry.result);
-      expect(output.querySelectorAll('.ai-tool-copy-button'), entry.name).toHaveLength(1);
-
-      rerender(<AiToolRow node={tool} onInspect={(inspected) => opened.push(inspected)} />);
+      const { container, unmount } = render(<AiToolRow node={tool} />);
       await user.click(screen.getByRole('button'));
       if (entry.name === 'run_terminal_command') expect(container.querySelector('.ai-terminal-command-row')).toHaveTextContent(`node ${codePath}`);
       else if (entry.name === 'run_code') {
@@ -152,18 +114,7 @@ describe('AI tool presentation', () => {
     expect(container.querySelector('.ai-code-footer svg')).not.toBeInTheDocument();
   });
 
-  it.each(['run_terminal_command', 'run_code', 'read_file', 'search_text', 'web_fetch', 'trash_file'])('keeps %s input separate while running and after failure', name => {
-    const input = { path: `${process.cwd()}/package.json` };
-    const { container, rerender } = render(<AiToolDetails node={{ ...node, name, input, state: 'running', output: null }} onBack={() => undefined} />);
-    const output = () => container.querySelectorAll('.ai-detail-section')[1];
-    expect(output().querySelector('.ai-terminal-command-row, .ai-code-content, .ai-io-input')).toBeNull();
-    const failure = capturedRead(false);
-    rerender(<AiToolDetails node={{ ...failure, name, input }} onBack={() => undefined} />);
-    expect(output().querySelector('.ai-terminal-command-row, .ai-code-content, .ai-io-input')).toBeNull();
-    expect(output().querySelector('pre')?.textContent).toBe(failure.error || failure.summary);
-  });
-
-  it.each(['zh-CN', 'en-US'] as const)('does not repeat input when a large patch falls back to plain output in %s', async locale => {
+  it.each(['zh-CN', 'en-US'] as const)('falls back to plain output when a large patch exceeds diff bounds in %s', async locale => {
     useAppStore.setState({ locale });
     await initI18n(locale);
     const artifacts = join(process.cwd(), 'artifacts/tests/ai-tool-presentation');
@@ -177,18 +128,11 @@ describe('AI tool presentation', () => {
     expect(result.status).toBe(1); // git diff reports actual differences with exit 1.
     expect(result.stdout.length).toBeGreaterThan(64 * 1024);
     const patchNode = { ...node, name: 'apply_patch', input: { patch: result.stdout }, output: { diff: result.stdout } };
-    const { container, rerender } = render(<AiToolDetails node={patchNode} onBack={() => undefined} />);
-    const output = container.querySelectorAll('.ai-detail-section')[1];
-    expect(output.querySelector('.ai-diff-block')).toBeNull();
-    expect(output.querySelectorAll('.ai-io-section')).toHaveLength(1);
-    expect(output.querySelector('.ai-io-input')).toBeNull();
-    expect(output.querySelector('.ai-tool-surface-header')).toBeNull();
-    expect(output.querySelector('.ai-io-output pre')?.textContent).toBe(JSON.stringify(patchNode.output, null, 2).slice(0, 64 * 1024) + '\n…');
-    expect(output.querySelectorAll('.ai-tool-copy-button')).toHaveLength(1);
-
-    rerender(<AiToolExpandedContent node={patchNode} />);
+    const { container } = render(<AiToolExpandedContent node={patchNode} />);
+    expect(container.querySelector('.ai-diff-block')).toBeNull();
     expect(container.querySelectorAll('.ai-io-section')).toHaveLength(2);
     expect(container.querySelector('.ai-io-input')).toBeInTheDocument();
+    expect(container.querySelector('.ai-io-output pre')?.textContent).toBe(JSON.stringify(patchNode.output, null, 2).slice(0, 64 * 1024) + '\n…');
   });
 
   it.each(['zh-CN', 'en-US'] as const)('separates input and output into independently scrollable content boxes in %s', async locale => {
@@ -347,30 +291,6 @@ describe('AI tool presentation', () => {
     expect(row).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it.each(['zh-CN', 'en-US'] as const)('does not duplicate the captured error in the details page in %s', async locale => {
-    useAppStore.setState({ locale });
-    await initI18n(locale);
-    const failure = capturedRead(true);
-    const { container, rerender } = render(<AiToolDetails node={failure} onBack={() => undefined} />);
-    expect(screen.getAllByText(failure.error!)).toHaveLength(1);
-    expect(container.querySelector('.ai-detail-error')).toBeNull();
-    expect(container.querySelector('.ai-detail-summary')).not.toHaveTextContent(failure.error!);
-    expect(container.querySelector('[data-ai-tool-view="error"] > .ai-block-banner')).toBeNull();
-    expect(screen.queryByText(locale === 'zh-CN' ? '查看错误详情' : 'View error details')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy Output' })).toBeVisible();
-    rerender(<AiToolDetails node={{ ...failure, output: null }} onBack={() => undefined} />);
-    expect(screen.getAllByText(failure.error!)).toHaveLength(1);
-    expect(container.querySelector('[data-ai-tool-view="error"] > .ai-block-banner')).toBeNull();
-    // A separate diagnostic remains visible alongside distinct structured output.
-    const success = projectAgentChatNodes(readRecoveryCapture as readonly AgentSessionEvent[])
-      .flatMap(item => item.kind === 'turnProcess' ? item.children : [])
-      .find((item): item is AiConversationNodeOf<'tool'> => item.kind === 'tool' && item.state === 'succeeded')!;
-    rerender(<AiToolDetails node={{ ...failure, output: success.output }} onBack={() => undefined} />);
-    expect(screen.getAllByText(failure.error!)).toHaveLength(1);
-    expect(container.querySelector('.ai-detail-error')).toHaveTextContent(failure.error!);
-    expect(screen.getByText(/"nextOffset": 2048/u)).toBeVisible();
-  });
-
   it.each(['zh-CN', 'en-US'] as const)('localizes the captured skill tool title in %s', async (locale) => {
     useAppStore.setState({ locale });
     await initI18n(locale);
@@ -463,13 +383,12 @@ describe('AI tool presentation', () => {
     await initI18n(locale);
     const execution = spawnSync('git', ['--version'], { encoding: 'utf8' });
     expect(execution.status).toBe(0);
-    const opened: AiConversationNodeOf<'tool'>[] = [];
     const result = {
       ...node,
       input: { command: 'git --version', description: 'Report the Git version' },
       output: { execution: 'completed', stdout: execution.stdout, exitCode: execution.status },
     };
-    render(<AiToolRow node={result} onInspect={(tool) => opened.push(tool)} />);
+    render(<AiToolRow node={result} />);
     const user = userEvent.setup();
     const row = screen.getByRole('button');
     row.focus();
@@ -669,8 +588,7 @@ describe('AI tool presentation', () => {
     expect(result.status).toBe(1); // Git reports an actual difference with exit 1.
     expect(result.stdout).not.toBe('');
     const patchNode = { ...node, name: 'apply_patch', input: { patch: result.stdout }, output: { diff: result.stdout } };
-    const opened: AiConversationNodeOf<'tool'>[] = [];
-    const { container, rerender } = render(<AiToolRow node={patchNode} onInspect={(tool) => opened.push(tool)} />);
+    const { container } = render(<AiToolRow node={patchNode} />);
     await userEvent.setup().click(screen.getByRole('button'));
     expect(screen.queryByText('View details')).not.toBeInTheDocument();
     const viewport = container.querySelector('.ai-diff-block [data-slot="scroll-area-viewport"]');
@@ -681,44 +599,28 @@ describe('AI tool presentation', () => {
     expect(container.querySelectorAll('.ai-diff-body').length).toBeGreaterThan(0);
     const titles = [...container.querySelectorAll('.ai-diff-block .ai-content-title')].map(title => title.textContent);
     expect(new Set(titles).size).toBe(titles.length);
-
-    rerender(<AiToolDetails node={patchNode} onBack={() => undefined} />);
-    const output = container.querySelectorAll('.ai-detail-section')[1];
-    const copy = screen.getByRole('button', { name: 'Copy Output' });
-    const firstFile = output.querySelector('.ai-diff-block section');
-    const header = firstFile?.querySelector('.ai-tool-surface-header');
-    const body = firstFile?.querySelector('.ai-tool-content-region');
-    expect(header).toHaveClass('ai-content-header', 'min-h-8', 'items-center');
-    expect(header).not.toHaveClass('min-h-6');
-    expect(header?.nextElementSibling).toBe(body);
-    expect(body).toContainElement(copy);
-    expect(body).toHaveAttribute('data-ai-copy-region');
-    expect(header).not.toContainElement(copy);
-    expect(output.querySelectorAll('.ai-tool-copy-button')).toHaveLength(1);
-    expect(output.querySelector(':scope > .ai-tool-content-region > .ai-tool-copy-button')).toBeNull();
-    expect(output.querySelectorAll('[data-slot="scroll-area-viewport"]')).toHaveLength(1);
-    expect(output.querySelector('.ai-diff-content')).toHaveClass('max-h-none');
-    expect(output.querySelector('.ai-diff-content')).not.toHaveAttribute('data-slot', 'scroll-area');
   });
 
-  it('omits the details action for an error-only card and stored tool outputs', async () => {
+  it('opens stored tool outputs directly from the expanded tool row without a details page', async () => {
     const user = userEvent.setup();
-    const onInspect = vi.fn();
+    const onOpenStoredOutput = vi.fn();
     const read = capturedRead(true);
-    const { rerender } = render(<AiToolRow node={read} onInspect={onInspect} />);
+    const { rerender } = render(<AiToolRow node={read} onOpenStoredOutput={onOpenStoredOutput} />);
 
     await user.click(screen.getByRole('button'));
     expect(screen.queryByRole('button', { name: `Open details for ${read.name}` })).not.toBeInTheDocument();
     expect(screen.queryByText('View details')).not.toBeInTheDocument();
 
+    const storedArtifactId = `artifact-${'a'.repeat(32)}`;
     const storedNode: AiConversationNodeOf<'tool'> = {
       ...node,
       name: 'http_probe',
-      output: { artifactRef: 'artifact-123', readWith: 'read_tool_result', status: 200, truncated: true },
+      output: { artifactRef: storedArtifactId, readWith: 'read_tool_result', status: 200, truncated: true },
     };
-    rerender(<AiToolRow node={storedNode} onInspect={onInspect} />);
-    expect(screen.queryByRole('button', { name: `Open details for ${storedNode.name}` })).not.toBeInTheDocument();
-    expect(screen.queryByText('View details')).not.toBeInTheDocument();
-    expect(onInspect).not.toHaveBeenCalled();
+    rerender(<AiToolRow node={storedNode} onOpenStoredOutput={onOpenStoredOutput} />);
+    await user.click(screen.getByRole('button', { name: /^Web:/u }));
+    const openStoredButton = screen.getByRole('button', { name: 'View saved output' });
+    await user.click(openStoredButton);
+    expect(onOpenStoredOutput).toHaveBeenCalledExactlyOnceWith(storedNode, storedArtifactId);
   });
 });

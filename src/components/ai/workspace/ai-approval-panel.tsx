@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ShieldAlertIcon } from 'lucide-react';
+import { ChevronDownIcon, ShieldAlertIcon } from 'lucide-react';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Spinner } from '@/components/ui/empty-state';
 import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { useI18n } from '@/hooks/useI18n';
@@ -37,11 +38,10 @@ export interface AiApprovalPanelProps {
   readonly argumentsError?: string | null;
   readonly onApprove: () => void;
   readonly onReject: () => void;
-  readonly onOpenDetails?: () => void;
 }
 
 export function AiApprovalSeat({ approval, decision, error, argumentsLoading, argumentsError,
-  onApprove, onReject, onOpenDetails }: Omit<AiApprovalPanelProps, 'approval' | 'onApprove' | 'onReject'> & {
+  onApprove, onReject }: Omit<AiApprovalPanelProps, 'approval' | 'onApprove' | 'onReject'> & {
   readonly approval?: AiPendingApproval | null;
   readonly onApprove?: () => void;
   readonly onReject?: () => void;
@@ -86,7 +86,6 @@ export function AiApprovalSeat({ approval, decision, error, argumentsLoading, ar
       argumentsError={retained ? retained.argumentsError : argumentsError}
       onApprove={() => submit('approve', onApprove)}
       onReject={() => submit('reject', onReject)}
-      onOpenDetails={displayedKey === currentKey ? onOpenDetails : undefined}
     />
   </div>;
 }
@@ -205,10 +204,10 @@ export function AiApprovalPanel({
   argumentsError = null,
   onApprove,
   onReject,
-  onOpenDetails,
 }: AiApprovalPanelProps): React.ReactNode {
   const { t } = useI18n();
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const [parametersOpen, setParametersOpen] = useState(false);
   const pending = decision !== null;
   const command = argumentString(approval, 'command');
   const vimInsertion = approval.toolName === 'insert_vim_text';
@@ -385,9 +384,29 @@ export function AiApprovalPanel({
               </AlertDescription>
             </Alert>
 
-            <Button variant="ghost" size="xs" className="self-start" disabled={!onOpenDetails} onClick={onOpenDetails}>
-              {t('ai.workspace.approval.fullParameters')}
-            </Button>
+            {!volatileArgumentsMissing && approval.arguments !== undefined && approval.arguments !== null && (
+              <Collapsible open={parametersOpen} onOpenChange={setParametersOpen}>
+                <CollapsibleTrigger
+                  render={(
+                    <Button variant="ghost" size="xs" className="self-start" aria-expanded={parametersOpen}>
+                      {t('ai.workspace.approval.fullParameters')}
+                      <ChevronDownIcon className={cn('size-3 transition-transform', parametersOpen && 'rotate-180')} aria-hidden="true" data-icon="inline-end" />
+                    </Button>
+                  )}
+                />
+                <CollapsibleContent>
+                  <div className="ai-approval-command ai-tool-content-region relative mt-1.5 min-w-0 overflow-hidden" data-ai-copy-region data-slot="ai-approval-full-parameters">
+                    <pre className={cn(AI_CONTENT_CODE_CLASS, 'max-h-56 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]')} tabIndex={0}>
+                      <code>{typeof approval.arguments === 'string' ? approval.arguments : JSON.stringify(approval.arguments, null, 2)}</code>
+                    </pre>
+                    <AiToolCopyButton
+                      text={typeof approval.arguments === 'string' ? approval.arguments : JSON.stringify(approval.arguments, null, 2)}
+                      label={t('ai.workspace.tool.copyInput')}
+                    />
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            )}
 
             {error && (
               <AiErrorNotice title={t('ai.workspace.recovery.title')}>

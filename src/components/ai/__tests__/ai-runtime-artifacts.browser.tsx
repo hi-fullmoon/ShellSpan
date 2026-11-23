@@ -2,10 +2,7 @@ import { Activity, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AiArtifactDetails } from '../workspace/ai-artifact-details';
 import { AiConversationNodeList } from '../workspace/ai-conversation-node-seat';
-import { AiToolDetails } from '../workspace/ai-tool-details';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
-import { storedToolOutputId } from '@/lib/ai/conversation-tool';
-import type { AiToolNode } from '@/lib/ai/conversation-node';
 import { initI18n, t } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import type { AgentArtifactResponse, AgentSessionEvent } from '@/types/agent-session';
@@ -21,20 +18,18 @@ async function loadOutput(sessionId: string, artifactId: string): Promise<AgentA
 
 function RecordedConversation({ events }: { readonly events: readonly AgentSessionEvent[] }) {
   const [nodes] = useState(() => projectAgentChatNodes(events));
-  const [tool, setTool] = useState<AiToolNode | null>(null);
-  const [artifactId, setArtifactId] = useState<string>();
-  const storedId = tool && storedToolOutputId(tool);
+  const [storedOutput, setStoredOutput] = useState<{ sessionId: string; artifactId: string } | null>(null);
   return (
     <main className="ai-panel-shell mx-auto h-dvh min-w-0 max-w-2xl">
-      {tool && (artifactId ? (
-        <AiArtifactDetails sessionId={tool.sessionId} node={null} artifactId={artifactId}
-          title={t('ai.workspace.details.output')} load={loadOutput} onBack={() => setArtifactId(undefined)} />
-      ) : (
-        <AiToolDetails node={tool} onBack={() => setTool(null)}
-          onOpenStoredOutput={storedId ? () => setArtifactId(storedId) : undefined} />
-      ))}
-      <Activity mode={tool ? 'hidden' : 'visible'}>
-        <AiConversationNodeList nodes={nodes} onOpenTool={setTool} />
+      {storedOutput && (
+        <AiArtifactDetails sessionId={storedOutput.sessionId} node={null} artifactId={storedOutput.artifactId}
+          title={t('ai.workspace.details.output')} load={loadOutput} onBack={() => setStoredOutput(null)} />
+      )}
+      <Activity mode={storedOutput ? 'hidden' : 'visible'}>
+        <AiConversationNodeList
+          nodes={nodes}
+          onOpenStoredOutput={(node, artifactId) => setStoredOutput({ sessionId: node.sessionId, artifactId })}
+        />
       </Activity>
     </main>
   );

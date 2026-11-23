@@ -188,7 +188,7 @@ function renderCase(id: string): ReactNode {
   if (id.startsWith('queue-')) return <AiQueueNotice conflict={id === 'queue-conflict'} error={id === 'queue-error' ? error!.message : null} onRetry={record} />;
   if (id === 'permission') return <AgentPermissionSelector sessionId={approval!.sessionId} mode="fullAccess" disabled />;
   if (id.startsWith('approval-')) return <AiApprovalPanel approval={approvals[id.slice(9)] ?? approval!}
-    decision={null} argumentsLoading={id === 'approval-loading'} error={id === 'approval-error' ? error!.message : null} onApprove={record} onReject={record} onOpenDetails={record} />;
+    decision={null} argumentsLoading={id === 'approval-loading'} error={id === 'approval-error' ? error!.message : null} onApprove={record} onReject={record} />;
   if (id === 'transcript-approval') return <AiConversationNodeList nodes={children.filter(node => node.kind === 'approvalMarker').slice(0, 1)} />;
   if (id === 'transcript-error') return <AiConversationNodeList nodes={flatten(budget.nodes).filter(node => node.kind === 'error').slice(0, 1)} />;
   if (id === 'processing' || id === 'thinking') return <AiConversation nodes={[]} status="running" runningIndicator={id === 'thinking' ? 'ask' : 'agent'} throughSeq={null} />;

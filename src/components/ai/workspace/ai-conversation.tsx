@@ -128,7 +128,7 @@ export interface AiConversationProps {
   readonly throughSeq: number | null;
   readonly initialAnchor?: AiScrollAnchor;
   readonly onAnchorChange?: (anchor: AiScrollAnchor) => void;
-  readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
+  readonly onOpenStoredOutput?: (node: AiConversationNodeOf<'tool'>, artifactId: string) => void;
   readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
   readonly canLoadOlder?: boolean;
   readonly loadingOlder?: boolean;
@@ -145,7 +145,7 @@ export const AiConversation = memo(function AiConversation({
   throughSeq,
   initialAnchor,
   onAnchorChange,
-  onOpenTool,
+  onOpenStoredOutput,
   onOpenArtifact,
   canLoadOlder = false,
   loadingOlder = false,
@@ -280,7 +280,7 @@ export const AiConversation = memo(function AiConversation({
             node.kind === 'turnTail' && '-ml-1.5',
             '[content-visibility:visible] [contain-intrinsic-size:none]',
           )}
-          onOpenTool={onOpenTool}
+          onOpenStoredOutput={onOpenStoredOutput}
           onOpenArtifact={onOpenArtifact}
           indicator={index === rows.length - 1 ? indicator : undefined}
         />

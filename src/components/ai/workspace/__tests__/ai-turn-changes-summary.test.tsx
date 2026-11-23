@@ -79,7 +79,7 @@ describe('AiTurnChangesSummary', () => {
     expect(summarizeTurnFileChanges(makeProcess({ children: [readTool] }))).toBeNull();
   });
 
-  it('aggregates multiple edits per file, excludes failed edits, and opens the tool diff on click', () => {
+  it('aggregates multiple edits per file, excludes failed edits, and expands inline diff on click', () => {
     const firstEdit = makeTool({
       key: 'tool:1',
       callId: 'call-1',
@@ -104,12 +104,11 @@ describe('AiTurnChangesSummary', () => {
       input: { path: 'etc/nginx/old.conf' },
     });
 
-    const onOpenTool = vi.fn();
     const process = makeProcess({
       children: [firstEdit, secondEditSameFile, failedEdit, trashTool],
       childKeys: [firstEdit.key, secondEditSameFile.key, failedEdit.key, trashTool.key],
     });
-    const { container } = render(<AiTurnChangesSummary process={process} onOpenTool={onOpenTool} />);
+    const { container } = render(<AiTurnChangesSummary process={process} />);
 
     const trigger = container.querySelector<HTMLButtonElement>('.ai-turn-changes-trigger')!;
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
@@ -121,7 +120,52 @@ describe('AiTurnChangesSummary', () => {
     expect(screen.queryByText('etc/nginx/broken.conf')).not.toBeInTheDocument();
     expect(screen.getByText('Moved to Trash')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'View changes in etc/nginx/nginx.conf' }));
-    expect(onOpenTool).toHaveBeenCalledExactlyOnceWith(secondEditSameFile);
+    const fileButton = screen.getByRole('button', { name: 'View changes in etc/nginx/nginx.conf' });
+    expect(fileButton).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(fileButton);
+    expect(fileButton).toHaveAttribute('aria-expanded', 'true');
+    expect(container.querySelector('[data-ai-turn-changes-file-body] [data-ai-tool-view="diff"]')).toBeInTheDocument();
+    expect(container.textContent).toContain('keepalive_timeout 30;');
+
+    const deletedButton = screen.getByRole('button', { name: 'View changes in etc/nginx/old.conf' });
+    fireEvent.click(deletedButton);
+    expect(deletedButton).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Copy path' })).toBeInTheDocument();
+  });
+
+  it('expands a concise saved summary with path copy instead of raw JSON for diff-less saves like save_vim_buffer', () => {
+    const vimSave = makeTool({
+      key: 'tool:vim-save',
+      callId: 'call-vim-save',
+      name: 'save_vim_buffer',
+      nativeName: 'save_vim_buffer',
+      input: {
+        connectionPolicyBinding: 'secret-binding-hash',
+        path: '/root/agent_vim_test.txt',
+        snapshotId: 'snap-2',
+      },
+      output: {
+        editor: 'vim',
+        outcome: 'saved',
+        snapshot: {
+          lineCount: 3,
+        },
+      },
+    });
+    const process = makeProcess({
+      children: [vimSave],
+      childKeys: [vimSave.key],
+    });
+    const { container } = render(<AiTurnChangesSummary process={process} />);
+
+    fireEvent.click(container.querySelector<HTMLButtonElement>('.ai-turn-changes-trigger')!);
+    const fileButton = screen.getByRole('button', { name: 'View changes in /root/agent_vim_test.txt' });
+    fireEvent.click(fileButton);
+
+    expect(fileButton).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Saved · 3 lines')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy path' })).toBeInTheDocument();
+    expect(container.textContent).not.toContain('connectionPolicyBinding');
+    expect(container.textContent).not.toContain('snap-2');
   });
 });

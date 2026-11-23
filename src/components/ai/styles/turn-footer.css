@@ -141,6 +141,16 @@
   color: var(--ai-error);
 }
 
+.ai-turn-changes-file-body {
+  border-top: 1px solid var(--ai-border-soft);
+  background: var(--ai-canvas);
+}
+
+.ai-turn-changes-saved-summary {
+  background: var(--ai-code-block);
+  color: var(--ai-text-secondary);
+}
+
 .ai-turn-stat-note {
   color: var(--ai-text-muted);
   font-size: 11px;

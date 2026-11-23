@@ -64,7 +64,6 @@ export function AiSubagentToolCard({
   node,
 }: {
   readonly node: AiConversationNodeOf<'tool'>;
-  readonly onInspect?: (node: AiConversationNodeOf<'tool'>) => void;
 }): React.ReactNode {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);

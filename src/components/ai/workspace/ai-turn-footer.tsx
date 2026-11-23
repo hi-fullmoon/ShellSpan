@@ -84,11 +84,9 @@ function StatPopover({
 export function AiTurnFooter({
   node,
   turnProcess,
-  onOpenTool,
 }: {
   readonly node: AiConversationNodeOf<'turnTail'>;
   readonly turnProcess?: AiConversationNodeOf<'turnProcess'>;
-  readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
 }) {
   const { t, locale } = useI18n();
   const routes = useLlmRoutesStore((state) => state.snapshot?.routes);
@@ -127,7 +125,7 @@ export function AiTurnFooter({
       data-stop-reason={node.stopReason ?? undefined}
       aria-label={t('ai.workspace.stats.label')}
     >
-      <AiTurnChangesSummary process={turnProcess} onOpenTool={onOpenTool} />
+      <AiTurnChangesSummary process={turnProcess} />
       {node.status === 'incomplete' && (
         <Badge variant="secondary" className="mb-1">
           {t(stepBudgetReached ? 'ai.workspace.turnProcess.stepBudgetReached' : 'ai.workspace.turnProcess.incomplete')}

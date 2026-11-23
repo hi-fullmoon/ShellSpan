@@ -697,7 +697,7 @@ describe('AiConversationNodeList', () => {
       error: 'Provider rejected the call',
     });
     const { container } = render(
-      <AiConversationNodeList nodes={[running, completed, failed]} onOpenTool={openTool} />,
+      <AiConversationNodeList nodes={[running, completed, failed]} />,
     );
     const runningSeat = container.querySelector('[data-ai-node-key="tool:fixture"]') as HTMLElement;
     const completedSeat = container.querySelector('[data-ai-node-key="tool:read"]') as HTMLElement;

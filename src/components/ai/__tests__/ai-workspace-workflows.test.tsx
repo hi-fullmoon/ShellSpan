@@ -221,7 +221,6 @@ describe('AI workspace workflows', () => {
         composerState={composer}
         onApprove={approve}
         onReject={reject}
-        onOpenTool={openTool}
       />,
     );
 
@@ -255,7 +254,7 @@ describe('AI workspace workflows', () => {
     expect(screen.queryByText('nativePolicyRequiresApproval')).toBeNull();
     expect(screen.getByRole('button', { name: 'Allow once' })).not.toHaveFocus();
     await user.click(screen.getByRole('button', { name: 'View technical details' }));
-    expect(openTool).toHaveBeenCalledWith(tool);
+    expect(container.querySelector('[data-slot="ai-approval-full-parameters"]')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Allow once' }));
     expect(approve).toHaveBeenCalledOnce();
 
@@ -402,12 +401,12 @@ describe('AI workspace workflows', () => {
     expect(screen.getByRole('group', { name: /Allow this command/ })).toBeVisible();
   });
 
-  it('uses single-stack tool details and returns focus to the originating row', async () => {
+  it('uses single-stack stored output details and returns focus to the originating tool row', async () => {
     const user = userEvent.setup();
     function Harness(): React.ReactNode {
       const [navigation, setNavigation] = useState<AiWorkspaceNavigationState>({
         ...createAiWorkspaceNavigationState('agent-workflow'),
-        route: { kind: 'toolDetails' as const, sessionId: 'agent-workflow', nodeKey: tool.key },
+        route: { kind: 'artifactDetails' as const, sessionId: 'agent-workflow', artifactId: 'stored-output-1', sourceToolKey: tool.key },
         returnFocus: { sessionId: 'agent-workflow', nodeKey: tool.key },
       });
       return (
@@ -416,6 +415,14 @@ describe('AI workspace workflows', () => {
             view={agentView()}
             scope="terminal"
             navigation={navigation}
+            loadArtifact={async () => ({
+              metadata: {
+                artifactId: 'stored-output-1', kind: 'text', title: 'Output',
+                mediaType: 'text/plain', sha256: 'a'.repeat(64), sizeBytes: 12,
+                sensitivity: 'internal', createdAtUnixMs: 1,
+              },
+              bodyBase64: btoa('stored output'), truncated: false,
+            })}
             onBack={() => setNavigation((current) => ({
               ...current,
               route: { kind: 'conversation', sessionId: 'agent-workflow' },
@@ -426,71 +433,12 @@ describe('AI workspace workflows', () => {
       );
     }
     const { container } = render(<Harness />);
-    expect(container).toHaveTextContent('systemctl restart nginx');
-    expect(container).toHaveTextContent('conditional');
-    expect(container.querySelectorAll('[data-slot="ai-tool-details"]')).toHaveLength(1);
+    expect(await screen.findByText('stored output')).toBeInTheDocument();
     expect(container.querySelectorAll('aside')).toHaveLength(0);
     await user.click(screen.getByRole('button', { name: 'Back' }));
     await waitFor(() => expect(screen.getByRole('button', {
       name: 'Command: Restart the web server to apply its new configuration.',
     })).toHaveFocus());
-  });
-
-  it('opens a failed nested command by its key when another step reused the call ID', async () => {
-    const user = userEvent.setup();
-    const error = 'native policy rejects unscoped command network egress';
-    const command = 'which docker && docker --version';
-    const events = [
-      sessionEvent(0, { type: 'turn/start', turnId: 'turn-inspect' }),
-      sessionEvent(1, {
-        type: 'tool/call', turnId: 'turn-inspect', stepId: 'step-1',
-        data: { call: { callId: 'call-1', name: 'exec_command', arguments: { command: 'echo earlier' } } },
-      }),
-      sessionEvent(2, {
-        type: 'tool/result', turnId: 'turn-inspect', stepId: 'step-1',
-        data: { callId: 'call-1', name: 'exec_command', status: 'completed', summary: 'earlier output' },
-      }),
-      sessionEvent(3, {
-        type: 'tool/call', turnId: 'turn-inspect', stepId: 'step-2',
-        data: { call: {
-          callId: 'call-1', name: 'exec_command', arguments: { command, cwd: '/tmp' },
-          effect: 'externalSideEffect', target: tool.target!,
-        } },
-      }),
-      sessionEvent(4, {
-        type: 'tool/result', turnId: 'turn-inspect', stepId: 'step-2',
-        data: { callId: 'call-1', name: 'exec_command', status: 'failed', summary: error },
-      }),
-    ];
-    const view = {
-      ...agentView(),
-      summary: { ...agentView().summary, id: 'session-fixture' },
-      nodes: projectAgentChatNodes(events),
-    };
-    const failedTool = view.nodes
-      .flatMap((node) => (node.kind === 'turnProcess' ? node.children : []))
-      .find((node) => node.kind === 'tool' && node.state === 'failed');
-    expect(failedTool).toBeDefined();
-    const navigation = {
-      ...createAiWorkspaceNavigationState(view.summary.id),
-      route: { kind: 'toolDetails' as const, sessionId: view.summary.id, nodeKey: failedTool!.key },
-    };
-    const { container } = render(
-      <AiWorkspaceRoot
-        view={view}
-        scope="terminal"
-        navigation={navigation}
-      />,
-    );
-    const details = container.querySelector('[data-slot="ai-tool-details"]');
-    expect(details).toHaveTextContent(command);
-    expect(details).toHaveTextContent('/tmp');
-    expect(details).toHaveTextContent(error);
-    expect(details).toHaveTextContent('externalSideEffect');
-    expect(details).toHaveTextContent('Production');
-    expect(details).not.toHaveTextContent('echo earlier');
-    expect(details).not.toHaveTextContent('earlier output');
-    expect(details).not.toHaveTextContent('This item is not available');
   });
 
   it('loads Artifact content only after entering its details route', async () => {
@@ -617,7 +565,6 @@ describe('AI workspace workflows', () => {
         view={agentView()}
         scope="terminal"
         navigation={createAiWorkspaceNavigationState('agent-workflow')}
-        onOpenTool={vi.fn()}
       />,
     );
     expect(screen.queryByRole('tab')).toBeNull();

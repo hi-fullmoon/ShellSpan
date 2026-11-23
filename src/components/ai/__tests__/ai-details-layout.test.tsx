@@ -2,7 +2,6 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiArtifactDetails } from '@/components/ai/workspace/ai-artifact-details';
-import { AiToolDetails } from '@/components/ai/workspace/ai-tool-details';
 import { AiToolExpandedContent } from '@/components/ai/workspace/ai-tool-presentation';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
@@ -41,53 +40,6 @@ describe('AI details content sizing', () => {
     const lines = [...container.querySelectorAll('.ai-terminal-output .ai-block-line')]
       .map((line) => line.textContent);
     expect(lines).toEqual(expected);
-  });
-
-  it.each(['wait_process', 'run_code', 'read_file', 'search', 'unknown_tool'])('keeps %s detail copy actions in content regions and long payloads shrinkable', (name) => {
-    const node: AiConversationNodeOf<'tool'> = {
-      ...baseNode,
-      kind: 'tool', key: 'tool:long-command', callId: 'long-command',
-      name, nativeName: null, title: null,
-      summary: 'Command rejected', state: 'rejected',
-      effect: 'unknown', durationMs: null, evidenceRefs: [],
-      detailRef: { kind: 'agentTool', sessionId: baseNode.sessionId, callId: 'long-command' },
-      input: { command: longValue }, output: longValue, error: null,
-      target: null, idempotency: null, approval: null,
-    };
-    const { container } = render(<AiToolDetails node={node} onBack={vi.fn()} />);
-
-    // Base UI supplies min-width inline; a CSS class alone cannot override it.
-    const content = container.querySelector<HTMLElement>('[data-slot="scroll-area-content"]');
-    expect(content).toHaveStyle({ minWidth: '0' });
-    expect(content?.style.minWidth).not.toBe('fit-content');
-    expect(container.querySelector('.ai-detail-code')).toHaveTextContent(longValue);
-    const sections = [...container.querySelectorAll('.ai-detail-section')];
-    expect(sections).toHaveLength(3);
-    expect(container.querySelector('.ai-detail-sections')).toHaveClass('flex-col', 'overflow-hidden', 'min-h-0', 'flex-1');
-    expect(container.querySelector('.ai-detail-sections')).not.toHaveClass('overflow-y-auto');
-    expect(container.querySelector('.ai-details-body')).toHaveClass('min-h-0', 'overflow-hidden');
-    expect(container.querySelectorAll('.ai-detail-section > .ai-tool-content-region > [data-slot="scroll-area"]')).toHaveLength(3);
-    expect(container.querySelector('.ai-detail-summary')).toHaveClass('max-h-[30%]', 'min-h-0');
-    expect(container.querySelector('.ai-detail-summary-meta')).toHaveClass('shrink-0');
-    expect(container.querySelector('.ai-detail-summary .ai-content-title > span')).toHaveClass('line-clamp-2');
-    for (const section of sections) {
-      expect(section).toHaveClass('flex-col', 'min-h-0', 'flex-1', 'max-h-fit');
-      expect(section).not.toHaveClass('shrink-0');
-      expect(section).not.toHaveClass('overflow-hidden');
-      const header = section.querySelector('.ai-detail-section-header');
-      expect(header).toHaveClass('ai-content-header', 'min-h-6', 'items-center', 'justify-between', 'px-3.5', 'shrink-0');
-      const body = section.querySelector('.ai-tool-content-region');
-      expect(header?.nextElementSibling).toBe(body);
-      expect(body).toHaveClass('overflow-hidden');
-      expect(body).not.toContainElement(header?.querySelector('h3') ?? null);
-      expect(section.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'max-h-65');
-      expect(section.querySelectorAll('[data-slot="scroll-area-viewport"]')).toHaveLength(1);
-      expect(section.querySelector('[data-slot="scroll-area-content"]')).toHaveStyle({ minWidth: '0' });
-      expect(header?.querySelectorAll('.ai-tool-copy-button')).toHaveLength(0);
-      expect(section.querySelector('.ai-tool-content-region')).toContainElement(section.querySelector('.ai-tool-copy-button'));
-      expect(section.querySelectorAll('.ai-tool-copy-button')).toHaveLength(1);
-    }
-    expect(screen.getByRole('button', { name: 'Copy Output' })).toBeInTheDocument();
   });
 
   it('keeps loaded artifact details shrinkable without truncating the preview', async () => {

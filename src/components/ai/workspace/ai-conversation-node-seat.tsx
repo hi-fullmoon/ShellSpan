@@ -62,7 +62,7 @@ type AiConversationNodeRendererProps<Kind extends AiConversationNode['kind']> = 
   readonly hasResponse?: boolean;
   readonly processPanelIds?: string;
   readonly renderers?: AiConversationNodeRendererMap;
-  readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
+  readonly onOpenStoredOutput?: (node: AiConversationNodeOf<'tool'>, artifactId: string) => void;
   readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
 };
 
@@ -566,12 +566,12 @@ function AskReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'r
 
 function ToolNodeView({
   node,
-  onOpenTool,
+  onOpenStoredOutput,
 }: {
   readonly node: AiConversationNodeOf<'tool'>;
-  readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
+  readonly onOpenStoredOutput?: (node: AiConversationNodeOf<'tool'>, artifactId: string) => void;
 }) {
-  return <AiToolRow node={node} onInspect={onOpenTool} />;
+  return <AiToolRow node={node} onOpenStoredOutput={onOpenStoredOutput} />;
 }
 
 function ArtifactNodeView({
@@ -748,13 +748,13 @@ function liveTurnProcessAction(
 function TurnProcessDisclosure({
   node,
   onOpenArtifact,
-  onOpenTool,
+  onOpenStoredOutput,
   renderers,
   processControlOnly = false,
   processPanelIds,
 }: {
   readonly node: AiConversationNodeOf<'turnProcess'>;
-  readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
+  readonly onOpenStoredOutput?: (node: AiConversationNodeOf<'tool'>, artifactId: string) => void;
   readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
   readonly renderers: AiConversationNodeRendererMap;
   readonly processControlOnly?: boolean;
@@ -848,7 +848,7 @@ function TurnProcessDisclosure({
                   node={entry.node}
                   groupedTools={entry.groupedTools}
                   renderers={renderers}
-                  onOpenTool={onOpenTool}
+                  onOpenStoredOutput={onOpenStoredOutput}
                   onOpenArtifact={onOpenArtifact}
                   inTurnProcess
                 />
@@ -864,7 +864,7 @@ function TurnProcessDisclosure({
 function TurnProcessRow({
   node,
   onOpenArtifact,
-  onOpenTool,
+  onOpenStoredOutput,
   renderers = aiConversationNodeRenderers,
   processControlOnly,
   hasResponse,
@@ -873,7 +873,7 @@ function TurnProcessRow({
   if (!node.children.some((child) => child.kind !== 'contextInjection' || isUserVisibleContextInjection(child))
     && !(processControlOnly && hasResponse && !node.hasEndBoundary)) return null;
   const key = turnProcessDisclosureKey(node);
-  return <TurnProcessDisclosure key={key} node={node} renderers={renderers} onOpenTool={onOpenTool} onOpenArtifact={onOpenArtifact} processControlOnly={processControlOnly} processPanelIds={processPanelIds} />;
+  return <TurnProcessDisclosure key={key} node={node} renderers={renderers} onOpenStoredOutput={onOpenStoredOutput} onOpenArtifact={onOpenArtifact} processControlOnly={processControlOnly} processPanelIds={processPanelIds} />;
 }
 
 export const aiConversationNodeRenderers = {
@@ -905,7 +905,7 @@ function assertNever(value: never): never {
 function renderNode(
   node: AiConversationNode,
   renderers: AiConversationNodeRendererMap,
-  onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void,
+  onOpenStoredOutput?: (node: AiConversationNodeOf<'tool'>, artifactId: string) => void,
   onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void,
   inTurnProcess = false,
   deferMessageActions = false,
@@ -930,9 +930,9 @@ function renderNode(
       return React.createElement(renderers.reasoning, { node });
     case 'tool':
       if (groupedTools && groupedTools.length > 1 && renderers.tool === ToolNodeView) {
-        return <AiToolGroupRow tools={groupedTools} onInspect={onOpenTool} />;
+        return <AiToolGroupRow tools={groupedTools} onOpenStoredOutput={onOpenStoredOutput} />;
       }
-      return React.createElement(renderers.tool, { node, onOpenTool });
+      return React.createElement(renderers.tool, { node, onOpenStoredOutput });
     case 'question':
       return React.createElement(renderers.question, { node });
     case 'artifact':
@@ -949,14 +949,14 @@ function renderNode(
       return React.createElement(renderers.turnProcess, {
         node,
         renderers,
-        onOpenTool,
+        onOpenStoredOutput,
         onOpenArtifact,
         processControlOnly,
         hasResponse,
         processPanelIds,
       });
     case 'turnTail':
-      return React.createElement(renderers.turnTail, { node, renderers, turnProcess, onOpenTool });
+      return React.createElement(renderers.turnTail, { node, renderers, turnProcess });
     default:
       return assertNever(node);
   }
@@ -1003,21 +1003,21 @@ const ConversationNodeContent = React.memo(
     node,
     groupedTools,
     renderers,
-    onOpenTool,
+    onOpenStoredOutput,
     onOpenArtifact,
     inTurnProcess,
   }: {
     readonly node: AiConversationNode;
     readonly groupedTools?: readonly AiConversationNodeOf<'tool'>[];
     readonly renderers: AiConversationNodeRendererMap;
-    readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
+    readonly onOpenStoredOutput?: (node: AiConversationNodeOf<'tool'>, artifactId: string) => void;
     readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
     readonly inTurnProcess?: boolean;
   }) {
     return renderNode(
       node,
       renderers,
-      onOpenTool,
+      onOpenStoredOutput,
       onOpenArtifact,
       inTurnProcess,
       false,
@@ -1030,7 +1030,7 @@ const ConversationNodeContent = React.memo(
   },
   (previous, next) =>
     previous.renderers === next.renderers &&
-    previous.onOpenTool === next.onOpenTool &&
+    previous.onOpenStoredOutput === next.onOpenStoredOutput &&
     previous.onOpenArtifact === next.onOpenArtifact &&
     previous.inTurnProcess === next.inTurnProcess &&
     sameGroupedTools(previous.groupedTools, next.groupedTools) &&
@@ -1057,7 +1057,7 @@ export const AiConversationNodeSeat = React.memo(
     node,
     groupedTools,
     renderers = aiConversationNodeRenderers,
-    onOpenTool,
+    onOpenStoredOutput,
     onOpenArtifact,
     deferMessageActions = false,
     inTurnProcess = false,
@@ -1078,7 +1078,7 @@ export const AiConversationNodeSeat = React.memo(
     readonly processControlOnly?: boolean;
     readonly hasResponse?: boolean;
     readonly processPanelIds?: string;
-    readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
+    readonly onOpenStoredOutput?: (node: AiConversationNodeOf<'tool'>, artifactId: string) => void;
     readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
   }) {
     if (node.kind === 'runtimeArtifacts') return null;
@@ -1092,7 +1092,7 @@ export const AiConversationNodeSeat = React.memo(
         {renderNode(
           node,
           renderers,
-          onOpenTool,
+          onOpenStoredOutput,
           onOpenArtifact,
           inTurnProcess,
           deferMessageActions,
@@ -1107,7 +1107,7 @@ export const AiConversationNodeSeat = React.memo(
   },
   (previous, next) =>
     previous.renderers === next.renderers &&
-    previous.onOpenTool === next.onOpenTool &&
+    previous.onOpenStoredOutput === next.onOpenStoredOutput &&
     previous.onOpenArtifact === next.onOpenArtifact &&
     previous.deferMessageActions === next.deferMessageActions &&
     previous.inTurnProcess === next.inTurnProcess &&
@@ -1123,12 +1123,12 @@ AiConversationNodeSeat.displayName = 'AiConversationNodeSeat';
 export function AiConversationNodeList({
   nodes,
   renderers = aiConversationNodeRenderers,
-  onOpenTool,
+  onOpenStoredOutput,
   onOpenArtifact,
 }: {
   readonly nodes: readonly AiConversationNode[];
   readonly renderers?: AiConversationNodeRendererMap;
-  readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
+  readonly onOpenStoredOutput?: (node: AiConversationNodeOf<'tool'>, artifactId: string) => void;
   readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
 }) {
   const processByTurn = new Map<string, AiConversationNodeOf<'turnProcess'>>();
@@ -1142,7 +1142,7 @@ export function AiConversationNodeList({
       key={node.key}
       node={node}
       renderers={renderers}
-      onOpenTool={onOpenTool}
+      onOpenStoredOutput={onOpenStoredOutput}
       onOpenArtifact={onOpenArtifact}
       turnProcess={node.kind === 'turnTail' && node.turnId ? processByTurn.get(`${node.sessionId}:${node.turnId}`) : undefined}
       scrollAnchor={node.kind === 'userMessage'}

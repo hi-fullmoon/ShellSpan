@@ -5,7 +5,6 @@ import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync } from 'node:
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { AiToolDetails } from '@/components/ai/workspace/ai-tool-details';
 import { AiToolExpandedContent, toolOutputForCopy } from '@/components/ai/workspace/ai-tool-presentation';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { stripAnsi } from '@/lib/terminal/terminal-output-buffer';
@@ -50,7 +49,7 @@ describe('terminal result presentation', () => {
     const result = execute('console.log(process.cwd()); console.log(process.version)');
     const metadata = { commandLine: result.command, cwd: process.cwd(), exitCode: result.exitCode, execution: 'completed' };
     const node = terminalNode(result.command, { ...metadata, stdout: '', stderr: '', combinedOutput: result.stdout });
-    const { container, rerender } = render(<AiToolExpandedContent node={node} />);
+    const { container } = render(<AiToolExpandedContent node={node} />);
     expect([...container.querySelectorAll('[data-ai-terminal-output] .ai-block-line')].map(line => line.textContent).join('\n')).toBe(result.stdout.trimEnd());
     expect(container.querySelector('[data-ai-terminal-output]')).not.toHaveTextContent('commandLine');
     expect(container.querySelector('.ai-terminal-footer')).toHaveTextContent(locale === 'zh-CN' ? /^成功$/u : /^Succeeded$/u);
@@ -58,16 +57,6 @@ describe('terminal result presentation', () => {
     expect(container.querySelector('.ai-terminal-header')).toHaveTextContent(/^Shell$/u);
     expect(container.querySelector('[data-ai-terminal-execution]')).not.toHaveClass('ai-terminal-exit');
     expect(toolOutputForCopy(node)).toBe(result.stdout);
-
-    rerender(<AiToolDetails node={node} onBack={() => undefined} />);
-    const sections = container.querySelectorAll('.ai-detail-section');
-    expect(sections[1].querySelector('.ai-terminal-header [data-ai-terminal-execution]')).toHaveTextContent(locale === 'zh-CN' ? '进程已退出' : 'Process exited');
-    expect(sections[1].querySelector('.ai-terminal-footer')).not.toBeInTheDocument();
-    expect(sections[1]).not.toHaveTextContent('commandLine');
-    expect(sections[2].querySelector('h3')).toHaveTextContent(locale === 'zh-CN' ? '执行信息' : 'Execution details');
-    expect(sections[2].querySelector('code')?.textContent).toBe(JSON.stringify(metadata, null, 2));
-    expect(sections[2].querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'max-h-65');
-    expect(sections[2].querySelector('[data-slot="scroll-area-content"]')).toHaveStyle({ minWidth: '0' });
   });
 
   it.each(['combined', 'separate'] as const)('keeps an empty %s capture empty instead of displaying its envelope', format => {
@@ -133,16 +122,13 @@ describe('terminal result presentation', () => {
     const output = format === 'combined' ? { combinedOutput: combined }
       : format === 'separate' ? { stdout: result.stdout, stderr: result.stderr } : combined;
     const node = terminalNode(result.command, output);
-    const { container, rerender } = render(<AiToolExpandedContent node={node} />);
+    const { container } = render(<AiToolExpandedContent node={node} />);
     const outputLines = () => [...container.querySelectorAll('[data-ai-terminal-output] .ai-block-line')]
       .map(line => line.textContent);
 
     const stdoutLine = `${process.release.name}  版本 ${process.version}`;
     expect(outputLines()).toEqual([stdoutLine, process.platform]);
     expect(toolOutputForCopy(node)).toBe(`${stdoutLine}\r\n${process.platform}\n`);
-
-    rerender(<AiToolDetails node={node} onBack={() => undefined} />);
-    expect(outputLines()).toEqual([stdoutLine, process.platform]);
   });
 
   it('shows the exited job status instead of the successful launch status', () => {

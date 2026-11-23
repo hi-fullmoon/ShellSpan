@@ -136,7 +136,6 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly onOpenModel?: () => void;
   readonly onApprove?: () => void;
   readonly onReject?: () => void;
-  readonly onOpenApprovalDetails?: () => void;
 }
 
 /** ShellSpan composer surface backed by the existing workspace state machine. */
@@ -205,7 +204,6 @@ export function AiComposerSeat({
   onOpenModel,
   onApprove,
   onReject,
-  onOpenApprovalDetails,
 }: AiComposerSeatProps): React.ReactNode {
   const { t } = useI18n();
   const toast = useToast();
@@ -600,7 +598,6 @@ export function AiComposerSeat({
           argumentsError={approvalArgumentsError}
           onApprove={onApprove}
           onReject={onReject}
-          onOpenDetails={onOpenApprovalDetails}
         />}
         {mode === 'agent' && (
           <AiTaskStrip

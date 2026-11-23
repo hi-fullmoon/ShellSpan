@@ -62,22 +62,22 @@ describe('approval identity across repeated tool calls', () => {
     });
   });
 
-  it('opens the pending command inside Turn Process instead of a previous same-ID command', async () => {
+  it('expands the pending command full parameters inline inside the approval card', async () => {
     const user = userEvent.setup();
     const view = waitingView();
-    const onOpenTool = vi.fn();
-    render(<AiWorkspaceRoot
+    const { container } = render(<AiWorkspaceRoot
       view={view}
       scope="terminal"
       composerState={createAiComposerState({
         phase: 'waitingApproval', runtimeStatus: 'waiting', waitingApproval: true, sessionId: 'session-fixture',
       })}
-      onOpenTool={onOpenTool}
     />);
-    await user.click(screen.getByRole('button', { name: 'View technical details' }));
-    expect(onOpenTool).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      kind: 'tool', sessionId: 'session-fixture', turnId: 'turn-1', stepId: 'step-2',
-      callId: 'call-health', input: { command: 'systemctl restart nginx' }, effect: 'stateChange',
-    }));
+    const detailsButton = screen.getByRole('button', { name: 'View technical details' });
+    expect(detailsButton).toHaveAttribute('aria-expanded', 'false');
+    await user.click(detailsButton);
+    expect(detailsButton).toHaveAttribute('aria-expanded', 'true');
+    const parametersRegion = container.querySelector('[data-slot="ai-approval-full-parameters"]');
+    expect(parametersRegion).toBeInTheDocument();
+    expect(parametersRegion?.textContent).toContain('systemctl restart nginx');
   });
 });

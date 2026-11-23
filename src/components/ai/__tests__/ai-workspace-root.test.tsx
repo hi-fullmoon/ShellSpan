@@ -288,12 +288,12 @@ describe('AiWorkspaceRoot conversation structure', () => {
       } : node),
     };
     const readKey = read.key;
-    let openReadDetails: (() => void) | undefined;
+    let openStoredOutputDetails: (() => void) | undefined;
     function DetailsWorkspace() {
       const [navigation, setNavigation] = useState(createAiWorkspaceNavigationState(view.summary.id));
-      openReadDetails = () => setNavigation((current) => ({
+      openStoredOutputDetails = () => setNavigation((current) => ({
         ...current,
-        route: { kind: 'toolDetails', sessionId: view.summary.id, nodeKey: readKey },
+        route: { kind: 'artifactDetails', sessionId: view.summary.id, artifactId: 'stored-out-1', sourceToolKey: readKey },
       }));
       return (
         <AiWorkspaceRoot
@@ -301,6 +301,14 @@ describe('AiWorkspaceRoot conversation structure', () => {
           scope="terminal"
           defaultDraft="Unsent draft"
           navigation={navigation}
+          loadArtifact={async () => ({
+            metadata: {
+              artifactId: 'stored-out-1', kind: 'text', title: 'Stored output',
+              mediaType: 'text/plain', sha256: 'a'.repeat(64), sizeBytes: 12,
+              sensitivity: 'internal', createdAtUnixMs: 1,
+            },
+            bodyBase64: btoa('stored output'), truncated: false,
+          })}
           onBack={() => setNavigation({ ...navigation, route: { kind: 'conversation', sessionId: view.summary.id } })}
         />
       );
@@ -315,11 +323,10 @@ describe('AiWorkspaceRoot conversation structure', () => {
     await user.click(screen.getByRole('button', { name: /^Read:/u }));
     expect(screen.queryByRole('button', { name: `Open details for ${read.name}` })).not.toBeInTheDocument();
     act(() => {
-      openReadDetails?.();
+      openStoredOutputDetails?.();
     });
-    const detail = container.querySelector('[data-slot="ai-tool-details"]');
+    const detail = container.querySelector('.ai-details-root');
     expect(detail).toBeVisible();
-    expect(detail).toHaveTextContent(read.summary);
     expect(tool).not.toBeVisible();
     expect(screen.queryByRole('textbox')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Back' }));
@@ -898,7 +905,6 @@ describe('AiWorkspaceRoot conversation structure', () => {
       idempotency: null,
       approval: null,
     };
-    const onOpenTool = vi.fn();
     const { container, rerender } = render(
       <AiWorkspaceRoot
         view={{
@@ -918,7 +924,6 @@ describe('AiWorkspaceRoot conversation structure', () => {
         mode="agent"
         sessions={[base.summary, child, grandchild]}
         onOpenSession={vi.fn()}
-        onOpenTool={onOpenTool}
       />,
     );
 
@@ -937,7 +942,6 @@ describe('AiWorkspaceRoot conversation structure', () => {
     await user.click(mainExpandButton);
     expect(within(uncertainCard).getByText('Outcome lost after disconnect')).toBeVisible();
     expect(within(uncertainCard).queryByRole('button', { name: 'Open details for Probe remote service' })).not.toBeInTheDocument();
-    expect(onOpenTool).not.toHaveBeenCalled();
 
     expect(staticCard).not.toHaveAttribute('data-clickable');
     expect(staticCard).not.toHaveAttribute('data-openable');
@@ -979,7 +983,6 @@ describe('AiWorkspaceRoot conversation structure', () => {
         mode="agent"
         sessions={[base.summary, child, grandchild]}
         onOpenSession={vi.fn()}
-        onOpenTool={onOpenTool}
       />,
     );
 
@@ -1008,7 +1011,6 @@ describe('AiWorkspaceRoot conversation structure', () => {
         mode="agent"
         sessions={[base.summary, child, grandchild]}
         onOpenSession={vi.fn()}
-        onOpenTool={onOpenTool}
       />,
     );
 

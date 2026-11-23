@@ -270,7 +270,6 @@ export function AiWorkspaceController({
       onReorderQueueLane={controller.reorderQueueLane}
       onRenameSession={controller.renameSession}
       onBack={controller.back}
-      onOpenTool={controller.openToolDetails}
       onOpenStoredOutput={controller.openStoredToolOutput}
       onOpenArtifact={controller.openArtifactDetails}
       onScrollAnchorChange={controller.saveScrollAnchor}

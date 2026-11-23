@@ -21,8 +21,7 @@ export async function show(approval: AiApprovalPanelProps['approval'], locale: L
   flushSync(() => root.render(
     <main className="ai-panel-shell @container/ai-workspace min-h-dvh min-w-0 p-3" data-ai-scope="workbench">
       <AiApprovalPanel approval={approval} decision={null} error={null}
-        onApprove={() => record('approve')} onReject={() => record('reject')}
-        onOpenDetails={() => record('details')} />
+        onApprove={() => record('approve')} onReject={() => record('reject')} />
     </main>,
   ));
 }
@@ -41,8 +40,7 @@ export async function showComposer(approval: AiApprovalPanelProps['approval']) {
           composerState={createAiComposerState({ phase: 'waitingApproval', runtimeStatus: 'waiting',
             waitingApproval: true, sessionId: approval.sessionId, draft: 'preserved draft' })}
           onApprove={() => record('approve')} onReject={() => record('reject')}
-          onSubmitGesture={() => record('queue')}
-          onOpenApprovalDetails={() => record('details')} />
+          onSubmitGesture={() => record('queue')} />
       </div>
     </main>,
   ));
@@ -60,7 +58,7 @@ export async function showSudo(approval: AiApprovalPanelProps['approval'], local
   const render = (authenticating: boolean) => root.render(
     <main className="ai-panel-shell @container/ai-workspace min-h-dvh min-w-0 p-3" data-ai-scope="workbench">
       <AiApprovalPanel approval={approval} decision={authenticating ? 'approve' : null} error={null}
-        onApprove={() => render(true)} onReject={() => render(false)} onOpenDetails={() => {}} />
+        onApprove={() => render(true)} onReject={() => render(false)} />
       {authenticating && <AiSudoDialog request={{ state: 'requested', promptId: approval.approvalId,
         host: host!, port: sudoOperation.runnerPort, username: sudoOperation.runnerUsername, command }}
         onRespond={async (id, password) => {

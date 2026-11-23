@@ -118,7 +118,6 @@ describe('AiSubagentToolCard', () => {
       const user = userEvent.setup();
       const childSummary = makeSummary();
       const onOpenSession = vi.fn();
-      const onInspect = vi.fn();
       const node = makeSubagentNode();
       const contextValue: AiSubagentContextValue = {
         lineage: makeLineage(childSummary),
@@ -128,7 +127,7 @@ describe('AiSubagentToolCard', () => {
 
       const { container } = render(
         <AiSubagentContext.Provider value={contextValue}>
-          <AiSubagentToolCard node={node} onInspect={onInspect} />
+          <AiSubagentToolCard node={node} />
         </AiSubagentContext.Provider>,
       );
 
@@ -157,7 +156,6 @@ describe('AiSubagentToolCard', () => {
       await user.click(rowTrigger);
       expect(onOpenSession).toHaveBeenCalledTimes(1);
       expect(onOpenSession).toHaveBeenCalledWith(childSummary);
-      expect(onInspect).not.toHaveBeenCalled();
       expect(card.querySelector('.ai-subagent-card-body')).toBeNull();
     },
   );
@@ -169,10 +167,9 @@ describe('AiSubagentToolCard', () => {
       useAppStore.setState({ locale });
 
       const user = userEvent.setup();
-      const onInspect = vi.fn();
       const node = makeSubagentNode();
 
-      const { container } = render(<AiSubagentToolCard node={node} onInspect={onInspect} />);
+      const { container } = render(<AiSubagentToolCard node={node} />);
 
       const expectedRowTitle = locale === 'zh-CN' ? '执行子代理' : 'Operator subagent';
       const goalLabel = locale === 'zh-CN' ? '任务目标' : 'Task goal';
@@ -225,7 +222,6 @@ describe('AiSubagentToolCard', () => {
 
       expect(within(body).queryByText(inspectLabel)).not.toBeInTheDocument();
       expect(within(body).queryByRole('button')).toBeNull();
-      expect(onInspect).not.toHaveBeenCalled();
 
       await user.click(rowTrigger);
       expect(rowTrigger).toHaveAttribute('aria-expanded', 'false');
@@ -252,11 +248,10 @@ describe('AiSubagentToolCard', () => {
     expect(within(body).queryByRole('button')).toBeNull();
   });
 
-  it('renders a non-expandable row when there are no body details even if onInspect is provided', async () => {
+  it('renders a non-expandable row when there are no body details', async () => {
     await initI18n('en-US');
     useAppStore.setState({ locale: 'en-US' });
 
-    const onInspect = vi.fn();
     const node = makeSubagentNode({
       summary: '',
       input: {
@@ -266,7 +261,7 @@ describe('AiSubagentToolCard', () => {
       output: { status: 'completed' },
     });
 
-    const { container } = render(<AiSubagentToolCard node={node} onInspect={onInspect} />);
+    const { container } = render(<AiSubagentToolCard node={node} />);
     const card = container.querySelector('[data-slot="ai-subagent-card"]') as HTMLElement;
     expect(card).not.toHaveAttribute('data-clickable');
     expect(container.querySelector('.ai-subagent-row-trigger')?.tagName).toBe('DIV');

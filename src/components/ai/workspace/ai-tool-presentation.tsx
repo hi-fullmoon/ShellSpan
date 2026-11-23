@@ -34,6 +34,7 @@ import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
+import { storedToolOutputId } from '@/lib/ai/conversation-tool';
 import { aiErrorMessage, httpProbeTimeoutKind } from '@/lib/ai/error-message';
 import { renderTerminalTranscript } from '@/lib/terminal/terminal-output-buffer';
 import { cn } from '@/lib/utils';
@@ -1191,15 +1192,15 @@ export function AiToolExpandedContent({
 
 export function AiToolRow({
   node,
-  onInspect,
+  onOpenStoredOutput,
 }: {
   readonly node: ToolNode;
-  readonly onInspect?: (node: ToolNode) => void;
+  readonly onOpenStoredOutput?: (node: ToolNode, artifactId: string) => void;
 }) {
   if (isSubagentDelegationTool(node.name, node.nativeName)) {
-    return <AiSubagentToolCard node={node} onInspect={onInspect} />;
+    return <AiSubagentToolCard node={node} />;
   }
-  return <StandardAiToolRow node={node} />;
+  return <StandardAiToolRow node={node} onOpenStoredOutput={onOpenStoredOutput} />;
 }
 
 function toolGroupTargetLabel(node: ToolNode, variant: 'read' | 'search'): string | null {
@@ -1219,10 +1220,10 @@ function toolGroupTargetLabel(node: ToolNode, variant: 'read' | 'search'): strin
 
 export function AiToolGroupRow({
   tools,
-  onInspect,
+  onOpenStoredOutput,
 }: {
   readonly tools: readonly ToolNode[];
-  readonly onInspect?: (node: ToolNode) => void;
+  readonly onOpenStoredOutput?: (node: ToolNode, artifactId: string) => void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -1319,7 +1320,7 @@ export function AiToolGroupRow({
         <CollapsibleContent>
           <div className="ai-tool-group-body ml-[22px] flex min-w-0 max-w-[calc(100%-22px)] flex-col gap-1 border-l pt-1 pb-0.5 pl-2.5">
             {tools.map((tool) => (
-              <AiToolRow key={tool.key} node={tool} onInspect={onInspect} />
+              <AiToolRow key={tool.key} node={tool} onOpenStoredOutput={onOpenStoredOutput} />
             ))}
           </div>
         </CollapsibleContent>
@@ -1330,8 +1331,10 @@ export function AiToolGroupRow({
 
 function StandardAiToolRow({
   node,
+  onOpenStoredOutput,
 }: {
   readonly node: ToolNode;
+  readonly onOpenStoredOutput?: (node: ToolNode, artifactId: string) => void;
 }) {
   const { t } = useI18n();
   const variant = classifyAiTool(node.name, node.nativeName);
@@ -1376,6 +1379,7 @@ function StandardAiToolRow({
   const title = toolTitle(node, variant, t);
   const model = useMemo(() => variant === 'write' || variant === 'edit' ? diffModel(node) : null, [node, variant]);
   const changeStat = model ? diffStat(model) : null;
+  const storedOutputId = storedToolOutputId(node);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div
@@ -1424,6 +1428,17 @@ function StandardAiToolRow({
         <CollapsibleContent>
           <div className="ai-tool-body flex min-w-0 max-w-full flex-col">
             <AiToolExpandedContent node={node} compact diffModel={model ?? undefined} />
+            {storedOutputId && onOpenStoredOutput && (
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                className="mt-1.5 ml-1 shrink-0 self-start"
+                onClick={() => onOpenStoredOutput(node, storedOutputId)}
+              >
+                {t('ai.workspace.details.openStoredOutput')}
+              </Button>
+            )}
           </div>
         </CollapsibleContent>
       </div>

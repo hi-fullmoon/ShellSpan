@@ -6,7 +6,6 @@ import { AiSessionHeader } from '@/components/ai/workspace/ai-session-header';
 import { AiSubagentCatalog } from '@/components/ai/workspace/ai-subagent-catalog';
 import { AiRouteHeader } from '@/components/ai/workspace/ai-route-header';
 import { AiSessionBrowser } from '@/components/ai/workspace/ai-session-browser';
-import { AiToolDetails } from '@/components/ai/workspace/ai-tool-details';
 import { AiArtifactDetails } from '@/components/ai/workspace/ai-artifact-details';
 import type { AiSessionSummary } from '@/lib/ai/session-adapter';
 import { initI18n } from '@/locales';
@@ -82,7 +81,7 @@ describe('AiSessionHeader', () => {
     expect(routeHeader).not.toHaveClass('border-border');
   });
 
-  it.each(['history', 'tool details', 'artifact details'] as const)(
+  it.each(['history', 'artifact details'] as const)(
     'uses the same buttons in %s and preserves navigation',
     async (page) => {
       const user = userEvent.setup();
@@ -96,8 +95,6 @@ describe('AiSessionHeader', () => {
           onBack={onBack} onClose={onClose} onNew={onNew} onRefresh={onRefresh}
           onOpen={vi.fn()} onArchive={vi.fn()}
         />
-      ) : page === 'tool details' ? (
-        <AiToolDetails node={null} onBack={onBack} onClose={onClose} />
       ) : (
         <AiArtifactDetails sessionId="fixture" node={null} load={vi.fn()} onBack={onBack} onClose={onClose} />
       ));

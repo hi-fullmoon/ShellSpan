@@ -16,7 +16,6 @@ import type { AiConversationNode } from '@/lib/ai/conversation-node';
 import { taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
-import { findConversationTool, storedToolOutputId } from '@/lib/ai/conversation-tool';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
 import type { AiInboxItem, AiSessionView } from '@/lib/ai/session-adapter';
 import type { AiSessionSummary } from '@/lib/ai/session-adapter';
@@ -57,7 +56,6 @@ import {
   correlateSubagentToolSessions,
   filterActiveSubagentEntries,
 } from '@/lib/ai/subagent-lineage';
-import { AiToolDetails } from './ai-tool-details';
 import { AiArtifactDetails } from './ai-artifact-details';
 import type { AiQueueMutationState } from './use-ai-session-controller';
 import { AiWorkspaceErrorNotices } from './ai-workspace-error-notices';
@@ -287,8 +285,7 @@ export interface AiWorkspaceRootProps {
   readonly onReorderQueueLane?: (lane: AiInboxItem['lane'], orderedItemIds: readonly string[]) => void;
   readonly onRenameSession?: (summary: AiSessionSummary, title: string) => void;
   readonly onBack?: () => void;
-  readonly onOpenTool?: (node: import('@/lib/ai/conversation-node').AiConversationNodeOf<'tool'>) => void;
-  readonly onOpenStoredOutput?: (artifactId: string) => void;
+  readonly onOpenStoredOutput?: (node: import('@/lib/ai/conversation-node').AiConversationNodeOf<'tool'>, artifactId: string) => void;
   readonly onOpenArtifact?: (node: import('@/lib/ai/conversation-node').AiConversationNodeOf<'artifact'>) => void;
   readonly onScrollAnchorChange?: (anchor: AiScrollAnchor) => void;
   readonly onRouteReturnComplete?: () => void;
@@ -391,7 +388,6 @@ export function AiWorkspaceRoot({
   onReorderQueueLane,
   onRenameSession,
   onBack,
-  onOpenTool,
   onOpenStoredOutput,
   onOpenArtifact,
   onScrollAnchorChange,
@@ -541,10 +537,6 @@ export function AiWorkspaceRoot({
   const scrollAnchor = sessionLedgerKey
     ? navigation.scrollAnchorBySession[sessionLedgerKey]
     : undefined;
-  const toolDetailsNode = route.kind === 'toolDetails' && view
-    ? findConversationTool(view.nodes, route)
-    : undefined;
-  const storedOutputId = toolDetailsNode && storedToolOutputId(toolDetailsNode);
   const artifactDetailsNode = route.kind === 'artifactDetails'
     ? conversationArtifacts(view?.nodes ?? []).find((node) => node.artifactId === route.artifactId)
     : undefined;
@@ -825,14 +817,7 @@ export function AiWorkspaceRoot({
       className="ai-workspace-root @container/ai-workspace flex size-full min-h-0 min-w-0 flex-col overflow-x-hidden"
       aria-label={t('ai.workspace')}
     >
-      {route.kind === 'toolDetails' ? (
-        <AiToolDetails
-          node={toolDetailsNode ?? null}
-          onOpenStoredOutput={storedOutputId && onOpenStoredOutput ? () => onOpenStoredOutput(storedOutputId) : undefined}
-          onBack={() => onBack?.()}
-          onClose={onClose}
-        />
-      ) : route.kind === 'artifactDetails' ? (
+      {route.kind === 'artifactDetails' ? (
         <AiArtifactDetails
           sessionId={route.sessionId}
           node={artifactDetailsNode?.kind === 'artifact' ? artifactDetailsNode : null}
@@ -843,7 +828,7 @@ export function AiWorkspaceRoot({
           onClose={onClose}
         />
       ) : null}
-      <Activity mode={route.kind === 'toolDetails' || route.kind === 'artifactDetails' ? 'hidden' : 'visible'}>
+      <Activity mode={route.kind === 'artifactDetails' ? 'hidden' : 'visible'}>
       <AiSessionHeader
         extraActions={headerActions}
         editorBadge={editorAttachedBadge}
@@ -945,7 +930,7 @@ export function AiWorkspaceRoot({
               throughSeq={view?.throughSeq ?? null}
               initialAnchor={scrollAnchor}
               onAnchorChange={onScrollAnchorChange}
-              onOpenTool={onOpenTool}
+              onOpenStoredOutput={onOpenStoredOutput}
               onOpenArtifact={onOpenArtifact}
               canLoadOlder={view?.canLoadOlder}
               loadingOlder={loadingOlder}
@@ -1126,12 +1111,6 @@ export function AiWorkspaceRoot({
           onOpenModel={onOpenModel}
           onApprove={canResolveApproval ? onApprove : undefined}
           onReject={canResolveApproval ? onReject : undefined}
-          onOpenApprovalDetails={() => {
-            if (!canResolveApproval || !view.pendingApproval) return;
-            const approval = view.pendingApproval;
-            const tool = findConversationTool(view.nodes, approval);
-            if (tool) onOpenTool?.(tool);
-          }}
         />
       </div>
       </Activity>

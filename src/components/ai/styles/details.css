@@ -56,39 +56,10 @@
   height: 13px;
 }
 
-[data-slot='ai-tool-details'] .ai-detail-section > .ai-tool-content-region {
-  border: 1px solid var(--ai-border-soft);
-  border-radius: var(--ai-content-radius);
-  background: var(--ai-code-block);
-}
-
 .ai-detail-section-header h3 {
   margin: 0;
   color: inherit;
   font: inherit;
-}
-
-[data-slot='ai-tool-details'] .ai-tool-surface-header {
-  min-height: calc(var(--spacing) * 8);
-}
-
-[data-slot='ai-tool-details'] .ai-detail-code {
-  border-radius: 0;
-}
-
-[data-slot='ai-tool-details'] [data-ai-tool-view],
-[data-slot='ai-tool-details'] .ai-io-card > .ai-io-section {
-  max-height: none;
-  max-width: 100%;
-  margin: 0;
-  border: 0;
-  border-radius: 0;
-  overflow: visible;
-}
-
-[data-slot='ai-tool-details'] .ai-terminal-command {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
 .ai-artifact-image-surface {

@@ -18,15 +18,14 @@ import type { AiSessionAdapter, AiSessionView } from '@/lib/ai/session-adapter';
 import type { LocaleKey } from '@/locales';
 import type { AgentSessionListItem } from '@/types/agent-session';
 import { AiConversation } from './workspace/ai-conversation';
-import { AiToolDetails } from './workspace/ai-tool-details';
 import { AiArtifactDetails } from './workspace/ai-artifact-details';
 import { AiSessionRecordsList } from './ai-session-records-list';
 import { AiSessionRecordsDeleteAll } from './ai-session-records-delete-all';
 
 type RecordFilter = 'all' | 'terminal' | 'workbench' | 'archived';
 type RecordDetail =
-  | { kind: 'tool'; node: AiConversationNodeOf<'tool'> }
-  | { kind: 'artifact'; node: AiConversationNodeOf<'artifact'> };
+  | { kind: 'artifact'; node: AiConversationNodeOf<'artifact'> }
+  | { kind: 'storedOutput'; sessionId: string; artifactId: string };
 
 const FILTERS = ['all', 'terminal', 'workbench', 'archived'] as const;
 
@@ -235,12 +234,20 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
               </Button>
             </div>
             <div className="ai-panel-shell ai-workspace-root ai-session-records-detail flex min-h-0 min-w-0 flex-1 flex-col">
-              {detail?.kind === 'tool' ? (
-                <AiToolDetails node={detail.node} onBack={() => setDetail(null)} />
-              ) : detail?.kind === 'artifact' ? (
+              {detail?.kind === 'artifact' ? (
                 <AiArtifactDetails
                   sessionId={detail.node.sessionId}
                   node={detail.node}
+                  load={(sessionId, artifactId, maxBytes) => adapterRef.current?.loadArtifact(sessionId, artifactId, maxBytes)
+                    ?? Promise.reject(new Error('Session viewer closed'))}
+                  onBack={() => setDetail(null)}
+                />
+              ) : detail?.kind === 'storedOutput' ? (
+                <AiArtifactDetails
+                  sessionId={detail.sessionId}
+                  node={null}
+                  artifactId={detail.artifactId}
+                  title={t('ai.workspace.details.output')}
                   load={(sessionId, artifactId, maxBytes) => adapterRef.current?.loadArtifact(sessionId, artifactId, maxBytes)
                     ?? Promise.reject(new Error('Session viewer closed'))}
                   onBack={() => setDetail(null)}
@@ -253,7 +260,7 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
                       status={view.status}
                       throughSeq={view.throughSeq}
                       runningIndicator="none"
-                      onOpenTool={(node) => setDetail({ kind: 'tool', node })}
+                      onOpenStoredOutput={(node, artifactId) => setDetail({ kind: 'storedOutput', sessionId: node.sessionId, artifactId })}
                       onOpenArtifact={(node) => setDetail({ kind: 'artifact', node })}
                     />
                   ) : null}
