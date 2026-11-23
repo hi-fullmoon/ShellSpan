@@ -122,6 +122,7 @@ export function useSftpPaneActions(
   connection: SftpConnection,
   side: SftpSide,
   localMode?: boolean,
+  onEnqueueLocalUpload?: (localPaths: string[], destinationDirectory: string) => void,
 ): UseSftpPaneActionsResult {
   const isLocal = localMode ?? side === 'local';
   const path = side === 'local' ? connection.localPath : connection.remotePath;
@@ -694,6 +695,10 @@ export function useSftpPaneActions(
     try {
       const files = await invokePickLocalFiles();
       if (!files.length) return;
+      if (onEnqueueLocalUpload) {
+        onEnqueueLocalUpload(files, path);
+        return;
+      }
       const defaultPolicy = useAppStore.getState().sftpConflictPolicy;
       const policies: UploadConflictPolicy[] = files.map(() =>
         defaultPolicy === 'ask' ? 'fail' : defaultPolicy,
@@ -708,13 +713,17 @@ export function useSftpPaneActions(
       logger.warn('Failed to upload files', err);
       error(getToastErrorMessage(err));
     }
-  }, [isLocal, path, reloadAfterTransfer, remoteConnectionKey, runAfterPathsIdle, uploadLocalPaths, error]);
+  }, [isLocal, onEnqueueLocalUpload, path, reloadAfterTransfer, remoteConnectionKey, runAfterPathsIdle, uploadLocalPaths, error]);
 
   const onUploadFolders = useCallback(async () => {
     if (isLocal) return;
     try {
       const folders = await invokePickLocalFolder();
       if (!folders.length) return;
+      if (onEnqueueLocalUpload) {
+        onEnqueueLocalUpload(folders, path);
+        return;
+      }
       const defaultPolicy = useAppStore.getState().sftpConflictPolicy;
       const policies: UploadConflictPolicy[] = folders.map(() =>
         defaultPolicy === 'ask' ? 'fail' : defaultPolicy,
@@ -729,7 +738,7 @@ export function useSftpPaneActions(
       logger.warn('Failed to upload folders', err);
       error(getToastErrorMessage(err));
     }
-  }, [isLocal, path, reloadAfterTransfer, remoteConnectionKey, runAfterPathsIdle, uploadLocalPaths, error]);
+  }, [isLocal, onEnqueueLocalUpload, path, reloadAfterTransfer, remoteConnectionKey, runAfterPathsIdle, uploadLocalPaths, error]);
 
   const uploadWithPolicies = useCallback(
     async (localPaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[], operationId?: string) => {
@@ -756,7 +765,7 @@ export function useSftpPaneActions(
   const copyWithPolicies = useCallback(
     async (sourcePaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[], operationId?: string) => {
       if (!isLocal) return;
-      const resolvedOperationId = operationId ?? `${connection.id}-copy-${Date.now()}`;
+      const resolvedOperationId = operationId ?? `${connection.id}-copy-${crypto.randomUUID()}`;
       const runCopy = async () => {
         markOperationRunning(resolvedOperationId);
         try {

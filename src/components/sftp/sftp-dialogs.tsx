@@ -85,6 +85,11 @@ export interface PermissionsDialogProps {
   defaultValue?: number;
 }
 
+function formatEditableOctalPermissions(value: number): string {
+  const mode = value & 0o7777;
+  return mode.toString(8).padStart(mode > 0o777 ? 4 : 3, '0');
+}
+
 export const PermissionsDialog: React.FC<PermissionsDialogProps> = ({
   open,
   onClose,
@@ -92,11 +97,11 @@ export const PermissionsDialog: React.FC<PermissionsDialogProps> = ({
   defaultValue = 0o644,
 }) => {
   const { t } = useI18n();
-  const [value, setValue] = React.useState(defaultValue.toString(8));
+  const [value, setValue] = React.useState(() => formatEditableOctalPermissions(defaultValue));
 
   React.useEffect(() => {
     if (open) {
-      setValue(defaultValue.toString(8));
+      setValue(formatEditableOctalPermissions(defaultValue));
     }
   }, [open, defaultValue]);
 
@@ -115,7 +120,7 @@ export const PermissionsDialog: React.FC<PermissionsDialogProps> = ({
         <SftpDialogBody>
           <div className="flex flex-col gap-2">
             <Label htmlFor="sftp-permissions-input" className="text-xs text-muted-foreground">
-              Octal (e.g. 644)
+              {t('sftp.permissions.octalLabel')}
             </Label>
             <Input
               id="sftp-permissions-input"

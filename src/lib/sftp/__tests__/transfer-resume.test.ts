@@ -21,7 +21,13 @@ import {
   hydrateTransferResumeCandidates,
   parseTransferResumeCandidates,
 } from '@/lib/sftp/transfer-resume';
+import {
+  clearDirectoryListingCache,
+  getCachedDirectoryListing,
+  setCachedDirectoryListing,
+} from '@/lib/sftp/directory-listing-cache';
 import { useProfileStore } from '@/stores/profileStore';
+import { useSftpStore } from '@/stores/sftpStore';
 import { useTransferStore } from '@/stores/transferStore';
 
 const profile = (id: string, host: string) => ({
@@ -85,6 +91,10 @@ describe('transfer resume metadata', () => {
       operationId: candidate.operationId,
       status: 'failed',
       kind: 'remote-copy',
+      pathScopes: [
+        { connectionId: candidate.sourceRouteKey, paths: candidate.sourcePaths },
+        { connectionId: candidate.destinationRouteKey, paths: ['/backup/archive.tar'] },
+      ],
     });
     expect(tauriMocks.copyRemoteToRemote).not.toHaveBeenCalled();
 
@@ -120,5 +130,43 @@ describe('transfer resume metadata', () => {
     expect(useTransferStore.getState().operations[0]?.retry).toBeUndefined();
     await useTransferStore.getState().retryOperation(candidate.operationId);
     expect(tauriMocks.copyRemoteToRemote).not.toHaveBeenCalled();
+  });
+
+  it('invalidates destination listing cache for escaped route keys and requests selection-preserving refresh', async () => {
+    clearDirectoryListingCache();
+    useSftpStore.setState({ connections: [], activeConnectionId: null });
+    useSftpStore.getState().addConnection(
+      { sessionId: 's1', title: 'Dest', host: destinationProfile.host, port: 22, username: 'deploy' },
+      { host: destinationProfile.host, port: 22, username: 'deploy', authMethod: 'password' },
+    );
+    const connId = useSftpStore.getState().connections[0]!.id;
+    useSftpStore.getState().setPath(connId, 'remote', '/backup/');
+
+    const destScope = JSON.stringify([connId, 'remote', candidate.destinationRouteKey, 'dest-profile', 'password']);
+    const otherRouteKey = sshRouteKey({ ...destinationProfile, port: 2200 });
+    const otherScope = JSON.stringify(['other-conn', 'remote', otherRouteKey, 'other', 'password']);
+    setCachedDirectoryListing(destScope, '/backup', { path: '/backup', entries: [] });
+    setCachedDirectoryListing(otherScope, '/backup', { path: '/backup', entries: [] });
+
+    const refreshEvents: Array<{ connectionId?: string; side?: string; path?: string; preserveSelection?: boolean }> = [];
+    const listener = (event: Event): void => {
+      refreshEvents.push((event as CustomEvent).detail);
+    };
+    document.addEventListener('shellspan:open-sftp-path', listener);
+    try {
+      await hydrateTransferResumeCandidates();
+      await useTransferStore.getState().retryOperation(candidate.operationId);
+    } finally {
+      document.removeEventListener('shellspan:open-sftp-path', listener);
+    }
+
+    expect(getCachedDirectoryListing(destScope, '/backup')).toBeUndefined();
+    expect(getCachedDirectoryListing(otherScope, '/backup')).toBeDefined();
+    expect(refreshEvents).toContainEqual({
+      connectionId: connId,
+      side: 'remote',
+      path: '/backup/',
+      preserveSelection: true,
+    });
   });
 });

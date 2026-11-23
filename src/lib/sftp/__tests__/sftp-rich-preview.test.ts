@@ -110,4 +110,45 @@ describe('SFTP rich preview parsers', () => {
       ],
     });
   });
+
+  it('aborts office archives whose actual decompressed size exceeds the part limit even with a forged header', () => {
+    // 2.2 MB of repeated text compresses to a few kilobytes in DEFLATE.
+    const hugeBody = 'A'.repeat(2_200_000);
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="urn:w"><w:body><w:p><w:r><w:t>${hugeBody}</w:t></w:r></w:p></w:body></w:document>`;
+    const archive = zipSync({ 'word/document.xml': strToU8(documentXml) }, { level: 9 });
+    // Forge the uncompressed-size field in both local file header (offset 22)
+    // and central directory header (signature 0x02014b50, offset +24) to 16 bytes.
+    const forged = archive.slice();
+    const view = new DataView(forged.buffer, forged.byteOffset, forged.byteLength);
+    view.setUint32(22, 16, true);
+    for (let i = 0; i <= forged.length - 46; i += 1) {
+      if (view.getUint32(i, true) === 0x02014b50) {
+        view.setUint32(i + 24, 16, true);
+      }
+    }
+
+    expect(() => parseOfficePreview(toBase64(forged), 'docx')).toThrow(/exceeded safe extraction limit/i);
+  });
+
+  it('preserves implicit XLSX columns and skips columns past the 64-column cap instead of overwriting column 64', () => {
+    const workbookXml = '<workbook xmlns="urn:x"><sheets><sheet name="Wide"/></sheets></workbook>';
+    const sheetXml = '<worksheet xmlns="urn:x"><sheetData><row>'
+      + '<c><v>first</v></c><c r="123"><v>second</v></c>'
+      + '<c r="BL1"><v>col-64</v></c><c r="BM1"><v>col-65-ignored</v></c>'
+      + '</row></sheetData></worksheet>';
+    const archive = zipSync({
+      'xl/workbook.xml': strToU8(workbookXml),
+      'xl/worksheets/sheet1.xml': strToU8(sheetXml),
+    });
+
+    const parsed = parseOfficePreview(toBase64(archive), 'xlsx');
+    expect(parsed?.kind).toBe('spreadsheet');
+    if (parsed?.kind === 'spreadsheet') {
+      const row = parsed.sheets[0]!.rows[0]!;
+      expect(row[0]).toBe('first');
+      expect(row[1]).toBe('second');
+      expect(row[63]).toBe('col-64');
+      expect(row).toHaveLength(64);
+    }
+  });
 });

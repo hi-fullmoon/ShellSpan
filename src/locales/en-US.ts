@@ -1318,6 +1318,7 @@ export default {
   'sftp.deleteConfirm.title': 'Confirm deletion',
   'sftp.deleteConfirm.single': 'Permanently delete “{name}”? This cannot be undone.',
   'sftp.deleteConfirm.multiple': 'Permanently delete the selected {count} items? This cannot be undone.',
+  'sftp.permissions.octalLabel': 'Octal (e.g. 644)',
 
   'sftp.newConnectionMenu.title': 'Quick Open SFTP',
   'sftp.newConnectionMenu.description': 'Open local files or connect with a saved SSH profile.',

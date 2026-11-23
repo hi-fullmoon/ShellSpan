@@ -1318,6 +1318,7 @@ export default {
   'sftp.deleteConfirm.title': '确认删除',
   'sftp.deleteConfirm.single': '确定要永久删除“{name}”吗？此操作不可恢复。',
   'sftp.deleteConfirm.multiple': '确定要永久删除选中的 {count} 个项目吗？此操作不可恢复。',
+  'sftp.permissions.octalLabel': '八进制（例如 644）',
 
   'sftp.newConnectionMenu.title': '快速打开 SFTP',
   'sftp.newConnectionMenu.description': '打开本地文件，或连接到已保存的 SSH 配置。',

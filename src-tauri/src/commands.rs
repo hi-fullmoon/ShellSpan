@@ -2716,12 +2716,12 @@ pub(crate) async fn copy_remote_path(
         request.destination_directory,
         summarize_remote_connection_request(&request.connection)
     );
-    let cancel_flag = copies
-        .register(request.operation_id.clone())
-        .map_err(|message| RemoteFsError::Other { message })?;
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
     let known_hosts = remote_known_hosts_path(&app)?;
+    let cancel_flag = copies
+        .register(request.operation_id.clone())
+        .map_err(|message| RemoteFsError::Other { message })?;
     let mut activity = crate::petdex::ActivityGuard::start_owned(
         &app,
         crate::petdex::ActivitySource::Sftp,
@@ -2763,12 +2763,12 @@ pub(crate) async fn copy_remote_to_remote(
         .map_err(|message| RemoteFsError::Other { message })?;
     resolve_keychain_key_for_remote(&credentials, &mut request.destination_connection)
         .map_err(|message| RemoteFsError::Other { message })?;
-    let cancel_flag = copies
-        .register(request.operation_id.clone())
-        .map_err(|message| RemoteFsError::Other { message })?;
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
     let known_hosts = remote_known_hosts_path(&app)?;
+    let cancel_flag = copies
+        .register(request.operation_id.clone())
+        .map_err(|message| RemoteFsError::Other { message })?;
     let mut activity = crate::petdex::ActivityGuard::start_owned(
         &app,
         crate::petdex::ActivitySource::Sftp,
@@ -4370,20 +4370,26 @@ pub(crate) async fn export_log_file(
 }
 
 #[tauri::command]
-pub(crate) fn list_local_directory(
+pub(crate) async fn list_local_directory(
     app: AppHandle,
     path: String,
 ) -> Result<LocalDirectoryListing, String> {
-    use std::fs;
-    use std::path::PathBuf;
-
     let target = if path.is_empty() {
         app.path()
             .home_dir()
             .map_err(|error| format!("failed to resolve home directory: {error}"))?
     } else {
-        PathBuf::from(&path)
+        std::path::PathBuf::from(&path)
     };
+    tauri::async_runtime::spawn_blocking(move || list_local_directory_blocking(target))
+        .await
+        .map_err(|error| format!("failed to join local directory listing task: {error}"))?
+}
+
+fn list_local_directory_blocking(
+    target: std::path::PathBuf,
+) -> Result<LocalDirectoryListing, String> {
+    use std::fs;
 
     let canonical =
         fs::canonicalize(&target).map_err(|error| format!("failed to resolve path: {error}"))?;
@@ -4397,10 +4403,23 @@ pub(crate) fn list_local_directory(
     for entry in
         fs::read_dir(&canonical).map_err(|error| format!("failed to read directory: {error}"))?
     {
-        let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
-        let metadata = entry
-            .metadata()
-            .map_err(|error| format!("failed to read entry metadata: {error}"))?;
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                debug!("Skipping unreadable local directory entry: {error}");
+                continue;
+            }
+        };
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                debug!(
+                    "Skipping local directory entry with unreadable metadata path={}: {error}",
+                    entry.path().display()
+                );
+                continue;
+            }
+        };
         let path = portable_local_path(&entry.path());
         let name = entry.file_name().to_string_lossy().to_string();
 

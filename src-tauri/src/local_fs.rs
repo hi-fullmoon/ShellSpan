@@ -17,6 +17,9 @@ pub(crate) fn read_local_file_blocking(path: String) -> Result<ReadRemoteFileRes
     if metadata.is_dir() {
         return Err("cannot preview a directory".to_string());
     }
+    if !metadata.is_file() {
+        return Err("cannot preview a special local file".to_string());
+    }
 
     let file_name = target
         .file_name()
@@ -139,15 +142,11 @@ pub(crate) fn copy_local_paths_blocking(request: CopyLocalPathsRequest) -> Resul
             continue;
         }
         validate_copy_destination(source_path, &destination_path)?;
-        if conflict_policy == UploadConflictPolicy::Replace && destination_path.is_dir() {
-            fs::remove_dir_all(&destination_path).map_err(|error| {
-                format!(
-                    "failed to replace directory {}: {error}",
-                    destination_path.display()
-                )
-            })?;
+        if conflict_policy == UploadConflictPolicy::Replace {
+            replace_local_entry(source_path, &destination_path)?;
+        } else {
+            copy_local_entry_to_path(source_path, &destination_path)?;
         }
-        copy_local_entry_to_path(source_path, &destination_path)?;
         existing_names.insert(destination_name);
     }
 
@@ -159,18 +158,26 @@ pub(crate) fn rename_local_path_blocking(path: String, new_name: String) -> Resu
     if trimmed.is_empty() {
         return Err("new name must not be empty".to_string());
     }
+    if trimmed == "." || trimmed == ".." {
+        return Err("'.' and '..' are not valid file names".to_string());
+    }
     if trimmed.contains('/') || trimmed.contains('\\') {
         return Err("new name must not contain path separators".to_string());
     }
     let source = Path::new(&portable_local_path(Path::new(&path))).to_path_buf();
-    if !source.exists() {
+    if fs::symlink_metadata(&source).is_err() {
         return Err(format!("path does not exist: {}", source.display()));
     }
     let parent = source
         .parent()
         .ok_or_else(|| format!("cannot rename a path without parent: {}", source.display()))?;
     let destination = parent.join(trimmed);
-    if destination.exists() {
+    if source == destination {
+        return Ok(());
+    }
+    if fs::symlink_metadata(&destination).is_ok()
+        && !paths_refer_to_same_entry(&source, &destination)
+    {
         return Err(format!("an entry named {trimmed} already exists"));
     }
     fs::rename(&source, &destination).map_err(|error| {
@@ -238,12 +245,28 @@ pub(crate) fn trash_local_paths_blocking(paths: Vec<String>) -> Result<(), Strin
     Ok(())
 }
 
+fn existing_name_matches(existing_names: &HashSet<String>, candidate: &str) -> bool {
+    if existing_names.contains(candidate) {
+        return true;
+    }
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        existing_names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(candidate))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        false
+    }
+}
+
 fn resolve_paste_target_name(
     existing_names: &HashSet<String>,
     base_name: &str,
     copy_suffix: &str,
 ) -> String {
-    if !existing_names.contains(base_name) {
+    if !existing_name_matches(existing_names, base_name) {
         return base_name.to_string();
     }
     let (stem, extension) = split_file_name(base_name);
@@ -257,7 +280,7 @@ fn resolve_paste_target_name(
             Some(ext) => format!("{stem}{suffix}.{ext}"),
             None => format!("{stem}{suffix}"),
         };
-        if !existing_names.contains(&candidate) {
+        if !existing_name_matches(existing_names, &candidate) {
             return candidate;
         }
     }
@@ -274,6 +297,22 @@ fn split_file_name(name: &str) -> (&str, Option<&str>) {
 fn paths_refer_to_same_entry(source: &Path, destination: &Path) -> bool {
     if source == destination {
         return true;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let (Ok(source_meta), Ok(dest_meta)) = (
+            fs::symlink_metadata(source),
+            fs::symlink_metadata(destination),
+        ) {
+            if source_meta.dev() == dest_meta.dev()
+                && source_meta.ino() == dest_meta.ino()
+                && (source_meta.file_type().is_symlink() || source_meta.nlink() == 1)
+            {
+                return true;
+            }
+        }
     }
 
     match (fs::canonicalize(source), fs::canonicalize(destination)) {
@@ -341,7 +380,7 @@ fn resolve_copy_target_name(
     base_name: &str,
     policy: UploadConflictPolicy,
 ) -> Result<Option<String>, String> {
-    if !existing_names.contains(base_name) {
+    if !existing_name_matches(existing_names, base_name) {
         return Ok(Some(base_name.to_string()));
     }
 
@@ -352,6 +391,85 @@ fn resolve_copy_target_name(
         UploadConflictPolicy::Skip => Ok(None),
         UploadConflictPolicy::Fail => Err(format!("local path already exists: {base_name}")),
     }
+}
+
+fn private_local_temp_directory(parent: &Path, prefix: &str) -> Result<tempfile::TempDir, String> {
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(prefix);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(fs::Permissions::from_mode(0o700));
+    }
+    builder
+        .tempdir_in(parent)
+        .map_err(|error| format!("failed to prepare local staging directory: {error}"))
+}
+
+fn replace_local_entry(source: &Path, destination: &Path) -> Result<(), String> {
+    let parent = destination
+        .parent()
+        .ok_or_else(|| format!("copy destination has no parent: {}", destination.display()))?;
+    let staging = private_local_temp_directory(parent, ".shellspan-copy-")?;
+    let payload = staging.path().join("payload");
+    copy_local_entry_to_path(source, &payload)?;
+
+    let target_exists = match fs::symlink_metadata(destination) {
+        Ok(_) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            return Err(format!(
+                "failed to inspect destination {}: {error}",
+                destination.display()
+            ));
+        }
+    };
+    if !target_exists {
+        return fs::rename(&payload, destination).map_err(|error| {
+            format!(
+                "failed to publish copied entry {}: {error}",
+                destination.display()
+            )
+        });
+    }
+
+    let backup_dir = private_local_temp_directory(parent, ".shellspan-copy-backup-")?;
+    let backup = backup_dir
+        .path()
+        .join(destination.file_name().ok_or_else(|| {
+            format!(
+                "copy destination has no file name: {}",
+                destination.display()
+            )
+        })?);
+    fs::rename(destination, &backup).map_err(|error| {
+        format!(
+            "failed to preserve previous target {}: {error}",
+            destination.display()
+        )
+    })?;
+    if let Err(error) = fs::rename(&payload, destination) {
+        if let Err(rollback) = fs::rename(&backup, destination) {
+            let _ = backup_dir.keep();
+            return Err(format!(
+                "failed to replace {}: {error}; previous target preserved at {}: {rollback}",
+                destination.display(),
+                backup.display(),
+            ));
+        }
+        return Err(format!(
+            "failed to replace {}: {error}",
+            destination.display()
+        ));
+    }
+    if let Err(error) = trash::delete(&backup) {
+        let _ = backup_dir.keep();
+        log::warn!(
+            "Local copy completed but failed to move backup {} to trash: {error}",
+            backup.display()
+        );
+    }
+    Ok(())
 }
 
 fn copy_local_entry_to_path(source: &Path, destination: &Path) -> Result<(), String> {

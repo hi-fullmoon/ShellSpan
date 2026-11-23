@@ -9,7 +9,9 @@ import {
 import { t } from '@/locales';
 import { sshRouteKey } from '@/lib/connections/ssh-route';
 import { createLogger } from '@/lib/logger';
+import { invalidateDirectoryListingCacheByRouteKey } from '@/lib/sftp/directory-listing-cache';
 import { useProfileStore } from '@/stores/profileStore';
+import { getSftpPaneConnectionKey, getSftpPaneSource, useSftpStore, type SftpSide } from '@/stores/sftpStore';
 import { useTransferStore } from '@/stores/transferStore';
 
 const PREFERENCE_KEY = 'transferResumeCandidates';
@@ -44,6 +46,39 @@ export interface TransferResumeCandidate {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function remoteDestinationPath(directory: string, sourcePath: string): string {
+  const normalized = sourcePath.replace(/\\/g, '/').replace(/\/+$/, '');
+  const name = normalized.split('/').filter(Boolean).pop() ?? sourcePath;
+  const base = directory === '/' ? '' : directory.replace(/\/+$/, '');
+  return `${base}/${name}`;
+}
+
+function normalizeRemoteDirectory(directory: string): string {
+  const trimmed = directory.trim();
+  if (!trimmed || trimmed === '/') return trimmed;
+  return trimmed.replace(/\/+$/, '') || '/';
+}
+
+function refreshDestinationPanes(destinationRouteKey: string | undefined, destinationDirectory: string): void {
+  if (!destinationRouteKey) return;
+  invalidateDirectoryListingCacheByRouteKey(destinationRouteKey);
+  if (typeof document === 'undefined') return;
+  const normalizedTarget = normalizeRemoteDirectory(destinationDirectory);
+  const connections = useSftpStore.getState().connections;
+  for (const conn of connections) {
+    for (const side of ['local', 'remote'] as SftpSide[]) {
+      if (getSftpPaneSource(conn, side) !== 'remote') continue;
+      if (getSftpPaneConnectionKey(conn, side) !== destinationRouteKey) continue;
+      const panePath = side === 'local' ? conn.localPath : conn.remotePath;
+      if (normalizeRemoteDirectory(panePath) === normalizedTarget) {
+        document.dispatchEvent(new CustomEvent('shellspan:open-sftp-path', {
+          detail: { connectionId: conn.id, side, path: panePath, preserveSelection: true },
+        }));
+      }
+    }
+  }
 }
 
 export function parseTransferResumeCandidates(raw: string | undefined): TransferResumeCandidate[] {
@@ -167,6 +202,7 @@ export async function hydrateTransferResumeCandidates(): Promise<void> {
         await removeTransferResumeCandidate(candidate.operationId).catch((error: unknown) =>
           logger.warn('Failed to remove the completed transfer recovery entry', error),
         );
+        refreshDestinationPanes(candidate.destinationRouteKey, candidate.destinationDirectory);
       } catch (error) {
         if (useTransferStore.getState().operations.find(
           (operation) => operation.operationId === candidate.operationId,
@@ -179,11 +215,34 @@ export async function hydrateTransferResumeCandidates(): Promise<void> {
       }
     };
 
+    const destinationPaths = candidate.sourcePaths.map((sourcePath) =>
+      remoteDestinationPath(candidate.destinationDirectory, sourcePath),
+    );
+    const pathScopes = candidate.sourceRouteKey && candidate.destinationRouteKey
+      ? [
+          { connectionId: candidate.sourceRouteKey, paths: candidate.sourcePaths },
+          { connectionId: candidate.destinationRouteKey, paths: destinationPaths },
+        ]
+      : undefined;
+
     useTransferStore.getState().addOperation({
       operationId: candidate.operationId,
       kind: 'remote-copy',
+      route: sourceProfile && destinationProfile
+        ? {
+            source: {
+              host: `${sourceProfile.username}@${sourceProfile.host}:${sourceProfile.port}`,
+              path: candidate.sourcePaths.join('\n'),
+            },
+            destination: {
+              host: `${destinationProfile.username}@${destinationProfile.host}:${destinationProfile.port}`,
+              path: candidate.destinationDirectory,
+            },
+          }
+        : undefined,
       connectionId: candidate.sourceRouteKey,
       paths: candidate.sourcePaths,
+      pathScopes,
       currentPath: candidate.sourcePaths[0],
       totalBytes: 0,
       processedBytes: 0,

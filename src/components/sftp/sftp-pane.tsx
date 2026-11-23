@@ -4,6 +4,7 @@ import { BookmarkIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsUpDownIcon, Mo
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
+import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
 import { PathBreadcrumb, type PathBreadcrumbHandle } from './path-breadcrumb';
@@ -128,6 +129,18 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     // the first directory load resolves. Sync that first entry so navigating
     // back can never land on the empty path.
     const initialPathSyncedRef = useRef(false);
+    const paneSourceKey = isLocal
+      ? 'local'
+      : `remote:${getSftpPaneConnectionKey(connection, side)}`;
+    const previousPaneSourceKeyRef = useRef(paneSourceKey);
+
+    useEffect(() => {
+      if (previousPaneSourceKeyRef.current === paneSourceKey) return;
+      previousPaneSourceKeyRef.current = paneSourceKey;
+      initialPathSyncedRef.current = Boolean(path);
+      updateHistory({ stack: [path], index: 0 });
+    }, [paneSourceKey, path, updateHistory]);
+
     useEffect(() => {
       if (initialPathSyncedRef.current || !path) return;
       initialPathSyncedRef.current = true;
@@ -149,6 +162,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
       x: number;
       y: number;
     } | null>(null);
+    const [batchDeleteTargets, setBatchDeleteTargets] = useState<FileEntry[]>([]);
     const [showSearch, setShowSearch] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const searchInputRef = useRef<HTMLInputElement>(null);
@@ -257,14 +271,23 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
             connectionId?: string;
             side?: SftpSide;
             path?: string;
+            preserveSelection?: boolean;
           }>
         ).detail;
         if (detail?.connectionId !== connection.id || detail.side !== side || !detail.path) return;
+        if (detail.preserveSelection) {
+          if (isLocal) {
+            loadLocalDirectory(detail.path);
+          } else {
+            loadRemoteDirectory(detail.path);
+          }
+          return;
+        }
         navigateTo(detail.path);
       };
       document.addEventListener('shellspan:open-sftp-path', handleOpenPath);
       return () => document.removeEventListener('shellspan:open-sftp-path', handleOpenPath);
-    }, [connection.id, navigateTo, side]);
+    }, [connection.id, isLocal, loadLocalDirectory, loadRemoteDirectory, navigateTo, side]);
 
     const goBack = useCallback((): void => {
       const current = historyRef.current;
@@ -398,25 +421,31 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     }, [actions]);
 
     useEffect(() => {
-      if (!pane.batchMode || fileContextMenu || blankContextMenu || bookmarkMenu) {
+      if (!pane.batchMode || fileContextMenu || blankContextMenu || bookmarkMenu || batchDeleteTargets.length > 0) {
         return;
       }
 
       const handleKeyDown = (event: KeyboardEvent): void => {
-        if (event.key === 'Escape') {
+        if (
+          event.key === 'Escape' &&
+          !event.defaultPrevented &&
+          !(event.target instanceof Element && event.target.closest('[role="dialog"], [role="alertdialog"]'))
+        ) {
           handleExitBatchMode();
         }
       };
       document.addEventListener('keydown', handleKeyDown);
       return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [blankContextMenu, bookmarkMenu, fileContextMenu, handleExitBatchMode, pane.batchMode]);
+    }, [batchDeleteTargets.length, blankContextMenu, bookmarkMenu, fileContextMenu, handleExitBatchMode, pane.batchMode]);
 
     const handleFileContextMenuAction = useCallback(
       (action: SftpFileContextMenuAction, targets?: FileEntry[]): void => {
         switch (action) {
           case 'open': {
             const target = selectedEntries[0];
-            if (target) actions.onOpen(target);
+            if (target && (target.kind === 'directory' || target.kind === 'symlink')) {
+              navigateTo(target.path);
+            }
             break;
           }
           case 'openWithDefaultEditor':
@@ -477,7 +506,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
             break;
         }
       },
-      [actions, selectedEntries, singleSelection],
+      [actions, navigateTo, selectedEntries, singleSelection],
     );
 
     const handleBlankContextMenuAction = useCallback(
@@ -730,7 +759,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
                   <Button
                     variant="destructive"
                     size="xs"
-                    onClick={() => void actions.onDelete(selectedEntries)}
+                    onClick={() => setBatchDeleteTargets([...selectedEntries])}
                     disabled={selectedEntries.length === 0 || selectionBusy}
                   >
                     {t('common.delete')}
@@ -793,6 +822,24 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
           bookmarks={remoteBookmarks}
           onNavigate={handleBookmarkNavigate}
           onClose={() => setBookmarkMenu(null)}
+        />
+
+        <ConfirmDeleteDialog
+          open={batchDeleteTargets.length > 0}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) setBatchDeleteTargets([]);
+          }}
+          title={t('sftp.deleteConfirm.title')}
+          description={
+            batchDeleteTargets.length === 1
+              ? t('sftp.deleteConfirm.single', { name: batchDeleteTargets[0].name })
+              : t('sftp.deleteConfirm.multiple', { count: batchDeleteTargets.length })
+          }
+          onConfirm={() => {
+            const targets = batchDeleteTargets;
+            setBatchDeleteTargets([]);
+            void actions.onDelete(targets);
+          }}
         />
       </div>
     );

@@ -241,8 +241,41 @@ export const SftpContent: React.FC<SftpContentProps> = ({
   const rightConnecting = connection.connectionAttemptIds?.remote !== undefined;
   const leftIsLocal = leftSource === 'local';
   const rightIsLocal = rightSource === 'local';
-  const localActions = useSftpPaneActions(connection, 'local', leftIsLocal);
-  const remoteActions = useSftpPaneActions(connection, 'remote', rightIsLocal);
+  const enqueueUploadBatchRef = useRef<((input: Omit<UploadQueue, 'process'>) => void) | null>(null);
+  const enqueueLeftLocalUpload = useCallback(
+    (paths: string[], destination: string): void => {
+      if (!destination) return;
+      enqueueUploadBatchRef.current?.({
+        paths,
+        destination,
+        side: 'local',
+        sourceLocal: true,
+        index: 0,
+        accepted: [],
+        policies: [],
+        remembered: undefined,
+      });
+    },
+    [],
+  );
+  const enqueueRightLocalUpload = useCallback(
+    (paths: string[], destination: string): void => {
+      if (!destination) return;
+      enqueueUploadBatchRef.current?.({
+        paths,
+        destination,
+        side: 'remote',
+        sourceLocal: true,
+        index: 0,
+        accepted: [],
+        policies: [],
+        remembered: undefined,
+      });
+    },
+    [],
+  );
+  const localActions = useSftpPaneActions(connection, 'local', leftIsLocal, enqueueLeftLocalUpload);
+  const remoteActions = useSftpPaneActions(connection, 'remote', rightIsLocal, enqueueRightLocalUpload);
   const { loadLocalDirectory } = useLocalDirectory(connection, 'local');
   const { loadLocalDirectory: loadRightLocalDirectory } = useLocalDirectory(connection, 'remote');
   const leftRemote = useSftpConnection(connection, 'local');
@@ -311,6 +344,9 @@ export const SftpContent: React.FC<SftpContentProps> = ({
   const [sourceTargetSide, setSourceTargetSide] = useState<SftpSide | null>(null);
 
   const releaseUploadBatch = useCallback((): void => {
+    if (uploadQueueRef.current) {
+      uploadQueueRef.current.cancelled = true;
+    }
     uploadQueueRef.current = null;
     if (uploadQueueMountedRef.current) setUploadConflict(undefined);
     const resolve = uploadBatchDoneRef.current;
@@ -779,6 +815,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
     },
     [addTransferOperation, connection, leftIsLocal, markTransferFailed, processUploadQueue, refreshAfterQueue, releaseUploadBatch, removeTransferOperation, rightIsLocal],
   );
+  enqueueUploadBatchRef.current = enqueueUploadBatch;
 
   const handleUploadConflictResolution = async (
     action: UploadConflictAction,
@@ -814,11 +851,13 @@ export const SftpContent: React.FC<SftpContentProps> = ({
 
   const handleDragEnd = (payload: SftpDndPayload, targetSide: 'local' | 'remote'): void => {
     if (payload.side === targetSide) return;
+    const destination = targetSide === 'local' ? connection.localPath : connection.remotePath;
+    if (!destination) return;
     const paths = payload.entries.map((entry) => entry.path);
     const sourceLocal = payload.side === 'local' ? leftIsLocal : rightIsLocal;
     enqueueUploadBatch({
       paths,
-      destination: targetSide === 'local' ? connection.localPath : connection.remotePath,
+      destination,
       side: targetSide,
       sourceSide: payload.side,
       sourceLocal,
@@ -993,6 +1032,17 @@ export const SftpContent: React.FC<SftpContentProps> = ({
           }}
           title={t('common.newFolder')}
           label={t('common.newFolder')}
+          confirmText={t('common.create')}
+        />
+
+        <PromptDialog
+          open={localActions.createMode === 'file'}
+          onClose={() => localActions.setCreateMode(null)}
+          onConfirm={(value) => {
+            if (value.trim()) localActions.handleCreate(value.trim(), 'file');
+          }}
+          title={t('sftp.contextMenu.newFile')}
+          label={t('common.name')}
           confirmText={t('common.create')}
         />
 

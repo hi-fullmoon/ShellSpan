@@ -416,6 +416,11 @@ describe('SftpPane', () => {
     expect(actions.onBatchDownload).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByText('common.delete'));
+    expect(actions.onDelete).not.toHaveBeenCalled();
+    expect(screen.getByText('sftp.deleteConfirm.title')).toBeInTheDocument();
+
+    const confirmButtons = screen.getAllByRole('button', { name: 'common.delete' });
+    fireEvent.click(confirmButtons[confirmButtons.length - 1]);
     expect(actions.onDelete).toHaveBeenCalledWith([entry]);
 
     fireEvent.click(screen.getByText('common.cancel'));
@@ -806,5 +811,67 @@ describe('SftpPane', () => {
 
     expect(container.querySelector('[data-slot="separator"]')).not.toBeInTheDocument();
     expect(container.querySelector('bdi')).not.toBeInTheDocument();
+  });
+
+  it('does not exit batch mode when Escape is pressed inside an open dialog', () => {
+    const connection = createConnection();
+    connection.localPane.batchMode = true;
+    const actions = createMockActions();
+
+    render(
+      <>
+        <SftpPane
+          connection={connection}
+          side="local"
+          actions={actions}
+          selectedPaths={new Set()}
+          onSelectedPathsChange={vi.fn()}
+        />
+        <div role="dialog">
+          <button type="button">inside-dialog</button>
+        </div>
+      </>,
+    );
+
+    fireEvent.keyDown(screen.getByText('inside-dialog'), { key: 'Escape' });
+    expect(actions.onToggleBatchMode).not.toHaveBeenCalled();
+  });
+
+  it('reloads without clearing selection when shellspan:open-sftp-path sets preserveSelection', async () => {
+    const connection = createConnection();
+    const onSelectedPathsChange = vi.fn();
+    vi.mocked(invokeListRemoteDirectory).mockResolvedValue({
+      path: '/remote',
+      entries: [],
+    });
+    render(
+      <SftpPane
+        connection={connection}
+        side="remote"
+        actions={createMockActions()}
+        selectedPaths={new Set(['/remote/file.txt'])}
+        onSelectedPathsChange={onSelectedPathsChange}
+      />,
+    );
+    vi.mocked(invokeListRemoteDirectory).mockClear();
+
+    act(() => {
+      document.dispatchEvent(new CustomEvent('shellspan:open-sftp-path', {
+        detail: {
+          connectionId: connection.id,
+          side: 'remote',
+          path: '/remote',
+          preserveSelection: true,
+        },
+      }));
+    });
+
+    await waitFor(() => {
+      expect(invokeListRemoteDirectory).toHaveBeenCalledWith(expect.objectContaining({
+        host: 'h',
+        path: '/remote',
+      }));
+    });
+    expect(onSelectedPathsChange).not.toHaveBeenCalled();
   });
 });

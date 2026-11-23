@@ -220,9 +220,17 @@ impl SftpPool {
                 (entry.connection.clone(), entry.last_verified.elapsed())
             })
         };
-        // Evicted entries are disconnected and dropped outside the pool lock
-        // so their teardown never blocks other pool users.
-        disconnect_entries(evicted);
+        // Evicted entries are disconnected in the background outside the pool
+        // lock so tearing down an unrelated host never blocks this lookup or
+        // delays abort checks.
+        if !evicted.is_empty() {
+            if let Err(error) = std::thread::Builder::new()
+                .name("sftp-pool-evict".to_string())
+                .spawn(move || disconnect_entries(evicted))
+            {
+                warn!("Failed to spawn SFTP pool eviction thread: {error}");
+            }
+        }
         ensure_pool_lookup_not_aborted(abort_flag)?;
 
         let (connection, verified_idle) = match found {

@@ -678,4 +678,82 @@ describe('sftpStore', () => {
 
     expect(task).not.toHaveBeenCalled();
   });
+
+  it('keeps the pooled connection alive while another tab uses the same host and disconnects when switching to local', () => {
+    useSftpStore.getState().addConnection(
+      { sessionId: 'c1', title: 'Tab 1', host: 'h', port: 22, username: 'u' },
+      baseConnection.connection,
+    );
+    useSftpStore.getState().addConnection(
+      { sessionId: 'c2', title: 'Tab 2', host: 'h', port: 22, username: 'u' },
+      baseConnection.connection,
+    );
+    const [tab1, tab2] = useSftpStore.getState().connections;
+
+    useSftpStore.getState().removeConnection(tab1!.id);
+    expect(invokeDisconnectSftp).not.toHaveBeenCalled();
+
+    useSftpStore.getState().setPaneLocal(tab2!.id, 'remote');
+    expect(invokeDisconnectSftp).toHaveBeenCalledTimes(1);
+    expect(invokeDisconnectSftp).toHaveBeenCalledWith(baseConnection.connection);
+  });
+
+  it('ignores late bookmark hydration results after a pane switches hosts', async () => {
+    const { invokeListSftpBookmarks } = await import('@/lib/ipc/tauri');
+    let resolveOldBookmarks!: (rows: Array<{ id: string; host: string; port: number; username: string; path: string; side: 'remote'; createdAt: number }>) => void;
+    vi.mocked(invokeListSftpBookmarks).mockImplementationOnce(
+      () => new Promise((resolve) => { resolveOldBookmarks = resolve; }),
+    );
+    useSftpStore.getState().addConnection(
+      { sessionId: 'c1', title: 'Old', host: 'old.example', port: 22, username: 'u' },
+      { host: 'old.example', port: 22, username: 'u', authMethod: 'password' },
+    );
+    const id = useSftpStore.getState().connections[0]!.id;
+
+    const hydration = useSftpStore.getState().hydrateSftpBookmarks('old.example', 22, 'u', id, 'remote');
+    useSftpStore.getState().attachRemoteConnection(
+      id,
+      'remote',
+      { sessionId: 'c2', title: 'New', host: 'new.example', port: 22, username: 'u' },
+      { host: 'new.example', port: 22, username: 'u', authMethod: 'password' },
+    );
+
+    resolveOldBookmarks([
+      { id: 'b1', host: 'old.example', port: 22, username: 'u', path: '/old-only', side: 'remote', createdAt: 1 },
+    ]);
+    await hydration;
+
+    expect(useSftpStore.getState().connections[0]?.remoteBookmarks.remote).toEqual([]);
+  });
+
+  it('disconnects the previous remote host when attachRemoteConnection switches hosts and no other pane uses it', () => {
+    const oldRemote = { host: 'old.example', port: 22, username: 'u', authMethod: 'password' as const };
+    const newRemote = { host: 'new.example', port: 22, username: 'u', authMethod: 'password' as const };
+    useSftpStore.getState().addConnection(
+      { sessionId: 'c1', title: 'Tab 1', host: 'old.example', port: 22, username: 'u' },
+      oldRemote,
+    );
+    useSftpStore.getState().addConnection(
+      { sessionId: 'c2', title: 'Tab 2', host: 'old.example', port: 22, username: 'u' },
+      oldRemote,
+    );
+    const [tab1, tab2] = useSftpStore.getState().connections;
+
+    useSftpStore.getState().attachRemoteConnection(
+      tab1!.id,
+      'remote',
+      { sessionId: 'c3', title: 'New', host: 'new.example', port: 22, username: 'u' },
+      newRemote,
+    );
+    expect(invokeDisconnectSftp).not.toHaveBeenCalled();
+
+    useSftpStore.getState().attachRemoteConnection(
+      tab2!.id,
+      'remote',
+      { sessionId: 'c4', title: 'New 2', host: 'new.example', port: 22, username: 'u' },
+      newRemote,
+    );
+    expect(invokeDisconnectSftp).toHaveBeenCalledTimes(1);
+    expect(invokeDisconnectSftp).toHaveBeenCalledWith(oldRemote);
+  });
 });

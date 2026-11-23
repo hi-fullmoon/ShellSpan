@@ -907,3 +907,20 @@
             "The waiter must allow at most one second for deadline cleanup"
         );
     }
+
+    #[test]
+    fn list_local_directory_blocking_lists_entries_and_formats_remote_fs_errors() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join("alpha")).unwrap();
+        std::fs::write(temp.path().join("beta.txt"), "hello").unwrap();
+
+        let listing = super::list_local_directory_blocking(temp.path().to_path_buf()).unwrap();
+        assert_eq!(listing.entries.len(), 2);
+        assert_eq!(listing.entries[0].name, "alpha");
+        assert_eq!(listing.entries[1].name, "beta.txt");
+
+        let msg = crate::remote_fs::remote_fs_error_message(&crate::models::RemoteFsError::Other {
+            message: "upload cancelled".to_string(),
+        });
+        assert_eq!(msg, "upload cancelled");
+    }

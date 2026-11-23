@@ -60,6 +60,24 @@ export function invalidateDirectoryListingCache(scope: string): void {
   }
 }
 
+function scopeMatchesRouteKey(scope: string, routeKey: string): boolean {
+  if (scope === routeKey) return true;
+  try {
+    const parsed: unknown = JSON.parse(scope);
+    return Array.isArray(parsed) && parsed[2] === routeKey;
+  } catch {
+    return false;
+  }
+}
+
+export function invalidateDirectoryListingCacheByRouteKey(routeKey: string): void {
+  for (const [key, cached] of cache) {
+    if (scopeMatchesRouteKey(cached.scope, routeKey)) {
+      cache.delete(key);
+    }
+  }
+}
+
 // Test isolation: the cache is module-level, so without an explicit reset
 // one test's listing would leak into the next test sharing a connection id.
 export function clearDirectoryListingCache(): void {

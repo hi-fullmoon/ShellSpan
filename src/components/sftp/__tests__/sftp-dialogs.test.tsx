@@ -62,4 +62,31 @@ describe('PermissionsDialog', () => {
     expect(onConfirm).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it('masks POSIX file type bits from st_mode defaults so remote entries open valid', () => {
+    const onConfirm = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <PermissionsDialog open onClose={onClose} onConfirm={onConfirm} defaultValue={0o100644} />,
+    );
+
+    const input = screen.getByRole('textbox');
+    expect(input).toHaveValue('644');
+    expect(screen.getByRole('button', { name: 'common.save' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    expect(onConfirm).toHaveBeenCalledWith(0o644);
+  });
+
+  it('preserves special permission bits as four octal digits', () => {
+    const onConfirm = vi.fn();
+    render(
+      <PermissionsDialog open onClose={vi.fn()} onConfirm={onConfirm} defaultValue={0o104755} />,
+    );
+
+    const input = screen.getByRole('textbox');
+    expect(input).toHaveValue('4755');
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    expect(onConfirm).toHaveBeenCalledWith(0o4755);
+  });
 });

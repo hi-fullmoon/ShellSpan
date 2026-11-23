@@ -390,4 +390,61 @@ describe('SftpPreviewDialog', () => {
     expect(image.parentElement).toHaveClass('px-4', 'pt-2', 'pb-4');
     expect(image).toHaveStyle({ width: '510px', height: '408px' });
   });
+
+  it('uses a revocable Blob object URL for PDF previews and revokes it on unmount', () => {
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:pdf-preview');
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    try {
+      const { unmount } = render(
+        <SftpPreviewDialog
+          open
+          content={response({
+            path: '/srv/manual.pdf',
+            name: 'manual.pdf',
+            content: 'JVBERi0xLjQ=',
+            size: 8,
+            isText: false,
+            contentEncoding: 'base64',
+          })}
+          onClose={vi.fn()}
+        />,
+      );
+
+      const frame = screen.getByTitle('manual.pdf');
+      expect(frame).toHaveAttribute('src', 'blob:pdf-preview');
+      expect(frame).toHaveAttribute('referrerpolicy', 'no-referrer');
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+
+      unmount();
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:pdf-preview');
+    } finally {
+      createObjectURL.mockRestore();
+      revokeObjectURL.mockRestore();
+    }
+  });
+
+  it('shows MediaUnavailable cleanly when blob-backed media has malformed base64', () => {
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:unused');
+    try {
+      render(
+        <SftpPreviewDialog
+          open
+          content={response({
+            path: '/srv/corrupt.pdf',
+            name: 'corrupt.pdf',
+            content: '!!!not-valid-base64!!!',
+            size: 16,
+            isText: false,
+            contentEncoding: 'base64',
+          })}
+          onClose={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText('sftp.preview.mediaUnavailableTitle')).toBeInTheDocument();
+      expect(createObjectURL).not.toHaveBeenCalled();
+    } finally {
+      createObjectURL.mockRestore();
+    }
+  });
 });

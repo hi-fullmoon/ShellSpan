@@ -33,7 +33,7 @@ import {
 } from '@/stores/sftpStore';
 import { useTransferStore } from '@/stores/transferStore';
 import { createLogger } from '@/lib/logger';
-import { getErrorMessage, getLocalizedErrorMessage } from '@/lib/error';
+import { classifyError, getErrorMessage, getLocalizedErrorMessage } from '@/lib/error';
 import { promptForMissingKeychainKey } from '@/lib/connections/keychain-key-prompt';
 import { sshRouteKey } from '@/lib/connections/ssh-route';
 import { normalizePortablePath } from '@/lib/path-utils';
@@ -104,6 +104,10 @@ async function runWithConfiguredRetries(
     } catch (error) {
       lastError = error;
       if (!shouldRetry()) throw error;
+      const classification = classifyError(error);
+      if (!classification.retryable || classification.category === 'cancelled') {
+        throw error;
+      }
       if (attempt < retryCount) {
         // Sleep in short slices so a cancellation observed by shouldRetry
         // interrupts the backoff instead of waiting out the full delay.
@@ -409,6 +413,17 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
     invalidateDirectoryListingCache(directoryCacheScope);
   }, [directoryCacheScope]);
 
+  const isCurrentPaneTarget = useCallback(
+    () =>
+      isTransferTargetCurrent(
+        connection,
+        useSftpStore.getState().connections.find((item) => item.id === connection.id),
+        side,
+        panePath,
+      ),
+    [connection, panePath, side],
+  );
+
   const createRemoteEntry = useCallback(
     async (parentPath: string, name: string, kind: 'file' | 'directory') => {
       invalidatePaneListingCache();
@@ -418,9 +433,9 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         name,
         kind,
       });
-      await loadRemoteDirectory(panePath);
+      await loadRemoteDirectory(panePath, isCurrentPaneTarget);
     },
-    [remoteConnection, panePath, loadRemoteDirectory, invalidatePaneListingCache],
+    [remoteConnection, panePath, loadRemoteDirectory, invalidatePaneListingCache, isCurrentPaneTarget],
   );
 
   const renameRemotePath = useCallback(
@@ -431,9 +446,9 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         path,
         newName,
       });
-      await loadRemoteDirectory(panePath);
+      await loadRemoteDirectory(panePath, isCurrentPaneTarget);
     },
-    [remoteConnection, panePath, loadRemoteDirectory, invalidatePaneListingCache],
+    [remoteConnection, panePath, loadRemoteDirectory, invalidatePaneListingCache, isCurrentPaneTarget],
   );
 
   const copyRemotePath = useCallback(
@@ -534,7 +549,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         // delivered after the invoke resolves and would otherwise
         // regress the counters, leaving the paths "busy" forever.
         markOperationCompleted(operationId);
-        await loadRemoteDirectory(panePath);
+        await loadRemoteDirectory(panePath, isCurrentPaneTarget);
       } catch (error) {
         const operation = useTransferStore.getState().operations.find(
           (item) => item.operationId === operationId,
@@ -543,14 +558,14 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
           // The backend observed the cancel flag and reported the delete as
           // cancelled; paths already deleted stay deleted.
           markOperationCancelled(operationId);
-          await loadRemoteDirectory(panePath);
+          await loadRemoteDirectory(panePath, isCurrentPaneTarget);
           return;
         }
         markOperationFailed(
           operationId,
           getLocalizedErrorMessage(error),
         );
-        await loadRemoteDirectory(panePath);
+        await loadRemoteDirectory(panePath, isCurrentPaneTarget);
         throw error;
       }
     },
@@ -561,6 +576,8 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       connection.id,
       panePath,
       loadRemoteDirectory,
+      invalidatePaneListingCache,
+      isCurrentPaneTarget,
       markOperationFailed,
       markOperationCompleted,
       markOperationCancelled,
@@ -575,9 +592,9 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         path,
         permissions,
       });
-      await loadRemoteDirectory(panePath);
+      await loadRemoteDirectory(panePath, isCurrentPaneTarget);
     },
-    [remoteConnection, panePath, loadRemoteDirectory],
+    [remoteConnection, panePath, loadRemoteDirectory, invalidatePaneListingCache, isCurrentPaneTarget],
   );
 
   const uploadLocalPaths = useCallback(

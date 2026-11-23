@@ -651,4 +651,73 @@ describe('transferStore', () => {
 
     expect(task).not.toHaveBeenCalled();
   });
+
+  it('treats root "/" as overlapping any absolute descendant path', () => {
+    useTransferStore.getState().addOperation({
+      ...operation,
+      operationId: 'root-op',
+      connectionId: 'connection-1',
+      paths: ['/'],
+      status: 'running',
+    });
+
+    expect(hasActivePathOperation('connection-1', ['/etc/hosts'])).toBe(true);
+
+    useTransferStore.getState().removeOperation('root-op');
+    useTransferStore.getState().addOperation({
+      ...operation,
+      operationId: 'child-op',
+      connectionId: 'connection-1',
+      paths: ['/etc/hosts'],
+      status: 'running',
+    });
+
+    expect(hasActivePathOperation('connection-1', ['/'])).toBe(true);
+  });
+
+  it('ignores late progress events for failed or cancelled operations', () => {
+    useTransferStore.getState().addOperation({
+      ...operation,
+      operationId: 'failed-op',
+      processedBytes: 25,
+      totalBytes: 100,
+      status: 'running',
+    });
+    useTransferStore.getState().markOperationFailed('failed-op', 'network lost');
+    useTransferStore.getState().updateUpload({
+      operationId: 'failed-op',
+      currentPath: '/stale',
+      totalBytes: 100,
+      uploadedBytes: 90,
+      totalSteps: 1,
+      completedSteps: 1,
+    });
+    expect(useTransferStore.getState().operations[0]).toMatchObject({
+      status: 'failed',
+      processedBytes: 25,
+      currentPath: operation.currentPath,
+    });
+
+    useTransferStore.getState().addOperation({
+      ...operation,
+      operationId: 'cancelled-op',
+      processedBytes: 10,
+      totalBytes: 100,
+      status: 'running',
+    });
+    useTransferStore.getState().markOperationCancelled('cancelled-op');
+    useTransferStore.getState().updateUpload({
+      operationId: 'cancelled-op',
+      currentPath: '/stale',
+      totalBytes: 100,
+      uploadedBytes: 80,
+      totalSteps: 1,
+      completedSteps: 1,
+    });
+    expect(useTransferStore.getState().operations[0]).toMatchObject({
+      status: 'cancelled',
+      processedBytes: 10,
+      currentPath: operation.currentPath,
+    });
+  });
 });

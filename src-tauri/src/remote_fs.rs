@@ -503,6 +503,13 @@ fn transfer_batch_status(batch: &TransferBatchResult) -> &'static str {
     }
 }
 
+pub(crate) fn remote_fs_error_message(error: &RemoteFsError) -> String {
+    match error {
+        RemoteFsError::Other { message } => message.clone(),
+        other => format!("{other:?}"),
+    }
+}
+
 pub(crate) fn is_connection_error(error: &RemoteFsError) -> bool {
     let message = match error {
         RemoteFsError::Other { message } => message.as_str(),
@@ -941,10 +948,14 @@ fn delete_remote_path_inner(
     // (120s per socket read) applies here just as it does to uploads/copies.
     let _transfer_timeout = TransferTimeoutGuard::new(&connected.session);
     // The tree is deleted in a single pass without a pre-count walk; the total
-    // grows rsync-style as entries are discovered, so progress reports
-    // "removed N of M discovered so far".
-    let mut progress =
-        DeleteProgressTracker::new(app, request.operation_id.clone(), cancel_flag, 0);
+    // starts with the requested root paths and grows as directory children are
+    // discovered, so progress reports "removed N of M discovered so far".
+    let mut progress = DeleteProgressTracker::new(
+        app,
+        request.operation_id.clone(),
+        cancel_flag,
+        request.paths.len() as u64,
+    );
     progress
         .emit()
         .map_err(|message| RemoteFsError::Other { message })?;
@@ -993,10 +1004,18 @@ fn copy_remote_path_inner(
     let connected = connected
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _transfer_timeout = TransferTimeoutGuard::new(&connected.session);
     metrics.start_phase(TransferPhase::Scan);
     let source_path = Path::new(&request.source_path);
     let destination_directory = Path::new(&request.destination_directory);
     ensure_remote_directory(&connected.sftp, destination_directory)?;
+    let destination_directory =
+        connected
+            .sftp
+            .realpath(destination_directory)
+            .map_err(|error| RemoteFsError::Other {
+                message: format!("failed to resolve remote copy directory: {error}"),
+            })?;
 
     let source_name = source_path
         .file_name()
@@ -1006,13 +1025,7 @@ fn copy_remote_path_inner(
         .to_string_lossy()
         .to_string();
     let destination_path =
-        unique_remote_destination(&connected.sftp, destination_directory, &source_name)?;
-
-    if destination_path.starts_with(source_path) {
-        return Err(RemoteFsError::Other {
-            message: "cannot paste a directory into itself".to_string(),
-        });
-    }
+        unique_remote_destination(&connected.sftp, &destination_directory, &source_name)?;
 
     let source_stat = connected
         .sftp
@@ -1020,6 +1033,14 @@ fn copy_remote_path_inner(
         .map_err(|error| RemoteFsError::Other {
             message: format!("failed to stat remote source: {error}"),
         })?;
+    let canonical_source = canonical_remote_entry(&connected.sftp, source_path)?;
+    if kind_from_permissions(source_stat.perm) == RemoteFileKind::Directory
+        && destination_path.starts_with(&canonical_source)
+    {
+        return Err(RemoteFsError::Other {
+            message: "cannot paste a directory into itself".to_string(),
+        });
+    }
     let mut scan_stats = RemoteCopyScanStats::default();
     metrics.start_phase(TransferPhase::Transfer);
     let mut transfer_buffer = new_transfer_buffer();
@@ -1153,12 +1174,18 @@ fn upload_local_paths_inner<E: TransferEventEmitter>(
                 status: TransferItemStatus::Skipped,
                 error: None,
             }),
-            Err(error) => items.push(TransferItemResult {
-                source_path,
-                destination_path: None,
-                status: TransferItemStatus::Failed,
-                error: Some(format!("{error:?}")),
-            }),
+            Err(error) => {
+                if let Err(message) = progress.ensure_not_cancelled() {
+                    cancel_message = Some(message);
+                    break;
+                }
+                items.push(TransferItemResult {
+                    source_path,
+                    destination_path: None,
+                    status: TransferItemStatus::Failed,
+                    error: Some(remote_fs_error_message(&error)),
+                });
+            }
         }
     }
 
@@ -1170,6 +1197,9 @@ fn upload_local_paths_inner<E: TransferEventEmitter>(
     if let Some(message) = cancel_message {
         return Err(RemoteFsError::Other { message });
     }
+    progress
+        .ensure_not_cancelled()
+        .map_err(|message| RemoteFsError::Other { message })?;
 
     let batch = TransferBatchResult { items };
     metrics.finish(transfer_batch_status(&batch));
@@ -1416,12 +1446,18 @@ fn download_remote_paths_inner<E: TransferEventEmitter>(
                 status: TransferItemStatus::Skipped,
                 error: None,
             }),
-            Err(error) => items.push(TransferItemResult {
-                source_path,
-                destination_path: None,
-                status: TransferItemStatus::Failed,
-                error: Some(format!("{error:?}")),
-            }),
+            Err(error) => {
+                if let Err(message) = progress.ensure_not_cancelled() {
+                    cancel_message = Some(message);
+                    break;
+                }
+                items.push(TransferItemResult {
+                    source_path,
+                    destination_path: None,
+                    status: TransferItemStatus::Failed,
+                    error: Some(remote_fs_error_message(&error)),
+                });
+            }
         }
     }
 
@@ -1433,6 +1469,9 @@ fn download_remote_paths_inner<E: TransferEventEmitter>(
     if let Some(message) = cancel_message {
         return Err(RemoteFsError::Other { message });
     }
+    progress
+        .ensure_not_cancelled()
+        .map_err(|message| RemoteFsError::Other { message })?;
 
     let batch = TransferBatchResult { items };
     metrics.finish(transfer_batch_status(&batch));
@@ -1911,6 +1950,7 @@ fn download_remote_entry_to_path<E: TransferEventEmitter>(
                     ),
                 });
             }
+            progress.add_total_bytes(stat.size.unwrap_or(0));
             download_remote_file(sftp, remote_path, local_path, progress, transfer_buffer)
         }
         _ => download_remote_file(sftp, remote_path, local_path, progress, transfer_buffer),
@@ -2184,7 +2224,12 @@ fn copy_remote_to_remote_with_sftp<E: TransferEventEmitter>(
                 tasks.push(task);
             }
             Ok(None) => items.push((index, remote_copy_item(source_path, Ok(None)))),
-            Err(error) => items.push((index, remote_copy_item(source_path, Err(error)))),
+            Err(error) => {
+                if cancel_flag.load(AtomicOrdering::SeqCst) {
+                    return Err(RemoteManifestPurpose::RemoteCopy.cancellation_error());
+                }
+                items.push((index, remote_copy_item(source_path, Err(error))));
+            }
         }
     }
 
@@ -2210,6 +2255,11 @@ fn copy_remote_to_remote_with_sftp<E: TransferEventEmitter>(
             &mut transfer_buffer,
         )
         .map(|()| Some(path_to_string(&task.destination_path)));
+        if result.is_err() {
+            progress
+                .ensure_not_cancelled()
+                .map_err(|message| RemoteFsError::Other { message })?;
+        }
         items.push((
             task.index,
             remote_copy_item(&request.source_paths[task.index], result),
@@ -2219,6 +2269,9 @@ fn copy_remote_to_remote_with_sftp<E: TransferEventEmitter>(
     metrics.start_phase(TransferPhase::Finalize);
     progress
         .set_current_path(None)
+        .map_err(|message| RemoteFsError::Other { message })?;
+    progress
+        .ensure_not_cancelled()
         .map_err(|message| RemoteFsError::Other { message })?;
     items.sort_by_key(|(index, _)| *index);
     Ok(TransferBatchResult {
@@ -3001,21 +3054,32 @@ fn download_remote_open_copy(
 
     if kind_from_permissions(stat.perm) == RemoteFileKind::Directory {
         return Err(RemoteFsError::Other {
-            message: "目录不支持使用默认编辑器打开".to_string(),
+            message: "cannot open a directory with an external application".to_string(),
         });
     }
 
-    // `sftp.open` follows symlinks, so size-limit the link target rather
-    // than the link itself before pulling it into a local temp copy.
+    // `sftp.open` follows symlinks, so inspect and size-limit the link target
+    // rather than the link itself before pulling it into a local temp copy.
     ensure_remote_file_read_not_cancelled(cancel_flag)?;
     let target_stat_result = connected.sftp.stat(remote_path);
     ensure_remote_file_read_not_cancelled(cancel_flag)?;
-    let target_size = target_stat_result
-        .map_err(|error| RemoteFsError::Other {
-            message: format!("failed to inspect remote file target: {error}"),
-        })?
-        .size
-        .unwrap_or(0);
+    let target_stat = target_stat_result.map_err(|error| RemoteFsError::Other {
+        message: format!("failed to inspect remote file target: {error}"),
+    })?;
+    match kind_from_permissions(target_stat.perm) {
+        RemoteFileKind::Directory => {
+            return Err(RemoteFsError::Other {
+                message: "cannot open a directory with an external application".to_string(),
+            });
+        }
+        RemoteFileKind::File => {}
+        _ => {
+            return Err(RemoteFsError::Other {
+                message: "cannot open a special remote file".to_string(),
+            });
+        }
+    }
+    let target_size = target_stat.size.unwrap_or(0);
     if target_size > OPEN_FILE_SIZE_LIMIT {
         return Err(RemoteFsError::Other {
             message: format!(
@@ -3110,12 +3174,23 @@ fn read_remote_file_inner(
     ensure_remote_file_read_not_cancelled(cancel_flag)?;
     let target_stat_result = connected.sftp.stat(remote_path);
     ensure_remote_file_read_not_cancelled(cancel_flag)?;
-    let size = target_stat_result
-        .map_err(|error| RemoteFsError::Other {
-            message: format!("failed to inspect remote file target: {error}"),
-        })?
-        .size
-        .unwrap_or(stat.size.unwrap_or(0));
+    let target_stat = target_stat_result.map_err(|error| RemoteFsError::Other {
+        message: format!("failed to inspect remote file target: {error}"),
+    })?;
+    match kind_from_permissions(target_stat.perm) {
+        RemoteFileKind::Directory => {
+            return Err(RemoteFsError::Other {
+                message: "cannot preview a directory".to_string(),
+            });
+        }
+        RemoteFileKind::File => {}
+        _ => {
+            return Err(RemoteFsError::Other {
+                message: "cannot preview a special remote file".to_string(),
+            });
+        }
+    }
+    let size = target_stat.size.unwrap_or(stat.size.unwrap_or(0));
     let requires_complete_file = preview_extension_requires_complete_file(&file_name);
     let read_limit = if requires_complete_file {
         PREVIEW_COMPLETE_FILE_SIZE_LIMIT
@@ -4081,8 +4156,6 @@ fn delete_remote_path_recursive(
         .ensure_not_cancelled()
         .map_err(|message| RemoteFsError::Other { message })?;
     ensure_remote_recursion_depth(depth)?;
-    // Count this entry as discovered before inspecting it.
-    progress.add_steps(1);
     let stat = sftp.lstat(path).map_err(|error| RemoteFsError::Other {
         message: format!("failed to inspect remote path: {error}"),
     })?;
@@ -4391,6 +4464,14 @@ fn scan_local_upload_path(
     local_path: &Path,
     cancel_flag: &Arc<AtomicBool>,
 ) -> Result<UploadScanStats, RemoteFsError> {
+    scan_local_upload_path_inner(local_path, cancel_flag, true)
+}
+
+fn scan_local_upload_path_inner(
+    local_path: &Path,
+    cancel_flag: &Arc<AtomicBool>,
+    is_root: bool,
+) -> Result<UploadScanStats, RemoteFsError> {
     if cancel_flag.load(AtomicOrdering::SeqCst) {
         return Err(RemoteFsError::Other {
             message: "upload cancelled".to_string(),
@@ -4402,9 +4483,16 @@ fn scan_local_upload_path(
     })?;
 
     if metadata.file_type().is_symlink() {
-        return Err(RemoteFsError::Other {
-            message: format!("symlink upload is not supported: {}", local_path.display()),
-        });
+        if is_root {
+            return Err(RemoteFsError::Other {
+                message: format!("symlink upload is not supported: {}", local_path.display()),
+            });
+        }
+        warn!(
+            "Skipping nested symlink during local directory upload scan: {}",
+            local_path.display()
+        );
+        return Ok(UploadScanStats::default());
     }
 
     if metadata.is_dir() {
@@ -4425,7 +4513,11 @@ fn scan_local_upload_path(
             let entry = entry.map_err(|error| RemoteFsError::Other {
                 message: format!("failed to read local directory entry: {error}"),
             })?;
-            stats.combine(scan_local_upload_path(&entry.path(), cancel_flag)?);
+            stats.combine(scan_local_upload_path_inner(
+                &entry.path(),
+                cancel_flag,
+                false,
+            )?);
         }
         return Ok(stats);
     }
@@ -4467,6 +4559,29 @@ fn upload_local_entry_to_path<E: TransferEventEmitter>(
     progress: &mut UploadProgressTracker<E>,
     transfer_buffer: &mut [u8],
 ) -> Result<(), RemoteFsError> {
+    upload_local_entry_to_path_inner(
+        sftp,
+        local_path,
+        remote_path,
+        conflict_policy,
+        known_remote_directories,
+        progress,
+        transfer_buffer,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn upload_local_entry_to_path_inner<E: TransferEventEmitter>(
+    sftp: &Sftp,
+    local_path: &Path,
+    remote_path: &Path,
+    conflict_policy: UploadConflictPolicy,
+    known_remote_directories: &mut RemoteDirectoryCache,
+    progress: &mut UploadProgressTracker<E>,
+    transfer_buffer: &mut [u8],
+    is_root: bool,
+) -> Result<(), RemoteFsError> {
     progress
         .ensure_not_cancelled()
         .map_err(|message| RemoteFsError::Other { message })?;
@@ -4475,9 +4590,16 @@ fn upload_local_entry_to_path<E: TransferEventEmitter>(
     })?;
 
     if metadata.file_type().is_symlink() {
-        return Err(RemoteFsError::Other {
-            message: format!("symlink upload is not supported: {}", local_path.display()),
-        });
+        if is_root {
+            return Err(RemoteFsError::Other {
+                message: format!("symlink upload is not supported: {}", local_path.display()),
+            });
+        }
+        warn!(
+            "Skipping nested symlink during local directory upload: {}",
+            local_path.display()
+        );
+        return Ok(());
     }
 
     if metadata.is_dir() {
@@ -4495,7 +4617,7 @@ fn upload_local_entry_to_path<E: TransferEventEmitter>(
             let entry = entry.map_err(|error| RemoteFsError::Other {
                 message: format!("failed to read local directory entry: {error}"),
             })?;
-            upload_local_entry_to_path(
+            upload_local_entry_to_path_inner(
                 sftp,
                 &entry.path(),
                 &remote_join(remote_path, &entry.file_name().to_string_lossy()),
@@ -4503,6 +4625,7 @@ fn upload_local_entry_to_path<E: TransferEventEmitter>(
                 known_remote_directories,
                 progress,
                 transfer_buffer,
+                false,
             )?;
         }
         return Ok(());
@@ -4524,7 +4647,6 @@ fn upload_local_entry_to_path<E: TransferEventEmitter>(
             sftp,
             local_path,
             remote_path,
-            metadata.len(),
             upload_mode,
             conflict_policy,
             progress,
@@ -4548,7 +4670,6 @@ fn upload_regular_file<E: TransferEventEmitter>(
     sftp: &Sftp,
     local_path: &Path,
     remote_path: &Path,
-    expected_size: u64,
     upload_mode: i32,
     conflict_policy: UploadConflictPolicy,
     progress: &mut UploadProgressTracker<E>,
@@ -4567,7 +4688,6 @@ fn upload_regular_file<E: TransferEventEmitter>(
         sftp,
         local_path,
         &temp_path,
-        expected_size,
         upload_mode,
         progress,
         transfer_buffer,
@@ -4728,7 +4848,6 @@ fn upload_regular_file_to_temp<E: TransferEventEmitter>(
     sftp: &Sftp,
     local_path: &Path,
     temp_path: &Path,
-    expected_size: u64,
     upload_mode: i32,
     progress: &mut UploadProgressTracker<E>,
     transfer_buffer: &mut [u8],
@@ -4746,6 +4865,7 @@ fn upload_regular_file_to_temp<E: TransferEventEmitter>(
         .map_err(|error| RemoteFsError::Other {
             message: format!("failed to create remote upload temp file: {error}"),
         })?;
+    let mut bytes_written = 0_u64;
     loop {
         progress
             .ensure_not_cancelled()
@@ -4766,6 +4886,7 @@ fn upload_regular_file_to_temp<E: TransferEventEmitter>(
         if read == 0 {
             break;
         }
+        bytes_written = bytes_written.saturating_add(read as u64);
         progress
             .advance_bytes(read as u64)
             .map_err(|message| RemoteFsError::Other { message })?;
@@ -4784,10 +4905,10 @@ fn upload_regular_file_to_temp<E: TransferEventEmitter>(
         .ok_or_else(|| RemoteFsError::Other {
             message: "remote server did not report uploaded file size".to_string(),
         })?;
-    if uploaded_size != expected_size {
+    if uploaded_size != bytes_written {
         return Err(RemoteFsError::Other {
             message: format!(
-                "remote upload size mismatch: expected {expected_size} bytes, got {uploaded_size}"
+                "remote upload size mismatch: expected {bytes_written} bytes, got {uploaded_size}"
             ),
         });
     }

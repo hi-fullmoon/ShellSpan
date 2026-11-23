@@ -468,3 +468,160 @@
         let result = trash_local_paths_blocking(vec![missing.to_str().unwrap().to_string()]);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn replace_preserves_existing_directory_when_source_copy_fails() {
+        let temp = TempDir::new().unwrap();
+        let missing_src = temp.path().join("src");
+        let dest_dir = temp.path().join("dest");
+        let existing_dir = dest_dir.join("src");
+        fs::create_dir_all(&existing_dir).unwrap();
+        fs::write(existing_dir.join("important.txt"), "keep-me").unwrap();
+
+        let request = make_request(
+            vec![missing_src.to_str().unwrap()],
+            dest_dir.to_str().unwrap(),
+            vec![UploadConflictPolicy::Replace],
+        );
+        let result = copy_local_paths_blocking(request);
+
+        assert!(result.is_err());
+        assert_eq!(
+            fs::read_to_string(existing_dir.join("important.txt")).unwrap(),
+            "keep-me"
+        );
+    }
+
+    #[test]
+    fn replace_handles_file_replacing_directory_and_directory_replacing_file() {
+        let temp = TempDir::new().unwrap();
+        let src_root = temp.path().join("src_root");
+        fs::create_dir_all(&src_root).unwrap();
+        let dest_dir = temp.path().join("dest");
+        fs::create_dir_all(&dest_dir).unwrap();
+
+        let src_file = src_root.join("entry");
+        fs::write(&src_file, "file-data").unwrap();
+        fs::create_dir_all(dest_dir.join("entry")).unwrap();
+        fs::write(dest_dir.join("entry/old.txt"), "old").unwrap();
+
+        copy_local_paths_blocking(make_request(
+            vec![src_file.to_str().unwrap()],
+            dest_dir.to_str().unwrap(),
+            vec![UploadConflictPolicy::Replace],
+        ))
+        .unwrap();
+        assert!(dest_dir.join("entry").is_file());
+        assert_eq!(
+            fs::read_to_string(dest_dir.join("entry")).unwrap(),
+            "file-data"
+        );
+
+        let src_dir_root = temp.path().join("src_dir_root");
+        let src_dir = src_dir_root.join("entry");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::write(src_dir.join("nested.txt"), "dir-data").unwrap();
+
+        copy_local_paths_blocking(make_request(
+            vec![src_dir.to_str().unwrap()],
+            dest_dir.to_str().unwrap(),
+            vec![UploadConflictPolicy::Replace],
+        ))
+        .unwrap();
+        assert!(dest_dir.join("entry").is_dir());
+        assert_eq!(
+            fs::read_to_string(dest_dir.join("entry/nested.txt")).unwrap(),
+            "dir-data"
+        );
+    }
+
+    #[test]
+    fn rename_rejects_dot_names_and_supports_broken_symlinks() {
+        let temp = TempDir::new().unwrap();
+        let file = temp.path().join("hello.txt");
+        fs::write(&file, "hi").unwrap();
+        assert!(
+            rename_local_path_blocking(file.to_string_lossy().to_string(), ".".to_string())
+                .is_err()
+        );
+        assert!(
+            rename_local_path_blocking(file.to_string_lossy().to_string(), "..".to_string())
+                .is_err()
+        );
+
+        #[cfg(unix)]
+        {
+            let broken = temp.path().join("broken-link");
+            std::os::unix::fs::symlink(temp.path().join("does-not-exist"), &broken).unwrap();
+            rename_local_path_blocking(
+                broken.to_string_lossy().to_string(),
+                "renamed-link".to_string(),
+            )
+            .unwrap();
+            assert!(fs::symlink_metadata(temp.path().join("renamed-link")).is_ok());
+            assert!(fs::symlink_metadata(&broken).is_err());
+        }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[test]
+    fn rename_allows_case_only_change_and_paste_avoids_case_collision() {
+        let temp = TempDir::new().unwrap();
+        let original = temp.path().join("readme.txt");
+        fs::write(&original, "content").unwrap();
+
+        rename_local_path_blocking(
+            original.to_string_lossy().to_string(),
+            "README.txt".to_string(),
+        )
+        .unwrap();
+        let names: Vec<String> = fs::read_dir(temp.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        assert!(names.contains(&"README.txt".to_string()));
+
+        let src_dir = temp.path().join("src");
+        fs::create_dir(&src_dir).unwrap();
+        let src_file = src_dir.join("readme.txt");
+        fs::write(&src_file, "new-copy").unwrap();
+
+        let written = paste_local_paths_blocking(
+            vec![src_file.to_string_lossy().to_string()],
+            temp.path().to_string_lossy().to_string(),
+            "copy".to_string(),
+        )
+        .unwrap();
+        assert!(written[0].ends_with("readme copy.txt"));
+        assert_eq!(
+            fs::read_to_string(temp.path().join("README.txt")).unwrap(),
+            "content"
+        );
+
+        let fail_copy = copy_local_paths_blocking(make_request(
+            vec![src_file.to_str().unwrap()],
+            temp.path().to_str().unwrap(),
+            vec![UploadConflictPolicy::Fail],
+        ));
+        assert!(fail_copy.is_err());
+        assert_eq!(
+            fs::read_to_string(temp.path().join("README.txt")).unwrap(),
+            "content"
+        );
+
+        #[cfg(target_os = "macos")]
+        {
+            let broken = temp.path().join("broken.lnk");
+            std::os::unix::fs::symlink(temp.path().join("missing-target"), &broken).unwrap();
+            rename_local_path_blocking(
+                broken.to_string_lossy().to_string(),
+                "BROKEN.lnk".to_string(),
+            )
+            .unwrap();
+            let updated_names: Vec<String> = fs::read_dir(temp.path())
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().to_string_lossy().to_string())
+                .collect();
+            assert!(updated_names.contains(&"BROKEN.lnk".to_string()));
+        }
+    }

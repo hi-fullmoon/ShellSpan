@@ -880,4 +880,46 @@ describe('useSftpConnection keychain key recovery', () => {
     expect(state.remoteError).toBe('still broken');
     expect(state.remoteLoading).toBe(false);
   });
+
+  it('does not auto-retry non-retryable upload errors such as conflicts', async () => {
+    const { classifyError } = await import('@/lib/error');
+    vi.mocked(classifyError).mockReturnValueOnce({
+      category: 'conflict',
+      retryable: false,
+      messageKey: 'error.pathConflict',
+    });
+    useAppStore.setState({ sftpRetryCount: 2 });
+    const connection = createConnection();
+    useSftpStore.setState({ connections: [connection], activeConnectionId: connection.id });
+    tauri.invokeUploadLocalPaths.mockResolvedValue({
+      items: [{ sourcePath: '/local/a.txt', status: 'failed', error: 'remote path already exists: a.txt' }],
+    });
+
+    const { result } = renderHook(() => useSftpConnection(connection));
+    await expect(
+      act(() => result.current.uploadLocalPaths(['/local/a.txt'], '/remote')),
+    ).rejects.toThrow(/already exists/);
+
+    expect(tauri.invokeUploadLocalPaths).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reload the old directory after a delete if the pane navigated away', async () => {
+    let resolveDelete!: () => void;
+    tauri.invokeDeleteRemotePath.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { resolveDelete = resolve; }),
+    );
+    const connection = createConnection();
+    useSftpStore.setState({ connections: [connection], activeConnectionId: connection.id });
+    const { result } = renderHook(() => useSftpConnection(connection));
+
+    let deletePromise!: Promise<void>;
+    act(() => {
+      deletePromise = result.current.deleteRemotePaths(['/remote/big-dir']);
+    });
+    useSftpStore.getState().setPath(connection.id, 'remote', '/remote/elsewhere');
+    resolveDelete();
+    await act(() => deletePromise);
+
+    expect(tauri.invokeListRemoteDirectory).not.toHaveBeenCalled();
+  });
 });

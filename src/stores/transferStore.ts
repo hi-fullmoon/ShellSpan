@@ -366,7 +366,10 @@ export function isTransferComplete(operation: TransferOperation): boolean {
 // must never regress a finished operation, or its paths would stay "busy"
 // for hasActivePathOperation forever.
 function isStaleProgressEvent(operation: TransferOperation | undefined): boolean {
-  return !operation || operation.status === 'completed';
+  return !operation
+    || operation.status === 'completed'
+    || operation.status === 'failed'
+    || operation.status === 'cancelled';
 }
 
 export function isTransferActive(operation: TransferOperation): boolean {
@@ -395,7 +398,10 @@ function normalizeRemotePath(path: string): string {
 function pathsOverlap(left: string, right: string): boolean {
   const a = normalizeRemotePath(left);
   const b = normalizeRemotePath(right);
-  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+  if (a === b) return true;
+  if (a === '/') return b.startsWith('/');
+  if (b === '/') return a.startsWith('/');
+  return a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
 }
 
 export interface PathOperationScope {

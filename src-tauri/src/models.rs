@@ -1034,53 +1034,119 @@ pub(crate) struct ConnectedSftp {
     pub(crate) _jump_session: Option<Session>,
 }
 
+const CANCELLATION_TOMBSTONE_LIMIT: usize = 512;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CancellationTombstoneKind {
+    PendingCancel,
+    Completed,
+}
+
+struct CancellationTombstone {
+    kind: CancellationTombstoneKind,
+    generation: u64,
+}
+
+#[derive(Default)]
+struct CancellationRegistryState {
+    operations: HashMap<String, Arc<AtomicBool>>,
+    tombstones: HashMap<String, CancellationTombstone>,
+    tombstone_order: VecDeque<(String, u64)>,
+    next_generation: u64,
+}
+
 pub(crate) struct CancellationRegistry {
     kind: &'static str,
-    operations: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    state: Mutex<CancellationRegistryState>,
 }
 
 impl CancellationRegistry {
     pub(crate) fn new(kind: &'static str) -> Self {
         Self {
             kind,
-            operations: Mutex::new(HashMap::new()),
+            state: Mutex::new(CancellationRegistryState::default()),
+        }
+    }
+
+    fn remember_tombstone(
+        state: &mut CancellationRegistryState,
+        operation_id: String,
+        kind: CancellationTombstoneKind,
+    ) {
+        state.next_generation = state.next_generation.wrapping_add(1).max(1);
+        let generation = state.next_generation;
+        state.tombstones.insert(
+            operation_id.clone(),
+            CancellationTombstone { kind, generation },
+        );
+        state.tombstone_order.push_back((operation_id, generation));
+
+        while state.tombstone_order.len() > CANCELLATION_TOMBSTONE_LIMIT {
+            let Some((old_operation_id, old_generation)) = state.tombstone_order.pop_front() else {
+                break;
+            };
+            if state
+                .tombstones
+                .get(&old_operation_id)
+                .is_some_and(|entry| entry.generation == old_generation)
+            {
+                state.tombstones.remove(&old_operation_id);
+            }
         }
     }
 
     pub(crate) fn register(&self, operation_id: String) -> Result<Arc<AtomicBool>, String> {
-        let flag = Arc::new(AtomicBool::new(false));
-        let mut guard = self
-            .operations
+        let mut state = self
+            .state
             .lock()
             .map_err(|_| format!("{} cancellation registry poisoned", self.kind))?;
-        if guard.contains_key(&operation_id) {
+        let cancelled_before_registration = state
+            .tombstones
+            .remove(&operation_id)
+            .is_some_and(|entry| entry.kind == CancellationTombstoneKind::PendingCancel);
+        let flag = Arc::new(AtomicBool::new(cancelled_before_registration));
+        if state.operations.contains_key(&operation_id) {
             warn!(
                 "{} cancellation registry: duplicate operation_id {operation_id}, replacing previous registration",
                 self.kind
             );
         }
-        guard.insert(operation_id, flag.clone());
+        state.operations.insert(operation_id, flag.clone());
         Ok(flag)
     }
 
     pub(crate) fn cancel(&self, operation_id: &str) -> Result<(), String> {
-        let guard = self
-            .operations
+        let mut state = self
+            .state
             .lock()
             .map_err(|_| format!("{} cancellation registry poisoned", self.kind))?;
-        let flag = guard
-            .get(operation_id)
-            .ok_or_else(|| format!("{} operation {operation_id} not found", self.kind))?;
-        flag.store(true, AtomicOrdering::SeqCst);
+        if let Some(flag) = state.operations.get(operation_id) {
+            flag.store(true, AtomicOrdering::SeqCst);
+            return Ok(());
+        }
+        if state.tombstones.contains_key(operation_id) {
+            return Ok(());
+        }
+        Self::remember_tombstone(
+            &mut state,
+            operation_id.to_string(),
+            CancellationTombstoneKind::PendingCancel,
+        );
         Ok(())
     }
 
     pub(crate) fn remove(&self, operation_id: &str) -> Result<(), String> {
-        let mut guard = self
-            .operations
+        let mut state = self
+            .state
             .lock()
             .map_err(|_| format!("{} cancellation registry poisoned", self.kind))?;
-        guard.remove(operation_id);
+        if state.operations.remove(operation_id).is_some() {
+            Self::remember_tombstone(
+                &mut state,
+                operation_id.to_string(),
+                CancellationTombstoneKind::Completed,
+            );
+        }
         Ok(())
     }
 }
@@ -1365,6 +1431,14 @@ impl<E: TransferEventEmitter> DownloadProgressTracker<E> {
         self.current_path = path;
         self.emit_state.mark_dirty();
         self.emit_if_due(flush)
+    }
+
+    pub(crate) fn add_total_bytes(&mut self, count: u64) {
+        if count == 0 {
+            return;
+        }
+        self.total_bytes = self.total_bytes.saturating_add(count);
+        self.emit_state.mark_dirty();
     }
 
     pub(crate) fn advance_bytes(&mut self, count: u64) -> Result<(), String> {
@@ -2591,6 +2665,32 @@ mod tests {
         registry.cancel("op-1").unwrap();
         assert!(second.load(AtomicOrdering::SeqCst));
         assert!(!first.load(AtomicOrdering::SeqCst));
+    }
+
+    #[test]
+    fn cancellation_registry_observes_cancel_before_register() {
+        let registry = CancellationRegistry::new("upload");
+
+        registry.cancel("early-op").unwrap();
+        let flag = registry.register("early-op".to_string()).unwrap();
+
+        assert!(flag.load(AtomicOrdering::SeqCst));
+    }
+
+    #[test]
+    fn cancellation_registry_completed_cancel_is_idempotent_and_allows_retry_reuse() {
+        let registry = CancellationRegistry::new("upload");
+        let first = registry.register("retry-op".to_string()).unwrap();
+        registry.remove("retry-op").unwrap();
+
+        // Late cancel after removal must not turn into a pending cancel for retries.
+        registry.cancel("retry-op").unwrap();
+        assert!(!first.load(AtomicOrdering::SeqCst));
+
+        let retry_flag = registry.register("retry-op".to_string()).unwrap();
+        assert!(!retry_flag.load(AtomicOrdering::SeqCst));
+        registry.cancel("retry-op").unwrap();
+        assert!(retry_flag.load(AtomicOrdering::SeqCst));
     }
 
     #[test]

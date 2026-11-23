@@ -10,6 +10,7 @@ import { useLastValue } from '@/hooks/useLastValue';
 import type { SftpPreviewFileActions, SftpPreviewTarget } from '@/hooks/useSftpPaneActions';
 import { formatSize } from '@/lib/sftp/sftp-utils';
 import { createPreviewDataUrl, formatHexPreviewRows, getFileExtension, getSftpPreviewDescriptor, type SftpPreviewDescriptor } from '@/lib/sftp/sftp-preview';
+import { decodePreviewBase64 } from '@/lib/sftp/sftp-rich-preview';
 import { cn } from '@/lib/utils';
 import type { ReadRemoteFileResponse } from '@/types';
 import { BinaryIcon, FileIcon, RotateCcwIcon, XIcon, ZoomInIcon, ZoomOutIcon } from 'lucide-react';
@@ -128,22 +129,24 @@ const ImagePreview: React.FC<{ dataUrl: string; name: string }> = ({ dataUrl, na
       </SftpPreviewToolbar>
       <SftpPreviewScrollArea viewportRef={viewportRef} horizontal>
         <div className="grid min-h-full w-max min-w-full place-items-center px-4 pt-2 pb-4">
-          <img
-            ref={imageRef}
-            src={dataUrl}
-            alt={name}
-            onError={() => setFailed(true)}
-            onLoad={(event) => fitImageToViewport(event.currentTarget)}
-            className={cn('block rounded-md object-contain shadow-sm', renderedSize ? 'max-h-none max-w-none' : 'max-h-[60vh] max-w-full')}
-            style={
-              renderedSize
-                ? {
-                    width: renderedSize.width * zoom,
-                    height: renderedSize.height * zoom,
-                  }
-                : undefined
-            }
-          />
+          {dataUrl ? (
+            <img
+              ref={imageRef}
+              src={dataUrl}
+              alt={name}
+              onError={() => setFailed(true)}
+              onLoad={(event) => fitImageToViewport(event.currentTarget)}
+              className={cn('block rounded-md object-contain shadow-sm', renderedSize ? 'max-h-none max-w-none' : 'max-h-[60vh] max-w-full')}
+              style={
+                renderedSize
+                  ? {
+                      width: renderedSize.width * zoom,
+                      height: renderedSize.height * zoom,
+                    }
+                  : undefined
+              }
+            />
+          ) : null}
         </div>
       </SftpPreviewScrollArea>
     </>
@@ -154,6 +157,7 @@ const MediaPreview: React.FC<{ dataUrl: string; kind: 'audio' | 'video'; name: s
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [dataUrl]);
   if (failed) return <MediaUnavailable />;
+  if (!dataUrl) return null;
 
   return (
     <div className={cn(sftpPreviewContentClassName, 'flex items-center justify-center px-4 pt-2 pb-4')}>
@@ -253,8 +257,78 @@ const FontPreview: React.FC<{ dataUrl: string }> = ({ dataUrl }) => {
   );
 };
 
+const LARGE_IMAGE_BASE64_THRESHOLD = 350_000;
+
+interface PreviewMediaUrlState {
+  url: string;
+  failed: boolean;
+}
+
+function usePreviewMediaUrl(
+  content: ReadRemoteFileResponse,
+  descriptor: SftpPreviewDescriptor,
+): PreviewMediaUrlState {
+  const shouldUseBlobUrl =
+    content.contentEncoding === 'base64'
+    && typeof URL !== 'undefined'
+    && typeof URL.createObjectURL === 'function'
+    && (
+      descriptor.kind === 'pdf'
+      || descriptor.kind === 'audio'
+      || descriptor.kind === 'video'
+      || (descriptor.kind === 'image' && content.content.length > LARGE_IMAGE_BASE64_THRESHOLD)
+    );
+
+  const [blobState, setBlobState] = useState<{
+    content: string;
+    mimeType: string;
+    url: string;
+    failed: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!shouldUseBlobUrl) {
+      setBlobState(null);
+      return undefined;
+    }
+    let url = '';
+    try {
+      const bytes = decodePreviewBase64(content.content);
+      const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+      url = URL.createObjectURL(new Blob([buffer], { type: descriptor.mimeType }));
+      setBlobState({ content: content.content, mimeType: descriptor.mimeType, url, failed: false });
+    } catch {
+      setBlobState({ content: content.content, mimeType: descriptor.mimeType, url: '', failed: true });
+      return undefined;
+    }
+    return () => {
+      if (url && typeof URL.revokeObjectURL === 'function') {
+        URL.revokeObjectURL(url);
+      }
+    };
+  }, [content.content, descriptor.mimeType, shouldUseBlobUrl]);
+
+  if (shouldUseBlobUrl) {
+    const matchesCurrent =
+      blobState !== null
+      && blobState.content === content.content
+      && blobState.mimeType === descriptor.mimeType;
+    return matchesCurrent
+      ? { url: blobState.url, failed: blobState.failed }
+      : { url: '', failed: false };
+  }
+  if (content.contentEncoding === 'base64') {
+    return { url: createPreviewDataUrl(content.content, descriptor.mimeType), failed: false };
+  }
+  if (descriptor.kind === 'image' && descriptor.extension === 'svg') {
+    return { url: `data:${descriptor.mimeType};charset=utf-8,${encodeURIComponent(content.content)}`, failed: false };
+  }
+  return { url: '', failed: false };
+}
+
 const PreviewRenderer: React.FC<PreviewRendererProps> = ({ content, descriptor }) => {
   const { t } = useI18n();
+  const { url: dataUrl, failed: mediaFailed } = usePreviewMediaUrl(content, descriptor);
   if (descriptor.kind === 'unavailable') {
     return (
       <SftpPreviewNotice
@@ -266,18 +340,22 @@ const PreviewRenderer: React.FC<PreviewRendererProps> = ({ content, descriptor }
   if (descriptor.kind === 'text') return <PlainTextPreview content={content.content} fileName={content.name} />;
   if (descriptor.kind === 'markdown') return <MarkdownPreview content={content.content} fileName={content.name} />;
   if (descriptor.kind === 'data') return <StructuredDataPreview content={content.content} extension={descriptor.extension} fileName={content.name} />;
-  const dataUrl =
-    content.contentEncoding === 'base64'
-      ? createPreviewDataUrl(content.content, descriptor.mimeType)
-      : descriptor.kind === 'image' && descriptor.extension === 'svg'
-        ? `data:${descriptor.mimeType};charset=utf-8,${encodeURIComponent(content.content)}`
-        : '';
-  if (descriptor.kind === 'image') return <ImagePreview dataUrl={dataUrl} name={content.name} />;
+  if (descriptor.kind === 'image') {
+    return mediaFailed ? <MediaUnavailable /> : <ImagePreview dataUrl={dataUrl} name={content.name} />;
+  }
   if (descriptor.kind === 'audio' || descriptor.kind === 'video') {
-    return <MediaPreview dataUrl={dataUrl} kind={descriptor.kind} name={content.name} />;
+    return mediaFailed ? <MediaUnavailable /> : <MediaPreview dataUrl={dataUrl} kind={descriptor.kind} name={content.name} />;
   }
   if (descriptor.kind === 'pdf') {
-    return <iframe className={cn(sftpPreviewContentClassName, 'w-full')} src={dataUrl} title={content.name} />;
+    if (mediaFailed) return <MediaUnavailable />;
+    return (
+      <iframe
+        className={cn(sftpPreviewContentClassName, 'w-full')}
+        src={dataUrl || undefined}
+        referrerPolicy="no-referrer"
+        title={content.name}
+      />
+    );
   }
   if (descriptor.kind === 'font') return <FontPreview dataUrl={dataUrl} />;
   if (descriptor.kind === 'document' || descriptor.kind === 'spreadsheet' || descriptor.kind === 'presentation') {

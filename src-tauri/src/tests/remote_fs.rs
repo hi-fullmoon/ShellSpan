@@ -2220,3 +2220,23 @@
         remove_remote_entry_simple(&connected.sftp, Path::new(&remote_root))
             .expect("remove remote benchmark fixtures");
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn scan_local_upload_skips_nested_symlinks_but_rejects_root_symlink() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("project");
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("real.txt"), "hello").unwrap();
+        let nested_link = dir.join("nested-link");
+        std::os::unix::fs::symlink(dir.join("real.txt"), &nested_link).unwrap();
+
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let stats = scan_local_upload_path(&dir, &cancel_flag).unwrap();
+        assert_eq!(stats.total_files, 1);
+        assert_eq!(stats.total_bytes, 5);
+        assert_eq!(stats.total_steps, 2);
+
+        let root_err = scan_local_upload_path(&nested_link, &cancel_flag).unwrap_err();
+        assert!(remote_fs_error_message(&root_err).contains("symlink upload is not supported"));
+    }

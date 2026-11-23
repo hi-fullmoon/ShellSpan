@@ -289,22 +289,48 @@ function hasActiveTransfer(connectionKey: string): boolean {
 }
 
 // Disconnect the pooled backend SFTP session of every distinct remote pane of
-// a closing tab. Fire-and-forget so closing never blocks on network teardown;
-// a pane with an in-flight transfer is left to the backend idle TTL instead.
-function disconnectRemotePanes(connection: SftpConnection): void {
+// a closing tab or switched pane, unless another remaining SFTP pane still
+// uses that same connection or a transfer is in flight.
+function collectActiveRemoteConnectionKeys(connections: SftpConnection[]): Set<string> {
+  const activeKeys = new Set<string>();
+  for (const conn of connections) {
+    for (const side of ['remote', 'local'] as SftpSide[]) {
+      if (getSftpPaneSource(conn, side) !== 'remote') continue;
+      activeKeys.add(getSftpPaneConnectionKey(conn, side));
+    }
+  }
+  return activeKeys;
+}
+
+function disconnectUnusedRemoteConnections(
+  candidates: Array<{ key: string; request: RemoteConnectionRequest }>,
+  remainingConnections: SftpConnection[],
+): void {
+  const remainingKeys = collectActiveRemoteConnectionKeys(remainingConnections);
   const seen = new Set<string>();
+  for (const candidate of candidates) {
+    if (seen.has(candidate.key)) continue;
+    seen.add(candidate.key);
+    if (remainingKeys.has(candidate.key) || hasActiveTransfer(candidate.key)) continue;
+    invokeDisconnectSftp(candidate.request).catch((error) => {
+      logger.error('failed to disconnect SFTP connection', error);
+    });
+  }
+}
+
+function disconnectRemotePanes(
+  connection: SftpConnection,
+  remainingConnections: SftpConnection[],
+): void {
+  const candidates: Array<{ key: string; request: RemoteConnectionRequest }> = [];
   for (const side of ['remote', 'local'] as SftpSide[]) {
     if (getSftpPaneSource(connection, side) !== 'remote') continue;
-    const connectionKey = getSftpPaneConnectionKey(connection, side);
-    if (seen.has(connectionKey)) continue;
-    seen.add(connectionKey);
-    if (hasActiveTransfer(connectionKey)) continue;
-    invokeDisconnectSftp(getSftpPaneConnection(connection, side)).catch(
-      (error) => {
-        logger.error('failed to disconnect SFTP connection', error);
-      },
-    );
+    candidates.push({
+      key: getSftpPaneConnectionKey(connection, side),
+      request: getSftpPaneConnection(connection, side),
+    });
   }
+  disconnectUnusedRemoteConnections(candidates, remainingConnections);
 }
 
 export const useSftpStore = create<SftpState>()((set) => ({
@@ -577,8 +603,15 @@ export const useSftpStore = create<SftpState>()((set) => ({
 
   setPaneLocal: (id, side) => {
     void usePortForwardStore.getState().stopOwnersByPrefix(`sftp:${id}:${side}:`);
-    set((state) => ({
-      connections: updateConnection(state, id, (current) => ({
+    set((state) => {
+      const previous = state.connections.find((conn) => conn.id === id);
+      const detachedCandidate = previous && getSftpPaneSource(previous, side) === 'remote'
+        ? {
+            key: getSftpPaneConnectionKey(previous, side),
+            request: getSftpPaneConnection(previous, side),
+          }
+        : undefined;
+      const connections = updateConnection(state, id, (current) => ({
         ...current,
         ...(side === 'local'
           ? {
@@ -614,14 +647,27 @@ export const useSftpStore = create<SftpState>()((set) => ({
           current.remoteClipboard?.sourceSide === side
             ? undefined
             : current.remoteClipboard,
-      })),
-      activeConnectionId: id,
-    }));
+      }));
+      if (detachedCandidate) {
+        disconnectUnusedRemoteConnections([detachedCandidate], connections);
+      }
+      return {
+        connections,
+        activeConnectionId: id,
+      };
+    });
   },
 
   attachRemoteConnection: (id, side, summary, connection, profileId) =>
-    set((state) => ({
-      connections: updateConnection(state, id, (current) => {
+    set((state) => {
+      const previous = state.connections.find((conn) => conn.id === id);
+      const detachedCandidate = previous && getSftpPaneSource(previous, side) === 'remote'
+        ? {
+            key: getSftpPaneConnectionKey(previous, side),
+            request: getSftpPaneConnection(previous, side),
+          }
+        : undefined;
+      const connections = updateConnection(state, id, (current) => {
         const wasRestored = current.restorePending?.[side] === true;
         return {
           ...current,
@@ -654,9 +700,15 @@ export const useSftpStore = create<SftpState>()((set) => ({
               ? undefined
               : current.remoteClipboard,
         };
-      }),
-      activeConnectionId: id,
-    })),
+      });
+      if (detachedCandidate) {
+        disconnectUnusedRemoteConnections([detachedCandidate], connections);
+      }
+      return {
+        connections,
+        activeConnectionId: id,
+      };
+    }),
 
   removeConnection: (id) => {
     void usePortForwardStore.getState().stopOwnersByPrefix(`sftp:${id}:`);
@@ -669,7 +721,7 @@ export const useSftpStore = create<SftpState>()((set) => ({
           : state.activeConnectionId;
       if (closing) {
         cancelQueuedPathOperationsForOwner(id);
-        disconnectRemotePanes(closing);
+        disconnectRemotePanes(closing, connections);
       }
       return { connections, activeConnectionId };
     });
@@ -809,13 +861,24 @@ export const useSftpStore = create<SftpState>()((set) => ({
         .map((r) => r.path);
       if (paths.length === 0) return;
       set((state) => ({
-        connections: updateConnection(state, connectionId, (connection) => ({
-          ...connection,
-          remoteBookmarks: {
-            ...connection.remoteBookmarks,
-            [side]: [...new Set([...connection.remoteBookmarks[side], ...paths])],
-          },
-        })),
+        connections: updateConnection(state, connectionId, (connection) => {
+          if (getSftpPaneSource(connection, side) !== 'remote') return connection;
+          const paneConnection = getSftpPaneConnection(connection, side);
+          if (
+            paneConnection.host !== host
+            || paneConnection.port !== port
+            || paneConnection.username !== username
+          ) {
+            return connection;
+          }
+          return {
+            ...connection,
+            remoteBookmarks: {
+              ...connection.remoteBookmarks,
+              [side]: [...new Set([...connection.remoteBookmarks[side], ...paths])],
+            },
+          };
+        }),
       }));
       logger.info(`loaded ${paths.length} SFTP bookmarks for ${username}@${host}`);
     } catch (error) {

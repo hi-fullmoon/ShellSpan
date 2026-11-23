@@ -1,4 +1,4 @@
-import { strFromU8, unzipSync } from 'fflate';
+import { strFromU8, Unzip, UnzipInflate, UnzipPassThrough } from 'fflate';
 
 export interface TabularPreview {
   columns: string[];
@@ -264,8 +264,9 @@ function extractDocument(files: Record<string, Uint8Array>): OfficePreview | und
   return blocks.length > 0 ? { kind: 'document', blocks } : undefined;
 }
 
-function columnIndex(reference: string): number {
-  const letters = reference.match(/^[A-Z]+/i)?.[0]?.toUpperCase() ?? 'A';
+function columnIndex(reference: string): number | undefined {
+  const letters = reference.match(/^[A-Z]+/i)?.[0]?.toUpperCase();
+  if (!letters) return undefined;
   let result = 0;
   for (const letter of letters) result = result * 26 + letter.charCodeAt(0) - 64;
   return Math.max(0, result - 1);
@@ -290,8 +291,12 @@ function extractSpreadsheet(files: Record<string, Uint8Array>): OfficePreview | 
     const sourceRows = elementsByLocalName(document, 'row');
     const rows = sourceRows.slice(0, MAX_TABLE_ROWS + 1).map((row) => {
       const values: string[] = [];
+      let nextImplicitColumn = 0;
       for (const cell of elementsByLocalName(row, 'c')) {
-        const index = Math.min(MAX_TABLE_COLUMNS - 1, columnIndex(cell.getAttribute('r') ?? 'A1'));
+        const ref = cell.getAttribute('r');
+        const index = (ref ? columnIndex(ref) : undefined) ?? nextImplicitColumn;
+        nextImplicitColumn = index + 1;
+        if (index >= MAX_TABLE_COLUMNS) continue;
         const type = cell.getAttribute('t');
         const raw = elementsByLocalName(cell, 'v')[0]?.textContent ?? '';
         const inline = elementsByLocalName(cell, 't').map((node) => node.textContent ?? '').join('');
@@ -333,6 +338,85 @@ function extractPresentation(files: Record<string, Uint8Array>): OfficePreview |
   return slides.length > 0 ? { kind: 'presentation', slides } : undefined;
 }
 
+function concatChunks(chunks: Uint8Array[], totalLength: number): Uint8Array {
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
+}
+
+function unzipBoundedOfficeParts(
+  archiveBytes: Uint8Array,
+  extension: string,
+): Record<string, Uint8Array> {
+  const files: Record<string, Uint8Array> = {};
+  let totalExtractedBytes = 0;
+  let selectedParts = 0;
+  let failure: Error | undefined;
+
+  const isNeededPart = (name: string): boolean => (
+    extension === 'docx'
+      ? name === 'word/document.xml'
+      : extension === 'xlsx'
+        ? name === 'xl/workbook.xml'
+          || name === 'xl/sharedStrings.xml'
+          || /^xl\/worksheets\/sheet\d+\.xml$/.test(name)
+        : /^ppt\/slides\/slide\d+\.xml$/.test(name)
+  );
+
+  const unzipper = new Unzip((file) => {
+    if (failure || !isNeededPart(file.name)) return;
+    if (
+      selectedParts >= 64
+      || (file.originalSize !== undefined && file.originalSize > MAX_OFFICE_PART_SIZE)
+    ) {
+      return;
+    }
+    selectedParts += 1;
+    const chunks: Uint8Array[] = [];
+    let partBytes = 0;
+    file.ondata = (err, data, final) => {
+      if (failure) {
+        file.terminate();
+        return;
+      }
+      if (err) {
+        failure = err;
+        file.terminate();
+        return;
+      }
+      if (data.byteLength > 0) {
+        partBytes += data.byteLength;
+        totalExtractedBytes += data.byteLength;
+        if (partBytes > MAX_OFFICE_PART_SIZE || totalExtractedBytes > MAX_OFFICE_EXTRACTED_SIZE) {
+          failure = new Error('Office preview archive exceeded safe extraction limit');
+          file.terminate();
+          return;
+        }
+        chunks.push(data);
+      }
+      if (final) {
+        files[file.name] = concatChunks(chunks, partBytes);
+      }
+    };
+    file.start();
+  });
+  unzipper.register(UnzipPassThrough);
+  unzipper.register(UnzipInflate);
+
+  const CHUNK_SIZE = 4 * 1024;
+  for (let offset = 0; offset < archiveBytes.byteLength; offset += CHUNK_SIZE) {
+    const end = Math.min(offset + CHUNK_SIZE, archiveBytes.byteLength);
+    unzipper.push(archiveBytes.subarray(offset, end), end >= archiveBytes.byteLength);
+    if (failure) throw failure;
+  }
+  if (failure) throw failure;
+  return files;
+}
+
 export function parseOfficePreview(content: string, extension: string): OfficePreview | undefined {
   if (!content) return undefined;
   if (extension === 'doc') {
@@ -349,24 +433,7 @@ export function parseOfficePreview(content: string, extension: string): OfficePr
       })),
     };
   }
-  let extractedSize = 0;
-  let selectedParts = 0;
-  const files = unzipSync(decodePreviewBase64(content), {
-    filter(file) {
-      const needed = extension === 'docx'
-        ? file.name === 'word/document.xml'
-        : extension === 'xlsx'
-          ? file.name === 'xl/workbook.xml'
-            || file.name === 'xl/sharedStrings.xml'
-            || /^xl\/worksheets\/sheet\d+\.xml$/.test(file.name)
-          : /^ppt\/slides\/slide\d+\.xml$/.test(file.name);
-      if (!needed || file.originalSize > MAX_OFFICE_PART_SIZE || selectedParts >= 64) return false;
-      if (extractedSize + file.originalSize > MAX_OFFICE_EXTRACTED_SIZE) return false;
-      extractedSize += file.originalSize;
-      selectedParts += 1;
-      return true;
-    },
-  });
+  const files = unzipBoundedOfficeParts(decodePreviewBase64(content), extension);
   if (extension === 'docx') return extractDocument(files);
   if (extension === 'xlsx') return extractSpreadsheet(files);
   if (extension === 'pptx') return extractPresentation(files);
