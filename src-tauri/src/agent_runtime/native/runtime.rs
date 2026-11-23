@@ -70,6 +70,8 @@ fn resolve_runtime_storage_path(path: &Path) -> PathBuf {
 pub(crate) struct NativeExecutionContext {
     #[cfg(windows)]
     pub(crate) windows_sandbox_required: bool,
+    #[cfg(target_os = "macos")]
+    pub(crate) mac_sandbox_required: bool,
     pub(crate) bound_terminal_surface: bool,
     pub(crate) request: AgentRequestNative,
     pub(crate) turn_id: String,
@@ -114,6 +116,8 @@ pub(crate) struct AgentAuthorizeCallRequestNative {
 pub(crate) struct PreparedAuthorizationNative {
     #[cfg(windows)]
     pub(crate) windows_sandbox_digest: Option<String>,
+    #[cfg(target_os = "macos")]
+    pub(crate) mac_sandbox: Option<super::mac_sandbox::Workspace>,
     reviewed_command: Option<super::ReviewedReadCommand>,
     pub(crate) sandbox: Option<crate::remote_sandbox::Binding>,
     #[cfg(all(
@@ -179,6 +183,8 @@ pub(crate) struct NativeToolEngine {
     checkpoint_root: Arc<Mutex<Option<PathBuf>>>,
     pub(crate) sudo_prompts: Arc<super::SudoPrompts>,
     pub(crate) tool_progress: ToolProgressHub,
+    #[cfg(target_os = "macos")]
+    mac_sandbox_paths: Arc<Mutex<Option<(PathBuf, Option<PathBuf>)>>>,
     #[cfg(all(test, target_os = "linux"))]
     local_sandbox: Option<local_sandbox_acceptance::Launcher>,
 }
@@ -211,6 +217,8 @@ impl NativeToolEngine {
             checkpoint_root: Arc::new(Mutex::new(None)),
             sudo_prompts: Arc::default(),
             tool_progress: ToolProgressHub::default(),
+            #[cfg(target_os = "macos")]
+            mac_sandbox_paths: Arc::new(Mutex::new(None)),
             #[cfg(all(test, target_os = "linux"))]
             local_sandbox: None,
         }
@@ -244,6 +252,42 @@ impl NativeToolEngine {
     pub(crate) fn reclaim_windows_sandbox_workspace(&self, cwd: &Path) -> Result<(), String> {
         let root = self.checkpoint_root()?;
         super::windows_sandbox::remove_workspace(&root, cwd)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn configure_mac_sandbox_paths(
+        &self,
+        home: PathBuf,
+        resource_dir: Option<PathBuf>,
+    ) -> Result<(), String> {
+        let mut stored = self
+            .mac_sandbox_paths
+            .lock()
+            .map_err(|_| "macOS sandbox paths are unavailable".to_string())?;
+        *stored = Some((home, resource_dir));
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn mac_sandbox_paths(&self) -> Result<(PathBuf, Option<PathBuf>), String> {
+        let stored = self
+            .mac_sandbox_paths
+            .lock()
+            .map_err(|_| "macOS sandbox paths are unavailable".to_string())?;
+        if let Some(paths) = stored.as_ref() {
+            return Ok(paths.clone());
+        }
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .ok_or_else(|| "Unable to resolve HOME for macOS sandbox".to_string())?;
+        Ok((home, None))
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn reclaim_mac_sandbox_workspace(&self, cwd: &Path) -> Result<(), String> {
+        let (home, _) = self.mac_sandbox_paths()?;
+        super::mac_sandbox::remove_workspace(&home, cwd)
     }
 
     pub(crate) fn tool(&self, name: &str) -> Result<&RegisteredToolNative, String> {
@@ -289,6 +333,8 @@ impl NativeToolEngine {
         let windows_sandbox_digest = self
             .windows_sandbox_binding(&context, &call, database)?
             .map(|binding| binding.digest);
+        #[cfg(target_os = "macos")]
+        let mac_sandbox = self.mac_sandbox_binding(&context, &call, database)?;
         #[cfg(all(
             feature = "native-input-acceptance",
             debug_assertions,
@@ -351,13 +397,24 @@ impl NativeToolEngine {
         ))]
         let managed_workspace = desktop_sandbox
             .as_ref()
-            .map(|binding| binding.workspace.as_path());
-        #[cfg(not(all(
-            feature = "native-input-acceptance",
-            debug_assertions,
+            .map(|binding| binding.workspace.as_path())
+            .or_else(|| {
+                mac_sandbox
+                    .as_ref()
+                    .map(|binding| binding.workspace.as_path())
+            });
+        #[cfg(all(
             target_os = "macos",
-            target_arch = "aarch64"
-        )))]
+            not(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_arch = "aarch64"
+            ))
+        ))]
+        let managed_workspace = mac_sandbox
+            .as_ref()
+            .map(|binding| binding.workspace.as_path());
+        #[cfg(not(target_os = "macos"))]
         let managed_workspace = None;
         let review = super::review_call(
             context.request.permission_mode,
@@ -400,6 +457,8 @@ impl NativeToolEngine {
         Ok(PreparedAuthorizationNative {
             #[cfg(windows)]
             windows_sandbox_digest,
+            #[cfg(target_os = "macos")]
+            mac_sandbox,
             reviewed_command: review.command,
             native_prompt,
             sandbox,
@@ -436,6 +495,12 @@ impl NativeToolEngine {
         let sandbox_digest = prepared
             .windows_sandbox_digest
             .as_deref()
+            .or(sandbox_digest);
+        #[cfg(target_os = "macos")]
+        let sandbox_digest = prepared
+            .mac_sandbox
+            .as_ref()
+            .map(|binding| binding.digest.as_str())
             .or(sandbox_digest);
         #[cfg(all(
             feature = "native-input-acceptance",
@@ -682,6 +747,8 @@ impl NativeToolEngine {
         let sandbox = call_sandbox_binding(context, &call, database, known_hosts_path)?;
         #[cfg(windows)]
         let windows_sandbox = self.windows_sandbox_binding(context, &call, database)?;
+        #[cfg(target_os = "macos")]
+        let mac_sandbox = self.mac_sandbox_binding(context, &call, database)?;
         #[cfg(all(
             feature = "native-input-acceptance",
             debug_assertions,
@@ -694,6 +761,11 @@ impl NativeToolEngine {
         let sandbox_digest = sandbox.as_ref().map(|binding| binding.digest.as_str());
         #[cfg(windows)]
         let sandbox_digest = windows_sandbox
+            .as_ref()
+            .map(|binding| binding.digest.as_str())
+            .or(sandbox_digest);
+        #[cfg(target_os = "macos")]
+        let sandbox_digest = mac_sandbox
             .as_ref()
             .map(|binding| binding.digest.as_str())
             .or(sandbox_digest);
@@ -811,6 +883,8 @@ impl NativeToolEngine {
                 sandbox.as_ref(),
                 #[cfg(windows)]
                 windows_sandbox,
+                #[cfg(target_os = "macos")]
+                mac_sandbox.as_ref(),
                 #[cfg(all(
                     feature = "native-input-acceptance",
                     debug_assertions,
@@ -1884,6 +1958,8 @@ mod tests {
             checkpoint_root: Arc::new(Mutex::new(None)),
             sudo_prompts: Arc::default(),
             tool_progress: ToolProgressHub::default(),
+            #[cfg(target_os = "macos")]
+            mac_sandbox_paths: Arc::new(Mutex::new(None)),
             #[cfg(target_os = "linux")]
             local_sandbox: None,
         }
@@ -2043,6 +2119,8 @@ mod tests {
         let context = NativeExecutionContext {
             #[cfg(windows)]
             windows_sandbox_required: false,
+            #[cfg(target_os = "macos")]
+            mac_sandbox_required: false,
             bound_terminal_surface: false,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
@@ -2158,6 +2236,8 @@ mod tests {
             context: NativeExecutionContext {
                 #[cfg(windows)]
                 windows_sandbox_required: false,
+                #[cfg(target_os = "macos")]
+                mac_sandbox_required: false,
                 bound_terminal_surface: false,
                 request: AgentRequestNative {
                     contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
@@ -2230,6 +2310,8 @@ mod tests {
         let context = NativeExecutionContext {
             #[cfg(windows)]
             windows_sandbox_required: false,
+            #[cfg(target_os = "macos")]
+            mac_sandbox_required: false,
             bound_terminal_surface: false,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
@@ -2334,6 +2416,8 @@ mod tests {
         let context = NativeExecutionContext {
             #[cfg(windows)]
             windows_sandbox_required: false,
+            #[cfg(target_os = "macos")]
+            mac_sandbox_required: false,
             bound_terminal_surface: false,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
@@ -2481,6 +2565,8 @@ mod tests {
         let context = NativeExecutionContext {
             #[cfg(windows)]
             windows_sandbox_required: false,
+            #[cfg(target_os = "macos")]
+            mac_sandbox_required: false,
             bound_terminal_surface: false,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
@@ -2526,6 +2612,10 @@ mod tests {
                 None,
                 &CancellationToken::new(),
                 None,
+                None,
+                #[cfg(windows)]
+                None,
+                #[cfg(target_os = "macos")]
                 None,
                 #[cfg(all(
                     feature = "native-input-acceptance",
@@ -2622,6 +2712,8 @@ mod tests {
         let context = NativeExecutionContext {
             #[cfg(windows)]
             windows_sandbox_required: false,
+            #[cfg(target_os = "macos")]
+            mac_sandbox_required: false,
             bound_terminal_surface: false,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
@@ -2954,6 +3046,8 @@ mod tests {
         let context = NativeExecutionContext {
             #[cfg(windows)]
             windows_sandbox_required: false,
+            #[cfg(target_os = "macos")]
+            mac_sandbox_required: false,
             bound_terminal_surface: false,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,

@@ -252,6 +252,11 @@ impl AgentSessionTarget {
         self.local_sandbox_required == Some(LocalSandboxKind::WindowsAppContainer)
     }
 
+    #[cfg(target_os = "macos")]
+    pub(crate) fn requires_mac_sandbox(&self) -> bool {
+        self.local_sandbox_required == Some(LocalSandboxKind::MacNono)
+    }
+
     pub(crate) fn requires_local_sandbox(&self) -> bool {
         self.local_sandbox_required.is_some()
     }

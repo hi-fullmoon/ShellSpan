@@ -2454,7 +2454,7 @@ impl AgentToolPipeline {
     ) -> Result<Option<AgentScopedPayload>, String> {
         if !matches!(
             preparation.call.arguments["sandboxExecutor"].as_str(),
-            Some("nonoMacAcceptance" | "windowsAppContainer")
+            Some("macNono" | "nonoMacAcceptance" | "windowsAppContainer")
         ) {
             return Ok(None);
         }

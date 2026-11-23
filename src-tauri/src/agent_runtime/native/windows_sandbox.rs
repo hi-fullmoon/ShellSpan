@@ -197,6 +197,10 @@ fn identity_record(path: &Path) -> PathBuf {
     path.with_extension("identity")
 }
 
+fn temp_root_for(path: &Path) -> PathBuf {
+    path.with_extension("tmp")
+}
+
 pub(crate) fn create_workspace(data: &Path, session: &str) -> Result<String, String> {
     let create = || -> io::Result<String> {
         let base = data.join(WORKSPACES);
@@ -260,6 +264,15 @@ pub(crate) fn remove_workspace(data: &Path, cwd: &Path) -> Result<(), String> {
             ));
         }
     }
+    match fs::remove_dir_all(temp_root_for(&path)) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "Failed to remove Windows sandbox temp root: {error}"
+            ));
+        }
+    }
     match fs::remove_file(identity_record(&path)) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -269,6 +282,7 @@ pub(crate) fn remove_workspace(data: &Path, cwd: &Path) -> Result<(), String> {
             ));
         }
     }
+    let _ = fs::remove_file(super::sandbox_sync::baseline_path_for_workspace(&path));
     let moniker = container_moniker(&name, &user);
     // SAFETY: moniker is a valid NUL-terminated UTF-16 AppContainer name.
     let result = unsafe { DeleteAppContainerProfile(moniker.as_ptr()) };
@@ -278,6 +292,35 @@ pub(crate) fn remove_workspace(data: &Path, cwd: &Path) -> Result<(), String> {
         return Err(format!("DeleteAppContainerProfile failed: {result:#x}"));
     }
     Ok(())
+}
+
+pub(crate) fn reclaim_orphaned_workspaces(
+    data: &Path,
+    known_cwds: &std::collections::HashSet<String>,
+) {
+    let base = data.join(WORKSPACES);
+    let Ok(entries) = fs::read_dir(&base) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(OsStr::to_str) else {
+            continue;
+        };
+        if name.len() != 32 || uuid::Uuid::parse_str(name).is_err() {
+            continue;
+        }
+        let portable = crate::path_utils::portable_local_path(&path);
+        if known_cwds.contains(&portable) {
+            continue;
+        }
+        if let Err(error) = remove_workspace(data, &path) {
+            log::warn!(
+                "Failed to reclaim orphaned Windows sandbox workspace: {}",
+                crate::redaction::redact_sensitive_text(&error)
+            );
+        }
+    }
 }
 
 pub(super) struct Workspace {
@@ -488,13 +531,37 @@ impl Suspended {
     }
 }
 
+const MAX_ACTIVE_PROCESSES: u32 = 64;
+const MAX_JOB_MEMORY_BYTES: usize = 2 * 1024 * 1024 * 1024;
+
+fn windows_sandbox_path_env(system: &Path) -> String {
+    let mut entries = vec![system.display().to_string()];
+    if let Some(program_files) = std::env::var_os("ProgramFiles").map(PathBuf::from) {
+        for relative in ["Git\\cmd", "nodejs", "PowerShell\\7"] {
+            let candidate = program_files.join(relative);
+            if candidate.is_dir() {
+                entries.push(candidate.display().to_string());
+            }
+        }
+    }
+    entries.join(";")
+}
+
 pub(super) fn prepare(workspace: Workspace, command: &str) -> io::Result<Suspended> {
     let sid = ContainerSid::for_workspace(&workspace.name, &workspace.user)?;
-    // Temp storage is a fresh, dedicated child of the workspace. It inherits
-    // the restricted ACL but does not need access to host TEMP or user profile.
+    // Temp storage lives in a sibling host-managed directory outside the visible
+    // workspace so crashes never leave `.shellspan-tmp-*` clutter inside user files.
+    let temp_root = temp_root_for(&workspace.path);
+    match create_writable_directory(&temp_root, &workspace.user, &sid) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            let _ = directory(&temp_root)?;
+        }
+        Err(error) => return Err(error),
+    }
     let temporary = tempfile::Builder::new()
-        .prefix(".shellspan-tmp-")
-        .tempdir_in(&workspace.path)?;
+        .prefix("run-")
+        .tempdir_in(&temp_root)?;
     let system = system_directory()?;
     let system_root = system
         .parent()
@@ -511,11 +578,12 @@ pub(super) fn prepare(workspace: Workspace, command: &str) -> io::Result<Suspend
     ));
     let program = wide(program);
     let cwd = wide(&workspace.path);
+    let path_env = windows_sandbox_path_env(&system);
     let env = format!(
         "HOME={}\0LOCALAPPDATA={}\0PATH={}\0SystemRoot={}\0TEMP={}\0TMP={}\0USERPROFILE={}\0",
         workspace.path.display(),
         temporary.path().display(),
-        system.display(),
+        path_env,
         system_root.display(),
         temporary.path().display(),
         temporary.path().display(),
@@ -544,7 +612,11 @@ pub(super) fn prepare(workspace: Workspace, command: &str) -> io::Result<Suspend
         }
         let job = OwnedHandle::from_raw_handle(job);
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            | JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+            | JOB_OBJECT_LIMIT_JOB_MEMORY;
+        limits.BasicLimitInformation.ActiveProcessLimit = MAX_ACTIVE_PROCESSES;
+        limits.JobMemoryLimit = MAX_JOB_MEMORY_BYTES;
         win(SetInformationJobObject(
             job.as_raw_handle(),
             JobObjectExtendedLimitInformation,

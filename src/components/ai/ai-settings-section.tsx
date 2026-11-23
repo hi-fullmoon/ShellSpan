@@ -19,7 +19,9 @@ import type { LocaleKey } from '@/locales';
 import {
   invokeArchiveAgentRuntimeSession,
   invokeCancelAgentRuntime,
+  invokeLocalSandboxStatus,
   isTauriRuntime,
+  type LocalSandboxStatus,
 } from '@/lib/ipc/tauri';
 import { listAllAgentSessionRecords } from '@/lib/ai/session-records';
 import { modelDefinitionOf } from '@/lib/ai/provider-contract';
@@ -94,6 +96,24 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const agentSandboxEnabled = useAiSettingsStore((state) => state.agentSandboxEnabled);
   const agentSandboxSaving = useAiSettingsStore((state) => state.agentSandboxSaving);
   const setAgentSandboxEnabled = useAiSettingsStore((state) => state.setAgentSandboxEnabled);
+  const [localSandboxStatus, setLocalSandboxStatus] = React.useState<LocalSandboxStatus | null>(null);
+  React.useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let cancelled = false;
+    void invokeLocalSandboxStatus().then((status) => {
+      if (!cancelled) setLocalSandboxStatus(status);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const sandboxDescription = localSandboxStatus?.supported && localSandboxStatus.kind === 'macNono'
+    ? t('settings.ai.agent.sandboxDescriptionMac')
+    : localSandboxStatus?.supported && localSandboxStatus.kind === 'windowsAppContainer'
+      ? t('settings.ai.agent.sandboxDescriptionWindows')
+      : localSandboxStatus && !localSandboxStatus.supported
+        ? t('settings.ai.agent.sandboxDescriptionRemoteOnly')
+        : t('settings.ai.agent.sandboxDescription');
   const vimBridgeAutoAttach = useAiSettingsStore((state) => state.vimBridgeAutoAttach);
   const vimBridgeAutoAttachSaving = useAiSettingsStore((state) => state.vimBridgeAutoAttachSaving);
   const setVimBridgeAutoAttach = useAiSettingsStore((state) => state.setVimBridgeAutoAttach);
@@ -315,7 +335,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
           <SettingRow
             controlId={sandboxControlId}
             label={t('settings.ai.agent.sandbox')}
-            description={t('settings.ai.agent.sandboxDescription')}
+            description={sandboxDescription}
             descriptionId={`${sandboxControlId}-description`}
           >
             <Switch

@@ -264,6 +264,62 @@ pub(crate) struct AgentSessionIdInput {
     session_id: String,
 }
 
+const LOCAL_SANDBOX_ALLOWED_TOOLS: &[&str] = &[
+    "run_terminal_command",
+    "ask_user_question",
+    "read_tool_result",
+    "read_file",
+    "list_directory",
+    "search_text",
+    "write_file",
+    "edit_file",
+    "apply_patch",
+    "trash_file",
+];
+
+fn rollback_created_local_sandbox(
+    app: &AppHandle,
+    created: Option<(super::LocalSandboxKind, String)>,
+) {
+    let Some((kind, workspace)) = created else {
+        return;
+    };
+    let Ok(home) = app.path().home_dir() else {
+        return;
+    };
+    match kind {
+        #[cfg(windows)]
+        super::LocalSandboxKind::WindowsAppContainer => {
+            let data = crate::shellspan_data_dir(&home);
+            if let Err(error) = super::native::windows_sandbox::remove_workspace(
+                &data,
+                std::path::Path::new(&workspace),
+            ) {
+                log::warn!(
+                    "Failed to roll back Windows sandbox workspace: {}",
+                    crate::redaction::redact_sensitive_text(&error)
+                );
+            }
+        }
+        #[cfg(target_os = "macos")]
+        super::LocalSandboxKind::MacNono => {
+            if let Err(error) = super::native::mac_sandbox::remove_workspace(
+                &home,
+                std::path::Path::new(&workspace),
+            ) {
+                log::warn!(
+                    "Failed to roll back macOS sandbox workspace: {}",
+                    crate::redaction::redact_sensitive_text(&error)
+                );
+            }
+        }
+        #[allow(unreachable_patterns)]
+        _ => {
+            let _ = workspace;
+        }
+    }
+}
+
 #[tauri::command]
 pub(crate) fn agent_runtime_create_session(
     app: AppHandle,
@@ -274,8 +330,12 @@ pub(crate) fn agent_runtime_create_session(
         return Err("Create child Agent Sessions through the delegation command".into());
     }
     configure_runtime(&app, &runtime)?;
-    apply_connection_sandbox(&app, &mut request)?;
-    runtime.create_session(request)
+    let created_sandbox = apply_connection_sandbox(&app, &mut request)?;
+    let result = runtime.create_session(request);
+    if result.is_err() {
+        rollback_created_local_sandbox(&app, created_sandbox);
+    }
+    result
 }
 
 #[tauri::command]
@@ -285,14 +345,18 @@ pub(crate) fn agent_runtime_continue_on_target(
     mut request: CreateAgentSessionRequest,
 ) -> Result<AgentSessionSnapshot, String> {
     configure_runtime(&app, &runtime)?;
-    apply_connection_sandbox(&app, &mut request)?;
-    runtime.continue_on_target(request)
+    let created_sandbox = apply_connection_sandbox(&app, &mut request)?;
+    let result = runtime.continue_on_target(request);
+    if result.is_err() {
+        rollback_created_local_sandbox(&app, created_sandbox);
+    }
+    result
 }
 
 fn apply_connection_sandbox(
     app: &AppHandle,
     request: &mut CreateAgentSessionRequest,
-) -> Result<(), String> {
+) -> Result<Option<(super::LocalSandboxKind, String)>, String> {
     #[cfg(all(
         feature = "native-input-acceptance",
         debug_assertions,
@@ -322,14 +386,47 @@ fn apply_connection_sandbox(
         }
     }
     let Some(target) = request.target.as_mut() else {
-        return Ok(());
+        return Ok(None);
     };
+    let mut created_local_sandbox: Option<(super::LocalSandboxKind, String)> = None;
     target.remote_sandbox_required = None;
     #[cfg(windows)]
     if target.kind == "local" && target.target_id != "workbench-ai" {
         let db = app.state::<crate::db::Database>();
         if db.agent_sandbox_enabled()? {
             target.local_sandbox_required = Some(super::LocalSandboxKind::WindowsAppContainer);
+        }
+    }
+    #[cfg(target_os = "macos")]
+    if target.kind == "local" && target.target_id != "workbench-ai" {
+        let trial_active = {
+            #[cfg(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_arch = "aarch64"
+            ))]
+            {
+                super::native::mac_sandbox_trial_active()
+            }
+            #[cfg(not(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_arch = "aarch64"
+            )))]
+            {
+                false
+            }
+        };
+        if !trial_active && target.local_sandbox_required.is_none() {
+            let db = app.state::<crate::db::Database>();
+            if db.agent_sandbox_enabled()? {
+                let resource_dir = app.path().resource_dir().ok();
+                if super::native::mac_sandbox::resolve_verified_launcher(resource_dir.as_deref())
+                    .is_ok()
+                {
+                    target.local_sandbox_required = Some(super::LocalSandboxKind::MacNono);
+                }
+            }
         }
     }
     match target.local_sandbox_required {
@@ -347,32 +444,54 @@ fn apply_connection_sandbox(
                 let database = app.state::<crate::db::Database>();
                 database.require_agent_sandbox_enabled()?;
                 let home = app.path().home_dir().map_err(|error| error.to_string())?;
+                let data_dir = crate::shellspan_data_dir(&home);
+                let import_source = target
+                    .local_root
+                    .as_deref()
+                    .or(target.cwd.as_deref())
+                    .and_then(|candidate| {
+                        super::native::sandbox_sync::is_importable_project_root(
+                            std::path::Path::new(candidate),
+                            &home,
+                            &data_dir,
+                        )
+                    });
                 let workspace = super::native::windows_sandbox::create_workspace(
-                    &crate::shellspan_data_dir(&home),
+                    &data_dir,
                     &request.session_id,
                 )?;
                 target.cwd = Some(workspace.clone());
-                target.local_root = Some(workspace);
+                target.local_root = Some(workspace.clone());
+                created_local_sandbox = Some((
+                    super::LocalSandboxKind::WindowsAppContainer,
+                    workspace.clone(),
+                ));
+                if let Some(source_root) = import_source {
+                    let ws_path = std::path::Path::new(&workspace);
+                    let baseline =
+                        super::native::sandbox_sync::baseline_path_for_workspace(ws_path);
+                    if let Err(error) = super::native::sandbox_sync::import_source_into_workspace(
+                        &source_root,
+                        ws_path,
+                        &baseline,
+                    ) {
+                        rollback_created_local_sandbox(app, created_local_sandbox);
+                        return Err(error);
+                    }
+                }
                 use super::AgentSessionEffect::*;
-                let allowed = |name: &str| {
-                    matches!(
-                        name,
-                        "run_terminal_command" | "ask_user_question" | "read_tool_result"
-                    )
-                };
+                let allowed = |name: &str| LOCAL_SANDBOX_ALLOWED_TOOLS.contains(&name);
                 if let Some(scope) = request.capability_scope.as_mut() {
                     if scope.tool_names.iter().any(|name| !allowed(name)) {
+                        rollback_created_local_sandbox(app, created_local_sandbox);
                         return Err("WINDOWS_SANDBOX_DIRECT_REQUIRED".into());
                     }
                 } else {
                     request.capability_scope = Some(super::AgentCapabilityScope {
-                        tool_names: [
-                            "run_terminal_command",
-                            "ask_user_question",
-                            "read_tool_result",
-                        ]
-                        .map(str::to_owned)
-                        .to_vec(),
+                        tool_names: LOCAL_SANDBOX_ALLOWED_TOOLS
+                            .iter()
+                            .map(|name| (*name).to_owned())
+                            .collect(),
                         effects: vec![
                             None,
                             ReadOnly,
@@ -392,15 +511,87 @@ fn apply_connection_sandbox(
             );
         }
         Some(super::LocalSandboxKind::MacNono) => {
+            if target.kind != "local"
+                || target.target_id == "workbench-ai"
+                || request.execution_surface != super::AgentExecutionSurface::Direct
+            {
+                return Err(
+                    "MAC_SANDBOX_DIRECT_REQUIRED: select a local Direct Agent session".into(),
+                );
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let database = app.state::<crate::db::Database>();
+                database.require_agent_sandbox_enabled()?;
+                let resource_dir = app.path().resource_dir().ok();
+                super::native::mac_sandbox::resolve_verified_launcher(resource_dir.as_deref())?;
+                let home = app.path().home_dir().map_err(|error| error.to_string())?;
+                let data_dir = crate::shellspan_data_dir(&home);
+                let import_source = target
+                    .local_root
+                    .as_deref()
+                    .or(target.cwd.as_deref())
+                    .and_then(|candidate| {
+                        super::native::sandbox_sync::is_importable_project_root(
+                            std::path::Path::new(candidate),
+                            &home,
+                            &data_dir,
+                        )
+                    });
+                let workspace =
+                    super::native::mac_sandbox::create_workspace(&home, &request.session_id)?;
+                target.cwd = Some(workspace.clone());
+                target.local_root = Some(workspace.clone());
+                created_local_sandbox = Some((super::LocalSandboxKind::MacNono, workspace.clone()));
+                if let Some(source_root) = import_source {
+                    let ws_path = std::path::Path::new(&workspace);
+                    let baseline =
+                        super::native::sandbox_sync::baseline_path_for_workspace(ws_path);
+                    if let Err(error) = super::native::sandbox_sync::import_source_into_workspace(
+                        &source_root,
+                        ws_path,
+                        &baseline,
+                    ) {
+                        rollback_created_local_sandbox(app, created_local_sandbox);
+                        return Err(error);
+                    }
+                }
+                use super::AgentSessionEffect::*;
+                let allowed = |name: &str| LOCAL_SANDBOX_ALLOWED_TOOLS.contains(&name);
+                if let Some(scope) = request.capability_scope.as_mut() {
+                    if scope.tool_names.iter().any(|name| !allowed(name)) {
+                        rollback_created_local_sandbox(app, created_local_sandbox);
+                        return Err("MAC_SANDBOX_DIRECT_REQUIRED".into());
+                    }
+                } else {
+                    request.capability_scope = Some(super::AgentCapabilityScope {
+                        tool_names: LOCAL_SANDBOX_ALLOWED_TOOLS
+                            .iter()
+                            .map(|name| (*name).to_owned())
+                            .collect(),
+                        effects: vec![
+                            None,
+                            ReadOnly,
+                            SensitiveRead,
+                            StateChange,
+                            Destructive,
+                            ExternalSideEffect,
+                            Unknown,
+                        ],
+                        target_ids: vec![target.target_id.clone()],
+                    });
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
             return Err(
-                "LOCAL_SANDBOX_UNAVAILABLE: macOS managed local sandbox is not enabled in this build"
+                "LOCAL_SANDBOX_UNAVAILABLE: macOS managed local sandbox is not available on this platform"
                     .into(),
             );
         }
         None => {}
     }
     if target.kind != "remote" {
-        return Ok(());
+        return Ok(created_local_sandbox);
     }
     let native = super::native_adapter::target_native(target)?;
     let db = app.state::<crate::db::Database>();
@@ -420,7 +611,7 @@ fn apply_connection_sandbox(
             target.root_path = Some(policy.workspace);
         }
     }
-    Ok(())
+    Ok(created_local_sandbox)
 }
 
 #[cfg(all(
@@ -442,6 +633,121 @@ fn require_mac_sandbox_direct(
         );
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LocalSandboxStatus {
+    pub(crate) supported: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) kind: Option<super::LocalSandboxKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) reason: Option<String>,
+}
+
+#[tauri::command]
+pub(crate) fn agent_runtime_local_sandbox_status(app: AppHandle) -> LocalSandboxStatus {
+    #[cfg(windows)]
+    {
+        let _ = app;
+        LocalSandboxStatus {
+            supported: true,
+            kind: Some(super::LocalSandboxKind::WindowsAppContainer),
+            reason: None,
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let resource_dir = app.path().resource_dir().ok();
+        match super::native::mac_sandbox::resolve_verified_launcher(resource_dir.as_deref()) {
+            Ok(_) => LocalSandboxStatus {
+                supported: true,
+                kind: Some(super::LocalSandboxKind::MacNono),
+                reason: None,
+            },
+            Err(error) => LocalSandboxStatus {
+                supported: false,
+                kind: None,
+                reason: Some(error),
+            },
+        }
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = app;
+        LocalSandboxStatus {
+            supported: false,
+            kind: None,
+            reason: Some("LOCAL_SANDBOX_UNAVAILABLE: unsupported platform".into()),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SandboxApplyInput {
+    session_id: String,
+    #[serde(default)]
+    paths: Option<Vec<String>>,
+    #[serde(default)]
+    allow_overwrite_conflicts: bool,
+}
+
+fn resolve_local_sandbox_workspace_for_session(
+    runtime: &AgentRuntime,
+    session_id: &str,
+) -> Result<std::path::PathBuf, String> {
+    let snapshot = runtime.session(session_id)?;
+    let target = snapshot
+        .header
+        .target
+        .ok_or_else(|| "Agent Session has no target".to_string())?;
+    if !target.requires_local_sandbox() {
+        return Err("Agent Session is not using a managed local sandbox".into());
+    }
+    let cwd = target
+        .cwd
+        .ok_or_else(|| "Managed local sandbox workspace is missing".to_string())?;
+    Ok(std::path::PathBuf::from(cwd))
+}
+
+#[tauri::command]
+pub(crate) fn agent_runtime_sandbox_diff(
+    runtime: State<'_, AgentRuntime>,
+    session_id: String,
+) -> Result<Option<super::native::sandbox_sync::SandboxDiffReport>, String> {
+    let workspace = resolve_local_sandbox_workspace_for_session(&runtime, &session_id)?;
+    let baseline = super::native::sandbox_sync::baseline_path_for_workspace(&workspace);
+    if !baseline.exists() {
+        return Ok(None);
+    }
+    super::native::sandbox_sync::diff_workspace_against_baseline(&workspace, &baseline).map(Some)
+}
+
+#[tauri::command]
+pub(crate) fn agent_runtime_sandbox_file_diff(
+    runtime: State<'_, AgentRuntime>,
+    session_id: String,
+    path: String,
+) -> Result<super::native::sandbox_sync::SandboxFileDiffPreview, String> {
+    let workspace = resolve_local_sandbox_workspace_for_session(&runtime, &session_id)?;
+    let baseline = super::native::sandbox_sync::baseline_path_for_workspace(&workspace);
+    super::native::sandbox_sync::diff_file_preview(&workspace, &baseline, &path)
+}
+
+#[tauri::command]
+pub(crate) fn agent_runtime_sandbox_apply(
+    runtime: State<'_, AgentRuntime>,
+    input: SandboxApplyInput,
+) -> Result<super::native::sandbox_sync::SandboxApplyReport, String> {
+    let workspace = resolve_local_sandbox_workspace_for_session(&runtime, &input.session_id)?;
+    let baseline = super::native::sandbox_sync::baseline_path_for_workspace(&workspace);
+    super::native::sandbox_sync::apply_workspace_changes(
+        &workspace,
+        &baseline,
+        input.paths.as_deref(),
+        input.allow_overwrite_conflicts,
+    )
 }
 
 #[derive(Debug, Deserialize)]

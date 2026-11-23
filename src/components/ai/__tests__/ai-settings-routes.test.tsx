@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/ipc/tauri', () => ({
   isTauriRuntime: () => true,
+  invokeLocalSandboxStatus: vi.fn().mockResolvedValue({ supported: false }),
   invokeListAgentRuntimeSessions: vi.fn().mockResolvedValue({ sessions: [] }),
   invokeCancelAgentRuntime: vi.fn(),
   invokeArchiveAgentRuntimeSession: vi.fn(),

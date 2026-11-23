@@ -226,6 +226,30 @@ if(includeBash||editorSupported){
   await mkdir(resolve(tree,'.cargo'),{recursive:true});
   await writeFile(resolve(tree,'.cargo/config.toml'),'[source.crates-io]\nreplace-with = "vendored-sources"\n[source.vendored-sources]\ndirectory = "vendor"\n');
 }else{for(const entry of await readdir(generated))await rm(resolve(generated,entry),{recursive:true});}
+if(target.endsWith('-apple-darwin')&&!validationOnly){
+  const sandboxTarget=resolve(root,'src-tauri/target/agent-sandbox-launcher');
+  const launcherBin=resolve(sandboxTarget,'release/shellspan-sandbox-probe');
+  if(!values['no-build']){
+    await run('cargo',['build','--release','--locked','--manifest-path','scripts/agent-sandbox/Cargo.toml','--target-dir',sandboxTarget]);
+  }
+  const launcherBytes=await readFile(launcherBin).catch(error=>{
+    if(error.code==='ENOENT'&&values['no-build'])return undefined;
+    throw error;
+  });
+  if(launcherBytes){
+    const sandboxDir=resolve(generated,'sandbox');
+    const stagedBin=resolve(sandboxDir,'shellspan-sandbox-launcher');
+    await mkdir(sandboxDir,{recursive:true});
+    await writeFile(stagedBin,launcherBytes,{mode:0o755});
+    await chmod(stagedBin,0o755);
+    await writeFile(resolve(sandboxDir,'launcher-manifest.json'),JSON.stringify({
+      version:1,
+      target,
+      binary:'shellspan-sandbox-launcher',
+      sha256:sha(launcherBytes),
+    },null,2)+'\n');
+  }
+}
 if(validationOnly){assert.deepEqual(captureValidationSources(root),frozenSources);await writeFile(resolve(generated,'editor-validation.json'),JSON.stringify({protocol:'shellspan.native-editor-validation',resourceRoot:destination,sourceManifestSha256,editorTargets:validationTargets},null,2));}
 await writeFile(resolve(generated,'resource-manifest.json'),JSON.stringify({version:1,target,targets,sourceHashesVerified:includeBash||editorSupported,unsupportedHost:!includeBash&&!editorSupported,validationOnly,validationEditorTargets:validationTargets},null,2)+'\n');
 await writableResourceTree(generated);

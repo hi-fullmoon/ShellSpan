@@ -35,6 +35,9 @@ impl NativeToolEngine {
         #[cfg(windows)] windows_sandbox: Option<
             crate::agent_runtime::native::windows_sandbox::Workspace,
         >,
+        #[cfg(target_os = "macos")] mac_sandbox: Option<
+            &crate::agent_runtime::native::mac_sandbox::Workspace,
+        >,
         #[cfg(all(
             feature = "native-input-acceptance",
             debug_assertions,
@@ -87,6 +90,8 @@ impl NativeToolEngine {
         }
         self.processes.ensure_capacity()?;
         validate_frozen_cwd(&call.target, arguments.cwd.as_deref())?;
+        #[cfg(target_os = "macos")]
+        let mut mac_launch = None;
         #[cfg(all(
             feature = "native-input-acceptance",
             debug_assertions,
@@ -169,6 +174,90 @@ impl NativeToolEngine {
                             effect,
                             &error,
                             json!({"sandbox": crate::agent_runtime::native::windows_sandbox::EXECUTOR, "started": false}),
+                            false,
+                        );
+                        result.status = if cancellation.is_cancelled() {
+                            AgentToolResultStatusNative::Cancelled
+                        } else {
+                            AgentToolResultStatusNative::Failed
+                        };
+                        return Ok(result);
+                    }
+                }
+            }
+            #[cfg(target_os = "macos")]
+            AgentToolTargetNative::Local { target_id, .. } if mac_sandbox.is_some() => {
+                use std::io::Write;
+
+                let binding = mac_sandbox.expect("macOS sandbox binding");
+                let launch = database.with_local_sandbox_dispatch(|| {
+                    if cancellation.is_cancelled() {
+                        return Err("Local sandbox launch cancelled".into());
+                    }
+                    let mut lease = binding.acquire_lease()?;
+                    let admitted = (|| {
+                        let journal =
+                            runner_journal.ok_or("Missing macOS sandbox dispatch journal")?;
+                        binding.revalidate()?;
+                        let (process, receipt, mut gate) =
+                            crate::agent_runtime::native::process::prepare_mac_sandbox_process(
+                                &context.request,
+                                target_id,
+                                &arguments.command,
+                                reviewed_command,
+                                &binding.workspace,
+                                &binding.launcher,
+                                timeout,
+                                &mut lease,
+                            )?;
+                        let mut registered = false;
+                        let dispatched = journal(&mut || {
+                            if cancellation.is_cancelled() {
+                                return Err("Local sandbox launch cancelled".into());
+                            }
+                            self.processes.insert(Arc::clone(&process))?;
+                            registered = true;
+                            gate.write_all(b"G").map_err(|error| error.to_string())
+                        });
+                        drop(gate);
+                        if let Err(error) = dispatched {
+                            let snapshot = process.wait(Duration::from_secs(3))?;
+                            if registered {
+                                self.processes
+                                    .remove_terminal(&snapshot.process_handle, snapshot.state)?;
+                            }
+                            return Err(error);
+                        }
+                        Ok((process, receipt))
+                    })();
+                    match admitted {
+                        Ok((process, receipt)) => Ok((process, receipt, lease)),
+                        Err(error) => {
+                            match lease.release() {
+                                Ok(true) => {}
+                                Ok(false) => log::warn!(
+                                    "Managed macOS sandbox recovery is waiting for the previous process group"
+                                ),
+                                Err(cleanup) => log::warn!(
+                                    "Managed macOS sandbox recovery retained directory protection: {cleanup}"
+                                ),
+                            }
+                            Err(error)
+                        }
+                    }
+                });
+                match launch {
+                    Ok((process, receipt, lease)) => {
+                        mac_launch = Some((receipt, lease));
+                        process
+                    }
+                    Err(error) => {
+                        let mut result = completed_result(
+                            &context.request,
+                            call,
+                            effect,
+                            &error,
+                            json!({"sandbox": crate::agent_runtime::native::mac_sandbox::EXECUTOR, "started": false}),
                             false,
                         );
                         result.status = if cancellation.is_cancelled() {
@@ -401,6 +490,43 @@ impl NativeToolEngine {
                 .remove_terminal(&snapshot.process_handle, snapshot.state)?;
         }
         let mut result = exec_process_result(&context.request, call, effect, snapshot, background);
+        #[cfg(target_os = "macos")]
+        if let Some((receipt, mut lease)) = mac_launch {
+            use std::os::unix::fs::FileExt;
+            let mut evidence = [0];
+            let data = result.data.as_mut().expect("Direct result data");
+            data["sandbox"] = json!(crate::agent_runtime::native::mac_sandbox::EXECUTOR);
+            match (receipt.read_at(&mut evidence, 0).ok(), evidence[0]) {
+                (Some(1), b'S') => data["started"] = json!(true),
+                (Some(1), b'F') => {
+                    result.status = AgentToolResultStatusNative::Failed;
+                    result.summary =
+                        "LOCAL_SANDBOX_START_FAILED: launcher rejected the command before it started"
+                            .into();
+                    data["started"] = json!(false);
+                    data["launcherExitCode"] = data["exitCode"].take();
+                }
+                _ => {
+                    result.status = AgentToolResultStatusNative::Uncertain;
+                    result.summary =
+                        "LOCAL_SANDBOX_START_UNCONFIRMED: no trusted launch evidence".into();
+                    data["started"] = Value::Null;
+                }
+            }
+            let cleanup = (|| {
+                lease.record_ended().map_err(|error| error.to_string())?;
+                if !lease.release().map_err(|error| error.to_string())? {
+                    return Err("Previous sandbox process group is still active".to_string());
+                }
+                Ok(())
+            })();
+            if let Err(error) = cleanup {
+                result.status = AgentToolResultStatusNative::Uncertain;
+                result.summary =
+                    format!("Managed sandbox directory retained its protection: {error}");
+                data["terminationConfirmed"] = json!(false);
+            }
+        }
         #[cfg(all(
             feature = "native-input-acceptance",
             debug_assertions,
@@ -689,10 +815,7 @@ impl NativeToolEngine {
         let AgentToolTargetNative::Local { cwd: Some(cwd), .. } = &call.target else {
             return Err("WINDOWS_SANDBOX_DIRECT_REQUIRED".into());
         };
-        if call.tool_name != "exec_command"
-            || call.arguments["background"] == true
-            || call.arguments["elevated"] == true
-        {
+        if !is_allowed_local_sandbox_native_tool(call) {
             return Err("WINDOWS_SANDBOX_DIRECT_REQUIRED".into());
         }
         crate::agent_runtime::native::windows_sandbox::Workspace::open(
@@ -701,6 +824,49 @@ impl NativeToolEngine {
         )
         .map(Some)
     }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn mac_sandbox_binding(
+        &self,
+        context: &NativeExecutionContext,
+        call: &AgentToolCallNative,
+        database: &Database,
+    ) -> Result<Option<crate::agent_runtime::native::mac_sandbox::Workspace>, String> {
+        if !context.mac_sandbox_required {
+            return Ok(None);
+        }
+        database.require_agent_sandbox_enabled()?;
+        let AgentToolTargetNative::Local { cwd: Some(cwd), .. } = &call.target else {
+            return Err("MAC_SANDBOX_DIRECT_REQUIRED".into());
+        };
+        if !is_allowed_local_sandbox_native_tool(call) {
+            return Err("MAC_SANDBOX_DIRECT_REQUIRED".into());
+        }
+        let (home, resource_dir) = self.mac_sandbox_paths()?;
+        crate::agent_runtime::native::mac_sandbox::Workspace::open(
+            &home,
+            Path::new(cwd),
+            resource_dir.as_deref(),
+        )
+        .map(Some)
+    }
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+fn is_allowed_local_sandbox_native_tool(call: &AgentToolCallNative) -> bool {
+    if call.tool_name == "exec_command" {
+        return call.arguments["background"] != true && call.arguments["elevated"] != true;
+    }
+    matches!(
+        call.tool_name.as_str(),
+        "read_file"
+            | "list_directory"
+            | "search_text"
+            | "write_file"
+            | "edit_file"
+            | "apply_patch"
+            | "trash_file"
+    )
 }
 
 fn remote_command_with_cwd(
@@ -866,5 +1032,56 @@ mod tests {
             remote_command_with_cwd("pwd", Some("C:\\Users\\work"), None),
             "pwd"
         );
+    }
+
+    #[cfg(any(windows, target_os = "macos"))]
+    #[test]
+    fn local_sandbox_tool_policy_allows_bounded_file_tools_and_blocks_unsafe_tools() {
+        use super::{is_allowed_local_sandbox_native_tool, json};
+        use crate::agent_runtime::{AgentToolCallNative, AgentToolTargetNative};
+        let make_call = |tool_name: &str, arguments: serde_json::Value| AgentToolCallNative {
+            request_id: "req-1".into(),
+            call_id: "call-1".into(),
+            tool_name: tool_name.into(),
+            arguments,
+            target: AgentToolTargetNative::Local {
+                target_id: "local-1".into(),
+                session_id: "term-1".into(),
+                cwd: Some("/tmp/ws".into()),
+            },
+            capability_id: "cap-1".into(),
+        };
+        assert!(is_allowed_local_sandbox_native_tool(&make_call(
+            "exec_command",
+            json!({ "command": "git status" })
+        )));
+        for tool in [
+            "read_file",
+            "list_directory",
+            "search_text",
+            "write_file",
+            "edit_file",
+            "apply_patch",
+            "trash_file",
+        ] {
+            assert!(
+                is_allowed_local_sandbox_native_tool(&make_call(tool, json!({}))),
+                "expected {tool} to be allowed in local sandbox"
+            );
+        }
+        assert!(!is_allowed_local_sandbox_native_tool(&make_call(
+            "exec_command",
+            json!({ "command": "sleep 10", "background": true })
+        )));
+        assert!(!is_allowed_local_sandbox_native_tool(&make_call(
+            "exec_command",
+            json!({ "command": "id", "elevated": true })
+        )));
+        for blocked in ["probe_http", "transfer_file", "terminal_execute"] {
+            assert!(
+                !is_allowed_local_sandbox_native_tool(&make_call(blocked, json!({}))),
+                "expected {blocked} to be rejected in local sandbox"
+            );
+        }
     }
 }

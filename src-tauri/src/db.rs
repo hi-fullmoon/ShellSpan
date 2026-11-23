@@ -1052,16 +1052,7 @@ impl Database {
         self.save_preferences(&[(AGENT_SANDBOX_ENABLED_KEY.into(), enabled.to_string())])
     }
 
-    #[cfg(any(
-        windows,
-        all(test, target_os = "linux"),
-        all(
-            feature = "native-input-acceptance",
-            debug_assertions,
-            target_os = "macos",
-            target_arch = "aarch64"
-        )
-    ))]
+    #[cfg(any(windows, target_os = "macos", all(test, target_os = "linux")))]
     pub(crate) fn with_local_sandbox_dispatch<T>(
         &self,
         send: impl FnOnce() -> Result<T, String>,

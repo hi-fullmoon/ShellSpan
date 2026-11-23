@@ -65,6 +65,8 @@ impl NativeToolAdapter {
             .path()
             .home_dir()
             .map_err(|error| format!("failed to resolve ShellSpan home directory: {error}"))?;
+        #[cfg(target_os = "macos")]
+        engine.configure_mac_sandbox_paths(home.clone(), app.path().resource_dir().ok())?;
         Self::from_services(
             NativeToolServices {
                 sessions: app.state::<SessionManager>().inner().clone(),
@@ -285,22 +287,30 @@ impl NativeToolRuntime for NativeToolAdapter {
         self.configure(runtime)?;
         let known_hosts_path = &self.services.known_hosts_path;
         let mut owner_target = target_native(&request.target)?;
-        let windows_sandbox = match request.target.local_sandbox_required {
-            Some(super::LocalSandboxKind::WindowsAppContainer) => true,
-            Some(super::LocalSandboxKind::MacNono) => {
-                return Err(
-                    "LOCAL_SANDBOX_UNAVAILABLE: macOS managed local sandbox is not enabled in this build"
-                        .into(),
-                );
-            }
-            None => false,
+        let (windows_sandbox, mac_sandbox) = match request.target.local_sandbox_required {
+            Some(super::LocalSandboxKind::WindowsAppContainer) => (true, false),
+            Some(super::LocalSandboxKind::MacNono) => (false, true),
+            None => (false, false),
+        };
+        let is_local_sandbox_tool = |name: &str| {
+            matches!(
+                name,
+                "run_terminal_command"
+                    | "read_file"
+                    | "list_directory"
+                    | "search_text"
+                    | "write_file"
+                    | "edit_file"
+                    | "apply_patch"
+                    | "trash_file"
+            )
         };
         if windows_sandbox {
             if !cfg!(windows) {
                 return Err("WINDOWS_SANDBOX_UNAVAILABLE".into());
             }
             if request.execution_surface != super::AgentExecutionSurface::Direct
-                || request.model_call.name != "run_terminal_command"
+                || !is_local_sandbox_tool(&request.model_call.name)
                 || request.model_call.arguments["background"] == true
                 || request.model_call.arguments["handoffToUser"] == true
                 || request
@@ -311,6 +321,27 @@ impl NativeToolRuntime for NativeToolAdapter {
                 || request.model_call.arguments.get("fileScope").is_some()
             {
                 return Err("WINDOWS_SANDBOX_DIRECT_REQUIRED".into());
+            }
+        }
+        if mac_sandbox {
+            if !cfg!(target_os = "macos") {
+                return Err(
+                    "LOCAL_SANDBOX_UNAVAILABLE: macOS managed local sandbox is not available on this platform"
+                        .into(),
+                );
+            }
+            if request.execution_surface != super::AgentExecutionSurface::Direct
+                || !is_local_sandbox_tool(&request.model_call.name)
+                || request.model_call.arguments["background"] == true
+                || request.model_call.arguments["handoffToUser"] == true
+                || request
+                    .model_call
+                    .arguments
+                    .get("sudoOperationId")
+                    .is_some()
+                || request.model_call.arguments.get("fileScope").is_some()
+            {
+                return Err("MAC_SANDBOX_DIRECT_REQUIRED".into());
             }
         }
         #[cfg(all(
@@ -519,6 +550,8 @@ impl NativeToolRuntime for NativeToolAdapter {
                 NativeExecutionContext {
                     #[cfg(windows)]
                     windows_sandbox_required: false,
+                    #[cfg(target_os = "macos")]
+                    mac_sandbox_required: false,
                     bound_terminal_surface: request.execution_surface
                         == super::AgentExecutionSurface::BoundTerminal,
                     request: frozen_request,
@@ -651,6 +684,8 @@ impl NativeToolRuntime for NativeToolAdapter {
             NativeExecutionContext {
                 #[cfg(windows)]
                 windows_sandbox_required: windows_sandbox,
+                #[cfg(target_os = "macos")]
+                mac_sandbox_required: mac_sandbox,
                 bound_terminal_surface: request.execution_surface
                     == super::AgentExecutionSurface::BoundTerminal,
                 request: frozen_request,
@@ -706,6 +741,11 @@ impl NativeToolRuntime for NativeToolAdapter {
         if let Some(digest) = &prepared.windows_sandbox_digest {
             call.arguments["sandboxExecutor"] = json!(super::native::windows_sandbox::EXECUTOR);
             call.arguments["connectionPolicyBinding"] = json!(digest);
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(binding) = &prepared.mac_sandbox {
+            call.arguments["sandboxExecutor"] = json!(super::native::mac_sandbox::EXECUTOR);
+            call.arguments["connectionPolicyBinding"] = json!(binding.digest);
         }
         #[cfg(all(
             feature = "native-input-acceptance",

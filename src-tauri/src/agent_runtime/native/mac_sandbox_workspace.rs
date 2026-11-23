@@ -60,6 +60,12 @@ struct Directory {
 }
 
 impl Directory {
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
     fn open(root: &Path) -> io::Result<Self> {
         let (parent, prefix) = if super::mac_sandbox_preview_active() {
             let home = std::env::var_os("HOME")
@@ -70,7 +76,11 @@ impl Directory {
         } else {
             (PathBuf::from("/private/tmp"), "ss-sandbox-desktop-")
         };
-        validate_anchor_path(root, &parent, prefix)?;
+        Self::open_in(root, &parent, prefix)
+    }
+
+    fn open_in(root: &Path, parent: &Path, prefix: &str) -> io::Result<Self> {
+        validate_anchor_path(root, parent, prefix)?;
         let anchor = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
@@ -173,7 +183,7 @@ impl Directory {
     }
 }
 
-fn validate_anchor_path(root: &Path, parent: &Path, prefix: &str) -> io::Result<()> {
+pub(super) fn validate_anchor_path(root: &Path, parent: &Path, prefix: &str) -> io::Result<()> {
     if root.parent() != Some(parent)
         || !root
             .file_name()
@@ -210,8 +220,23 @@ pub(super) struct Lease {
 }
 
 impl Lease {
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
     pub(super) fn acquire(root: &Path) -> io::Result<Self> {
         let directory = Directory::open(root)?;
+        Self::acquire_directory(root, directory)
+    }
+
+    pub(super) fn acquire_in(root: &Path, parent: &Path, prefix: &str) -> io::Result<Self> {
+        let directory = Directory::open_in(root, parent, prefix)?;
+        Self::acquire_directory(root, directory)
+    }
+
+    fn acquire_directory(root: &Path, directory: Directory) -> io::Result<Self> {
         if !directory.recover()? || directory.flags()? & libc::UF_IMMUTABLE != 0 {
             return Err(io::Error::other(
                 "managed sandbox directory requires recovery",
@@ -264,10 +289,38 @@ impl Lease {
     }
 }
 
+#[cfg(all(
+    feature = "native-input-acceptance",
+    debug_assertions,
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
 pub(crate) fn recover_on_startup(root: PathBuf) {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         match Directory::open(&root).and_then(|directory| directory.recover()) {
+            Ok(true) => return,
+            Ok(false) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(75)),
+            Ok(false) => {
+                log::warn!("Managed sandbox recovery is waiting for the previous process group");
+                return;
+            }
+            Err(error) => {
+                log::warn!("Managed sandbox recovery retained directory protection: {error}");
+                return;
+            }
+        }
+    }
+}
+
+pub(super) fn recover_once_in(root: &Path, parent: &Path, prefix: &str) -> io::Result<bool> {
+    Directory::open_in(root, parent, prefix).and_then(|directory| directory.recover())
+}
+
+pub(super) fn recover_on_startup_in(root: &Path, parent: &Path, prefix: &str) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        match recover_once_in(root, parent, prefix) {
             Ok(true) => return,
             Ok(false) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(75)),
             Ok(false) => {
@@ -315,7 +368,12 @@ mod tests {
             .tempdir_in("/private/tmp")
             .unwrap();
         fs::create_dir(root.path().join("data")).unwrap();
-        let mut lease = Lease::acquire(root.path()).unwrap();
+        let mut lease = Lease::acquire_in(
+            root.path(),
+            Path::new("/private/tmp"),
+            "ss-sandbox-desktop-",
+        )
+        .unwrap();
         let mut child = Command::new("/bin/sleep")
             .arg("30")
             .process_group(0)
@@ -324,10 +382,20 @@ mod tests {
         lease.record_group(child.id()).unwrap();
         drop(lease);
 
-        let acquired_while_running = Lease::acquire(root.path()).is_ok();
+        let acquired_while_running = Lease::acquire_in(
+            root.path(),
+            Path::new("/private/tmp"),
+            "ss-sandbox-desktop-",
+        )
+        .is_ok();
         child.kill().unwrap();
         child.wait().unwrap();
-        let recovered = Lease::acquire(root.path()).unwrap();
+        let recovered = Lease::acquire_in(
+            root.path(),
+            Path::new("/private/tmp"),
+            "ss-sandbox-desktop-",
+        )
+        .unwrap();
         assert!(recovered.release().unwrap());
         assert!(!acquired_while_running);
         assert!(!root.path().join("data").join(JOURNAL).exists());
@@ -340,7 +408,12 @@ mod tests {
             .tempdir_in("/private/tmp")
             .unwrap();
         fs::create_dir(root.path().join("data")).unwrap();
-        let mut lease = Lease::acquire(root.path()).unwrap();
+        let mut lease = Lease::acquire_in(
+            root.path(),
+            Path::new("/private/tmp"),
+            "ss-sandbox-desktop-",
+        )
+        .unwrap();
         let current_group = unsafe { libc::getpgrp() };
         let stale_boot = system_boot_time().unwrap().saturating_sub(600);
         lease.record.phase = Phase::Running {
@@ -350,7 +423,12 @@ mod tests {
         lease.directory.save(lease.record).unwrap();
         drop(lease);
 
-        let recovered = Lease::acquire(root.path()).unwrap();
+        let recovered = Lease::acquire_in(
+            root.path(),
+            Path::new("/private/tmp"),
+            "ss-sandbox-desktop-",
+        )
+        .unwrap();
         assert!(recovered.release().unwrap());
         assert!(!root.path().join("data").join(JOURNAL).exists());
     }

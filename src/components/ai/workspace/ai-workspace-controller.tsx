@@ -15,6 +15,7 @@ import { useReconnectSession } from '@/hooks/useReconnectSession';
 import { isTauriRuntime } from '@/lib/ipc/tauri';
 import { AgentPermissionSelector } from '../agent-permission-selector';
 import { AgentExecutionSurfaceSelector } from '../agent-execution-surface-selector';
+import { SandboxSyncDialog } from './sandbox-sync-dialog';
 import { AgentTerminalBusyNotice } from '../agent-terminal-busy-notice';
 import { AiComposerModelSelector } from './ai-composer-model-selector';
 import { AiWorkspaceRoot } from './ai-workspace-root';
@@ -204,15 +205,20 @@ export function AiWorkspaceController({
         : undefined}
       executionSurfaceControl={!focusMode && scope === 'terminal' && activeTerminalId
         ? (
-            <AgentExecutionSurfaceSelector
-              surface={controller.selectedExecutionSurface}
-              realTerminalState={realTerminalState}
-              nativeStartupTimedOut={activeTerminalStatus === 'connected' && nativeStartupTimedOut}
-              glibcMismatch={controller.glibcMismatch}
-              sandboxDirectOnly={controller.sandboxDirectOnly}
-              disabled={executionSurfaceLocked}
-              onSurfaceChange={controller.selectExecutionSurface}
-            />
+            <div className="flex items-center gap-1">
+              <AgentExecutionSurfaceSelector
+                surface={controller.selectedExecutionSurface}
+                realTerminalState={realTerminalState}
+                nativeStartupTimedOut={activeTerminalStatus === 'connected' && nativeStartupTimedOut}
+                glibcMismatch={controller.glibcMismatch}
+                sandboxDirectOnly={controller.sandboxDirectOnly}
+                disabled={executionSurfaceLocked}
+                onSurfaceChange={controller.selectExecutionSurface}
+              />
+              {session?.header.target?.localSandboxRequired && (
+                <SandboxSyncDialog sessionId={session.header.sessionId} />
+              )}
+            </div>
           )
         : undefined}
       executionSurfaceNotice={session?.header.subagent ? undefined : <>

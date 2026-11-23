@@ -2864,6 +2864,14 @@ impl AgentRuntime {
             .and_then(|snapshot| snapshot.header.target)
             .filter(|target| target.requires_windows_sandbox())
             .and_then(|target| target.cwd);
+        #[cfg(target_os = "macos")]
+        let mac_sandbox_cwd = self
+            .sessions
+            .snapshot(session_id)
+            .ok()
+            .and_then(|snapshot| snapshot.header.target)
+            .filter(|target| target.requires_mac_sandbox())
+            .and_then(|target| target.cwd);
         self.sessions.delete_archived(session_id)?;
         #[cfg(windows)]
         if let Some(cwd) = windows_sandbox_cwd {
@@ -2877,8 +2885,42 @@ impl AgentRuntime {
                 );
             }
         }
+        #[cfg(target_os = "macos")]
+        if let Some(cwd) = mac_sandbox_cwd {
+            if let Err(error) = self
+                .native_engine
+                .reclaim_mac_sandbox_workspace(std::path::Path::new(&cwd))
+            {
+                log::warn!(
+                    "Failed to reclaim macOS sandbox workspace: {}",
+                    crate::redaction::redact_sensitive_text(&error)
+                );
+            }
+        }
         self.cleanup_images();
         Ok(())
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn reclaim_orphaned_windows_sandboxes(&self, data_root: &std::path::Path) {
+        let Ok(records) = self.sessions.list(true) else {
+            return;
+        };
+        let mut known_cwds = std::collections::HashSet::new();
+        for record in records {
+            if let Ok(snapshot) = self.sessions.snapshot(&record.session_id) {
+                if let Some(target) = snapshot.header.target {
+                    if target.requires_windows_sandbox() {
+                        if let Some(cwd) = target.cwd {
+                            known_cwds.insert(crate::path_utils::portable_local_path(
+                                std::path::Path::new(&cwd),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        super::native::windows_sandbox::reclaim_orphaned_workspaces(data_root, &known_cwds);
     }
 
     fn with_image_store<T>(&self, write: impl FnOnce() -> Result<T, String>) -> Result<T, String> {

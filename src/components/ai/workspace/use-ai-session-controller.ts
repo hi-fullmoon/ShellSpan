@@ -296,7 +296,7 @@ export function useAiSessionController({
   const activeTerminal = useTerminalStore((state) => state.sessions.find(item => item.sessionId === (focusMode ? focusTargetId : state.activeSessionId)));
   const terminalExecution = useTerminalAgentExecution(scope === 'terminal' ? activeTerminal : undefined);
   const {
-    localSandboxPreview, windowsSandbox: newWindowsSandbox, localSandbox: newLocalSandbox,
+    localSandboxPreview, localSandboxKind: newLocalSandboxKind, localSandbox: newLocalSandbox,
     profileSandbox: sandboxConfigured, profileSandboxResolved, sandboxChecking, sandboxEnabled: agentSandboxEnabled,
   } = terminalExecution;
   const activeTerminalId = useTerminalStore((state) => focusMode ? focusTargetId : state.activeSessionId);
@@ -705,8 +705,8 @@ export function useAiSessionController({
         taskId: `task-${sessionId}`,
         goal: intent.goal,
         target: {
-          ...runtimeTarget(activeTerminal, newLocalSandbox ? undefined : workspaceRoot),
-          ...(newWindowsSandbox && { localSandboxRequired: 'windowsAppContainer' as const }),
+          ...runtimeTarget(activeTerminal, localSandboxPreview ? undefined : workspaceRoot),
+          ...(newLocalSandboxKind && { localSandboxRequired: newLocalSandboxKind }),
         },
         permissionMode: permissionMode(
           useAgentPermissionStore.getState().getMode(activeTerminal.sessionId),
@@ -715,7 +715,7 @@ export function useAiSessionController({
         successCriteria: intent.successCriteria,
       },
     };
-  }, [activeTerminal, focusMode, newLocalSandbox, newWindowsSandbox, operationId, scope, t, terminalCreationSurface]);
+  }, [activeTerminal, focusMode, localSandboxPreview, newLocalSandboxKind, operationId, scope, t, terminalCreationSurface]);
 
   const projectKey = `${workspaceScopeKey}:${openedSessionId ?? 'new'}:${skillNavigation}:${focusMode ? activeTerminal?.sessionId ?? '' : ''}`;
   const projectEpoch = useRef({ key: projectKey });

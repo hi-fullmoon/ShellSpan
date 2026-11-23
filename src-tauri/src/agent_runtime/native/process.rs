@@ -924,12 +924,46 @@ fn manage_local_child_native(
     Ok(process)
 }
 
+#[cfg(target_os = "macos")]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn prepare_mac_sandbox_process(
+    request: &crate::agent_runtime::AgentRequestNative,
+    target_id: &str,
+    command: &str,
+    reviewed_command: Option<&super::ReviewedReadCommand>,
+    workspace: &Path,
+    launcher: &Path,
+    timeout: Duration,
+    lease: &mut super::mac_sandbox_workspace::Lease,
+) -> Result<
+    (
+        Arc<ManagedProcessNative>,
+        std::fs::File,
+        std::os::unix::net::UnixStream,
+    ),
+    String,
+> {
+    prepare_mac_sandbox_process_with_writable(
+        request,
+        target_id,
+        command,
+        reviewed_command,
+        workspace,
+        launcher,
+        timeout,
+        lease,
+        false,
+        true,
+    )
+}
+
 #[cfg(all(
     feature = "native-input-acceptance",
     debug_assertions,
     target_os = "macos",
     target_arch = "aarch64"
 ))]
+#[allow(clippy::too_many_arguments)]
 pub(super) fn prepare_mac_sandbox_acceptance_process(
     request: &crate::agent_runtime::AgentRequestNative,
     target_id: &str,
@@ -939,6 +973,83 @@ pub(super) fn prepare_mac_sandbox_acceptance_process(
     launcher: &Path,
     timeout: Duration,
     lease: &mut super::mac_sandbox_workspace::Lease,
+) -> Result<
+    (
+        Arc<ManagedProcessNative>,
+        std::fs::File,
+        std::os::unix::net::UnixStream,
+    ),
+    String,
+> {
+    let simulate_missing_temp =
+        super::mac_sandbox_automated() && command.starts_with("printf init > init-");
+    prepare_mac_sandbox_process_with_writable(
+        request,
+        target_id,
+        command,
+        reviewed_command,
+        workspace,
+        launcher,
+        timeout,
+        lease,
+        simulate_missing_temp,
+        false,
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn mac_sandbox_readonly_toolchains() -> (Vec<PathBuf>, String) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let is_safe_dir = |path: &Path| {
+        std::fs::symlink_metadata(path).is_ok_and(|meta| {
+            meta.is_dir()
+                && !meta.file_type().is_symlink()
+                && (meta.permissions().mode() & 0o002 == 0)
+        })
+    };
+    let mut read_paths = Vec::new();
+    let mut path_entries = Vec::new();
+    // Place root-owned CommandLineTools ahead of /usr/bin so tools like git and
+    // python3 bypass macOS xcrun shims (which fail under Seatbelt without /var/select).
+    let clt_root = Path::new("/Library/Developer/CommandLineTools");
+    let clt_bin = Path::new("/Library/Developer/CommandLineTools/usr/bin");
+    if is_safe_dir(clt_root) {
+        read_paths.push(clt_root.to_path_buf());
+        if is_safe_dir(clt_bin) {
+            path_entries.push("/Library/Developer/CommandLineTools/usr/bin");
+        }
+    }
+    path_entries.push("/usr/bin");
+    path_entries.push("/bin");
+    for (root, bin) in [
+        ("/opt/homebrew", "/opt/homebrew/bin"),
+        ("/usr/local", "/usr/local/bin"),
+    ] {
+        let root_path = Path::new(root);
+        if is_safe_dir(root_path) {
+            read_paths.push(root_path.to_path_buf());
+            if is_safe_dir(Path::new(bin)) {
+                path_entries.push(bin);
+            }
+        }
+    }
+    (read_paths, path_entries.join(":"))
+}
+
+#[cfg(target_os = "macos")]
+#[allow(clippy::too_many_arguments)]
+fn prepare_mac_sandbox_process_with_writable(
+    request: &crate::agent_runtime::AgentRequestNative,
+    target_id: &str,
+    command: &str,
+    reviewed_command: Option<&super::ReviewedReadCommand>,
+    workspace: &Path,
+    launcher: &Path,
+    timeout: Duration,
+    lease: &mut super::mac_sandbox_workspace::Lease,
+    simulate_missing_temp: bool,
+    include_toolchains: bool,
 ) -> Result<
     (
         Arc<ManagedProcessNative>,
@@ -965,10 +1076,15 @@ pub(super) fn prepare_mac_sandbox_acceptance_process(
     let fd = receipt.as_raw_fd();
     let (gate_reader, gate_writer) = UnixStream::pair().map_err(|error| error.to_string())?;
     let gate_fd = gate_reader.as_raw_fd();
-    let writable = if super::mac_sandbox_automated() && command.starts_with("printf init > init-") {
+    let writable = if simulate_missing_temp {
         temporary.path().join("absent")
     } else {
         temporary.path().to_path_buf()
+    };
+    let (readonly_paths, sandbox_path_env) = if include_toolchains {
+        mac_sandbox_readonly_toolchains()
+    } else {
+        (Vec::new(), "/usr/bin:/bin".to_string())
     };
     let launcher_command = |program: &std::ffi::OsStr, inherit_cwd: bool| {
         let mut child = Command::new(launcher);
@@ -979,6 +1095,9 @@ pub(super) fn prepare_mac_sandbox_acceptance_process(
             .arg(gate_fd.to_string());
         if inherit_cwd {
             child.arg("--inherit-cwd");
+        }
+        for path in &readonly_paths {
+            child.arg("--read-path").arg(path);
         }
         child.arg(workspace).arg(&writable).arg("--").arg(program);
         child
@@ -991,7 +1110,7 @@ pub(super) fn prepare_mac_sandbox_acceptance_process(
         child
             .args(shell.get_args())
             .env_clear()
-            .env("PATH", "/usr/bin:/bin")
+            .env("PATH", &sandbox_path_env)
             .env("HOME", workspace)
             .env("TMPDIR", temporary.path())
             .current_dir(workspace)

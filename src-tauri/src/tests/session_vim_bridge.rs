@@ -67,6 +67,8 @@ impl EditorAgent {
             context: NativeExecutionContext {
                 #[cfg(windows)]
                 windows_sandbox_required: false,
+                #[cfg(target_os = "macos")]
+                mac_sandbox_required: false,
                 bound_terminal_surface: false,
                 turn_id: "editor-turn".into(),
                 step_id: "editor-step".into(),
@@ -850,8 +852,9 @@ fn isolated_ssh_vim_bridge_guards_disk_versions_and_resumes() {
         );
         assert!(bridge.attached(), "{editor} must stay open when unsaved");
 
-        // Reload cleanly, then close through the bridge and verify detach + prompt return.
-        editor_command(&mut terminal, &mut bridge, ":edit!");
+        // Reload all buffers cleanly (Neovim enables 'hidden' by default, so earlier rejected saves
+        // may leave background buffers modified), then close through the bridge and verify detach.
+        editor_command(&mut terminal, &mut bridge, ":silent! bufdo! edit!");
         let clean_observed = inspect(&mut terminal, &mut bridge, &root);
         let clean_close = prepare(
             &mut terminal,

@@ -328,6 +328,13 @@ pub fn run() {
                 }
             }
             let home_dir = app.path().home_dir()?;
+            #[cfg(target_os = "macos")]
+            {
+                let mac_home = home_dir.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    agent_runtime::mac_sandbox::recover_all_on_startup(&mac_home);
+                });
+            }
             #[cfg(all(
                 feature = "native-input-acceptance",
                 debug_assertions,
@@ -423,6 +430,14 @@ pub fn run() {
             let runtime = app.state::<agent_runtime::AgentRuntime>();
             agent_runtime::configure_runtime(app.handle(), &runtime)?;
             runtime.configure_credentials(credentials)?;
+            #[cfg(windows)]
+            {
+                let runtime_for_reclaim = runtime.inner().clone();
+                let data_dir = shellspan_dir.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    runtime_for_reclaim.reclaim_orphaned_windows_sandboxes(&data_dir);
+                });
+            }
             #[cfg(all(
                 feature = "native-input-acceptance",
                 debug_assertions,
@@ -525,6 +540,10 @@ pub fn run() {
             ai::ai_resolve_model,
             ai::ai_model_declaration_template,
             agent_runtime::agent_runtime_create_session,
+            agent_runtime::agent_runtime_local_sandbox_status,
+            agent_runtime::agent_runtime_sandbox_diff,
+            agent_runtime::agent_runtime_sandbox_file_diff,
+            agent_runtime::agent_runtime_sandbox_apply,
             agent_runtime::agent_runtime_continue_on_target,
             agent_runtime::agent_runtime_reconnect_terminal,
             agent_runtime::agent_runtime_start,

@@ -7,17 +7,15 @@ mod diagnostics;
 mod effect;
 mod filesystem;
 mod http_probe;
-#[cfg(all(
-    feature = "native-input-acceptance",
-    debug_assertions,
-    target_os = "macos",
-    target_arch = "aarch64"
-))]
+#[cfg(target_os = "macos")]
+pub(crate) mod mac_sandbox;
+#[cfg(target_os = "macos")]
 mod mac_sandbox_workspace;
 mod mcp;
 mod process;
 mod registry;
 mod runtime;
+pub(crate) mod sandbox_sync;
 pub(crate) mod scoped_read;
 mod shell_guard;
 mod shell_policy;

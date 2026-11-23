@@ -679,6 +679,35 @@ it.each([
   }
 });
 
+it('selects macNono local Direct sandbox on macOS when the bundled launcher is supported', async () => {
+  const platformSpy = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+  const previewSpy = vi.spyOn(tauri, 'isLocalAgentSandboxPreview').mockResolvedValue(false);
+  const statusSpy = vi.spyOn(tauri, 'invokeLocalSandboxStatus').mockResolvedValue({
+    supported: true,
+    kind: 'macNono',
+  });
+  try {
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    connectedLocalTerminal();
+    setNativeRoute('route-default', 'route-model', 7);
+    useAiSettingsStore.setState({ agentSandboxEnabled: true, agentExecutionSurface: 'boundTerminal' });
+    const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: adapter() }));
+
+    await waitFor(() => {
+      expect(result.current.sandboxDirectOnly).toBe('local');
+      expect(result.current.selectedExecutionSurface).toBe('direct');
+      expect(result.current.canSubmitAgent).toBe(true);
+    });
+    act(() => useAiSettingsStore.setState({ agentSandboxEnabled: false }));
+    expect(result.current.sandboxDirectOnly).toBeUndefined();
+    expect(result.current.canSubmitAgent).toBe(true);
+  } finally {
+    platformSpy.mockRestore();
+    previewSpy.mockRestore();
+    statusSpy.mockRestore();
+  }
+});
+
 it('gates submission while checking sandbox settings without flashing an availability banner', async () => {
   let resolvePreview!: (value: boolean) => void;
   const previewSpy = vi.spyOn(tauri, 'isLocalAgentSandboxPreview')

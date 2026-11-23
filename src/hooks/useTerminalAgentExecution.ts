@@ -1,21 +1,43 @@
 import { useEffect } from 'react';
 import { create } from 'zustand';
 import { usePlatform } from '@/hooks/usePlatform';
-import { invokeGetProfileSandbox, isLocalAgentSandboxPreview, isTauriRuntime } from '@/lib/ipc/tauri';
+import {
+  invokeGetProfileSandbox,
+  invokeLocalSandboxStatus,
+  isLocalAgentSandboxPreview,
+  isTauriRuntime,
+  type LocalSandboxStatus,
+} from '@/lib/ipc/tauri';
 import { remoteGlibcMismatch } from '@/lib/terminal/terminal-surface-semantics';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
-import type { AgentExecutionSurface } from '@/types/agent-session';
+import type { AgentExecutionSurface, LocalSandboxKind } from '@/types/agent-session';
 
 interface SandboxCheck {
   readonly configured: boolean | null;
   readonly checking: boolean;
 }
 
+interface LocalStatusState {
+  readonly status: LocalSandboxStatus | null;
+  readonly checking: boolean;
+}
+
 const useSandboxChecks = create<{ checks: Readonly<Partial<Record<string, SandboxCheck>>> }>()(() => ({ checks: {} }));
+const useLocalSandboxStatusStore = create<LocalStatusState>()(() => ({ status: null, checking: false }));
 const localSandboxKey = 'local';
 const profileSandboxKey = (profileId: string): string => `profile:${profileId}`;
+
+function checkLocalSandboxStatus(): void {
+  const current = useLocalSandboxStatusStore.getState();
+  if (current.checking || current.status !== null) return;
+  useLocalSandboxStatusStore.setState({ status: null, checking: true });
+  void invokeLocalSandboxStatus().then(
+    status => useLocalSandboxStatusStore.setState({ status, checking: false }),
+    () => useLocalSandboxStatusStore.setState({ status: { supported: false }, checking: false }),
+  );
+}
 
 function isLocal(terminal: TerminalSession | undefined): boolean {
   return terminal?.host === 'local' && terminal.port === 0;
@@ -43,6 +65,10 @@ function checkProfileSandbox(profileId: string, refresh = false): void {
 // the workspace has a terminal using that profile.
 const unsubscribeTerminals = useTerminalStore.subscribe(({ sessions }, previous) => {
   if (sessions === previous.sessions) return;
+  const hasLocal = sessions.some(isLocal);
+  if (!hasLocal && useLocalSandboxStatusStore.getState().status !== null) {
+    useLocalSandboxStatusStore.setState({ status: null, checking: false });
+  }
   const entries = Object.entries(useSandboxChecks.getState().checks);
   if (entries.length === 0) return;
   const liveKeys = new Set(sessions.flatMap(session => [
@@ -78,17 +104,28 @@ export function useTerminalAgentExecution(terminal: TerminalSession | undefined)
   const local = native && isLocal(terminal);
   const profileId = native ? terminal?.profileId : undefined;
   const localCheck = useSandboxChecks(state => local ? state.checks[localSandboxKey] : undefined);
+  const localStatusState = useLocalSandboxStatusStore();
   const profileCheck = useSandboxChecks(state => profileId ? state.checks[profileSandboxKey(profileId)] : undefined);
   useEffect(() => {
-    if (local) checkSandbox(localSandboxKey, isLocalAgentSandboxPreview);
+    if (local) {
+      checkSandbox(localSandboxKey, isLocalAgentSandboxPreview);
+      if (platform === 'macos') checkLocalSandboxStatus();
+    }
     if (profileId) checkProfileSandbox(profileId);
-  }, [local, profileId]);
+  }, [local, platform, profileId]);
 
   const localSandboxPreview = localCheck?.configured === true;
   const windowsSandbox = local && platform === 'windows' && sandboxEnabled;
-  const localSandbox = localSandboxPreview || windowsSandbox;
+  const macSandbox = local && platform === 'macos' && sandboxEnabled
+    && localStatusState.status?.supported === true && localStatusState.status.kind === 'macNono';
+  const localSandboxKind: LocalSandboxKind | undefined = windowsSandbox
+    ? 'windowsAppContainer' : macSandbox ? 'macNono' : undefined;
+  const localSandbox = localSandboxPreview || Boolean(localSandboxKind);
   const profileSandbox = profileCheck?.configured === true;
+  const macStatusChecking = local && platform === 'macos' && sandboxEnabled
+    && (localStatusState.checking || localStatusState.status === null);
   const sandboxChecking = (local && (!localCheck || localCheck.checking))
+    || macStatusChecking
     || (Boolean(profileId) && (!profileCheck || profileCheck.checking));
   const glibcMismatch = remoteGlibcMismatch(terminal?.integrationReason);
   const creationSurface: AgentExecutionSurface = localSandbox || profileSandbox || glibcMismatch
@@ -100,6 +137,7 @@ export function useTerminalAgentExecution(terminal: TerminalSession | undefined)
     conversationId: conversation?.agentSessionId,
     localSandboxPreview,
     windowsSandbox,
+    localSandboxKind,
     localSandbox,
     profileSandbox,
     profileSandboxResolved: typeof profileCheck?.configured === 'boolean' && !profileCheck.checking,

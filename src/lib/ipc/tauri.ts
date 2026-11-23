@@ -1358,6 +1358,71 @@ export async function isLocalAgentSandboxPreview(): Promise<boolean> {
   return (await getIdentifier()) === 'com.shellspan.validation.agent-sandbox-preview-keychain';
 }
 
+export interface LocalSandboxStatus {
+  readonly supported: boolean;
+  readonly kind?: import('@/types/agent-session').LocalSandboxKind;
+  readonly reason?: string;
+}
+
+export async function invokeLocalSandboxStatus(): Promise<LocalSandboxStatus> {
+  if (!isTauriRuntime()) return { supported: false };
+  try {
+    return await invoke<LocalSandboxStatus>('agent_runtime_local_sandbox_status');
+  } catch {
+    return { supported: false };
+  }
+}
+
+export type SandboxChangeKind = 'added' | 'modified' | 'deleted';
+
+export interface SandboxFileChange {
+  readonly path: string;
+  readonly kind: SandboxChangeKind;
+  readonly conflict: boolean;
+  readonly sandboxSize?: number;
+  readonly sourceSize?: number;
+}
+
+export interface SandboxDiffReport {
+  readonly sourceRoot: string;
+  readonly changes: readonly SandboxFileChange[];
+  readonly totalChanges: number;
+  readonly conflictCount: number;
+}
+
+export interface SandboxApplyReport {
+  readonly applied: readonly string[];
+  readonly skippedConflicts: readonly string[];
+  readonly errors: readonly string[];
+}
+
+export interface SandboxFileDiffPreview {
+  readonly path: string;
+  readonly isBinary: boolean;
+  readonly truncated: boolean;
+  readonly unifiedDiff: string;
+}
+
+export async function invokeSandboxDiff(sessionId: string): Promise<SandboxDiffReport | null> {
+  if (!isTauriRuntime()) return null;
+  return invokeLogged<SandboxDiffReport | null>('agent_runtime_sandbox_diff', { sessionId });
+}
+
+export async function invokeSandboxFileDiff(
+  sessionId: string,
+  path: string,
+): Promise<SandboxFileDiffPreview> {
+  return invokeLogged<SandboxFileDiffPreview>('agent_runtime_sandbox_file_diff', { sessionId, path });
+}
+
+export async function invokeSandboxApply(input: {
+  sessionId: string;
+  paths?: readonly string[];
+  allowOverwriteConflicts?: boolean;
+}): Promise<SandboxApplyReport> {
+  return invokeLogged<SandboxApplyReport>('agent_runtime_sandbox_apply', { input });
+}
+
 export async function invokeRequestAppRestart(): Promise<void> {
   return invokeLogged('request_app_restart');
 }
