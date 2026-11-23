@@ -107,6 +107,11 @@
   color: var(--ai-text);
 }
 
+.ai-turn-changes-review-row:hover {
+  background: var(--ai-action-hover-solid);
+  color: var(--ai-text);
+}
+
 .ai-turn-changes-chevron {
   color: var(--ai-text-muted);
   transition: transform var(--ai-transition-duration) var(--ai-ease-in-out);
@@ -164,6 +169,31 @@
 .ai-turn-changes-dialog {
   background: var(--ai-canvas);
   color: var(--ai-text);
+}
+
+.ai-turn-changes-review-row {
+  background: var(--ai-canvas);
+  color: var(--ai-text-secondary);
+  font: inherit;
+}
+
+.ai-turn-changes-review-trigger {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+@media (hover: hover) {
+  .ai-turn-changes-review-copy {
+    opacity: 0;
+    transition: opacity var(--ai-transition-duration-fast) var(--ai-ease-in-out);
+  }
+
+  .ai-turn-changes-review-row:hover .ai-turn-changes-review-copy,
+  .ai-turn-changes-review-row:focus-within .ai-turn-changes-review-copy {
+    opacity: 1;
+  }
 }
 
 .ai-turn-changes-dialog .ai-diff-block {

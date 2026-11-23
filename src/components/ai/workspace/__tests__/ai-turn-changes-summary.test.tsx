@@ -136,21 +136,37 @@ describe('AiTurnChangesSummary', () => {
     expect(dialog).toHaveClass('ai-turn-changes-dialog', 'absolute', 'inset-0', 'z-[15]', 'min-h-0', 'flex-col', 'overflow-hidden');
     expect(dialog).toHaveAttribute('aria-modal', 'false');
     expect(dialog.querySelector('[data-slot="dialog-footer"]')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Copy path' })).toBeInTheDocument();
-    const embeddedDiff = dialog.querySelector('[data-ai-turn-changes-file-body] [data-ai-tool-view="diff"]');
+
+    const reviewFiles = Array.from(
+      dialog.querySelectorAll<HTMLElement>('[data-ai-turn-changes-review-file]'),
+      (el) => el.dataset.aiTurnChangesReviewFile,
+    );
+    expect(reviewFiles).toEqual(['etc/nginx/nginx.conf', 'etc/nginx/old.conf']);
+
+    const nginxReviewSection = dialog.querySelector('[data-ai-turn-changes-review-file="etc/nginx/nginx.conf"]')!;
+    const oldReviewSection = dialog.querySelector('[data-ai-turn-changes-review-file="etc/nginx/old.conf"]')!;
+    expect(nginxReviewSection.querySelector('.ai-turn-changes-review-trigger')).toHaveAttribute('aria-expanded', 'true');
+    expect(oldReviewSection.querySelector('.ai-turn-changes-review-trigger')).toHaveAttribute('aria-expanded', 'true');
+
+    const embeddedDiff = nginxReviewSection.querySelector('[data-ai-turn-changes-file-body] [data-ai-tool-view="diff"]');
     expect(embeddedDiff).toBeInTheDocument();
     expect(embeddedDiff).toHaveAttribute('data-embedded');
     expect(embeddedDiff?.querySelector('.ai-tool-surface-header')).toBeNull();
     expect(embeddedDiff?.querySelector('.ai-diff-counts')).toBeNull();
     expect(dialog.textContent).toContain('keepalive_timeout 30;');
 
+    fireEvent.click(oldReviewSection.querySelector<HTMLButtonElement>('.ai-turn-changes-review-trigger')!);
+    expect(oldReviewSection.querySelector('.ai-turn-changes-review-trigger')).toHaveAttribute('aria-expanded', 'false');
+    expect(nginxReviewSection.querySelector('.ai-turn-changes-review-trigger')).toHaveAttribute('aria-expanded', 'true');
+
     fireEvent.keyDown(dialog, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
     const deletedButton = screen.getByRole('button', { name: 'View changes in etc/nginx/old.conf' });
     fireEvent.click(deletedButton);
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy path' })).toBeInTheDocument();
+    const reopenedDialog = screen.getByRole('dialog');
+    expect(reopenedDialog.querySelector('[data-ai-turn-changes-review-file="etc/nginx/old.conf"] .ai-turn-changes-review-trigger')).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getAllByRole('button', { name: 'Copy path' }).length).toBeGreaterThanOrEqual(1);
   });
 
   it('opens a concise saved summary dialog with path copy instead of raw JSON for diff-less saves like save_vim_buffer', () => {

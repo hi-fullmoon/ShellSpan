@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeftIcon, ChevronDownIcon, FileCodeIcon, FileCogIcon, FileTextIcon, Trash2Icon } from 'lucide-react';
+import { ArrowLeftIcon, ChevronDownIcon, ChevronRightIcon, FileCodeIcon, FileCogIcon, FileTextIcon, Trash2Icon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { CopyButton } from '@/components/ui/copy-button';
@@ -164,22 +164,23 @@ function TurnChangedFileItem({
   );
 }
 
-function TurnChangedFileOverlay({
+function TurnReviewFileSection({
   file,
-  portalContainer,
-  onClose,
+  expanded,
+  autoScroll,
+  onExpandedChange,
 }: {
-  readonly file: ToolFileChangeEntry | null;
-  readonly portalContainer: HTMLElement | null;
-  readonly onClose: () => void;
+  readonly file: ToolFileChangeEntry;
+  readonly expanded: boolean;
+  readonly autoScroll: boolean;
+  readonly onExpandedChange: (open: boolean) => void;
 }) {
   const { t } = useI18n();
-  const titleId = useId();
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+  const { basename, directory } = useMemo(() => splitFilePath(file.path), [file.path]);
 
   const fileDiff = useMemo(() => {
-    if (!file || file.kind === 'deleted') return null;
+    if (file.kind === 'deleted') return null;
     const preview = toolDiffPreview(file.tool);
     if (!preview) return null;
     const matchingHunks = preview.hunks.filter((hunk) => hunk.path === file.path);
@@ -188,23 +189,138 @@ function TurnChangedFileOverlay({
   }, [file]);
 
   const savedLineCount = useMemo(
-    () => (!file || file.kind === 'deleted' || fileDiff ? null : extractSavedLineCount(file.tool.output)),
-    [file, fileDiff],
+    () => (file.kind === 'deleted' || fileDiff ? null : extractSavedLineCount(file.tool.output)),
+    [file.kind, file.tool.output, fileDiff],
   );
 
-  const split = useMemo(() => (file ? splitFilePath(file.path) : null), [file]);
+  useEffect(() => {
+    if (autoScroll && sectionRef.current && typeof sectionRef.current.scrollIntoView === 'function') {
+      sectionRef.current.scrollIntoView({ block: 'nearest' });
+    }
+  }, [autoScroll]);
+
+  return (
+    <section
+      ref={sectionRef}
+      className="ai-turn-changes-review-section min-w-0"
+      data-ai-turn-changes-review-file={file.path}
+    >
+      <Collapsible open={expanded} onOpenChange={onExpandedChange}>
+        <div className="ai-turn-changes-review-row sticky top-0 z-[12] flex h-9 min-w-0 items-center border-b border-app-border/40 pr-2.5">
+          <CollapsibleTrigger
+            render={(
+              <button
+                type="button"
+                className="ai-turn-changes-review-trigger flex h-full min-w-0 flex-1 items-center justify-between gap-2 pl-3.5 pr-1 text-left"
+                title={file.path}
+                aria-label={t('ai.workspace.turnChanges.openDiff', { path: file.path })}
+                aria-expanded={expanded}
+              />
+            )}
+          >
+            <span className="flex min-w-0 flex-1 items-center gap-2">
+              <span className={cn('flex items-center gap-1', directory ? 'max-w-[60%] shrink-0' : 'min-w-0')}>
+                <FileChangeIcon path={file.path} kind={file.kind} />
+                <span className="ai-turn-changes-basename min-w-0 truncate">{basename}</span>
+              </span>
+              {directory && (
+                <span className="ai-turn-changes-dir min-w-0 truncate">{directory}</span>
+              )}
+            </span>
+          </CollapsibleTrigger>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <CopyButton
+              text={file.path}
+              label={t('ai.workspace.turnChanges.copyPath')}
+              iconOnly
+              size="icon-xs"
+              className="ai-turn-changes-review-copy"
+            />
+            {file.kind === 'deleted' ? (
+              <span className="ai-turn-changes-deleted shrink-0 text-xs">{t('ai.workspace.turnChanges.deleted')}</span>
+            ) : file.added !== null && file.removed !== null ? (
+              <span className="ai-turn-changes-counts inline-flex shrink-0 items-center gap-1 tabular-nums">
+                <span data-diff-count="added">+{file.added}</span>
+                <span data-diff-count="removed">-{file.removed}</span>
+              </span>
+            ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              tabIndex={-1}
+              aria-hidden="true"
+              onClick={() => onExpandedChange(!expanded)}
+            >
+              <ChevronRightIcon
+                className={cn('ai-turn-changes-chevron size-3.5 shrink-0', expanded && 'rotate-90')}
+                aria-hidden="true"
+              />
+            </Button>
+          </div>
+        </div>
+        <CollapsibleContent>
+          <div className="ai-turn-changes-review-body min-w-0 border-b border-app-border/40" data-ai-turn-changes-file-body="">
+            {file.kind === 'deleted' ? (
+              <div className="px-4 py-3">
+                <AiTrashRecoveryNotice />
+              </div>
+            ) : fileDiff ? (
+              <AiToolExpandedContent
+                node={file.tool}
+                compact
+                showInput={false}
+                hideHeader
+                scrollable={false}
+                diffModel={fileDiff}
+              />
+            ) : (
+              <div className="ai-turn-changes-saved-summary px-4 py-3 text-sm">
+                {savedLineCount !== null
+                  ? t('ai.workspace.turnChanges.savedLines', { count: savedLineCount })
+                  : t('ai.workspace.turnChanges.savedNoDiff')}
+              </div>
+            )}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </section>
+  );
+}
+
+function TurnChangedFilesOverlay({
+  summary,
+  title,
+  initialFilePath,
+  portalContainer,
+  onClose,
+}: {
+  readonly summary: TurnFileChangesSummary;
+  readonly title: string;
+  readonly initialFilePath: string | null;
+  readonly portalContainer: HTMLElement | null;
+  readonly onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const titleId = useId();
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const filesRef = useRef(summary.files);
+  filesRef.current = summary.files;
+  const [expandedPaths, setExpandedPaths] = useState<ReadonlySet<string>>(() => new Set());
 
   useEffect(() => {
-    if (!file) return;
+    if (!initialFilePath) return;
+    setExpandedPaths(new Set(filesRef.current.map((file) => file.path)));
     previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     closeButtonRef.current?.focus();
     return () => {
       previousFocusRef.current?.focus();
       previousFocusRef.current = null;
     };
-  }, [file]);
+  }, [initialFilePath]);
 
-  if (!file || !split) return null;
+  if (!initialFilePath) return null;
 
   const target = portalContainer ?? (typeof document !== 'undefined' ? document.body : null);
   if (!target) return null;
@@ -240,54 +356,34 @@ function TurnChangedFileOverlay({
           >
             <ArrowLeftIcon className="size-3.5" aria-hidden="true" />
           </Button>
-          <span className={cn('flex items-center gap-1', split.directory ? 'max-w-[60%] shrink-0' : 'min-w-0')}>
-            <FileChangeIcon path={file.path} kind={file.kind} />
-            <h2 id={titleId} className="ai-turn-changes-basename m-0 min-w-0 truncate">{split.basename}</h2>
+          <h2 id={titleId} className="ai-turn-changes-title m-0 min-w-0 truncate text-[13px]">{title}</h2>
+        </div>
+        {summary.totalAdded !== null && summary.totalRemoved !== null && (
+          <span className="ai-turn-changes-counts inline-flex shrink-0 items-center gap-1 tabular-nums">
+            <span data-diff-count="added">+{summary.totalAdded}</span>
+            <span data-diff-count="removed">-{summary.totalRemoved}</span>
           </span>
-          {split.directory && (
-            <span className="ai-turn-changes-dir min-w-0 truncate" title={file.path}>
-              {split.directory}
-            </span>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {file.kind === 'deleted' ? (
-            <span className="ai-turn-changes-deleted shrink-0 text-xs">{t('ai.workspace.turnChanges.deleted')}</span>
-          ) : file.added !== null && file.removed !== null ? (
-            <span className="ai-turn-changes-counts inline-flex shrink-0 items-center gap-1 tabular-nums">
-              <span data-diff-count="added">+{file.added}</span>
-              <span data-diff-count="removed">-{file.removed}</span>
-            </span>
-          ) : null}
-          <CopyButton
-            text={file.path}
-            label={t('ai.workspace.turnChanges.copyPath')}
-            iconOnly
-            size="icon-xs"
-          />
-        </div>
-      </div>
-      <ScrollArea className="min-h-0 flex-1" data-ai-turn-changes-file-body="">
-        {file.kind === 'deleted' ? (
-          <div className="px-4 py-3">
-            <AiTrashRecoveryNotice />
-          </div>
-        ) : fileDiff ? (
-          <AiToolExpandedContent
-            node={file.tool}
-            compact
-            showInput={false}
-            hideHeader
-            scrollable={false}
-            diffModel={fileDiff}
-          />
-        ) : (
-          <div className="ai-turn-changes-saved-summary px-4 py-3 text-sm">
-            {savedLineCount !== null
-              ? t('ai.workspace.turnChanges.savedLines', { count: savedLineCount })
-              : t('ai.workspace.turnChanges.savedNoDiff')}
-          </div>
         )}
+      </div>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="flex min-w-0 flex-col">
+          {summary.files.map((file) => (
+            <TurnReviewFileSection
+              key={file.path}
+              file={file}
+              expanded={expandedPaths.has(file.path)}
+              autoScroll={summary.files.length > 1 && file.path === initialFilePath}
+              onExpandedChange={(nextOpen) => {
+                setExpandedPaths((prev) => {
+                  const next = new Set(prev);
+                  if (nextOpen) next.add(file.path);
+                  else next.delete(file.path);
+                  return next;
+                });
+              }}
+            />
+          ))}
+        </div>
       </ScrollArea>
     </div>,
     target,
@@ -302,7 +398,7 @@ export function AiTurnChangesSummary({
   const { t } = useI18n();
   const rootRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<ToolFileChangeEntry | null>(null);
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
   const summary = useMemo(() => summarizeTurnFileChanges(process), [process]);
   if (!summary) return null;
@@ -313,7 +409,7 @@ export function AiTurnChangesSummary({
 
   const handleSelectFile = (file: ToolFileChangeEntry) => {
     setPortalContainer(rootRef.current?.closest<HTMLElement>('.ai-panel-shell') ?? null);
-    setSelectedFile(file);
+    setSelectedFilePath(file.path);
   };
 
   return (
@@ -354,10 +450,12 @@ export function AiTurnChangesSummary({
           </CollapsibleContent>
         </div>
       </Collapsible>
-      <TurnChangedFileOverlay
-        file={selectedFile}
+      <TurnChangedFilesOverlay
+        summary={summary}
+        title={title}
+        initialFilePath={selectedFilePath}
         portalContainer={portalContainer}
-        onClose={() => setSelectedFile(null)}
+        onClose={() => setSelectedFilePath(null)}
       />
     </>
   );
