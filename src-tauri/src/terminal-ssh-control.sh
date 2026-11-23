@@ -3,7 +3,7 @@ umask 077
 exec 3<> "$1" || exit 1
 cat <&3 &
 reader=$!
-trap 'kill "$reader" 2>/dev/null || :; wait "$reader" 2>/dev/null || :' EXIT
+trap 'rm -f -- "$1" 2>/dev/null || :; kill "$reader" 2>/dev/null || :; wait "$reader" 2>/dev/null || :' EXIT
 trap 'exit 0' HUP INT TERM
 while IFS=' ' read -r kind ticket decision extra; do
   [ "$kind" = TTY-RECOVERY ] && [ -z "$extra" ] || continue

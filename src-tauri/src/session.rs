@@ -180,15 +180,11 @@ impl RemoteSshShellIntegration {
             let mut control = session
                 .channel_session()
                 .map_err(|error| format!("failed to open remote integration channel: {error}"))?;
-            let command = if shell == TerminalShellKind::Zsh {
-                format!(
-                    "exec /bin/sh -c {} shellspan-control {}",
-                    quote_remote_posix(include_str!("terminal-ssh-control.sh")),
-                    quote_remote_posix(&fifo_path),
-                )
-            } else {
-                format!("exec 3<> {}; cat <&3", quote_remote_posix(&fifo_path))
-            };
+            let command = format!(
+                "exec /bin/sh -c {} shellspan-control {}",
+                quote_remote_posix(include_str!("terminal-ssh-control.sh")),
+                quote_remote_posix(&fifo_path),
+            );
             control
                 .exec(&command)
                 .map_err(|error| format!("failed to start remote integration reader: {error}"))?;
@@ -250,9 +246,11 @@ impl RemoteSshShellIntegration {
     }
 
     fn close(mut self, session: &Session) {
-        self.active = false;
-        let _ = self.control.send_eof();
-        let _ = self.control.close();
+        if self.active {
+            self.active = false;
+            let _ = self.control.send_eof();
+            let _ = self.control.close();
+        }
         self.cleanup_files(session);
     }
 }

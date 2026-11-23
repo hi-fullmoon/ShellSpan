@@ -1273,15 +1273,6 @@
                 "remoteControlChannelFailed",
             )
             .unwrap();
-        terminal.session.set_blocking(true);
-        let resources_removed = terminal
-            .session
-            .sftp()
-            .unwrap()
-            .stat(Path::new(&remote_root))
-            .is_err();
-        terminal.session.set_blocking(false);
-        assert!(resources_removed);
 
         write_all_nonblocking(
             &terminal.session,
@@ -1297,6 +1288,20 @@
             thread::sleep(Duration::from_millis(5));
         }
         assert!(String::from_utf8_lossy(&terminal.display).contains("control-fallback-alive"));
+        write_all_nonblocking(
+            &terminal.session,
+            &mut terminal.shell_channel,
+            b"printf 'control-%s' still-unblocked\n",
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && !String::from_utf8_lossy(&terminal.display).contains("control-still-unblocked")
+        {
+            terminal.pump_once();
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(String::from_utf8_lossy(&terminal.display).contains("control-still-unblocked"));
         let snapshot = terminal
             .broker
             .snapshot(Some(&terminal.transport_id))
@@ -1307,6 +1312,20 @@
             snapshot.integration_state,
             crate::terminal_broker::TerminalIntegrationState::Degraded
         );
+        terminal.session.set_blocking(true);
+        terminal
+            .integration
+            .take()
+            .unwrap()
+            .close(&terminal.session);
+        let resources_removed = terminal
+            .session
+            .sftp()
+            .unwrap()
+            .stat(Path::new(&remote_root))
+            .is_err();
+        terminal.session.set_blocking(false);
+        assert!(resources_removed);
     }
 
     #[test]

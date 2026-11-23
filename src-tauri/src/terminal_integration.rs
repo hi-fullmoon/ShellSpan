@@ -1053,7 +1053,7 @@ __shellspan_guard_prompt_tty() {{
 __shellspan_emit() {{
   [[ ${{BASH_SUBSHELL:-0}} -eq 0 ]] || return 0
   [[ $__shellspan_integration_active -eq 1 ]] || return 0
-  builtin printf '%s\0' "$@" 2>/dev/null >"$__shellspan_control_path" || {{
+  [[ -p "$__shellspan_control_path" ]] && builtin printf '%s\0' "$@" 2>/dev/null >"$__shellspan_control_path" || {{
     __shellspan_integration_active=0
     return 0
   }}
@@ -1467,7 +1467,7 @@ __shellspan_emit() {{
     [[ $1 == Q && ${{__shellspan_prompt_end_active:-0}} == 1 ]] || return 0
   fi
   (( __shellspan_integration_active )) || return 0
-  {{ builtin printf '%s\0' "$@" >"$__shellspan_control_path"; }} 2>/dev/null || {{
+  [[ -p "$__shellspan_control_path" ]] && {{ builtin printf '%s\0' "$@" >"$__shellspan_control_path"; }} 2>/dev/null || {{
     __shellspan_integration_active=0
     return 0
   }}
