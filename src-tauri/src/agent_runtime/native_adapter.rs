@@ -190,6 +190,17 @@ impl NativeToolRuntime for NativeToolAdapter {
             .unwrap_or_default()
     }
 
+    fn preferred_ui_locale(&self) -> Option<String> {
+        self.services
+            .database
+            .load_preferences()
+            .ok()?
+            .into_iter()
+            .find(|(key, _)| key == "locale")
+            .map(|(_, value)| serde_json::from_str::<String>(&value).unwrap_or(value))
+            .filter(|value| !value.trim().is_empty())
+    }
+
     fn terminal_execution_capabilities(
         &self,
         transport_session_id: &str,

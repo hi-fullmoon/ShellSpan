@@ -203,6 +203,10 @@ pub(crate) trait NativeToolRuntime: Send + Sync {
         false
     }
 
+    fn preferred_ui_locale(&self) -> Option<String> {
+        None
+    }
+
     fn list_file_references(
         &self,
         request: super::file_references::FileReferenceRequest,
@@ -454,6 +458,12 @@ impl NativeToolRuntime for NativeToolRuntimeSlot {
     fn vim_bridge_available(&self, terminal_id: &str) -> bool {
         self.runtime()
             .is_ok_and(|runtime| runtime.vim_bridge_available(terminal_id))
+    }
+
+    fn preferred_ui_locale(&self) -> Option<String> {
+        self.runtime()
+            .ok()
+            .and_then(|runtime| runtime.preferred_ui_locale())
     }
 
     fn list_file_references(
@@ -743,6 +753,10 @@ impl AgentToolPipeline {
         header: &super::AgentSessionHeader,
         assembly: &mut super::prompt::ModelInputAssembly,
     ) -> Result<(), String> {
+        super::prompt::apply_ui_locale_context(
+            self.native.preferred_ui_locale().as_deref(),
+            assembly,
+        );
         if let Some(target) = &header.target {
             let operations = self.native.configured_sudo_operations(target);
             super::prompt::apply_sudo_operations(&mut assembly.tools, &operations);
