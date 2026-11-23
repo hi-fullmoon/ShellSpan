@@ -166,10 +166,6 @@
   color: var(--ai-text);
 }
 
-.ai-turn-changes-dialog-header {
-  border-bottom: 1px solid var(--ai-border-subtle);
-}
-
 .ai-turn-changes-dialog .ai-diff-block {
   max-width: 100%;
   margin: 0;

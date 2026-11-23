@@ -133,11 +133,10 @@ describe('AiTurnChangesSummary', () => {
     const panelShell = container.querySelector('.ai-panel-shell')!;
     const dialog = screen.getByRole('dialog');
     expect(panelShell.contains(dialog)).toBe(true);
-    expect(dialog).toHaveClass('ai-turn-changes-dialog', 'absolute', 'inset-0', 'min-h-0', 'flex-col', 'overflow-hidden');
+    expect(dialog).toHaveClass('ai-turn-changes-dialog', 'absolute', 'inset-0', 'z-[15]', 'min-h-0', 'flex-col', 'overflow-hidden');
     expect(dialog).toHaveAttribute('aria-modal', 'false');
-    const footer = dialog.querySelector('[data-slot="dialog-footer"]');
-    expect(footer).toHaveClass('shrink-0');
-    expect(footer).not.toHaveClass('border-t');
+    expect(dialog.querySelector('[data-slot="dialog-footer"]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Copy path' })).toBeInTheDocument();
     const embeddedDiff = dialog.querySelector('[data-ai-turn-changes-file-body] [data-ai-tool-view="diff"]');
     expect(embeddedDiff).toBeInTheDocument();
     expect(embeddedDiff).toHaveAttribute('data-embedded');

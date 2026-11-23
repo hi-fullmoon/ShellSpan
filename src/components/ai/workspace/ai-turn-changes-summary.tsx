@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDownIcon, FileCodeIcon, FileCogIcon, FileTextIcon, Trash2Icon, XIcon } from 'lucide-react';
+import { ArrowLeftIcon, ChevronDownIcon, FileCodeIcon, FileCogIcon, FileTextIcon, Trash2Icon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { CopyButton } from '@/components/ui/copy-button';
@@ -225,11 +225,21 @@ function TurnChangedFileOverlay({
       }}
       className={cn(
         'ai-turn-changes-dialog flex min-h-0 min-w-0 flex-col overflow-hidden outline-none',
-        scopedToPanel ? 'absolute inset-0 z-30' : 'fixed inset-0 z-50',
+        scopedToPanel ? 'absolute inset-0 z-[15]' : 'fixed inset-0 z-50',
       )}
     >
-      <div className="ai-turn-changes-dialog-header flex shrink-0 items-center justify-between gap-2 px-3.5 py-2.5">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+      <div className="ai-turn-changes-dialog-header flex h-10 min-h-10 shrink-0 items-center justify-between gap-2 border-b border-app-border/50 px-[var(--ai-shell-clearance)]">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+          <Button
+            ref={closeButtonRef}
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t('common.close')}
+            onClick={onClose}
+          >
+            <ArrowLeftIcon className="size-3.5" aria-hidden="true" />
+          </Button>
           <span className={cn('flex items-center gap-1', split.directory ? 'max-w-[60%] shrink-0' : 'min-w-0')}>
             <FileChangeIcon path={file.path} kind={file.kind} />
             <h2 id={titleId} className="ai-turn-changes-basename m-0 min-w-0 truncate">{split.basename}</h2>
@@ -240,7 +250,7 @@ function TurnChangedFileOverlay({
             </span>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5">
           {file.kind === 'deleted' ? (
             <span className="ai-turn-changes-deleted shrink-0 text-xs">{t('ai.workspace.turnChanges.deleted')}</span>
           ) : file.added !== null && file.removed !== null ? (
@@ -249,16 +259,12 @@ function TurnChangedFileOverlay({
               <span data-diff-count="removed">-{file.removed}</span>
             </span>
           ) : null}
-          <Button
-            ref={closeButtonRef}
-            type="button"
-            variant="ghost"
+          <CopyButton
+            text={file.path}
+            label={t('ai.workspace.turnChanges.copyPath')}
+            iconOnly
             size="icon-xs"
-            aria-label={t('common.close')}
-            onClick={onClose}
-          >
-            <XIcon className="size-3.5" aria-hidden="true" />
-          </Button>
+          />
         </div>
       </div>
       <ScrollArea className="min-h-0 flex-1" data-ai-turn-changes-file-body="">
@@ -283,17 +289,6 @@ function TurnChangedFileOverlay({
           </div>
         )}
       </ScrollArea>
-      <div className="flex shrink-0 items-center justify-end gap-2 px-3.5 py-2.5" data-slot="dialog-footer">
-        <CopyButton
-          text={file.path}
-          label={t('ai.workspace.turnChanges.copyPath')}
-          variant="ghost"
-          size="sm"
-        />
-        <Button type="button" variant="outline" size="sm" onClick={onClose}>
-          {t('common.close')}
-        </Button>
-      </div>
     </div>,
     target,
   );
@@ -351,7 +346,7 @@ export function AiTurnChangesSummary({
             <ChevronDownIcon className={cn('ai-turn-changes-chevron size-3.5 shrink-0', open && 'rotate-180')} aria-hidden="true" />
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <ul className="ai-turn-changes-list m-0 flex list-none flex-col py-1.5 px-0">
+            <ul className="ai-turn-changes-list m-0 flex list-none flex-col p-0">
               {summary.files.map((file) => (
                 <TurnChangedFileItem key={file.path} file={file} onSelect={handleSelectFile} />
               ))}
