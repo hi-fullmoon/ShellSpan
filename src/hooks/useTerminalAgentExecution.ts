@@ -133,6 +133,9 @@ export function useTerminalAgentExecution(terminal: TerminalSession | undefined)
   const localSandboxKind: LocalSandboxKind | undefined = windowsSandbox
     ? 'windowsAppContainer' : macSandbox ? 'macNono' : undefined;
   const localSandbox = localSandboxPreview || Boolean(localSandboxKind);
+  const localSandboxSupportsVisiblePty = macSandbox
+    && !localSandboxPreview
+    && localStatusState.status?.supportsVisiblePty === true;
   const profileSandbox = profileCheck?.configured === true;
   const macStatusChecking = local && platform === 'macos' && sandboxEnabled
     && (localStatusState.checking || localStatusState.status === null);
@@ -140,7 +143,8 @@ export function useTerminalAgentExecution(terminal: TerminalSession | undefined)
     || macStatusChecking
     || (Boolean(profileId) && (!profileCheck || profileCheck.checking));
   const glibcMismatch = remoteGlibcMismatch(terminal?.integrationReason);
-  const creationSurface: AgentExecutionSurface = localSandbox || profileSandbox || glibcMismatch
+  const localDirectOnly = localSandbox && !localSandboxSupportsVisiblePty;
+  const creationSurface: AgentExecutionSurface = localDirectOnly || profileSandbox || glibcMismatch
     ? 'direct' : preference?.surface ?? defaultSurface;
   const reconnectingSurface = terminal?.reconnecting ? preference?.reconnectingSurface : undefined;
   return {
@@ -151,6 +155,7 @@ export function useTerminalAgentExecution(terminal: TerminalSession | undefined)
     windowsSandbox,
     localSandboxKind,
     localSandbox,
+    localSandboxSupportsVisiblePty,
     profileSandbox,
     profileSandboxResolved: typeof profileCheck?.configured === 'boolean' && !profileCheck.checking,
     sandboxChecking,

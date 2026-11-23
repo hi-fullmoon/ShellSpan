@@ -260,6 +260,14 @@ export interface LocalTerminalOptions {
   supportsShellSpanBash: boolean;
 }
 
+export interface LocalSandboxPtyBinding {
+  readonly agentSessionId: string;
+  readonly kind: import('@/types/agent-session').LocalSandboxKind;
+  readonly workspaceRoot: string;
+  readonly policyDigest: string;
+  readonly networkMode: import('@/stores/aiSettingsStore').AgentSandboxNetworkMode;
+}
+
 export interface SessionPtyInfo {
   /** Local Windows startup waits for the renderer's initial resize/ready FIFO. */
   deferredStartup?: boolean;
@@ -267,6 +275,8 @@ export interface SessionPtyInfo {
   inputMode?: TerminalBrokerSessionSnapshot['inputMode'];
   nativeDisplayBinding?: TerminalBrokerSessionSnapshot['nativeDisplayBinding'];
   localProfile?: LocalTerminalProfile;
+  /** Managed local sandbox PTY binding when this terminal runs inside an Agent sandbox. */
+  sandboxBinding?: LocalSandboxPtyBinding;
   /** Actual local Windows kernel build, absent for SSH and non-Windows PTYs. */
   windowsBuildNumber?: number;
 }

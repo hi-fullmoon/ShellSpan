@@ -1362,7 +1362,12 @@ impl AgentRuntime {
     }
 
     pub(crate) async fn stop_terminal_agents(&self, terminal_id: &str) -> Result<(), String> {
-        let associated = self.sessions.terminal_root_sessions(terminal_id)?;
+        let mut associated = self.sessions.terminal_root_sessions(terminal_id)?;
+        if let Ok(Some(binding)) = self.terminal_broker().local_sandbox_binding(terminal_id) {
+            if !associated.contains(&binding.agent_session_id) {
+                associated.push(binding.agent_session_id);
+            }
+        }
         for id in &associated {
             if let Some(entry) = self.agents.get(id)? {
                 entry.stop_admission()?;
@@ -2078,12 +2083,23 @@ impl AgentRuntime {
         let Some(target) = snapshot.header.target else {
             return Ok(None);
         };
-        if self.terminal_turn_owner(&target.session_id)?.as_deref() == Some(session_id) {
+        let effective_terminal_id =
+            if target.local_sandbox_required == Some(super::event::LocalSandboxKind::MacNono) {
+                self.terminal_broker()
+                    .active_sandbox_transports_for_agent(session_id)?
+                    .into_iter()
+                    .next()
+                    .map(|(transport_id, _)| transport_id)
+                    .unwrap_or_else(|| target.session_id.clone())
+            } else {
+                target.session_id.clone()
+            };
+        if self.terminal_turn_owner(&effective_terminal_id)?.as_deref() == Some(session_id) {
             return Ok(None);
         }
         // Atomic acquisition closes the gap between two simultaneous submissions.
         self.native_engine
-            .begin_terminal_turn(&target.session_id, session_id)
+            .begin_terminal_turn(&effective_terminal_id, session_id)
             .map_err(|error| {
                 if error.contains("Agent owner") {
                     "TERMINAL_AGENT_CONFLICT".into()
@@ -2111,7 +2127,18 @@ impl AgentRuntime {
         let Some(target) = snapshot.header.target else {
             return Ok(());
         };
-        let Some(owner) = self.terminal_turn_owner(&target.session_id)? else {
+        let effective_terminal_id =
+            if target.local_sandbox_required == Some(super::event::LocalSandboxKind::MacNono) {
+                self.terminal_broker()
+                    .active_sandbox_transports_for_agent(session_id)?
+                    .into_iter()
+                    .next()
+                    .map(|(transport_id, _)| transport_id)
+                    .unwrap_or_else(|| target.session_id.clone())
+            } else {
+                target.session_id.clone()
+            };
+        let Some(owner) = self.terminal_turn_owner(&effective_terminal_id)? else {
             return Ok(());
         };
         if owner == session_id {

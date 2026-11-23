@@ -1010,7 +1010,7 @@ export function createAgentSessionAdapter(
       const view = await openEntry(sessionId);
       if (defersSettings(view)) {
         const target = view.snapshot.value.header.target;
-        if ((target?.localSandboxRequired != null || target?.windowsSandboxRequired === true) && surface !== 'direct') {
+        if ((target?.localSandboxRequired === 'windowsAppContainer' || target?.windowsSandboxRequired === true) && surface !== 'direct') {
           throw new Error('WINDOWS_SANDBOX_DIRECT_REQUIRED');
         }
         recordDeferredSetting(sessionId, { executionSurface: surface });

@@ -71,6 +71,7 @@ export interface AgentExecutionSurfaceSelectorProps {
   readonly nativeStartupTimedOut?: boolean;
   readonly glibcMismatch?: RemoteGlibcMismatch | null;
   readonly sandboxDirectOnly?: 'local' | 'remote';
+  readonly sandboxVisiblePty?: boolean;
   /** Reserved for a future authoritative runtime routing result. */
   readonly runtimeFallback?: TerminalSurfaceRuntimeFallbackSignal;
   readonly onSurfaceChange?: (surface: AgentExecutionSurface) => void;
@@ -84,6 +85,7 @@ export function AgentExecutionSurfaceSelector({
   nativeStartupTimedOut = false,
   glibcMismatch,
   sandboxDirectOnly,
+  sandboxVisiblePty = false,
   runtimeFallback,
   onSurfaceChange,
 }: AgentExecutionSurfaceSelectorProps): React.ReactNode {
@@ -99,10 +101,13 @@ export function AgentExecutionSurfaceSelector({
   const CurrentIcon = current.icon;
   const disabledHint = disabled ? t('agent.executionSurface.switchHint') : undefined;
   const realTerminalCopy = REAL_TERMINAL_STATE_COPY[presentation.realTerminalState];
-  const visibleAvailable = !sandboxDirectOnly && presentation.realTerminalState === 'ready';
+  const visibleAvailable = !sandboxDirectOnly
+    && (sandboxVisiblePty || presentation.realTerminalState === 'ready');
   const realTerminalDescription = sandboxDirectOnly
     ? t(sandboxDirectOnly === 'local' ? 'ai.error.localSandboxDirectRequired' : 'ai.error.sandboxDirectRequired')
-    : presentation.realTerminalState !== 'unavailable'
+    : sandboxVisiblePty
+      ? t('agent.executionSurface.v1.sandboxReadyDescription')
+      : presentation.realTerminalState !== 'unavailable'
     ? t(realTerminalCopy.description)
     : glibcMismatch
       ? t('agent.executionSurface.v1.remoteGlibcTooOld', { ...glibcMismatch })

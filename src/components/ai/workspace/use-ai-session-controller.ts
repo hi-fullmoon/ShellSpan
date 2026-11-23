@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useFocusStore } from '@/stores/focusStore';
+import { ensureManagedSandboxTerminal } from '@/lib/terminal/sandbox-terminal';
 import { agentTerminalLeaseState, type AgentTerminalLeaseView } from '@/components/terminal/agent-terminal-lease-state';
 import { useTerminalTaskNavigation } from '@/components/terminal/agent-terminal-task-navigation';
 import { canSwitchFocusTarget } from '@/lib/ai/focus-target';
@@ -125,6 +126,8 @@ export interface AiSessionController {
   readonly selectedPermission?: AgentPermissionMode;
   readonly selectedExecutionSurface: AgentExecutionSurface;
   readonly sandboxDirectOnly: 'local' | 'remote' | undefined;
+  readonly localSandbox: boolean;
+  readonly sandboxVisiblePty: boolean;
   readonly glibcMismatch: RemoteGlibcMismatch | null;
   readonly settingsBusy: boolean;
   readonly selectModel: (provider: AiProviderConfig) => Promise<void>;
@@ -271,6 +274,15 @@ function needsVolatileApprovalArguments(approval: AiPendingApproval): boolean {
   return arguments_.textProvided === true;
 }
 
+function matchesActiveTerminalTarget(
+  sessionView: AiSessionView | null | undefined,
+  terminal: TerminalSession | undefined,
+): boolean {
+  if (!sessionView || !terminal) return false;
+  if (sessionView.snapshot.value.header.target?.sessionId === terminal.sessionId) return true;
+  return terminal.ptyInfo?.sandboxBinding?.agentSessionId === sessionView.summary.id;
+}
+
 function sameOptimistic(
   left: readonly AiOptimisticSubmission[],
   right: readonly AiOptimisticSubmission[],
@@ -297,6 +309,7 @@ export function useAiSessionController({
   const terminalExecution = useTerminalAgentExecution(scope === 'terminal' ? activeTerminal : undefined);
   const {
     localSandboxPreview, localSandboxKind: newLocalSandboxKind, localSandbox: newLocalSandbox,
+    localSandboxSupportsVisiblePty,
     profileSandbox: sandboxConfigured, profileSandboxResolved, sandboxChecking, sandboxEnabled: agentSandboxEnabled,
   } = terminalExecution;
   const activeTerminalId = useTerminalStore((state) => focusMode ? focusTargetId : state.activeSessionId);
@@ -410,7 +423,7 @@ export function useAiSessionController({
     if (scope !== 'terminal' || activeTerminal?.status !== 'connected') return undefined;
     const boundView = agentSessionId && viewRef.current?.summary.id === agentSessionId
       ? viewRef.current : null;
-    if (agentSessionId && boundView?.snapshot.value.header.target?.sessionId !== activeTerminal.sessionId) return undefined;
+    if (agentSessionId && !matchesActiveTerminalTarget(boundView, activeTerminal)) return undefined;
     const maxLines = useAiSettingsStore.getState().contextLines;
     const snapshot = getRecentTerminalOutputSnapshot(
       activeTerminal.sessionId,
@@ -509,16 +522,25 @@ export function useAiSessionController({
     || Boolean(openedSessionId && !view && openFailedSessionId !== openedSessionId)
     || waitingForTerminalRestore);
   const currentAgentTarget = view?.snapshot.value.header.target;
-  const sameSandboxTarget = currentAgentTarget?.sessionId === activeTerminalId;
+  const sameSandboxTarget = matchesActiveTerminalTarget(view, activeTerminal);
   const sandboxRequired = sameSandboxTarget && currentAgentTarget?.remoteSandboxRequired === true;
+  const currentLocalSandboxKind = sameSandboxTarget
+    ? currentAgentTarget?.localSandboxRequired
+      ?? (currentAgentTarget?.windowsSandboxRequired === true ? 'windowsAppContainer' : undefined)
+    : undefined;
   const localSandbox = localSandboxPreview
-    || (sameSandboxTarget && (currentAgentTarget?.localSandboxRequired != null
-      || currentAgentTarget?.windowsSandboxRequired === true))
+    || Boolean(currentLocalSandboxKind)
     || (!view && newLocalSandbox);
-  const sandboxDirectOnly = localSandbox ? 'local' : sandboxConfigured || sandboxRequired ? 'remote' : undefined;
+  const effectiveLocalSandboxKind = currentLocalSandboxKind ?? (!view ? newLocalSandboxKind : undefined);
+  const sandboxVisiblePty = localSandbox
+    && !localSandboxPreview
+    && effectiveLocalSandboxKind === 'macNono'
+    && localSandboxSupportsVisiblePty;
+  const localSandboxDirectOnly = localSandbox && !sandboxVisiblePty;
+  const sandboxDirectOnly = localSandboxDirectOnly ? 'local' : sandboxConfigured || sandboxRequired ? 'remote' : undefined;
   const sandboxSessionChanged = sameSandboxTarget && profileSandboxResolved && currentAgentTarget?.remoteSandboxRequired !== undefined
     && currentAgentTarget.remoteSandboxRequired !== sandboxConfigured;
-  const sandboxNeedsDirect = !focusMode && (sandboxConfigured || localSandbox) && sameSandboxTarget
+  const sandboxNeedsDirect = !focusMode && (sandboxConfigured || localSandboxDirectOnly) && sameSandboxTarget
     && view?.snapshot.value.header.executionSurface === 'boundTerminal';
   const visibleExecutionRequired = focusMode && Boolean(view && view.snapshot.value.header.executionSurface !== 'boundTerminal');
   const sandboxUnavailableReason =
@@ -763,7 +785,7 @@ export function useAiSessionController({
     };
   }, [createInput, newLocalSandbox, resolveProjectRoot]);
   const ensureProjectSession = useCallback(async (root?: string): Promise<string> => {
-    if (focusMode && viewRef.current && viewRef.current.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId) {
+    if (focusMode && viewRef.current && !matchesActiveTerminalTarget(viewRef.current, activeTerminal)) {
       throw new Error(t('focus.continueFirst'));
     }
     const epoch = projectEpoch.current;
@@ -938,6 +960,31 @@ export function useAiSessionController({
         const cold = payload.sessionId === null ? await coldSkillSession.current : null;
         if (cold) queue.bindSession(cold.summary.id);
         const create = await creating;
+        if (
+          payload.sessionId === null
+          && !cold
+          && create?.request.target?.localSandboxRequired === 'macNono'
+          && create.request.executionSurface === 'boundTerminal'
+          && adapter.create
+        ) {
+          const created = await adapter.create(create);
+          queue.bindSession(created.summary.id);
+          await ensureManagedSandboxTerminal(created.summary.id, {
+            insertAfterId: activeTerminalId ?? undefined,
+            formatTitle: (shell) => t('terminal.sandbox.tabTitle', { shell }),
+          });
+          return base;
+        }
+        if (
+          payload.sessionId !== null
+          && viewRef.current?.snapshot.value.header.target?.localSandboxRequired === 'macNono'
+          && viewRef.current.snapshot.value.header.executionSurface === 'boundTerminal'
+        ) {
+          await ensureManagedSandboxTerminal(payload.sessionId, {
+            insertAfterId: activeTerminalId ?? undefined,
+            formatTitle: (shell) => t('terminal.sandbox.tabTitle', { shell }),
+          });
+        }
         return {
           ...base,
           ...(create ? { create } : {}),
@@ -1248,7 +1295,7 @@ export function useAiSessionController({
         && (view.summary.archived
           || view.snapshot.value.header.subagent?.continuable === false
           || (scope === 'terminal'
-            && view.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId)),
+            && !matchesActiveTerminalTarget(view, activeTerminal))),
       waitingApproval: view?.pendingApproval !== null && view?.pendingApproval !== undefined,
       waitingQuestion: Boolean(view?.pendingQuestion || view?.pendingSkillProposal),
     });
@@ -1340,7 +1387,7 @@ export function useAiSessionController({
     || visibleView?.summary.archived || visibleView?.snapshot.value.archived
     || ['completed', 'cancelled', 'failed'].includes(visibleView?.status ?? 'idle'));
   const historicalTargetUnavailable = scope === 'terminal' && Boolean(visibleView
-    && visibleView.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId);
+    && !matchesActiveTerminalTarget(visibleView, activeTerminal));
   const readOnlySession = oneShotSubagent || endedSubagent || historicalTargetUnavailable;
   const canContinueReconnectedView = scope === 'terminal' && visibleView?.snapshot.kind === 'agent'
     && canContinueOnReconnectedTerminal(visibleView.snapshot.value, activeTerminal)
@@ -1419,7 +1466,7 @@ export function useAiSessionController({
   const visibleSessionId = visibleView?.summary.id;
   const activeConversationId = !workspaceChanging && !readOnlySession && !isSubagent
     && !visibleView?.summary.archived && !visibleView?.snapshot.value.archived
-    && visibleView?.snapshot.value.header.target?.sessionId === activeTerminalId
+    && matchesActiveTerminalTarget(visibleView, activeTerminal)
     ? visibleSessionId : undefined;
   useLayoutEffect(() => {
     if (scope !== 'terminal' || focusMode || workspaceChanging || !activeTerminalId || !visibleSessionId) return;
@@ -2047,7 +2094,7 @@ export function useAiSessionController({
     skillsNeedsRoot: !skillRoot && !(visibleView?.snapshot.value.header.target?.cwd || visibleView?.snapshot.value.header.target?.rootPath)
       && !(scope === 'terminal' && activeTerminal?.status === 'connected'
         && (!openedSessionId && !visibleView
-          || visibleView?.snapshot.value.header.target?.sessionId === activeTerminal.sessionId)),
+          || matchesActiveTerminalTarget(visibleView, activeTerminal))),
     skillsScopeKey: `${workspaceScopeKey}:${openedSessionId ?? "new"}:${skillNavigation}`,
     view: displayView,
     restoringSession: scope === 'workbench' && canRestoreWorkbench && !displayView
@@ -2093,6 +2140,8 @@ export function useAiSessionController({
       : permissionModeForUi(visibleView.snapshot.value.header.permissionMode),
     selectedExecutionSurface,
     sandboxDirectOnly,
+    localSandbox,
+    sandboxVisiblePty,
     glibcMismatch,
     settingsBusy,
     selectModel: (provider) => changeSettings(async (sessionId) => {
@@ -2120,6 +2169,15 @@ export function useAiSessionController({
           if (permissions.conversationSurfaces[activeTerminalId]?.agentSessionId === sessionId) {
             permissions.setConversationSurface(activeTerminalId, { agentSessionId: sessionId, surface });
             if (viewRef.current?.summary.id === sessionId) permissions.setExecutionSurface(activeTerminalId, surface);
+          }
+          if (
+            surface === 'boundTerminal'
+            && viewRef.current?.snapshot.value.header.target?.localSandboxRequired === 'macNono'
+          ) {
+            await ensureManagedSandboxTerminal(sessionId, {
+              insertAfterId: activeTerminalId,
+              formatTitle: (shell) => t('terminal.sandbox.tabTitle', { shell }),
+            });
           }
         });
         return;
@@ -2190,7 +2248,7 @@ export function useAiSessionController({
       const context = submissionContextRef.current;
       const effectiveAccelerated = accelerated
         && !viewRef.current?.snapshot.value.header.subagent;
-      if (scope === 'terminal' && viewRef.current?.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId
+      if (scope === 'terminal' && !matchesActiveTerminalTarget(viewRef.current, activeTerminal)
         && viewRef.current?.snapshot.kind === 'agent'
         && !canVerifyCurrentTerminal
         && (focusMode ? canSwitchFocusTarget(viewRef.current, activeTerminal) : canContinueHistoricalConversation(viewRef.current.snapshot.value, activeTerminal))) {
@@ -2198,7 +2256,7 @@ export function useAiSessionController({
         return;
       }
       if (scope === 'terminal' && ((openedSessionId && !viewRef.current)
-        || (viewRef.current && viewRef.current.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId))) {
+        || (viewRef.current && !matchesActiveTerminalTarget(viewRef.current, activeTerminal)))) {
         setAnnouncement('sessionUnavailable');
         return;
       }

@@ -518,12 +518,9 @@ fn apply_connection_sandbox(
             );
         }
         Some(super::LocalSandboxKind::MacNono) => {
-            if target.kind != "local"
-                || target.target_id == "workbench-ai"
-                || request.execution_surface != super::AgentExecutionSurface::Direct
-            {
+            if target.kind != "local" || target.target_id == "workbench-ai" {
                 return Err(
-                    "MAC_SANDBOX_DIRECT_REQUIRED: select a local Direct Agent session".into(),
+                    "MAC_SANDBOX_DIRECT_REQUIRED: select a local terminal Agent session".into(),
                 );
             }
             #[cfg(target_os = "macos")]
@@ -646,6 +643,7 @@ fn require_mac_sandbox_direct(
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LocalSandboxStatus {
     pub(crate) supported: bool,
+    pub(crate) supports_visible_pty: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) kind: Option<super::LocalSandboxKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -659,6 +657,7 @@ pub(crate) fn agent_runtime_local_sandbox_status(app: AppHandle) -> LocalSandbox
         let _ = app;
         LocalSandboxStatus {
             supported: true,
+            supports_visible_pty: false,
             kind: Some(super::LocalSandboxKind::WindowsAppContainer),
             reason: None,
         }
@@ -671,6 +670,7 @@ pub(crate) fn agent_runtime_local_sandbox_status(app: AppHandle) -> LocalSandbox
             Err(error) => {
                 return LocalSandboxStatus {
                     supported: false,
+                    supports_visible_pty: false,
                     kind: None,
                     reason: Some(format!(
                         "LOCAL_SANDBOX_UNAVAILABLE: failed to resolve home directory: {error}"
@@ -680,13 +680,19 @@ pub(crate) fn agent_runtime_local_sandbox_status(app: AppHandle) -> LocalSandbox
         };
         let data_dir = crate::shellspan_data_dir(&home);
         match super::native::mac_sandbox::probe_local_sandbox(&data_dir, resource_dir.as_deref()) {
-            Ok(()) => LocalSandboxStatus {
-                supported: true,
-                kind: Some(super::LocalSandboxKind::MacNono),
-                reason: None,
-            },
+            Ok(()) => {
+                let supports_visible_pty = cfg!(target_arch = "aarch64")
+                    && crate::terminal_command::artifacts::resource_root(&app).is_ok();
+                LocalSandboxStatus {
+                    supported: true,
+                    supports_visible_pty,
+                    kind: Some(super::LocalSandboxKind::MacNono),
+                    reason: None,
+                }
+            }
             Err(error) => LocalSandboxStatus {
                 supported: false,
+                supports_visible_pty: false,
                 kind: None,
                 reason: Some(error),
             },
@@ -697,6 +703,7 @@ pub(crate) fn agent_runtime_local_sandbox_status(app: AppHandle) -> LocalSandbox
         let _ = app;
         LocalSandboxStatus {
             supported: false,
+            supports_visible_pty: false,
             kind: None,
             reason: Some("LOCAL_SANDBOX_UNAVAILABLE: unsupported platform".into()),
         }
@@ -1005,14 +1012,15 @@ pub(crate) struct AgentExecutionSurfaceInput {
 }
 
 #[tauri::command]
-pub(crate) fn agent_runtime_set_execution_surface(
+pub(crate) async fn agent_runtime_set_execution_surface(
     app: AppHandle,
+    sessions: State<'_, crate::models::SessionManager>,
     runtime: State<'_, AgentRuntime>,
     input: AgentExecutionSurfaceInput,
 ) -> Result<AgentSessionSnapshot, String> {
     configure_runtime(&app, &runtime)?;
+    let snapshot = runtime.session(&input.session_id)?;
     if input.surface == super::AgentExecutionSurface::BoundTerminal {
-        let snapshot = runtime.session(&input.session_id)?;
         #[cfg(all(
             feature = "native-input-acceptance",
             debug_assertions,
@@ -1022,6 +1030,18 @@ pub(crate) fn agent_runtime_set_execution_surface(
         if super::native::mac_sandbox_trial_active() {
             if let Some(target) = &snapshot.header.target {
                 require_mac_sandbox_direct(target, input.surface)?;
+            }
+        }
+        if let Some(target) = &snapshot.header.target {
+            if target.local_sandbox_required
+                == Some(super::event::LocalSandboxKind::WindowsAppContainer)
+            {
+                return Err("WINDOWS_SANDBOX_DIRECT_REQUIRED".into());
+            }
+            if target.local_sandbox_required == Some(super::event::LocalSandboxKind::MacNono)
+                && !cfg!(all(target_os = "macos", target_arch = "aarch64"))
+            {
+                return Err("MAC_SANDBOX_DIRECT_REQUIRED".into());
             }
         }
         if let Some(target) = snapshot
@@ -1039,6 +1059,17 @@ pub(crate) fn agent_runtime_set_execution_surface(
             {
                 return Err(crate::remote_sandbox::DIRECT_REQUIRED.into());
             }
+        }
+    } else if snapshot.header.target.as_ref().is_some_and(|target| {
+        target.local_sandbox_required == Some(super::event::LocalSandboxKind::MacNono)
+    }) {
+        // Release any live sandbox PTY lease before returning to Direct mode so
+        // Direct commands do not contend on the managed directory guard lock.
+        let active = runtime
+            .terminal_broker()
+            .active_sandbox_transports_for_agent(&input.session_id)?;
+        for (transport_id, _) in active {
+            let _ = runtime.close_terminal(&sessions, &transport_id).await;
         }
     }
     runtime.set_execution_surface(&input.session_id, input.surface)
@@ -1240,10 +1271,19 @@ pub(crate) fn agent_runtime_archive_session(
 #[tauri::command]
 pub(crate) async fn agent_runtime_delete_session(
     app: AppHandle,
+    sessions: State<'_, crate::models::SessionManager>,
     runtime: State<'_, AgentRuntime>,
     input: AgentSessionIdInput,
 ) -> Result<(), String> {
     configure_runtime(&app, &runtime)?;
+    if let Ok(active) = runtime
+        .terminal_broker()
+        .active_sandbox_transports_for_agent(&input.session_id)
+    {
+        for (transport_id, _) in active {
+            let _ = runtime.close_terminal(&sessions, &transport_id).await;
+        }
+    }
     let runtime = runtime.inner().clone();
     tokio::task::spawn_blocking(move || runtime.delete_session(&input.session_id))
         .await

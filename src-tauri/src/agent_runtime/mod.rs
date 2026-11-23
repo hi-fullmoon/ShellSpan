@@ -67,6 +67,8 @@ pub(crate) fn terminal_execution_needs_user_action(error: &str) -> bool {
         "TERMINAL_DIRECT_REQUIRED",
         "SANDBOX_DIRECT_REQUIRED",
         "SANDBOX_SESSION_POLICY_CHANGED",
+        "LOCAL_SANDBOX_TERMINAL_REQUIRED",
+        "LOCAL_SANDBOX_POLICY_DRIFT",
     ]
     .iter()
     .any(|code| {

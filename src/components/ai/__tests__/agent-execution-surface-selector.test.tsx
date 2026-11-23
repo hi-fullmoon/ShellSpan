@@ -17,6 +17,7 @@ const translations = vi.hoisted<Record<string, string>>(() => ({
   'agent.executionSurface.v1.state.directFallback': 'Direct fallback',
   'agent.executionSurface.v1.initializingDescription': 'Real-terminal command support is initializing. Use Direct for now.',
   'agent.executionSurface.v1.readyDescription': 'Runs visibly with cooperative shell lifecycle. Use Direct for security-sensitive or untrusted code.',
+  'agent.executionSurface.v1.sandboxReadyDescription': 'Runs visibly inside an isolated managed sandbox terminal with interactive handoff and diff syncback.',
   'agent.executionSurface.v1.busyDescription': 'This terminal is running a foreground program. Wait for the prompt to return, or use Direct.',
   'agent.executionSurface.v1.unavailableDescription': 'Real-terminal command support is unavailable for this terminal. Choose Direct instead.',
   'agent.executionSurface.v1.directFallbackDescription': 'The runtime fell back to Direct because real-terminal command support could not be used.',
@@ -150,6 +151,29 @@ describe('AgentExecutionSurfaceSelector', () => {
     await user.click(screen.getByRole('button', { name: 'Command execution: Visible command' }));
     await user.click(await screen.findByRole('menuitemradio', { name: 'Direct' }));
     expect(onSurfaceChange).toHaveBeenLastCalledWith('direct');
+  });
+
+  it('enables Visible command with managed sandbox description when sandboxVisiblePty is supported', async () => {
+    const user = userEvent.setup();
+    const onSurfaceChange = vi.fn();
+    render(
+      <AgentExecutionSurfaceSelector
+        surface="direct"
+        realTerminalState="unavailable"
+        sandboxVisiblePty
+        onSurfaceChange={onSurfaceChange}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Command execution: Direct' }));
+    const visibleOption = await screen.findByRole('menuitemradio', { name: 'Visible command' });
+    expect(visibleOption).not.toHaveAttribute('aria-disabled', 'true');
+    expect(visibleOption).toHaveAttribute(
+      'aria-description',
+      'Runs visibly inside an isolated managed sandbox terminal with interactive handoff and diff syncback.',
+    );
+    await user.click(visibleOption);
+    expect(onSurfaceChange).toHaveBeenCalledWith('boundTerminal');
   });
 
 });

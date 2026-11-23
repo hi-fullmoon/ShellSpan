@@ -833,10 +833,63 @@ pub(crate) async fn create_local_session(
             replaces_session_id,
             native_input_protocol,
             local_profile,
+            None,
         )
     })
     .await
     .map_err(|_| "local terminal worker failed".to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn open_local_sandbox_terminal(
+    app: AppHandle,
+    state: State<'_, SessionManager>,
+    agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
+    agent_session_id: String,
+    cols: u16,
+    rows: u16,
+    replaces_session_id: Option<String>,
+) -> Result<SessionSummary, String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (
+            app,
+            state,
+            agent_runtime,
+            agent_session_id,
+            cols,
+            rows,
+            replaces_session_id,
+        );
+        return Err(
+            "LOCAL_SANDBOX_VISIBLE_PTY_UNSUPPORTED: managed sandbox visible terminal requires macOS"
+                .into(),
+        );
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let prior = agent_runtime
+            .terminal_broker()
+            .active_sandbox_transports_for_agent(&agent_session_id)?;
+        for (existing_id, _) in prior {
+            let _ = agent_runtime.close_terminal(&state, &existing_id).await;
+        }
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            create_local_session_blocking(
+                app,
+                &state,
+                cols,
+                rows,
+                replaces_session_id,
+                Some(crate::terminal_command::protocol::PROTOCOL.to_string()),
+                None,
+                Some(agent_session_id),
+            )
+        })
+        .await
+        .map_err(|_| "local sandbox terminal worker failed".to_string())?
+    }
 }
 
 fn local_terminal_rollouts(app: &AppHandle) -> Result<(bool, bool), String> {
@@ -849,6 +902,7 @@ fn local_terminal_rollouts(app: &AppHandle) -> Result<(bool, bool), String> {
     Ok((broker_enabled, shell_integration_enabled))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create_local_session_blocking(
     app: AppHandle,
     state: &SessionManager,
@@ -857,13 +911,28 @@ fn create_local_session_blocking(
     replaces_session_id: Option<String>,
     native_input_protocol: Option<String>,
     local_profile: Option<LocalTerminalProfile>,
+    sandbox_agent_session_id: Option<String>,
 ) -> Result<SessionSummary, String> {
     #[cfg(windows)]
     if local_profile.is_some() {
         return Err("TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into());
     }
+    #[cfg(not(target_os = "macos"))]
+    if sandbox_agent_session_id.is_some() {
+        return Err(
+            "LOCAL_SANDBOX_VISIBLE_PTY_UNSUPPORTED: managed sandbox visible terminal requires macOS"
+                .into(),
+        );
+    }
     let session_id = Uuid::new_v4().to_string();
     let (terminal_broker_enabled, shell_integration_enabled) = local_terminal_rollouts(&app)?;
+    if sandbox_agent_session_id.is_some()
+        && (!terminal_broker_enabled || !shell_integration_enabled)
+    {
+        return Err(
+            "LOCAL_SANDBOX_VISIBLE_PTY_UNAVAILABLE: terminal shell integration is disabled".into(),
+        );
+    }
     let predecessor_mode = if let Some(previous) = replaces_session_id.as_deref() {
         app.state::<crate::agent_runtime::AgentRuntime>()
             .terminal_broker_snapshot(Some(previous))?
@@ -882,9 +951,13 @@ fn create_local_session_blocking(
         &session_id,
     );
     #[cfg(not(windows))]
-    let shell = resolve_unix_local_shell(local_profile, std::env::var("SHELL").ok(), || {
-        crate::terminal_command::artifacts::resource_root(&app)
-    })?;
+    let shell = if sandbox_agent_session_id.is_some() {
+        "/bin/zsh".to_string()
+    } else {
+        resolve_unix_local_shell(local_profile, std::env::var("SHELL").ok(), || {
+            crate::terminal_command::artifacts::resource_root(&app)
+        })?
+    };
     let shell_kind = TerminalShellKind::detect(&shell);
     let title = std::path::Path::new(&shell)
         .file_stem()
@@ -908,7 +981,7 @@ fn create_local_session_blocking(
     };
     summary.pty_info.local_profile = local_profile;
     #[cfg(unix)]
-    let prepared_native = if native_client
+    let mut prepared_native = if native_client
         && shell_integration_enabled
         && matches!(shell_kind, TerminalShellKind::Bash | TerminalShellKind::Zsh)
     {
@@ -1028,47 +1101,119 @@ fn create_local_session_blocking(
             error!("Failed to create local terminal session_id={session_id}: {error}");
             format!("failed to create local terminal: {error}")
         })?;
-    let executable = std::path::Path::new(&shell);
+    let executable = std::path::PathBuf::from(&shell);
     #[cfg(unix)]
     let executable = prepared_native
         .as_ref()
         .and_then(|native| native.shell_override())
+        .map(std::path::Path::to_path_buf)
         .unwrap_or(executable);
-    let mut command = CommandBuilder::new(executable);
-    #[cfg(windows)]
-    command.set_start_suspended(true);
-    configure_local_terminal_environment(&mut command);
-    #[cfg(unix)]
-    if shell_kind == TerminalShellKind::Bash {
-        configure_local_bash_locale(&mut command);
-    }
-    let home = std::env::var_os("SHELLSPAN_LOCAL_HOME");
-    #[cfg(all(
-        feature = "native-input-acceptance",
-        debug_assertions,
-        target_os = "macos",
-        target_arch = "aarch64"
-    ))]
-    let home = if home.is_some()
-        && crate::agent_runtime::mac_sandbox_preview_active()
-        && !app.state::<Database>().agent_sandbox_enabled()?
+    #[cfg(target_os = "macos")]
+    let (command, prepared_sandbox_pty, sandbox_binding, sandbox_blocked_domains) = if let Some(
+        agent_session_id,
+    ) =
+        sandbox_agent_session_id.as_deref()
     {
-        None
+        let native = prepared_native.as_mut().filter(|n| n.is_zle()).ok_or_else(|| {
+                "LOCAL_SANDBOX_VISIBLE_PTY_UNAVAILABLE: verified ZLE shell integration is unavailable"
+                    .to_string()
+            })?;
+        let database = app.state::<Database>();
+        database.require_agent_sandbox_enabled()?;
+        let network_policy = database.agent_sandbox_network_policy()?;
+        let runtime = app
+            .try_state::<crate::agent_runtime::AgentRuntime>()
+            .ok_or_else(|| "Agent runtime is unavailable".to_string())?;
+        let snapshot = runtime.session(agent_session_id)?;
+        let target = snapshot
+            .header
+            .target
+            .ok_or_else(|| "Agent Session has no target".to_string())?;
+        if target.local_sandbox_required != Some(crate::agent_runtime::LocalSandboxKind::MacNono) {
+            return Err(
+                    "LOCAL_SANDBOX_VISIBLE_PTY_UNAVAILABLE: Agent Session does not require macOS nono sandbox"
+                        .into(),
+                );
+        }
+        let workspace_cwd = target
+            .cwd
+            .as_deref()
+            .ok_or_else(|| "Managed local sandbox workspace is missing".to_string())?;
+        let home_dir = app.path().home_dir().map_err(|error| error.to_string())?;
+        let data_dir = crate::shellspan_data_dir(&home_dir);
+        let resource_dir = app.path().resource_dir().ok();
+        let (prepared_pty, mut cmd) =
+            crate::agent_runtime::mac_sandbox::PreparedMacSandboxPty::prepare(
+                &data_dir,
+                std::path::Path::new(workspace_cwd),
+                resource_dir.as_deref(),
+                network_policy,
+                native.nip_root_path(),
+                &native.control_socket_path(),
+                &executable,
+            )?;
+        native.configure_sandbox_zle(&mut cmd)?;
+        let binding = prepared_pty.binding(agent_session_id);
+        let blocked_domains = prepared_pty.blocked_domains_handle();
+        summary.pty_info.sandbox_binding = Some(binding.clone());
+        (cmd, Some(prepared_pty), Some(binding), blocked_domains)
     } else {
-        home
+        let mut cmd = CommandBuilder::new(&executable);
+        configure_local_terminal_environment(&mut cmd);
+        if shell_kind == TerminalShellKind::Bash {
+            configure_local_bash_locale(&mut cmd);
+        }
+        let home = std::env::var_os("SHELLSPAN_LOCAL_HOME");
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let home = if home.is_some()
+            && crate::agent_runtime::mac_sandbox_preview_active()
+            && !app.state::<Database>().agent_sandbox_enabled()?
+        {
+            None
+        } else {
+            home
+        };
+        configure_local_terminal_home(&mut cmd, home.as_deref())?;
+        if let Some(native) = prepared_native.as_ref() {
+            native.configure(&mut cmd)?;
+        }
+        if let Some(integration) = prepared_integration.as_ref() {
+            integration.configure_command(&mut cmd)?;
+        } else if native_mode != Some(crate::terminal_command::protocol::InputMode::NativeInline) {
+            cmd.arg("-l");
+        }
+        (cmd, None, None, None)
     };
-    configure_local_terminal_home(&mut command, home.as_deref())?;
-    #[cfg(any(unix, windows))]
-    if let Some(native) = prepared_native.as_ref() {
-        native.configure(&mut command)?;
-    }
-    if let Some(integration) = prepared_integration.as_ref() {
-        integration.configure_command(&mut command)?;
-    } else if !cfg!(target_os = "windows")
-        && native_mode != Some(crate::terminal_command::protocol::InputMode::NativeInline)
-    {
-        command.arg("-l");
-    }
+    #[cfg(not(target_os = "macos"))]
+    let mut command = {
+        let mut command = CommandBuilder::new(executable);
+        #[cfg(windows)]
+        command.set_start_suspended(true);
+        configure_local_terminal_environment(&mut command);
+        #[cfg(unix)]
+        if shell_kind == TerminalShellKind::Bash {
+            configure_local_bash_locale(&mut command);
+        }
+        let home = std::env::var_os("SHELLSPAN_LOCAL_HOME");
+        configure_local_terminal_home(&mut command, home.as_deref())?;
+        #[cfg(any(unix, windows))]
+        if let Some(native) = prepared_native.as_ref() {
+            native.configure(&mut command)?;
+        }
+        if let Some(integration) = prepared_integration.as_ref() {
+            integration.configure_command(&mut command)?;
+        } else if !cfg!(target_os = "windows")
+            && native_mode != Some(crate::terminal_command::protocol::InputMode::NativeInline)
+        {
+            command.arg("-l");
+        }
+        command
+    };
     let writer = crate::local_terminal_input::take_writer(pair.master.as_ref(), shell_kind)
         .map_err(|error| {
             error!("Failed to take local terminal writer session_id={session_id}: {error}");
@@ -1078,6 +1223,28 @@ fn create_local_session_blocking(
         error!("Failed to start local shell session_id={session_id} shell={shell}: {error}");
         format!("failed to start local shell: {error}")
     })?;
+    #[cfg(target_os = "macos")]
+    let sandbox_pty_guard = if let Some(prepared_pty) = prepared_sandbox_pty {
+        let Some(child_pid) = child.process_id() else {
+            let _ = terminate_failed_local_child(child.as_mut(), move || {
+                drop(writer);
+            });
+            return Err(
+                "MAC_SANDBOX_START_FAILED: sandbox launcher did not expose a process id".into(),
+            );
+        };
+        match prepared_pty.activate(child_pid) {
+            Ok(guard) => Some(guard),
+            Err(error) => {
+                let _ = terminate_failed_local_child(child.as_mut(), move || {
+                    drop(writer);
+                });
+                return Err(error);
+            }
+        }
+    } else {
+        None
+    };
     #[cfg(all(
         feature = "native-input-acceptance",
         debug_assertions,
@@ -1176,6 +1343,30 @@ fn create_local_session_blocking(
             summary.terminal_generation = Some(attachment.terminal_generation);
             #[cfg(unix)]
             if let Some(runtime) = app.try_state::<crate::agent_runtime::AgentRuntime>() {
+                #[cfg(target_os = "macos")]
+                if let Some(binding) = sandbox_binding.clone() {
+                    if let Err(error) = runtime.terminal_broker().attach_local_sandbox_binding(
+                        &session_id,
+                        binding,
+                        sandbox_blocked_domains.clone(),
+                    ) {
+                        let _ = runtime.close_terminal_broker_transport(
+                            &session_id,
+                            crate::terminal_broker::TerminalGenerationCloseReason::TransportDisconnected,
+                        );
+                        return Err(rollback_local_broker_attachment_failure(
+                            state,
+                            &session_id,
+                            child.as_mut(),
+                            move || {
+                                drop(writer);
+                                drop(master);
+                                drop(reader);
+                            },
+                            &error,
+                        ));
+                    }
+                }
                 if let Some(probe) =
                     crate::local_terminal_input::PtyEchoProbe::from_master(master.as_ref())
                 {
@@ -1462,6 +1653,10 @@ fn create_local_session_blocking(
             #[cfg(windows)]
             let _native_bootstrap = native_bootstrap;
             let wait_result = child.wait();
+            #[cfg(target_os = "macos")]
+            if let Some(guard) = sandbox_pty_guard {
+                guard.finish();
+            }
             #[cfg(unix)]
             drop(local_zle_bootstrap);
             #[cfg(windows)]

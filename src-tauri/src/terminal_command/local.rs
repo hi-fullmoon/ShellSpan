@@ -28,6 +28,7 @@ pub(crate) struct PreparedNativeBash {
     pub profile: VerifiedNativeProfile,
     zle: bool,
     shell_override: Option<PathBuf>,
+    sandbox_isolated: bool,
 }
 impl PreparedNativeBash {
     pub(crate) fn display_recovery_token(&self) -> &str {
@@ -99,6 +100,7 @@ impl PreparedNativeBash {
             profile,
             zle: false,
             shell_override: None,
+            sandbox_isolated: false,
         })
     }
     fn prepare_zle(shell: &Path, resources: &Path) -> Result<Self, String> {
@@ -205,6 +207,7 @@ impl PreparedNativeBash {
             profile,
             zle: true,
             shell_override,
+            sandbox_isolated: false,
         })
     }
     pub(crate) fn shell_override(&self) -> Option<&Path> {
@@ -212,6 +215,57 @@ impl PreparedNativeBash {
     }
     pub(crate) fn zle_bootstrap_lifetime(&self) -> Option<Arc<tempfile::TempDir>> {
         self.zle.then(|| Arc::clone(&self.root))
+    }
+    pub(crate) fn nip_root_path(&self) -> &Path {
+        self.root.path()
+    }
+    pub(crate) fn control_socket_path(&self) -> PathBuf {
+        self.root.path().join("control")
+    }
+    pub(crate) fn is_zle(&self) -> bool {
+        self.zle
+    }
+    /// Configure an isolated Zsh ZLE startup for a local sandbox PTY.
+    /// Avoids sourcing host `~/.zshenv` / `~/.zshrc` / `/etc/zshrc` and leaves
+    /// the shell executable args to the sandbox launcher (`zsh -i`).
+    pub(crate) fn configure_sandbox_zle(
+        &mut self,
+        command: &mut portable_pty::CommandBuilder,
+    ) -> Result<(), String> {
+        if !self.zle {
+            return Err("TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into());
+        }
+        let quote = |value: &str| {
+            shlex::try_quote(value)
+                .map(|v| v.into_owned())
+                .map_err(|_| "TERMINAL_NATIVE_PATH_INVALID")
+        };
+        let core_path = self.root.path().join("scoped");
+        let core_path = quote(core_path.to_str().ok_or("TERMINAL_NATIVE_PATH_INVALID")?)?;
+        let core_loader = format!(
+            "() {{\n local -a old_path=(\"${{module_path[@]}}\")\n if builtin zmodload -e zsh/zle; then return 1; fi\n module_path=({core_path} \"${{old_path[@]}}\")\n builtin zmodload zsh/zle\n local core_result=$?\n module_path=(\"${{old_path[@]}}\")\n return $core_result\n}}"
+        );
+        let socket = self.root.path().join("control");
+        let socket = quote(socket.to_str().ok_or("TERMINAL_NATIVE_PATH_INVALID")?)?;
+        let initializer = format!(
+            "__shellspan_nip_initialize() {{\n precmd_functions=(\"${{(@)precmd_functions:#__shellspan_nip_initialize}}\")\n unfunction __shellspan_nip_initialize\n if [[ -S {socket} ]]; then\n  builtin source {}\n fi\n}}\nprecmd_functions=(__shellspan_nip_initialize \"${{precmd_functions[@]}}\")\n",
+            quote(
+                self.bootstrap
+                    .to_str()
+                    .ok_or("TERMINAL_NATIVE_PATH_INVALID")?
+            )?
+        );
+        let zshenv = format!(
+            "setopt NO_GLOBAL_RCS\nif {core_loader}; then\n{initializer}else\n builtin printf '%s\\n' TERMINAL_NATIVE_SCOPED_CORE_CONFLICT >&2\nfi\n"
+        );
+        let zshrc = "setopt NO_GLOBAL_RCS\nPROMPT='%F{cyan}sandbox%f %1~ %# '\n";
+        fs::write(self.root.path().join(".zshenv"), zshenv)
+            .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
+        fs::write(self.root.path().join(".zshrc"), zshrc)
+            .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
+        command.env("ZDOTDIR", self.root.path());
+        self.sandbox_isolated = true;
+        Ok(())
     }
 
     pub fn configure(&self, command: &mut portable_pty::CommandBuilder) -> Result<(), String> {
@@ -276,6 +330,7 @@ impl PreparedNativeBash {
         let trace_control_id = probe.connection.control_id.clone();
         let thread = thread::spawn(move || {
             let root = self.root;
+            let mut listener = Some(self.listener);
             let result = (|| -> Result<(), String> {
                 // ZLE connects at the first prompt, after the user's login
                 // files have run. Its deadline is independent of opening the PTY.
@@ -287,7 +342,10 @@ impl PreparedNativeBash {
                     if Instant::now() >= deadline {
                         return Err("TERMINAL_NATIVE_CONNECT_TIMEOUT".into());
                     }
-                    match self.listener.accept() {
+                    let Some(active_listener) = listener.as_ref() else {
+                        return Err("TERMINAL_NATIVE_CONTROL_UNAVAILABLE".into());
+                    };
+                    match active_listener.accept() {
                         Ok((stream, _)) => break stream,
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                             thread::sleep(Duration::from_millis(5))
@@ -295,6 +353,10 @@ impl PreparedNativeBash {
                         Err(_) => return Err("TERMINAL_NATIVE_CONTROL_UNAVAILABLE".into()),
                     }
                 };
+                if self.sandbox_isolated {
+                    drop(listener.take());
+                    let _ = fs::remove_file(root.path().join("control"));
+                }
                 // BSD accepted sockets may inherit O_NONBLOCK from the listener.
                 // Normalize the duplex stream so the existing timeouts apply.
                 stream
@@ -460,7 +522,7 @@ impl PreparedNativeBash {
             if self.zle {
                 // The shell still owns the startup files. Unpublish just the
                 // socket so a late first prompt can skip native setup quietly.
-                drop(self.listener);
+                drop(listener.take());
                 let _ = fs::remove_file(root.path().join("control"));
             }
             #[cfg(all(

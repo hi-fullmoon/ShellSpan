@@ -331,10 +331,13 @@ impl NativeToolRuntime for NativeToolAdapter {
                         .into(),
                 );
             }
-            if request.execution_surface != super::AgentExecutionSurface::Direct
+            let visible_pty_allowed = cfg!(target_arch = "aarch64")
+                && request.execution_surface == super::AgentExecutionSurface::BoundTerminal;
+            if (!visible_pty_allowed
+                && request.execution_surface != super::AgentExecutionSurface::Direct)
                 || !is_local_sandbox_tool(&request.model_call.name)
                 || request.model_call.arguments["background"] == true
-                || request.model_call.arguments["handoffToUser"] == true
+                || (!visible_pty_allowed && request.model_call.arguments["handoffToUser"] == true)
                 || request
                     .model_call
                     .arguments
@@ -411,6 +414,7 @@ impl NativeToolRuntime for NativeToolAdapter {
             || is_model_process_tool(&request.model_call.name);
         let mut scratch = if !sandbox_enabled
             && !windows_sandbox
+            && !mac_sandbox
             && (scratch_scope
                 || (tracks_execution
                     && (request.target.kind == "local" || request.target.profile_id.is_some())))
@@ -496,6 +500,48 @@ impl NativeToolRuntime for NativeToolAdapter {
                         *cwd = Some(live_cwd);
                     }
                 }
+            }
+        }
+        #[cfg(target_os = "macos")]
+        if mac_sandbox
+            && request.execution_surface == super::AgentExecutionSurface::BoundTerminal
+            && request.model_call.name == "run_terminal_command"
+        {
+            database.require_agent_sandbox_enabled()?;
+            let expected_cwd = request.target.cwd.as_deref().ok_or_else(|| {
+                "LOCAL_SANDBOX_TERMINAL_REQUIRED: managed local sandbox workspace is missing"
+                    .to_string()
+            })?;
+            let (sandbox_transport_id, binding) = runtime
+                .terminal_broker()
+                .active_sandbox_transports_for_agent(&request.session_id)?
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    "LOCAL_SANDBOX_TERMINAL_REQUIRED: open the managed sandbox terminal before running visible commands"
+                        .to_string()
+                })?;
+            if binding.kind != super::LocalSandboxKind::MacNono
+                || binding.agent_session_id != request.session_id
+                || binding.workspace_root != expected_cwd
+            {
+                return Err(
+                    "LOCAL_SANDBOX_TERMINAL_REQUIRED: bound terminal does not match this managed sandbox session"
+                        .into(),
+                );
+            }
+            let live_policy = super::SandboxPolicy::for_mac_nono(
+                &binding.workspace_root,
+                &database.agent_sandbox_network_policy()?,
+            );
+            if live_policy.digest() != binding.policy_digest {
+                return Err(
+                    "LOCAL_SANDBOX_POLICY_DRIFT: sandbox policy changed; restart the sandbox terminal to apply the new policy"
+                        .into(),
+                );
+            }
+            if let AgentToolTargetNative::Local { session_id, .. } = &mut owner_target {
+                *session_id = sandbox_transport_id;
             }
         }
         let target = process_target_for_model_call(&request.model_call, &owner_target)?

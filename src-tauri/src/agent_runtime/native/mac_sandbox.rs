@@ -464,6 +464,277 @@ impl super::LocalSandboxBackend for Workspace {
     }
 }
 
+pub(crate) struct PreparedMacSandboxPty {
+    workspace_root: String,
+    policy_digest: String,
+    network_mode: super::sandbox_proxy::SandboxNetworkMode,
+    lease: Option<Lease>,
+    proxy: Option<super::sandbox_proxy::SandboxProxy>,
+    temp_dir: Option<tempfile::TempDir>,
+    gate_listener: Option<std::os::unix::net::UnixListener>,
+    gate_socket: PathBuf,
+}
+
+impl PreparedMacSandboxPty {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn prepare(
+        data_dir: &Path,
+        workspace_cwd: &Path,
+        resource_dir: Option<&Path>,
+        network_policy: super::sandbox_proxy::SandboxNetworkPolicy,
+        nip_root: &Path,
+        control_socket: &Path,
+        shell_executable: &Path,
+    ) -> Result<(Self, portable_pty::CommandBuilder), String> {
+        let binding = Workspace::open(data_dir, workspace_cwd, resource_dir, network_policy)?;
+        let policy = binding.sandbox_policy();
+        let policy_digest = policy.digest();
+        let network_mode = binding.network_policy.mode;
+        let temporary_root = binding.anchor.join("temporary");
+        if !fs::symlink_metadata(&temporary_root)
+            .map_err(|error| format!("{START_FAILED}: {error}"))?
+            .is_dir()
+        {
+            return Err(format!(
+                "{START_FAILED}: expected a real sandbox temporary directory"
+            ));
+        }
+        let temp_dir = tempfile::tempdir_in(&temporary_root)
+            .map_err(|error| format!("{START_FAILED}: {error}"))?;
+        let sandbox_home = temp_dir.path().join("home");
+        fs::create_dir(&sandbox_home).map_err(|error| format!("{START_FAILED}: {error}"))?;
+
+        let proxy = if binding.network_policy.uses_proxy() {
+            Some(
+                super::sandbox_proxy::SandboxProxy::start(binding.network_policy.clone())
+                    .map_err(|error| format!("{START_FAILED}: failed to start proxy: {error}"))?,
+            )
+        } else {
+            None
+        };
+
+        let lease = binding.acquire_lease()?;
+        let gate_socket = nip_root.join("gate");
+        let _ = fs::remove_file(&gate_socket);
+        let gate_listener = std::os::unix::net::UnixListener::bind(&gate_socket)
+            .map_err(|error| format!("{START_FAILED}: failed to bind launch gate: {error}"))?;
+        fs::set_permissions(&gate_socket, fs::Permissions::from_mode(0o600))
+            .map_err(|error| format!("{START_FAILED}: {error}"))?;
+        gate_listener
+            .set_nonblocking(true)
+            .map_err(|error| format!("{START_FAILED}: {error}"))?;
+
+        let (readonly_paths, sandbox_path_env) = super::process::mac_sandbox_readonly_toolchains();
+        let mut command = portable_pty::CommandBuilder::new(&binding.launcher);
+        command.env_clear();
+        command.cwd(&binding.workspace);
+        command.arg("--gate-socket");
+        command.arg(&gate_socket);
+        command.arg("--allow-tty");
+        command.arg("--unix-socket");
+        command.arg(control_socket);
+        command.arg("--read-path");
+        command.arg(nip_root);
+        for path in &readonly_paths {
+            command.arg("--read-path");
+            command.arg(path);
+        }
+        if let Some(proxy) = &proxy {
+            command.arg("--proxy-port");
+            command.arg(proxy.port().to_string());
+        }
+        command.arg(&binding.workspace);
+        command.arg(temp_dir.path());
+        command.arg("--");
+        command.arg(shell_executable);
+        command.arg("-i");
+
+        command.env("PATH", &sandbox_path_env);
+        command.env("HOME", &sandbox_home);
+        command.env("TMPDIR", temp_dir.path());
+        command.env("HISTFILE", sandbox_home.join(".zsh_history"));
+        command.env("TERM", "xterm-256color");
+        command.env("COLORTERM", "truecolor");
+        command.env("LANG", "en_US.UTF-8");
+        command.env("LC_ALL", "en_US.UTF-8");
+        if let Some(proxy) = &proxy {
+            let proxy_url = proxy.proxy_url();
+            command.env("HTTP_PROXY", &proxy_url);
+            command.env("HTTPS_PROXY", &proxy_url);
+            command.env("ALL_PROXY", &proxy_url);
+            command.env("http_proxy", &proxy_url);
+            command.env("https_proxy", &proxy_url);
+            command.env("all_proxy", &proxy_url);
+            command.env("NO_PROXY", "localhost,127.0.0.1");
+            command.env("no_proxy", "localhost,127.0.0.1");
+        }
+
+        let workspace_root = binding.workspace.to_string_lossy().into_owned();
+        Ok((
+            Self {
+                workspace_root,
+                policy_digest,
+                network_mode,
+                lease: Some(lease),
+                proxy,
+                temp_dir: Some(temp_dir),
+                gate_listener: Some(gate_listener),
+                gate_socket,
+            },
+            command,
+        ))
+    }
+
+    pub(crate) fn binding(&self, agent_session_id: &str) -> crate::models::LocalSandboxPtyBinding {
+        crate::models::LocalSandboxPtyBinding {
+            agent_session_id: agent_session_id.to_string(),
+            kind: crate::agent_runtime::LocalSandboxKind::MacNono,
+            workspace_root: self.workspace_root.clone(),
+            policy_digest: self.policy_digest.clone(),
+            network_mode: self.network_mode,
+        }
+    }
+
+    pub(crate) fn blocked_domains_handle(&self) -> Option<std::sync::Arc<Mutex<Vec<String>>>> {
+        self.proxy
+            .as_ref()
+            .map(super::sandbox_proxy::SandboxProxy::blocked_domains_handle)
+    }
+
+    pub(crate) fn activate(mut self, child_pid: u32) -> Result<ActiveMacSandboxPtyGuard, String> {
+        let mut lease = self
+            .lease
+            .take()
+            .ok_or_else(|| format!("{START_FAILED}: missing sandbox directory lease"))?;
+        let listener = self
+            .gate_listener
+            .take()
+            .ok_or_else(|| format!("{START_FAILED}: missing sandbox launch gate"))?;
+        let pgid = i32::try_from(child_pid)
+            .map_err(|_| format!("{START_FAILED}: invalid sandbox process group"))?;
+
+        let activate_result = (|| -> Result<(), String> {
+            lease
+                .record_group(child_pid)
+                .map_err(|error| format!("{START_FAILED}: {error}"))?;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                        if std::time::Instant::now() >= deadline {
+                            return Err(format!(
+                                "{START_FAILED}: timed out waiting for sandbox launcher gate"
+                            ));
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    Err(error) => {
+                        return Err(format!(
+                            "{START_FAILED}: failed to accept sandbox launcher gate: {error}"
+                        ));
+                    }
+                }
+            };
+            stream
+                .set_nonblocking(false)
+                .map_err(|error| format!("{START_FAILED}: {error}"))?;
+            stream
+                .set_write_timeout(Some(std::time::Duration::from_secs(1)))
+                .map_err(|error| format!("{START_FAILED}: {error}"))?;
+            stream.write_all(b"G").map_err(|error| {
+                format!("{START_FAILED}: failed to release launch gate: {error}")
+            })?;
+            Ok(())
+        })();
+
+        drop(listener);
+        let _ = fs::remove_file(&self.gate_socket);
+
+        if let Err(error) = activate_result {
+            terminate_sandbox_group(pgid);
+            let _ = lease.record_ended();
+            let _ = lease.release();
+            return Err(error);
+        }
+
+        Ok(ActiveMacSandboxPtyGuard {
+            lease: Some(lease),
+            _proxy: self.proxy.take(),
+            _temp_dir: self.temp_dir.take(),
+            pgid,
+        })
+    }
+}
+
+impl Drop for PreparedMacSandboxPty {
+    fn drop(&mut self) {
+        drop(self.gate_listener.take());
+        let _ = fs::remove_file(&self.gate_socket);
+        if let Some(lease) = self.lease.take() {
+            let _ = lease.release();
+        }
+    }
+}
+
+fn terminate_sandbox_group(pgid: i32) {
+    if pgid <= 1 {
+        return;
+    }
+    if super::process::local_process_group_gone(pgid).unwrap_or(true) {
+        return;
+    }
+    unsafe {
+        libc::kill(-pgid, libc::SIGTERM);
+    }
+    let term_deadline = std::time::Instant::now() + std::time::Duration::from_millis(400);
+    while std::time::Instant::now() < term_deadline {
+        if super::process::local_process_group_gone(pgid).unwrap_or(true) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(15));
+    }
+    unsafe {
+        libc::kill(-pgid, libc::SIGKILL);
+    }
+    let kill_deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    while std::time::Instant::now() < kill_deadline {
+        if super::process::local_process_group_gone(pgid).unwrap_or(true) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(15));
+    }
+}
+
+pub(crate) struct ActiveMacSandboxPtyGuard {
+    lease: Option<Lease>,
+    _proxy: Option<super::sandbox_proxy::SandboxProxy>,
+    _temp_dir: Option<tempfile::TempDir>,
+    pgid: i32,
+}
+
+impl ActiveMacSandboxPtyGuard {
+    pub(crate) fn finish(mut self) {
+        self.finish_inner();
+    }
+
+    fn finish_inner(&mut self) {
+        terminate_sandbox_group(self.pgid);
+        if let Some(mut lease) = self.lease.take() {
+            let _ = lease.record_ended();
+            let _ = lease.release();
+        }
+        self._proxy.take();
+        self._temp_dir.take();
+    }
+}
+
+impl Drop for ActiveMacSandboxPtyGuard {
+    fn drop(&mut self) {
+        self.finish_inner();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -553,5 +824,141 @@ mod tests {
         fs::set_permissions(data_dir.path(), fs::Permissions::from_mode(0o775)).unwrap();
         let error = create_workspace(data_dir.path(), "group-writable-session").unwrap_err();
         assert!(error.contains("group or world writable"), "got {error}");
+    }
+
+    #[test]
+    fn prepared_mac_sandbox_pty_enforces_seatbelt_and_nip_handshake() {
+        use portable_pty::{native_pty_system, PtySize};
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+        use std::time::{Duration, Instant};
+
+        let resources = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/native-input/generated");
+        if resolve_verified_launcher(Some(&resources)).is_err() {
+            return;
+        }
+        let Ok(mut prepared_native) = crate::terminal_command::local::PreparedNativeBash::prepare(
+            Path::new("/bin/zsh"),
+            &resources,
+        ) else {
+            return;
+        };
+        let data_dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let session = format!("mac-sandbox-pty-{}", uuid::Uuid::new_v4());
+        let workspace_path = create_workspace(data_dir.path(), &session).unwrap();
+        let executable = prepared_native
+            .shell_override()
+            .unwrap_or(Path::new("/bin/zsh"))
+            .to_path_buf();
+        let control_socket = prepared_native.control_socket_path();
+
+        let (prepared_pty, mut command) = PreparedMacSandboxPty::prepare(
+            data_dir.path(),
+            Path::new(&workspace_path),
+            Some(&resources),
+            crate::agent_runtime::SandboxNetworkPolicy::blocked(),
+            prepared_native.nip_root_path(),
+            &control_socket,
+            &executable,
+        )
+        .unwrap();
+        prepared_native.configure_sandbox_zle(&mut command).unwrap();
+        let binding = prepared_pty.binding(&session);
+        assert_eq!(binding.agent_session_id, session);
+        assert_eq!(binding.workspace_root, workspace_path);
+
+        let pty = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let mut writer = pty.master.take_writer().unwrap();
+        let mut reader = pty.master.try_clone_reader().unwrap();
+        let mut child = pty.slave.spawn_command(command).unwrap();
+        drop(pty.slave);
+        let pid = child.process_id().expect("sandbox PTY child pid");
+        let guard = prepared_pty.activate(pid).unwrap();
+
+        let handshake_seen = Arc::new(AtomicBool::new(false));
+        let handshake_flag = Arc::clone(&handshake_seen);
+        let probe = crate::terminal_command::protocol::ConnectionEnvelope {
+            protocol: crate::terminal_command::protocol::PROTOCOL.into(),
+            request_id: "probe-1".into(),
+            connection: crate::terminal_command::protocol::ConnectionIdentity {
+                terminal_session_id: "sandbox-pty-test".into(),
+                terminal_generation: 1,
+                control_id: "sandbox-pty-control".into(),
+            },
+            payload: crate::terminal_command::protocol::ConnectionPayload::Probe,
+        };
+        let control_handle = prepared_native.start(
+            probe,
+            move |_message| {
+                handshake_flag.store(true, Ordering::Release);
+                Ok(())
+            },
+            || {},
+        );
+
+        let reader_thread = std::thread::spawn(move || {
+            let mut buf = [0_u8; 4096];
+            while let Ok(n) = reader.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+            }
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline && !handshake_seen.load(Ordering::Acquire) {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert!(
+            handshake_seen.load(Ordering::Acquire),
+            "expected NIP handshake from sandboxed zsh PTY"
+        );
+        // Control socket is unlinked immediately after single sandbox accept.
+        assert!(
+            !control_socket.exists(),
+            "sandbox NIP control socket must be unlinked after initial handshake"
+        );
+
+        let inside_file = Path::new(&workspace_path).join("allowed.txt");
+        let outside_file = outside.path().join("blocked.txt");
+        let cmd = format!(
+            "printf ok > '{}'; printf nope > '{}' 2>/dev/null; printf done > '{}'\n",
+            inside_file.display(),
+            outside_file.display(),
+            Path::new(&workspace_path).join("done.txt").display()
+        );
+        writer.write_all(cmd.as_bytes()).unwrap();
+        writer.flush().unwrap();
+
+        let done_file = Path::new(&workspace_path).join("done.txt");
+        let cmd_deadline = Instant::now() + Duration::from_secs(8);
+        while Instant::now() < cmd_deadline && !done_file.exists() {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert_eq!(fs::read_to_string(&inside_file).unwrap(), "ok");
+        assert!(
+            !outside_file.exists(),
+            "Seatbelt must block writes outside the managed sandbox workspace"
+        );
+
+        drop(control_handle);
+        drop(writer);
+        drop(pty.master);
+        guard.finish();
+        let _ = child.wait();
+        let _ = reader_thread.join();
+
+        let anchor = Path::new(&workspace_path).parent().unwrap();
+        fs::remove_dir_all(anchor).unwrap();
     }
 }

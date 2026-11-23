@@ -28,7 +28,10 @@ import { openTerminalTask, terminalTaskWorkspace } from './agent-terminal-task-n
 import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
 import { useAiDraftStore } from '@/stores/aiDraftStore';
 import { useAiPanelStore } from '@/stores/aiPanelStore';
+import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useFocusStore } from '@/stores/focusStore';
+import { ensureManagedSandboxTerminal } from '@/lib/terminal/sandbox-terminal';
+import { SandboxSyncDialog } from '@/components/ai/workspace/sandbox-sync-dialog';
 import { eventMatchesShortcut } from '@/lib/shortcuts';
 import { terminalFontSizeAfterKey } from '@/lib/terminal/terminal-font';
 import { getTerminalBroadcastTargets } from '@/stores/terminalBroadcastStore';
@@ -45,7 +48,7 @@ import {
   agentTerminalLeaseState,
   type AgentTerminalLeaseView,
 } from '@/components/terminal/agent-terminal-lease-state';
-import { LockIcon, RadioTowerIcon, TerminalIcon, TriangleAlertIcon } from 'lucide-react';
+import { LockIcon, RadioTowerIcon, RefreshCwIcon, ShieldCheckIcon, TerminalIcon, TriangleAlertIcon } from 'lucide-react';
 
 const effectiveShortcuts = (): ShortcutBindings => ({
   ...DEFAULT_SHORTCUTS,
@@ -258,6 +261,36 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const { t } = useI18n();
   const reconnectSession = useReconnectSession();
   const { error: showError } = useToast();
+  const agentSandboxEnabled = useAiSettingsStore((state) => state.agentSandboxEnabled);
+  const agentSandboxNetworkMode = useAiSettingsStore((state) => state.agentSandboxNetworkMode);
+  const agentSandboxNetworkAllowlist = useAiSettingsStore((state) => state.agentSandboxNetworkAllowlist);
+  const [sandboxRestarting, setSandboxRestarting] = useState(false);
+  const sandboxBinding = activeSession?.ptyInfo?.sandboxBinding;
+  const sandboxDisabled = Boolean(sandboxBinding && !agentSandboxEnabled);
+  const sandboxPolicyDrifted = Boolean(
+    sandboxBinding
+    && agentSandboxEnabled
+    && sandboxBinding.networkMode !== agentSandboxNetworkMode,
+  );
+  const sandboxNetworkLabel = sandboxBinding?.networkMode === 'devRegistries'
+    ? t('ai.sandboxStatus.networkDevRegistries')
+    : sandboxBinding?.networkMode === 'customAllowlist'
+      ? t('ai.sandboxStatus.networkCustomAllowlist', { count: agentSandboxNetworkAllowlist.length })
+      : t('ai.sandboxStatus.networkBlocked');
+  const handleRestartSandboxTerminal = useCallback(async () => {
+    if (!sandboxBinding || !activeSession || sandboxRestarting) return;
+    setSandboxRestarting(true);
+    try {
+      await ensureManagedSandboxTerminal(sandboxBinding.agentSessionId, {
+        replacesSessionId: activeSession.sessionId,
+        formatTitle: (shell) => t('terminal.sandbox.tabTitle', { shell }),
+      });
+    } catch {
+      showError(t('terminal.sandbox.restartFailed'));
+    } finally {
+      setSandboxRestarting(false);
+    }
+  }, [activeSession, sandboxBinding, sandboxRestarting, showError, t]);
   const copyOnSelect = useAppStore((state) => state.terminalCopyOnSelect);
   const multiLinePasteWarning = useAppStore((state) => state.terminalMultiLinePasteWarning);
   const largePasteWarning = useAppStore((state) => state.terminalLargePasteWarning);
@@ -607,6 +640,49 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
   return (
     <div ref={resizeBoundaryRef} className="relative flex h-full w-full flex-col overflow-hidden bg-app-bg" data-terminal-pane-session={activeSessionId}>
+      {sandboxBinding && activeSession && (
+        <div
+          role="status"
+          data-terminal-sandbox-bar
+          data-sandbox-drifted={sandboxPolicyDrifted || undefined}
+          data-sandbox-disabled={sandboxDisabled || undefined}
+          className="flex shrink-0 flex-wrap items-center justify-between gap-1 border-b border-app-border/50 bg-app-surface px-2.5 py-1 text-xs text-app-text"
+        >
+          <span className="flex min-w-0 items-center gap-1">
+            {sandboxDisabled || sandboxPolicyDrifted ? (
+              <TriangleAlertIcon aria-hidden="true" className="size-3.5 shrink-0 text-warning" />
+            ) : (
+              <ShieldCheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-app-success" />
+            )}
+            <span className="truncate">
+              {sandboxDisabled
+                ? t('terminal.sandbox.disabledBanner')
+                : sandboxPolicyDrifted
+                  ? t('terminal.sandbox.policyDriftBanner')
+                  : `${t('terminal.sandbox.bannerLabel')} · ${sandboxNetworkLabel}`}
+            </span>
+          </span>
+          <div className="flex shrink-0 items-center gap-1">
+            {!sandboxDisabled && (
+              <SandboxSyncDialog sessionId={sandboxBinding.agentSessionId} />
+            )}
+            {(sandboxPolicyDrifted || activeSession.status === 'disconnected' || activeSession.status === 'error') && !sandboxDisabled && (
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                disabled={sandboxRestarting}
+                onClick={() => {
+                  void handleRestartSandboxTerminal();
+                }}
+              >
+                <RefreshCwIcon aria-hidden="true" className={cn('size-3', sandboxRestarting && 'animate-spin')} />
+                <span>{t(sandboxRestarting ? 'terminal.sandbox.restarting' : 'terminal.sandbox.restart')}</span>
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
       {activeSession?.readOnly && <div role="status" className="flex shrink-0 flex-wrap items-center justify-between gap-1 border-b border-app-border/50 bg-app-surface px-2.5 py-1 text-xs text-app-text">
         <span className="flex items-center gap-1"><LockIcon aria-hidden="true" className="size-3.5 shrink-0 text-app-text-soft" />{t('terminal.inputLock.label')}</span>
         <Button type="button" size="xs" variant="ghost" onClick={() => {

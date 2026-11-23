@@ -23,6 +23,7 @@ impl NativeToolEngine {
         call: &AgentToolCallNative,
         effect: &AgentObservedEffectNative,
         sessions: &SessionManager,
+        database: Option<&Database>,
         default_timeout_ms: u64,
         cancellation: &CancellationToken,
         dispatch_policy: Option<&VisibleTerminalDispatch<'_>>,
@@ -72,6 +73,14 @@ impl NativeToolEngine {
         } else {
             None
         };
+        #[cfg(target_os = "macos")]
+        if context.mac_sandbox_required {
+            // Clear any proxy-blocked domains from prior manual or previous commands
+            // so diagnostics reflect only this command's network attempts.
+            let _ = self
+                .terminal_broker
+                .drain_local_sandbox_blocked_domains(&session_id);
+        }
         let started = self.terminal_execute.start_native_submission_outcome_until(
             sessions,
             &session_id,
@@ -101,6 +110,22 @@ impl NativeToolEngine {
                 }
                 if launch_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                     return Err("TERMINAL_JOB_LAUNCH_DEADLINE: no automatic replay".into());
+                }
+                #[cfg(target_os = "macos")]
+                if context.mac_sandbox_required {
+                    let db = database.ok_or_else(|| {
+                        "LOCAL_SANDBOX_TERMINAL_REQUIRED: database unavailable for sandbox policy verification"
+                            .to_string()
+                    })?;
+                    let AgentToolTargetNative::Local { cwd: Some(cwd), .. } = &call.target else {
+                        return Err("MAC_SANDBOX_DIRECT_REQUIRED".into());
+                    };
+                    self.validate_mac_sandbox_visible_terminal(
+                        &context.request.user_session_id,
+                        &session_id,
+                        cwd,
+                        db,
+                    )?;
                 }
                 self.revalidate_terminal_execution(
                     &call.target,
@@ -209,6 +234,7 @@ impl NativeToolEngine {
         // sensitive-output boundary, including secrets split by ANSI sequences,
         // while stripping shell-chrome OSC sequences (title/integration markers)
         // so models do not mistake them for truncated output.
+        let violation_text = redacted_plain.clone();
         let model_output = if operation.is_native_protocol()? && redacted_plain == plain_output {
             let cleaned = strip_shell_control_osc(&snapshot.combined_output);
             crate::redaction::redact_sensitive_text(&cleaned)
@@ -234,6 +260,72 @@ impl NativeToolEngine {
                 None => format!("Visible terminal command reached {state}."),
             },
         });
+        let mut data = json!({
+            "contractVersion": 1,
+            "channel": "terminal",
+            "state": state,
+            "terminalSessionId": snapshot.terminal_session_id,
+            "terminalGeneration": snapshot.terminal_generation,
+            "operationId": snapshot.operation_id,
+            "commandId": snapshot.command_id,
+            "commandLine": snapshot.command_line,
+            "submittedCommandLine": snapshot.submitted_command_line,
+            "inputRejection": snapshot.input_rejection,
+            "handedOffToUser": handed_off,
+            "commandObservation": snapshot.command_observation,
+            "execution": if !snapshot.may_have_submitted || snapshot.input_rejection.is_some() || job.as_ref().is_some_and(|job| job.state == "rejected") {
+                "notStarted"
+            } else if job.as_ref().is_some_and(|job| job.state == "exited") || (job.is_none() && snapshot.state == crate::terminal_broker::TerminalCommandState::Completed) {
+                "completed"
+            } else if handed_off || job.as_ref().is_some_and(|job| job.launch_confirmed && job.native_active == Some(true)) {
+                "running"
+            } else { "unknown" },
+            "exitCode": snapshot.exit_code,
+            "cwd": snapshot.cwd,
+            "stdout": "",
+            "stderr": "",
+            "combinedOutput": model_output,
+            "captureStartSequence": snapshot.capture_start_sequence,
+            "captureEndSequence": snapshot.capture_end_sequence,
+            "truncated": snapshot.capture_truncated,
+            "noAutoReplay": snapshot.no_auto_replay,
+            "processHandle": job.as_ref().map(|job| &job.process_handle),
+            "launchState": job.as_ref().map(|job| if job.state == "rejected" { "rejected" } else if job.launch_confirmed { "confirmed" } else { "uncertain" }),
+            "launchWaitTimedOut": launch_deadline.is_some_and(|deadline|Instant::now()>=deadline) && snapshot.state!=crate::terminal_broker::TerminalCommandState::Completed,
+            "job": job,
+            "outputScope": "sharedTerminal",
+        });
+        #[cfg(target_os = "macos")]
+        if context.mac_sandbox_required {
+            if let Some(obj) = data.as_object_mut() {
+                obj.insert(
+                    "sandbox".into(),
+                    json!(crate::agent_runtime::native::mac_sandbox::EXECUTOR),
+                );
+                let blocked_domains = self
+                    .terminal_broker
+                    .drain_local_sandbox_blocked_domains(&session_id);
+                let exit_code = snapshot.exit_code.unwrap_or(0);
+                let classified = if !blocked_domains.is_empty() {
+                    Some((
+                        "networkBlocked",
+                        "Outbound request was blocked by the sandbox filtering proxy; do not retry blocked hosts.",
+                    ))
+                } else {
+                    super::command_exec::classify_sandbox_violation(exit_code, &violation_text, "")
+                };
+                if let Some((category, hint)) = classified {
+                    let mut violation = json!({
+                        "category": category,
+                        "hint": hint,
+                    });
+                    if !blocked_domains.is_empty() {
+                        violation["blockedDomains"] = json!(blocked_domains);
+                    }
+                    obj.insert("sandboxViolation".into(), violation);
+                }
+            }
+        }
         Ok(AgentToolResultNative {
             request_id: context.request.request_id.clone(),
             call_id: call.call_id.clone(),
@@ -268,41 +360,7 @@ impl NativeToolEngine {
                 }
             },
             summary,
-            data: Some(json!({
-                "contractVersion": 1,
-                "channel": "terminal",
-                "state": state,
-                "terminalSessionId": snapshot.terminal_session_id,
-                "terminalGeneration": snapshot.terminal_generation,
-                "operationId": snapshot.operation_id,
-                "commandId": snapshot.command_id,
-                "commandLine": snapshot.command_line,
-                "submittedCommandLine": snapshot.submitted_command_line,
-                "inputRejection": snapshot.input_rejection,
-                "handedOffToUser": handed_off,
-                "commandObservation": snapshot.command_observation,
-                "execution": if !snapshot.may_have_submitted || snapshot.input_rejection.is_some() || job.as_ref().is_some_and(|job| job.state == "rejected") {
-                    "notStarted"
-                } else if job.as_ref().is_some_and(|job| job.state == "exited") || (job.is_none() && snapshot.state == crate::terminal_broker::TerminalCommandState::Completed) {
-                    "completed"
-                } else if handed_off || job.as_ref().is_some_and(|job| job.launch_confirmed && job.native_active == Some(true)) {
-                    "running"
-                } else { "unknown" },
-                "exitCode": snapshot.exit_code,
-                "cwd": snapshot.cwd,
-                "stdout": "",
-                "stderr": "",
-                "combinedOutput": model_output,
-                "captureStartSequence": snapshot.capture_start_sequence,
-                "captureEndSequence": snapshot.capture_end_sequence,
-                "truncated": snapshot.capture_truncated,
-                "noAutoReplay": snapshot.no_auto_replay,
-                "processHandle": job.as_ref().map(|job| &job.process_handle),
-                "launchState": job.as_ref().map(|job| if job.state == "rejected" { "rejected" } else if job.launch_confirmed { "confirmed" } else { "uncertain" }),
-                "launchWaitTimedOut": launch_deadline.is_some_and(|deadline|Instant::now()>=deadline) && snapshot.state!=crate::terminal_broker::TerminalCommandState::Completed,
-                "job": job,
-                "outputScope": "sharedTerminal",
-            })),
+            data: Some(data),
             artifacts: Vec::new(),
             effects: vec![effect.clone()],
             truncated: Some(snapshot.capture_truncated),

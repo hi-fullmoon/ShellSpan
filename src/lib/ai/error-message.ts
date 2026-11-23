@@ -53,6 +53,8 @@ export function aiErrorMessage(message: string, t: (key: LocaleKey, values?: Rec
   if (code === 'MAC_SANDBOX_PREVIEW_MANAGED_ROOT_REQUIRED' || code === 'MAC_SANDBOX_MANAGED_ROOT_REQUIRED' || code === 'WINDOWS_SANDBOX_MANAGED_ROOT_REQUIRED') return t('ai.error.localSandboxManagedRoot');
   if (code === 'MAC_SANDBOX_START_FAILED' || code === 'WINDOWS_SANDBOX_START_FAILED') return t('ai.error.localSandboxStartFailed');
   if (code === 'LOCAL_SANDBOX_UNAVAILABLE' || code === 'LOCAL_SANDBOX_LAUNCHER_UNAVAILABLE' || code === 'WINDOWS_SANDBOX_UNAVAILABLE') return t('ai.error.localSandboxUnavailable');
+  if (code === 'LOCAL_SANDBOX_TERMINAL_REQUIRED') return t('ai.error.localSandboxTerminalRequired');
+  if (code === 'LOCAL_SANDBOX_POLICY_DRIFT') return t('ai.error.localSandboxPolicyDrift');
   if (code === 'LOCAL_SANDBOX_LAUNCHER_CHANGED') return t('ai.error.localSandboxLauncherChanged');
   if (code === 'SANDBOX_SYNC_BUSY') return t('ai.error.sandboxSyncBusy');
   if (code === 'SANDBOX_SESSION_POLICY_CHANGED') return t('ai.error.sandboxSessionPolicyChanged');

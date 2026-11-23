@@ -870,6 +870,44 @@ impl NativeToolEngine {
     }
 
     #[cfg(target_os = "macos")]
+    pub(super) fn validate_mac_sandbox_visible_terminal(
+        &self,
+        agent_session_id: &str,
+        transport_session_id: &str,
+        workspace_cwd: &str,
+        database: &Database,
+    ) -> Result<(), String> {
+        database.require_agent_sandbox_enabled()?;
+        let binding = self
+            .terminal_broker
+            .local_sandbox_binding(transport_session_id)?
+            .ok_or_else(|| {
+                "LOCAL_SANDBOX_TERMINAL_REQUIRED: open the managed sandbox terminal before running visible commands"
+                    .to_string()
+            })?;
+        if binding.kind != crate::agent_runtime::LocalSandboxKind::MacNono
+            || binding.agent_session_id != agent_session_id
+            || binding.workspace_root != workspace_cwd
+        {
+            return Err(
+                "LOCAL_SANDBOX_TERMINAL_REQUIRED: bound terminal does not match this managed sandbox session"
+                    .into(),
+            );
+        }
+        let live_policy = crate::agent_runtime::SandboxPolicy::for_mac_nono(
+            &binding.workspace_root,
+            &database.agent_sandbox_network_policy()?,
+        );
+        if live_policy.digest() != binding.policy_digest {
+            return Err(
+                "LOCAL_SANDBOX_POLICY_DRIFT: sandbox policy changed; restart the sandbox terminal to apply the new policy"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
     pub(super) fn mac_sandbox_binding(
         &self,
         context: &NativeExecutionContext,
@@ -880,10 +918,28 @@ impl NativeToolEngine {
             return Ok(None);
         }
         database.require_agent_sandbox_enabled()?;
-        let AgentToolTargetNative::Local { cwd: Some(cwd), .. } = &call.target else {
+        let AgentToolTargetNative::Local {
+            session_id,
+            cwd: Some(cwd),
+            ..
+        } = &call.target
+        else {
             return Err("MAC_SANDBOX_DIRECT_REQUIRED".into());
         };
-        if !is_allowed_local_sandbox_native_tool(call) {
+        if call.tool_name == "terminal_execute" {
+            if !context.bound_terminal_surface
+                || !cfg!(target_arch = "aarch64")
+                || call.arguments["background"] == true
+            {
+                return Err("MAC_SANDBOX_DIRECT_REQUIRED".into());
+            }
+            self.validate_mac_sandbox_visible_terminal(
+                &context.request.user_session_id,
+                session_id,
+                cwd,
+                database,
+            )?;
+        } else if !is_allowed_local_sandbox_native_tool(call) {
             return Err("MAC_SANDBOX_DIRECT_REQUIRED".into());
         }
         let (data_dir, resource_dir) = self.mac_sandbox_paths()?;
@@ -898,7 +954,7 @@ impl NativeToolEngine {
     }
 }
 
-fn classify_sandbox_violation(
+pub(super) fn classify_sandbox_violation(
     exit_code: i32,
     stderr: &str,
     stdout: &str,
@@ -1248,6 +1304,111 @@ mod tests {
         assert_eq!(
             classify_sandbox_violation(153, "", "").map(|(cat, _)| cat),
             Some("resourceLimit")
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_sandbox_visible_terminal_validation_rejects_unbound_mismatched_drifted_and_disabled() {
+        use crate::agent_runtime::{
+            LocalSandboxKind, SandboxNetworkMode, SandboxNetworkPolicy, SandboxPolicy,
+        };
+        use crate::db::Database;
+        use crate::models::LocalSandboxPtyBinding;
+        use crate::terminal_broker::{TerminalGeometry, TerminalTransportKind};
+        use crate::terminal_command::protocol::InputMode;
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("sandbox-visible.sqlite")).unwrap();
+        let set_pref = |key: &str, value: &str| {
+            db.save_preferences(&[(key.to_string(), value.to_string())])
+                .unwrap();
+        };
+        set_pref("ai.agentSandboxEnabled", "true");
+        set_pref("ai.agentSandboxNetworkMode", "\"blocked\"");
+
+        let engine = super::NativeToolEngine::with_terminal_broker(
+            crate::terminal_broker::TerminalSessionBroker::default(),
+        );
+        let workspace = "/tmp/ws-demo";
+        engine
+            .attach_native_terminal_transport(
+                "term-ordinary",
+                None,
+                TerminalTransportKind::LocalPty,
+                TerminalGeometry::new(80, 24),
+                InputMode::NativeInline,
+            )
+            .unwrap();
+        engine
+            .attach_native_terminal_transport(
+                "term-sandbox",
+                None,
+                TerminalTransportKind::LocalPty,
+                TerminalGeometry::new(80, 24),
+                InputMode::NativeInline,
+            )
+            .unwrap();
+
+        let policy_digest =
+            SandboxPolicy::for_mac_nono(workspace, &SandboxNetworkPolicy::blocked()).digest();
+        engine
+            .terminal_broker()
+            .attach_local_sandbox_binding(
+                "term-sandbox",
+                LocalSandboxPtyBinding {
+                    agent_session_id: "agent-1".into(),
+                    kind: LocalSandboxKind::MacNono,
+                    workspace_root: workspace.into(),
+                    policy_digest,
+                    network_mode: SandboxNetworkMode::Blocked,
+                },
+                None,
+            )
+            .unwrap();
+
+        // Valid sandbox terminal passes.
+        assert!(engine
+            .validate_mac_sandbox_visible_terminal("agent-1", "term-sandbox", workspace, &db)
+            .is_ok());
+
+        // Ordinary unbound terminal is rejected.
+        let unbound = engine
+            .validate_mac_sandbox_visible_terminal("agent-1", "term-ordinary", workspace, &db)
+            .unwrap_err();
+        assert!(
+            unbound.starts_with("LOCAL_SANDBOX_TERMINAL_REQUIRED"),
+            "got {unbound}"
+        );
+
+        // Wrong agent session or workspace is rejected.
+        let wrong_session = engine
+            .validate_mac_sandbox_visible_terminal("agent-other", "term-sandbox", workspace, &db)
+            .unwrap_err();
+        assert!(
+            wrong_session.starts_with("LOCAL_SANDBOX_TERMINAL_REQUIRED"),
+            "got {wrong_session}"
+        );
+
+        // Network policy change triggers policy drift rejection.
+        set_pref("ai.agentSandboxNetworkMode", "\"devRegistries\"");
+        let drifted = engine
+            .validate_mac_sandbox_visible_terminal("agent-1", "term-sandbox", workspace, &db)
+            .unwrap_err();
+        assert!(
+            drifted.starts_with("LOCAL_SANDBOX_POLICY_DRIFT"),
+            "got {drifted}"
+        );
+
+        // Disabling global sandbox gate fails closed.
+        set_pref("ai.agentSandboxNetworkMode", "\"blocked\"");
+        set_pref("ai.agentSandboxEnabled", "false");
+        let disabled = engine
+            .validate_mac_sandbox_visible_terminal("agent-1", "term-sandbox", workspace, &db)
+            .unwrap_err();
+        assert!(
+            disabled.contains("AGENT_SANDBOX_DISABLED"),
+            "got {disabled}"
         );
     }
 }

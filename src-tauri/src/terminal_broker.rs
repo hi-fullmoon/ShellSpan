@@ -817,6 +817,82 @@ impl TerminalSessionBroker {
         Ok(state.sessions.get(terminal_session_id).cloned())
     }
 
+    pub(crate) fn attach_local_sandbox_binding(
+        &self,
+        transport_session_id: &str,
+        binding: crate::models::LocalSandboxPtyBinding,
+        blocked_domains: Option<Arc<Mutex<Vec<String>>>>,
+    ) -> Result<(), String> {
+        let Some((attachment, slot)) = self.lookup_enabled_session_slot(transport_session_id)?
+        else {
+            return Err("TERMINAL_BROKER_UNAVAILABLE".into());
+        };
+        let mut record = slot.lock_current(transport_session_id, &attachment)?;
+        record.sandbox_binding = Some(binding);
+        record.sandbox_blocked_domains = blocked_domains;
+        Ok(())
+    }
+
+    pub(crate) fn drain_local_sandbox_blocked_domains(
+        &self,
+        transport_session_id: &str,
+    ) -> Vec<String> {
+        let Ok(Some((attachment, slot))) = self.lookup_enabled_session_slot(transport_session_id)
+        else {
+            return Vec::new();
+        };
+        let Ok(record) = slot.lock_current(transport_session_id, &attachment) else {
+            return Vec::new();
+        };
+        let Some(handle) = record.sandbox_blocked_domains.as_ref() else {
+            return Vec::new();
+        };
+        handle
+            .lock()
+            .map(|mut guard| std::mem::take(&mut *guard))
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn local_sandbox_binding(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<Option<crate::models::LocalSandboxPtyBinding>, String> {
+        let Some((attachment, slot)) = self.lookup_enabled_session_slot(transport_session_id)?
+        else {
+            return Ok(None);
+        };
+        let record = slot.lock_current(transport_session_id, &attachment)?;
+        Ok(record.sandbox_binding.clone())
+    }
+
+    pub(crate) fn active_sandbox_transports_for_agent(
+        &self,
+        agent_session_id: &str,
+    ) -> Result<Vec<(String, crate::models::LocalSandboxPtyBinding)>, String> {
+        let slots: Vec<Arc<SessionSlot>> = {
+            let state = self
+                .state
+                .lock()
+                .map_err(|_| "terminal broker state lock poisoned".to_string())?;
+            state.sessions.values().cloned().collect()
+        };
+        let mut matches = Vec::new();
+        for slot in slots {
+            let Ok(record) = slot.record.lock() else {
+                continue;
+            };
+            if !record.open {
+                continue;
+            }
+            if let Some(binding) = &record.sandbox_binding {
+                if binding.agent_session_id == agent_session_id {
+                    matches.push((record.transport_session_id.clone(), binding.clone()));
+                }
+            }
+        }
+        Ok(matches)
+    }
+
     #[cfg(unix)]
     pub(crate) fn attach_local_echo_probe(
         &self,

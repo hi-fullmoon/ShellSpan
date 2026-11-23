@@ -1001,7 +1001,7 @@ pub(super) fn prepare_mac_sandbox_acceptance_process(
 }
 
 #[cfg(target_os = "macos")]
-fn mac_sandbox_readonly_toolchains() -> (Vec<PathBuf>, String) {
+pub(crate) fn mac_sandbox_readonly_toolchains() -> (Vec<PathBuf>, String) {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     let is_safe_dir = |path: &Path| {

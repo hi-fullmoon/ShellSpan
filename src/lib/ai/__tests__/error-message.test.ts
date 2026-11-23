@@ -57,6 +57,8 @@ describe.each([['zh-CN', zhCN], ['en-US', enUS]] as const)('AI error messages in
     ['MAC_SANDBOX_START_FAILED: managed directory locked', 'ai.error.localSandboxStartFailed'],
     ['LOCAL_SANDBOX_UNAVAILABLE: probe failed', 'ai.error.localSandboxUnavailable'],
     ['LOCAL_SANDBOX_LAUNCHER_UNAVAILABLE: missing binary', 'ai.error.localSandboxUnavailable'],
+    ['LOCAL_SANDBOX_TERMINAL_REQUIRED: open sandbox terminal', 'ai.error.localSandboxTerminalRequired'],
+    ['LOCAL_SANDBOX_POLICY_DRIFT: policy changed', 'ai.error.localSandboxPolicyDrift'],
     ['SANDBOX_SYNC_BUSY: wait for the Agent session to become idle', 'ai.error.sandboxSyncBusy'],
     ['TERMINAL_AGENT_CONFLICT: agent-owning-task', 'terminal.occupancy.conflict'],
     ['Error: TERMINAL_AGENT_CONFLICT', 'terminal.occupancy.conflict'],

@@ -308,6 +308,10 @@ impl SandboxProxy {
             .map(|guard| guard.clone())
             .unwrap_or_default()
     }
+
+    pub(crate) fn blocked_domains_handle(&self) -> Arc<Mutex<Vec<String>>> {
+        Arc::clone(&self.blocked_domains)
+    }
 }
 
 impl Drop for SandboxProxy {

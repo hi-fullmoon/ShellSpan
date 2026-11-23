@@ -303,6 +303,20 @@ export async function invokeCreateLocalSession(
   });
 }
 
+export async function invokeOpenLocalSandboxTerminal(
+  agentSessionId: string,
+  cols = 120,
+  rows = 30,
+  replacesSessionId?: string,
+): Promise<SessionSummary> {
+  return invokeLogged<SessionSummary>('open_local_sandbox_terminal', {
+    agentSessionId,
+    cols,
+    rows,
+    ...(replacesSessionId ? { replacesSessionId } : {}),
+  });
+}
+
 export function invokeGetLocalTerminalOptions(): Promise<LocalTerminalOptions> {
   return invokeLogged<LocalTerminalOptions>('get_local_terminal_options');
 }
@@ -1360,16 +1374,17 @@ export async function isLocalAgentSandboxPreview(): Promise<boolean> {
 
 export interface LocalSandboxStatus {
   readonly supported: boolean;
+  readonly supportsVisiblePty?: boolean;
   readonly kind?: import('@/types/agent-session').LocalSandboxKind;
   readonly reason?: string;
 }
 
 export async function invokeLocalSandboxStatus(): Promise<LocalSandboxStatus> {
-  if (!isTauriRuntime()) return { supported: false };
+  if (!isTauriRuntime()) return { supported: false, supportsVisiblePty: false };
   try {
     return await invoke<LocalSandboxStatus>('agent_runtime_local_sandbox_status');
   } catch {
-    return { supported: false };
+    return { supported: false, supportsVisiblePty: false };
   }
 }
 

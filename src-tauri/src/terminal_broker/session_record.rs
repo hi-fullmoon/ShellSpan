@@ -238,6 +238,8 @@ pub(super) struct SessionRecord {
     pub(super) subscribers: SubscriberSet,
     #[cfg(unix)]
     pub(super) echo_probe: Option<crate::local_terminal_input::PtyEchoProbe>,
+    pub(super) sandbox_binding: Option<crate::models::LocalSandboxPtyBinding>,
+    pub(super) sandbox_blocked_domains: Option<Arc<Mutex<Vec<String>>>>,
 }
 
 /// Only an exact shell command start followed by its end can acknowledge
@@ -388,6 +390,8 @@ impl SessionRecord {
             subscribers: SubscriberSet::default(),
             #[cfg(unix)]
             echo_probe: None,
+            sandbox_binding: None,
+            sandbox_blocked_domains: None,
         }
     }
 

@@ -615,6 +615,7 @@ pub fn run() {
             commands::create_session,
             commands::cancel_pending_ssh_connection,
             commands::create_local_session,
+            commands::open_local_sandbox_terminal,
             commands::get_local_terminal_options,
             commands::write_session,
             commands::respond_terminal_prompt_origin,

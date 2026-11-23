@@ -30,6 +30,16 @@ pub(crate) struct SessionSummary {
     pub(crate) pty_info: SessionPtyInfo,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LocalSandboxPtyBinding {
+    pub(crate) agent_session_id: String,
+    pub(crate) kind: crate::agent_runtime::LocalSandboxKind,
+    pub(crate) workspace_root: String,
+    pub(crate) policy_digest: String,
+    pub(crate) network_mode: crate::agent_runtime::SandboxNetworkMode,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SessionPtyInfo {
@@ -45,6 +55,8 @@ pub(crate) struct SessionPtyInfo {
     pub(crate) native_display_binding: Option<crate::terminal_command::protocol::DisplayBinding>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) local_profile: Option<LocalTerminalProfile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) sandbox_binding: Option<LocalSandboxPtyBinding>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
@@ -60,6 +72,7 @@ impl SessionPtyInfo {
             input_mode: None,
             native_display_binding: None,
             local_profile: None,
+            sandbox_binding: None,
             transport_kind: if cfg!(windows) {
                 crate::terminal_broker::TerminalTransportKind::WindowsConPty
             } else {
@@ -83,6 +96,7 @@ impl SessionPtyInfo {
             input_mode: None,
             native_display_binding: None,
             local_profile: None,
+            sandbox_binding: None,
             transport_kind: crate::terminal_broker::TerminalTransportKind::SshPty,
             windows_build_number: None,
         }

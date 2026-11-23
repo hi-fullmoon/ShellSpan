@@ -211,7 +211,7 @@ export function AiWorkspaceController({
               variant="composer"
               disabled={runtimeSettingsLocked}
               mode={controller.selectedPermission}
-              localDirectSandboxEnabled={controller.sandboxDirectOnly === 'local' && sandboxEnabled && controller.selectedExecutionSurface === 'direct'}
+              localDirectSandboxEnabled={controller.localSandbox && sandboxEnabled && controller.selectedExecutionSurface === 'direct'}
               onModeChange={controller.view && !configuringContinuation ? controller.selectPermission : undefined}
             />
         )
@@ -224,6 +224,7 @@ export function AiWorkspaceController({
               nativeStartupTimedOut={activeTerminalStatus === 'connected' && nativeStartupTimedOut}
               glibcMismatch={controller.glibcMismatch}
               sandboxDirectOnly={controller.sandboxDirectOnly}
+              sandboxVisiblePty={controller.sandboxVisiblePty}
               disabled={executionSurfaceLocked}
               onSurfaceChange={controller.selectExecutionSurface}
             />

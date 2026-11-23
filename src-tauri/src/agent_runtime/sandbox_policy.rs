@@ -128,7 +128,7 @@ impl SandboxPolicy {
             filesystem_mode: SandboxFilesystemMode::WorkspaceWrite,
             workspace_root: workspace_root.into(),
             network: SandboxNetworkPosture::from_local_policy(network_policy),
-            supports_visible_pty: false,
+            supports_visible_pty: true,
             supports_shell_commands: true,
         }
     }
@@ -236,7 +236,7 @@ mod tests {
             SandboxFilesystemMode::WorkspaceWrite
         );
         assert_eq!(blocked.network, SandboxNetworkPosture::Blocked);
-        assert!(!blocked.supports_visible_pty);
+        assert!(blocked.supports_visible_pty);
         assert!(blocked.supports_shell_commands);
 
         let custom_a = SandboxPolicy::for_mac_nono(

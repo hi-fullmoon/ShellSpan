@@ -31,7 +31,7 @@ import { Kbd } from '@/components/ui/kbd';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { BotIcon, CircleDotIcon, EllipsisIcon, Link2Icon, LockIcon, Minimize2Icon, PinIcon, RadioTowerIcon, XIcon } from 'lucide-react';
+import { BotIcon, CircleDotIcon, EllipsisIcon, Link2Icon, LockIcon, Minimize2Icon, PinIcon, RadioTowerIcon, ShieldCheckIcon, XIcon } from 'lucide-react';
 import { useCloseTerminal } from '@/hooks/useCloseTerminal';
 import { cancelSshConnection } from '@/lib/terminal/ssh-connection-attempt';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
@@ -204,6 +204,12 @@ const SessionTab: React.FC<SessionTabProps> = ({
       <div className={cn('flex min-w-0 flex-1 items-center gap-1', hasAction && 'mr-6')}>
         {session.pendingConnection ? (
           <Spinner className="size-3 shrink-0 text-app-warning" />
+        ) : session.ptyInfo?.sandboxBinding ? (
+          <ShieldCheckIcon
+            aria-hidden="true"
+            data-terminal-sandbox-tab-icon
+            className="size-3 shrink-0 text-app-success"
+          />
         ) : (
           <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full ring-1 ring-app-bg/60', sessionStatusDotClass(session.status))} />
         )}
