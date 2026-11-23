@@ -8,6 +8,8 @@ import {
   CheckCircle2Icon,
   CheckIcon,
   ChevronDownIcon,
+  ChevronsUpDownIcon,
+  ChevronUpIcon,
   CircleDashedIcon,
   CircleHelpIcon,
   Code2Icon,
@@ -1177,7 +1179,7 @@ function normalizePatchFileName(fileName: string | undefined): string | null {
   return fileName.replace(/^[ab]\//, '');
 }
 
-function applyToolEditToText(text: string, path: string, node: ToolNode): string | null {
+export function applyToolEditToText(text: string, path: string, node: ToolNode): string | null {
   const input = asRecord(node.input);
   const output = asRecord(node.output);
   const unifiedDiff = firstString(output, ['diff']) ?? firstString(input, ['patch']);
@@ -1476,46 +1478,57 @@ function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAc
                           return { ...prev, [row.id]: { ...cur, bottom: cur.bottom + DIFF_EXPAND_STEP } };
                         });
                         const showStepper = row.remainingCount > DIFF_EXPAND_STEP && (row.canExpandDown || row.canExpandUp);
+                        const GutterIcon = row.canExpandDown && row.canExpandUp
+                          ? ChevronsUpDownIcon
+                          : row.canExpandUp
+                            ? ChevronUpIcon
+                            : ChevronDownIcon;
                         return (
                           <span key={row.id} data-diff="fold" className="ai-diff-fold-row">
-                            <span className="ai-diff-fold-gutter" aria-hidden="true" />
-                            <span className="ai-diff-fold-cell table-cell">
-                              <span className="ai-diff-fold-bar flex w-full items-center justify-center py-1.5">
-                                <span className="ai-diff-fold-controls sticky left-4 right-4 inline-flex items-center gap-1.5 px-2">
-                                  <button
-                                    type="button"
-                                    className="ai-diff-fold-pill inline-flex h-6 items-center px-2.5"
-                                    onClick={expandAll}
-                                  >
-                                    {t('ai.workspace.tool.diffExpandLines', { count: row.remainingCount })}
-                                  </button>
-                                  {showStepper && (
-                                    <span className="ai-diff-fold-stepper inline-flex flex-col overflow-hidden">
-                                      {row.canExpandDown && (
-                                        <button
-                                          type="button"
-                                          className="ai-diff-fold-step inline-flex h-5 items-center justify-center px-1.5 tabular-nums"
-                                          aria-label={t('ai.workspace.tool.diffExpandDown', { count: DIFF_EXPAND_STEP })}
-                                          title={t('ai.workspace.tool.diffExpandDown', { count: DIFF_EXPAND_STEP })}
-                                          onClick={expandDown}
-                                        >
-                                          +{DIFF_EXPAND_STEP}
-                                        </button>
-                                      )}
-                                      {row.canExpandUp && (
-                                        <button
-                                          type="button"
-                                          className="ai-diff-fold-step inline-flex h-5 items-center justify-center px-1.5 tabular-nums"
-                                          aria-label={t('ai.workspace.tool.diffExpandUp', { count: DIFF_EXPAND_STEP })}
-                                          title={t('ai.workspace.tool.diffExpandUp', { count: DIFF_EXPAND_STEP })}
-                                          onClick={expandUp}
-                                        >
-                                          +{DIFF_EXPAND_STEP}
-                                        </button>
-                                      )}
-                                    </span>
-                                  )}
-                                </span>
+                            <span
+                              className="ai-diff-fold-gutter"
+                              aria-hidden="true"
+                              onClick={expandAll}
+                            >
+                              <GutterIcon className="inline-block size-3 align-[-2px]" />
+                            </span>
+                            <span className="ai-diff-fold-cell table-cell align-middle">
+                              <span className="ai-diff-fold-bar flex h-[26px] w-full items-center justify-between gap-2">
+                                <button
+                                  type="button"
+                                  className="ai-diff-fold-main flex h-full min-w-0 flex-1 items-center px-3 text-left"
+                                  onClick={expandAll}
+                                >
+                                  {t('ai.workspace.tool.diffExpandLines', { count: row.remainingCount })}
+                                </button>
+                                {showStepper && (
+                                  <span className="ai-diff-fold-steps flex shrink-0 items-center gap-0.5 pr-3.5">
+                                    {row.canExpandDown && (
+                                      <button
+                                        type="button"
+                                        className="ai-diff-fold-step inline-flex h-5 items-center gap-0.5 px-1.5 tabular-nums"
+                                        aria-label={t('ai.workspace.tool.diffExpandDown', { count: DIFF_EXPAND_STEP })}
+                                        title={t('ai.workspace.tool.diffExpandDown', { count: DIFF_EXPAND_STEP })}
+                                        onClick={expandDown}
+                                      >
+                                        <ChevronDownIcon className="size-3 shrink-0" aria-hidden="true" />
+                                        <span>+{DIFF_EXPAND_STEP}</span>
+                                      </button>
+                                    )}
+                                    {row.canExpandUp && (
+                                      <button
+                                        type="button"
+                                        className="ai-diff-fold-step inline-flex h-5 items-center gap-0.5 px-1.5 tabular-nums"
+                                        aria-label={t('ai.workspace.tool.diffExpandUp', { count: DIFF_EXPAND_STEP })}
+                                        title={t('ai.workspace.tool.diffExpandUp', { count: DIFF_EXPAND_STEP })}
+                                        onClick={expandUp}
+                                      >
+                                        <ChevronUpIcon className="size-3 shrink-0" aria-hidden="true" />
+                                        <span>+{DIFF_EXPAND_STEP}</span>
+                                      </button>
+                                    )}
+                                  </span>
+                                )}
                               </span>
                             </span>
                           </span>
@@ -1524,12 +1537,10 @@ function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAc
                       if (row.type === 'gap') {
                         return (
                           <span key={`gap:${rowIndex}`} data-diff="gap" className="ai-diff-gap-row">
-                            <span className="ai-diff-fold-gutter" aria-hidden="true" />
-                            <span className="ai-diff-gap-cell table-cell">
-                              <span className="ai-diff-fold-bar flex w-full items-center justify-center py-1.5">
-                                <span className="ai-diff-gap-pill sticky left-4 right-4 inline-flex h-6 items-center px-2.5">
-                                  {t('ai.workspace.tool.diffOmittedLines', { count: row.hiddenCount })}
-                                </span>
+                            <span className="ai-diff-fold-gutter" aria-hidden="true">⋯</span>
+                            <span className="ai-diff-gap-cell table-cell align-middle">
+                              <span className="ai-diff-fold-bar flex h-6 w-full items-center px-3">
+                                {t('ai.workspace.tool.diffOmittedLines', { count: row.hiddenCount })}
                               </span>
                             </span>
                           </span>

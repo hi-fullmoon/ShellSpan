@@ -11,6 +11,7 @@ import { useConversationHistory } from './use-conversation-history';
 import { AiProcessingStatus } from './ai-processing-status';
 import { MessageScroller } from '../chat-primitives';
 import { AiConversationNodeSeat, isUserVisibleContextInjection, type AiConversationNodeRendererMap } from './ai-conversation-node-seat';
+import { AiTurnFileBaselinesContext, buildConversationTurnBaselines } from './ai-turn-changes-summary';
 import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible';
 import { conversationRows, type AiConversationRow } from './ai-conversation-rows';
 import { processDisclosureKey, registerProcessMember, useProcessDisclosure } from './ai-process-disclosure';
@@ -235,8 +236,10 @@ export const AiConversation = memo(function AiConversation({
     ) : status === 'waiting' && runningIndicator === 'agent' ? (
       <AgentWaitingIndicator reason={statusReason} />
     ) : null;
+  const turnFileBaselines = useMemo(() => buildConversationTurnBaselines(allNodes), [allNodes]);
   return (
-    <MessageScroller
+    <AiTurnFileBaselinesContext.Provider value={turnFileBaselines}>
+      <MessageScroller
       className="min-h-0 flex-1"
       contentClassName="ai-conversation-content mx-auto min-w-0 w-[min(calc(100%-var(--ai-shell-clearance)-var(--ai-transcript-extra-inset)-var(--ai-shell-clearance)-var(--ai-transcript-extra-inset)),var(--ai-chat-content-max-width))] gap-0 px-0 pt-5 pb-7"
       followKey={followKey(nodes, throughSeq)}
@@ -287,5 +290,6 @@ export const AiConversation = memo(function AiConversation({
       ))}
       {!nodes.length && indicator}
     </MessageScroller>
+    </AiTurnFileBaselinesContext.Provider>
   );
 });

@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeftIcon, ChevronDownIcon, ChevronRightIcon, FileCodeIcon, FileCogIcon, FileTextIcon, Trash2Icon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -6,16 +6,19 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
-import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
+import type { AiConversationNode, AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { cn } from '@/lib/utils';
 import { AiHeaderIconButton } from './ai-header-icon-button';
 import {
   AiToolExpandedContent,
   AiTrashRecoveryNotice,
+  applyToolEditToText,
   buildTurnFileDiffPreview,
   extractToolFileChanges,
   type ToolFileChangeEntry,
 } from './ai-tool-presentation';
+
+export const AiTurnFileBaselinesContext = createContext<ReadonlyMap<string, ReadonlyMap<string, string>> | null>(null);
 
 export interface TurnChangedFileEntry extends ToolFileChangeEntry {
   readonly tools: readonly ToolFileChangeEntry['tool'][];
@@ -28,9 +31,71 @@ export interface TurnFileChangesSummary {
   readonly totalRemoved: number | null;
 }
 
+const MAX_TRACKED_BASELINE_BYTES = 200_000;
+
+function normalizePathKey(raw: string): string {
+  return raw.replace(/\\/g, '/').replace(/^\.\//, '');
+}
+
+function collectToolPathKeys(tool: AiConversationNodeOf<'tool'>): readonly string[] {
+  const keys = new Set<string>();
+  const add = (value: unknown) => {
+    if (typeof value === 'string' && value.length > 0) {
+      keys.add(value);
+      keys.add(normalizePathKey(value));
+    }
+  };
+  if (tool.input && typeof tool.input === 'object' && !Array.isArray(tool.input)) {
+    const input = tool.input as Record<string, unknown>;
+    add(input.path);
+    add(input.file_path);
+    add(input.filePath);
+  }
+  if (tool.output && typeof tool.output === 'object' && !Array.isArray(tool.output)) {
+    const output = tool.output as Record<string, unknown>;
+    add(output.path);
+    add(output.file_path);
+    add(output.filePath);
+    if (Array.isArray(output.files)) {
+      for (const item of output.files) {
+        if (item && typeof item === 'object' && !Array.isArray(item)) {
+          add((item as Record<string, unknown>).path);
+        }
+      }
+    }
+  }
+  return [...keys];
+}
+
+function lookupBaseline(map: ReadonlyMap<string, string>, path: string, aliases: readonly string[] = []): string | null {
+  const normalized = normalizePathKey(path);
+  const direct = map.get(path) ?? map.get(normalized);
+  if (direct !== undefined) return direct;
+  for (const alias of aliases) {
+    const found = map.get(alias);
+    if (found !== undefined) return found;
+  }
+  let suffixMatch: string | null = null;
+  for (const [key, content] of map.entries()) {
+    const normKey = normalizePathKey(key);
+    if (normKey.endsWith(`/${normalized}`) || normalized.endsWith(`/${normKey}`)) {
+      if (suffixMatch !== null && suffixMatch !== content) return null;
+      suffixMatch = content;
+    }
+  }
+  return suffixMatch;
+}
+
+function storeBaseline(map: Map<string, string>, paths: readonly string[], content: string): void {
+  if (content.length > MAX_TRACKED_BASELINE_BYTES) return;
+  for (const key of paths) {
+    map.set(key, content);
+  }
+}
+
 function extractFullReadFileContent(
   tool: AiConversationNodeOf<'tool'>,
-): { readonly path: string; readonly content: string } | null {
+): { readonly paths: readonly string[]; readonly content: string } | null {
   if (tool.state !== 'succeeded') return null;
   if (tool.name !== 'read_file' && tool.nativeName !== 'read_file') return null;
   if (!tool.output || typeof tool.output !== 'object' || Array.isArray(tool.output)) return null;
@@ -38,14 +103,8 @@ function extractFullReadFileContent(
   const input = tool.input && typeof tool.input === 'object' && !Array.isArray(tool.input)
     ? tool.input as Record<string, unknown>
     : null;
-  const path = typeof output.path === 'string' && output.path.length > 0
-    ? output.path
-    : typeof input?.path === 'string' && input.path.length > 0
-      ? input.path
-      : typeof input?.file_path === 'string' && input.file_path.length > 0
-        ? input.file_path
-        : null;
-  if (!path) return null;
+  const paths = collectToolPathKeys(tool);
+  if (paths.length === 0) return null;
   if (typeof output.content !== 'string') return null;
   if (output.truncated === true) return null;
   if (output.encoding === 'base64' || output.encoding === 'metadataOnly') return null;
@@ -55,29 +114,96 @@ function extractFullReadFileContent(
       ? input.offset
       : 0;
   if (offset !== 0) return null;
-  return { path, content: output.content };
+  return { paths, content: output.content };
+}
+
+function extractFullWriteFileContent(
+  tool: AiConversationNodeOf<'tool'>,
+): { readonly paths: readonly string[]; readonly content: string } | null {
+  if (tool.state !== 'succeeded') return null;
+  if (tool.name !== 'write_file' && tool.nativeName !== 'write_file') return null;
+  if (!tool.input || typeof tool.input !== 'object' || Array.isArray(tool.input)) return null;
+  const content = (tool.input as Record<string, unknown>).content;
+  if (typeof content !== 'string') return null;
+  const paths = collectToolPathKeys(tool);
+  if (paths.length === 0) return null;
+  return { paths, content };
+}
+
+export function buildConversationTurnBaselines(
+  nodes: readonly AiConversationNode[],
+): ReadonlyMap<string, ReadonlyMap<string, string>> {
+  const byTurnKey = new Map<string, ReadonlyMap<string, string>>();
+  const knownByPath = new Map<string, string>();
+  for (const node of nodes) {
+    if (node.kind !== 'turnProcess') continue;
+    byTurnKey.set(node.key, new Map(knownByPath));
+    for (const child of node.children) {
+      if (child.kind !== 'tool' || child.state !== 'succeeded') continue;
+      const readSnapshot = extractFullReadFileContent(child);
+      if (readSnapshot) {
+        storeBaseline(knownByPath, readSnapshot.paths, readSnapshot.content);
+        continue;
+      }
+      const writeSnapshot = extractFullWriteFileContent(child);
+      if (writeSnapshot) {
+        storeBaseline(knownByPath, writeSnapshot.paths, writeSnapshot.content);
+        continue;
+      }
+      if (child.name === 'trash_file' || child.nativeName === 'trash_file') {
+        for (const key of collectToolPathKeys(child)) knownByPath.delete(key);
+        continue;
+      }
+      const changes = extractToolFileChanges(child);
+      if (changes.length === 0) continue;
+      const aliases = collectToolPathKeys(child);
+      for (const entry of changes) {
+        if (entry.kind === 'deleted') {
+          knownByPath.delete(entry.path);
+          knownByPath.delete(normalizePathKey(entry.path));
+          continue;
+        }
+        const current = lookupBaseline(knownByPath, entry.path, aliases);
+        if (current === null) continue;
+        const patched = applyToolEditToText(current, entry.path, child);
+        if (patched !== null) {
+          storeBaseline(knownByPath, [entry.path, normalizePathKey(entry.path), ...aliases], patched);
+        } else {
+          for (const key of [entry.path, normalizePathKey(entry.path), ...aliases]) {
+            knownByPath.delete(key);
+          }
+        }
+      }
+    }
+  }
+  return byTurnKey;
 }
 
 export function summarizeTurnFileChanges(
   process: AiConversationNodeOf<'turnProcess'> | undefined,
+  priorBaselines?: ReadonlyMap<string, string>,
 ): TurnFileChangesSummary | null {
   if (!process || process.status === 'running' || !process.hasEndBoundary) return null;
   const merged = new Map<string, TurnChangedFileEntry>();
-  const baselineByPath = new Map<string, string>();
+  const baselineByPath = new Map<string, string>(priorBaselines ?? []);
   for (const child of process.children) {
     if (child.kind !== 'tool') continue;
     const readSnapshot = extractFullReadFileContent(child);
-    if (readSnapshot && !merged.has(readSnapshot.path)) {
-      baselineByPath.set(readSnapshot.path, readSnapshot.content);
+    if (readSnapshot) {
+      const alreadyModified = readSnapshot.paths.some((key) => merged.has(key));
+      if (!alreadyModified) {
+        storeBaseline(baselineByPath, readSnapshot.paths, readSnapshot.content);
+      }
       continue;
     }
+    const toolAliases = collectToolPathKeys(child);
     for (const entry of extractToolFileChanges(child)) {
       const existing = merged.get(entry.path);
       if (!existing) {
         merged.set(entry.path, {
           ...entry,
           tools: [entry.tool],
-          baseText: entry.kind === 'deleted' ? null : (baselineByPath.get(entry.path) ?? null),
+          baseText: entry.kind === 'deleted' ? null : lookupBaseline(baselineByPath, entry.path, toolAliases),
         });
         continue;
       }
@@ -440,7 +566,9 @@ export function AiTurnChangesSummary({
   const [open, setOpen] = useState(false);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
-  const summary = useMemo(() => summarizeTurnFileChanges(process), [process]);
+  const baselinesByTurn = useContext(AiTurnFileBaselinesContext);
+  const priorBaselines = process ? baselinesByTurn?.get(process.key) : undefined;
+  const summary = useMemo(() => summarizeTurnFileChanges(process, priorBaselines), [process, priorBaselines]);
   if (!summary) return null;
 
   const title = summary.files.length === 1

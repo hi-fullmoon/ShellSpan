@@ -171,6 +171,10 @@
   color: var(--ai-text);
 }
 
+.ai-turn-changes-dialog [data-slot='scroll-area-scrollbar'] {
+  z-index: 20;
+}
+
 .ai-turn-changes-review-row {
   background: var(--ai-canvas);
   color: var(--ai-text-secondary);
@@ -195,11 +199,29 @@
 .ai-turn-changes-dialog .ai-diff-content {
   max-height: none;
   overflow-x: auto;
+  container-type: inline-size;
 }
 
 .ai-turn-changes-dialog .ai-diff-body {
-  padding-block: 8px;
+  padding-block: 4px;
   background: transparent;
+}
+
+.ai-turn-changes-dialog .ai-diff-body:has(.ai-diff-lines > [data-diff='fold']:first-child),
+.ai-turn-changes-dialog .ai-diff-body:has(.ai-diff-lines > [data-diff='gap']:first-child) {
+  padding-top: 0;
+}
+
+.ai-turn-changes-dialog .ai-diff-body:has(.ai-diff-lines > [data-diff='fold']:last-child),
+.ai-turn-changes-dialog .ai-diff-body:has(.ai-diff-lines > [data-diff='gap']:last-child) {
+  padding-bottom: 0;
+}
+
+.ai-turn-changes-dialog .ai-diff-fold-bar {
+  position: sticky;
+  left: 0;
+  width: calc(100cqi - 4.5ch - 22px);
+  max-width: 100%;
 }
 
 .ai-turn-changes-dialog .ai-diff-body [data-diff='removed'],
@@ -227,16 +249,6 @@
 .ai-turn-changes-dialog .ai-diff-fold-cell,
 .ai-turn-changes-dialog .ai-diff-gap-cell {
   border-left: 3px solid transparent;
-}
-
-.ai-turn-changes-dialog .ai-diff-fold-controls {
-  background: var(--ai-canvas);
-}
-
-.ai-turn-changes-dialog .ai-diff-fold-pill,
-.ai-turn-changes-dialog .ai-diff-gap-pill,
-.ai-turn-changes-dialog .ai-diff-fold-stepper {
-  background: var(--ai-code-block);
 }
 
 .ai-turn-changes-dialog .ai-diff-body [data-diff='removed'] .ai-diff-code {

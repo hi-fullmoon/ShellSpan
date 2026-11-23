@@ -4,7 +4,12 @@ import type { AiToolNode, AiTurnProcessNode } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { AiToolExpandedContent } from '../ai-tool-presentation';
-import { AiTurnChangesSummary, summarizeTurnFileChanges } from '../ai-turn-changes-summary';
+import {
+  AiTurnChangesSummary,
+  AiTurnFileBaselinesContext,
+  buildConversationTurnBaselines,
+  summarizeTurnFileChanges,
+} from '../ai-turn-changes-summary';
 
 function makeTool(overrides: Partial<AiToolNode>): AiToolNode {
   return {
@@ -256,22 +261,22 @@ describe('AiTurnChangesSummary', () => {
       />,
     );
 
-    const foldPills = container.querySelectorAll<HTMLButtonElement>('.ai-diff-fold-pill');
-    expect(foldPills).toHaveLength(2);
-    expect(foldPills[0]).toHaveTextContent('+17 more lines');
-    expect(foldPills[1]).toHaveTextContent('+17 more lines');
+    const foldButtons = container.querySelectorAll<HTMLButtonElement>('.ai-diff-fold-main');
+    expect(foldButtons).toHaveLength(2);
+    expect(foldButtons[0]).toHaveTextContent('+17 more lines');
+    expect(foldButtons[1]).toHaveTextContent('+17 more lines');
     expect(container.textContent).not.toContain('line-01');
     expect(container.textContent).toContain('line-18');
     expect(container.textContent).toContain('new-target');
 
     const expandUpBtn = screen.getByRole('button', { name: 'Expand 10 lines up' });
     fireEvent.click(expandUpBtn);
-    expect(container.querySelectorAll('.ai-diff-fold-pill')[0]).toHaveTextContent('+7 more lines');
+    expect(container.querySelectorAll('.ai-diff-fold-main')[0]).toHaveTextContent('+7 more lines');
     expect(container.textContent).toContain('line-08');
     expect(container.textContent).not.toContain('line-01');
 
-    fireEvent.click(container.querySelectorAll<HTMLButtonElement>('.ai-diff-fold-pill')[0]);
-    expect(container.querySelectorAll('.ai-diff-fold-pill')).toHaveLength(1);
+    fireEvent.click(container.querySelectorAll<HTMLButtonElement>('.ai-diff-fold-main')[0]);
+    expect(container.querySelectorAll('.ai-diff-fold-main')).toHaveLength(1);
     expect(container.textContent).toContain('line-01');
 
     const baseLines = Array.from({ length: 40 }, (_, idx) => `row-${String(idx + 1).padStart(2, '0')}`);
@@ -312,8 +317,8 @@ describe('AiTurnChangesSummary', () => {
     fireEvent.click(reviewContainer.querySelector<HTMLButtonElement>('.ai-turn-changes-trigger')!);
     fireEvent.click(screen.getByRole('button', { name: 'View changes in src/app.ts' }));
     const reviewDialog = screen.getByRole('dialog');
-    const middlePill = reviewDialog.querySelector<HTMLButtonElement>('.ai-diff-fold-pill')!;
-    expect(middlePill).toHaveTextContent('+25 more lines');
+    const middleFold = reviewDialog.querySelector<HTMLButtonElement>('.ai-diff-fold-main')!;
+    expect(middleFold).toHaveTextContent('+25 more lines');
     expect(reviewDialog.textContent).toContain('row-04-updated');
     expect(reviewDialog.textContent).toContain('row-36-updated');
     expect(reviewDialog.textContent).not.toContain('row-15');
@@ -344,9 +349,9 @@ describe('AiTurnChangesSummary', () => {
       />,
     );
 
-    const gapPill = disjointContainer.querySelector('.ai-diff-gap-pill');
-    expect(gapPill).toBeInTheDocument();
-    expect(gapPill).toHaveTextContent('89 lines omitted');
+    const gapCell = disjointContainer.querySelector('.ai-diff-gap-cell');
+    expect(gapCell).toBeInTheDocument();
+    expect(gapCell).toHaveTextContent('89 lines omitted');
 
     const pagedRead = makeTool({
       key: 'tool:read-paged',
@@ -368,5 +373,59 @@ describe('AiTurnChangesSummary', () => {
       childKeys: [pagedRead.key, pagedEdit.key],
     }));
     expect(pagedSummary?.files[0]?.baseText).toBeNull();
+
+    const turn1Write = makeTool({
+      key: 'tool:turn1-write',
+      callId: 'call-turn1-write',
+      turnId: 'turn-1',
+      name: 'write_file',
+      nativeName: 'write_file',
+      input: { path: 'demo/app.ts', content: baseText },
+      output: { path: '/root/demo/app.ts', written: true },
+    });
+    const turn1Process = makeProcess({
+      key: 'turn-process:turn-1',
+      turnId: 'turn-1',
+      children: [turn1Write],
+      childKeys: [turn1Write.key],
+    });
+    const turn2Edit1 = makeTool({
+      key: 'tool:turn2-edit1',
+      callId: 'call-turn2-edit1',
+      turnId: 'turn-2',
+      name: 'edit_file',
+      nativeName: 'edit_file',
+      input: { path: 'demo/app.ts', oldString: 'row-04', newString: 'row-04-v2' },
+      output: { diff: '--- a/demo/app.ts\n+++ b/demo/app.ts\n@@ -3,3 +3,3 @@\n row-03\n-row-04\n+row-04-v2\n row-05\n' },
+    });
+    const turn2Edit2 = makeTool({
+      key: 'tool:turn2-edit2',
+      callId: 'call-turn2-edit2',
+      turnId: 'turn-2',
+      name: 'edit_file',
+      nativeName: 'edit_file',
+      input: { path: 'demo/app.ts', oldString: 'row-36', newString: 'row-36-v2' },
+      output: { diff: '--- a/demo/app.ts\n+++ b/demo/app.ts\n@@ -35,3 +35,3 @@\n row-35\n-row-36\n+row-36-v2\n row-37\n' },
+    });
+    const turn2Process = makeProcess({
+      key: 'turn-process:turn-2',
+      turnId: 'turn-2',
+      children: [turn2Edit1, turn2Edit2],
+      childKeys: [turn2Edit1.key, turn2Edit2.key],
+    });
+    const baselines = buildConversationTurnBaselines([turn1Process, turn2Process]);
+    const { container: crossTurnContainer } = render(
+      <AiTurnFileBaselinesContext.Provider value={baselines}>
+        <div className="ai-panel-shell relative">
+          <AiTurnChangesSummary process={turn2Process} />
+        </div>
+      </AiTurnFileBaselinesContext.Provider>,
+    );
+    fireEvent.click(crossTurnContainer.querySelector<HTMLButtonElement>('.ai-turn-changes-trigger')!);
+    fireEvent.click(screen.getByRole('button', { name: 'View changes in demo/app.ts' }));
+    const crossTurnDialog = crossTurnContainer.querySelector('[role="dialog"]')!;
+    expect(crossTurnDialog.querySelector('.ai-diff-fold-main')).toHaveTextContent('+25 more lines');
+    expect(crossTurnDialog.querySelector('button[aria-label="Expand 10 lines down"]')).toBeInTheDocument();
+    expect(crossTurnDialog.querySelector('button[aria-label="Expand 10 lines up"]')).toBeInTheDocument();
   });
 });
