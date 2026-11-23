@@ -1558,8 +1558,16 @@ impl AgentRuntime {
                 }
                 target.session_id = terminal_session_id.into();
                 target.target_id = format!("terminal-{terminal_session_id}");
-                self.sessions
-                    .reconnect_terminal(session_id, previous_session_id, target)
+                if entry.is_none() {
+                    self.sessions.reconnect_terminal_settling_orphaned_turn(
+                        session_id,
+                        previous_session_id,
+                        target,
+                    )
+                } else {
+                    self.sessions
+                        .reconnect_terminal(session_id, previous_session_id, target)
+                }
             },
         )
     }

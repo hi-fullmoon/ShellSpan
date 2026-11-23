@@ -660,6 +660,25 @@ impl AgentSessionStore {
         previous_session_id: &str,
         target: AgentSessionTarget,
     ) -> Result<AgentSessionSnapshot, String> {
+        self.reconnect_terminal_inner(session_id, previous_session_id, target, false)
+    }
+
+    pub(crate) fn reconnect_terminal_settling_orphaned_turn(
+        &self,
+        session_id: &str,
+        previous_session_id: &str,
+        target: AgentSessionTarget,
+    ) -> Result<AgentSessionSnapshot, String> {
+        self.reconnect_terminal_inner(session_id, previous_session_id, target, true)
+    }
+
+    fn reconnect_terminal_inner(
+        &self,
+        session_id: &str,
+        previous_session_id: &str,
+        target: AgentSessionTarget,
+        settle_orphaned_turn: bool,
+    ) -> Result<AgentSessionSnapshot, String> {
         let mut inner = self.lock_configured()?;
         let record = inner
             .sessions
@@ -685,18 +704,20 @@ impl AgentSessionStore {
                 descendants.push(child.header.session_id.clone());
             }
         }
-        let (events, publisher) = append_payloads_locked(
-            &mut inner,
-            session_id,
-            vec![(
-                None,
-                None,
-                AgentSessionEventPayload::SessionTerminalReconnected {
-                    previous_session_id: previous_session_id.into(),
-                    target,
-                },
-            )],
-        )?;
+        let mut payloads = if settle_orphaned_turn {
+            orphaned_interrupted_turn_settlement_payloads(inner.sessions.get(session_id).unwrap())?
+        } else {
+            Vec::new()
+        };
+        payloads.push((
+            None,
+            None,
+            AgentSessionEventPayload::SessionTerminalReconnected {
+                previous_session_id: previous_session_id.into(),
+                target,
+            },
+        ));
+        let (events, publisher) = append_payloads_locked(&mut inner, session_id, payloads)?;
         let snapshot = inner.sessions[session_id].snapshot()?;
         drop(inner);
         publish_events(publisher, &events);
@@ -3514,6 +3535,101 @@ fn terminal_reconnect_settled(record: &AgentSessionRecord) -> Result<bool, Strin
         && snapshot.inbox.next_turn.is_empty())
 }
 
+fn orphaned_interrupted_turn_settlement_payloads(
+    record: &AgentSessionRecord,
+) -> Result<Vec<(Option<String>, Option<String>, AgentSessionEventPayload)>, String> {
+    if record.archived
+        || record.ended
+        || record.header.subagent.is_some()
+        || record.header.capability_scope.is_some()
+    {
+        return Ok(Vec::new());
+    }
+    let snapshot = record.snapshot()?;
+    if !snapshot.inbox.next_step.is_empty()
+        || !snapshot.inbox.next_turn.is_empty()
+        || super::skill_runtime::resumable_skill_queue(&record.events).is_some()
+    {
+        return Ok(Vec::new());
+    }
+    let mut turn_id = None;
+    let mut step_id = None;
+    for event in &record.events {
+        match event.payload {
+            AgentSessionEventPayload::TurnStart => {
+                turn_id.clone_from(&event.turn_id);
+                step_id = None;
+            }
+            AgentSessionEventPayload::TurnEnd { .. }
+            | AgentSessionEventPayload::SessionEnded { .. }
+            | AgentSessionEventPayload::SubagentRecoveryStarted { .. }
+            | AgentSessionEventPayload::SessionResumed {} => {
+                turn_id = None;
+                step_id = None;
+            }
+            AgentSessionEventPayload::StepStart => step_id.clone_from(&event.step_id),
+            AgentSessionEventPayload::StepEnd { .. } => step_id = None,
+            _ => {}
+        }
+    }
+    let interrupted_open = turn_id.is_some()
+        || matches!(
+            snapshot.status,
+            AgentSessionStatus::Running | AgentSessionStatus::Waiting
+        );
+    let safe_interrupted_recovery = matches!(
+        (snapshot.recovery.kind, snapshot.recovery.status),
+        (
+            super::AgentRecoveryCheckpointKind::Idle,
+            super::AgentRecoveryStatus::None
+        ) | (
+            super::AgentRecoveryCheckpointKind::OpenModelRequest
+                | super::AgentRecoveryCheckpointKind::ToolResultCommitted,
+            super::AgentRecoveryStatus::Available
+        )
+    );
+    if !interrupted_open || !safe_interrupted_recovery {
+        return Ok(Vec::new());
+    }
+    let reason = "runtimeRestarted: an in-flight Model Step was not replayed";
+    let mut payloads = Vec::new();
+    if let Some(turn_id) = turn_id {
+        if let Some(step_id) = step_id {
+            payloads.push((
+                Some(turn_id.clone()),
+                Some(step_id),
+                AgentSessionEventPayload::StepEnd {
+                    reason: reason.to_string(),
+                },
+            ));
+        }
+        payloads.push((
+            Some(turn_id),
+            None,
+            AgentSessionEventPayload::TurnEnd {
+                reason: reason.to_string(),
+            },
+        ));
+    }
+    payloads.push((
+        None,
+        None,
+        AgentSessionEventPayload::AgentStatus {
+            status: AgentSessionStatus::Failed,
+            reason: Some(reason.to_string()),
+        },
+    ));
+    payloads.push((
+        None,
+        None,
+        AgentSessionEventPayload::SessionEnded {
+            status: AgentSessionStatus::Failed,
+            reason: Some(reason.to_string()),
+        },
+    ));
+    Ok(payloads)
+}
+
 fn validate_child_retry_record(
     record: &AgentSessionRecord,
     request: &super::AgentChildRetryRequest,
@@ -3987,21 +4103,34 @@ fn validate_event_transition(
             || old.session_id == target.session_id
             || old.target_id == target.target_id
             || expected != *target
-            || !terminal_reconnect_settled(record)?
         {
             return Err(
                 "terminal reconnect requires a settled root Session and the same target identity"
                     .into(),
             );
         }
+        let settled = terminal_reconnect_settled(record)?;
         let recovery = record.snapshot()?.recovery;
+        if (recovery.kind == super::AgentRecoveryCheckpointKind::ExecutionInFlight && !settled)
+            || (recovery.kind != super::AgentRecoveryCheckpointKind::ExecutionInFlight
+                && matches!(
+                    recovery.status,
+                    super::AgentRecoveryStatus::Required | super::AgentRecoveryStatus::Reconciling
+                ))
+        {
+            return Err(
+                "TERMINAL_RECONNECT_RECOVERY_REQUIRED: terminal reconnect requires reconciled effects"
+                    .into(),
+            );
+        }
+        if !settled {
+            return Err(
+                "terminal reconnect requires a settled root Session and the same target identity"
+                    .into(),
+            );
+        }
         if recovery.kind != super::AgentRecoveryCheckpointKind::ExecutionInFlight
-            && matches!(
-                recovery.status,
-                super::AgentRecoveryStatus::Available
-                    | super::AgentRecoveryStatus::Required
-                    | super::AgentRecoveryStatus::Reconciling
-            )
+            && recovery.status == super::AgentRecoveryStatus::Available
         {
             return Err("terminal reconnect requires reconciled effects".into());
         }

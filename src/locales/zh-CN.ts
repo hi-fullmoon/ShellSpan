@@ -2597,6 +2597,7 @@ export default {
   'ai.workspace.reconnectChecking': '正在验证连接…',
   'ai.workspace.reconnectUnverified': '当前终端尚未连接，或与原主机、用户不一致。请连接原主机并使用相同用户登录后重试，历史记录和草稿已保留。',
   'ai.workspace.reconnectUnsettled': '旧对话或当前终端仍有正在执行的任务、待处理输入或排队消息。请等待执行结束，或停止任务并处理排队消息后重试。',
+  'ai.workspace.reconnectRecoveryRequired': '旧对话上一轮有结果未确认的命令或待核对状态，无法自动继续。请先核对终端状态，或新建对话后重试。',
   'ai.workspace.reconnectIntegrationUnavailable': '当前连接的终端集成不可用，无法继续使用可视命令。请重新连接终端后重试，历史记录和草稿已保留。',
   'ai.workspace.reconnectNativeResourcesUnavailable': '当前 ShellSpan 安装包缺少可用于此连接的 Linux 原生终端资源。请使用包含相应 SSH 资源的安装包，重新连接后继续。历史记录和草稿已保留。',
   'ai.workspace.reconnectSourceActive': '旧终端仍然可用。请回到旧终端继续，或先断开旧连接后再验证当前连接。历史记录和草稿已保留。',

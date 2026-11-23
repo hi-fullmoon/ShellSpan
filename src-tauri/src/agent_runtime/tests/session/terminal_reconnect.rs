@@ -375,3 +375,238 @@ fn terminal_reconnect_preserves_pinned_filesystem_scope_for_paths_and_skills() {
         store.snapshot("reconnect-files").unwrap()
     );
 }
+
+#[test]
+fn terminal_reconnect_settles_orphaned_interrupted_model_stream_without_replay() {
+    let (_storage, store) = configured();
+    store
+        .create(CreateAgentSessionRequest {
+            session_id: "reconnect-interrupted".into(),
+            task_id: "task-interrupted".into(),
+            goal: "Inspect SSH files".into(),
+            parent_session_id: None,
+            continued_from_session_id: None,
+            target: Some(target()),
+            permission_mode: Some(AgentSessionPermissionMode::Operator),
+            execution_surface: AgentExecutionSurface::BoundTerminal,
+            success_criteria: vec![],
+            capability_scope: None,
+            subagent: None,
+        })
+        .unwrap();
+    let request_snapshot = crate::llm::runtime::RequestSnapshot::Prepared {
+        route_id: "route-1".into(),
+        route_revision: 1,
+        adapter_id: "chat-completions".into(),
+        model_id: "model-1".into(),
+        catalog_version: 1,
+        capabilities: crate::llm::catalog::fixture_definition(
+            crate::llm::config::AiProviderKind::OpenAiCompatible,
+            8192,
+        ),
+        endpoint_identity: "https://example.test/v1/chat/completions".into(),
+        replay_domain_id: "domain-1".into(),
+        reasoning_effort: None,
+        output_tokens: 8192,
+        retry_policy: Default::default(),
+        timeouts: Default::default(),
+        purpose: "step".into(),
+        preparation_version: 1,
+        projection_policy: "immutable-png-v1-strict".into(),
+        content_hash: crate::llm::runtime::digest(b"request"),
+        images: Vec::new(),
+    };
+    let series = super::super::AgentRequestSeries {
+        series_id: "series-1".into(),
+        request_index: 0,
+        starts_series: true,
+    };
+    store
+        .append_batch(
+            "reconnect-interrupted",
+            vec![
+                AgentScopedPayload {
+                    turn_id: Some("turn-1".into()),
+                    step_id: None,
+                    payload: AgentSessionEventPayload::TurnStart,
+                },
+                AgentScopedPayload {
+                    turn_id: None,
+                    step_id: None,
+                    payload: AgentSessionEventPayload::AgentStatus {
+                        status: AgentSessionStatus::Running,
+                        reason: None,
+                    },
+                },
+                AgentScopedPayload {
+                    turn_id: Some("turn-1".into()),
+                    step_id: Some("step-1".into()),
+                    payload: AgentSessionEventPayload::StepStart,
+                },
+                AgentScopedPayload {
+                    turn_id: Some("turn-1".into()),
+                    step_id: Some("step-1".into()),
+                    payload: AgentSessionEventPayload::RequestHeader {
+                        request_id: "req-1".into(),
+                        snapshot: request_snapshot.clone(),
+                        snapshot_digest: request_snapshot.digest(),
+                        provider_id: "route-1".into(),
+                        model: "model-1".into(),
+                        reasoning_effort: None,
+                        reason: super::super::AgentRequestReason::Initial,
+                        series: series.clone(),
+                        snapshot_reason: super::super::AgentRequestSnapshotReason::Initial,
+                        system_prompt: "system".into(),
+                        tool_schemas: Vec::new(),
+                        attempt: 1,
+                    },
+                },
+                AgentScopedPayload {
+                    turn_id: Some("turn-1".into()),
+                    step_id: Some("step-1".into()),
+                    payload: AgentSessionEventPayload::RequestStart {
+                        request_id: "req-1".into(),
+                        header_request_id: "req-1".into(),
+                        provider_id: "route-1".into(),
+                        model: "model-1".into(),
+                        reasoning_effort: None,
+                        reason: super::super::AgentRequestReason::Initial,
+                        series,
+                        attempt: 1,
+                    },
+                },
+                AgentScopedPayload {
+                    turn_id: Some("turn-1".into()),
+                    step_id: Some("step-1".into()),
+                    payload: AgentSessionEventPayload::AssistantChunk {
+                        request_id: "req-1".into(),
+                        text_delta: Some("Partial response before restart".into()),
+                        reasoning_delta: None,
+                        tool_call_delta: None,
+                        usage: None,
+                    },
+                },
+            ],
+        )
+        .unwrap();
+    let replacement = AgentSessionTarget {
+        session_id: "terminal-2".into(),
+        target_id: "target-2".into(),
+        ..target()
+    };
+    let rebound = store
+        .reconnect_terminal_settling_orphaned_turn(
+            "reconnect-interrupted",
+            "terminal-1",
+            replacement.clone(),
+        )
+        .unwrap();
+    assert_eq!(rebound.header.target, Some(replacement));
+    assert_eq!(rebound.status, AgentSessionStatus::Failed);
+    assert!(rebound.ended);
+    assert_eq!(
+        rebound.header.permission_mode,
+        Some(AgentSessionPermissionMode::RequestApproval)
+    );
+    let resumed = store.resume("reconnect-interrupted").unwrap();
+    assert!(!resumed.ended);
+    assert_eq!(resumed.status, AgentSessionStatus::Idle);
+}
+
+#[test]
+fn terminal_reconnect_does_not_settle_orphaned_turn_with_in_flight_execution() {
+    let (_storage, store) = configured();
+    store
+        .create(CreateAgentSessionRequest {
+            session_id: "reconnect-inflight".into(),
+            task_id: "task-inflight".into(),
+            goal: "Run command".into(),
+            parent_session_id: None,
+            continued_from_session_id: None,
+            target: Some(target()),
+            permission_mode: Some(AgentSessionPermissionMode::Operator),
+            execution_surface: AgentExecutionSurface::BoundTerminal,
+            success_criteria: vec![],
+            capability_scope: None,
+            subagent: None,
+        })
+        .unwrap();
+    store
+        .append_batch(
+            "reconnect-inflight",
+            vec![
+                AgentScopedPayload {
+                    turn_id: Some("turn-1".into()),
+                    step_id: None,
+                    payload: AgentSessionEventPayload::TurnStart,
+                },
+                AgentScopedPayload {
+                    turn_id: None,
+                    step_id: None,
+                    payload: AgentSessionEventPayload::AgentStatus {
+                        status: AgentSessionStatus::Running,
+                        reason: None,
+                    },
+                },
+                AgentScopedPayload {
+                    turn_id: Some("turn-1".into()),
+                    step_id: Some("step-1".into()),
+                    payload: AgentSessionEventPayload::StepStart,
+                },
+                AgentScopedPayload {
+                    turn_id: Some("turn-1".into()),
+                    step_id: Some("step-1".into()),
+                    payload: AgentSessionEventPayload::ToolCall {
+                        call: super::super::RecordedToolCall {
+                            call_id: "call-1".into(),
+                            provider_call_id: None,
+                            name: "run_terminal_command".into(),
+                            native_name: Some("run_terminal_command".into()),
+                            arguments: serde_json::json!({"command": "touch /tmp/x"}),
+                            title: None,
+                            effect: Some(super::super::AgentSessionEffect::ExternalSideEffect),
+                            target: None,
+                        },
+                    },
+                },
+                AgentScopedPayload {
+                    turn_id: Some("turn-1".into()),
+                    step_id: Some("step-1".into()),
+                    payload: AgentSessionEventPayload::ToolApproval {
+                        request_id: "approval-1".into(),
+                        call_id: "call-1".into(),
+                        approval_id: None,
+                        status: super::super::AgentToolApprovalStatus::Approved,
+                        risk: Some(super::super::AgentSessionEffect::ExternalSideEffect),
+                        reason: None,
+                        expires_at_unix_ms: None,
+                        prompt: None,
+                    },
+                },
+                AgentScopedPayload {
+                    turn_id: Some("turn-1".into()),
+                    step_id: Some("step-1".into()),
+                    payload: AgentSessionEventPayload::ToolExecution {
+                        call_id: "call-1".into(),
+                        status: super::super::AgentToolExecutionStatus::Dispatched,
+                        idempotency: "no".into(),
+                    },
+                },
+            ],
+        )
+        .unwrap();
+    let before = store.snapshot("reconnect-inflight").unwrap();
+    let replacement = AgentSessionTarget {
+        session_id: "terminal-2".into(),
+        target_id: "target-2".into(),
+        ..target()
+    };
+    let error = store
+        .reconnect_terminal_settling_orphaned_turn("reconnect-inflight", "terminal-1", replacement)
+        .unwrap_err();
+    assert!(
+        error.starts_with("TERMINAL_RECONNECT_RECOVERY_REQUIRED:"),
+        "unexpected error: {error}"
+    );
+    assert_eq!(store.snapshot("reconnect-inflight").unwrap(), before);
+}

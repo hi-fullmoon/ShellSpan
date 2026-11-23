@@ -2599,6 +2599,7 @@ export default {
   'ai.workspace.reconnectChecking': 'Verifying connection…',
   'ai.workspace.reconnectUnverified': 'The current terminal is disconnected or does not match the original host and user. Connect with the original login and retry. Your history and draft are preserved.',
   'ai.workspace.reconnectUnsettled': 'The earlier conversation or current terminal still has active work, pending input, or queued messages. Wait for execution to finish, or stop the task and handle queued messages before retrying.',
+  'ai.workspace.reconnectRecoveryRequired': 'The earlier conversation has an unconfirmed command outcome or pending reconciliation and cannot continue automatically. Check the terminal state or start a new conversation.',
   'ai.workspace.reconnectIntegrationUnavailable': 'Terminal integration is unavailable on this connection, so visible commands cannot resume. Reconnect the terminal and try again. Your history and draft are preserved.',
   'ai.workspace.reconnectNativeResourcesUnavailable': 'This ShellSpan build is missing usable Linux terminal resources for this connection. Use a build that includes the required SSH resources, then reconnect to continue. Your history and draft are preserved.',
   'ai.workspace.reconnectSourceActive': 'The earlier terminal is still available. Continue there, or disconnect it before verifying the current connection. Your history and draft are preserved.',

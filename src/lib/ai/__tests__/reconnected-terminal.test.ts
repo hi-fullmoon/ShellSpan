@@ -82,6 +82,8 @@ describe('reconnected terminal Agent continuation', () => {
       .toBe('ai.workspace.reconnectIntegrationUnavailable');
     expect(terminalReconnectErrorKey('TERMINAL_RECONNECT_BUSY: current terminal execution must settle'))
       .toBe('ai.workspace.reconnectUnsettled');
+    expect(terminalReconnectErrorKey('TERMINAL_RECONNECT_RECOVERY_REQUIRED: terminal reconnect requires reconciled effects'))
+      .toBe('ai.workspace.reconnectRecoveryRequired');
   });
 
   it('allows rebinding only to a replacement of the same SSH target', () => {
