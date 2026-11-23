@@ -105,13 +105,14 @@ function TurnChangedFileItem({ file }: { readonly file: ToolFileChangeEntry }) {
   );
 
   return (
-    <li className="min-w-0">
+    <li className="ai-turn-changes-item min-w-0">
       <Collapsible open={expanded} onOpenChange={setExpanded}>
         <CollapsibleTrigger
           render={(
             <button
               type="button"
-              className="ai-turn-changes-file flex h-7 w-full min-w-0 items-center justify-between gap-2 px-3 text-left"
+              className="ai-turn-changes-file flex h-8 w-full min-w-0 items-center justify-between gap-2 px-3 text-left"
+              data-expanded={expanded || undefined}
               title={file.path}
               aria-label={t('ai.workspace.turnChanges.openDiff', { path: file.path })}
               aria-expanded={expanded}
@@ -120,8 +121,8 @@ function TurnChangedFileItem({ file }: { readonly file: ToolFileChangeEntry }) {
         >
           <span className="flex min-w-0 flex-1 items-center gap-1">
             {file.kind === 'deleted'
-              ? <Trash2Icon className="size-3 shrink-0" aria-hidden="true" />
-              : <FilePenLineIcon className="size-3 shrink-0" aria-hidden="true" />}
+              ? <Trash2Icon className="size-3.5 shrink-0" aria-hidden="true" />
+              : <FilePenLineIcon className="size-3.5 shrink-0" aria-hidden="true" />}
             <span className="ai-turn-changes-path min-w-0 truncate">{file.path}</span>
           </span>
           <span className="flex shrink-0 items-center gap-1.5">
@@ -133,13 +134,13 @@ function TurnChangedFileItem({ file }: { readonly file: ToolFileChangeEntry }) {
                 <span data-diff-count="removed">-{file.removed}</span>
               </span>
             ) : null}
-            <ChevronDownIcon className={cn('ai-turn-changes-chevron size-3 shrink-0', expanded && 'rotate-180')} aria-hidden="true" />
+            <ChevronDownIcon className={cn('ai-turn-changes-chevron size-3.5 shrink-0', expanded && 'rotate-180')} aria-hidden="true" />
           </span>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="ai-turn-changes-file-body px-3 pt-1 pb-2" data-ai-turn-changes-file-body="">
+          <div className="ai-turn-changes-file-body min-w-0" data-ai-turn-changes-file-body="">
             {file.kind === 'deleted' ? (
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2 px-3 py-2">
                 <AiTrashRecoveryNotice />
                 <div className="flex justify-end">
                   <CopyButton
@@ -155,10 +156,11 @@ function TurnChangedFileItem({ file }: { readonly file: ToolFileChangeEntry }) {
                 node={file.tool}
                 compact
                 showInput={false}
+                hideHeader
                 diffModel={fileDiff}
               />
             ) : (
-              <div className="ai-turn-changes-saved-summary flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md px-2.5 py-1.5">
+              <div className="ai-turn-changes-saved-summary flex min-w-0 flex-wrap items-center justify-between gap-2 px-3 py-2">
                 <span className="min-w-0 break-words text-xs">
                   {savedLineCount !== null
                     ? t('ai.workspace.turnChanges.savedLines', { count: savedLineCount })

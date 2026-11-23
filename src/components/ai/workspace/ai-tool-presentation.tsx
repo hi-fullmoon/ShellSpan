@@ -1033,7 +1033,7 @@ export function toolDiffPreview(node: ToolNode): DiffModel | null {
   return model.hunks.length > 0 ? model : null;
 }
 
-function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAction, showInput, headerAction }: { node: ToolNode; compact: boolean; model?: DiffModel; showCopyActions: boolean; scrollable: boolean; copyAction?: ReactNode; showInput: boolean; headerAction?: ReactNode }) {
+function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAction, showInput, hideHeader = false, headerAction }: { node: ToolNode; compact: boolean; model?: DiffModel; showCopyActions: boolean; scrollable: boolean; copyAction?: ReactNode; showInput: boolean; hideHeader?: boolean; headerAction?: ReactNode }) {
   const { t } = useI18n();
   const currentModel = useMemo(() => model ?? diffModel(node), [model, node]);
   const hunks = useMemo(() => currentModel.hunks.map((hunk) => {
@@ -1064,16 +1064,25 @@ function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAc
     ?? outputText(node);
   if (hunks.length === 0) return <IoSurface node={node} compact={compact} showCopyActions={showCopyActions} scrollable={scrollable} showInput={showInput} headerAction={headerAction} />;
   return (
-    <div className="ai-diff-block my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col gap-px overflow-hidden" data-ai-tool-view="diff">
+    <div
+      className={cn(
+        'ai-diff-block flex min-w-0 flex-col gap-px overflow-hidden',
+        hideHeader ? 'w-full max-w-full' : 'my-1 ml-1 max-w-[calc(100%-4px)]',
+      )}
+      data-ai-tool-view="diff"
+      data-embedded={hideHeader || undefined}
+    >
       {files.map((hunk, index) => (
         <section key={`${hunk.path}:${index}`} className="min-w-0 max-w-full shrink-0">
-          <ToolSurfaceHeader title={hunk.path} className={showInput ? undefined : 'min-h-8'}>
-            {hunk.exact && currentModel.totalsKnown && <span className="ai-diff-counts shrink-0">
-              <span data-diff-count="added">+{hunk.lines.filter((line) => line.kind === 'added').length}</span>{' '}
-              <span data-diff-count="removed">-{hunk.lines.filter((line) => line.kind === 'removed').length}</span>
-            </span>}
-            {index === 0 && headerAction}
-          </ToolSurfaceHeader>
+          {!hideHeader && (
+            <ToolSurfaceHeader title={hunk.path} className={showInput ? undefined : 'min-h-8'}>
+              {hunk.exact && currentModel.totalsKnown && <span className="ai-diff-counts shrink-0">
+                <span data-diff-count="added">+{hunk.lines.filter((line) => line.kind === 'added').length}</span>{' '}
+                <span data-diff-count="removed">-{hunk.lines.filter((line) => line.kind === 'removed').length}</span>
+              </span>}
+              {index === 0 && headerAction}
+            </ToolSurfaceHeader>
+          )}
           <AiToolContentRegion text={showCopyActions && index === 0 ? copyText : undefined} label={t('ai.workspace.tool.copyOutput')}>
             <ToolScrollArea className="ai-diff-content max-h-65 min-w-0 max-w-full" viewportClassName={showInput ? TOOL_OUTPUT_FADE_CLASS : undefined} scrollable={scrollable}>
               {!hunk.exact && <div className="px-2.5 py-1 text-xs text-muted-foreground" data-diff-simplified>
@@ -1415,6 +1424,7 @@ export function AiToolExpandedContent({
   compact = false,
   showCopyActions = true,
   showInput = true,
+  hideHeader = false,
   scrollable = true,
   diffModel: precomputedDiff,
   diffCopyAction,
@@ -1424,6 +1434,7 @@ export function AiToolExpandedContent({
   readonly compact?: boolean;
   readonly showCopyActions?: boolean;
   readonly showInput?: boolean;
+  readonly hideHeader?: boolean;
   readonly scrollable?: boolean;
   readonly diffModel?: DiffModel;
   readonly diffCopyAction?: ReactNode;
@@ -1441,7 +1452,7 @@ export function AiToolExpandedContent({
     case 'search': return <SearchSurface node={node} showCopyActions={showCopyActions} showInput={showInput} scrollable={scrollable} headerAction={headerAction} />;
     case 'web': return <WebSurface node={node} showCopyActions={showCopyActions} showInput={showInput} scrollable={scrollable} headerAction={headerAction} />;
     case 'write':
-    case 'edit': return <DiffSurface node={node} compact={compact} model={precomputedDiff} showCopyActions={showCopyActions} scrollable={scrollable} copyAction={diffCopyAction} showInput={showInput} headerAction={headerAction} />;
+    case 'edit': return <DiffSurface node={node} compact={compact} model={precomputedDiff} showCopyActions={showCopyActions} scrollable={scrollable} copyAction={diffCopyAction} showInput={showInput} hideHeader={hideHeader} headerAction={headerAction} />;
     case 'code': return <CodeSurface node={node} showCopyActions={showCopyActions} scrollable={scrollable} showInput={showInput} headerAction={headerAction} />;
     case 'plan': return <PlanSurface node={node} compact={compact} showCopyActions={showCopyActions} scrollable={scrollable} showInput={showInput} headerAction={headerAction} />;
     case 'generic': return <IoSurface node={node} compact={compact} showCopyActions={showCopyActions} showInput={showInput} scrollable={scrollable} headerAction={headerAction} />;

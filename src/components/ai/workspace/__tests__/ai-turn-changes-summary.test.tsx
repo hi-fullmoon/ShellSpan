@@ -124,7 +124,11 @@ describe('AiTurnChangesSummary', () => {
     expect(fileButton).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(fileButton);
     expect(fileButton).toHaveAttribute('aria-expanded', 'true');
-    expect(container.querySelector('[data-ai-turn-changes-file-body] [data-ai-tool-view="diff"]')).toBeInTheDocument();
+    const embeddedDiff = container.querySelector('[data-ai-turn-changes-file-body] [data-ai-tool-view="diff"]');
+    expect(embeddedDiff).toBeInTheDocument();
+    expect(embeddedDiff).toHaveAttribute('data-embedded');
+    expect(embeddedDiff?.querySelector('.ai-tool-surface-header')).toBeNull();
+    expect(embeddedDiff?.querySelector('.ai-diff-counts')).toBeNull();
     expect(container.textContent).toContain('keepalive_timeout 30;');
 
     const deletedButton = screen.getByRole('button', { name: 'View changes in etc/nginx/old.conf' });
