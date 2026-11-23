@@ -422,8 +422,40 @@
             false,
         )
         .unwrap();
+        assert_eq!(name, "exec_command");
+        assert_eq!(arguments["channel"], "direct");
+        assert_eq!(arguments["background"], true);
+        assert_eq!(arguments["cwd"], "/workspace");
+        assert_eq!(arguments["timeoutMs"], 120_000);
+
+        let remote_with_profile = target_native(&remote_target()).unwrap();
+        background.target = remote_target();
+        let (name, arguments) = normalize_arguments(
+            &background,
+            &remote_with_profile,
+            Some(TerminalVisibleCommandRoute::TerminalExecute),
+            false,
+        )
+        .unwrap();
+        assert_eq!(name, "exec_command");
+        assert_eq!(arguments["channel"], "direct");
+        assert_eq!(arguments["background"], true);
+
+        let mut profileless = remote_target();
+        profileless.profile_id = None;
+        let remote_without_profile = target_native(&profileless).unwrap();
+        background.target = profileless;
+        let (name, arguments) = normalize_arguments(
+            &background,
+            &remote_without_profile,
+            Some(TerminalVisibleCommandRoute::TerminalExecute),
+            false,
+        )
+        .unwrap();
         assert_eq!(name, "terminal_execute");
         assert_eq!(arguments["background"], true);
+
+        background.target = local_target();
         background.execution_surface = AgentExecutionSurface::Direct;
         let (name, arguments) = normalize_arguments(&background, &owner, None, true).unwrap();
         assert_eq!(name, "exec_command");

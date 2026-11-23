@@ -313,16 +313,36 @@ impl NativeToolEngine {
                 cwd.as_deref().map(Path::new),
                 timeout,
             )?,
-            AgentToolTargetNative::Remote { target_id, .. } => {
+            AgentToolTargetNative::Remote {
+                target_id,
+                session_id,
+                ..
+            } => {
                 let connection = connection_for_remote_target(&call.target, database, credentials)?;
                 let binding =
                     sandbox.ok_or("Remote Direct requires a current SSH profile binding")?;
+                let command = if arguments.background == Some(true) {
+                    let terminal = self
+                        .terminal_broker
+                        .snapshot(Some(session_id))
+                        .ok()
+                        .and_then(|snapshot| snapshot.session);
+                    let remote_cwd = terminal
+                        .as_ref()
+                        .and_then(|session| session.current_directory.as_deref());
+                    let shell = terminal
+                        .as_ref()
+                        .and_then(|session| session.integration_shell);
+                    remote_command_with_cwd(&arguments.command, remote_cwd, shell)
+                } else {
+                    arguments.command
+                };
                 spawn_remote_process_native(
                     RemoteProcessStartNative {
                         task_id: context.request.task_id.clone(),
                         request_id: context.request.request_id.clone(),
                         owner_target_id: target_id.clone(),
-                        command: arguments.command,
+                        command,
                         connection,
                         known_hosts_path: known_hosts_path.to_path_buf(),
                         timeout,
@@ -679,6 +699,32 @@ impl NativeToolEngine {
     }
 }
 
+fn remote_command_with_cwd(
+    command: &str,
+    cwd: Option<&str>,
+    shell: Option<crate::terminal_integration::TerminalShellKind>,
+) -> String {
+    let Some(cwd) = cwd.filter(|value| {
+        !value.is_empty() && !value.contains('\0') && !value.contains('\n') && !value.contains('\r')
+    }) else {
+        return command.to_string();
+    };
+    if matches!(
+        shell,
+        Some(
+            crate::terminal_integration::TerminalShellKind::WindowsPowerShell
+                | crate::terminal_integration::TerminalShellKind::PowerShell7
+        )
+    ) {
+        let literal = cwd.replace('\'', "''");
+        return format!("Set-Location -LiteralPath '{literal}'; if ($?) {{\n{command}\n}}");
+    }
+    let Ok(quoted) = shlex::try_quote(cwd) else {
+        return command.to_string();
+    };
+    format!("cd -- {quoted} && {{\n{command}\n}}")
+}
+
 fn validate_frozen_cwd(
     target: &AgentToolTargetNative,
     argument_cwd: Option<&str>,
@@ -748,5 +794,43 @@ fn exec_process_result(
         artifacts: Vec::new(),
         effects: vec![effect.clone()],
         truncated: Some(truncated),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::remote_command_with_cwd;
+    use crate::terminal_integration::TerminalShellKind;
+
+    #[test]
+    fn remote_command_with_cwd_quotes_posix_paths_and_preserves_multiline_scripts() {
+        assert_eq!(
+            remote_command_with_cwd(
+                "sleep 1\nfind . -maxdepth 1",
+                Some("/var/log/my app's dir"),
+                Some(TerminalShellKind::Bash),
+            ),
+            "cd -- \"/var/log/my app's dir\" && {\nsleep 1\nfind . -maxdepth 1\n}"
+        );
+    }
+
+    #[test]
+    fn remote_command_with_cwd_supports_powershell_and_skips_invalid_values() {
+        assert_eq!(
+            remote_command_with_cwd(
+                "Get-ChildItem",
+                Some("C:\\Users\\O'Neil\\work"),
+                Some(TerminalShellKind::PowerShell7),
+            ),
+            "Set-Location -LiteralPath 'C:\\Users\\O''Neil\\work'; if ($?) {\nGet-ChildItem\n}"
+        );
+        assert_eq!(
+            remote_command_with_cwd("pwd", None, Some(TerminalShellKind::Bash)),
+            "pwd"
+        );
+        assert_eq!(
+            remote_command_with_cwd("pwd", Some("/tmp\nrm -rf /"), Some(TerminalShellKind::Bash)),
+            "pwd"
+        );
     }
 }

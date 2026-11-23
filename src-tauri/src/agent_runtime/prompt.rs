@@ -644,8 +644,16 @@ pub(crate) fn apply_terminal_execution_context(
             && state.integration_capabilities.contains(&"commandLifecycle")
             && !state.input_recovery_required
     });
+    let independent_background = header.target.as_ref().is_some_and(|target| {
+        target.kind == "local" || (target.kind == "remote" && target.profile_id.is_some())
+    });
+    let background_guidance = if independent_background {
+        "Background commands (background=true) run in an independent background process (proc-* handle) with isolated stdout/stderr and inherit the terminal's current working directory when available, without sharing temporary interactive shell variables or aliases."
+    } else {
+        "Request background=true only when nativeJobControl=true."
+    };
     let constraints = format!(
-        "Current bound terminal capabilities: nativeScriptInput={script_input}; nativeJobControl={job_control}; boundCommandReady={command_ready}. Submit new shell commands only when boundCommandReady=true. When false, available read_terminal/wait_terminal tools may observe the foreground program, and write_terminal_input may send deliberate pager/REPL input after the command observation has ended. To quit less, use inputKind=text and text=q, then wait for the shell prompt before another command. Prefer git --no-pager for bounded Git inspection. Use complete multiline scripts, heredocs, Tab, CR or commands longer than 512 UTF-8 bytes only when nativeScriptInput=true. Otherwise use bounded complete single-line commands of at most 512 UTF-8 bytes without Tab or CR. Request background=true only when nativeJobControl=true. Unknown capabilities are unavailable. TERMINAL_INPUT_RECOVERY_REQUIRED requires recovery or reconnect; TERMINAL_DIRECT_REQUIRED requires an explicit user switch to Direct. Stop terminal calls on either error; do not retry through another command or tool. Never replay uncertain input."
+        "Current bound terminal capabilities: nativeScriptInput={script_input}; nativeJobControl={job_control}; boundCommandReady={command_ready}. Submit new shell commands only when boundCommandReady=true. When false, available read_terminal/wait_terminal tools may observe the foreground program, and write_terminal_input may send deliberate pager/REPL input after the command observation has ended. To quit less, use inputKind=text and text=q, then wait for the shell prompt before another command. Prefer git --no-pager for bounded Git inspection. Use complete multiline scripts, heredocs, Tab, CR or commands longer than 512 UTF-8 bytes only when nativeScriptInput=true. Otherwise use bounded complete single-line commands of at most 512 UTF-8 bytes without Tab or CR. {background_guidance} Unknown capabilities are unavailable. TERMINAL_INPUT_RECOVERY_REQUIRED requires recovery or reconnect; TERMINAL_DIRECT_REQUIRED requires an explicit user switch to Direct. Stop terminal calls on either error; do not retry through another command or tool. Never replay uncertain input."
     );
     if let Some(tool) = assembly
         .tools

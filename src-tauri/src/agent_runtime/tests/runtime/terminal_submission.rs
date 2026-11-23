@@ -319,7 +319,7 @@ async fn rejected_background_launch_does_not_restrict_later_execution_or_reopen_
             "printf rejected > {} &",
             shlex::try_quote(marker.to_str().unwrap()).unwrap()
         );
-        run(vec![file_call("run_terminal_command", "rejected-launch", json!({
+        run(vec![file_call("terminal_execute", "rejected-launch", json!({
             "command": source, "explanation": "Exercise rejection of nested background execution", "background": true,
         }))]).await.unwrap();
         let (status, rejected) = recorded_result(&scenario, session, "rejected-launch");
@@ -363,7 +363,7 @@ async fn rejected_background_launch_does_not_restrict_later_execution_or_reopen_
             "printf started > {}; sleep 0.2",
             shlex::try_quote(completed_marker.to_str().unwrap()).unwrap()
         );
-        run(vec![file_call("run_terminal_command", "corrected-launch", json!({
+        run(vec![file_call("terminal_execute", "corrected-launch", json!({
             "command": corrected, "explanation": "Launch the corrected foreground source as a managed job", "background": true,
         }))]).await.unwrap();
         let (status, started) = recorded_result(&scenario, session, "corrected-launch");
@@ -413,7 +413,7 @@ async fn background_launch_deadline_before_accept_line_reports_not_started() {
             shlex::try_quote(marker.to_str().unwrap()).unwrap()
         );
         let outcome = scenario.runtime.tools.process_model_calls(&entry, "deadline-turn", "deadline-step", "deadline-request", vec![
-            file_call("run_terminal_command", "expired-launch", json!({
+            file_call("terminal_execute", "expired-launch", json!({
                 "command": source, "explanation": "Apply a real launch deadline before native accept-line", "background": true, "timeoutMs": 1,
             }))
         ]).await;
@@ -543,4 +543,83 @@ async fn missing_search_mode_returns_canonical_schema_and_allows_corrected_call(
         .sessions
         .execution_observation_only(session)
         .unwrap());
+}
+
+#[tokio::test]
+async fn bound_terminal_background_command_uses_independent_process_and_inherits_cwd() {
+    let scenario = Scenario::with_native_input(TerminalShellKind::Bash, true);
+    let session = "bound-independent-bg";
+    let subdir = scenario.root.path().join("work/nested-dir");
+    std::fs::create_dir_all(&subdir).unwrap();
+    let entry = scenario.root(
+        session,
+        AgentExecutionSurface::BoundTerminal,
+        AgentSessionPermissionMode::Operator,
+    );
+    scenario.start(&entry, "bg-turn", "bg-step");
+    let run = |calls| {
+        scenario.runtime.tools.process_model_calls(
+            &entry,
+            "bg-turn",
+            "bg-step",
+            "bg-request",
+            calls,
+        )
+    };
+    let cd_cmd = format!(
+        "cd -- {}",
+        shlex::try_quote(subdir.to_str().unwrap()).unwrap()
+    );
+    run(vec![file_call(
+        "run_terminal_command",
+        "cd-visible",
+        json!({ "command": cd_cmd, "explanation": "Change bound terminal directory" }),
+    )])
+    .await
+    .unwrap();
+    assert_eq!(
+        recorded_result(&scenario, session, "cd-visible").0,
+        AgentToolResultStatus::Completed
+    );
+    run(vec![file_call(
+        "run_terminal_command",
+        "independent-bg",
+        json!({
+            "command": "pwd && printf 'independent-ok\\n'",
+            "explanation": "Run a background command without touching the visible terminal",
+            "background": true,
+        }),
+    )])
+    .await
+    .unwrap();
+    let (status, started) = recorded_result(&scenario, session, "independent-bg");
+    assert_eq!(status, AgentToolResultStatus::Completed, "{started}");
+    assert_eq!(started["channel"], "direct");
+    let handle = started["processHandle"].as_str().unwrap();
+    assert!(
+        handle.starts_with("proc-"),
+        "expected proc-* handle, got {handle}"
+    );
+    assert!(!scenario.broker.has_active_shell_jobs(TERMINAL).unwrap());
+
+    run(vec![file_call(
+        "wait_process",
+        "independent-bg-wait",
+        json!({ "processHandle": handle, "timeoutMs": 5_000 }),
+    )])
+    .await
+    .unwrap();
+    let (status, waited) = recorded_result(&scenario, session, "independent-bg-wait");
+    assert_eq!(status, AgentToolResultStatus::Completed, "{waited}");
+    assert_eq!(waited["state"], "exited");
+    assert_eq!(waited["exitCode"], 0);
+    let stdout = waited["stdout"].as_str().unwrap();
+    assert!(
+        stdout.contains("nested-dir"),
+        "expected inherited cwd in stdout: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("independent-ok"),
+        "expected isolated stdout: {stdout:?}"
+    );
 }

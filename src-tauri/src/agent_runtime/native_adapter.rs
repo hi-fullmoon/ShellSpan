@@ -437,6 +437,22 @@ impl NativeToolRuntime for NativeToolAdapter {
                 _ => return Err("scratch requires a host target".into()),
             }
         }
+        if !scratch_scope && bound_background_uses_independent_exec(&request, &owner_target) {
+            if let AgentToolTargetNative::Local {
+                session_id, cwd, ..
+            } = &mut owner_target
+            {
+                if let Ok(snapshot) = runtime.terminal_broker_snapshot(Some(session_id)) {
+                    if let Some(live_cwd) = snapshot
+                        .session
+                        .and_then(|session| session.current_directory)
+                        .filter(|dir| !dir.is_empty())
+                    {
+                        *cwd = Some(live_cwd);
+                    }
+                }
+            }
+        }
         let target = process_target_for_model_call(&request.model_call, &owner_target)?
             .unwrap_or_else(|| owner_target.clone());
         if matches!(
@@ -549,10 +565,13 @@ impl NativeToolRuntime for NativeToolAdapter {
         }
         let direct_lifecycle_required =
             !elevated_command && terminal_command_requires_direct_lifecycle(&request)?;
+        let independent_background =
+            !elevated_command && bound_background_uses_independent_exec(&request, &target);
         let visible_route = if request.model_call.name == "run_terminal_command"
             && request.execution_surface == super::AgentExecutionSurface::BoundTerminal
             && !direct_lifecycle_required
             && !elevated_command
+            && !independent_background
         {
             let route = match &target {
                 AgentToolTargetNative::Local { session_id, .. } => {
@@ -1114,6 +1133,22 @@ fn normalize_arguments(
                 if direct_lifecycle_required || terminal_command_requires_direct_lifecycle(request)? => Err(
                     "TERMINAL_DIRECT_REQUIRED: this request requires an independent process lifecycle; no command was executed; explicitly switch the session to direct before retrying".into(),
                 ),
+            super::AgentExecutionSurface::BoundTerminal
+                if bound_background_uses_independent_exec(request, target) =>
+            {
+                Ok((
+                    "exec_command".into(),
+                    omit_null_fields(json!({
+                        "command": arguments.command,
+                        "explanation": arguments.explanation,
+                        "channel": "direct",
+                        "cwd": cwd,
+                        "background": true,
+                        "elevated": false,
+                        "timeoutMs": timeout_ms
+                    })),
+                ))
+            }
             super::AgentExecutionSurface::BoundTerminal => match visible_route
                 .unwrap_or(TerminalVisibleCommandRoute::Unavailable)
             {
@@ -1251,6 +1286,39 @@ fn omit_null_fields(mut value: Value) -> Value {
     value
 }
 
+fn bound_background_uses_independent_exec(
+    request: &NativeToolRequest,
+    target: &AgentToolTargetNative,
+) -> bool {
+    request.execution_surface == super::AgentExecutionSurface::BoundTerminal
+        && request.model_call.name == "run_terminal_command"
+        && request
+            .model_call
+            .arguments
+            .get("background")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && request
+            .model_call
+            .arguments
+            .get("handoffToUser")
+            .and_then(Value::as_bool)
+            != Some(true)
+        && request
+            .model_call
+            .arguments
+            .get("sudoOperationId")
+            .is_none()
+        && matches!(
+            target,
+            AgentToolTargetNative::Local { .. }
+                | AgentToolTargetNative::Remote {
+                    profile_id: Some(_),
+                    ..
+                }
+        )
+}
+
 fn terminal_command_requires_direct_lifecycle(request: &NativeToolRequest) -> Result<bool, String> {
     if request.model_call.name != "run_terminal_command" {
         return Ok(false);
@@ -1259,7 +1327,13 @@ fn terminal_command_requires_direct_lifecycle(request: &NativeToolRequest) -> Re
         serde_json::from_value(request.model_call.arguments.clone())
             .map_err(|error| format!("run_terminal_command schema rejected arguments: {error}"))?;
     if request.execution_surface == super::AgentExecutionSurface::BoundTerminal {
-        super::validate_visible_command_input(&arguments.command)?;
+        let independent_background = arguments.background
+            && !arguments.handoff_to_user
+            && (request.target.kind == "local"
+                || (request.target.kind == "remote" && request.target.profile_id.is_some()));
+        if !independent_background {
+            super::validate_visible_command_input(&arguments.command)?;
+        }
         return Ok(arguments.lifecycle_trust == TerminalLifecycleTrust::DirectRequired);
     }
     Ok(arguments.background || arguments.lifecycle_trust == TerminalLifecycleTrust::DirectRequired)
