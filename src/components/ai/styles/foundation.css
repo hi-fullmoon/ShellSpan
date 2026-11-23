@@ -3,6 +3,7 @@
 .ai-composer-add-menu,
 .ai-completion-popup,
 .ai-turn-stat-panel,
+.ai-turn-changes-dialog,
 .ai-subagent-popover {
   --ai-font-family: var(--font-sans);
   --ai-font-family-code: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';

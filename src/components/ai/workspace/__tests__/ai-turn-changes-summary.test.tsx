@@ -109,7 +109,11 @@ describe('AiTurnChangesSummary', () => {
       children: [firstEdit, secondEditSameFile, failedEdit, trashTool],
       childKeys: [firstEdit.key, secondEditSameFile.key, failedEdit.key, trashTool.key],
     });
-    const { container } = render(<AiTurnChangesSummary process={process} />);
+    const { container } = render(
+      <div className="ai-panel-shell relative">
+        <AiTurnChangesSummary process={process} />
+      </div>,
+    );
 
     const trigger = container.querySelector<HTMLButtonElement>('.ai-turn-changes-trigger')!;
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
@@ -122,23 +126,35 @@ describe('AiTurnChangesSummary', () => {
     expect(screen.getByText('Moved to Trash')).toBeInTheDocument();
 
     const fileButton = screen.getByRole('button', { name: 'View changes in etc/nginx/nginx.conf' });
-    expect(fileButton).toHaveAttribute('aria-expanded', 'false');
+    expect(fileButton.querySelector('.ai-turn-changes-basename')).toHaveTextContent('nginx.conf');
+    expect(fileButton.querySelector('.ai-turn-changes-dir')).toHaveTextContent('etc/nginx');
     fireEvent.click(fileButton);
-    expect(fileButton).toHaveAttribute('aria-expanded', 'true');
-    const embeddedDiff = container.querySelector('[data-ai-turn-changes-file-body] [data-ai-tool-view="diff"]');
+
+    const panelShell = container.querySelector('.ai-panel-shell')!;
+    const dialog = screen.getByRole('dialog');
+    expect(panelShell.contains(dialog)).toBe(true);
+    expect(dialog).toHaveClass('ai-turn-changes-dialog', 'absolute', 'inset-0', 'min-h-0', 'flex-col', 'overflow-hidden');
+    expect(dialog).toHaveAttribute('aria-modal', 'false');
+    const footer = dialog.querySelector('[data-slot="dialog-footer"]');
+    expect(footer).toHaveClass('shrink-0');
+    expect(footer).not.toHaveClass('border-t');
+    const embeddedDiff = dialog.querySelector('[data-ai-turn-changes-file-body] [data-ai-tool-view="diff"]');
     expect(embeddedDiff).toBeInTheDocument();
     expect(embeddedDiff).toHaveAttribute('data-embedded');
     expect(embeddedDiff?.querySelector('.ai-tool-surface-header')).toBeNull();
     expect(embeddedDiff?.querySelector('.ai-diff-counts')).toBeNull();
-    expect(container.textContent).toContain('keepalive_timeout 30;');
+    expect(dialog.textContent).toContain('keepalive_timeout 30;');
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
     const deletedButton = screen.getByRole('button', { name: 'View changes in etc/nginx/old.conf' });
     fireEvent.click(deletedButton);
-    expect(deletedButton).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy path' })).toBeInTheDocument();
   });
 
-  it('expands a concise saved summary with path copy instead of raw JSON for diff-less saves like save_vim_buffer', () => {
+  it('opens a concise saved summary dialog with path copy instead of raw JSON for diff-less saves like save_vim_buffer', () => {
     const vimSave = makeTool({
       key: 'tool:vim-save',
       callId: 'call-vim-save',
@@ -167,11 +183,11 @@ describe('AiTurnChangesSummary', () => {
     const fileButton = screen.getByRole('button', { name: 'View changes in /root/agent_vim_test.txt' });
     fireEvent.click(fileButton);
 
-    expect(fileButton).toHaveAttribute('aria-expanded', 'true');
+    const dialog = screen.getByRole('dialog');
     expect(screen.getByText('Saved · 3 lines')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy path' })).toBeInTheDocument();
-    expect(container.textContent).not.toContain('connectionPolicyBinding');
-    expect(container.textContent).not.toContain('snap-2');
+    expect(dialog.textContent).not.toContain('connectionPolicyBinding');
+    expect(dialog.textContent).not.toContain('snap-2');
   });
 
   it('keeps per-file diff headers when hideHeader is set on a multi-file diff fallback', () => {
