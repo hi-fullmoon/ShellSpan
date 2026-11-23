@@ -5,8 +5,10 @@ import hljs from 'highlight.js/lib/common';
 import {
   BotIcon,
   BracesIcon,
+  CheckCircle2Icon,
   CheckIcon,
   ChevronDownIcon,
+  CircleDashedIcon,
   CircleHelpIcon,
   Code2Icon,
   CopyIcon,
@@ -15,15 +17,17 @@ import {
   FileTextIcon,
   GlobeIcon,
   ListTodoIcon,
+  LoaderCircleIcon,
+  OctagonAlertIcon,
   SearchIcon,
   ShieldAlertIcon,
   SparklesIcon,
-  SquareArrowOutUpRightIcon,
   SquareTerminalIcon,
   Trash2Icon,
 } from 'lucide-react';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Collapsible,
@@ -50,9 +54,6 @@ import { AiSubagentContext } from './ai-subagent-context';
 import { AiSubagentToolCard } from './ai-subagent-tool-card';
 import { subagentRoleLabel } from './ai-subagent-tree';
 import { useToolLiveOutput } from './use-tool-live-output';
-import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
-import { useAppStore } from '@/stores/appStore';
-import { useTerminalStore } from '@/stores/terminalStore';
 import {
   AI_CONTENT_CODE_CLASS,
   AI_CONTENT_HEADER_CLASS,
@@ -121,28 +122,36 @@ function bounded(value: string): string {
   return value.length > DETAIL_LIMIT ? `${value.slice(0, DETAIL_LIMIT)}\n…` : value;
 }
 
+function mergeTerminalOutput(base: string, observed: string): string {
+  if (!observed) return base;
+  if (!base || base === observed) return observed;
+  const separator = !base.endsWith('\n') && !observed.startsWith('\n') ? '\n' : '';
+  return `${base}${separator}${observed}`;
+}
+
 function outputText(node: ToolNode): string {
-  if (node.output === null) return '';
-  if (typeof node.output === 'string') return node.output;
+  const observedOutput = node.backgroundJob?.output ?? '';
+  if (node.output === null) return observedOutput;
+  if (typeof node.output === 'string') return mergeTerminalOutput(node.output, observedOutput);
   const record = asRecord(node.output);
   if (record && classifyAiTool(node.name, node.nativeName) === 'terminal') {
     // Bound terminals have one shared PTY stream. An empty capture is still
     // an output value; it must not fall through to the protocol envelope.
-    if (typeof record.combinedOutput === 'string') return record.combinedOutput;
+    if (typeof record.combinedOutput === 'string') return mergeTerminalOutput(record.combinedOutput, observedOutput);
     if ((typeof record.stdout === 'string' || typeof record.stderr === 'string')
       && !firstString(record, ['output', 'content', 'text', 'result', 'body', 'data', 'message', 'error'])) {
       const stdout = typeof record.stdout === 'string' ? record.stdout : '';
       const stderr = typeof record.stderr === 'string' ? record.stderr : '';
       const separator = stdout && stderr && !stdout.endsWith('\n') && !stderr.startsWith('\n') ? '\n' : '';
-      return `${stdout}${separator}${stderr}`;
+      return mergeTerminalOutput(`${stdout}${separator}${stderr}`, observedOutput);
     }
   }
   const direct = firstString(record, [
     'output', 'stdout', 'content', 'text', 'result', 'body', 'data', 'message',
   ]);
   const stderr = firstString(record, ['stderr', 'error']);
-  if (direct && stderr && direct !== stderr) return `${direct}\n${stderr}`;
-  return direct ?? stderr ?? formatToolValue(node.output);
+  if (direct && stderr && direct !== stderr) return mergeTerminalOutput(`${direct}\n${stderr}`, observedOutput);
+  return mergeTerminalOutput(direct ?? stderr ?? formatToolValue(node.output), observedOutput);
 }
 
 function classifyAiToolName(name: string): AiToolVariant {
@@ -218,11 +227,7 @@ function titleKey(variant: AiToolVariant): LocaleKey {
   return `ai.workspace.tool.title.${variant}` as LocaleKey;
 }
 
-function toolSummary(node: ToolNode, variant: AiToolVariant): string {
-  if (node.state === 'failed' || node.state === 'rejected') {
-    const failure = node.error || node.summary || outputText(node);
-    if (failure) return failure.split('\n')[0] ?? failure;
-  }
+function toolInputSummary(node: ToolNode, variant: AiToolVariant): string | undefined {
   const input = asRecord(node.input);
   if (node.name === 'trash_file') return firstString(input, ['path']) ?? node.name;
   const path = variant === 'write' || variant === 'edit' ? toolFilePath(node) : null;
@@ -239,7 +244,15 @@ function toolSummary(node: ToolNode, variant: AiToolVariant): string {
     generic: ['description', 'explanation', 'summary', 'intent', 'goal'],
   };
   const inputSummary = firstString(input, keys[variant]);
-  return inputSummary?.split('\n')[0]
+  return inputSummary?.split('\n')[0];
+}
+
+function toolSummary(node: ToolNode, variant: AiToolVariant): string {
+  if (node.state === 'failed' || node.state === 'rejected') {
+    const failure = node.error || node.summary || outputText(node);
+    if (failure) return failure.split('\n')[0] ?? failure;
+  }
+  return toolInputSummary(node, variant)
     ?? (node.summary ? node.summary.split('\n')[0] : undefined)
     ?? node.title
     ?? node.name;
@@ -306,7 +319,11 @@ export function toolDisplaySummary(node: ToolNode, t: ReturnType<typeof useI18n>
   const raw = toolSummary(node, variant);
   if (node.state === 'failed' || node.state === 'rejected') {
     const translated = aiErrorMessage(raw, t);
-    return translated !== raw ? translated : t(node.state === 'rejected'
+    if (translated !== raw) return translated;
+    const inputSummary = toolInputSummary(node, variant)
+      ?? (node.state === 'rejected' ? node.approval?.prompt?.split('\n')[0] : undefined);
+    if (inputSummary) return inputSummary;
+    return t(node.state === 'rejected'
       ? 'ai.workspace.tool.rejected' : 'ai.workspace.tool.failureSummary');
   }
   return raw === 'Agent orchestration' ? t('ai.workspace.tool.title.orchestration') : raw;
@@ -324,15 +341,21 @@ export function toolErrorIsInOutput(node: ToolNode): boolean {
   return Boolean(node.error && (failureOnly(node) || bounded(outputText(node)).includes(node.error.trim())));
 }
 
-function FailureSurface({ node, diagnostic, showCopyActions, scrollable }: {
+function FailureSurface({ node, diagnostic, showCopyActions, scrollable, headerAction }: {
   readonly node: ToolNode;
   readonly diagnostic: string;
   readonly showCopyActions: boolean;
   readonly scrollable: boolean;
+  readonly headerAction?: ReactNode;
 }) {
   const { t } = useI18n();
   return (
     <div className="ai-read-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="error">
+      {headerAction && (
+        <ToolSurfaceHeader title={t('ai.workspace.tool.outputLabel')}>
+          {headerAction}
+        </ToolSurfaceHeader>
+      )}
       <AiToolContentRegion text={showCopyActions ? diagnostic : undefined} label={t('ai.workspace.tool.copyOutput')}>
         <pre tabIndex={0} className={cn(AI_CONTENT_CODE_CLASS, 'ai-detail-code ai-tool-text whitespace-pre-wrap [overflow-wrap:anywhere]', scrollable ? 'max-h-65 overflow-auto' : 'overflow-visible')} data-error={!node.recoveredByToolKey || undefined}>
           <code>{bounded(diagnostic)}</code>
@@ -494,14 +517,16 @@ function ToolScrollArea({ children, className, contentClassName, viewportClassNa
 
 const TOOL_OUTPUT_FADE_CLASS = 'data-[overflow-y-end]:scroll-fade-b';
 
-function ToolExecutionFooter({ children, className, succeeded }: {
+function ToolExecutionFooter({ children, className, succeeded, running }: {
   readonly children: ReactNode;
   readonly className: string;
   readonly succeeded: boolean;
+  readonly running?: boolean;
 }) {
   return (
-    <div className={cn(AI_CONTENT_HEADER_CLASS, 'flex-wrap justify-end py-1.5', className)}>
-      {succeeded && <CheckIcon className="size-3 shrink-0" aria-hidden="true" />}
+    <div className={cn(AI_CONTENT_HEADER_CLASS, 'flex-wrap justify-end', className)}>
+      {running ? <LoaderCircleIcon className="size-3 shrink-0 animate-spin" aria-hidden="true" />
+        : succeeded && <CheckIcon className="size-3 shrink-0" aria-hidden="true" />}
       {children}
     </div>
   );
@@ -509,7 +534,7 @@ function ToolExecutionFooter({ children, className, succeeded }: {
 
 const LIVE_SCROLL_FOLLOW_THRESHOLD = 8;
 
-function TerminalSurface({ node, showCopyActions, scrollable, showInput }: { node: ToolNode; showCopyActions: boolean; scrollable: boolean; showInput: boolean }) {
+function TerminalSurface({ node, showCopyActions, scrollable, showInput, headerAction }: { node: ToolNode; showCopyActions: boolean; scrollable: boolean; showInput: boolean; headerAction?: ReactNode }) {
   const { t } = useI18n();
   const input = asRecord(node.input);
   const rawOutput = outputText(node);
@@ -534,34 +559,62 @@ function TerminalSurface({ node, showCopyActions, scrollable, showInput }: { nod
   }, [usingLive, output]);
   const command = firstString(input, ['command', 'cmd', 'script']) ?? formatToolValue(node.input);
   const displayCommand = command || node.name;
+  const observedJob = node.backgroundJob;
+  const isBackground = input?.background === true || Boolean(observedJob);
   const outputRecord = asRecord(node.output);
-  const execution = firstString(outputRecord, ['execution']);
-  const executionLabel = execution === 'running' ? 'ai.workspace.tool.execution.running'
+  const rawExecution = firstString(outputRecord, ['execution']);
+  const rawState = firstString(outputRecord, ['state']);
+  const observedExecution = observedJob
+    ? observedJob.observing || observedJob.state === 'running' ? 'running'
+      : observedJob.state === 'exited' ? 'completed'
+        : observedJob.state === 'rejected' ? 'notStarted'
+          : observedJob.state === 'uncertain' ? 'unknown' : null
+    : null;
+  const execution = observedExecution ?? rawExecution ?? (rawState === 'running' ? 'running' : null);
+  const executionLabel: LocaleKey | null = execution === 'running'
+    ? (isBackground && !observedJob ? 'ai.workspace.tool.execution.started' : 'ai.workspace.tool.execution.running')
     : execution === 'completed' ? 'ai.workspace.tool.execution.completed'
       : execution === 'notStarted' ? 'ai.workspace.tool.execution.notStarted'
         : execution === 'unknown' ? 'ai.workspace.tool.uncertain' : null;
-  const targetTerminalSessionId = node.target?.sessionId ?? null;
-  const isBoundTerminalTool = node.nativeName === 'terminal_execute' || outputRecord?.channel === 'terminal';
-  const canFocusTerminal = useTerminalStore((state) => Boolean(
-    isBoundTerminalTool
-    && targetTerminalSessionId
-    && state.sessions.some((session) => session.sessionId === targetTerminalSessionId),
-  ));
-  const handleFocusTerminal = (): void => {
-    if (!targetTerminalSessionId) return;
-    useTerminalStore.getState().setActiveSession(targetTerminalSessionId);
-    useAppStore.getState().setActiveSection('terminal');
-    terminalRegistry.get(targetTerminalSessionId)?.terminal?.focus();
-  };
   const job = asRecord(outputRecord?.job);
+  const processHandle = observedJob?.processHandle
+    ?? firstString(outputRecord, ['processHandle', 'process_handle'])
+    ?? firstString(job, ['processHandle', 'process_handle']);
   const exitCode = execution && execution !== 'completed' ? null
-    : firstNumber(execution === 'completed' && job ? job : outputRecord, ['exitCode', 'exit_code', 'code']);
+    : observedJob
+      ? observedJob.exitCode
+      : firstNumber(execution === 'completed' && job ? job : outputRecord, ['exitCode', 'exit_code', 'code']);
   const hasFailedExit = exitCode !== null && exitCode !== 0;
   const succeeded = exitCode === 0;
-  const showSuccessIcon = succeeded || (execution === null && exitCode === null && node.state === 'succeeded');
+  const backgroundLaunchOnly = isBackground && !observedJob && execution !== 'completed' && exitCode === null && node.state === 'succeeded';
+  const showSuccessIcon = succeeded || (!isBackground && execution === null && exitCode === null && node.state === 'succeeded');
+  const showRunningIcon = isBackground && (node.state === 'running' || Boolean(observedJob?.observing));
   const exitStatus = hasFailedExit && <span className="ai-terminal-exit shrink-0">{t('ai.workspace.tool.exitCode', { code: exitCode })}</span>;
-  const footerLabel = succeeded ? 'ai.workspace.tool.execution.succeeded' : executionLabel ?? `ai.workspace.tool.${node.state}`;
-  const showOutputSection = Boolean(output || isAlternateScreen || node.state !== 'running');
+  const footerLabel: LocaleKey = succeeded
+    ? 'ai.workspace.tool.execution.succeeded'
+    : executionLabel ?? (backgroundLaunchOnly ? 'ai.workspace.tool.execution.started' : `ai.workspace.tool.${node.state}` as LocaleKey);
+  const showBackgroundNotice = isBackground
+    && !output
+    && !isAlternateScreen
+    && node.state !== 'running'
+    && node.state !== 'failed'
+    && node.state !== 'rejected'
+    && node.state !== 'uncertain'
+    && execution !== 'notStarted'
+    && execution !== 'unknown'
+    && !hasFailedExit;
+  const backgroundNoticeLabel: LocaleKey = observedJob?.state === 'exited'
+    ? 'ai.workspace.tool.backgroundCompleted'
+    : 'ai.workspace.tool.backgroundStarted';
+  const showOutputSection = Boolean(output || isAlternateScreen || showBackgroundNotice || node.state !== 'running');
+  const terminalTitle = isBackground ? (
+    <span className="inline-flex items-center gap-1.5">
+      <span>{t('ai.workspace.tool.shell')}</span>
+      <Badge variant="outline" size="sm" data-ai-terminal-background="">
+        {t('ai.workspace.tool.background')}
+      </Badge>
+    </span>
+  ) : t('ai.workspace.tool.shell');
   const commandTitle = <>
     <AiToolContentRegion text={showCopyActions ? command : undefined} label={t('ai.workspace.tool.copyCommand')} showCopiedTooltip={false}>
       <div className="ai-terminal-command-row flex min-w-0 items-start py-1 pl-3.5">
@@ -585,59 +638,60 @@ function TerminalSurface({ node, showCopyActions, scrollable, showInput }: { nod
       data-ai-tool-view="terminal"
       data-running={node.state === 'running' || undefined}
       data-live-output={usingLive || undefined}
+      data-background={isBackground || undefined}
     >
-      <ToolSurfaceHeader className="ai-terminal-header" title={t('ai.workspace.tool.shell')}>
+      <ToolSurfaceHeader className="ai-terminal-header" title={terminalTitle}>
         {usingLive && liveOutput.truncated && !isAlternateScreen && (
           <span className="shrink-0 text-xs text-muted-foreground" data-ai-live-truncated="">
             {t('ai.workspace.tool.showingRecentOutput')}
           </span>
         )}
-        {canFocusTerminal && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            className="ai-terminal-focus-button h-5 shrink-0 gap-1 px-1.5 text-xs text-muted-foreground hover:text-foreground"
-            onClick={handleFocusTerminal}
-          >
-            <SquareArrowOutUpRightIcon className="size-3 shrink-0" aria-hidden="true" />
-            <span>{t('ai.workspace.tool.focusTerminal')}</span>
-          </Button>
-        )}
         {!showInput && <>
           {executionLabel && <span className="shrink-0" data-ai-terminal-execution={execution}>{t(executionLabel)}</span>}
           {exitStatus}
         </>}
+        {headerAction}
       </ToolSurfaceHeader>
       <div className="ai-terminal-output relative m-0 min-w-0 max-w-full">
         {showInput && commandTitle}
         {showOutputSection && <div className={showInput ? 'mt-2' : undefined} data-ai-terminal-output>
-          <AiToolContentRegion text={showCopyActions && !isAlternateScreen ? output : undefined} label={t('ai.workspace.tool.copyOutput')} showCopiedTooltip={false}>
-            <ToolScrollArea
-              className={cn('ai-terminal-transcript min-w-0 max-w-full', usingLive ? 'max-h-[156px]' : 'max-h-65')}
-              viewportClassName={showInput ? TOOL_OUTPUT_FADE_CLASS : undefined}
-              scrollable={scrollable}
-              label={t('ai.workspace.tool.shell')}
-              viewportRef={viewportRef}
-              onViewportScroll={handleViewportScroll}
-            >
-              <div className="px-3.5 pb-3">
-                {isAlternateScreen ? (
-                  <span className="text-muted-foreground" data-ai-terminal-interactive="">
-                    {t('ai.workspace.tool.interactiveRunning')}
-                  </span>
-                ) : output ? (
-                  <TerminalOutputText text={output} />
-                ) : (
-                  t('ai.workspace.tool.noOutput')
-                )}
-              </div>
-            </ToolScrollArea>
-          </AiToolContentRegion>
+          {showBackgroundNotice ? (
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3.5 pb-2 text-xs text-muted-foreground" data-ai-terminal-background-notice="">
+              <span>{t(backgroundNoticeLabel)}</span>
+              {processHandle && (
+                <code className="font-mono text-xs opacity-80" data-ai-terminal-handle="">
+                  {processHandle}
+                </code>
+              )}
+            </div>
+          ) : (
+            <AiToolContentRegion text={showCopyActions && !isAlternateScreen ? output : undefined} label={t('ai.workspace.tool.copyOutput')} showCopiedTooltip={false}>
+              <ToolScrollArea
+                className={cn('ai-terminal-transcript min-w-0 max-w-full', usingLive ? 'max-h-[156px]' : 'max-h-65')}
+                viewportClassName={showInput ? TOOL_OUTPUT_FADE_CLASS : undefined}
+                scrollable={scrollable}
+                label={t('ai.workspace.tool.shell')}
+                viewportRef={viewportRef}
+                onViewportScroll={handleViewportScroll}
+              >
+                <div className="px-3.5 pb-3">
+                  {isAlternateScreen ? (
+                    <span className="text-muted-foreground" data-ai-terminal-interactive="">
+                      {t('ai.workspace.tool.interactiveRunning')}
+                    </span>
+                  ) : output ? (
+                    <TerminalOutputText text={output} />
+                  ) : (
+                    t('ai.workspace.tool.noOutput')
+                  )}
+                </div>
+              </ToolScrollArea>
+            </AiToolContentRegion>
+          )}
         </div>}
       </div>
       {showInput && (
-        <ToolExecutionFooter className="ai-terminal-footer" succeeded={showSuccessIcon}>
+        <ToolExecutionFooter className="ai-terminal-footer" succeeded={showSuccessIcon} running={showRunningIcon}>
           {hasFailedExit ? exitStatus : <span data-ai-terminal-execution={execution}>{t(footerLabel)}</span>}
         </ToolExecutionFooter>
       )}
@@ -645,7 +699,7 @@ function TerminalSurface({ node, showCopyActions, scrollable, showInput }: { nod
   );
 }
 
-function ReadSurface({ node, showCopyActions, showInput, scrollable }: { node: ToolNode; showCopyActions: boolean; showInput: boolean; scrollable: boolean }) {
+function ReadSurface({ node, showCopyActions, showInput, scrollable, headerAction }: { node: ToolNode; showCopyActions: boolean; showInput: boolean; scrollable: boolean; headerAction?: ReactNode }) {
   const { t } = useI18n();
   const input = asRecord(node.input);
   const path = firstString(input, ['path', 'file_path', 'filePath']);
@@ -658,7 +712,11 @@ function ReadSurface({ node, showCopyActions, showInput, scrollable }: { node: T
   const viewportRef = useRef<HTMLPreElement>(null);
   return (
     <div className="ai-read-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="read">
-      {showInput && <ToolSurfaceHeader title={label} copyText={showCopyActions ? inputText : undefined} copyLabel={t('ai.workspace.tool.copyInput')} />}
+      {(showInput || Boolean(headerAction)) && (
+        <ToolSurfaceHeader title={label} copyText={showInput && showCopyActions ? inputText : undefined} copyLabel={t('ai.workspace.tool.copyInput')}>
+          {headerAction}
+        </ToolSurfaceHeader>
+      )}
       <div className="ai-tool-content-region relative min-w-0" data-ai-copy-region>
         {showCopyActions && output && <AiToolCopyButton text={output} label={t('ai.workspace.tool.copyOutput')} className="top-1 right-3.5" />}
         <pre ref={viewportRef} className={cn(AI_CONTENT_CODE_CLASS, 'ai-read-lines pr-12 whitespace-pre', scrollable ? 'max-h-65 overflow-auto' : 'overflow-visible')} tabIndex={0}>
@@ -675,7 +733,7 @@ function ReadSurface({ node, showCopyActions, showInput, scrollable }: { node: T
   );
 }
 
-function SearchSurface({ node, showCopyActions, showInput, scrollable }: { node: ToolNode; showCopyActions: boolean; showInput: boolean; scrollable: boolean }) {
+function SearchSurface({ node, showCopyActions, showInput, scrollable, headerAction }: { node: ToolNode; showCopyActions: boolean; showInput: boolean; scrollable: boolean; headerAction?: ReactNode }) {
   const { t } = useI18n();
   const input = asRecord(node.input);
   const query = firstString(input, ['query', 'pattern'])
@@ -684,7 +742,11 @@ function SearchSurface({ node, showCopyActions, showInput, scrollable }: { node:
   const lines = bounded(output).split('\n').filter(Boolean);
   return (
     <div className="ai-search-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="search">
-      {showInput && <ToolSurfaceHeader title={query} icon={SearchIcon} />}
+      {(showInput || Boolean(headerAction)) && (
+        <ToolSurfaceHeader title={query} icon={SearchIcon}>
+          {headerAction}
+        </ToolSurfaceHeader>
+      )}
       <AiToolContentRegion text={showCopyActions ? output : undefined} label={t('ai.workspace.tool.copyOutput')}>
         <div className={cn('ai-search-results m-0 flex max-w-full flex-col gap-1 px-3.5 pt-1 pb-3', scrollable ? 'max-h-65 overflow-auto' : 'overflow-visible')} tabIndex={0}>
           {lines.map((line, index) => <div key={index} className="ai-search-result min-w-0 [overflow-wrap:anywhere]">{line}</div>)}
@@ -715,7 +777,7 @@ function webSources(value: unknown): readonly WebSource[] {
   });
 }
 
-function WebSurface({ node, showCopyActions, showInput, scrollable }: { node: ToolNode; showCopyActions: boolean; showInput: boolean; scrollable: boolean }) {
+function WebSurface({ node, showCopyActions, showInput, scrollable, headerAction }: { node: ToolNode; showCopyActions: boolean; showInput: boolean; scrollable: boolean; headerAction?: ReactNode }) {
   const { t } = useI18n();
   const input = asRecord(node.input);
   const sources = webSources(node.output);
@@ -729,7 +791,11 @@ function WebSurface({ node, showCopyActions, showInput, scrollable }: { node: To
   const output = timeoutKind ? diagnostic : outputText(node);
   return (
     <div className="ai-web-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="web">
-      {showInput && <ToolSurfaceHeader title={label} icon={GlobeIcon} />}
+      {(showInput || Boolean(headerAction)) && (
+        <ToolSurfaceHeader title={label} icon={GlobeIcon}>
+          {headerAction}
+        </ToolSurfaceHeader>
+      )}
       <AiToolContentRegion text={showCopyActions ? output : undefined} label={t('ai.workspace.tool.copyOutput')}>
         <div className={cn('ai-web-content min-w-0 max-w-full', scrollable ? 'max-h-65 overflow-auto' : 'overflow-visible')} tabIndex={0}>
           {(timeoutKind || answer) && <p className="ai-web-answer m-0 px-3.5 pt-3 pb-1">{timeoutKind
@@ -967,7 +1033,7 @@ export function toolDiffPreview(node: ToolNode): DiffModel | null {
   return model.hunks.length > 0 ? model : null;
 }
 
-function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAction, showInput }: { node: ToolNode; compact: boolean; model?: DiffModel; showCopyActions: boolean; scrollable: boolean; copyAction?: ReactNode; showInput: boolean }) {
+function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAction, showInput, headerAction }: { node: ToolNode; compact: boolean; model?: DiffModel; showCopyActions: boolean; scrollable: boolean; copyAction?: ReactNode; showInput: boolean; headerAction?: ReactNode }) {
   const { t } = useI18n();
   const currentModel = useMemo(() => model ?? diffModel(node), [model, node]);
   const hunks = useMemo(() => currentModel.hunks.map((hunk) => {
@@ -996,7 +1062,7 @@ function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAc
   const copyText = firstString(asRecord(node.output), ['diff', 'patch', 'unified_diff'])
     ?? firstString(asRecord(node.input), ['patch', 'diff'])
     ?? outputText(node);
-  if (hunks.length === 0) return <IoSurface node={node} compact={compact} showCopyActions={showCopyActions} scrollable={scrollable} showInput={showInput} />;
+  if (hunks.length === 0) return <IoSurface node={node} compact={compact} showCopyActions={showCopyActions} scrollable={scrollable} showInput={showInput} headerAction={headerAction} />;
   return (
     <div className="ai-diff-block my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col gap-px overflow-hidden" data-ai-tool-view="diff">
       {files.map((hunk, index) => (
@@ -1006,6 +1072,7 @@ function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAc
               <span data-diff-count="added">+{hunk.lines.filter((line) => line.kind === 'added').length}</span>{' '}
               <span data-diff-count="removed">-{hunk.lines.filter((line) => line.kind === 'removed').length}</span>
             </span>}
+            {index === 0 && headerAction}
           </ToolSurfaceHeader>
           <AiToolContentRegion text={showCopyActions && index === 0 ? copyText : undefined} label={t('ai.workspace.tool.copyOutput')}>
             <ToolScrollArea className="ai-diff-content max-h-65 min-w-0 max-w-full" viewportClassName={showInput ? TOOL_OUTPUT_FADE_CLASS : undefined} scrollable={scrollable}>
@@ -1043,7 +1110,7 @@ function DiffCode({ text, path }: { text: string; path: string }) {
     : <span className="ai-diff-code table-cell px-3" dangerouslySetInnerHTML={{ __html: html || '&nbsp;' }} />;
 }
 
-function CodeSurface({ node, showCopyActions, scrollable, showInput }: { node: ToolNode; showCopyActions: boolean; scrollable: boolean; showInput: boolean }) {
+function CodeSurface({ node, showCopyActions, scrollable, showInput, headerAction }: { node: ToolNode; showCopyActions: boolean; scrollable: boolean; showInput: boolean; headerAction?: ReactNode }) {
   const { t } = useI18n();
   const input = asRecord(node.input);
   const code = firstString(input, ['code', 'program', 'script']) ?? formatToolValue(node.input);
@@ -1057,14 +1124,20 @@ function CodeSurface({ node, showCopyActions, scrollable, showInput }: { node: T
   const outputLabel = t('ai.workspace.tool.outputLabel');
   return (
     <div className="ai-code-block ai-tool-code-block relative my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="code">
-      {showInput && <>
-        <ToolSurfaceHeader title={language} titleClassName="ai-code-block-language" />
+      {showInput ? <>
+        <ToolSurfaceHeader title={language} titleClassName="ai-code-block-language">
+          {headerAction}
+        </ToolSurfaceHeader>
         <AiToolContentRegion text={showCopyActions ? code : undefined} label={t('ai.workspace.tool.copyInput')} showCopiedTooltip={false}>
           <ToolScrollArea className="ai-code-content max-h-65 min-w-0 max-w-full" viewportClassName={TOOL_OUTPUT_FADE_CLASS} scrollable={scrollable} label={language}>
             <pre className={cn(AI_CONTENT_CODE_CLASS, 'ai-code-block-pre ai-tool-text whitespace-pre-wrap [overflow-wrap:anywhere]')}><code>{bounded(code)}</code></pre>
           </ToolScrollArea>
         </AiToolContentRegion>
-      </>}
+      </> : headerAction ? (
+        <ToolSurfaceHeader title={outputLabel}>
+          {headerAction}
+        </ToolSurfaceHeader>
+      ) : null}
       {node.output !== null && (
         <div className={cn('ai-io-section min-w-0', showInput && 'mt-2')}>
           <AiToolContentRegion text={showCopyActions ? output : undefined} label={t('ai.workspace.tool.copyOutput')} showCopiedTooltip={!showInput}>
@@ -1106,12 +1179,189 @@ export function AiToolTextSection({ title, text, copyText, copyLabel, scrollable
   );
 }
 
-function IoSurface({ node, showCopyActions, scrollable, showInput = true }: {
+type PlanStepStatus = 'completed' | 'inProgress' | 'pending' | 'blocked' | 'failed';
+
+interface PlanSurfaceStep {
+  readonly id: string;
+  readonly title: string;
+  readonly detail: string | null;
+  readonly status: PlanStepStatus;
+}
+
+const PLAN_STATUS_ORDER: readonly PlanStepStatus[] = [
+  'completed',
+  'inProgress',
+  'pending',
+  'blocked',
+  'failed',
+];
+
+function normalizePlanStepStatus(value: unknown): PlanStepStatus {
+  if (value === 'in_progress' || value === 'inProgress') return 'inProgress';
+  if (value === 'completed' || value === 'blocked' || value === 'failed') return value;
+  return 'pending';
+}
+
+function PlanStepStatusIcon({ status }: { readonly status: PlanStepStatus }) {
+  switch (status) {
+    case 'completed':
+      return <CheckCircle2Icon data-status="completed" />;
+    case 'inProgress':
+      return <LoaderCircleIcon data-status="inProgress" />;
+    case 'blocked':
+    case 'failed':
+      return <OctagonAlertIcon data-status={status} />;
+    case 'pending':
+      return <CircleDashedIcon data-status="pending" />;
+  }
+}
+
+function extractPlanSurfaceData(node: ToolNode): {
+  readonly explanation: string | null;
+  readonly steps: readonly PlanSurfaceStep[];
+  readonly counts: Readonly<Record<PlanStepStatus, number>>;
+  readonly planVersion: number | null;
+} {
+  const input = asRecord(node.input);
+  const output = asRecord(node.output);
+  const explanation = firstString(input, ['explanation'])?.trim() || null;
+  const rawSteps = Array.isArray(input?.steps) && input.steps.length > 0
+    ? input.steps
+    : Array.isArray(output?.steps) && output.steps.length > 0
+      ? output.steps
+      : [];
+  const steps: PlanSurfaceStep[] = rawSteps.flatMap((rawStep, index) => {
+    const step = asRecord(rawStep);
+    const title = firstString(step, ['title', 'step', 'id']);
+    if (!title) return [];
+    const detail = firstString(step, ['detail', 'description'])?.trim() || null;
+    const id = firstString(step, ['id']) ?? `step-${index}`;
+    return [{ id, title, detail, status: normalizePlanStepStatus(step?.status) }];
+  });
+
+  const outputCounts = asRecord(output?.counts);
+  const counts: Record<PlanStepStatus, number> = {
+    completed: 0,
+    inProgress: 0,
+    pending: 0,
+    blocked: 0,
+    failed: 0,
+  };
+  if (outputCounts) {
+    counts.completed = firstNumber(outputCounts, ['completed']) ?? 0;
+    counts.inProgress = firstNumber(outputCounts, ['inProgress', 'in_progress']) ?? 0;
+    counts.pending = firstNumber(outputCounts, ['pending']) ?? 0;
+    counts.blocked = firstNumber(outputCounts, ['blocked']) ?? 0;
+    counts.failed = firstNumber(outputCounts, ['failed']) ?? 0;
+  } else {
+    for (const step of steps) {
+      counts[step.status] += 1;
+    }
+  }
+  const planVersion = firstNumber(output, ['planVersion', 'version']);
+  return { explanation, steps, counts, planVersion };
+}
+
+function PlanSurface({ node, compact, showCopyActions, scrollable, showInput, headerAction }: {
+  readonly node: ToolNode;
+  readonly compact: boolean;
+  readonly showCopyActions: boolean;
+  readonly scrollable: boolean;
+  readonly showInput: boolean;
+  readonly headerAction?: ReactNode;
+}) {
+  const { t } = useI18n();
+  const { explanation, steps, counts, planVersion } = useMemo(() => extractPlanSurfaceData(node), [node]);
+  const progressParts = PLAN_STATUS_ORDER.flatMap((status) => (
+    counts[status] > 0 ? [t(`ai.workspace.tasks.${status}`, { count: counts[status] })] : []
+  ));
+  const progressText = progressParts.join(t('ai.workspace.turnProcess.separator'));
+  const hasStructuredContent = Boolean(explanation || steps.length > 0 || progressText);
+  if (node.state === 'failed' || node.state === 'rejected' || !hasStructuredContent) {
+    return <IoSurface node={node} compact={compact} showCopyActions={showCopyActions} scrollable={scrollable} showInput={showInput} headerAction={headerAction} />;
+  }
+
+  const copyLines: string[] = [];
+  if (explanation) copyLines.push(explanation);
+  for (const step of steps) {
+    const statusLabel = t(`ai.workspace.tasks.status.${step.status}`);
+    copyLines.push(`- [${statusLabel}] ${step.title}`);
+    if (step.detail) copyLines.push(`  ${step.detail}`);
+  }
+  if (copyLines.length === 0 && progressText) copyLines.push(progressText);
+  const copyText = copyLines.join('\n');
+
+  return (
+    <div className="ai-plan-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="plan">
+      <ToolSurfaceHeader
+        title={(
+          <span className="inline-flex min-w-0 items-baseline gap-1.5">
+            <span className="truncate">{progressText || t('ai.workspace.tasks.title')}</span>
+            {planVersion !== null && (
+              <span className="ai-plan-version shrink-0 text-[11px] tabular-nums">
+                v{planVersion}
+              </span>
+            )}
+          </span>
+        )}
+        copyText={showCopyActions && copyText ? copyText : undefined}
+        copyLabel={t('ai.workspace.tool.copyOutput')}
+      >
+        {headerAction}
+      </ToolSurfaceHeader>
+      {(explanation || steps.length > 0) && (
+        <ToolScrollArea
+          className="ai-plan-content max-h-65 min-w-0 max-w-full"
+          contentClassName="flex min-w-0 flex-col gap-2 px-3.5 pt-1 pb-3"
+          viewportClassName={TOOL_OUTPUT_FADE_CLASS}
+          scrollable={scrollable}
+          horizontal={false}
+          label={t('ai.workspace.tasks.title')}
+        >
+          {explanation && (
+            <p className="ai-plan-explanation m-0 whitespace-pre-wrap [overflow-wrap:anywhere] text-xs leading-5">
+              {explanation}
+            </p>
+          )}
+          {steps.length > 0 && (
+            <ul className="ai-plan-steps m-0 flex list-none flex-col gap-1.5 p-0">
+              {steps.map((step) => (
+                <li
+                  key={step.id}
+                  className="ai-plan-step flex min-w-0 items-start gap-1"
+                  data-status={step.status}
+                >
+                  <span className="ai-plan-step-status mt-0.5 grid size-4 shrink-0 place-items-center" aria-hidden="true">
+                    <PlanStepStatusIcon status={step.status} />
+                  </span>
+                  <span className="sr-only">{t(`ai.workspace.tasks.status.${step.status}`)}: </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="ai-plan-step-title [overflow-wrap:anywhere] text-xs leading-5">
+                      {step.title}
+                    </div>
+                    {step.detail && (
+                      <div className="ai-plan-step-detail mt-0.5 whitespace-pre-wrap [overflow-wrap:anywhere] text-[11px] leading-4">
+                        {step.detail}
+                      </div>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </ToolScrollArea>
+      )}
+    </div>
+  );
+}
+
+function IoSurface({ node, showCopyActions, scrollable, showInput = true, headerAction }: {
   node: ToolNode;
   compact: boolean;
   showCopyActions: boolean;
   scrollable: boolean;
   showInput?: boolean;
+  headerAction?: ReactNode;
 }) {
   const { t } = useI18n();
   const input = bounded(formatToolValue(node.input));
@@ -1123,24 +1373,30 @@ function IoSurface({ node, showCopyActions, scrollable, showInput = true }: {
           copyText={showCopyActions ? formatToolValue(node.input) : undefined}
           copyLabel={t('ai.workspace.tool.copyInput')} scrollable={scrollable} />
       )}
-      {output && (
+      {(output || Boolean(headerAction)) && (
         <div className="ai-io-section min-w-0 shrink-0 overflow-hidden">
-          {(showInput || showCopyActions) && <ToolSurfaceHeader title={t('ai.workspace.tool.outputLabel')} titleClassName={showInput ? 'ai-io-label' : undefined} />}
-          <AiToolContentRegion text={showCopyActions ? outputText(node) : undefined} label={t('ai.workspace.tool.copyOutput')}>
-            <ToolScrollArea className="ai-io-output max-h-65 min-w-0 max-w-full" scrollable={scrollable}>
-              <pre className={cn(AI_CONTENT_CODE_CLASS, 'ai-io-text whitespace-pre-wrap [overflow-wrap:anywhere]')} data-error={node.state === 'failed' || undefined}>
-                {output}
-              </pre>
-            </ToolScrollArea>
-          </AiToolContentRegion>
+          {(showInput || showCopyActions || Boolean(headerAction)) && (
+            <ToolSurfaceHeader title={t('ai.workspace.tool.outputLabel')} titleClassName={showInput ? 'ai-io-label' : undefined}>
+              {headerAction}
+            </ToolSurfaceHeader>
+          )}
+          {output && (
+            <AiToolContentRegion text={showCopyActions ? outputText(node) : undefined} label={t('ai.workspace.tool.copyOutput')}>
+              <ToolScrollArea className="ai-io-output max-h-65 min-w-0 max-w-full" scrollable={scrollable}>
+                <pre className={cn(AI_CONTENT_CODE_CLASS, 'ai-io-text whitespace-pre-wrap [overflow-wrap:anywhere]')} data-error={node.state === 'failed' || undefined}>
+                  {output}
+                </pre>
+              </ToolScrollArea>
+            </AiToolContentRegion>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function TrashSurface({ node, showCopyActions, scrollable, showInput }: { readonly node: ToolNode; readonly showCopyActions: boolean; readonly scrollable: boolean; readonly showInput: boolean }) {
-  if (node.state !== 'succeeded') return <IoSurface node={node} compact={false} showCopyActions={showCopyActions} scrollable={scrollable} showInput={showInput} />;
+function TrashSurface({ node, showCopyActions, scrollable, showInput, headerAction }: { readonly node: ToolNode; readonly showCopyActions: boolean; readonly scrollable: boolean; readonly showInput: boolean; readonly headerAction?: ReactNode }) {
+  if (node.state !== 'succeeded') return <IoSurface node={node} compact={false} showCopyActions={showCopyActions} scrollable={scrollable} showInput={showInput} headerAction={headerAction} />;
   return <AiTrashRecoveryNotice />;
 }
 
@@ -1162,6 +1418,7 @@ export function AiToolExpandedContent({
   scrollable = true,
   diffModel: precomputedDiff,
   diffCopyAction,
+  headerAction,
 }: {
   readonly node: ToolNode;
   readonly compact?: boolean;
@@ -1170,23 +1427,24 @@ export function AiToolExpandedContent({
   readonly scrollable?: boolean;
   readonly diffModel?: DiffModel;
   readonly diffCopyAction?: ReactNode;
+  readonly headerAction?: ReactNode;
 }) {
   const variant = classifyAiTool(node.name, node.nativeName);
   const diagnostic = failureOnly(node);
   if (diagnostic && !httpProbeTimeoutKind(diagnostic)) {
-    return <FailureSurface node={node} diagnostic={diagnostic} showCopyActions={showCopyActions} scrollable={scrollable} />;
+    return <FailureSurface node={node} diagnostic={diagnostic} showCopyActions={showCopyActions} scrollable={scrollable} headerAction={headerAction} />;
   }
-  if (node.name === 'trash_file') return <TrashSurface node={node} showCopyActions={showCopyActions} scrollable={scrollable} showInput={showInput} />;
+  if (node.name === 'trash_file') return <TrashSurface node={node} showCopyActions={showCopyActions} scrollable={scrollable} showInput={showInput} headerAction={headerAction} />;
   switch (variant) {
-    case 'terminal': return <TerminalSurface node={node} showCopyActions={showCopyActions} scrollable={scrollable} showInput={showInput} />;
-    case 'read': return <ReadSurface node={node} showCopyActions={showCopyActions} showInput={showInput} scrollable={scrollable} />;
-    case 'search': return <SearchSurface node={node} showCopyActions={showCopyActions} showInput={showInput} scrollable={scrollable} />;
-    case 'web': return <WebSurface node={node} showCopyActions={showCopyActions} showInput={showInput} scrollable={scrollable} />;
+    case 'terminal': return <TerminalSurface node={node} showCopyActions={showCopyActions} scrollable={scrollable} showInput={showInput} headerAction={headerAction} />;
+    case 'read': return <ReadSurface node={node} showCopyActions={showCopyActions} showInput={showInput} scrollable={scrollable} headerAction={headerAction} />;
+    case 'search': return <SearchSurface node={node} showCopyActions={showCopyActions} showInput={showInput} scrollable={scrollable} headerAction={headerAction} />;
+    case 'web': return <WebSurface node={node} showCopyActions={showCopyActions} showInput={showInput} scrollable={scrollable} headerAction={headerAction} />;
     case 'write':
-    case 'edit': return <DiffSurface node={node} compact={compact} model={precomputedDiff} showCopyActions={showCopyActions} scrollable={scrollable} copyAction={diffCopyAction} showInput={showInput} />;
-    case 'code': return <CodeSurface node={node} showCopyActions={showCopyActions} scrollable={scrollable} showInput={showInput} />;
-    case 'plan':
-    case 'generic': return <IoSurface node={node} compact={compact} showCopyActions={showCopyActions} showInput={showInput} scrollable={scrollable} />;
+    case 'edit': return <DiffSurface node={node} compact={compact} model={precomputedDiff} showCopyActions={showCopyActions} scrollable={scrollable} copyAction={diffCopyAction} showInput={showInput} headerAction={headerAction} />;
+    case 'code': return <CodeSurface node={node} showCopyActions={showCopyActions} scrollable={scrollable} showInput={showInput} headerAction={headerAction} />;
+    case 'plan': return <PlanSurface node={node} compact={compact} showCopyActions={showCopyActions} scrollable={scrollable} showInput={showInput} headerAction={headerAction} />;
+    case 'generic': return <IoSurface node={node} compact={compact} showCopyActions={showCopyActions} showInput={showInput} scrollable={scrollable} headerAction={headerAction} />;
   }
 }
 
@@ -1372,14 +1630,71 @@ function StandardAiToolRow({
     && subagentSummary.title !== 'Agent orchestration'
     ? subagentSummary.title
     : null;
-  const summary = subagentSummary
-    ? readableSubagentTitle ?? subagentRoleLabel(subagentSummary.role, t)
-    : toolDisplaySummary(node, t);
+  const linkedJob = node.linkedBackgroundJob;
+  const linkedJobSummary = linkedJob
+    ? node.state === 'running'
+      ? t('ai.workspace.tool.running')
+      : linkedJob.observedState === 'exited' && linkedJob.exitCode !== null && linkedJob.exitCode !== 0
+        ? t('ai.workspace.tool.exitCode', { code: linkedJob.exitCode })
+        : linkedJob.observedState === 'exited'
+          ? t('ai.workspace.tool.backgroundJob.completed')
+          : linkedJob.observedState === 'running'
+            ? t('ai.workspace.tool.execution.running')
+            : linkedJob.observedState === 'rejected'
+              ? t('ai.workspace.tool.execution.notStarted')
+              : linkedJob.observedState === 'uncertain'
+                ? t('ai.workspace.tool.uncertain')
+                : t(stateKey)
+    : null;
+  const summary = linkedJobSummary
+    ?? (subagentSummary
+      ? readableSubagentTitle ?? subagentRoleLabel(subagentSummary.role, t)
+      : toolDisplaySummary(node, t));
   const hasError = !node.recoveredByToolKey && (node.state === 'failed' || node.state === 'rejected');
-  const title = toolTitle(node, variant, t);
+  const statusLabel = hasError ? t(stateKey) : null;
+  const showStatusLabel = Boolean(statusLabel && summary !== statusLabel);
+  const title = linkedJob
+    ? t(linkedJob.action === 'kill' ? 'ai.workspace.tool.title.stopBackgroundJob' : 'ai.workspace.tool.title.checkBackgroundJob')
+    : toolTitle(node, variant, t);
   const model = useMemo(() => variant === 'write' || variant === 'edit' ? diffModel(node) : null, [node, variant]);
   const changeStat = model ? diffStat(model) : null;
   const storedOutputId = storedToolOutputId(node);
+  const storedOutputAction = storedOutputId && onOpenStoredOutput ? (
+    <Button
+      type="button"
+      size="xs"
+      variant="ghost"
+      className="shrink-0"
+      onClick={() => onOpenStoredOutput(node, storedOutputId)}
+    >
+      {t('ai.workspace.details.openStoredOutput')}
+    </Button>
+  ) : undefined;
+  if (linkedJob && !hasError && node.state !== 'uncertain' && !storedOutputId) {
+    return (
+      <div
+        className="ai-tool-row-root flex min-w-0 flex-col"
+        data-tool-state={node.state}
+        data-tool-variant={variant}
+        data-tool-linked-background-job={linkedJob.processHandle}
+      >
+        <span className="sr-only" role="status">{t(stateKey)}</span>
+        <div className={AI_TOOL_ROW_CLASS}>
+          <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
+            {node.state === 'running' ? <LoaderCircleIcon className="animate-spin" /> : <Icon />}
+          </span>
+          <span className={AI_DISCLOSURE_TITLE_CLASS}>{title}</span>
+          <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
+          <span className={AI_DISCLOSURE_SUMMARY_CLASS}>{summary}</span>
+          {node.durationMs !== null && (
+            <span className="ai-tool-meta ml-2 inline-flex shrink-0 items-baseline gap-2 whitespace-nowrap">
+              <span className="ai-tool-duration">{formatToolDuration(node.durationMs, t)}</span>
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div
@@ -1416,9 +1731,12 @@ function StandardAiToolRow({
           >
             {summary}
           </span>
-          {(changeStat || node.durationMs !== null) && (
+          {(changeStat || showStatusLabel || node.durationMs !== null) && (
             <span className="ai-tool-meta ml-2 inline-flex shrink-0 items-baseline gap-2 whitespace-nowrap">
               {changeStat && <span className="ai-tool-diff-stat">{changeStat}</span>}
+              {showStatusLabel && (
+                <span className="ai-subagent-row-meta" data-state="failed">{statusLabel}</span>
+              )}
               {node.durationMs !== null && (
                 <span className="ai-tool-duration">{formatToolDuration(node.durationMs, t)}</span>
               )}
@@ -1427,18 +1745,12 @@ function StandardAiToolRow({
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="ai-tool-body flex min-w-0 max-w-full flex-col">
-            <AiToolExpandedContent node={node} compact diffModel={model ?? undefined} />
-            {storedOutputId && onOpenStoredOutput && (
-              <Button
-                type="button"
-                size="xs"
-                variant="outline"
-                className="mt-1.5 ml-1 shrink-0 self-start"
-                onClick={() => onOpenStoredOutput(node, storedOutputId)}
-              >
-                {t('ai.workspace.details.openStoredOutput')}
-              </Button>
-            )}
+            <AiToolExpandedContent
+              node={node}
+              compact
+              diffModel={model ?? undefined}
+              headerAction={storedOutputAction}
+            />
           </div>
         </CollapsibleContent>
       </div>

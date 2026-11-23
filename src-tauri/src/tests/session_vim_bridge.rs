@@ -67,6 +67,7 @@ impl EditorAgent {
             context: NativeExecutionContext {
                 #[cfg(windows)]
                 windows_sandbox_required: false,
+                bound_terminal_surface: false,
                 turn_id: "editor-turn".into(),
                 step_id: "editor-step".into(),
                 request: AgentRequestNative {

@@ -39,6 +39,12 @@ class ToolLiveOutputStore {
     this.notify(key);
   }
 
+  clearCallIfIdle(sessionId: string, callId: string): void {
+    const key = progressKey(sessionId, callId);
+    if (this.listeners.has(key)) return;
+    this.entries.delete(key);
+  }
+
   clearSession(sessionId: string): void {
     const prefix = `${sessionId}\0`;
     for (const key of [...this.entries.keys()]) {
@@ -87,6 +93,7 @@ class ToolLiveOutputStore {
     this.listening = true;
     const generation = ++this.subscriptionGeneration;
     void listenToAgentToolProgress((event) => {
+      if (this.subscriptionGeneration !== generation) return;
       this.ingest(event.payload);
     }).then((unlisten) => {
       if (this.subscriptionGeneration !== generation || this.activeSubscribers === 0) {
@@ -126,7 +133,7 @@ export function useToolLiveOutput(
   const value = useSyncExternalStore(subscribe, snapshot, snapshot);
 
   useEffect(() => {
-    if (!active) toolLiveOutputStore.clearCall(sessionId, callId);
+    if (!active) toolLiveOutputStore.clearCallIfIdle(sessionId, callId);
   }, [active, callId, sessionId]);
 
   return value;

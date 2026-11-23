@@ -129,18 +129,7 @@
   animation: ai-tool-row-sweep 2.6s ease-out infinite;
 }
 
-.ai-subagent-card[data-state='failed'] .ai-subagent-row-trigger > .ai-disclosure-leading > .ai-disclosure-chevron {
-  color: var(--ai-error);
-}
-
-.ai-subagent-card[data-openable] .ai-subagent-row-trigger:is(:hover, :focus-visible) > .ai-disclosure-leading > :not(.ai-disclosure-chevron) {
-  opacity: 0;
-}
-
-.ai-subagent-card[data-openable] .ai-subagent-row-trigger:is(:hover, :focus-visible) > .ai-disclosure-leading > .ai-disclosure-chevron {
-  opacity: 1;
-}
-
+.ai-subagent-card[data-openable] .ai-subagent-row-trigger:is(:hover, :focus-visible) > .ai-disclosure-leading,
 .ai-subagent-card[data-openable] .ai-subagent-row-trigger:is(:hover, :focus-visible) .ai-disclosure-title {
   color: var(--ai-text);
 }

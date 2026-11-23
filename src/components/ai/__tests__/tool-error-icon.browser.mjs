@@ -66,26 +66,36 @@ try {
             const context = `${engine.name()}/${locale}/${theme}/${width}`;
             await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
             await page.mouse.move(width - 1, 600);
-            const dot = await row.locator('.ai-state-dot').evaluate(element => getComputedStyle(element).backgroundColor);
+            const dotEl = row.locator('.ai-state-dot');
+            const titleEl = row.locator('.ai-disclosure-title');
+            const dot = await dotEl.evaluate(element => getComputedStyle(element).backgroundColor);
             const summary = await row.locator('.ai-disclosure-summary').evaluate(element => getComputedStyle(element).color);
+            const idleTitle = await titleEl.evaluate(element => getComputedStyle(element).color);
             assert.notEqual(dot, summary, `${context}: summary retains its muted color`);
+            assert.equal(await dotEl.evaluate(element => getComputedStyle(element).opacity), '1');
             assert.equal(await arrow.evaluate(element => getComputedStyle(element).opacity), '0');
             await row.hover();
-            assert.equal(await arrow.evaluate(element => getComputedStyle(element).opacity), '1');
-            assert.equal(await arrow.evaluate(element => getComputedStyle(element).color), dot,
-              `${context}: hovered arrow matches the red failure dot`);
+            assert.equal(await dotEl.evaluate(element => getComputedStyle(element).opacity), '1',
+              `${context}: hover keeps the red failure dot visible`);
+            assert.equal(await arrow.evaluate(element => getComputedStyle(element).opacity), '0',
+              `${context}: hover does not swap the icon to a chevron`);
+            assert.notEqual(await titleEl.evaluate(element => getComputedStyle(element).color), idleTitle,
+              `${context}: hover highlights the row title`);
             await page.screenshot({ path: join(artifacts, `${engine.name()}-${locale}-${theme}-${width}-hover.png`) });
             await page.mouse.move(width - 1, 600);
             await page.keyboard.press('Tab');
             await row.focus();
             assert.equal(await row.evaluate(element => element.matches(':focus-visible')), true);
-            assert.equal(await arrow.evaluate(element => getComputedStyle(element).opacity), '1');
-            assert.equal(await arrow.evaluate(element => getComputedStyle(element).color), dot,
-              `${context}: keyboard focus preserves the red arrow`);
+            assert.equal(await dotEl.evaluate(element => getComputedStyle(element).opacity), '1',
+              `${context}: keyboard focus keeps the red failure dot visible`);
+            assert.equal(await arrow.evaluate(element => getComputedStyle(element).opacity), '0',
+              `${context}: keyboard focus does not swap the icon to a chevron`);
             await row.press('Enter');
             assert.equal(await row.getAttribute('aria-expanded'), 'true');
-            assert.equal(await arrow.evaluate(element => getComputedStyle(element).color), dot,
-              `${context}: expanded arrow remains red`);
+            assert.equal(await dotEl.evaluate(element => getComputedStyle(element).opacity), '1',
+              `${context}: expanded row keeps the red failure dot visible`);
+            assert.equal(await arrow.evaluate(element => getComputedStyle(element).opacity), '0',
+              `${context}: expanded row does not swap the icon to a chevron`);
             await row.press('Enter');
             await row.evaluate(element => element.blur());
           }
@@ -93,10 +103,12 @@ try {
           await page.locator('[data-tool-recovered="true"]').waitFor();
           await row.hover();
           const recovered = await row.evaluate(element => ({
-            arrow: getComputedStyle(element.querySelector('.ai-disclosure-chevron')).color,
-            muted: getComputedStyle(element.querySelector('.ai-disclosure-leading')).color,
+            leading: getComputedStyle(element.querySelector('.ai-disclosure-leading')).color,
+            title: getComputedStyle(element.querySelector('.ai-disclosure-title')).color,
+            arrowOpacity: getComputedStyle(element.querySelector('.ai-disclosure-chevron')).opacity,
           }));
-          assert.equal(recovered.arrow, recovered.muted, 'Recovered tools restore the normal arrow color');
+          assert.equal(recovered.leading, recovered.title, 'Hovered recovered tools highlight icon and title together');
+          assert.equal(recovered.arrowOpacity, '0', 'Hovered recovered tools do not swap the icon to a chevron');
           assert.equal(await row.locator('.ai-disclosure-summary[data-error]').count(), 0);
           assert.deepEqual(errors, []);
           await page.close();

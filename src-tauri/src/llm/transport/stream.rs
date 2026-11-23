@@ -262,19 +262,20 @@ pub(in crate::llm) fn normalize_provider_error(status: u16, message: &str) -> No
             "insufficient_quota"
                 | "billing_hard_limit_reached"
                 | "content_policy_violation"
-                | "invalid_request_error"
                 | "model_not_found"
         )
     ) {
         NormalizedModelErrorKind::Terminal
-    } else if matches!(code.as_deref(), Some("context_length_exceeded")) {
+    } else if matches!(code.as_deref(), Some("context_length_exceeded"))
+        || (context_too_large && !matches!(status, 401 | 403 | 429))
+    {
         NormalizedModelErrorKind::ContextTooLarge
+    } else if matches!(code.as_deref(), Some("invalid_request_error")) {
+        NormalizedModelErrorKind::Terminal
     } else if matches!(status, 401 | 403) {
         NormalizedModelErrorKind::Authentication
     } else if status == 429 {
         NormalizedModelErrorKind::RateLimited
-    } else if context_too_large {
-        NormalizedModelErrorKind::ContextTooLarge
     } else if matches!(status, 408 | 409 | 425 | 500..=599) {
         NormalizedModelErrorKind::Retryable
     } else {
@@ -390,5 +391,29 @@ impl StreamDeadline {
             format!("{stream_name} returned an empty response body"),
             "EMPTY_RESPONSE",
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn anthropic_invalid_request_prompt_too_long_is_context_too_large() {
+        let error = normalize_provider_error(
+            400,
+            r#"{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 210000 tokens > 200000 maximum"}}"#,
+        );
+        assert_eq!(error.kind, NormalizedModelErrorKind::ContextTooLarge);
+        assert_eq!(error.code.as_deref(), Some("invalid_request_error"));
+    }
+
+    #[test]
+    fn non_context_invalid_request_error_remains_terminal() {
+        let error = normalize_provider_error(
+            400,
+            r#"{"type":"error","error":{"type":"invalid_request_error","message":"messages: field required"}}"#,
+        );
+        assert_eq!(error.kind, NormalizedModelErrorKind::Terminal);
     }
 }

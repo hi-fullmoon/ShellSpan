@@ -256,6 +256,9 @@ describe('AiWorkspaceRoot conversation structure', () => {
     rerender(<AiWorkspaceRoot mode="agent" scope="terminal" view={null} historyScopeLabel={target} terminalConnected />);
     expect(context()).toHaveTextContent(target);
     expect(context()).toHaveTextContent(locale === 'zh-CN' ? '已连接' : 'Connected');
+    rerender(<AiWorkspaceRoot mode="agent" scope="terminal" view={null} historyScopeLabel={target} terminalConnected={false} terminalReconnecting />);
+    expect(context()).toHaveTextContent(target);
+    expect(context()).toHaveTextContent(locale === 'zh-CN' ? '正在重连' : 'Reconnecting');
     rerender(<AiWorkspaceRoot mode="agent" scope="terminal" view={null} historyScopeLabel={target} terminalConnected={false} />);
     expect(context()).toHaveTextContent(target);
     expect(context()).toHaveTextContent(locale === 'zh-CN' ? '未连接' : 'Disconnected');

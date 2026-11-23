@@ -223,6 +223,14 @@ pub(crate) trait NativeToolRuntime: Send + Sync {
 
     fn prepare(&self, request: NativeToolRequest) -> Result<NativeToolPreparation, String>;
 
+    fn prepare_with_approved_call(
+        &self,
+        request: NativeToolRequest,
+        _approved_call: Option<&RecordedToolCall>,
+    ) -> Result<NativeToolPreparation, String> {
+        self.prepare(request)
+    }
+
     fn execute(
         &self,
         token: &str,
@@ -2033,11 +2041,24 @@ impl AgentToolPipeline {
     }
 
     fn prepare_native(&self, request: &NativeToolRequest) -> Result<NativeToolPreparation, String> {
+        self.prepare_native_with_approved_call(request, None)
+    }
+
+    fn prepare_native_with_approved_call(
+        &self,
+        request: &NativeToolRequest,
+        approved_call: Option<&RecordedToolCall>,
+    ) -> Result<NativeToolPreparation, String> {
         super::model::reject_omitted_input_replay(
             &request.model_call.name,
             &request.model_call.arguments,
         )?;
-        let preparation = self.native.prepare(request.clone())?;
+        let preparation = match approved_call {
+            Some(approved) => self
+                .native
+                .prepare_with_approved_call(request.clone(), Some(approved))?,
+            None => self.native.prepare(request.clone())?,
+        };
         if let Err(error) = self.validate_preparation(request, &preparation) {
             self.native.abandon(&preparation.token);
             return Err(error);

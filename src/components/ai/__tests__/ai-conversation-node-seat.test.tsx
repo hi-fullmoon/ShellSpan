@@ -426,7 +426,7 @@ describe('AiConversationNodeList', () => {
     expect(disclosure).toHaveAttribute('aria-expanded', 'false');
     expect(disclosure.querySelector('.ai-disclosure-summary')).toHaveClass('truncate');
     expect(disclosure.querySelector('.ai-disclosure-summary')).not.toHaveClass('line-clamp-2');
-    expect(getComputedStyle(disclosure.querySelector('.ai-disclosure-leading > svg:first-child')!).translate).toBe('0 -1px');
+    expect(getComputedStyle(disclosure.querySelector('.ai-disclosure-leading > svg:first-child')!).translate).toBe('0 -0.5px');
     expect(getComputedStyle(disclosure.querySelector('.ai-disclosure-leading > svg:first-child')!).marginInlineEnd).toBe('0px');
     expect(getComputedStyle(disclosure.querySelector('.ai-disclosure-leading > .ai-disclosure-chevron')!).marginInlineEnd).toBe('0px');
     expect(container.querySelector('.ai-reasoning-body')).toBeNull();
@@ -434,6 +434,8 @@ describe('AiConversationNodeList', () => {
     expect(container.querySelector('.ai-reasoning-body'))
       .toHaveTextContent('Inspect the service state Choose the safe read-only command.');
     expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+    expect(getComputedStyle(disclosure.querySelector('.ai-disclosure-leading > svg:first-child')!).opacity).not.toBe('0');
+    expect(getComputedStyle(disclosure.querySelector('.ai-disclosure-leading > .ai-disclosure-chevron')!).opacity).toBe('0');
     expect(disclosure.querySelector('.ai-disclosure-summary')).toHaveClass('truncate');
     expect(disclosure.querySelector('.ai-disclosure-summary')).not.toHaveClass('whitespace-pre-wrap', 'overflow-auto');
     await user.click(disclosure);
@@ -704,7 +706,7 @@ describe('AiConversationNodeList', () => {
     const failedSeat = container.querySelector('[data-ai-node-key="tool:future"]') as HTMLElement;
 
     expect(runningSeat.querySelector('[data-tool-state="running"]')).toHaveAttribute('data-tool-variant', 'terminal');
-    expect(getComputedStyle(runningSeat.querySelector('.ai-tool-row .ai-disclosure-leading > svg:first-child')!).translate).toBe('0 -1px');
+    expect(getComputedStyle(runningSeat.querySelector('.ai-tool-row .ai-disclosure-leading > svg:first-child')!).translate).toBe('0 -0.5px');
     expect(completedSeat.querySelector('[data-tool-state="succeeded"]')).toHaveAttribute('data-tool-variant', 'read');
     expect(completedSeat).toHaveTextContent('125 ms');
     expect(failedSeat.querySelector('[data-tool-state="failed"]')).toHaveAttribute('data-tool-fallback');
@@ -752,7 +754,7 @@ describe('AiConversationNodeList', () => {
     expect(container.querySelector('.ai-produced-files')).toHaveClass('min-h-6', 'items-center');
     expect(container.querySelector('.ai-produced-files-label')).toHaveClass('gap-1');
     expect(container.querySelector('.ai-produced-files-label > span')).toHaveClass('size-4', 'items-center', 'justify-center');
-    expect(getComputedStyle(container.querySelector('.ai-produced-files-label svg')!).translate).toBe('0 -1px');
+    expect(getComputedStyle(container.querySelector('.ai-produced-files-label svg')!).translate).toBe('0 -0.5px');
     await user.click(screen.getByRole('button', { name: 'Open artifact Deployment report' }));
     expect(openArtifact).toHaveBeenCalledWith(artifact);
   });
@@ -776,7 +778,7 @@ describe('AiConversationNodeList', () => {
     expect(approvalRow.querySelector('.ai-disclosure-leading')).toHaveClass('mr-1', 'size-4');
     expect(approvalRow.querySelector('.ai-disclosure-title')).toHaveClass('shrink-0');
     expect(getComputedStyle(approvalRow).lineHeight).toBe(getComputedStyle(toolRow.querySelector('.ai-disclosure-title')!).lineHeight);
-    expect(getComputedStyle(approvalRow.querySelector('svg')!).translate).toBe('0 0');
+    expect(getComputedStyle(approvalRow.querySelector('svg')!).translate).toBe('0 -0.5px');
   });
 
   it('renders only real tail metrics and keeps long generic payloads bounded at narrow widths', async () => {

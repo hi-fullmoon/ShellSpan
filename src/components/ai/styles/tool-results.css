@@ -216,6 +216,54 @@
   color: var(--ai-error);
 }
 
+.ai-plan-block {
+  border: 1px solid var(--ai-border-soft);
+  border-radius: var(--ai-content-radius);
+  background: var(--ai-code-block);
+  color: var(--ai-text-secondary);
+}
+
+.ai-plan-version {
+  color: var(--ai-text-caption);
+}
+
+.ai-plan-explanation {
+  color: var(--ai-text-secondary);
+}
+
+.ai-plan-step-title {
+  color: var(--ai-text);
+}
+
+.ai-plan-step-detail {
+  color: var(--ai-text-muted);
+}
+
+.ai-plan-step-status > svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ai-plan-step-status [data-status='pending'] {
+  color: var(--ai-text-caption);
+}
+
+.ai-plan-step-status [data-status='completed'] {
+  color: var(--ai-success);
+}
+
+.ai-plan-step-status [data-status='inProgress'] {
+  color: var(--ai-accent);
+}
+
+.ai-plan-step-status [data-status='blocked'] {
+  color: var(--ai-warning);
+}
+
+.ai-plan-step-status [data-status='failed'] {
+  color: var(--ai-error);
+}
+
 .ai-produced-files {
   color: var(--ai-text-muted);
   font-size: 13px;
@@ -242,10 +290,6 @@
 
 .ai-transcript-notice[data-variant='approval'] .ai-disclosure-leading {
   color: var(--ai-warning);
-}
-
-.ai-transcript-notice .ai-disclosure-leading > svg:not(.ai-disclosure-chevron):not([data-slot='spinner']) {
-  translate: 0 0;
 }
 
 .ai-transcript-notice-detail {

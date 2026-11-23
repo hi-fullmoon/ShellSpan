@@ -365,12 +365,25 @@ function flattenChatNodes(nodes: readonly AiConversationNode[]): readonly AiConv
 }
 
 function pendingApproval(nodes: readonly AiConversationNode[]): AiPendingApproval | null {
-  const activeTurn = nodes.find(candidate => candidate.kind === 'turnProcess'
-    && !candidate.hasEndBoundary && (candidate.status === 'running' || candidate.status === 'partial'));
-  const node = activeTurn?.kind === 'turnProcess'
-    ? activeTurn.children.find(candidate => candidate.kind === 'approvalMarker' && candidate.status === 'requested')
-    : undefined;
-  if (node?.kind !== 'approvalMarker' || node.turnId === null || node.stepId === null) return null;
+  let node: Extract<AiConversationNode, { kind: 'approvalMarker' }> | undefined;
+  for (let index = nodes.length - 1; index >= 0; index -= 1) {
+    const candidate = nodes[index];
+    if (
+      candidate.kind !== 'turnProcess'
+      || candidate.hasEndBoundary
+      || (candidate.status !== 'running' && candidate.status !== 'partial')
+    ) continue;
+    const marker = candidate.children.find(
+      (child): child is Extract<AiConversationNode, { kind: 'approvalMarker' }> => (
+        child.kind === 'approvalMarker' && child.status === 'requested'
+      ),
+    );
+    if (marker) {
+      node = marker;
+      break;
+    }
+  }
+  if (!node || node.turnId === null || node.stepId === null) return null;
   const tool = findConversationTool(nodes, node);
   const args = tool?.nativeName === 'exec_command' && tool.input && typeof tool.input === 'object'
     && !Array.isArray(tool.input) ? tool.input as Record<string, unknown> : null;

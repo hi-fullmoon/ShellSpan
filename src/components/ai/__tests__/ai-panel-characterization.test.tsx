@@ -98,6 +98,7 @@ describe('AI panel production path and immutable shell', () => {
     expect(panel.querySelector('[data-slot="empty-state-title"]')).toHaveTextContent('ai.workbench.emptyTitle');
     const header = panel.querySelector('[data-slot="ai-workspace-header"]');
     expect(header).toHaveClass('h-10', 'items-center', 'px-[var(--ai-shell-clearance)]');
+    expect(within(panel).queryByRole('button', { name: 'ai.close' })).toBeNull();
     expect(within(panel).getByRole('textbox'))
       .toHaveAttribute('aria-label', 'ai.workbench.composerPlaceholder');
     expect(panel.querySelector('[data-slot="panel-empty-state"]')).toBeNull();

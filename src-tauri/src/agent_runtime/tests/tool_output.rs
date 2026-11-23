@@ -811,3 +811,31 @@ fn replay_artifacts_are_inaccessible_and_tampered_results_are_rejected() {
     .unwrap_err()
     .contains("tampered"));
 }
+
+#[test]
+fn result_reference_preserves_bounded_combined_output_and_execution_preview() {
+    let (_root, _sessions, artifacts) = stores();
+    let long_output = format!("=== CWD: /root ===\n{}", "23019431 pyi 9150\n".repeat(600));
+    let original = json!({
+        "channel": "terminal",
+        "execution": "completed",
+        "exitCode": 0,
+        "stdout": "",
+        "stderr": "",
+        "combinedOutput": long_output,
+    });
+    let artifact = artifacts
+        .store_json("source", "tool-result", "Terminal output", &original)
+        .unwrap();
+    let reference = result_reference(&original, &artifact, 128);
+    assert_eq!(reference["execution"], json!("completed"));
+    assert_eq!(reference["channel"], json!("terminal"));
+    assert_eq!(reference["exitCode"], json!(0));
+    assert_eq!(reference["readWith"], json!(READ_TOOL_RESULT));
+    assert_eq!(reference["artifactRef"], json!(artifact.artifact_id));
+    let preview = reference["combinedOutput"]
+        .as_str()
+        .expect("combinedOutput preview");
+    assert!(preview.starts_with("=== CWD: /root ==="));
+    assert!(preview.len() < long_output.len());
+}

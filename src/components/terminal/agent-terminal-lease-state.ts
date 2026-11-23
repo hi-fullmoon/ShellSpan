@@ -3,6 +3,7 @@ import type { TerminalInputObservation } from '@/types';
 
 export interface AgentTerminalLeaseView extends AgentTerminalLeaseEvent {
   readonly workspace?: 'terminal' | 'focus';
+  readonly rootAgentSessionId?: string;
   readonly state: 'acquired';
   /** False while the same Agent turn continues between commands; input stays locked. */
   readonly terminalOwned: boolean;

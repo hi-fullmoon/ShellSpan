@@ -99,8 +99,22 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
   const waitingForUserAction = new Set<string>();
   const pendingTurnBindings = new Map<string, Promise<void>>();
   const workspaceOwners = new Map<string, TerminalWorkspace>();
+  const rootSessionOwners = new Map<string, string>();
   const fencedTurns = new Map<string, string | undefined>();
   const pendingTurnStops = new Map<string, PendingTurnStop>();
+  const releasedOperations = new Set<string>();
+  const MAX_RELEASED_OPERATION_TOMBSTONES = 256;
+
+  const operationKey = (sessionId: string, operationId: string): string => `${sessionId}\0${operationId}`;
+  const markOperationReleased = (sessionId: string, operationId: string): void => {
+    const key = operationKey(sessionId, operationId);
+    releasedOperations.delete(key);
+    releasedOperations.add(key);
+    if (releasedOperations.size > MAX_RELEASED_OPERATION_TOMBSTONES) {
+      const oldest = releasedOperations.values().next().value;
+      if (oldest !== undefined) releasedOperations.delete(oldest);
+    }
+  };
 
   const runsBehindFocus = (agentSessionId: string): boolean =>
     useFocusStore.getState().enabled
@@ -155,6 +169,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
   const clearTurn = (agentSessionId: string): void => {
     waitingForUserAction.delete(agentSessionId);
     workspaceOwners.delete(agentSessionId);
+    rootSessionOwners.delete(agentSessionId);
     const pendingStop = pendingTurnStops.get(agentSessionId);
     if (pendingStop) clearTimeout(pendingStop.timer);
     pendingTurnStops.delete(agentSessionId);
@@ -257,16 +272,19 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
     binding: Omit<TerminalManualHandoff, 'throughSeq'>,
     workspace: TerminalWorkspace | undefined,
     focus = true,
+    rootAgentSessionId?: string,
   ): void => {
     const { sessionId, agentSessionId, taskId, turnId, acquiredAtUnixMs } = binding;
     if (turnSurfaces.has(agentSessionId)) return;
     if (workspace) workspaceOwners.set(agentSessionId, workspace);
+    const resolvedRoot = rootAgentSessionId ?? rootSessionOwners.get(agentSessionId) ?? agentSessionId;
+    rootSessionOwners.set(agentSessionId, resolvedRoot);
     const operationId = `turn:${turnId}`;
     // Preserve the frozen target even when another Agent is visible.
     turnSurfaces.set(agentSessionId, { sessionId, operationId, turnId });
     const existingOwner = agentTerminalLeaseState.get(sessionId);
     const view: AgentTerminalLeaseView = {
-      sessionId, agentSessionId, workspace, taskId, operationId, acquiredAtUnixMs,
+      sessionId, agentSessionId, rootAgentSessionId: resolvedRoot, workspace, taskId, operationId, acquiredAtUnixMs,
       state: 'acquired',
       terminalOwned: false,
       waitingForUserAction: waitingForUserAction.has(agentSessionId),
@@ -440,13 +458,17 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         return;
       }
       if (lease.state === 'acquired') {
+        if (releasedOperations.has(operationKey(lease.sessionId, lease.operationId))) return;
         await pendingTurnBindings.get(lease.agentSessionId);
-        if (disposed) return;
+        if (disposed || releasedOperations.has(operationKey(lease.sessionId, lease.operationId))) return;
       }
       if (lease.state === 'released' && lease.reason === 'handedOff') {
+        markOperationReleased(lease.sessionId, lease.operationId);
         const active = activeLeases.get(lease.sessionId);
         if (active?.lease.operationId === lease.operationId) {
           cleanup(active, true);
+          clearTurn(lease.agentSessionId);
+        } else {
           clearTurn(lease.agentSessionId);
         }
         await refreshTerminalIntegrationState(lease.sessionId);
@@ -472,6 +494,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         return;
       }
       if (lease.state === 'released') {
+        markOperationReleased(lease.sessionId, lease.operationId);
         const active = activeLeases.get(lease.sessionId);
         if (active?.lease.operationId === lease.operationId) {
           // A command ending does not end the Agent turn. Keep the same input
@@ -530,12 +553,16 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         && !!previousView && currentTurns.has(previousView.agentSessionId)
         && turnSurfaces.get(previousView.agentSessionId)?.operationId === previousView.operationId
         && delegatedInput?.sessionId === lease.sessionId && delegatedInput.controller === controller;
-      suspendedTurnViews.delete(lease.agentSessionId);
-      if (previousView && previousView.agentSessionId !== lease.agentSessionId
+      const delegatedRoot = previousView && previousView.agentSessionId !== lease.agentSessionId
         && currentTurns.has(previousView.agentSessionId)
-        && turnSurfaces.get(previousView.agentSessionId)?.operationId === previousView.operationId) {
+        && turnSurfaces.get(previousView.agentSessionId)?.operationId === previousView.operationId
+        ? (previousView.rootAgentSessionId ?? previousView.agentSessionId)
+        : undefined;
+      suspendedTurnViews.delete(lease.agentSessionId);
+      if (delegatedRoot && previousView) {
         suspendedTurnViews.set(previousView.agentSessionId, previousView);
       }
+      const rootAgentSessionId = rootSessionOwners.get(lease.agentSessionId) ?? delegatedRoot ?? lease.agentSessionId;
       const pendingTurnStop = pendingTurnStops.has(lease.agentSessionId);
       const turnStartedAtUnixMs = previousView?.agentSessionId === lease.agentSessionId
         ? previousView.acquiredAtUnixMs
@@ -553,6 +580,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
           previousSurface.operationId,
         );
       }
+      if (disposed || releasedOperations.has(operationKey(lease.sessionId, lease.operationId))) return;
       const active: ActiveLeaseResources = {
         lease: acquiredLease,
         controller,
@@ -584,7 +612,8 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       }
       agentTerminalLeaseState.set({
         ...acquiredLease,
-        workspace: workspaceOwners.get(lease.agentSessionId) ?? rootWorkspace(lease.agentSessionId),
+        rootAgentSessionId,
+        workspace: workspaceOwners.get(lease.agentSessionId) ?? rootWorkspace(rootAgentSessionId) ?? previousView?.workspace,
         acquiredAtUnixMs: turnStartedAtUnixMs,
         terminalOwned: true,
         inputBlocked: false,
@@ -695,21 +724,40 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
           if (disposed || currentTurns.get(event.sessionId) !== turnId) return;
           if (snapshot.header.executionSurface !== 'boundTerminal') return;
           let workspace = rootWorkspace(event.sessionId);
+          let rootAgentSessionId = event.sessionId;
           let parentId = snapshot.header.parentSessionId;
           const visited = new Set([event.sessionId]);
-          while (!workspace && parentId && !visited.has(parentId)) {
+          while (parentId && !visited.has(parentId)) {
             visited.add(parentId);
-            workspace = workspaceOwners.get(parentId) ?? rootWorkspace(parentId);
-            if (workspace) break;
+            const knownRoot = rootSessionOwners.get(parentId);
+            workspace ??= workspaceOwners.get(parentId) ?? rootWorkspace(parentId);
+            if (knownRoot) {
+              rootAgentSessionId = knownRoot;
+              if (workspace) break;
+            } else {
+              rootAgentSessionId = parentId;
+              if (rootWorkspace(parentId)) break;
+            }
             const parent = await invokeGetAgentRuntimeSession({ sessionId: parentId });
             if (disposed || currentTurns.get(event.sessionId) !== turnId) return;
             parentId = parent.header.parentSessionId;
           }
+          rootSessionOwners.set(event.sessionId, rootAgentSessionId);
           const sessionId = snapshot.header.target?.sessionId;
-          if (sessionId) bindTurnSurface({
-            sessionId, agentSessionId: event.sessionId, taskId: snapshot.header.taskId,
-            turnId, acquiredAtUnixMs: event.timeUnixMs,
-          }, workspace);
+          if (sessionId) {
+            const current = agentTerminalLeaseState.get(sessionId);
+            if (current?.agentSessionId === event.sessionId && current.rootAgentSessionId !== rootAgentSessionId) {
+              agentTerminalLeaseState.update(sessionId, current.operationId, (view) => ({
+                ...view,
+                rootAgentSessionId,
+                workspace: workspace ?? view.workspace,
+              }));
+            }
+            bindTurnSurface({
+              sessionId, agentSessionId: event.sessionId, taskId: snapshot.header.taskId,
+              turnId, acquiredAtUnixMs: event.timeUnixMs,
+            }, workspace, true, rootAgentSessionId);
+          }
         }).catch((error) => {
           logger.warn(`Failed to bind Agent turn terminal ${event.sessionId}`, error);
         });
@@ -765,6 +813,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       waitingForUserAction.clear();
       pendingTurnBindings.clear();
       workspaceOwners.clear();
+      rootSessionOwners.clear();
       fencedTurns.clear();
       for (const pending of pendingTurnStops.values()) clearTimeout(pending.timer);
       pendingTurnStops.clear();

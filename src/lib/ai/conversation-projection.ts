@@ -2,7 +2,7 @@ import { skillContexts } from './skill-projection';
 import { createCommittedEventProjection } from './committed-event-projection';
 import { createQuestionProjector } from './question-projection';
 import { conversationTurnTimeline } from './conversation-turn-timeline';
-import { markRecoveredToolReads } from './conversation-tool';
+import { linkBackgroundJobTools, markRecoveredToolReads } from './conversation-tool';
 import { groupConversationArtifacts } from './conversation-artifact';
 import { questionKey } from '@/types/agent-question';
 import {
@@ -1129,10 +1129,10 @@ function createChatProjection() {
           requestId: event.data.requestId,
           callId: event.data.callId,
           status: event.data.status,
-          risk: event.data.risk ?? 'unknown',
-          prompt: event.data.prompt ?? null,
-          reason: event.data.reason ?? null,
-          expiresAtUnixMs: event.data.expiresAtUnixMs ?? null,
+          risk: event.data.risk ?? previousApproval?.risk ?? 'unknown',
+          prompt: event.data.prompt ?? previousApproval?.prompt ?? null,
+          reason: event.data.reason ?? previousApproval?.reason ?? null,
+          expiresAtUnixMs: event.data.expiresAtUnixMs ?? previousApproval?.expiresAtUnixMs ?? null,
         };
         putProcessChild(turnId, node);
         updateTool(event, event.data.callId, (tool) => ({
@@ -1143,10 +1143,10 @@ function createChatProjection() {
             approvalId,
             requestId: event.data.requestId,
             status: event.data.status,
-            risk: event.data.risk ?? tool.effect,
-            prompt: event.data.prompt ?? null,
-            reason: event.data.reason ?? null,
-            expiresAtUnixMs: event.data.expiresAtUnixMs ?? null,
+            risk: event.data.risk ?? tool.approval?.risk ?? tool.effect,
+            prompt: event.data.prompt ?? tool.approval?.prompt ?? null,
+            reason: event.data.reason ?? tool.approval?.reason ?? null,
+            expiresAtUnixMs: event.data.expiresAtUnixMs ?? tool.approval?.expiresAtUnixMs ?? null,
           },
         }));
         break;
@@ -1438,9 +1438,9 @@ function createChatProjection() {
           child.kind === 'question' ? [child.question.identity.callId] : [],
         ),
       );
-      const children = markRecoveredToolReads([...turn.children.values(), ...assistants.filter((assistant) => !outputKeys.has(assistant.key))]
+      const children = linkBackgroundJobTools(markRecoveredToolReads([...turn.children.values(), ...assistants.filter((assistant) => !outputKeys.has(assistant.key))]
         .filter((child) => child.kind !== 'tool' || !questionCallIds.has(child.callId))
-        .sort(processChildSort));
+        .sort(processChildSort)));
       const status: AiTurnProcessStatus = turn.startSeq === undefined
         ? 'partial'
         : turn.status ?? (turn.endSeq === undefined ? 'running' : 'completed');

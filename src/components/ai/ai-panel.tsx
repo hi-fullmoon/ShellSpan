@@ -326,7 +326,7 @@ export const AiPanel: React.FC = () => {
         scope="workbench"
         onOpenChange={(nextOpen) => setOpen(nextOpen, 'workbench')}
       >
-        <WorkbenchAskController onClose={() => setOpen(false, 'workbench')} />
+        <WorkbenchAskController />
       </AiPanelShell>
       <AiPanelShell
         open={terminalOpen}
@@ -335,7 +335,7 @@ export const AiPanel: React.FC = () => {
         scope="terminal"
         onOpenChange={(nextOpen) => setOpen(nextOpen, 'terminal')}
       >
-        <TerminalAgentController onClose={() => setOpen(false, 'terminal')} />
+        <TerminalAgentController />
       </AiPanelShell>
     </>
   );

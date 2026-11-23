@@ -1018,4 +1018,67 @@ describe('TerminalControllerLayer', () => {
     expect(subscribeFilter).not.toHaveBeenCalled();
   });
 
+  it('tracks the root parent session as rootAgentSessionId when a subagent acquires a delegated terminal lease', async () => {
+    seedController('s1');
+    addSession('s1');
+    useTerminalStore.getState().setStatus('s1', { sessionId: 's1', status: 'connected' });
+    vi.mocked(invokeGetAgentRuntimeSession).mockImplementation(async ({ sessionId }) => {
+      if (sessionId === 'agent-parent') {
+        return {
+          header: {
+            sessionId: 'agent-parent',
+            taskId: 'task-parent',
+            executionSurface: 'boundTerminal',
+            target: { sessionId: 's1' },
+          },
+        } as unknown as AgentSessionSnapshot;
+      }
+      if (sessionId === 'subagent-child') {
+        return {
+          header: {
+            sessionId: 'subagent-child',
+            parentSessionId: 'agent-parent',
+            taskId: 'task-child',
+            executionSurface: 'boundTerminal',
+            target: { sessionId: 's1' },
+          },
+        } as unknown as AgentSessionSnapshot;
+      }
+      return { header: { executionSurface: 'direct' } } as unknown as AgentSessionSnapshot;
+    });
+
+    const coordinator = createAgentTerminalLeaseCoordinator();
+    coordinator.handleSession({
+      ...turnEvent('turn/start', 'turn-parent'),
+      sessionId: 'agent-parent',
+      timeUnixMs: 1000,
+    });
+    await vi.waitFor(() => {
+      expect(agentTerminalLeaseState.get('s1')?.agentSessionId).toBe('agent-parent');
+    });
+    expect(agentTerminalLeaseState.get('s1')?.rootAgentSessionId).toBe('agent-parent');
+
+    // Child acquires the command lease even before its own turn/start finishes resolving.
+    await coordinator.handle(leaseEvent('op-child', 'acquired', {
+      sessionId: 's1',
+      agentSessionId: 'subagent-child',
+      taskId: 'task-child',
+    }).payload);
+    expect(agentTerminalLeaseState.get('s1')?.agentSessionId).toBe('subagent-child');
+    expect(agentTerminalLeaseState.get('s1')?.rootAgentSessionId).toBe('agent-parent');
+
+    // Child turn/start resolves and preserves the root parent owner.
+    coordinator.handleSession({
+      ...turnEvent('turn/start', 'turn-child'),
+      sessionId: 'subagent-child',
+      timeUnixMs: 1100,
+    });
+    await vi.waitFor(() => {
+      expect(invokeGetAgentRuntimeSession).toHaveBeenCalledWith({ sessionId: 'subagent-child' });
+    });
+    expect(agentTerminalLeaseState.get('s1')?.rootAgentSessionId).toBe('agent-parent');
+
+    coordinator.dispose();
+  });
+
 });

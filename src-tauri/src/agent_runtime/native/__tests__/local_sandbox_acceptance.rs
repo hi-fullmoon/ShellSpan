@@ -172,6 +172,7 @@ impl Fixture {
     ) -> Result<PreparedAuthorizationNative, String> {
         let request_id = format!("request-{name}");
         let context = NativeExecutionContext {
+            bound_terminal_surface: false,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                 request_id: request_id.clone(),

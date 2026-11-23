@@ -8,6 +8,7 @@ import {
   NotebookTextIcon,
   RefreshCwIcon,
   ShieldAlertIcon,
+  ShieldCheckIcon,
   SquareIcon,
 } from 'lucide-react';
 
@@ -610,13 +611,14 @@ function ArtifactNodeView({
 
 function ApprovalMarkerNodeView({ node }: { readonly node: AiConversationNodeOf<'approvalMarker'> }) {
   const { t } = useI18n();
+  const detail = node.prompt ?? node.reason;
   return (
     <div className="ai-transcript-notice flex h-6 min-w-0 items-center gap-0" data-variant="approval" data-state={node.status}>
       <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
-        <ShieldAlertIcon />
+        {node.status === 'approved' ? <ShieldCheckIcon /> : <ShieldAlertIcon />}
       </span>
       <span className={AI_DISCLOSURE_TITLE_CLASS}>{t(`ai.workspace.approval.${node.status}` as LocaleKey)}</span>
-      {node.prompt && <span className="ai-transcript-notice-detail ml-1 min-w-0 flex-1 truncate">{node.prompt}</span>}
+      {detail && <span className="ai-transcript-notice-detail ml-1 min-w-0 flex-1 truncate">{detail}</span>}
     </div>
   );
 }

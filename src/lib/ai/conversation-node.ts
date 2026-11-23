@@ -85,6 +85,25 @@ export interface AiToolDetailRef {
   readonly stepId?: string | null;
 }
 
+export interface AiBackgroundJobObservationSummary {
+  readonly processHandle: string;
+  readonly state: 'running' | 'exited' | 'rejected' | 'uncertain' | 'unknown';
+  readonly exitCode: number | null;
+  readonly output: string;
+  readonly observing: boolean;
+  readonly stopRequested?: boolean;
+  readonly latestObserverToolKey: string;
+  readonly observationCount: number;
+}
+
+export interface AiBackgroundJobLink {
+  readonly launchToolKey: string;
+  readonly processHandle: string;
+  readonly action: 'wait' | 'kill';
+  readonly observedState: 'running' | 'exited' | 'rejected' | 'uncertain' | 'unknown';
+  readonly exitCode: number | null;
+}
+
 export interface AiToolNode extends AiConversationNodeBase {
   readonly kind: 'tool';
   readonly callId: string;
@@ -102,6 +121,10 @@ export interface AiToolNode extends AiConversationNodeBase {
   readonly error: string | null;
   /** A later successful read of the same stored result range; the original state remains failed. */
   readonly recoveredByToolKey?: string;
+  /** Aggregated lifecycle and output from later process observations targeting the same handle. */
+  readonly backgroundJob?: AiBackgroundJobObservationSummary;
+  /** Present on wait_process / kill_process nodes linked to an earlier background launch in this turn. */
+  readonly linkedBackgroundJob?: AiBackgroundJobLink;
   readonly target: import('@/types/agent-session').AgentSessionTarget | null;
   readonly idempotency: 'yes' | 'no' | 'conditional' | null;
   readonly approval: Readonly<{

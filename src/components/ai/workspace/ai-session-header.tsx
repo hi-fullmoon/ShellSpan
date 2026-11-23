@@ -140,6 +140,22 @@ export function AiSessionHeader({
 
       <div className="ai-session-actions flex min-w-0 shrink-0 items-center gap-1 @min-[400px]/ai-workspace:gap-2">
         {subagentNav ? subagentNav.switcher : lineage}
+        {showNewSession && (
+          <Tooltip>
+            <TooltipTrigger
+              render={(
+                <AiHeaderIconButton
+                  onClick={onNewSession}
+                  aria-label={t('ai.newConversation')}
+                />
+              )}
+            >
+              <SquarePenIcon data-icon="inline-start" />
+            </TooltipTrigger>
+            <TooltipContent>{t('ai.newConversation')}</TooltipContent>
+          </Tooltip>
+        )}
+
         {showHistory && (
           <Popover
             open={historyOpen}
@@ -170,22 +186,6 @@ export function AiSessionHeader({
               {historyContent}
             </PopoverContent>
           </Popover>
-        )}
-
-        {showNewSession && (
-          <Tooltip>
-            <TooltipTrigger
-              render={(
-                <AiHeaderIconButton
-                  onClick={onNewSession}
-                  aria-label={t('ai.newConversation')}
-                />
-              )}
-            >
-              <SquarePenIcon data-icon="inline-start" />
-            </TooltipTrigger>
-            <TooltipContent>{t('ai.newConversation')}</TooltipContent>
-          </Tooltip>
         )}
 
         {!subagentNav?.hideSessionChrome && onExportMarkdown && (

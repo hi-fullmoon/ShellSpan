@@ -70,6 +70,7 @@ fn resolve_runtime_storage_path(path: &Path) -> PathBuf {
 pub(crate) struct NativeExecutionContext {
     #[cfg(windows)]
     pub(crate) windows_sandbox_required: bool,
+    pub(crate) bound_terminal_surface: bool,
     pub(crate) request: AgentRequestNative,
     pub(crate) turn_id: String,
     pub(crate) step_id: String,
@@ -2042,6 +2043,7 @@ mod tests {
         let context = NativeExecutionContext {
             #[cfg(windows)]
             windows_sandbox_required: false,
+            bound_terminal_surface: false,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                 request_id: "cancel-request".into(),
@@ -2156,6 +2158,7 @@ mod tests {
             context: NativeExecutionContext {
                 #[cfg(windows)]
                 windows_sandbox_required: false,
+                bound_terminal_surface: false,
                 request: AgentRequestNative {
                     contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                     request_id: "request".into(), user_session_id: "session".into(), task_id: "task".into(),
@@ -2227,6 +2230,7 @@ mod tests {
         let context = NativeExecutionContext {
             #[cfg(windows)]
             windows_sandbox_required: false,
+            bound_terminal_surface: false,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                 request_id: "request".into(),
@@ -2330,6 +2334,7 @@ mod tests {
         let context = NativeExecutionContext {
             #[cfg(windows)]
             windows_sandbox_required: false,
+            bound_terminal_surface: false,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                 request_id: "request-a".into(),
@@ -2476,6 +2481,7 @@ mod tests {
         let context = NativeExecutionContext {
             #[cfg(windows)]
             windows_sandbox_required: false,
+            bound_terminal_surface: false,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                 request_id: "request-full-access".into(),
@@ -2616,6 +2622,7 @@ mod tests {
         let context = NativeExecutionContext {
             #[cfg(windows)]
             windows_sandbox_required: false,
+            bound_terminal_surface: false,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                 request_id: "request-remote-source".into(),
@@ -2947,6 +2954,7 @@ mod tests {
         let context = NativeExecutionContext {
             #[cfg(windows)]
             windows_sandbox_required: false,
+            bound_terminal_surface: false,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                 request_id: "request-remote-revalidate".into(),

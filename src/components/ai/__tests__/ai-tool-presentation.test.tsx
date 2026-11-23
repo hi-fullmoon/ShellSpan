@@ -44,7 +44,7 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('AI tool presentation', () => {
-  it.each(['zh-CN', 'en-US'] as const)('shows the recorded plan input and result inline in %s', async locale => {
+  it.each(['zh-CN', 'en-US'] as const)('shows the recorded plan as a structured surface inline in %s', async locale => {
     useAppStore.setState({ locale });
     await initI18n(locale);
     const plan = projectAgentChatNodes(conversationFoldRecording.completed.events)
@@ -53,11 +53,53 @@ describe('AI tool presentation', () => {
     expect(plan).toBeDefined();
     const { container } = render(<AiToolRow node={plan!} />);
     await userEvent.setup().click(screen.getByRole('button'));
-    const inline = container.querySelectorAll('.ai-io-section');
-    expect(inline).toHaveLength(2);
-    expect(inline[0].querySelector('pre')?.textContent).toBe(JSON.stringify(plan!.input, null, 2));
-    expect(inline[1].querySelector('pre')?.textContent).toBe(JSON.stringify(plan!.output, null, 2));
+    const surface = container.querySelector('[data-ai-tool-view="plan"]');
+    expect(surface).toBeInTheDocument();
+    expect(container.querySelectorAll('.ai-io-section')).toHaveLength(0);
+    const headerTitle = surface?.querySelector('.ai-content-title');
+    expect(headerTitle).toHaveTextContent(locale === 'zh-CN' ? '5 已完成' : '5 completed');
+    expect(headerTitle?.querySelector('.ai-plan-version')).toHaveTextContent('v7');
+    expect(surface?.querySelector('.ai-plan-explanation')).toHaveTextContent('本轮仅使用只读工具');
+    const stepItems = surface?.querySelectorAll('.ai-plan-step') ?? [];
+    expect(stepItems).toHaveLength(5);
+    expect(stepItems[0]).toHaveAttribute('data-status', 'completed');
+    expect(stepItems[0]).toHaveTextContent('清点剩余未细读模块与协议文档');
+    expect(stepItems[0]).toHaveTextContent('list_directory 获取 src-tauri/src/agent_runtime');
     expect(screen.queryByText(locale === 'zh-CN' ? '查看详情' : 'View details')).not.toBeInTheDocument();
+  });
+
+  it('normalizes update_plan step aliases and falls back to raw IO on failure or empty payload', async () => {
+    useAppStore.setState({ locale: 'zh-CN' });
+    await initI18n('zh-CN');
+    const aliasNode: AiConversationNodeOf<'tool'> = {
+      ...node,
+      key: 'tool:plan-alias',
+      callId: 'plan-alias',
+      name: 'update_plan',
+      title: 'Update task plan',
+      input: {
+        steps: [
+          { step: 'Inspect logs', status: 'in_progress', description: 'Check recent errors' },
+          { id: 'verify', status: 'blocked' },
+        ],
+      },
+      output: null,
+    };
+    const { container, rerender } = render(<AiToolExpandedContent node={aliasNode} />);
+    const planSurface = container.querySelector('[data-ai-tool-view="plan"]');
+    expect(planSurface).toBeInTheDocument();
+    expect(planSurface?.querySelector('.ai-content-title')).toHaveTextContent('1 进行中 · 1 已阻塞');
+    const items = planSurface?.querySelectorAll('.ai-plan-step') ?? [];
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveAttribute('data-status', 'inProgress');
+    expect(items[0]).toHaveTextContent('Inspect logs');
+    expect(items[0]).toHaveTextContent('Check recent errors');
+    expect(items[1]).toHaveAttribute('data-status', 'blocked');
+    expect(items[1]).toHaveTextContent('verify');
+
+    rerender(<AiToolExpandedContent node={{ ...aliasNode, state: 'failed', output: { error: 'Invalid plan' } }} />);
+    expect(container.querySelector('[data-ai-tool-view="plan"]')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-ai-tool-view="generic"]')).toBeInTheDocument();
   });
 
   it.each(['zh-CN', 'en-US'] as const)('renders every specialized inline tool surface in %s', async locale => {
@@ -620,7 +662,63 @@ describe('AI tool presentation', () => {
     rerender(<AiToolRow node={storedNode} onOpenStoredOutput={onOpenStoredOutput} />);
     await user.click(screen.getByRole('button', { name: /^Web:/u }));
     const openStoredButton = screen.getByRole('button', { name: 'View saved output' });
+    expect(openStoredButton.closest('.ai-web-block .ai-tool-surface-header')).not.toBeNull();
     await user.click(openStoredButton);
     expect(onOpenStoredOutput).toHaveBeenCalledExactlyOnceWith(storedNode, storedArtifactId);
+
+    const storedTerminalNode: AiConversationNodeOf<'tool'> = {
+      ...node,
+      key: 'tool:stored-terminal',
+      name: 'run_terminal_command',
+      input: { command: 'find /root -type f' },
+      output: {
+        artifactRef: storedArtifactId,
+        readWith: 'read_tool_result',
+        channel: 'terminal',
+        execution: 'completed',
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        combinedOutput: '=== CWD: /root ===\n23019431 pyi 9150',
+        truncated: true,
+      },
+    };
+    rerender(<AiToolRow node={storedTerminalNode} onOpenStoredOutput={onOpenStoredOutput} />);
+    const terminalButton = screen.getByRole('button', { name: 'View saved output' });
+    expect(terminalButton.closest('.ai-terminal-block .ai-tool-surface-header')).not.toBeNull();
+    expect(screen.getByText(/=== CWD: \/root ===/u)).toBeInTheDocument();
+    expect(screen.queryByText('No output')).not.toBeInTheDocument();
+  });
+
+  it('retains the target summary and shows an inline status label when a tool is rejected or fails without a localized error message', async () => {
+    useAppStore.setState({ locale: 'zh-CN' });
+    await initI18n('zh-CN');
+    const rejectedCommand: AiConversationNodeOf<'tool'> = {
+      ...node,
+      key: 'tool:rejected-cmd',
+      name: 'run_command',
+      state: 'rejected',
+      input: { command: 'ss -ltnp | grep 18999' },
+      summary: 'TERMINAL_JOB_OWNER_MISMATCH',
+      error: 'TERMINAL_JOB_OWNER_MISMATCH',
+      output: null,
+    };
+    const { container, rerender } = render(<AiToolRow node={rejectedCommand} />);
+    expect(container.querySelector('.ai-disclosure-summary')).toHaveTextContent('ss -ltnp | grep 18999');
+    expect(container.querySelector('.ai-tool-meta')).toHaveTextContent('已拒绝');
+
+    const failedRead: AiConversationNodeOf<'tool'> = {
+      ...node,
+      key: 'tool:failed-read',
+      name: 'read_file',
+      state: 'failed',
+      input: { path: '/proc/net/tcp' },
+      summary: 'permission denied',
+      error: 'permission denied',
+      output: null,
+    };
+    rerender(<AiToolRow node={failedRead} />);
+    expect(container.querySelector('.ai-disclosure-summary')).toHaveTextContent('/proc/net/tcp');
+    expect(container.querySelector('.ai-tool-meta')).toHaveTextContent('失败');
   });
 });

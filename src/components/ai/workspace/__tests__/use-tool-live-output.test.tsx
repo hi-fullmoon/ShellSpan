@@ -1,10 +1,9 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
-import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { AiToolRow } from '../ai-tool-presentation';
 import { toolLiveOutputStore } from '../use-tool-live-output';
 
@@ -147,11 +146,7 @@ describe('tool live output subscription and terminal card presentation', () => {
     expect(container.querySelector('.ai-terminal-block')).toBeNull();
   });
 
-  it('shows interactive program notice on alternateScreen and focuses bound terminal on click', () => {
-    const focus = vi.fn();
-    vi.spyOn(terminalRegistry, 'get').mockReturnValue({
-      terminal: { focus },
-    } as unknown as ReturnType<typeof terminalRegistry.get>);
+  it('shows interactive program notice on alternateScreen without a focus terminal button', () => {
     useTerminalStore.setState({
       sessions: [{
         sessionId: 'term-1',
@@ -183,10 +178,43 @@ describe('tool live output subscription and terminal card presentation', () => {
     });
 
     expect(container.querySelector('[data-ai-terminal-interactive]')).toHaveTextContent('Interactive program running');
-    const focusButton = screen.getByRole('button', { name: 'Focus terminal' });
-    fireEvent.click(focusButton);
-    expect(useTerminalStore.getState().activeSessionId).toBe('term-1');
-    expect(useAppStore.getState().activeSection).toBe('terminal');
-    expect(focus).toHaveBeenCalledOnce();
+    expect(container.querySelector('.ai-terminal-focus-button')).toBeNull();
+  });
+
+  it('does not clear an active tool call live output when an older completed card shares the same callId', () => {
+    const completedOlderNode = makeTerminalTool({
+      key: 'tool:older',
+      turnId: 'turn-1',
+      stepId: 'step-1',
+      state: 'succeeded',
+      output: { stdout: 'older output\n', exitCode: 0 },
+    });
+    const runningNewerNode = makeTerminalTool({
+      key: 'tool:newer',
+      turnId: 'turn-2',
+      stepId: 'step-1',
+      state: 'running',
+    });
+    const { container } = render(
+      <>
+        <AiToolRow node={completedOlderNode} />
+        <AiToolRow node={runningNewerNode} />
+      </>,
+    );
+
+    act(() => {
+      toolLiveOutputStore.ingest({
+        sessionId: 'agent-sess-1',
+        callId: 'call-live-1',
+        revision: 1,
+        tail: 'fresh live output\n',
+        totalBytes: 18,
+        truncated: false,
+        alternateScreen: false,
+      });
+    });
+
+    expect(toolLiveOutputStore.get('agent-sess-1', 'call-live-1')?.tail).toBe('fresh live output\n');
+    expect(container.querySelector('.ai-terminal-block[data-live-output="true"]')).not.toBeNull();
   });
 });

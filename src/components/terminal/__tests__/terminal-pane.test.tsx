@@ -436,7 +436,7 @@ describe('TerminalPane', () => {
     expect(document.querySelector('div.absolute.inset-0.z-10')).toBeNull();
   });
 
-  it('shows reconnecting dots over the terminal without the loading spinner', () => {
+  it('shows reconnecting indicator with spinner and dots without the full-screen connecting overlay', () => {
     render(
       <TerminalPane
         activeSession={makeSession({ status: 'connecting', reconnecting: true })}
@@ -448,7 +448,8 @@ describe('TerminalPane', () => {
     });
     expect(indicator).toHaveTextContent('terminal.notice.reconnectingLabel...');
     expect(indicator.querySelectorAll('.animate-pulse')).toHaveLength(3);
-    expect(document.querySelector('svg.animate-spin')).toBeNull();
+    expect(indicator.querySelector('svg')).not.toBeNull();
+    expect(screen.queryByText('terminal.status.connecting...')).toBeNull();
   });
 
   it('opens the content menu without pasting on right click', async () => {

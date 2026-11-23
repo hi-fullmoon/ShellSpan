@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useFocusStore } from '@/stores/focusStore';
-import { agentTerminalLeaseState } from '@/components/terminal/agent-terminal-lease-state';
+import { agentTerminalLeaseState, type AgentTerminalLeaseView } from '@/components/terminal/agent-terminal-lease-state';
 import { useTerminalTaskNavigation } from '@/components/terminal/agent-terminal-task-navigation';
 import { canSwitchFocusTarget } from '@/lib/ai/focus-target';
 import { toast } from 'sonner';
@@ -97,6 +97,17 @@ const OPTIMISTIC_COMMIT_TIMEOUT_MS = 15_000;
 const MAX_AGENT_TERMINAL_SNAPSHOT_BYTES = 32 * 1024;
 export const WORKBENCH_AI_TARGET_ID = 'workbench-ai';
 type AiAnnouncement = Extract<AiComposerEffect, { type: 'announce' }>['reason'];
+
+function isOwnedTerminalOccupancy(
+  occupancy: AgentTerminalLeaseView,
+  ownSessionId: string | null | undefined,
+  subagents: readonly { readonly sessionId: string }[] | undefined,
+): boolean {
+  if (!ownSessionId) return false;
+  const ownerId = occupancy.rootAgentSessionId ?? occupancy.agentSessionId;
+  if (ownerId === ownSessionId || occupancy.agentSessionId === ownSessionId) return true;
+  return Boolean(subagents?.some((subagent) => subagent.sessionId === occupancy.agentSessionId));
+}
 
 export type AiSessionControllerAdapter = AiSessionAdapter<'agent'>;
 
@@ -483,6 +494,8 @@ export function useAiSessionController({
   const automaticRestore = useRef({ key: workspaceScopeKey, eligible: true });
   const appliedRestore = useRef(automaticRestore.current);
   const [completedRestore, setCompletedRestore] = useState<object | null>(null);
+  const [openFailedSessionId, setOpenFailedSessionId] = useState<string | null>(null);
+  const retrySyncPendingRef = useRef(false);
   if (automaticRestore.current.key !== workspaceScopeKey) {
     automaticRestore.current = { key: workspaceScopeKey, eligible: true };
   }
@@ -493,7 +506,8 @@ export function useAiSessionController({
   const waitingForTerminalRestore = !view && completedRestore !== automaticRestore.current
     && Boolean(retainedTerminalConversationId || (terminalOccupancy && automaticRestore.current.eligible));
   const terminalSessionRestoring = scope === 'terminal' && (workspaceChanging
-    || Boolean(openedSessionId && !view) || waitingForTerminalRestore);
+    || Boolean(openedSessionId && !view && openFailedSessionId !== openedSessionId)
+    || waitingForTerminalRestore);
   const currentAgentTarget = view?.snapshot.value.header.target;
   const sameSandboxTarget = currentAgentTarget?.sessionId === activeTerminalId;
   const sandboxRequired = sameSandboxTarget && currentAgentTarget?.remoteSandboxRequired === true;
@@ -1165,7 +1179,16 @@ export function useAiSessionController({
       if (!canPublish() || !sessionId) return;
       const publish = (next: AiSessionView): void => {
         if (!canPublish()) return;
+        const current = viewRef.current;
+        if (
+          current
+          && current.summary.id === next.summary.id
+          && current.throughSeq !== null
+          && next.throughSeq !== null
+          && next.throughSeq < current.throughSeq
+        ) return;
         established = true;
+        setOpenFailedSessionId(null);
         viewRef.current = next;
         setView(next);
       };
@@ -1173,7 +1196,10 @@ export function useAiSessionController({
       publish(await adapter.open(sessionId));
     };
     void open().catch((error: unknown) => {
-      if (canPublish()) dispatch({ type: 'error.reported', error: normalizeAiSessionError(error) });
+      if (canPublish()) {
+        if (openedSessionId) setOpenFailedSessionId(openedSessionId);
+        dispatch({ type: 'error.reported', error: normalizeAiSessionError(error) });
+      }
     }).finally(() => {
       if (!alive || automaticRestore.current !== restore) return;
       if (retainedConversation && activeTerminalId && submissionContextRef.current === context && !viewRef.current) {
@@ -1407,8 +1433,13 @@ export function useAiSessionController({
   const historicalSurface = activeConversationId ? undefined : sessionSurface;
   const selectedExecutionSurface = focusMode ? 'boundTerminal' : canContinueHistoricalView ? terminalCreationSurface
     : historicalSurface ?? terminalExecution.executionSurface;
+  const ownTerminalSessionId = visibleView?.summary.id ?? composer.sessionId;
+  const terminalOwnedByCurrentSession = Boolean(
+    terminalOccupancy
+    && isOwnedTerminalOccupancy(terminalOccupancy, ownTerminalSessionId, visibleView?.subagents),
+  );
   const terminalConflict = !terminalSessionRestoring && !isSubagent && scope === 'terminal' && selectedExecutionSurface === 'boundTerminal'
-    && Boolean(terminalOccupancy && terminalOccupancy.agentSessionId !== (visibleView?.summary.id ?? composer.sessionId));
+    && Boolean(terminalOccupancy && !terminalOwnedByCurrentSession);
   const agentUnavailableReason = terminalSessionRestoring ? null
     : sandboxUnavailableReason ?? (terminalConflict ? t('terminal.occupancy.submitBlocked') : visibleExecutionRequired ? t('focus.visibleRequired') : oneShotSubagent
     ? t('ai.workspace.subagents.oneShotReadOnly')
@@ -1916,10 +1947,10 @@ export function useAiSessionController({
   const terminalInsertions = useAiDraftStore(state => state.terminalInsertions);
   useEffect(() => {
     if (composer.lastError?.message === 'TERMINAL_AGENT_CONFLICT'
-      && (isSubagent || terminalConflict || !terminalOccupancy || terminalOccupancy.agentSessionId === (visibleView?.summary.id ?? composer.sessionId))) {
+      && (isSubagent || terminalConflict || !terminalOccupancy || terminalOwnedByCurrentSession)) {
       dispatch({ type: 'error.dismissed' });
     }
-  }, [composer.lastError, composer.sessionId, dispatch, isSubagent, terminalConflict, terminalOccupancy, visibleView?.summary.id]);
+  }, [composer.lastError, dispatch, isSubagent, terminalConflict, terminalOccupancy, terminalOwnedByCurrentSession]);
   const taskRequest = useTerminalTaskNavigation(state => state.request);
   useEffect(() => {
     if (!taskRequest || scope !== 'terminal' || workspaceChanging
@@ -1965,12 +1996,22 @@ export function useAiSessionController({
   }, [activeTerminalId, claimWorkspace, dispatch, focusMode, scope, terminalInsertions, workspaceChanging]);
 
   const retrySync = async (): Promise<void> => {
-    const sessionId = viewRef.current?.summary.id;
+    if (retrySyncPendingRef.current) return;
+    const existingSessionId = viewRef.current?.summary.id;
+    const sessionId = existingSessionId ?? openedSessionId;
     const context = submissionContextRef.current;
     if (!sessionId) return;
+    retrySyncPendingRef.current = true;
     try {
-      const refreshed = await (adapter.retrySync ? adapter.retrySync(sessionId) : adapter.refresh(sessionId));
-      if (mountedRef.current && submissionContextRef.current === context && viewRef.current?.summary.id === sessionId) {
+      const refreshed = existingSessionId
+        ? await (adapter.retrySync ? adapter.retrySync(sessionId) : adapter.refresh(sessionId))
+        : await adapter.open(sessionId);
+      if (
+        mountedRef.current
+        && submissionContextRef.current === context
+        && (existingSessionId ? viewRef.current?.summary.id === sessionId : openedSessionId === sessionId)
+      ) {
+        setOpenFailedSessionId(null);
         viewRef.current = refreshed;
         setView(refreshed);
       }
@@ -1979,6 +2020,8 @@ export function useAiSessionController({
       if (mountedRef.current && submissionContextRef.current === context && !viewRef.current?.syncError) {
         dispatch({ type: 'error.reported', error: normalizeAiSessionError(error) });
       }
+    } finally {
+      retrySyncPendingRef.current = false;
     }
   };
 
@@ -2135,7 +2178,8 @@ export function useAiSessionController({
       const owner = agentTerminalLeaseState.get(activeTerminal?.sessionId ?? null);
       const ownSession = viewRef.current?.summary.id ?? composerRef.current.sessionId;
       // Child follow-ups use sendChildInput; they do not acquire a terminal lease.
-      if (!child && scope === 'terminal' && selectedExecutionSurface === 'boundTerminal' && owner && owner.agentSessionId !== ownSession) {
+      if (!child && scope === 'terminal' && selectedExecutionSurface === 'boundTerminal'
+        && owner && !isOwnedTerminalOccupancy(owner, ownSession, viewRef.current?.subagents)) {
         dispatch({ type: 'error.reported', error: { kind: 'conflict', message: 'TERMINAL_AGENT_CONFLICT', retryable: true } });
         return;
       }

@@ -321,22 +321,23 @@ impl NativeToolEngine {
                 let connection = connection_for_remote_target(&call.target, database, credentials)?;
                 let binding =
                     sandbox.ok_or("Remote Direct requires a current SSH profile binding")?;
-                let command = if arguments.background == Some(true) {
-                    let terminal = self
-                        .terminal_broker
-                        .snapshot(Some(session_id))
-                        .ok()
-                        .and_then(|snapshot| snapshot.session);
-                    let remote_cwd = terminal
-                        .as_ref()
-                        .and_then(|session| session.current_directory.as_deref());
-                    let shell = terminal
-                        .as_ref()
-                        .and_then(|session| session.integration_shell);
-                    remote_command_with_cwd(&arguments.command, remote_cwd, shell)
-                } else {
-                    arguments.command
-                };
+                let command =
+                    if context.bound_terminal_surface && arguments.background == Some(true) {
+                        let terminal = self
+                            .terminal_broker
+                            .snapshot(Some(session_id))
+                            .ok()
+                            .and_then(|snapshot| snapshot.session);
+                        let remote_cwd = terminal
+                            .as_ref()
+                            .and_then(|session| session.current_directory.as_deref());
+                        let shell = terminal
+                            .as_ref()
+                            .and_then(|session| session.integration_shell);
+                        remote_command_with_cwd(&arguments.command, remote_cwd, shell)
+                    } else {
+                        arguments.command
+                    };
                 spawn_remote_process_native(
                     RemoteProcessStartNative {
                         task_id: context.request.task_id.clone(),
@@ -719,6 +720,20 @@ fn remote_command_with_cwd(
         let literal = cwd.replace('\'', "''");
         return format!("Set-Location -LiteralPath '{literal}'; if ($?) {{\n{command}\n}}");
     }
+    if matches!(
+        shell,
+        Some(crate::terminal_integration::TerminalShellKind::Unsupported)
+    ) {
+        return command.to_string();
+    }
+    // Avoid quoting unexpanded tilde paths (`cd -- '~'` fails) or Windows drive paths when shell is unknown.
+    let looks_like_windows_drive = cwd.len() >= 3
+        && cwd.as_bytes()[0].is_ascii_alphabetic()
+        && cwd.as_bytes()[1] == b':'
+        && matches!(cwd.as_bytes()[2], b'\\' | b'/');
+    if cwd.starts_with('~') || (shell.is_none() && looks_like_windows_drive) {
+        return command.to_string();
+    }
     let Ok(quoted) = shlex::try_quote(cwd) else {
         return command.to_string();
     };
@@ -830,6 +845,22 @@ mod tests {
         );
         assert_eq!(
             remote_command_with_cwd("pwd", Some("/tmp\nrm -rf /"), Some(TerminalShellKind::Bash)),
+            "pwd"
+        );
+        assert_eq!(
+            remote_command_with_cwd(
+                "pwd",
+                Some("/tmp/work"),
+                Some(TerminalShellKind::Unsupported)
+            ),
+            "pwd"
+        );
+        assert_eq!(
+            remote_command_with_cwd("pwd", Some("~/work"), Some(TerminalShellKind::Bash)),
+            "pwd"
+        );
+        assert_eq!(
+            remote_command_with_cwd("pwd", Some("C:\\Users\\work"), None),
             "pwd"
         );
     }

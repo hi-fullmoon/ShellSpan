@@ -5,7 +5,7 @@ import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync } from 'node:
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { AiToolExpandedContent, toolOutputForCopy } from '@/components/ai/workspace/ai-tool-presentation';
+import { AiToolExpandedContent, AiToolRow, toolOutputForCopy } from '@/components/ai/workspace/ai-tool-presentation';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { stripAnsi } from '@/lib/terminal/terminal-output-buffer';
 import { initI18n } from '@/locales';
@@ -52,7 +52,10 @@ describe('terminal result presentation', () => {
     const { container } = render(<AiToolExpandedContent node={node} />);
     expect([...container.querySelectorAll('[data-ai-terminal-output] .ai-block-line')].map(line => line.textContent).join('\n')).toBe(result.stdout.trimEnd());
     expect(container.querySelector('[data-ai-terminal-output]')).not.toHaveTextContent('commandLine');
-    expect(container.querySelector('.ai-terminal-footer')).toHaveTextContent(locale === 'zh-CN' ? /^成功$/u : /^Succeeded$/u);
+    const footer = container.querySelector('.ai-terminal-footer');
+    expect(footer).toHaveTextContent(locale === 'zh-CN' ? /^成功$/u : /^Succeeded$/u);
+    expect(footer).toHaveClass('ai-content-header', 'min-h-6', 'px-3.5');
+    expect(footer).not.toHaveClass('py-1.5');
     expect(container.querySelector('.ai-terminal-footer svg')).toBeInTheDocument();
     expect(container.querySelector('.ai-terminal-header')).toHaveTextContent(/^Shell$/u);
     expect(container.querySelector('[data-ai-terminal-execution]')).not.toHaveClass('ai-terminal-exit');
@@ -211,5 +214,150 @@ describe('terminal result presentation', () => {
       child.stdin.end();
       await exited;
     }
+  });
+
+  it.each(['zh-CN', 'en-US'] as const)('presents a background shell launch with badge, handle, and started status in %s', async locale => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+    const node: AiConversationNodeOf<'tool'> = {
+      ...terminalNode('sleep 5', {
+        channel: 'terminal',
+        execution: 'running',
+        exitCode: 0,
+        combinedOutput: '',
+        stdout: '',
+        stderr: '',
+        processHandle: 'job-1bc99e73fa4145cab59c63486bbc0490',
+        job: { processHandle: 'job-1bc99e73fa4145cab59c63486bbc0490', state: 'running', launchConfirmed: true, nativeActive: true },
+      }),
+      input: { command: 'sleep 5', background: true },
+    };
+    const { container } = render(<AiToolExpandedContent node={node} />);
+    expect(container.querySelector('[data-ai-terminal-background]')).toHaveTextContent(locale === 'zh-CN' ? /^后台$/u : /^Background$/u);
+    expect(container.querySelector('[data-ai-terminal-background-notice]')).toHaveTextContent(
+      locale === 'zh-CN' ? '已在后台启动' : 'Started in background',
+    );
+    expect(container.querySelector('[data-ai-terminal-handle]')).toHaveTextContent('job-1bc99e73fa4145cab59c63486bbc0490');
+    expect(container.querySelector('.ai-terminal-transcript')).toBeNull();
+    expect(container.querySelector('[data-ai-terminal-output]')).not.toHaveTextContent(locale === 'zh-CN' ? '无输出' : 'No output');
+    expect(container.querySelector('.ai-terminal-footer')).toHaveTextContent(locale === 'zh-CN' ? /^已启动$/u : /^Started$/u);
+    expect(container.querySelector('.ai-terminal-footer svg')).not.toBeInTheDocument();
+  });
+
+  it('treats direct running background processes as started rather than succeeded', () => {
+    const node: AiConversationNodeOf<'tool'> = {
+      ...terminalNode('node server.js', {
+        channel: 'direct',
+        state: 'running',
+        exitCode: null,
+        stdout: '',
+        stderr: '',
+        processHandle: 'proc-direct-123',
+      }),
+      input: { command: 'node server.js', background: true },
+    };
+    const { container } = render(<AiToolExpandedContent node={node} />);
+    expect(container.querySelector('[data-ai-terminal-background]')).toHaveTextContent('Background');
+    expect(container.querySelector('[data-ai-terminal-handle]')).toHaveTextContent('proc-direct-123');
+    expect(container.querySelector('.ai-terminal-footer')).toHaveTextContent(/^Started$/u);
+    expect(container.querySelector('.ai-terminal-footer svg')).not.toBeInTheDocument();
+  });
+
+  it('shows spinner while a background launch is in progress and omits started notice if rejected', () => {
+    const runningNode: AiConversationNodeOf<'tool'> = {
+      ...terminalNode('sleep 5', null),
+      state: 'running',
+      input: { command: 'sleep 5', background: true },
+    };
+    const { container, rerender } = render(<AiToolExpandedContent node={runningNode} />);
+    expect(container.querySelector('.ai-terminal-footer svg')).toHaveClass('animate-spin');
+    expect(container.querySelector('[data-ai-terminal-background-notice]')).toBeNull();
+
+    const rejectedNode: AiConversationNodeOf<'tool'> = {
+      ...terminalNode('sleep 5', { execution: 'notStarted', combinedOutput: '' }),
+      state: 'failed',
+      input: { command: 'sleep 5', background: true },
+    };
+    rerender(<AiToolExpandedContent node={rejectedNode} />);
+    expect(container.querySelector('[data-ai-terminal-background-notice]')).toBeNull();
+    expect(container.querySelector('.ai-terminal-footer')).toHaveTextContent(/^Not started$/u);
+  });
+
+  it('merges observed background output and exit state onto the launch card', () => {
+    const node: AiConversationNodeOf<'tool'> = {
+      ...terminalNode('node report.js', {
+        channel: 'direct',
+        state: 'running',
+        exitCode: null,
+        stdout: '',
+        stderr: '',
+        processHandle: 'proc-report-1',
+      }),
+      input: { command: 'node report.js', background: true },
+      backgroundJob: {
+        processHandle: 'proc-report-1',
+        state: 'exited',
+        exitCode: 0,
+        output: 'total: 42 files\n',
+        observing: false,
+        latestObserverToolKey: 'wait-1',
+        observationCount: 1,
+      },
+    };
+    const { container, rerender } = render(<AiToolExpandedContent node={node} />);
+    expect(container.querySelector('[data-ai-terminal-output] .ai-block-line')).toHaveTextContent('total: 42 files');
+    expect(container.querySelector('[data-ai-terminal-background-notice]')).toBeNull();
+    expect(container.querySelector('.ai-terminal-footer')).toHaveTextContent(/^Succeeded$/u);
+    expect(container.querySelector('.ai-terminal-footer svg')).toBeInTheDocument();
+    expect(toolOutputForCopy(node)).toBe('total: 42 files\n');
+
+    rerender(<AiToolExpandedContent node={{
+      ...node,
+      backgroundJob: {
+        processHandle: 'proc-report-1',
+        state: 'exited',
+        exitCode: 7,
+        output: '',
+        observing: false,
+        latestObserverToolKey: 'wait-2',
+        observationCount: 2,
+      },
+    }} />);
+    expect(container.querySelector('.ai-terminal-footer')).toHaveTextContent(/^Exit 7$/u);
+    expect(container.querySelector('.ai-terminal-footer svg')).not.toBeInTheDocument();
+  });
+
+  it.each(['zh-CN', 'en-US'] as const)('renders linked background observations as lightweight rows in %s', async locale => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+    const observation: AiConversationNodeOf<'tool'> = {
+      ...terminalNode('wait_process', {
+        processHandle: 'job-abc',
+        state: 'exited',
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      }),
+      name: 'wait_process',
+      nativeName: 'wait_process',
+      summary: 'Native shell job observation completed; output is shared with the terminal.',
+      durationMs: 369,
+      linkedBackgroundJob: {
+        launchToolKey: 'launch-1',
+        processHandle: 'job-abc',
+        action: 'wait',
+        observedState: 'exited',
+        exitCode: 0,
+      },
+    };
+    const { container, rerender } = render(<AiToolRow node={observation} />);
+    expect(container.querySelector('[data-tool-linked-background-job="job-abc"]')).toBeInTheDocument();
+    expect(container.querySelector('button')).toBeNull();
+    expect(container).toHaveTextContent(locale === 'zh-CN' ? '检查后台作业' : 'Check background job');
+    expect(container).toHaveTextContent(locale === 'zh-CN' ? '已完成' : 'Completed');
+    expect(container).not.toHaveTextContent('Native shell job observation');
+
+    rerender(<AiToolRow node={{ ...observation, state: 'uncertain' }} />);
+    expect(container.querySelector('button')).not.toBeNull();
   });
 });

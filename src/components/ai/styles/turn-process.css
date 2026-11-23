@@ -27,10 +27,6 @@
   color: var(--ai-text-muted);
 }
 
-.ai-tool-row-root:is([data-tool-state='failed'], [data-tool-state='rejected']):not([data-tool-recovered]) > .ai-tool-row > .ai-disclosure-leading > .ai-disclosure-chevron {
-  color: var(--ai-error);
-}
-
 .ai-block-banner > svg,
 .ai-produced-files-label svg,
 .ai-turn-error > svg,
@@ -44,10 +40,10 @@
   height: 14px;
 }
 
-/* Content icons retain their optical offset; spinners and hover chevrons stay centered. */
+/* Optical offset for 13px/24px mixed CJK/Latin text; spinners stay centered. */
 .ai-disclosure-leading > svg:not(.ai-disclosure-chevron):not([data-slot='spinner']):not([data-status='running']),
 .ai-produced-files-label svg {
-  translate: 0 -1px;
+  translate: 0 -0.5px;
 }
 
 /* Match the separator to the text baseline; row icons use centered layout. */
@@ -104,7 +100,7 @@
 
 .ai-turn-process-trigger > .ai-disclosure-leading > .ai-disclosure-chevron {
   opacity: 1;
-  translate: 0 -1px;
+  translate: 0 -0.5px;
 }
 
 .ai-turn-process-trigger[aria-expanded='false'] > .ai-disclosure-leading > .ai-disclosure-chevron {
@@ -116,14 +112,11 @@
   margin-inline-end: 0;
 }
 
-.ai-disclosure-row[aria-expanded]:is([aria-expanded='true'], :hover, :focus-visible) > .ai-disclosure-leading > :not(.ai-disclosure-chevron),
-.ai-tool-row[aria-expanded]:is([aria-expanded='true'], :hover, :focus-visible) > .ai-disclosure-leading > :not(.ai-disclosure-chevron) {
-  opacity: 0;
-}
-
-.ai-disclosure-row[aria-expanded]:is([aria-expanded='true'], :hover, :focus-visible) > .ai-disclosure-leading > .ai-disclosure-chevron,
-.ai-tool-row[aria-expanded]:is([aria-expanded='true'], :hover, :focus-visible) > .ai-disclosure-leading > .ai-disclosure-chevron {
-  opacity: 1;
+.ai-disclosure-row[aria-expanded]:is(:hover, :focus-visible) > .ai-disclosure-leading,
+.ai-tool-row[aria-expanded]:is(:hover, :focus-visible) > .ai-disclosure-leading,
+.ai-disclosure-row[aria-expanded]:is(:hover, :focus-visible) .ai-disclosure-title,
+.ai-tool-row[aria-expanded]:is(:hover, :focus-visible) .ai-disclosure-title {
+  color: var(--ai-text);
 }
 
 .ai-turn-process[data-status='running'] .ai-turn-process-trigger .ai-disclosure-leading > [data-slot='spinner'] {

@@ -198,17 +198,12 @@ impl ModelAdapter for ResponsesAdapter {
         sink: Arc<dyn ModelStreamSink>,
     ) -> Result<ModelResponse, NormalizedModelError> {
         let resolved = self.http.validate(&request)?;
-        let (input, previous_response_id) = responses_input_with_replay(&request.messages);
-        let mut body = json!({
-            "model": self.http.provider.model,
-            "stream": true,
-            "store": false,
-            "instructions": request.system_prompt,
-            "input": input,
-        });
-        if let Some(previous_response_id) = previous_response_id {
-            body["previous_response_id"] = json!(previous_response_id);
-        }
+        let mut body = build_responses_request_body(
+            &self.http.provider.model,
+            &request.system_prompt,
+            &request.messages,
+            false,
+        );
         crate::llm::catalog::apply_reasoning(
             &mut body,
             &resolved,
@@ -266,6 +261,32 @@ impl ModelAdapter for ResponsesAdapter {
             .await?;
         stream_responses(response, &cancellation, sink, self.http.timeouts).await
     }
+}
+
+fn build_responses_request_body(
+    model: &str,
+    system_prompt: &str,
+    messages: &[ModelMessage],
+    store: bool,
+) -> Value {
+    // Only chain via `previous_response_id` when server-side storage is enabled;
+    // with `store: false`, prior responses are not persisted and chaining fails with 400/404.
+    let (input, previous_response_id) = if store {
+        responses_input_with_replay(messages)
+    } else {
+        (responses_input(messages), None)
+    };
+    let mut body = json!({
+        "model": model,
+        "stream": true,
+        "store": store,
+        "instructions": system_prompt,
+        "input": input,
+    });
+    if let Some(previous_response_id) = previous_response_id {
+        body["previous_response_id"] = json!(previous_response_id);
+    }
+    body
 }
 
 pub(in crate::llm) fn responses_input(messages: &[ModelMessage]) -> Vec<Value> {
@@ -787,5 +808,33 @@ mod tests {
         }));
         assert_eq!(unknown.code.as_deref(), Some("RESPONSE_INCOMPLETE"));
         assert!(!unknown.message.contains("output token limit"));
+    }
+
+    #[test]
+    fn stateless_responses_request_omits_previous_response_id_and_sends_full_input() {
+        let messages = vec![
+            ModelMessage::User {
+                content: "check status".into(),
+            },
+            ModelMessage::Assistant {
+                content: vec![ModelContentBlock::Text {
+                    text: "running".into(),
+                }],
+                replay: None,
+                native_replay: Some(json!({ "responseId": "resp_123" })),
+            },
+            ModelMessage::User {
+                content: "next".into(),
+            },
+        ];
+        let stateless = build_responses_request_body("gpt-5", "sys", &messages, false);
+        assert_eq!(stateless["store"], json!(false));
+        assert!(stateless.get("previous_response_id").is_none());
+        assert_eq!(stateless["input"].as_array().map(Vec::len), Some(3));
+
+        let stateful = build_responses_request_body("gpt-5", "sys", &messages, true);
+        assert_eq!(stateful["store"], json!(true));
+        assert_eq!(stateful["previous_response_id"], json!("resp_123"));
+        assert_eq!(stateful["input"].as_array().map(Vec::len), Some(1));
     }
 }

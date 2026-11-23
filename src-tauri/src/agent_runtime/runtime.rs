@@ -3130,6 +3130,7 @@ impl AgentRuntime {
         &self,
         input: super::AgentRecoveryReconcileInput,
     ) -> Result<AgentSessionSnapshot, String> {
+        self.require_session_not_stopping(&input.session_id)?;
         let snapshot = self.sessions.snapshot(&input.session_id)?;
         let checkpoint = snapshot.recovery;
         if checkpoint.kind != super::AgentRecoveryCheckpointKind::ExecutionInFlight {
@@ -3214,7 +3215,7 @@ impl AgentRuntime {
             ),
             _ => unreachable!(),
         };
-        let mut payloads = vec![
+        let payloads = vec![
             super::AgentScopedPayload {
                 turn_id: turn_id.clone(),
                 step_id: step_id.clone(),
@@ -3238,10 +3239,19 @@ impl AgentRuntime {
                 },
             },
         ];
+        self.sessions.append_batch(&input.session_id, payloads)?;
         if snapshot.ended {
-            self.sessions.append_batch(&input.session_id, payloads)?;
             return self.sessions.snapshot(&input.session_id);
         }
+        // Only close the step and resume the driver once every unresolved execution is reconciled.
+        let has_remaining_unresolved = self
+            .sessions
+            .read_events(&input.session_id, super::recovery::unresolved_execution)?
+            .is_some();
+        if has_remaining_unresolved {
+            return self.sessions.snapshot(&input.session_id);
+        }
+        let mut completion_payloads = Vec::new();
         if !events.iter().any(|event| {
             event.turn_id == turn_id
                 && event.step_id == step_id
@@ -3250,7 +3260,7 @@ impl AgentRuntime {
                     super::AgentSessionEventPayload::StepEnd { .. }
                 )
         }) {
-            payloads.push(super::AgentScopedPayload {
+            completion_payloads.push(super::AgentScopedPayload {
                 turn_id: turn_id.clone(),
                 step_id: step_id.clone(),
                 payload: super::AgentSessionEventPayload::StepEnd {
@@ -3258,7 +3268,7 @@ impl AgentRuntime {
                 },
             });
         }
-        payloads.push(super::AgentScopedPayload {
+        completion_payloads.push(super::AgentScopedPayload {
             turn_id: None,
             step_id: None,
             payload: super::AgentSessionEventPayload::TaskState {
@@ -3272,7 +3282,7 @@ impl AgentRuntime {
                 fleet: None,
             },
         });
-        payloads.push(super::AgentScopedPayload {
+        completion_payloads.push(super::AgentScopedPayload {
             turn_id: None,
             step_id: None,
             payload: super::AgentSessionEventPayload::AgentStatus {
@@ -3280,7 +3290,8 @@ impl AgentRuntime {
                 reason: Some("reconciliationCompleted".into()),
             },
         });
-        self.sessions.append_batch(&input.session_id, payloads)?;
+        self.sessions
+            .append_batch(&input.session_id, completion_payloads)?;
         if let Some(entry) = self.agents.get(&input.session_id)? {
             let turn_already_ended = events.iter().any(|event| {
                 event.turn_id == turn_id

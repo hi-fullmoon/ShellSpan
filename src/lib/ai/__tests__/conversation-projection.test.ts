@@ -412,6 +412,33 @@ describe('AI chat projection', () => {
     });
     expect(processChild(pending, 'tool', 'turn-1')).toMatchObject({ state: 'approval' });
 
+    const requestedEvent = agentSessionWaitingApprovalEventFixture.find(
+      (event) => event.type === 'tool/approval',
+    );
+    expect(requestedEvent?.type).toBe('tool/approval');
+    if (requestedEvent?.type === 'tool/approval') {
+      const lastEvent = agentSessionWaitingApprovalEventFixture[agentSessionWaitingApprovalEventFixture.length - 1];
+      const resolved = projectAgentChatNodes([
+        ...agentSessionWaitingApprovalEventFixture,
+        {
+          ...requestedEvent,
+          seq: lastEvent.seq + 1,
+          timeUnixMs: lastEvent.timeUnixMs + 100,
+          data: {
+            requestId: requestedEvent.data.requestId,
+            callId: requestedEvent.data.callId,
+            approvalId: requestedEvent.data.approvalId,
+            status: 'approved',
+          },
+        },
+      ]);
+      expect(processChild(resolved, 'approvalMarker', 'turn-1')).toMatchObject({
+        status: 'approved',
+        prompt: requestedEvent.data.prompt,
+        risk: requestedEvent.data.risk,
+      });
+    }
+
     const retry = projectAgentChatNodes(agentSessionBaselineScenarios['retry-success'].events);
     expect(processChild(retry, 'retry')).toMatchObject({
       requestId: 'request-02',

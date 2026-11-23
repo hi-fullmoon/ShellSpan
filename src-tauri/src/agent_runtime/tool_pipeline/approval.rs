@@ -74,7 +74,9 @@ impl AgentToolPipeline {
 
         // Recheck live native policy without running before_tool again or charging again.
         self.native.abandon(&pending.preparation.token);
-        let refreshed = match self.prepare_native(&pending.request) {
+        let refreshed = match self
+            .prepare_native_with_approved_call(&pending.request, Some(&pending.preparation.call))
+        {
             Ok(refreshed) => refreshed,
             Err(error) if is_terminal_call_blocked(&error) => {
                 self.append_terminal_approval(

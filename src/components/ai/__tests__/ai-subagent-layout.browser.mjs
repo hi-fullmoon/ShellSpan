@@ -199,8 +199,8 @@ try {
     assert.equal(await leadingStatus.evaluate(el => getComputedStyle(el).opacity), '1');
     assert.equal(await enterChevron.evaluate(el => getComputedStyle(el).opacity), '0');
     await rowTrigger.hover();
-    assert.equal(await leadingStatus.evaluate(el => getComputedStyle(el).opacity), '0');
-    assert.equal(await enterChevron.evaluate(el => getComputedStyle(el).opacity), '1');
+    assert.equal(await leadingStatus.evaluate(el => getComputedStyle(el).opacity), '1');
+    assert.equal(await enterChevron.evaluate(el => getComputedStyle(el).opacity), '0');
     const openedBefore = await page.evaluate(() => window.__openedSubagentSessions.length);
     await rowTrigger.click();
     await page.mouse.move(width - 1, 790);

@@ -266,7 +266,18 @@ impl NativeToolRuntime for NativeToolAdapter {
         )
     }
 
-    fn prepare(&self, mut request: NativeToolRequest) -> Result<NativeToolPreparation, String> {
+    fn prepare(&self, request: NativeToolRequest) -> Result<NativeToolPreparation, String> {
+        self.prepare_with_approved_call(request, None)
+    }
+
+    fn prepare_with_approved_call(
+        &self,
+        mut request: NativeToolRequest,
+        approved_call: Option<&RecordedToolCall>,
+    ) -> Result<NativeToolPreparation, String> {
+        let frozen_cwd = approved_call
+            .filter(|call| call.native_name.as_deref() == Some("exec_command"))
+            .and_then(|call| call.arguments.get("cwd").and_then(Value::as_str));
         let runtime = &self.engine;
         let sessions = &self.services.sessions;
         let database = &self.services.database;
@@ -442,7 +453,9 @@ impl NativeToolRuntime for NativeToolAdapter {
                 session_id, cwd, ..
             } = &mut owner_target
             {
-                if let Ok(snapshot) = runtime.terminal_broker_snapshot(Some(session_id)) {
+                if let Some(pinned) = frozen_cwd.filter(|dir| !dir.is_empty()) {
+                    *cwd = Some(pinned.to_string());
+                } else if let Ok(snapshot) = runtime.terminal_broker_snapshot(Some(session_id)) {
                     if let Some(live_cwd) = snapshot
                         .session
                         .and_then(|session| session.current_directory)
@@ -506,6 +519,8 @@ impl NativeToolRuntime for NativeToolAdapter {
                 NativeExecutionContext {
                     #[cfg(windows)]
                     windows_sandbox_required: false,
+                    bound_terminal_surface: request.execution_surface
+                        == super::AgentExecutionSurface::BoundTerminal,
                     request: frozen_request,
                     turn_id: request.turn_id.clone(),
                     step_id: request.step_id.clone(),
@@ -636,6 +651,8 @@ impl NativeToolRuntime for NativeToolAdapter {
             NativeExecutionContext {
                 #[cfg(windows)]
                 windows_sandbox_required: windows_sandbox,
+                bound_terminal_surface: request.execution_surface
+                    == super::AgentExecutionSurface::BoundTerminal,
                 request: frozen_request,
                 turn_id: request.turn_id.clone(),
                 step_id: request.step_id.clone(),

@@ -39,7 +39,7 @@ try {
       return { offset: icon.y + icon.height / 2 - label.y - label.height / 2, gap: label.x - slot.right, height: row.height };
     });
     await page.locator('#stopped-check').screenshot({ path: `/tmp/shellspan-stopped-${width}.png` });
-    assert.equal(geometry.offset, 0, 'Stopped icon and label must be vertically centered');
+    assert.equal(geometry.offset, -0.5, 'Stopped icon must retain the -0.5px optical offset');
     assert.equal(geometry.gap, 4, 'Keep the existing 4px spacing');
     assert.equal(geometry.height, 24, 'Keep the existing row height');
     console.log(`Stopped alignment passed at ${width}px`);

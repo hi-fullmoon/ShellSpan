@@ -251,6 +251,7 @@ pub(crate) fn result_reference(
                     | "cancelled"
                     | "state"
                     | "channel"
+                    | "execution"
             ) && (value.is_null()
                 || value.is_boolean()
                 || value.is_number()
@@ -259,7 +260,7 @@ pub(crate) fn result_reference(
                 data.insert(key.clone(), value.clone());
             }
         }
-        for field in ["stdout", "stderr"] {
+        for field in ["stdout", "stderr", "combinedOutput"] {
             if let Some(text) = original.get(field).and_then(Value::as_str) {
                 data.insert(field.into(), json!(bounded_text(text, preview_bytes)));
             }

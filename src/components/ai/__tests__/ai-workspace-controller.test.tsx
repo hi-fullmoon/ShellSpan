@@ -19,6 +19,7 @@ import { useAppStore } from '@/stores/appStore';
 import { useFocusStore } from '@/stores/focusStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { agentTerminalLeaseState } from '@/components/terminal/agent-terminal-lease-state';
 import { appendTerminalOutput, clearTerminalOutput } from '@/lib/terminal/terminal-output-buffer';
 import type { ResolvedModel } from '@/lib/ai/provider-contract';
 import * as imageDraftModule from '@/components/ai/workspace/use-image-draft';
@@ -2276,5 +2277,102 @@ describe('Queue mutation controller', () => {
     act(() => publish?.({ ...view, inbox: [{ ...view.inbox[0], lane: 'nextStep', state: 'claimed', consumed: true }] }));
     expect(screen.queryByText('queued text')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Steer now' })).toBeNull();
+  });
+
+  it('does not flag terminal occupancy conflict when a subagent of the current session holds the terminal lease', async () => {
+    connectedTerminal('terminal-1');
+    const base = runningAgentView('agent-parent', 'terminal-1');
+    const view: AiSessionView = {
+      ...base,
+      snapshot: {
+        ...base.snapshot,
+        value: {
+          ...base.snapshot.value,
+          header: {
+            ...base.snapshot.value.header,
+            executionSurface: 'boundTerminal',
+          },
+        },
+      },
+      subagents: [{
+        sessionId: 'subagent-child',
+        role: 'general',
+        status: 'running',
+        continuable: false,
+      }],
+    };
+    const agent = adapter({
+      list: vi.fn(async () => ({ sessions: [view.summary] })),
+      open: vi.fn(async () => view),
+      submit: vi.fn(async (sessionId, input) => ({
+        sessionId: sessionId ?? view.summary.id,
+        clientOperationId: input.clientOperationId,
+        mode: input.mode,
+      })),
+    });
+
+    try {
+      agentTerminalLeaseState.set({
+        sessionId: 'terminal-1',
+        agentSessionId: 'subagent-child',
+        rootAgentSessionId: 'agent-parent',
+        workspace: 'terminal',
+        taskId: 'task-child',
+        operationId: 'op-child',
+        acquiredAtUnixMs: 1000,
+        state: 'acquired',
+        terminalOwned: true,
+        inputBlocked: false,
+        takeoverRequested: false,
+        takeoverFailed: false,
+        requestTakeover: () => undefined,
+      });
+
+      const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+      await waitFor(() => expect(result.current.view?.summary.id).toBe('agent-parent'));
+
+      expect(result.current.agentUnavailableReason).toBeNull();
+
+      // Even without rootAgentSessionId, matching view.subagents avoids false conflict.
+      act(() => {
+        agentTerminalLeaseState.set({
+          sessionId: 'terminal-1',
+          agentSessionId: 'subagent-child',
+          workspace: 'terminal',
+          taskId: 'task-child',
+          operationId: 'op-child-2',
+          acquiredAtUnixMs: 1001,
+          state: 'acquired',
+          terminalOwned: true,
+          inputBlocked: false,
+          takeoverRequested: false,
+          takeoverFailed: false,
+          requestTakeover: () => undefined,
+        });
+      });
+      expect(result.current.agentUnavailableReason).toBeNull();
+
+      // An unrelated Agent task still blocks submission with the conflict warning.
+      act(() => {
+        agentTerminalLeaseState.set({
+          sessionId: 'terminal-1',
+          agentSessionId: 'subagent-other',
+          rootAgentSessionId: 'agent-other',
+          workspace: 'terminal',
+          taskId: 'task-other',
+          operationId: 'op-other',
+          acquiredAtUnixMs: 1002,
+          state: 'acquired',
+          terminalOwned: true,
+          inputBlocked: false,
+          takeoverRequested: false,
+          takeoverFailed: false,
+          requestTakeover: () => undefined,
+        });
+      });
+      expect(result.current.agentUnavailableReason).toBe(t('terminal.occupancy.submitBlocked'));
+    } finally {
+      agentTerminalLeaseState.clearAll();
+    }
   });
 });

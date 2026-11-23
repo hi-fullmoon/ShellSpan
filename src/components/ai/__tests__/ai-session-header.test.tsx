@@ -27,10 +27,11 @@ describe('AiSessionHeader', () => {
     await user.tab();
     expect(await screen.findByRole('tooltip')).toHaveTextContent(context);
   });
-  it('uses compact action buttons while preserving their labels and callbacks', async () => {
+  it('uses compact action buttons in new -> history -> export -> close order while preserving callbacks', async () => {
     const user = userEvent.setup();
     const onHistory = vi.fn();
     const onNewSession = vi.fn();
+    const onExportMarkdown = vi.fn();
     const onClose = vi.fn();
     render(
       <AiSessionHeader
@@ -39,6 +40,7 @@ describe('AiSessionHeader', () => {
         status="failed"
         onHistory={onHistory}
         onNewSession={onNewSession}
+        onExportMarkdown={onExportMarkdown}
         onClose={onClose}
       />,
     );
@@ -46,7 +48,13 @@ describe('AiSessionHeader', () => {
     expect(screen.getByRole('heading', { name: '/docker-diagnosis' })).toBeVisible();
     expect(screen.getByText('Terminal')).toBeVisible();
     const buttons = screen.getAllByRole('button');
-    expect(buttons).toHaveLength(3);
+    expect(buttons).toHaveLength(4);
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
+      'New conversation',
+      'Conversation history',
+      'Export as Markdown',
+      'Close AI assistant',
+    ]);
     for (const button of buttons) {
       expect(button).toHaveClass('size-7', 'rounded-md', '[&_svg]:size-4');
       expect(button).not.toHaveClass('rounded-full');
@@ -55,6 +63,7 @@ describe('AiSessionHeader', () => {
     }
     expect(onHistory).toHaveBeenCalledOnce();
     expect(onNewSession).toHaveBeenCalledOnce();
+    expect(onExportMarkdown).toHaveBeenCalledOnce();
     expect(onClose).toHaveBeenCalledOnce();
   });
 

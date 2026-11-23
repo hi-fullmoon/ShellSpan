@@ -474,8 +474,15 @@ export function AiWorkspaceRoot({
     : sessionTarget && (terminalLoginLabel(sessionTarget) ?? sessionTarget.label ?? sessionTarget.host);
   const terminalContext = readOnlySession || historicalTargetUnavailable
     ? t('ai.terminal.readOnlyContext', { target: historicalTargetLabel || t('section.terminal') })
-    : historyScopeLabel || terminalConnected
-      ? t(terminalConnected ? 'ai.terminal.connectedContext' : 'ai.terminal.disconnectedContext', { target: historyScopeLabel ?? t('section.terminal') })
+    : historyScopeLabel || terminalConnected || terminalReconnecting
+      ? t(
+        terminalConnected
+          ? 'ai.terminal.connectedContext'
+          : terminalReconnecting
+            ? 'ai.terminal.reconnectingContext'
+            : 'ai.terminal.disconnectedContext',
+        { target: historyScopeLabel ?? t('section.terminal') },
+      )
       : t('ai.terminal.noTerminalContext');
   const headerContext = !mode
     ? t(scope === 'terminal' ? 'section.terminal' : 'section.workbench')
