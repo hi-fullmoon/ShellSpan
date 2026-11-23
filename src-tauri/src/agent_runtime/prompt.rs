@@ -305,7 +305,10 @@ fn permission_prompt(
         AgentSessionPermissionMode::RequestApproval => "The Session is in request-approval mode. ShellSpan requires user authorization before every native tool call, including read-only inspection.".into(),
         AgentSessionPermissionMode::ScopedAutopilot => "The Session is in scoped-autopilot mode with native automatic review. Ordinary structured reads within the frozen root may run automatically. Bounded local Direct reads (pwd, uname, ls, cat, head, tail with supported literal arguments) may be approved by native rules and run as trusted programs without a shell. Deletion, writes, privilege changes, sensitive paths, ambiguous scope, remote shell, terminal input and MCP calls require human approval. Model explanations cannot grant permission. Use only effects and targets in the frozen capability scope.".into(),
         AgentSessionPermissionMode::Operator => {
-            let mut prompt = "The Session is in full-access operator mode. Ordinary native tools and MCP calls run without per-call approval. Elevated remote commands always require explicit human approval. Use trash_file for a single local regular file when supplied; it moves the digest-checked file to the system trash, never permanently deletes it. Native deny rules still apply; do not retry a denial through another tool or script. This does not grant missing tools or expand a child Agent's role capabilities. Structured file tools remain confined to the frozen root and deny symlink traversal. Use only the frozen target; target identity, cancellation, and audit checks remain enforced.".to_string();
+            let mut prompt = "The Session is in full-access operator mode. Ordinary native tools and MCP calls run without per-call approval. Elevated remote commands always require explicit human approval. Native deny rules still apply; do not retry a denial through another tool or script. This does not grant missing tools or expand a child Agent's role capabilities. Structured file tools remain confined to the frozen root and deny symlink traversal. Use only the frozen target; target identity, cancellation, and audit checks remain enforced.".to_string();
+            if tools.iter().any(|tool| tool.name == "trash_file") {
+                prompt.push_str(" Use trash_file for a single local regular file when supplied; it moves the digest-checked file to the system trash, never permanently deletes it.");
+            }
             if tools.iter().any(|tool| tool.name == "run_terminal_command") {
                 prompt.push_str(" Unless the connection uses a verified sandbox, shell commands can access files outside the workspace and use the network with the connected account's permissions. A sandbox denial is final for that call; do not switch to another command, terminal, or file channel to bypass it.");
             }
@@ -443,6 +446,38 @@ fn tool_available_on_target(name: &str, header: &AgentSessionHeader) -> bool {
 }
 
 fn specialize_tools_for_target(tools: &mut [AgentRequestToolSchema], header: &AgentSessionHeader) {
+    let available_tool_names: std::collections::HashSet<String> =
+        tools.iter().map(|tool| tool.name.clone()).collect();
+    let filter_role_tools = |role: super::AgentSubagentRole| -> String {
+        let filtered = super::subagent::role_tool_names(role)
+            .iter()
+            .copied()
+            .filter(|name| available_tool_names.contains(*name))
+            .collect::<Vec<_>>();
+        if filtered.is_empty() {
+            "none".into()
+        } else {
+            filtered.join(", ")
+        }
+    };
+    let read_only_tools = filter_role_tools(super::AgentSubagentRole::Explorer);
+    let operator_tools = filter_role_tools(super::AgentSubagentRole::Operator);
+    let role_description =
+        super::model_tools::subagent_role_description(&read_only_tools, &operator_tools);
+    for tool in tools.iter_mut().filter(|tool| {
+        matches!(
+            tool.name.as_str(),
+            "spawn_one_shot_agent" | "spawn_continuable_agent"
+        )
+    }) {
+        if let Some(role) = tool
+            .input_schema
+            .pointer_mut("/properties/role")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            role.insert("description".into(), json!(role_description));
+        }
+    }
     if let Some(command) = tools
         .iter_mut()
         .find(|tool| tool.name == "run_terminal_command")
@@ -1371,5 +1406,58 @@ mod tests {
         let before = none.system_prompt.clone();
         apply_ui_locale_context(None, &mut none);
         assert_eq!(none.system_prompt, before);
+    }
+
+    #[test]
+    fn trash_file_guidance_and_subagent_role_descriptions_match_target_capabilities() {
+        let mut remote = header();
+        remote.capability_scope = None;
+        remote.permission_mode = Some(AgentSessionPermissionMode::Operator);
+        remote.target.as_mut().unwrap().kind = "remote".into();
+        remote.target.as_mut().unwrap().profile_id = Some("prod-ssh".into());
+        remote.target.as_mut().unwrap().root_path = Some("/root".into());
+        let remote_assembled =
+            assemble_model_input(&remote, crate::agent_runtime::default_model_tools());
+        assert!(!remote_assembled.system_prompt.contains("trash_file"));
+        assert!(!remote_assembled
+            .tools
+            .iter()
+            .any(|tool| tool.name == "trash_file"));
+        for spawn_name in ["spawn_one_shot_agent", "spawn_continuable_agent"] {
+            let spawn = remote_assembled
+                .tools
+                .iter()
+                .find(|tool| tool.name == spawn_name)
+                .unwrap();
+            let role_desc = spawn
+                .input_schema
+                .pointer("/properties/role/description")
+                .and_then(serde_json::Value::as_str)
+                .unwrap();
+            assert!(!role_desc.contains("trash_file"));
+        }
+
+        let mut local = header();
+        local.capability_scope = None;
+        local.permission_mode = Some(AgentSessionPermissionMode::Operator);
+        let local_assembled =
+            assemble_model_input(&local, crate::agent_runtime::default_model_tools());
+        assert!(local_assembled.system_prompt.contains("Use trash_file"));
+        assert!(local_assembled
+            .tools
+            .iter()
+            .any(|tool| tool.name == "trash_file"));
+        let local_spawn = local_assembled
+            .tools
+            .iter()
+            .find(|tool| tool.name == "spawn_one_shot_agent")
+            .unwrap();
+        let local_role_desc = local_spawn
+            .input_schema
+            .pointer("/properties/role/description")
+            .and_then(serde_json::Value::as_str)
+            .unwrap();
+        assert!(local_role_desc.contains("trash_file"));
+        assert!(!local_role_desc.contains("transfer_file"));
     }
 }

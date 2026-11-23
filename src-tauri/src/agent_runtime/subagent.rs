@@ -2324,6 +2324,10 @@ pub(super) fn validate_required_tools(
     } else {
         let recovery = if missing.iter().any(|tool| tool == "run_terminal_command") {
             "Explorer/diagnostician/verifier/reviewer support structured read-only tools, never run_terminal_command, including read-only shell commands such as rg, wc or git log. For file-only review, keep the role and use read_file/list_directory/search_text without requesting shell execution. If shell execution is essential and authorized, select general or operator only when the parent and target supply every required tool; otherwise collect the missing evidence in the parent."
+        } else if missing.iter().any(|tool| tool == "trash_file")
+            && !available.iter().any(|tool| tool.name == "trash_file")
+        {
+            "trash_file is only available for frozen local workspaces and is not supported on remote targets or sessions without a local root. Changing roles cannot grant a capability absent from the parent or target. Explain this limitation to the user or use an authorized tool supported on the target."
         } else {
             "These tools are unavailable within the selected role, parent scope or target. Use supplied tools or have the parent collect missing evidence. Changing roles cannot grant a capability absent from the parent or target."
         };

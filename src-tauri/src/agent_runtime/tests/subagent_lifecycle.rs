@@ -1010,6 +1010,65 @@ fn ancestor_can_inspect_descendant_but_cannot_mutate_it() {
     );
 }
 
+#[tokio::test]
+async fn subagent_remote_target_explains_trash_file_is_local_only() {
+    let (_storage, manager, _) = setup();
+    let parent = manager.sessions.snapshot("lifecycle-parent").unwrap();
+    let mut target = parent.header.target.unwrap();
+    target.target_id = "remote-trash-target".into();
+    target.kind = "remote".into();
+    target.profile_id = Some("prod-ssh".into());
+    target.host = Some("10.0.0.10".into());
+    target.port = Some(22);
+    target.username = Some("root".into());
+    target.root_path = Some("/root".into());
+    manager
+        .sessions
+        .create(CreateAgentSessionRequest {
+            session_id: "remote-trash-parent".into(),
+            task_id: "remote-trash-task".into(),
+            goal: "Inspect remote files".into(),
+            parent_session_id: None,
+            continued_from_session_id: None,
+            target: Some(target),
+            permission_mode: Some(super::super::AgentSessionPermissionMode::Operator),
+            execution_surface: AgentExecutionSurface::Direct,
+            success_criteria: Vec::new(),
+            capability_scope: None,
+            subagent: None,
+        })
+        .unwrap();
+    let request = OrchestrationToolRequest {
+        parent_session_id: "remote-trash-parent".into(),
+        turn_id: "trash-turn".into(),
+        step_id: "trash-step".into(),
+        call: super::super::ModelToolCall {
+            call_id: "trash-child-call".into(),
+            provider_call_id: None,
+            name: "spawn_one_shot_agent".into(),
+            arguments: json!({
+                "goal": "Move /root/agent_test_demo.txt to trash",
+                "role": "operator",
+                "inheritanceMode": "blank",
+                "targetIds": ["remote-trash-target"],
+                "requiredTools": ["trash_file", "list_directory"]
+            }),
+        },
+    };
+    let error = manager
+        .execute(request, CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(error.contains("subagent capability unavailable: trash_file"));
+    assert!(error.contains("No child was created"));
+    assert!(error.contains("only available for frozen local workspaces"));
+    assert!(manager
+        .sessions
+        .child_session_ids("remote-trash-parent")
+        .unwrap()
+        .is_empty());
+}
+
 mod fleet_tool_budget_tests {
     use super::*;
     include!("fleet_tool_budget.rs");

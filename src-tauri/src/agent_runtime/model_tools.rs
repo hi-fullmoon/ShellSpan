@@ -552,6 +552,10 @@ fn wait_terminal_schema() -> Value {
     })
 }
 
+pub(super) fn subagent_role_description(read_only_tools: &str, operator_tools: &str) -> String {
+    format!("Choose from requiredTools before spawning. Explorer, diagnostician, verifier and reviewer allow only: {read_only_tools}. Operator allows only: {operator_tools}. General inherits the parent's tools. Even read-only rg/wc/git log shell commands require general or operator with run_terminal_command. For file-only review, prefer explorer with read_file/list_directory/search_text. Every role remains limited by parent and target capabilities.")
+}
+
 fn subagent_spawn_schema() -> Value {
     let read_only_tools =
         super::subagent::role_tool_names(super::AgentSubagentRole::Explorer).join(", ");
@@ -561,7 +565,7 @@ fn subagent_spawn_schema() -> Value {
         &["goal", "role", "inheritanceMode", "targetIds"],
         json!({
             "goal": bounded_string(131072),
-            "role": { "type": "string", "enum": ["general", "explorer", "diagnostician", "operator", "verifier", "reviewer"], "description": format!("Choose from requiredTools before spawning. Explorer, diagnostician, verifier and reviewer allow only: {read_only_tools}. Operator allows only: {operator_tools}. General inherits the parent's tools. Even read-only rg/wc/git log shell commands require general or operator with run_terminal_command. For file-only review, prefer explorer with read_file/list_directory/search_text. Every role remains limited by parent and target capabilities.") },
+            "role": { "type": "string", "enum": ["general", "explorer", "diagnostician", "operator", "verifier", "reviewer"], "description": subagent_role_description(&read_only_tools, &operator_tools) },
             "requiredTools": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": bounded_string(128), "description": "Only tools essential to this child task, compatible with the selected role. Never copy the parent's full tool list into every child. Include run_terminal_command only when shell execution is essential, selecting general or operator. Missing capabilities fail before child creation; fix the combination before submitting other tasks in the batch." },
             "inheritanceMode": { "type": "string", "enum": ["blank", "safePrefix"] },
             "targetIds": { "type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true, "items": bounded_string(128) },
