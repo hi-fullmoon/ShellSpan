@@ -2323,6 +2323,8 @@ export default {
   'ai.workspace.tool.execution.succeeded': 'Succeeded',
   'ai.workspace.tool.execution.notStarted': 'Not started',
   'ai.workspace.tool.diffSimplified': 'Large change shown as a whole block; line totals are omitted.',
+  'ai.workspace.tool.diffExpandLines': 'Show {count} unchanged lines',
+  'ai.workspace.tool.diffOmittedLines': '{count} lines omitted',
   'ai.workspace.tool.expand': 'Show {count} hidden lines',
   'ai.workspace.tool.collapse': 'Collapse output',
   'ai.workspace.artifact.produced': 'Produced',

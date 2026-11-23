@@ -8,6 +8,7 @@ import {
   CheckCircle2Icon,
   CheckIcon,
   ChevronDownIcon,
+  ChevronsUpDownIcon,
   CircleDashedIcon,
   CircleHelpIcon,
   Code2Icon,
@@ -129,12 +130,36 @@ function mergeTerminalOutput(base: string, observed: string): string {
   return `${base}${separator}${observed}`;
 }
 
+function formatByteSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDirectoryEntries(entries: readonly unknown[]): string | null {
+  if (entries.length === 0) return '';
+  const lines: string[] = [];
+  for (const item of entries) {
+    if (typeof item === 'string') {
+      if (item) lines.push(item);
+      continue;
+    }
+    const entry = asRecord(item);
+    const label = firstString(entry, ['name', 'path']);
+    if (!label) return null;
+    const kind = firstString(entry, ['kind', 'type'])?.toLowerCase();
+    lines.push((kind === 'directory' || kind === 'dir') && !label.endsWith('/') ? `${label}/` : label);
+  }
+  return lines.join('\n');
+}
+
 function outputText(node: ToolNode): string {
   const observedOutput = node.backgroundJob?.output ?? '';
   if (node.output === null) return observedOutput;
   if (typeof node.output === 'string') return mergeTerminalOutput(node.output, observedOutput);
   const record = asRecord(node.output);
-  if (record && classifyAiTool(node.name, node.nativeName) === 'terminal') {
+  const variant = classifyAiTool(node.name, node.nativeName);
+  if (record && variant === 'terminal') {
     // Bound terminals have one shared PTY stream. An empty capture is still
     // an output value; it must not fall through to the protocol envelope.
     if (typeof record.combinedOutput === 'string') return mergeTerminalOutput(record.combinedOutput, observedOutput);
@@ -144,6 +169,18 @@ function outputText(node: ToolNode): string {
       const stderr = typeof record.stderr === 'string' ? record.stderr : '';
       const separator = stdout && stderr && !stdout.endsWith('\n') && !stderr.startsWith('\n') ? '\n' : '';
       return mergeTerminalOutput(`${stdout}${separator}${stderr}`, observedOutput);
+    }
+  }
+  if (record && variant === 'read') {
+    // Preserve empty/whitespace file content, directory listings, and metadata-only
+    // responses instead of falling through to the raw protocol JSON envelope.
+    if (typeof record.content === 'string') return mergeTerminalOutput(record.content, observedOutput);
+    if (Array.isArray(record.entries)) {
+      const formatted = formatDirectoryEntries(record.entries);
+      if (formatted !== null) return mergeTerminalOutput(formatted, observedOutput);
+    }
+    if (record.encoding === 'metadataOnly' || (record.content === null && typeof record.byteLength === 'number')) {
+      return observedOutput;
     }
   }
   const direct = firstString(record, [
@@ -706,7 +743,36 @@ function ReadSurface({ node, showCopyActions, showInput, scrollable, headerActio
   const inputText = path ?? formatToolValue(node.input);
   const label = path
     ?? (node.state === 'failed' || node.state === 'rejected' ? t('ai.workspace.tool.title.read') : node.summary || node.name);
+  const outputRecord = asRecord(node.output);
   const output = outputText(node);
+  const isDirectoryListing = Array.isArray(outputRecord?.entries);
+  const isMetadataOnly = Boolean(
+    outputRecord
+    && !output
+    && (outputRecord.encoding === 'metadataOnly'
+      || (outputRecord.content === null && typeof outputRecord.byteLength === 'number')),
+  );
+  const metadataSummary = useMemo(() => {
+    if (!isMetadataOnly || !outputRecord) return null;
+    const parts = [t('ai.workspace.tool.readMetadataOnly')];
+    const byteLength = firstNumber(outputRecord, ['byteLength', 'sizeBytes']);
+    if (byteLength !== null) parts.push(formatByteSize(byteLength));
+    if (outputRecord.isBinary === true) parts.push(t('ai.workspace.tool.readBinary'));
+    const permissions = firstString(outputRecord, ['permissions']);
+    if (permissions) parts.push(permissions);
+    return parts.join(t('ai.workspace.turnProcess.separator'));
+  }, [isMetadataOnly, outputRecord, t]);
+  const emptyNotice = useMemo(() => {
+    if (output || metadataSummary) return null;
+    if (node.output === null && (node.state === 'preparing' || node.state === 'running')) {
+      return t('ai.workspace.tool.reading');
+    }
+    if (isDirectoryListing) return t('ai.workspace.tool.readEmptyDirectory');
+    if (node.output === '' || (outputRecord && typeof outputRecord.content === 'string' && outputRecord.content === '')) {
+      return t('ai.workspace.tool.readEmptyFile');
+    }
+    return null;
+  }, [isDirectoryListing, metadataSummary, node.output, node.state, output, outputRecord, t]);
   const preview = bounded(output);
   const lines = preview.split('\n');
   const viewportRef = useRef<HTMLPreElement>(null);
@@ -719,15 +785,27 @@ function ReadSurface({ node, showCopyActions, showInput, scrollable, headerActio
       )}
       <div className="ai-tool-content-region relative min-w-0" data-ai-copy-region>
         {showCopyActions && output && <AiToolCopyButton text={output} label={t('ai.workspace.tool.copyOutput')} className="top-1 right-3.5" />}
-        <pre ref={viewportRef} className={cn(AI_CONTENT_CODE_CLASS, 'ai-read-lines pr-12 whitespace-pre', scrollable ? 'max-h-65 overflow-auto' : 'overflow-visible')} tabIndex={0}>
-          {lines.map((line, index) => (
-            <span key={index} className="ai-read-line grid min-h-[18px] grid-cols-[34px_minmax(max-content,1fr)]">
-              <span className="ai-read-line-number" aria-hidden="true">{index + 1}</span>
-              <span>{line || '\u00a0'}</span>
-            </span>
-          ))}
-        </pre>
-        {scrollable && <AiNativeCodeFade viewportRef={viewportRef} text={preview} />}
+        {metadataSummary ? (
+          <div className="px-3.5 pt-1 pb-3 text-xs text-muted-foreground" data-ai-read-metadata="">
+            {metadataSummary}
+          </div>
+        ) : emptyNotice ? (
+          <div className="px-3.5 pt-1 pb-3 text-xs text-muted-foreground" data-ai-read-empty="">
+            {emptyNotice}
+          </div>
+        ) : (
+          <>
+            <pre ref={viewportRef} className={cn(AI_CONTENT_CODE_CLASS, 'ai-read-lines pr-12 whitespace-pre', scrollable ? 'max-h-65 overflow-auto' : 'overflow-visible')} tabIndex={0}>
+              {lines.map((line, index) => (
+                <span key={index} className="ai-read-line grid min-h-[18px] grid-cols-[34px_minmax(max-content,1fr)]">
+                  <span className="ai-read-line-number" aria-hidden="true">{index + 1}</span>
+                  <span>{line || '\u00a0'}</span>
+                </span>
+              ))}
+            </pre>
+            {scrollable && <AiNativeCodeFade viewportRef={viewportRef} text={preview} />}
+          </>
+        )}
       </div>
     </div>
   );
@@ -1033,8 +1111,78 @@ export function toolDiffPreview(node: ToolNode): DiffModel | null {
   return model.hunks.length > 0 ? model : null;
 }
 
-function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAction, showInput, hideHeader = false, headerAction }: { node: ToolNode; compact: boolean; model?: DiffModel; showCopyActions: boolean; scrollable: boolean; copyAction?: ReactNode; showInput: boolean; hideHeader?: boolean; headerAction?: ReactNode }) {
+const DIFF_CONTEXT_RADIUS = 3;
+const DIFF_MIN_FOLD_LINES = 4;
+
+type NumberedDiffLine = DiffLine & { readonly number: number };
+
+type DiffRowItem =
+  | { readonly type: 'line'; readonly line: NumberedDiffLine }
+  | { readonly type: 'gap'; readonly hiddenCount: number }
+  | { readonly type: 'fold'; readonly id: string; readonly lines: readonly NumberedDiffLine[] };
+
+function foldSegmentLines(
+  segmentKey: string,
+  lines: readonly NumberedDiffLine[],
+  expandedIds: ReadonlySet<string>,
+): readonly DiffRowItem[] {
+  const hasChanges = lines.some((line) => line.kind !== 'context');
+  if (!hasChanges || lines.length < DIFF_MIN_FOLD_LINES) {
+    return lines.map((line) => ({ type: 'line', line }));
+  }
+  const visible = new Array<boolean>(lines.length).fill(false);
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i].kind === 'context') continue;
+    const start = Math.max(0, i - DIFF_CONTEXT_RADIUS);
+    const end = Math.min(lines.length - 1, i + DIFF_CONTEXT_RADIUS);
+    for (let j = start; j <= end; j += 1) visible[j] = true;
+  }
+  const rows: DiffRowItem[] = [];
+  let cursor = 0;
+  while (cursor < lines.length) {
+    if (visible[cursor]) {
+      rows.push({ type: 'line', line: lines[cursor] });
+      cursor += 1;
+      continue;
+    }
+    let end = cursor;
+    while (end < lines.length && !visible[end]) end += 1;
+    const hidden = lines.slice(cursor, end);
+    const foldId = `${segmentKey}:${cursor}-${end}`;
+    if (hidden.length >= DIFF_MIN_FOLD_LINES && !expandedIds.has(foldId)) {
+      rows.push({ type: 'fold', id: foldId, lines: hidden });
+    } else {
+      for (const line of hidden) rows.push({ type: 'line', line });
+    }
+    cursor = end;
+  }
+  return rows;
+}
+
+function buildDiffRows(
+  fileKey: string,
+  segments: readonly (readonly NumberedDiffLine[])[],
+  expandedIds: ReadonlySet<string>,
+): readonly DiffRowItem[] {
+  const rows: DiffRowItem[] = [];
+  for (let segIndex = 0; segIndex < segments.length; segIndex += 1) {
+    const segment = segments[segIndex];
+    if (segIndex > 0 && segment.length > 0) {
+      const previous = segments[segIndex - 1];
+      const prevEnd = previous[previous.length - 1]?.number;
+      const nextStart = segment[0]?.number;
+      if (typeof prevEnd === 'number' && typeof nextStart === 'number' && nextStart > prevEnd + 1) {
+        rows.push({ type: 'gap', hiddenCount: nextStart - prevEnd - 1 });
+      }
+    }
+    rows.push(...foldSegmentLines(`${fileKey}:${segIndex}`, segment, expandedIds));
+  }
+  return rows;
+}
+
+function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAction, showInput, hideHeader = false, foldContext = false, headerAction }: { node: ToolNode; compact: boolean; model?: DiffModel; showCopyActions: boolean; scrollable: boolean; copyAction?: ReactNode; showInput: boolean; hideHeader?: boolean; foldContext?: boolean; headerAction?: ReactNode }) {
   const { t } = useI18n();
+  const [expandedFolds, setExpandedFolds] = useState<ReadonlySet<string>>(() => new Set());
   const currentModel = useMemo(() => model ?? diffModel(node), [model, node]);
   const hunks = useMemo(() => currentModel.hunks.map((hunk) => {
     let oldNumber = hunk.oldStart ?? 1;
@@ -1047,14 +1195,30 @@ function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAc
     }) };
   }), [currentModel]);
   const files = useMemo(() => {
-    const grouped = new Map<string, (typeof hunks)[number]>();
+    const grouped = new Map<string, {
+      path: string;
+      exact: boolean;
+      added: number;
+      removed: number;
+      segments: (readonly NumberedDiffLine[])[];
+    }>();
     for (const hunk of hunks) {
+      const added = hunk.lines.filter((line) => line.kind === 'added').length;
+      const removed = hunk.lines.filter((line) => line.kind === 'removed').length;
       const previous = grouped.get(hunk.path);
       if (previous) {
         previous.exact = previous.exact && hunk.exact;
-        previous.lines.push(...hunk.lines);
+        previous.added += added;
+        previous.removed += removed;
+        previous.segments.push(hunk.lines);
       } else {
-        grouped.set(hunk.path, { ...hunk, lines: [...hunk.lines] });
+        grouped.set(hunk.path, {
+          path: hunk.path,
+          exact: hunk.exact,
+          added,
+          removed,
+          segments: [hunk.lines],
+        });
       }
     }
     return [...grouped.values()];
@@ -1072,37 +1236,77 @@ function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAc
       data-ai-tool-view="diff"
       data-embedded={hideHeader || undefined}
     >
-      {files.map((hunk, index) => (
-        <section key={`${hunk.path}:${index}`} className="min-w-0 max-w-full shrink-0">
-          {(!hideHeader || files.length > 1) && (
-            <ToolSurfaceHeader title={hunk.path} className={showInput ? undefined : 'min-h-8'}>
-              {hunk.exact && currentModel.totalsKnown && <span className="ai-diff-counts shrink-0">
-                <span data-diff-count="added">+{hunk.lines.filter((line) => line.kind === 'added').length}</span>{' '}
-                <span data-diff-count="removed">-{hunk.lines.filter((line) => line.kind === 'removed').length}</span>
-              </span>}
-              {index === 0 && headerAction}
-            </ToolSurfaceHeader>
-          )}
-          <AiToolContentRegion text={showCopyActions && index === 0 ? copyText : undefined} label={t('ai.workspace.tool.copyOutput')}>
-            <ToolScrollArea className="ai-diff-content max-h-65 min-w-0 max-w-full" viewportClassName={showInput ? TOOL_OUTPUT_FADE_CLASS : undefined} scrollable={scrollable}>
-              {!hunk.exact && <div className="px-2.5 py-1 text-xs text-muted-foreground" data-diff-simplified>
-                {t('ai.workspace.tool.diffSimplified')}
-              </div>}
-              <pre className="ai-diff-body m-0 min-w-0 max-w-full pt-px whitespace-pre" aria-label={hunk.path}>
-                <code className="ai-diff-lines">
-                  {hunk.lines.map((line, lineIndex) => (
-                    <span key={lineIndex} data-diff={line.kind}>
-                      <span className="ai-diff-line-number" aria-hidden="true">{line.number}</span>
-                      <DiffCode text={line.text} path={hunk.path} />
-                    </span>
-                  ))}
-                </code>
-              </pre>
-            </ToolScrollArea>
-            {index === 0 && copyAction}
-          </AiToolContentRegion>
-        </section>
-      ))}
+      {files.map((hunk, index) => {
+        const rows = foldContext
+          ? buildDiffRows(`${hunk.path}:${index}`, hunk.segments, expandedFolds)
+          : hunk.segments.flatMap((segment) => segment.map((line): DiffRowItem => ({ type: 'line', line })));
+        return (
+          <section key={`${hunk.path}:${index}`} className="min-w-0 max-w-full shrink-0">
+            {(!hideHeader || files.length > 1) && (
+              <ToolSurfaceHeader title={hunk.path} className={showInput ? undefined : 'min-h-8'}>
+                {hunk.exact && currentModel.totalsKnown && <span className="ai-diff-counts shrink-0">
+                  <span data-diff-count="added">+{hunk.added}</span>{' '}
+                  <span data-diff-count="removed">-{hunk.removed}</span>
+                </span>}
+                {index === 0 && headerAction}
+              </ToolSurfaceHeader>
+            )}
+            <AiToolContentRegion text={showCopyActions && index === 0 ? copyText : undefined} label={t('ai.workspace.tool.copyOutput')}>
+              <ToolScrollArea className="ai-diff-content max-h-65 min-w-0 max-w-full" viewportClassName={showInput ? TOOL_OUTPUT_FADE_CLASS : undefined} scrollable={scrollable}>
+                {!hunk.exact && <div className="px-2.5 py-1 text-xs text-muted-foreground" data-diff-simplified>
+                  {t('ai.workspace.tool.diffSimplified')}
+                </div>}
+                <pre className="ai-diff-body m-0 min-w-0 max-w-full pt-px whitespace-pre" aria-label={hunk.path}>
+                  <code className="ai-diff-lines">
+                    {rows.map((row, rowIndex) => {
+                      if (row.type === 'fold') {
+                        const expand = () => setExpandedFolds((prev) => new Set(prev).add(row.id));
+                        return (
+                          <span key={row.id} data-diff="fold" className="ai-diff-fold-row">
+                            <span
+                              className="ai-diff-fold-gutter"
+                              aria-hidden="true"
+                              onClick={expand}
+                            >
+                              <ChevronsUpDownIcon className="inline-block size-3 align-[-2px]" />
+                            </span>
+                            <span className="ai-diff-fold-cell table-cell">
+                              <button
+                                type="button"
+                                className="ai-diff-fold-button flex w-full items-center gap-1 px-3 py-1 text-left"
+                                onClick={expand}
+                              >
+                                <span>{t('ai.workspace.tool.diffExpandLines', { count: row.lines.length })}</span>
+                              </button>
+                            </span>
+                          </span>
+                        );
+                      }
+                      if (row.type === 'gap') {
+                        return (
+                          <span key={`gap:${rowIndex}`} data-diff="gap" className="ai-diff-gap-row">
+                            <span className="ai-diff-fold-gutter" aria-hidden="true">⋯</span>
+                            <span className="ai-diff-gap-cell table-cell px-3 py-1">
+                              {t('ai.workspace.tool.diffOmittedLines', { count: row.hiddenCount })}
+                            </span>
+                          </span>
+                        );
+                      }
+                      return (
+                        <span key={rowIndex} data-diff={row.line.kind}>
+                          <span className="ai-diff-line-number" aria-hidden="true">{row.line.number}</span>
+                          <DiffCode text={row.line.text} path={hunk.path} />
+                        </span>
+                      );
+                    })}
+                  </code>
+                </pre>
+              </ToolScrollArea>
+              {index === 0 && copyAction}
+            </AiToolContentRegion>
+          </section>
+        );
+      })}
     </div>
   );
 }
@@ -1425,6 +1629,7 @@ export function AiToolExpandedContent({
   showCopyActions = true,
   showInput = true,
   hideHeader = false,
+  foldContext = false,
   scrollable = true,
   diffModel: precomputedDiff,
   diffCopyAction,
@@ -1435,6 +1640,7 @@ export function AiToolExpandedContent({
   readonly showCopyActions?: boolean;
   readonly showInput?: boolean;
   readonly hideHeader?: boolean;
+  readonly foldContext?: boolean;
   readonly scrollable?: boolean;
   readonly diffModel?: DiffModel;
   readonly diffCopyAction?: ReactNode;
@@ -1452,7 +1658,7 @@ export function AiToolExpandedContent({
     case 'search': return <SearchSurface node={node} showCopyActions={showCopyActions} showInput={showInput} scrollable={scrollable} headerAction={headerAction} />;
     case 'web': return <WebSurface node={node} showCopyActions={showCopyActions} showInput={showInput} scrollable={scrollable} headerAction={headerAction} />;
     case 'write':
-    case 'edit': return <DiffSurface node={node} compact={compact} model={precomputedDiff} showCopyActions={showCopyActions} scrollable={scrollable} copyAction={diffCopyAction} showInput={showInput} hideHeader={hideHeader} headerAction={headerAction} />;
+    case 'edit': return <DiffSurface node={node} compact={compact} model={precomputedDiff} showCopyActions={showCopyActions} scrollable={scrollable} copyAction={diffCopyAction} showInput={showInput} hideHeader={hideHeader} foldContext={foldContext} headerAction={headerAction} />;
     case 'code': return <CodeSurface node={node} showCopyActions={showCopyActions} scrollable={scrollable} showInput={showInput} headerAction={headerAction} />;
     case 'plan': return <PlanSurface node={node} compact={compact} showCopyActions={showCopyActions} scrollable={scrollable} showInput={showInput} headerAction={headerAction} />;
     case 'generic': return <IoSurface node={node} compact={compact} showCopyActions={showCopyActions} showInput={showInput} scrollable={scrollable} headerAction={headerAction} />;

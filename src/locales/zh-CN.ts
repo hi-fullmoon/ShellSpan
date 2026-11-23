@@ -2321,6 +2321,8 @@ export default {
   'ai.workspace.tool.execution.succeeded': '成功',
   'ai.workspace.tool.execution.notStarted': '尚未启动',
   'ai.workspace.tool.diffSimplified': '变更较大，已按整段显示；行数统计已省略。',
+  'ai.workspace.tool.diffExpandLines': '展开 {count} 行未变更内容',
+  'ai.workspace.tool.diffOmittedLines': '省略 {count} 行',
   'ai.workspace.tool.expand': '显示隐藏的 {count} 行',
   'ai.workspace.tool.collapse': '收起输出',
   'ai.workspace.artifact.produced': '已生成',

@@ -184,18 +184,6 @@
   font: inherit;
 }
 
-@media (hover: hover) {
-  .ai-turn-changes-review-copy {
-    opacity: 0;
-    transition: opacity var(--ai-transition-duration-fast) var(--ai-ease-in-out);
-  }
-
-  .ai-turn-changes-review-row:hover .ai-turn-changes-review-copy,
-  .ai-turn-changes-review-row:focus-within .ai-turn-changes-review-copy {
-    opacity: 1;
-  }
-}
-
 .ai-turn-changes-dialog .ai-diff-block {
   max-width: 100%;
   margin: 0;
@@ -218,7 +206,8 @@
   background: transparent;
 }
 
-.ai-turn-changes-dialog .ai-diff-line-number {
+.ai-turn-changes-dialog .ai-diff-line-number,
+.ai-turn-changes-dialog .ai-diff-fold-gutter {
   min-width: 4.5ch;
   padding-inline: 12px 10px;
   border-right: 0;
@@ -228,6 +217,15 @@
 .ai-turn-changes-dialog .ai-diff-code {
   border-left: 3px solid transparent;
   padding-inline: 12px 16px;
+}
+
+.ai-turn-changes-dialog .ai-diff-fold-cell,
+.ai-turn-changes-dialog .ai-diff-gap-cell {
+  border-left: 3px solid transparent;
+}
+
+.ai-turn-changes-dialog .ai-diff-fold-row:hover .ai-diff-fold-gutter {
+  color: var(--ai-text);
 }
 
 .ai-turn-changes-dialog .ai-diff-body [data-diff='removed'] .ai-diff-code {

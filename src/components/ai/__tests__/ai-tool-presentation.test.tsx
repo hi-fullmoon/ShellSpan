@@ -721,6 +721,74 @@ describe('AI tool presentation', () => {
     expect(container.querySelector('.ai-disclosure-summary')).toHaveTextContent('/proc/net/tcp');
     expect(container.querySelector('.ai-tool-meta')).toHaveTextContent('失败');
   });
+
+  it.each(['zh-CN', 'en-US'] as const)('renders friendly read surfaces instead of raw protocol JSON in %s', async (locale) => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+
+    const { container, rerender } = render(<AiToolExpandedContent node={{
+      ...node,
+      name: 'read_file',
+      input: { path: 'empty.txt', encoding: 'utf8' },
+      output: { path: 'empty.txt', encoding: 'utf8', byteLength: 0, sha256: 'e3b0', content: '', untrusted: true },
+    }} />);
+    expect(container.querySelector('[data-ai-read-empty]')).toHaveTextContent(locale === 'zh-CN' ? '空文件' : 'Empty file');
+    expect(container.textContent).not.toContain('"byteLength"');
+    expect(screen.queryByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy output' })).not.toBeInTheDocument();
+
+    rerender(<AiToolExpandedContent node={{
+      ...node,
+      name: 'read_file',
+      input: { path: 'blank.txt', encoding: 'utf8' },
+      output: { path: 'blank.txt', encoding: 'utf8', byteLength: 4, content: '   \n', untrusted: true },
+    }} />);
+    expect(container.querySelectorAll('.ai-read-line')).toHaveLength(2);
+    expect(container.textContent).not.toContain('"byteLength"');
+
+    rerender(<AiToolExpandedContent node={{
+      ...node,
+      name: 'read_file',
+      input: { path: 'archive.bin', encoding: 'metadataOnly' },
+      output: { path: 'archive.bin', encoding: 'metadataOnly', byteLength: 2048, isBinary: true, content: null, permissions: '0644' },
+    }} />);
+    expect(container.querySelector('[data-ai-read-metadata]')).toHaveTextContent(
+      locale === 'zh-CN' ? '仅读取元信息 · 2.0 KB · 二进制 · 0644' : 'Metadata only · 2.0 KB · Binary · 0644',
+    );
+    expect(container.textContent).not.toContain('"encoding"');
+
+    rerender(<AiToolExpandedContent node={{
+      ...node,
+      name: 'list_directory',
+      input: { path: 'src' },
+      output: {
+        path: 'src',
+        entries: [
+          { name: 'components', path: 'src/components', kind: 'directory', sensitive: false },
+          { name: 'App.tsx', path: 'src/App.tsx', kind: 'file', byteLength: 1024, sensitive: false },
+        ],
+      },
+    }} />);
+    expect([...container.querySelectorAll('.ai-read-line > span:last-child')].map((line) => line.textContent))
+      .toEqual(['components/', 'App.tsx']);
+    expect(container.textContent).not.toContain('"sensitive"');
+
+    rerender(<AiToolExpandedContent node={{
+      ...node,
+      name: 'list_directory',
+      input: { path: 'empty-dir' },
+      output: { path: 'empty-dir', entries: [] },
+    }} />);
+    expect(container.querySelector('[data-ai-read-empty]')).toHaveTextContent(locale === 'zh-CN' ? '空目录' : 'Empty directory');
+
+    rerender(<AiToolExpandedContent node={{
+      ...node,
+      name: 'read_file',
+      state: 'running',
+      input: { path: 'agent_test_demo.txt' },
+      output: null,
+    }} />);
+    expect(container.querySelector('[data-ai-read-empty]')).toHaveTextContent(locale === 'zh-CN' ? '正在读取…' : 'Reading…');
+  });
 });
 
 afterAll(() => {

@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { ArrowLeftIcon, ChevronDownIcon, ChevronRightIcon, FileCodeIcon, FileCogIcon, FileTextIcon, Trash2Icon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { CopyButton } from '@/components/ui/copy-button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
@@ -206,12 +205,12 @@ function TurnReviewFileSection({
       data-ai-turn-changes-review-file={file.path}
     >
       <Collapsible open={expanded} onOpenChange={onExpandedChange}>
-        <div className="ai-turn-changes-review-row sticky top-0 z-[12] flex h-9 min-w-0 items-center border-b border-app-border/40 pr-2.5">
+        <div className="ai-turn-changes-review-row sticky top-0 z-[12] flex h-9 min-w-0 items-center border-b border-app-border/40">
           <CollapsibleTrigger
             render={(
               <button
                 type="button"
-                className="ai-turn-changes-review-trigger flex h-full min-w-0 flex-1 items-center justify-between gap-2 pl-3.5 pr-1 text-left"
+                className="ai-turn-changes-review-trigger flex h-full min-w-0 flex-1 items-center justify-between gap-2 px-3.5 text-left"
                 title={file.path}
                 aria-label={t('ai.workspace.turnChanges.openDiff', { path: file.path })}
                 aria-expanded={expanded}
@@ -227,37 +226,21 @@ function TurnReviewFileSection({
                 <span className="ai-turn-changes-dir min-w-0 truncate">{directory}</span>
               )}
             </span>
-          </CollapsibleTrigger>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <CopyButton
-              text={file.path}
-              label={t('ai.workspace.turnChanges.copyPath')}
-              iconOnly
-              size="icon-xs"
-              className="ai-turn-changes-review-copy"
-            />
-            {file.kind === 'deleted' ? (
-              <span className="ai-turn-changes-deleted shrink-0 text-xs">{t('ai.workspace.turnChanges.deleted')}</span>
-            ) : file.added !== null && file.removed !== null ? (
-              <span className="ai-turn-changes-counts inline-flex shrink-0 items-center gap-1 tabular-nums">
-                <span data-diff-count="added">+{file.added}</span>
-                <span data-diff-count="removed">-{file.removed}</span>
-              </span>
-            ) : null}
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              tabIndex={-1}
-              aria-hidden="true"
-              onClick={() => onExpandedChange(!expanded)}
-            >
+            <span className="flex shrink-0 items-center gap-2">
+              {file.kind === 'deleted' ? (
+                <span className="ai-turn-changes-deleted shrink-0 text-xs">{t('ai.workspace.turnChanges.deleted')}</span>
+              ) : file.added !== null && file.removed !== null ? (
+                <span className="ai-turn-changes-counts inline-flex shrink-0 items-center gap-1 tabular-nums">
+                  <span data-diff-count="added">+{file.added}</span>
+                  <span data-diff-count="removed">-{file.removed}</span>
+                </span>
+              ) : null}
               <ChevronRightIcon
                 className={cn('ai-turn-changes-chevron size-3.5 shrink-0', expanded && 'rotate-90')}
                 aria-hidden="true"
               />
-            </Button>
-          </div>
+            </span>
+          </CollapsibleTrigger>
         </div>
         <CollapsibleContent>
           <div className="ai-turn-changes-review-body min-w-0 border-b border-app-border/40" data-ai-turn-changes-file-body="">
@@ -269,8 +252,10 @@ function TurnReviewFileSection({
               <AiToolExpandedContent
                 node={file.tool}
                 compact
+                showCopyActions={false}
                 showInput={false}
                 hideHeader
+                foldContext
                 scrollable={false}
                 diffModel={fileDiff}
               />
@@ -344,7 +329,7 @@ function TurnChangedFilesOverlay({
         scopedToPanel ? 'absolute inset-0 z-[15]' : 'fixed inset-0 z-50',
       )}
     >
-      <div className="ai-turn-changes-dialog-header flex h-10 min-h-10 shrink-0 items-center justify-between gap-2 border-b border-app-border/50 px-[var(--ai-shell-clearance)]">
+      <div className="ai-turn-changes-dialog-header flex h-10 min-h-10 shrink-0 items-center justify-between gap-2 border-b border-app-border/50 pl-2.5 pr-3.5">
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <Button
             ref={closeButtonRef}

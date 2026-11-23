@@ -166,10 +166,10 @@ describe('AiTurnChangesSummary', () => {
     fireEvent.click(deletedButton);
     const reopenedDialog = screen.getByRole('dialog');
     expect(reopenedDialog.querySelector('[data-ai-turn-changes-review-file="etc/nginx/old.conf"] .ai-turn-changes-review-trigger')).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getAllByRole('button', { name: 'Copy path' }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByRole('button', { name: 'Copy path' })).not.toBeInTheDocument();
   });
 
-  it('opens a concise saved summary dialog with path copy instead of raw JSON for diff-less saves like save_vim_buffer', () => {
+  it('opens a concise saved summary dialog instead of raw JSON for diff-less saves like save_vim_buffer', () => {
     const vimSave = makeTool({
       key: 'tool:vim-save',
       callId: 'call-vim-save',
@@ -200,7 +200,7 @@ describe('AiTurnChangesSummary', () => {
 
     const dialog = screen.getByRole('dialog');
     expect(screen.getByText('Saved · 3 lines')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy path' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy path' })).not.toBeInTheDocument();
     expect(dialog.textContent).not.toContain('connectionPolicyBinding');
     expect(dialog.textContent).not.toContain('snap-2');
   });
@@ -229,5 +229,70 @@ describe('AiTurnChangesSummary', () => {
 
     const titles = Array.from(container.querySelectorAll('.ai-tool-surface-header .ai-content-title'), (el) => el.textContent);
     expect(titles).toEqual(['src/a.ts', 'src/b.ts']);
+  });
+
+  it('folds long unchanged context runs with an expandable bar and separates disjoint hunks with an omitted-lines row', () => {
+    const contextBefore = Array.from({ length: 12 }, (_, idx) => `line-${String(idx + 1).padStart(2, '0')}`).join('\n');
+    const contextAfter = Array.from({ length: 12 }, (_, idx) => `tail-${String(idx + 1).padStart(2, '0')}`).join('\n');
+    const editTool = makeTool({
+      key: 'tool:long-context',
+      callId: 'call-long-context',
+      input: {
+        path: 'src/long.ts',
+        old_string: `${contextBefore}\nold-target\n${contextAfter}\n`,
+        new_string: `${contextBefore}\nnew-target\n${contextAfter}\n`,
+      },
+    });
+    const { container } = render(
+      <AiToolExpandedContent
+        node={editTool}
+        compact
+        showCopyActions={false}
+        showInput={false}
+        hideHeader
+        foldContext
+        scrollable={false}
+      />,
+    );
+
+    const foldButtons = container.querySelectorAll<HTMLButtonElement>('.ai-diff-fold-button');
+    expect(foldButtons).toHaveLength(2);
+    expect(foldButtons[0]).toHaveTextContent('Show 9 unchanged lines');
+    expect(foldButtons[1]).toHaveTextContent('Show 9 unchanged lines');
+    expect(container.textContent).not.toContain('line-01');
+    expect(container.textContent).toContain('line-10');
+    expect(container.textContent).toContain('new-target');
+
+    fireEvent.click(foldButtons[0]);
+    expect(container.querySelectorAll('.ai-diff-fold-button')).toHaveLength(1);
+    expect(container.textContent).toContain('line-01');
+
+    const disjointTool = makeTool({
+      key: 'tool:disjoint-hunks',
+      callId: 'call-disjoint-hunks',
+      input: { patch: '' },
+    });
+    const { container: disjointContainer } = render(
+      <AiToolExpandedContent
+        node={disjointTool}
+        compact
+        showCopyActions={false}
+        showInput={false}
+        hideHeader
+        foldContext
+        scrollable={false}
+        diffModel={{
+          totalsKnown: true,
+          hunks: [
+            { path: 'src/long.ts', exact: true, oldStart: 10, newStart: 10, lines: [{ kind: 'added', text: 'first-change' }] },
+            { path: 'src/long.ts', exact: true, oldStart: 100, newStart: 100, lines: [{ kind: 'added', text: 'second-change' }] },
+          ],
+        }}
+      />,
+    );
+
+    const gapCell = disjointContainer.querySelector('.ai-diff-gap-cell');
+    expect(gapCell).toBeInTheDocument();
+    expect(gapCell).toHaveTextContent('89 lines omitted');
   });
 });
