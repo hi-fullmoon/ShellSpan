@@ -103,6 +103,15 @@ impl AgentMessageSource {
         }
     }
 
+    pub(crate) fn task_plan() -> Self {
+        Self {
+            kind: AgentMessageSourceKind::Runtime,
+            label: "Current task plan".into(),
+            producer_id: "shellspan.task-plan.v1".into(),
+            metadata: BTreeMap::from([("form".into(), Value::String("snapshot".into()))]),
+        }
+    }
+
     pub(crate) fn terminal_output(
         session_id: &str,
         version: u64,

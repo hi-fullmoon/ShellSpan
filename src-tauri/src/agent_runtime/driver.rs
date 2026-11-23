@@ -940,7 +940,7 @@ async fn apply_pre_step_hooks(
     );
     scope_current_task_context(sessions, &snapshot, &mut assembly)?;
     tools.sync_terminal_execution_context(&snapshot.header, &mut assembly)?;
-    append_current_task_plan_context(sessions, &snapshot, turn_id, &mut assembly.system_prompt)?;
+    append_current_task_plan_context(sessions, &snapshot, turn_id, &mut assembly)?;
     let mut request = ModelRequest::from_surface(
         "pre-step-budget".into(),
         &snapshot.surface,
@@ -1096,13 +1096,15 @@ fn scope_current_task_context(
 fn is_assembled_context_source(source: &super::AgentMessageSource) -> bool {
     matches!(
         source.producer_id.as_str(),
-        "shellspan.runtime-context.v1" | "shellspan.agent-instructions.v1"
+        "shellspan.runtime-context.v1"
+            | "shellspan.agent-instructions.v1"
+            | "shellspan.task-plan.v1"
     )
 }
 
 fn ensure_model_context(
     sessions: &AgentSessionStore,
-    entry: &AgentEntry,
+    session_id: &str,
     turn_id: &str,
     step_id: &str,
     surface: &super::AgentSurfaceSnapshot,
@@ -1134,7 +1136,7 @@ fn ensure_model_context(
         })
         .collect::<Vec<_>>();
     if !payloads.is_empty() {
-        sessions.append_batch(&entry.session_id, payloads)?;
+        sessions.append_batch(session_id, payloads)?;
     }
     Ok(())
 }
@@ -1968,7 +1970,7 @@ fn append_current_task_plan_context(
     sessions: &AgentSessionStore,
     snapshot: &super::AgentSessionSnapshot,
     turn_id: &str,
-    system_prompt: &mut String,
+    assembly: &mut super::ModelInputAssembly,
 ) -> Result<(), String> {
     if let Some(plan) = &snapshot.task.plan {
         let current_turn_owns_plan =
@@ -1978,9 +1980,9 @@ fn append_current_task_plan_context(
                         && matches!(event.payload, AgentSessionEventPayload::TaskPlan { .. })
                 })
             })?;
-        super::prompt::append_task_plan_context(system_prompt, Some(plan), current_turn_owns_plan);
+        super::prompt::append_task_plan_context(assembly, Some(plan), current_turn_owns_plan);
     } else {
-        super::prompt::append_task_plan_context(system_prompt, None, false);
+        super::prompt::append_task_plan_context(assembly, None, false);
     }
     Ok(())
 }
