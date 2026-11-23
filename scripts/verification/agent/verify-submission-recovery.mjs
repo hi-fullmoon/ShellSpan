@@ -18,6 +18,42 @@ try {
   if (!address || typeof address === 'string') throw new Error('Missing test server address');
   browser = await webkit.launch();
   const page = await browser.newPage();
+  await page.addInitScript(() => {
+    const drafts = new Map();
+    const persistWaiters = [];
+    window.releaseImagePersist = () => { while (persistWaiters.length) persistWaiters.shift()(); };
+    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
+    window.__TAURI_INTERNALS__ = {
+      metadata: {
+        currentWindow: { label: 'main' },
+        currentWebview: { label: 'main', windowLabel: 'main' },
+      },
+      transformCallback: () => 1,
+      invoke: async (cmd, args = {}) => {
+        if (cmd === 'plugin:event|listen') return 1;
+        if (cmd === 'plugin:event|unlisten') return null;
+        const input = args.input ?? {};
+        if (cmd === 'read_image_drafts') {
+          const keys = new Set(input.keys ?? []);
+          return [...drafts.values()].filter(
+            (record) => keys.has(record.owner) || (input.recoveryOwner && record.originOwner === input.recoveryOwner),
+          );
+        }
+        if (cmd === 'commit_image_drafts') {
+          if (window.holdImageWrite) {
+            await new Promise((resolve) => persistWaiters.push(resolve));
+          }
+          for (const check of input.checks ?? []) {
+            if ((drafts.get(check.owner)?.revision ?? 0) !== check.revision) throw new Error('IMAGE_DRAFT_CONFLICT');
+          }
+          for (const record of input.writes ?? []) drafts.set(record.owner, record);
+          for (const owner of input.deletes ?? []) drafts.delete(owner);
+          return null;
+        }
+        throw new Error(`IPC unavailable: ${cmd}`);
+      },
+    };
+  });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${address.port}/${entry}`, { waitUntil: 'networkidle' });
@@ -39,16 +75,7 @@ try {
       const binding = new Promise(resolve => { release = resolve; });
       window.releaseImageBinding = release;
       if (boundary === 'persisting') {
-        const database = await new Promise((resolve, reject) => {
-          const open = indexedDB.open('shellspan-image-drafts-v1');
-          open.onsuccess = () => resolve(open.result); open.onerror = () => reject(open.error);
-        });
         window.holdImageWrite = true;
-        const tx = database.transaction('drafts', 'readwrite');
-        const store = tx.objectStore('drafts');
-        const keepOpen = () => { const read = store.get(window.imageOwner); read.onsuccess = () => { if (window.holdImageWrite) keepOpen(); }; };
-        keepOpen();
-        tx.oncomplete = () => database.close();
         release();
       }
       window.imageResult = window.imageView.api.current.detach(async () => {
@@ -61,6 +88,7 @@ try {
     const cancelled = await page.evaluate(async boundary => {
       await window.imageView.api.current.cancel(boundary === 'stop-binding');
       window.holdImageWrite = false;
+      window.releaseImagePersist();
       const result = await window.imageResult;
       window.releaseImageBinding();
       await Promise.resolve();
@@ -76,6 +104,7 @@ try {
   }
 
   await page.evaluate(async () => {
+    delete window.__TAURI_INTERNALS__;
     window.controllerView = await window.recoveryProbe.mountDisconnectedController(document.querySelector('#probe'));
   });
   await page.waitForFunction(() => Boolean(window.controllerView.api.current));
@@ -91,6 +120,7 @@ try {
     return ids;
   });
   await page.evaluate(async () => {
+    delete window.__TAURI_INTERNALS__;
     window.controllerView = await window.recoveryProbe.mountDisconnectedController(document.querySelector('#probe'));
   });
   await page.waitForFunction(() => window.controllerView.api.current?.composer.failedDrafts.length === 1);
