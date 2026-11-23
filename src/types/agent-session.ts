@@ -194,6 +194,8 @@ export interface AgentTerminalContextSnapshot {
   readonly content: string;
 }
 
+export type LocalSandboxKind = 'windowsAppContainer' | 'macNono';
+
 export interface AgentSessionTarget {
   readonly kind: 'local' | 'remote';
   readonly targetId: string;
@@ -207,6 +209,7 @@ export interface AgentSessionTarget {
   readonly rootPath?: string;
   readonly localRoot?: string;
   readonly remoteSandboxRequired?: boolean;
+  readonly localSandboxRequired?: LocalSandboxKind;
   readonly windowsSandboxRequired?: boolean;
 }
 

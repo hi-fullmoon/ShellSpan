@@ -499,7 +499,8 @@ export function useAiSessionController({
   const sameSandboxTarget = currentAgentTarget?.sessionId === activeTerminalId;
   const sandboxRequired = sameSandboxTarget && currentAgentTarget?.remoteSandboxRequired === true;
   const localSandbox = localSandboxPreview
-    || (sameSandboxTarget && currentAgentTarget?.windowsSandboxRequired === true)
+    || (sameSandboxTarget && (currentAgentTarget?.localSandboxRequired != null
+      || currentAgentTarget?.windowsSandboxRequired === true))
     || (!view && newLocalSandbox);
   const sandboxDirectOnly = localSandbox ? 'local' : sandboxConfigured || sandboxRequired ? 'remote' : undefined;
   const sandboxSessionChanged = sameSandboxTarget && profileSandboxResolved && currentAgentTarget?.remoteSandboxRequired !== undefined
@@ -692,7 +693,7 @@ export function useAiSessionController({
         goal: intent.goal,
         target: {
           ...runtimeTarget(activeTerminal, newLocalSandbox ? undefined : workspaceRoot),
-          ...(newWindowsSandbox && { windowsSandboxRequired: true }),
+          ...(newWindowsSandbox && { localSandboxRequired: 'windowsAppContainer' as const }),
         },
         permissionMode: permissionMode(
           useAgentPermissionStore.getState().getMode(activeTerminal.sessionId),

@@ -6,6 +6,7 @@ import {
   ChevronRightIcon,
   MessageCircleQuestionIcon,
   PenLineIcon,
+  TerminalIcon,
 } from 'lucide-react';
 import {
   Card,
@@ -79,6 +80,21 @@ function isAnswerInvalid(answer: QuestionAnswer): boolean {
   return (!answer.selected.length && !answer.custom?.trim()) ||
     (answer.custom !== undefined && !answer.custom.trim()) ||
     new TextEncoder().encode(answer.custom ?? '').length > 8192;
+}
+
+function isStandaloneUserAction(question: AgentQuestionView): boolean {
+  return question.questions.length === 1
+    && Boolean(question.questions[0]?.user_action)
+    && !question.questions[0]?.options?.length;
+}
+
+function actionPanelTitle(question: AgentQuestionView, fallback: string): string {
+  if (!isStandaloneUserAction(question)) return fallback;
+  const item = question.questions[0];
+  const title = item?.question.trim() ?? '';
+  const instructions = item?.user_action?.instructions.trimStart() ?? '';
+  if (!title || instructions.startsWith(title)) return fallback;
+  return title;
 }
 
 function RecoveryButtonLabel({ label, busyLabel, busy }: {
@@ -327,7 +343,9 @@ export function AiQuestionPanel({
           <AiContentTitle>{userAction ? t('ai.workspace.question.actionTitle') : currentQuestion.header ?? t('ai.workspace.question.title')}</AiContentTitle>
         </CardDescription>
         <CardTitle className="ai-question-panel-title">
-          <AiContentTitle key={currentQuestion.id}>{userAction ? t('ai.workspace.question.actionWaiting') : currentQuestion.question}</AiContentTitle>
+          <AiContentTitle key={currentQuestion.id}>
+            {userAction ? actionPanelTitle(question, t('ai.workspace.question.actionWaiting')) : currentQuestion.question}
+          </AiContentTitle>
         </CardTitle>
         <CardAction className="ai-question-panel-actions flex items-center gap-0.5">
           <Button
@@ -360,57 +378,6 @@ export function AiQuestionPanel({
               >
                 {formatUserActionInstructions(userAction.instructions)}
               </MarkdownContent>
-              <Field>
-                <FieldDescription>{t('ai.workspace.question.actionVerification')}</FieldDescription>
-                <div className="ai-code-block flex min-w-0 items-baseline" data-ai-copy-region>
-                  <pre className={cn(AI_CONTENT_CODE_CLASS, 'flex-1 pr-12 whitespace-pre-wrap [overflow-wrap:anywhere]')}>
-                    <code>{userAction.verification_command}</code>
-                  </pre>
-                  {/* A zero-size box shares the first text baseline without taking space from the command. */}
-                  <span className="relative size-0 shrink-0" data-ai-copy-anchor>
-                    <AiToolCopyButton
-                      text={userAction.verification_command}
-                      label={copyCommandLabel}
-                      errorLabel={t('ai.workspace.question.actionCopyFailed')}
-                      className="-top-[0.5ex] -translate-y-1/2 [font:var(--ai-font-markdown-code-block)]"
-                    />
-                  </span>
-                </div>
-              </Field>
-              {changePlanOpen && (
-                <Field className="gap-1.5 pt-1" data-invalid={actionNoteTooLong || undefined}>
-                  <FieldLabel htmlFor={`${question.identity.questionRequestId}-action-note`} className="text-xs text-muted-foreground">
-                    {t('ai.workspace.question.actionNoteLabel')}
-                  </FieldLabel>
-                  <InputGroup className="ai-question-custom-group min-h-[34px] items-start">
-                    <InputGroupTextarea
-                      ref={actionNoteInputRef}
-                      id={`${question.identity.questionRequestId}-action-note`}
-                      className="ai-question-custom-input min-h-[34px] max-h-24 resize-none px-2.5 py-[7px] text-xs leading-relaxed"
-                      rows={2}
-                      disabled={editingLocked}
-                      value={actionNote}
-                      aria-invalid={actionNoteTooLong || undefined}
-                      maxLength={2048}
-                      placeholder={t('ai.workspace.question.actionNotePlaceholder')}
-                      onChange={(event) => setActionNote(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                          event.preventDefault();
-                          if (!pending && onAnswer && !actionNoteTooLong) {
-                            void submit('change_plan', question.answers, actionNote);
-                          }
-                        }
-                      }}
-                    />
-                  </InputGroup>
-                  {actionNoteTooLong && (
-                    <FieldError>
-                      {t('ai.workspace.question.actionNoteTooLong')}
-                    </FieldError>
-                  )}
-                </Field>
-              )}
             </FieldGroup> : <FieldGroup className="ai-question-list gap-0">
               <FieldSet
                 key={currentQuestion.id}
@@ -527,6 +494,64 @@ export function AiQuestionPanel({
               </pre>}
             </FieldError>}
           </CardContent>
+          {userAction && (
+            <div
+              className="ai-question-action-verification shrink-0 px-4 pt-1.5 pb-0.5 @max-[421px]/ai-workspace:px-2.5"
+              data-slot="ai-question-verification"
+            >
+              <Field className="gap-1">
+                <FieldDescription>{t('ai.workspace.question.actionVerification')}</FieldDescription>
+                <div className="ai-code-block flex min-w-0 items-baseline" data-ai-copy-region>
+                  <pre className={cn(AI_CONTENT_CODE_CLASS, 'flex-1 pr-12 whitespace-pre-wrap [overflow-wrap:anywhere]')}>
+                    <code>{userAction.verification_command}</code>
+                  </pre>
+                  {/* A zero-size box shares the first text baseline without taking space from the command. */}
+                  <span className="relative size-0 shrink-0" data-ai-copy-anchor>
+                    <AiToolCopyButton
+                      text={userAction.verification_command}
+                      label={copyCommandLabel}
+                      errorLabel={t('ai.workspace.question.actionCopyFailed')}
+                      className="-top-[0.5ex] -translate-y-1/2 [font:var(--ai-font-markdown-code-block)]"
+                    />
+                  </span>
+                </div>
+              </Field>
+              {changePlanOpen && (
+                <Field className="gap-1.5 pt-2" data-invalid={actionNoteTooLong || undefined}>
+                  <FieldLabel htmlFor={`${question.identity.questionRequestId}-action-note`} className="text-xs text-muted-foreground">
+                    {t('ai.workspace.question.actionNoteLabel')}
+                  </FieldLabel>
+                  <InputGroup className="ai-question-custom-group min-h-[34px] items-start">
+                    <InputGroupTextarea
+                      ref={actionNoteInputRef}
+                      id={`${question.identity.questionRequestId}-action-note`}
+                      className="ai-question-custom-input min-h-[34px] max-h-24 resize-none px-2.5 py-[7px] text-xs leading-relaxed"
+                      rows={2}
+                      disabled={editingLocked}
+                      value={actionNote}
+                      aria-invalid={actionNoteTooLong || undefined}
+                      maxLength={2048}
+                      placeholder={t('ai.workspace.question.actionNotePlaceholder')}
+                      onChange={(event) => setActionNote(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                          event.preventDefault();
+                          if (!pending && onAnswer && !actionNoteTooLong) {
+                            void submit('change_plan', question.answers, actionNote);
+                          }
+                        }
+                      }}
+                    />
+                  </InputGroup>
+                  {actionNoteTooLong && (
+                    <FieldError>
+                      {t('ai.workspace.question.actionNoteTooLong')}
+                    </FieldError>
+                  )}
+                </Field>
+              )}
+            </div>
+          )}
           <CardFooter className="ai-question-panel-footer min-h-12 shrink-0 justify-between gap-2.5 px-3.5 pt-1.5 pb-[7px] @max-[421px]/ai-workspace:flex-wrap @max-[421px]/ai-workspace:px-2.5">
             {!userAction && <div className="ai-question-pagination flex shrink-0 items-center gap-0.5">
               <Button
@@ -626,12 +651,28 @@ export function AiQuestionHistory({
   const { t } = useI18n();
   const key = questionKey(question.identity);
   const [open, setOpen] = useState(false);
-  const status = t(`ai.workspace.question.${question.status}`);
+  const standaloneAction = isStandaloneUserAction(question);
+  const status = standaloneAction
+    ? t(
+      question.status === 'pending'
+        ? 'ai.workspace.question.actionStatus.pending'
+        : question.status === 'cancelled' || question.actionResponse === 'cancelled'
+          ? 'ai.workspace.question.actionStatus.cancelled'
+          : question.actionResponse === 'change_plan'
+            ? 'ai.workspace.question.actionStatus.change_plan'
+            : 'ai.workspace.question.actionStatus.completed',
+    )
+    : t(`ai.workspace.question.${question.status}`);
+  const historyTitle = t(
+    standaloneAction
+      ? 'ai.workspace.question.actionHistoryTitle'
+      : 'ai.workspace.question.historyTitle',
+  );
   const answered = question.questions.filter((item) =>
     (item.user_action && question.actionResponse !== undefined)
     || question.answers.some((answer) => answer.id === item.id),
   ).length;
-  const summary = `${answered}/${question.questions.length} ${status}`;
+  const summary = standaloneAction ? status : `${answered}/${question.questions.length} ${status}`;
   useEffect(() => {
     if (question.status !== 'pending') {
       useAgentQuestionStore.getState().clear(key);
@@ -652,17 +693,17 @@ export function AiQuestionHistory({
               variant="plain"
               size="sm"
               className={`${AI_DISCLOSURE_ROW_CLASS} ai-question-history-trigger`}
-              aria-label={`${t('ai.workspace.question.historyTitle')} ${summary}`}
+              aria-label={`${historyTitle} ${summary}`}
               aria-expanded={open}
             />
           )}
         >
           <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
-            <MessageCircleQuestionIcon />
+            {standaloneAction ? <TerminalIcon /> : <MessageCircleQuestionIcon />}
             <ChevronDownIcon className="ai-disclosure-chevron" />
           </span>
           <span className={AI_DISCLOSURE_TITLE_CLASS}>
-            {t('ai.workspace.question.historyTitle')}
+            {historyTitle}
           </span>
           <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
           <span className={AI_DISCLOSURE_SUMMARY_CLASS}>{summary}</span>

@@ -129,6 +129,7 @@ const APPROVAL_ACTION_KEYS: Readonly<Record<string, LocaleKey>> = {
   inspect_vim_buffer: 'ai.workspace.approval.action.inspectVimBuffer',
   insert_vim_text: 'ai.workspace.approval.action.insertVimText',
   save_vim_buffer: 'ai.workspace.approval.action.saveVimBuffer',
+  close_vim_editor: 'ai.workspace.approval.action.closeVimEditor',
   search_text: 'ai.workspace.approval.action.searchText',
   trash_file: 'ai.workspace.approval.action.trashFile',
 };

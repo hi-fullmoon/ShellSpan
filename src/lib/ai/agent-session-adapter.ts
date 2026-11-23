@@ -379,7 +379,9 @@ function pendingApproval(nodes: readonly AiConversationNode[]): AiPendingApprova
   let commandSandbox: AiPendingApproval['commandSandbox'];
   if (boundDirect && tool?.target?.kind === 'local'
     && (args.sandboxExecutor === 'nonoMacAcceptance'
-      || (args.sandboxExecutor === 'windowsAppContainer' && tool.target.windowsSandboxRequired === true))) {
+      || (args.sandboxExecutor === 'windowsAppContainer'
+        && (tool.target.localSandboxRequired === 'windowsAppContainer'
+          || tool.target.windowsSandboxRequired === true)))) {
     commandSandbox = 'local';
   } else if (boundDirect && args.sandboxExecutor === 'bubblewrapV1' && tool?.target?.kind === 'remote') {
     commandSandbox = 'remote';
@@ -948,7 +950,8 @@ export function createAgentSessionAdapter(
     async setExecutionSurface(sessionId, surface) {
       const view = await openEntry(sessionId);
       if (defersSettings(view)) {
-        if (view.snapshot.value.header.target?.windowsSandboxRequired === true && surface !== 'direct') {
+        const target = view.snapshot.value.header.target;
+        if ((target?.localSandboxRequired != null || target?.windowsSandboxRequired === true) && surface !== 'direct') {
           throw new Error('WINDOWS_SANDBOX_DIRECT_REQUIRED');
         }
         recordDeferredSetting(sessionId, { executionSurface: surface });

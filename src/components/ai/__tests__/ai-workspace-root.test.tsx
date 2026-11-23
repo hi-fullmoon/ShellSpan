@@ -1844,4 +1844,41 @@ describe('AiWorkspaceRoot conversation structure', () => {
     expect(screen.getByRole('button', { name: 'Toggle 2 tasks' })).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('button', { name: 'Toggle 1 subagents' })).toHaveAttribute('aria-expanded', 'false');
   });
+
+  it('suppresses the duplicate trailing waiting indicator when the manual action panel is visible', () => {
+    const base = agentView();
+    const actionView: AiSessionView = {
+      ...base,
+      status: 'waiting',
+      statusReason: 'waitingForUserAction',
+      summary: { ...base.summary, status: 'waiting' },
+      pendingQuestion: {
+        identity: {
+          sessionId: base.summary.id,
+          turnId: 'turn-1',
+          stepId: 'step-2',
+          requestId: 'req-2',
+          callId: 'call-2',
+          questionRequestId: 'action-1',
+        },
+        questions: [{
+          id: 'manual',
+          question: 'Exit Vim to continue',
+          multi_select: false,
+          user_action: {
+            instructions: 'Press Esc, type `:q`, and press Enter.',
+            verification_command: 'test -f /root/agent_vim_test.txt',
+          },
+        }],
+        status: 'pending',
+        answers: [],
+        firstSeq: 10,
+        lastSeq: 10,
+        timestamp: '2026-11-21T02:00:00Z',
+      },
+    };
+    const { container } = render(<AiWorkspaceRoot view={actionView} scope="terminal" />);
+    expect(container.querySelector('[data-slot="ai-question-panel"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+  });
 });

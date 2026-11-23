@@ -120,6 +120,10 @@ describe('user operation within the existing question card', () => {
     expect(screen.getByText(action.verification_command)).toBeVisible();
     expect(container.querySelector('.ai-question-panel-header [data-slot="card-action"]')).toBeInTheDocument();
     expect(container.querySelector('.ai-question-panel-content')).toHaveClass('min-h-0', 'overflow-y-auto');
+    expect(container.querySelector('[data-slot="ai-question-verification"]')).toHaveClass('shrink-0');
+    expect(container.querySelector('.ai-question-panel-content')?.contains(
+      container.querySelector('[data-slot="ai-question-verification"]'),
+    )).toBe(false);
     expect(container.querySelector('.ai-question-panel-footer')).toHaveClass('shrink-0');
     const complete = screen.getByRole('button', { name: locale === 'en-US' ? 'Continue verification' : '继续验证' });
     fireEvent.click(complete);
@@ -147,11 +151,11 @@ describe('user operation within the existing question card', () => {
     const submissions: AnswerQuestionInput[] = [];
     const { rerender } = render(<AiQuestionPanel question={question} onAnswer={async input => { submissions.push(input); }} />);
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Change plan' }));
+    await user.click(screen.getByRole('button', { name: 'Report issue' }));
     const textbox = screen.getByRole('textbox');
     expect(textbox).toBeVisible();
     await user.type(textbox, 'admin is not in the sudoers file');
-    const submit = screen.getByRole('button', { name: 'Submit and change plan' });
+    const submit = screen.getByRole('button', { name: 'Submit and adjust plan' });
     await user.click(submit);
     expect(submissions).toHaveLength(1);
     expect(submissions[0]).toMatchObject({
@@ -199,14 +203,14 @@ describe('user operation within the existing question card', () => {
 
   it.each([
     {
-      locale: 'zh-CN', complete: '继续验证', title: '提问', summary: '1/1 已回答',
+      locale: 'zh-CN', complete: '继续验证', title: '手动操作', pending: '等待完成', summary: '已完成',
       detail: '用户已确认完成，仍需验证结果。',
     },
     {
-      locale: 'en-US', complete: 'Continue verification', title: 'Question', summary: '1/1 Answered',
+      locale: 'en-US', complete: 'Continue verification', title: 'Manual action', pending: 'Waiting for completion', summary: 'Completed',
       detail: 'User confirmed completion; verification is required.',
     },
-  ] as const)('counts a standalone confirmation in history in $locale', async ({ locale, complete, title, summary, detail }) => {
+  ] as const)('renders standalone manual action status without question counts in $locale', async ({ locale, complete, title, pending, summary, detail }) => {
     await initI18n(locale);
     useAppStore.setState({ locale });
     const projection = createQuestionProjection();
@@ -219,15 +223,22 @@ describe('user operation within the existing question card', () => {
         identity: question.identity,
         provider: { routeId: 'route', modelId: 'model' },
         arguments: {
-          questions: [{ id: 'manual', question: action.instructions, multi_select: false, user_action: action }],
+          questions: [{ id: 'manual', question: 'Exit Vim to continue', multi_select: false, user_action: action }],
         },
       },
     });
 
     const submissions: AnswerQuestionInput[] = [];
     const user = userEvent.setup();
-    const { rerender } = render(<AiQuestionPanel question={projection.snapshot()[0]}
-      onAnswer={async input => { submissions.push(input); }} />);
+    const { rerender } = render(
+      <>
+        <AiQuestionHistory question={projection.snapshot()[0]} />
+        <AiQuestionPanel question={projection.snapshot()[0]}
+          onAnswer={async input => { submissions.push(input); }} />
+      </>,
+    );
+    expect(screen.getByRole('button', { name: `${title} ${pending}` })).toBeVisible();
+    expect(screen.getByText('Exit Vim to continue')).toBeVisible();
     await user.click(screen.getByRole('button', { name: complete }));
     expect(submissions).toHaveLength(1);
     expect(submissions[0].answers).toEqual([]);

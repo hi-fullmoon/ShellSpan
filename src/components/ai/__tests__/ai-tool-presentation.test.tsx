@@ -524,11 +524,47 @@ describe('AI tool presentation', () => {
     expect(container.querySelector('.lucide-list-todo')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^更新任务计划:/u })).toBeInTheDocument();
     const summary = container.querySelector('.ai-disclosure-summary');
+    expect(summary).toHaveTextContent('1 进行中 · 2 待处理');
     expect(summary).toHaveClass('truncate');
     expect(summary).not.toHaveClass('line-clamp-2');
     await userEvent.setup().click(screen.getByRole('button', { name: /^更新任务计划:/u }));
     expect(summary).toHaveClass('truncate');
     expect(summary).not.toHaveClass('whitespace-pre-wrap', 'overflow-auto');
+  });
+
+  it('localizes update_plan step counts and prefers explanation when provided', async () => {
+    useAppStore.setState({ locale: 'zh-CN' });
+    await initI18n('zh-CN');
+    const stepsInput = {
+      steps: [
+        { step: 'Inspect logs', status: 'in_progress' },
+        { step: 'Confirm scope', status: 'pending' },
+        { step: 'Clean logs', status: 'pending' },
+        { step: 'Verify disk', status: 'pending' },
+      ],
+    };
+    const stepsNode: AiConversationNodeOf<'tool'> = {
+      ...node,
+      key: 'tool:plan-steps',
+      callId: 'plan-steps',
+      name: 'update_plan',
+      title: 'Update task plan',
+      summary: 'Updated task plan: 3 pending, 1 in progress, 0 completed, 0 blocked, 0 failed (version 1)',
+      input: stepsInput,
+    };
+
+    const { container, rerender } = render(<AiToolRow node={stepsNode} />);
+    expect(container.querySelector('.ai-disclosure-summary')).toHaveTextContent('1 进行中 · 3 待处理');
+
+    rerender(
+      <AiToolRow
+        node={{
+          ...stepsNode,
+          input: { ...stepsInput, explanation: '先检查磁盘与日志现状' },
+        }}
+      />,
+    );
+    expect(container.querySelector('.ai-disclosure-summary')).toHaveTextContent('先检查磁盘与日志现状');
   });
 
   it('limits command input to two lines and expands it with one click', async () => {

@@ -158,6 +158,7 @@ function classifyAiToolName(name: string): AiToolVariant {
 
 const EXACT_TOOL_VARIANTS: Readonly<Record<string, AiToolVariant>> = {
   apply_patch: 'edit',
+  close_vim_editor: 'terminal',
   exec_command: 'terminal',
   insert_vim_text: 'edit',
   inspect_vim_buffer: 'read',
@@ -243,10 +244,65 @@ function toolSummary(node: ToolNode, variant: AiToolVariant): string {
     ?? node.name;
 }
 
+function localizedPlanSummary(
+  node: ToolNode,
+  t: ReturnType<typeof useI18n>['t'],
+): string | null {
+  const input = asRecord(node.input);
+  const explanation = firstString(input, ['explanation']);
+  if (explanation) return explanation.split('\n')[0] ?? explanation;
+
+  const counts = { inProgress: 0, pending: 0, completed: 0, blocked: 0, failed: 0 };
+  const output = asRecord(node.output);
+  const rawSteps = Array.isArray(input?.steps) && input.steps.length > 0
+    ? input.steps
+    : Array.isArray(output?.steps) && output.steps.length > 0
+      ? output.steps
+      : null;
+
+  if (rawSteps) {
+    for (const step of rawSteps) {
+      const status = asRecord(step)?.status;
+      if (status === 'in_progress' || status === 'inProgress') counts.inProgress += 1;
+      else if (status === 'pending') counts.pending += 1;
+      else if (status === 'completed') counts.completed += 1;
+      else if (status === 'blocked') counts.blocked += 1;
+      else if (status === 'failed') counts.failed += 1;
+    }
+  } else if (node.summary.startsWith('Updated task plan:')) {
+    const match = (label: string): number => {
+      const found = node.summary.match(new RegExp(`(\\d+)\\s+${label}`, 'i'));
+      return found ? Number.parseInt(found[1], 10) : 0;
+    };
+    counts.inProgress = match('in progress');
+    counts.pending = match('pending');
+    counts.completed = match('completed');
+    counts.blocked = match('blocked');
+    counts.failed = match('failed');
+  } else {
+    return null;
+  }
+
+  const parts = [
+    counts.inProgress > 0 ? t('ai.workspace.tasks.inProgress', { count: counts.inProgress }) : null,
+    counts.pending > 0 ? t('ai.workspace.tasks.pending', { count: counts.pending }) : null,
+    counts.completed > 0 ? t('ai.workspace.tasks.completed', { count: counts.completed }) : null,
+    counts.blocked > 0 ? t('ai.workspace.tasks.blocked', { count: counts.blocked }) : null,
+    counts.failed > 0 ? t('ai.workspace.tasks.failed', { count: counts.failed }) : null,
+  ].filter((part): part is string => part !== null);
+
+  return parts.length > 0 ? parts.join(t('ai.workspace.turnProcess.separator')) : null;
+}
+
 export function toolDisplaySummary(node: ToolNode, t: ReturnType<typeof useI18n>['t']): string {
   if (node.recoveredByToolKey) return t('ai.workspace.tool.recoveredSummary');
   if (node.state === 'uncertain') return t('ai.workspace.tool.uncertain');
-  const raw = toolSummary(node, classifyAiTool(node.name, node.nativeName));
+  const variant = classifyAiTool(node.name, node.nativeName);
+  if (variant === 'plan' && node.state !== 'failed' && node.state !== 'rejected') {
+    const planSummary = localizedPlanSummary(node, t);
+    if (planSummary) return planSummary;
+  }
+  const raw = toolSummary(node, variant);
   if (node.state === 'failed' || node.state === 'rejected') {
     const translated = aiErrorMessage(raw, t);
     return translated !== raw ? translated : t(node.state === 'rejected'
@@ -301,6 +357,29 @@ function toolTitle(
     return t(titleKey(variant));
   }
   return node.title;
+}
+
+export function toolLiveActionSummary(
+  node: ToolNode,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  const variant = classifyAiTool(node.name, node.nativeName);
+  const title = toolTitle(node, variant, t);
+  const summary = toolDisplaySummary(node, t).trim();
+  const hasDetail = Boolean(summary && summary !== title && summary !== node.name && summary !== node.nativeName);
+  if (node.state === 'preparing') {
+    return hasDetail
+      ? t('ai.workspace.turnProcess.runningAction', { action: t('ai.workspace.turnProcess.preparingTool', { tool: title }), detail: summary })
+      : t('ai.workspace.turnProcess.preparingTool', { tool: title });
+  }
+  if (node.state === 'approval') {
+    return hasDetail
+      ? t('ai.workspace.turnProcess.approvalAction', { detail: summary })
+      : t('ai.workspace.turnProcess.approvalAction', { detail: title });
+  }
+  return hasDetail
+    ? t('ai.workspace.turnProcess.runningAction', { action: title, detail: summary })
+    : t('ai.workspace.turnProcess.runningTool', { tool: title });
 }
 
 function TerminalOutputText({ text }: { text: string }) {
@@ -359,29 +438,6 @@ function ToolSurfaceHeader({ title, icon: Icon, copyText, copyLabel, className, 
   readonly titleClassName?: string;
   readonly children?: ReactNode;
 }) {
-export function toolLiveActionSummary(
-  node: ToolNode,
-  t: ReturnType<typeof useI18n>['t'],
-): string {
-  const variant = classifyAiTool(node.name, node.nativeName);
-  const title = toolTitle(node, variant, t);
-  const summary = toolDisplaySummary(node, t).trim();
-  const hasDetail = Boolean(summary && summary !== title && summary !== node.name && summary !== node.nativeName);
-  if (node.state === 'preparing') {
-    return hasDetail
-      ? t('ai.workspace.turnProcess.runningAction', { action: t('ai.workspace.turnProcess.preparingTool', { tool: title }), detail: summary })
-      : t('ai.workspace.turnProcess.preparingTool', { tool: title });
-  }
-  if (node.state === 'approval') {
-    return hasDetail
-      ? t('ai.workspace.turnProcess.approvalAction', { detail: summary })
-      : t('ai.workspace.turnProcess.approvalAction', { detail: title });
-  }
-  return hasDetail
-    ? t('ai.workspace.turnProcess.runningAction', { action: title, detail: summary })
-    : t('ai.workspace.turnProcess.runningTool', { tool: title });
-}
-
   return (
     <div className={cn(AI_CONTENT_HEADER_CLASS, 'ai-block-banner ai-tool-surface-header', className)} data-ai-copy-region={copyText ? '' : undefined}>
       {Icon && <Icon className="shrink-0" aria-hidden="true" />}
@@ -416,6 +472,8 @@ function ToolScrollArea({ children, className, contentClassName, viewportClassNa
   readonly view?: 'generic' | 'diff';
   readonly label?: string;
   readonly horizontal?: boolean;
+  readonly viewportRef?: RefObject<HTMLDivElement | null>;
+  readonly onViewportScroll?: () => void;
 }) {
   // Embedded previews may delegate vertical scrolling to their parent section.
   if (!scrollable) return <div ref={viewportRef} onScroll={onViewportScroll} className={cn(className, contentClassName, 'max-h-none overflow-auto')} data-ai-tool-view={view}>{children}</div>;
@@ -448,6 +506,8 @@ function ToolExecutionFooter({ children, className, succeeded }: {
   );
 }
 
+const LIVE_SCROLL_FOLLOW_THRESHOLD = 8;
+
 function TerminalSurface({ node, showCopyActions, scrollable, showInput }: { node: ToolNode; showCopyActions: boolean; scrollable: boolean; showInput: boolean }) {
   const { t } = useI18n();
   const input = asRecord(node.input);
@@ -479,6 +539,19 @@ function TerminalSurface({ node, showCopyActions, scrollable, showInput }: { nod
     : execution === 'completed' ? 'ai.workspace.tool.execution.completed'
       : execution === 'notStarted' ? 'ai.workspace.tool.execution.notStarted'
         : execution === 'unknown' ? 'ai.workspace.tool.uncertain' : null;
+  const targetTerminalSessionId = node.target?.sessionId ?? null;
+  const isBoundTerminalTool = node.nativeName === 'terminal_execute' || outputRecord?.channel === 'terminal';
+  const canFocusTerminal = useTerminalStore((state) => Boolean(
+    isBoundTerminalTool
+    && targetTerminalSessionId
+    && state.sessions.some((session) => session.sessionId === targetTerminalSessionId),
+  ));
+  const handleFocusTerminal = (): void => {
+    if (!targetTerminalSessionId) return;
+    useTerminalStore.getState().setActiveSession(targetTerminalSessionId);
+    useAppStore.getState().setActiveSection('terminal');
+    terminalRegistry.get(targetTerminalSessionId)?.terminal?.focus();
+  };
   const job = asRecord(outputRecord?.job);
   const exitCode = execution && execution !== 'completed' ? null
     : firstNumber(execution === 'completed' && job ? job : outputRecord, ['exitCode', 'exit_code', 'code']);
@@ -487,11 +560,10 @@ function TerminalSurface({ node, showCopyActions, scrollable, showInput }: { nod
   const showSuccessIcon = succeeded || (execution === null && exitCode === null && node.state === 'succeeded');
   const exitStatus = hasFailedExit && <span className="ai-terminal-exit shrink-0">{t('ai.workspace.tool.exitCode', { code: exitCode })}</span>;
   const footerLabel = succeeded ? 'ai.workspace.tool.execution.succeeded' : executionLabel ?? `ai.workspace.tool.${node.state}`;
+  const showOutputSection = Boolean(output || isAlternateScreen || node.state !== 'running');
   const commandTitle = <>
     <AiToolContentRegion text={showCopyActions ? command : undefined} label={t('ai.workspace.tool.copyCommand')} showCopiedTooltip={false}>
       <div className="ai-terminal-command-row flex min-w-0 items-start py-1 pl-3.5">
-  readonly viewportRef?: RefObject<HTMLDivElement | null>;
-  readonly onViewportScroll?: () => void;
         <AiContentTitle
           className="flex-1"
           buttonClassName="ai-terminal-command pr-3.5"
@@ -514,6 +586,23 @@ function TerminalSurface({ node, showCopyActions, scrollable, showInput }: { nod
       data-live-output={usingLive || undefined}
     >
       <ToolSurfaceHeader className="ai-terminal-header" title={t('ai.workspace.tool.shell')}>
+        {usingLive && liveOutput.truncated && !isAlternateScreen && (
+          <span className="shrink-0 text-xs text-muted-foreground" data-ai-live-truncated="">
+            {t('ai.workspace.tool.showingRecentOutput')}
+          </span>
+        )}
+        {canFocusTerminal && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="ai-terminal-focus-button h-5 shrink-0 gap-1 px-1.5 text-xs text-muted-foreground hover:text-foreground"
+            onClick={handleFocusTerminal}
+          >
+            <SquareArrowOutUpRightIcon className="size-3 shrink-0" aria-hidden="true" />
+            <span>{t('ai.workspace.tool.focusTerminal')}</span>
+          </Button>
+        )}
         {!showInput && <>
           {executionLabel && <span className="shrink-0" data-ai-terminal-execution={execution}>{t(executionLabel)}</span>}
           {exitStatus}
@@ -528,9 +617,9 @@ function TerminalSurface({ node, showCopyActions, scrollable, showInput }: { nod
               viewportClassName={showInput ? TOOL_OUTPUT_FADE_CLASS : undefined}
               scrollable={scrollable}
               label={t('ai.workspace.tool.shell')}
+              viewportRef={viewportRef}
+              onViewportScroll={handleViewportScroll}
             >
-const LIVE_SCROLL_FOLLOW_THRESHOLD = 8;
-
               <div className="px-3.5 pb-3">
                 {isAlternateScreen ? (
                   <span className="text-muted-foreground" data-ai-terminal-interactive="">
@@ -554,19 +643,6 @@ const LIVE_SCROLL_FOLLOW_THRESHOLD = 8;
     </div>
   );
 }
-  const targetTerminalSessionId = node.target?.sessionId ?? null;
-  const isBoundTerminalTool = node.nativeName === 'terminal_execute' || outputRecord?.channel === 'terminal';
-  const canFocusTerminal = useTerminalStore((state) => Boolean(
-    isBoundTerminalTool
-    && targetTerminalSessionId
-    && state.sessions.some((session) => session.sessionId === targetTerminalSessionId),
-  ));
-  const handleFocusTerminal = (): void => {
-    if (!targetTerminalSessionId) return;
-    useTerminalStore.getState().setActiveSession(targetTerminalSessionId);
-    useAppStore.getState().setActiveSection('terminal');
-    terminalRegistry.get(targetTerminalSessionId)?.terminal?.focus();
-  };
 
 function ReadSurface({ node, showCopyActions, showInput, scrollable }: { node: ToolNode; showCopyActions: boolean; showInput: boolean; scrollable: boolean }) {
   const { t } = useI18n();
@@ -575,7 +651,6 @@ function ReadSurface({ node, showCopyActions, showInput, scrollable }: { node: T
   const inputText = path ?? formatToolValue(node.input);
   const label = path
     ?? (node.state === 'failed' || node.state === 'rejected' ? t('ai.workspace.tool.title.read') : node.summary || node.name);
-  const showOutputSection = Boolean(output || isAlternateScreen || node.state !== 'running');
   const output = outputText(node);
   const preview = bounded(output);
   const lines = preview.split('\n');
@@ -596,23 +671,6 @@ function ReadSurface({ node, showCopyActions, showInput, scrollable }: { node: T
         {scrollable && <AiNativeCodeFade viewportRef={viewportRef} text={preview} />}
       </div>
     </div>
-        {usingLive && liveOutput.truncated && !isAlternateScreen && (
-          <span className="shrink-0 text-xs text-muted-foreground" data-ai-live-truncated="">
-            {t('ai.workspace.tool.showingRecentOutput')}
-          </span>
-        )}
-        {canFocusTerminal && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            className="ai-terminal-focus-button h-5 shrink-0 gap-1 px-1.5 text-xs text-muted-foreground hover:text-foreground"
-            onClick={handleFocusTerminal}
-          >
-            <SquareArrowOutUpRightIcon className="size-3 shrink-0" aria-hidden="true" />
-            <span>{t('ai.workspace.tool.focusTerminal')}</span>
-          </Button>
-        )}
   );
 }
 
@@ -627,8 +685,6 @@ function SearchSurface({ node, showCopyActions, showInput, scrollable }: { node:
     <div className="ai-search-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="search">
       {showInput && <ToolSurfaceHeader title={query} icon={SearchIcon} />}
       <AiToolContentRegion text={showCopyActions ? output : undefined} label={t('ai.workspace.tool.copyOutput')}>
-              viewportRef={viewportRef}
-              onViewportScroll={handleViewportScroll}
         <div className={cn('ai-search-results m-0 flex max-w-full flex-col gap-1 px-3.5 pt-1 pb-3', scrollable ? 'max-h-65 overflow-auto' : 'overflow-visible')} tabIndex={0}>
           {lines.map((line, index) => <div key={index} className="ai-search-result min-w-0 [overflow-wrap:anywhere]">{line}</div>)}
         </div>
@@ -759,6 +815,53 @@ function textDiffLines(oldText: string | null, newText: string): Pick<DiffHunk, 
   return { lines: [...before, ...middle, ...after], exact: changes !== undefined };
 }
 
+export interface ToolFileChangeEntry {
+  readonly path: string;
+  readonly added: number | null;
+  readonly removed: number | null;
+  readonly kind: 'modified' | 'deleted';
+  readonly tool: ToolNode;
+}
+
+export function extractToolFileChanges(node: ToolNode): readonly ToolFileChangeEntry[] {
+  if (node.state !== 'succeeded') return [];
+  if (node.name === 'trash_file' || node.nativeName === 'trash_file') {
+    const path = firstString(asRecord(node.input), ['path', 'file_path', 'filePath']);
+    return path ? [{ path, added: null, removed: null, kind: 'deleted', tool: node }] : [];
+  }
+  const variant = classifyAiTool(node.name, node.nativeName);
+  if (variant !== 'write' && variant !== 'edit') return [];
+  const model = diffModel(node);
+  if (model.hunks.length > 0) {
+    const byPath = new Map<string, { added: number; removed: number; exact: boolean }>();
+    for (const hunk of model.hunks) {
+      let added = 0;
+      let removed = 0;
+      for (const line of hunk.lines) {
+        if (line.kind === 'added') added += 1;
+        if (line.kind === 'removed') removed += 1;
+      }
+      const existing = byPath.get(hunk.path);
+      if (existing) {
+        existing.added += added;
+        existing.removed += removed;
+        existing.exact = existing.exact && hunk.exact;
+      } else {
+        byPath.set(hunk.path, { added, removed, exact: hunk.exact && model.totalsKnown });
+      }
+    }
+    return [...byPath.entries()].map(([path, counts]) => ({
+      path,
+      added: counts.exact ? counts.added : null,
+      removed: counts.exact ? counts.removed : null,
+      kind: 'modified',
+      tool: node,
+    }));
+  }
+  const path = toolFilePath(node);
+  return path ? [{ path, added: null, removed: null, kind: 'modified', tool: node }] : [];
+}
+
 function diffStat(model: DiffModel): string | null {
   if (!model.totalsKnown || model.hunks.length === 0) return null;
   let added = 0;
@@ -815,53 +918,6 @@ function unifiedDiffHunks(node: ToolNode): readonly DiffHunk[] {
     return parsePatch(unifiedDiff).flatMap((patch) => patch.hunks.map((hunk) => {
       return {
         path: fallbackPath ?? patch.newFileName ?? patch.oldFileName ?? node.name,
-export interface ToolFileChangeEntry {
-  readonly path: string;
-  readonly added: number | null;
-  readonly removed: number | null;
-  readonly kind: 'modified' | 'deleted';
-  readonly tool: ToolNode;
-}
-
-export function extractToolFileChanges(node: ToolNode): readonly ToolFileChangeEntry[] {
-  if (node.state !== 'succeeded') return [];
-  if (node.name === 'trash_file' || node.nativeName === 'trash_file') {
-    const path = firstString(asRecord(node.input), ['path', 'file_path', 'filePath']);
-    return path ? [{ path, added: null, removed: null, kind: 'deleted', tool: node }] : [];
-  }
-  const variant = classifyAiTool(node.name, node.nativeName);
-  if (variant !== 'write' && variant !== 'edit') return [];
-  const model = diffModel(node);
-  if (model.hunks.length > 0) {
-    const byPath = new Map<string, { added: number; removed: number; exact: boolean }>();
-    for (const hunk of model.hunks) {
-      let added = 0;
-      let removed = 0;
-      for (const line of hunk.lines) {
-        if (line.kind === 'added') added += 1;
-        if (line.kind === 'removed') removed += 1;
-      }
-      const existing = byPath.get(hunk.path);
-      if (existing) {
-        existing.added += added;
-        existing.removed += removed;
-        existing.exact = existing.exact && hunk.exact;
-      } else {
-        byPath.set(hunk.path, { added, removed, exact: hunk.exact && model.totalsKnown });
-      }
-    }
-    return [...byPath.entries()].map(([path, counts]) => ({
-      path,
-      added: counts.exact ? counts.added : null,
-      removed: counts.exact ? counts.removed : null,
-      kind: 'modified',
-      tool: node,
-    }));
-  }
-  const path = toolFilePath(node);
-  return path ? [{ path, added: null, removed: null, kind: 'modified', tool: node }] : [];
-}
-
         exact: true,
         oldStart: hunk.oldStart,
         newStart: hunk.newStart,
@@ -1146,70 +1202,6 @@ export function AiToolRow({
   return <StandardAiToolRow node={node} />;
 }
 
-function StandardAiToolRow({
-  node,
-}: {
-  readonly node: ToolNode;
-}) {
-  const { t } = useI18n();
-  const variant = classifyAiTool(node.name, node.nativeName);
-  const liveOutput = useToolLiveOutput(node.sessionId, node.callId, variant === 'terminal' && node.state === 'running');
-  const [disclosure, setDisclosure] = useState<{ open?: boolean; recoveryKey?: string }>({});
-  const autoOpenedRef = useRef(false);
-  if (variant === 'terminal' && node.state === 'running' && liveOutput !== null && disclosure.open === undefined) {
-    autoOpenedRef.current = true;
-  }
-  const hasManualChoice = disclosure.open !== undefined && disclosure.recoveryKey === node.recoveredByToolKey;
-  const open = hasManualChoice
-    ? Boolean(disclosure.open)
-    : (autoOpenedRef.current && !node.recoveredByToolKey);
-  const setOpen = (next: boolean) => setDisclosure({ open: next, recoveryKey: node.recoveredByToolKey });
-  const subagentContext = use(AiSubagentContext);
-  const subagentAction = subagentToolAction(node.name, node.nativeName);
-  const Icon = subagentAction ? BotIcon : node.name === 'trash_file' ? Trash2Icon : iconFor(variant);
-  const stateKey = `ai.workspace.tool.${node.state}` as LocaleKey;
-  const subagentSummary = (subagentAction === 'inspect' || subagentAction === 'cancel')
-    && !node.recoveredByToolKey
-    && node.state !== 'uncertain'
-    && node.state !== 'failed'
-    && node.state !== 'rejected'
-    ? extractSubagentToolSummary(
-        node,
-        subagentContext?.lineage ?? null,
-        subagentContext?.toolChildSessionIds ?? EMPTY_SUBAGENT_ID_MAP,
-      )
-    : null;
-  const readableSubagentTitle = subagentSummary
-    && subagentSummary.title.trim() !== ''
-    && subagentSummary.title !== subagentSummary.childSessionId
-    && subagentSummary.title !== node.name
-    && subagentSummary.title !== node.nativeName
-    && subagentSummary.title !== 'Agent orchestration'
-    ? subagentSummary.title
-    : null;
-  const summary = subagentSummary
-    ? readableSubagentTitle ?? subagentRoleLabel(subagentSummary.role, t)
-    : toolDisplaySummary(node, t);
-  const hasError = !node.recoveredByToolKey && (node.state === 'failed' || node.state === 'rejected');
-  const title = toolTitle(node, variant, t);
-  const model = useMemo(() => variant === 'write' || variant === 'edit' ? diffModel(node) : null, [node, variant]);
-  const changeStat = model ? diffStat(model) : null;
-  return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <div
-        className="ai-tool-row-root flex min-w-0 flex-col"
-        data-tool-state={node.state}
-        data-tool-recovered={Boolean(node.recoveredByToolKey) || undefined}
-        data-tool-variant={variant}
-        data-tool-fallback={variant === 'generic' || undefined}
-      >
-        <span className="sr-only" role="status">{t(node.recoveredByToolKey ? 'ai.workspace.tool.recovered' : stateKey)}</span>
-        <CollapsibleTrigger
-          render={(
-            <button
-              type="button"
-              className={AI_TOOL_ROW_CLASS}
-              data-ai-node-action=""
 function toolGroupTargetLabel(node: ToolNode, variant: 'read' | 'search'): string | null {
   const input = asRecord(node.input);
   const raw = variant === 'read'
@@ -1336,6 +1328,70 @@ export function AiToolGroupRow({
   );
 }
 
+function StandardAiToolRow({
+  node,
+}: {
+  readonly node: ToolNode;
+}) {
+  const { t } = useI18n();
+  const variant = classifyAiTool(node.name, node.nativeName);
+  const liveOutput = useToolLiveOutput(node.sessionId, node.callId, variant === 'terminal' && node.state === 'running');
+  const [disclosure, setDisclosure] = useState<{ open?: boolean; recoveryKey?: string }>({});
+  const autoOpenedRef = useRef(false);
+  if (variant === 'terminal' && node.state === 'running' && liveOutput !== null && disclosure.open === undefined) {
+    autoOpenedRef.current = true;
+  }
+  const hasManualChoice = disclosure.open !== undefined && disclosure.recoveryKey === node.recoveredByToolKey;
+  const open = hasManualChoice
+    ? Boolean(disclosure.open)
+    : (autoOpenedRef.current && !node.recoveredByToolKey);
+  const setOpen = (next: boolean) => setDisclosure({ open: next, recoveryKey: node.recoveredByToolKey });
+  const subagentContext = use(AiSubagentContext);
+  const subagentAction = subagentToolAction(node.name, node.nativeName);
+  const Icon = subagentAction ? BotIcon : node.name === 'trash_file' ? Trash2Icon : iconFor(variant);
+  const stateKey = `ai.workspace.tool.${node.state}` as LocaleKey;
+  const subagentSummary = (subagentAction === 'inspect' || subagentAction === 'cancel')
+    && !node.recoveredByToolKey
+    && node.state !== 'uncertain'
+    && node.state !== 'failed'
+    && node.state !== 'rejected'
+    ? extractSubagentToolSummary(
+        node,
+        subagentContext?.lineage ?? null,
+        subagentContext?.toolChildSessionIds ?? EMPTY_SUBAGENT_ID_MAP,
+      )
+    : null;
+  const readableSubagentTitle = subagentSummary
+    && subagentSummary.title.trim() !== ''
+    && subagentSummary.title !== subagentSummary.childSessionId
+    && subagentSummary.title !== node.name
+    && subagentSummary.title !== node.nativeName
+    && subagentSummary.title !== 'Agent orchestration'
+    ? subagentSummary.title
+    : null;
+  const summary = subagentSummary
+    ? readableSubagentTitle ?? subagentRoleLabel(subagentSummary.role, t)
+    : toolDisplaySummary(node, t);
+  const hasError = !node.recoveredByToolKey && (node.state === 'failed' || node.state === 'rejected');
+  const title = toolTitle(node, variant, t);
+  const model = useMemo(() => variant === 'write' || variant === 'edit' ? diffModel(node) : null, [node, variant]);
+  const changeStat = model ? diffStat(model) : null;
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <div
+        className="ai-tool-row-root flex min-w-0 flex-col"
+        data-tool-state={node.state}
+        data-tool-recovered={Boolean(node.recoveredByToolKey) || undefined}
+        data-tool-variant={variant}
+        data-tool-fallback={variant === 'generic' || undefined}
+      >
+        <span className="sr-only" role="status">{t(node.recoveredByToolKey ? 'ai.workspace.tool.recovered' : stateKey)}</span>
+        <CollapsibleTrigger
+          render={(
+            <button
+              type="button"
+              className={AI_TOOL_ROW_CLASS}
+              data-ai-node-action=""
               aria-label={`${title}: ${summary}${changeStat ? ` ${changeStat}` : ''}`}
             />
           )}
@@ -1375,6 +1431,20 @@ export function AiToolGroupRow({
   );
 }
 
+function formatToolDuration(
+  durationMs: number,
+  t: (key: LocaleKey, values?: Record<string, string | number>) => string,
+): string {
+  const safeMs = Math.max(0, durationMs);
+  if (safeMs < 1_000) return t('ai.workspace.durationMs', { duration: Math.round(safeMs) });
+  const seconds = safeMs < 10_000
+    ? Math.round(safeMs / 100) / 10
+    : Math.round(safeMs / 1_000);
+  return seconds < 60
+    ? t('ai.workspace.duration.seconds', { seconds })
+    : t('ai.workspace.duration.minutes', { minutes: Math.floor(seconds / 60), seconds: seconds % 60 });
+}
+
 export function ToolStateIcon({ node }: { readonly node: ToolNode }) {
   if (node.state === 'uncertain') return <CircleHelpIcon aria-hidden="true" />;
   if (node.state === 'succeeded') return <CheckIcon aria-hidden="true" />;
@@ -1391,17 +1461,3 @@ export function toolOutputForCopy(node: ToolNode): string {
   const output = outputText(node);
   return classifyAiTool(node.name, node.nativeName) === 'terminal' ? renderTerminalTranscript(output) : output;
 }
-function formatToolDuration(
-  durationMs: number,
-  t: (key: LocaleKey, values?: Record<string, string | number>) => string,
-): string {
-  const safeMs = Math.max(0, durationMs);
-  if (safeMs < 1_000) return t('ai.workspace.durationMs', { duration: Math.round(safeMs) });
-  const seconds = safeMs < 10_000
-    ? Math.round(safeMs / 100) / 10
-    : Math.round(safeMs / 1_000);
-  return seconds < 60
-    ? t('ai.workspace.duration.seconds', { seconds })
-    : t('ai.workspace.duration.minutes', { minutes: Math.floor(seconds / 60), seconds: seconds % 60 });
-}
-

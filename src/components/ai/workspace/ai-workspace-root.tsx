@@ -26,6 +26,7 @@ import {
   type AiWorkspaceNavigationState,
 } from '@/lib/ai/panel-route';
 import type { AgentArtifactResponse } from '@/types/agent-session';
+import { pendingUserAction } from '@/types/agent-question';
 import type { AppSection } from '@/types';
 import { AiComposerSeat } from './ai-composer-seat';
 import { useFirstSubmitTransition } from './use-first-submit-transition';
@@ -367,11 +368,11 @@ export function AiWorkspaceRoot({
   const visibleNodes = view?.nodes ?? pendingNodes;
   const selectedSessionId = view?.summary.id ?? composerState?.sessionId
     ?? (route.kind === 'conversation' ? route.sessionId : null);
-  const sessionLoading = !view && (restoringSession || selectedSessionId !== null) && visibleNodes.length === 0;
   useEffect(() => {
     if (!selectedSessionId) return;
     return () => toolLiveOutputStore.clearSession(selectedSessionId);
   }, [selectedSessionId]);
+  const sessionLoading = !view && (restoringSession || selectedSessionId !== null) && visibleNodes.length === 0;
   const taskSteps = view?.snapshot.kind === 'agent'
     ? view.snapshot.value.task.plan?.steps ?? []
     : [];
@@ -401,7 +402,6 @@ export function AiWorkspaceRoot({
   const terminalRecovery = surfaceMode === 'agent' && !readOnlySession && !historicalTargetUnavailable
     ? terminalExecutionRecovery(view) : null;
   const sessionTarget = view?.snapshot.value.header.target;
-  const historicalTargetLabel = sessionTarget?.kind === 'local'
   const terminalInsertTarget = useTerminalInsertTarget(
     !readOnlySession && !historicalTargetUnavailable ? sessionTarget?.sessionId : null,
   );
@@ -416,6 +416,7 @@ export function AiWorkspaceRoot({
     } : undefined),
     [terminalInsertTarget, t],
   );
+  const historicalTargetLabel = sessionTarget?.kind === 'local'
     ? t('ai.workspace.localTarget')
     : sessionTarget && (terminalLoginLabel(sessionTarget) ?? sessionTarget.label ?? sessionTarget.host);
   const terminalContext = readOnlySession || historicalTargetUnavailable
@@ -620,7 +621,6 @@ export function AiWorkspaceRoot({
           ? <AiNoticeAction onClick={onOpenModel}>{t('ai.workspace.status.openSettings')}</AiNoticeAction> : null;
   const availabilityCopyClass = cn('min-w-0 flex-1 basis-48', availabilityAction && 'py-1');
 
-  return (
   const canContinueGeneration = Boolean(
     onSubmit
     && !submissionDisabled
@@ -702,6 +702,7 @@ export function AiWorkspaceRoot({
     }
   };
 
+  return (
     <section
       ref={rootRef}
       data-slot="ai-workspace-root"
@@ -766,8 +767,8 @@ export function AiWorkspaceRoot({
           />
         )}
         onNewSession={onNewSession && canStartAgent ? onNewSession : undefined}
-      />
         onExportMarkdown={canExportMarkdown ? handleExportMarkdown : undefined}
+      />
 
       <div
         ref={firstSubmitTransition.bodyRef}
@@ -810,14 +811,16 @@ export function AiWorkspaceRoot({
               failedDraftRetryBlockedReason,
             }}>
             <AiMarkdownTargetContext.Provider value={sessionTarget}>
-            <AiSubagentContext.Provider value={subagentContextValue}>
             <AiTerminalInsertContext.Provider value={terminalInsertContext}>
             <AiContinueGenerationContext.Provider value={continueGenerationContext}>
+            <AiSubagentContext.Provider value={subagentContextValue}>
             <AiConversation
               key={conversationIdentity.generation}
               nodes={conversationNodes}
               renderers={surfaceMode === 'ask' ? aiAskConversationNodeRenderers : undefined}
-              runningIndicator={historicalTargetUnavailable ? 'none' : surfaceMode}
+              runningIndicator={historicalTargetUnavailable
+                || (status === 'waiting' && Boolean(activeBlockingQuestion && pendingUserAction(activeBlockingQuestion)))
+                ? 'none' : surfaceMode}
               pending={surfaceMode === 'ask' && (activeComposerState?.phase === 'submitting'
                 || Boolean(pendingSubmissions?.some(submission => submission.startsTurn)))}
               submittedOperationId={submittedOperationId}
@@ -836,11 +839,11 @@ export function AiWorkspaceRoot({
               onLoadOlder={onLoadOlder}
             />
             </AiSubagentContext.Provider>
+            </AiContinueGenerationContext.Provider>
+            </AiTerminalInsertContext.Provider>
             </AiMarkdownTargetContext.Provider>
             </AiFailedDraftRecoveryContext.Provider>
             </AiFailureRecoveryContext.Provider>
-            </AiContinueGenerationContext.Provider>
-            </AiTerminalInsertContext.Provider>
           )}
         </div>
 
