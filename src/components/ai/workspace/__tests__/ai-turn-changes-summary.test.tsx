@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AiToolNode, AiTurnProcessNode } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
+import { AiToolExpandedContent } from '../ai-tool-presentation';
 import { AiTurnChangesSummary, summarizeTurnFileChanges } from '../ai-turn-changes-summary';
 
 function makeTool(overrides: Partial<AiToolNode>): AiToolNode {
@@ -171,5 +172,31 @@ describe('AiTurnChangesSummary', () => {
     expect(screen.getByRole('button', { name: 'Copy path' })).toBeInTheDocument();
     expect(container.textContent).not.toContain('connectionPolicyBinding');
     expect(container.textContent).not.toContain('snap-2');
+  });
+
+  it('keeps per-file diff headers when hideHeader is set on a multi-file diff fallback', () => {
+    const patchTool = makeTool({
+      key: 'tool:multi-file',
+      callId: 'call-multi-file',
+      input: { patch: '' },
+    });
+    const { container } = render(
+      <AiToolExpandedContent
+        node={patchTool}
+        compact
+        showInput={false}
+        hideHeader
+        diffModel={{
+          totalsKnown: true,
+          hunks: [
+            { path: 'src/a.ts', exact: true, oldStart: 1, newStart: 1, lines: [{ kind: 'added', text: 'const a = 1;' }] },
+            { path: 'src/b.ts', exact: true, oldStart: 1, newStart: 1, lines: [{ kind: 'removed', text: 'const b = 2;' }] },
+          ],
+        }}
+      />,
+    );
+
+    const titles = Array.from(container.querySelectorAll('.ai-tool-surface-header .ai-content-title'), (el) => el.textContent);
+    expect(titles).toEqual(['src/a.ts', 'src/b.ts']);
   });
 });

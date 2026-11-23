@@ -1074,7 +1074,7 @@ function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAc
     >
       {files.map((hunk, index) => (
         <section key={`${hunk.path}:${index}`} className="min-w-0 max-w-full shrink-0">
-          {!hideHeader && (
+          {(!hideHeader || files.length > 1) && (
             <ToolSurfaceHeader title={hunk.path} className={showInput ? undefined : 'min-h-8'}>
               {hunk.exact && currentModel.totalsKnown && <span className="ai-diff-counts shrink-0">
                 <span data-diff-count="added">+{hunk.lines.filter((line) => line.kind === 'added').length}</span>{' '}
