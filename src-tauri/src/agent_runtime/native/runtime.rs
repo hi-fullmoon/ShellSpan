@@ -992,6 +992,7 @@ impl NativeToolEngine {
                 &call,
                 &effect,
                 sessions,
+                Some(database),
                 tool.descriptor.default_timeout_ms,
                 cancellation,
                 terminal_dispatch.as_ref(),
@@ -1210,6 +1211,66 @@ impl NativeToolEngine {
             .map_err(|_| "Native checkpoint root is unavailable".to_string())?
             .clone()
             .ok_or_else(|| "Native checkpoint root was not configured".into())
+    }
+
+    pub(crate) fn list_file_checkpoints(
+        &self,
+        task_id: &str,
+    ) -> Result<Vec<super::AgentFileCheckpointNative>, String> {
+        let root = self.checkpoint_root()?;
+        self.checkpoints.list_for_task(&root, task_id)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn preview_file_checkpoint(
+        &self,
+        task_id: &str,
+        checkpoint_id: &str,
+        target: &AgentToolTargetNative,
+        database: &Database,
+        credentials: &CredentialManager,
+        known_hosts_path: &Path,
+        sandbox: Option<&crate::remote_sandbox::Binding>,
+    ) -> Result<super::FileCheckpointDiffPreview, String> {
+        let root = self.checkpoint_root()?;
+        super::preview_file_checkpoint_native(
+            &root,
+            &self.checkpoints,
+            &self.file_operations,
+            task_id,
+            checkpoint_id,
+            target,
+            database,
+            credentials,
+            known_hosts_path,
+            sandbox,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn restore_file_checkpoint(
+        &self,
+        task_id: &str,
+        checkpoint_id: &str,
+        target: &AgentToolTargetNative,
+        database: &Database,
+        credentials: &CredentialManager,
+        known_hosts_path: &Path,
+        sandbox: Option<&crate::remote_sandbox::Binding>,
+    ) -> Result<super::FileCheckpointRestoreResult, String> {
+        let root = self.checkpoint_root()?;
+        super::restore_file_checkpoint_native(
+            &root,
+            &self.checkpoints,
+            &self.file_operations,
+            task_id,
+            checkpoint_id,
+            target,
+            database,
+            credentials,
+            known_hosts_path,
+            sandbox,
+        )
     }
 
     fn enforce_runtime_storage_policy_for_session(
@@ -2919,6 +2980,7 @@ mod tests {
             &call,
             &effect,
             &sessions,
+            None,
             1_000,
             &CancellationToken::new(),
             None,
@@ -2930,6 +2992,7 @@ mod tests {
             &second_call,
             &effect,
             &sessions,
+            None,
             1_000,
             &CancellationToken::new(),
             None,

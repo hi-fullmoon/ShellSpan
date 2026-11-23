@@ -57,6 +57,10 @@ export function aiErrorMessage(message: string, t: (key: LocaleKey, values?: Rec
   if (code === 'LOCAL_SANDBOX_POLICY_DRIFT') return t('ai.error.localSandboxPolicyDrift');
   if (code === 'LOCAL_SANDBOX_LAUNCHER_CHANGED') return t('ai.error.localSandboxLauncherChanged');
   if (code === 'SANDBOX_SYNC_BUSY') return t('ai.error.sandboxSyncBusy');
+  if (code === 'CHECKPOINT_RESTORE_BUSY') return t('ai.error.checkpointRestoreBusy');
+  if (code === 'CHECKPOINT_NOT_FOUND') return t('ai.error.checkpointNotFound');
+  if (code === 'CHECKPOINT_CORRUPTED') return t('ai.error.checkpointCorrupted');
+  if (code === 'SANDBOX_READ_ONLY') return t('ai.error.sandboxReadOnly');
   if (code === 'SANDBOX_SESSION_POLICY_CHANGED') return t('ai.error.sandboxSessionPolicyChanged');
   if (code === 'AUTO_REVIEW_CHANGED') return t('ai.error.autoReviewChanged');
   if (code === 'AGENT_UNSAFE_FILE_ROOT') return t('ai.error.unsafeFileRoot');

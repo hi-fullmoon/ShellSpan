@@ -56,6 +56,13 @@ struct PersistedCheckpointNative {
     modified_unix_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct LoadedCheckpointNative {
+    pub(crate) snapshot: AgentFileCheckpointNative,
+    pub(crate) original_bytes: Option<Vec<u8>>,
+    pub(crate) permissions: Option<u32>,
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct CheckpointStoreNative {
     lock: Arc<Mutex<()>>,
@@ -110,6 +117,113 @@ impl CheckpointStoreNative {
         write_record(&directory, &record)?;
         enforce_capacity_locked(&directory)?;
         Ok(snapshot)
+    }
+
+    pub(crate) fn list_for_task(
+        &self,
+        root: &Path,
+        task_id: &str,
+    ) -> Result<Vec<AgentFileCheckpointNative>, String> {
+        let _guard = self
+            .lock
+            .lock()
+            .map_err(|_| "checkpoint store is unavailable".to_string())?;
+        let directory = checkpoint_directory(root);
+        if !directory.exists() {
+            return Ok(Vec::new());
+        }
+        cleanup_locked(&directory, current_unix_ms())?;
+        let mut items: Vec<AgentFileCheckpointNative> = load_records(&directory)?
+            .into_iter()
+            .filter(|record| record.snapshot.task_id == task_id)
+            .map(|record| record.snapshot)
+            .collect();
+        items.sort_by(|left, right| {
+            right
+                .created_at_unix_ms
+                .cmp(&left.created_at_unix_ms)
+                .then_with(|| left.checkpoint_id.cmp(&right.checkpoint_id))
+        });
+        Ok(items)
+    }
+
+    pub(crate) fn load(
+        &self,
+        root: &Path,
+        task_id: &str,
+        checkpoint_id: &str,
+    ) -> Result<LoadedCheckpointNative, String> {
+        validate_checkpoint_id(checkpoint_id)?;
+        let _guard = self
+            .lock
+            .lock()
+            .map_err(|_| "checkpoint store is unavailable".to_string())?;
+        let directory = checkpoint_directory(root);
+        if !directory.exists() {
+            return Err("CHECKPOINT_NOT_FOUND: file checkpoint does not exist".into());
+        }
+        let now = current_unix_ms();
+        cleanup_locked(&directory, now)?;
+        let record_path = directory.join(format!("{checkpoint_id}.json"));
+        if !record_path.exists() {
+            return Err("CHECKPOINT_NOT_FOUND: file checkpoint does not exist or expired".into());
+        }
+        let bytes = read_bounded(&record_path, 64 * 1024)?;
+        let record: PersistedCheckpointNative = serde_json::from_slice(&bytes)
+            .map_err(|error| format!("checkpoint metadata is invalid: {error}"))?;
+        if record.snapshot.checkpoint_id != checkpoint_id || record.snapshot.task_id != task_id {
+            return Err("CHECKPOINT_NOT_FOUND: checkpoint does not belong to this session".into());
+        }
+        if record.snapshot.expires_at_unix_ms <= now {
+            return Err("CHECKPOINT_NOT_FOUND: file checkpoint has expired".into());
+        }
+        let original_bytes = match (
+            record.backup_file.as_deref(),
+            record.snapshot.original_sha256.as_deref(),
+        ) {
+            (Some(file_name), Some(expected_sha)) => {
+                validate_backup_file(file_name, checkpoint_id)?;
+                let content = read_bounded(&directory.join(file_name), MAX_CHECKPOINT_FILE_BYTES)?;
+                if sha256_hex(&content) != expected_sha {
+                    return Err(
+                        "CHECKPOINT_CORRUPTED: backup file digest does not match recorded sha256"
+                            .into(),
+                    );
+                }
+                Some(content)
+            }
+            (None, None) => None,
+            _ => return Err("CHECKPOINT_CORRUPTED: backup file metadata is inconsistent".into()),
+        };
+        Ok(LoadedCheckpointNative {
+            snapshot: record.snapshot,
+            original_bytes,
+            permissions: record.permissions,
+        })
+    }
+
+    pub(crate) fn mark_restored(
+        &self,
+        root: &Path,
+        task_id: &str,
+        checkpoint_id: &str,
+    ) -> Result<AgentFileCheckpointNative, String> {
+        validate_checkpoint_id(checkpoint_id)?;
+        let _guard = self
+            .lock
+            .lock()
+            .map_err(|_| "checkpoint store is unavailable".to_string())?;
+        let directory = checkpoint_directory(root);
+        let record_path = directory.join(format!("{checkpoint_id}.json"));
+        let bytes = read_bounded(&record_path, 64 * 1024)?;
+        let mut record: PersistedCheckpointNative = serde_json::from_slice(&bytes)
+            .map_err(|error| format!("checkpoint metadata is invalid: {error}"))?;
+        if record.snapshot.checkpoint_id != checkpoint_id || record.snapshot.task_id != task_id {
+            return Err("CHECKPOINT_NOT_FOUND: checkpoint does not belong to this session".into());
+        }
+        record.snapshot.restored_at_unix_ms = Some(current_unix_ms());
+        write_record(&directory, &record)?;
+        Ok(record.snapshot)
     }
 }
 
@@ -298,5 +412,71 @@ mod tests {
             .join("agent-native-call-checkpoints")
             .join(format!("{}.json", checkpoint.checkpoint_id))
             .is_file());
+    }
+
+    #[test]
+    fn list_load_mark_restored_and_tamper_detection_work_end_to_end() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = CheckpointStoreNative::default();
+        let cp1 = store
+            .create(
+                directory.path(),
+                "task-a",
+                "remote-1",
+                CheckpointTargetKindNative::Remote,
+                "/etc/nginx/nginx.conf",
+                Some(b"worker_processes 1;\n"),
+                CheckpointOriginalMetadataNative {
+                    permissions: Some(0o644),
+                    modified_unix_ms: Some(1_700_000_000_000),
+                },
+            )
+            .unwrap();
+        let _cp_other = store
+            .create(
+                directory.path(),
+                "task-b",
+                "remote-2",
+                CheckpointTargetKindNative::Remote,
+                "/etc/hosts",
+                None,
+                CheckpointOriginalMetadataNative::default(),
+            )
+            .unwrap();
+
+        let listed = store.list_for_task(directory.path(), "task-a").unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].checkpoint_id, cp1.checkpoint_id);
+
+        let loaded = store
+            .load(directory.path(), "task-a", &cp1.checkpoint_id)
+            .unwrap();
+        assert_eq!(
+            loaded.original_bytes.as_deref(),
+            Some(b"worker_processes 1;\n".as_slice())
+        );
+        assert_eq!(loaded.permissions, Some(0o644));
+
+        // Cross-task load must fail closed.
+        assert!(store
+            .load(directory.path(), "task-b", &cp1.checkpoint_id)
+            .unwrap_err()
+            .contains("CHECKPOINT_NOT_FOUND"));
+
+        let marked = store
+            .mark_restored(directory.path(), "task-a", &cp1.checkpoint_id)
+            .unwrap();
+        assert!(marked.restored_at_unix_ms.is_some());
+
+        // Tampering with the backup file must fail digest verification.
+        let backup = directory
+            .path()
+            .join("agent-native-call-checkpoints")
+            .join(format!("{}.bin", cp1.checkpoint_id));
+        fs::write(&backup, b"corrupted").unwrap();
+        assert!(store
+            .load(directory.path(), "task-a", &cp1.checkpoint_id)
+            .unwrap_err()
+            .contains("CHECKPOINT_CORRUPTED"));
     }
 }

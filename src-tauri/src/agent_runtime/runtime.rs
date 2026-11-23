@@ -1382,6 +1382,10 @@ impl AgentRuntime {
         failure.map_or(Ok(()), Err)
     }
 
+    pub(crate) fn native_engine(&self) -> &Arc<NativeToolEngine> {
+        &self.native_engine
+    }
+
     pub(crate) fn prepare_for_shutdown(
         &self,
         sessions: &crate::models::SessionManager,

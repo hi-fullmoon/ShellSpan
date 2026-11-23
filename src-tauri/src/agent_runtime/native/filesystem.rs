@@ -1153,6 +1153,211 @@ fn compute_patch_preview(
     })
 }
 
+const MAX_CHECKPOINT_PREVIEW_DIFF_BYTES: usize = 128 * 1024;
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FileCheckpointDiffPreview {
+    pub(crate) checkpoint_id: String,
+    pub(crate) target_path: String,
+    pub(crate) target_kind: CheckpointTargetKindNative,
+    pub(crate) existed_before: bool,
+    pub(crate) current_exists: bool,
+    pub(crate) unchanged: bool,
+    pub(crate) is_binary: bool,
+    pub(crate) truncated: bool,
+    pub(crate) unified_diff: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FileCheckpointRestoreResult {
+    pub(crate) checkpoint: AgentFileCheckpointNative,
+    pub(crate) action: &'static str,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn preview_file_checkpoint_native(
+    checkpoint_root: &Path,
+    checkpoints: &CheckpointStoreNative,
+    operations: &FileOperationRegistryNative,
+    task_id: &str,
+    checkpoint_id: &str,
+    target: &AgentToolTargetNative,
+    database: &Database,
+    credentials: &CredentialManager,
+    known_hosts_path: &Path,
+    sandbox: Option<&Binding>,
+) -> Result<FileCheckpointDiffPreview, String> {
+    let loaded = checkpoints.load(checkpoint_root, task_id, checkpoint_id)?;
+    let operation = operations.begin_with_policy(
+        task_id,
+        &format!("checkpoint-preview-{checkpoint_id}"),
+        sandbox,
+        CancellationToken::new(),
+    )?;
+    let (_, current_bytes, _) = read_write_destination(
+        target,
+        &loaded.snapshot.target_path,
+        database,
+        credentials,
+        known_hosts_path,
+        &operation,
+    )?;
+    let existed_before = loaded.original_bytes.is_some();
+    let current_exists = current_bytes.is_some();
+    let unchanged = current_bytes == loaded.original_bytes;
+    let is_binary = current_bytes
+        .as_deref()
+        .is_some_and(|b| b.contains(&0) || std::str::from_utf8(b).is_err())
+        || loaded
+            .original_bytes
+            .as_deref()
+            .is_some_and(|b| b.contains(&0) || std::str::from_utf8(b).is_err());
+    if is_binary || unchanged {
+        return Ok(FileCheckpointDiffPreview {
+            checkpoint_id: loaded.snapshot.checkpoint_id,
+            target_path: loaded.snapshot.target_path,
+            target_kind: loaded.snapshot.target_kind,
+            existed_before,
+            current_exists,
+            unchanged,
+            is_binary,
+            truncated: false,
+            unified_diff: String::new(),
+        });
+    }
+    let current_text = current_bytes
+        .as_deref()
+        .and_then(|b| std::str::from_utf8(b).ok())
+        .unwrap_or_default();
+    let original_text = loaded
+        .original_bytes
+        .as_deref()
+        .and_then(|b| std::str::from_utf8(b).ok())
+        .unwrap_or_default();
+    let mut unified = diffy::create_patch(current_text, original_text).to_string();
+    let mut truncated = false;
+    if unified.len() > MAX_CHECKPOINT_PREVIEW_DIFF_BYTES {
+        let mut end = MAX_CHECKPOINT_PREVIEW_DIFF_BYTES;
+        while end > 0 && !unified.is_char_boundary(end) {
+            end -= 1;
+        }
+        unified.truncate(end);
+        truncated = true;
+    }
+    Ok(FileCheckpointDiffPreview {
+        checkpoint_id: loaded.snapshot.checkpoint_id,
+        target_path: loaded.snapshot.target_path,
+        target_kind: loaded.snapshot.target_kind,
+        existed_before,
+        current_exists,
+        unchanged: false,
+        is_binary: false,
+        truncated,
+        unified_diff: unified,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn restore_file_checkpoint_native(
+    checkpoint_root: &Path,
+    checkpoints: &CheckpointStoreNative,
+    operations: &FileOperationRegistryNative,
+    task_id: &str,
+    checkpoint_id: &str,
+    target: &AgentToolTargetNative,
+    database: &Database,
+    credentials: &CredentialManager,
+    known_hosts_path: &Path,
+    sandbox: Option<&Binding>,
+) -> Result<FileCheckpointRestoreResult, String> {
+    let loaded = checkpoints.load(checkpoint_root, task_id, checkpoint_id)?;
+    let operation = operations.begin_with_policy(
+        task_id,
+        &format!("checkpoint-restore-{checkpoint_id}"),
+        sandbox,
+        CancellationToken::new(),
+    )?;
+    let (resolved_path, current_bytes, _) = read_write_destination(
+        target,
+        &loaded.snapshot.target_path,
+        database,
+        credentials,
+        known_hosts_path,
+        &operation,
+    )?;
+    if current_bytes == loaded.original_bytes {
+        let checkpoint = checkpoints.mark_restored(checkpoint_root, task_id, checkpoint_id)?;
+        return Ok(FileCheckpointRestoreResult {
+            checkpoint,
+            action: "unchanged",
+        });
+    }
+    let current_sha = current_bytes.as_deref().map(sha256_hex);
+    let action = match loaded.original_bytes.as_deref() {
+        Some(original) => {
+            write_target_file(
+                target,
+                &resolved_path,
+                original,
+                current_sha.as_deref(),
+                database,
+                credentials,
+                known_hosts_path,
+                &operation,
+            )?;
+            #[cfg(unix)]
+            if let (AgentToolTargetNative::Local { .. }, Some(mode)) = (target, loaded.permissions)
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&resolved_path, fs::Permissions::from_mode(mode));
+            }
+            "restored"
+        }
+        None => match target {
+            AgentToolTargetNative::Local {
+                cwd: Some(root), ..
+            } => {
+                let root = canonical_local_root(Path::new(root))?;
+                let path = resolve_local_existing(&root, &loaded.snapshot.target_path, false)?;
+                let meta = fs::symlink_metadata(&path)
+                    .map_err(|error| format!("Failed to inspect local file: {error}"))?;
+                if meta.file_type().is_symlink() || !meta.is_file() {
+                    return Err("Checkpoint rollback only removes regular files".into());
+                }
+                trash::TrashContext::new()
+                    .delete(&path)
+                    .map_err(|error| format!("Failed to move file to Trash: {error}"))?;
+                "trashed"
+            }
+            AgentToolTargetNative::Remote {
+                root_path: Some(root),
+                ..
+            } => {
+                let connected =
+                    operation.connect(target, database, credentials, known_hosts_path)?;
+                let sftp = connected.sftp();
+                let root = resolve_remote_root(&sftp, root)?;
+                let remote_file =
+                    resolve_remote_path(&sftp, &root, &loaded.snapshot.target_path, false)?;
+                let stat = sftp
+                    .lstat(Path::new(&remote_file))
+                    .map_err(|error| format!("Failed to inspect remote file: {error}"))?;
+                if remote_kind(stat.perm) != "file" {
+                    return Err("Checkpoint rollback only removes regular remote files".into());
+                }
+                sftp.unlink(Path::new(&remote_file))
+                    .map_err(|error| format!("Failed to remove remote file: {error}"))?;
+                "removed"
+            }
+            _ => return Err("Checkpoint rollback requires a frozen local or remote target".into()),
+        },
+    };
+    let checkpoint = checkpoints.mark_restored(checkpoint_root, task_id, checkpoint_id)?;
+    Ok(FileCheckpointRestoreResult { checkpoint, action })
+}
+
 fn checkpoint_target_file(
     context: &FileExecutionContextNative<'_>,
     path: &str,
@@ -3389,5 +3594,107 @@ mod tests {
         assert_eq!(truncated.data["operation"], "replace");
         assert_eq!(truncated.data["byteLength"], 0);
         assert_eq!(fs::read(path).unwrap(), b"");
+    }
+
+    #[test]
+    fn preview_and_restore_file_checkpoint_reverts_modified_file_and_marks_restored() {
+        let workspace = tempfile::tempdir().unwrap();
+        let runtime_root = tempfile::tempdir().unwrap();
+        let database = Database::open(&runtime_root.path().join("db.sqlite")).unwrap();
+        let credentials = CredentialManager::in_memory_for_tests();
+        let known_hosts_path = runtime_root.path().join("known_hosts");
+        let checkpoints = CheckpointStoreNative::default();
+        let operations = FileOperationRegistryNative::default();
+
+        let file_path = workspace.path().join("nginx.conf");
+        fs::write(&file_path, "worker_processes 1;\n").unwrap();
+        let target = AgentToolTargetNative::Local {
+            target_id: "local-1".into(),
+            session_id: "term-1".into(),
+            cwd: Some(workspace.path().to_string_lossy().to_string()),
+        };
+        let write_call = AgentToolCallNative {
+            request_id: "req-1".into(),
+            call_id: "call-1".into(),
+            tool_name: "write_file".into(),
+            arguments: json!({
+                "path": "nginx.conf",
+                "content": "worker_processes 4;\n",
+                "precondition": { "sha256": sha256_hex(b"worker_processes 1;\n") }
+            }),
+            target: target.clone(),
+            capability_id: "cap-1".into(),
+        };
+        let written = execute_file_tool_native(FileExecutionContextNative {
+            task_id: "task-rb",
+            call: &write_call,
+            database: &database,
+            credentials: &credentials,
+            known_hosts_path: &known_hosts_path,
+            checkpoint_root: runtime_root.path(),
+            checkpoints: &checkpoints,
+            operations: &operations,
+        })
+        .unwrap();
+        let checkpoint_id = written.data["checkpointId"].as_str().unwrap().to_string();
+        assert_eq!(
+            fs::read_to_string(&file_path).unwrap(),
+            "worker_processes 4;\n"
+        );
+
+        let preview = preview_file_checkpoint_native(
+            runtime_root.path(),
+            &checkpoints,
+            &operations,
+            "task-rb",
+            &checkpoint_id,
+            &target,
+            &database,
+            &credentials,
+            &known_hosts_path,
+            None,
+        )
+        .unwrap();
+        assert!(preview.existed_before);
+        assert!(preview.current_exists);
+        assert!(!preview.unchanged);
+        assert!(!preview.is_binary);
+        assert!(preview.unified_diff.contains("-worker_processes 4;"));
+        assert!(preview.unified_diff.contains("+worker_processes 1;"));
+
+        let restored = restore_file_checkpoint_native(
+            runtime_root.path(),
+            &checkpoints,
+            &operations,
+            "task-rb",
+            &checkpoint_id,
+            &target,
+            &database,
+            &credentials,
+            &known_hosts_path,
+            None,
+        )
+        .unwrap();
+        assert_eq!(restored.action, "restored");
+        assert!(restored.checkpoint.restored_at_unix_ms.is_some());
+        assert_eq!(
+            fs::read_to_string(&file_path).unwrap(),
+            "worker_processes 1;\n"
+        );
+
+        let second = restore_file_checkpoint_native(
+            runtime_root.path(),
+            &checkpoints,
+            &operations,
+            "task-rb",
+            &checkpoint_id,
+            &target,
+            &database,
+            &credentials,
+            &known_hosts_path,
+            None,
+        )
+        .unwrap();
+        assert_eq!(second.action, "unchanged");
     }
 }

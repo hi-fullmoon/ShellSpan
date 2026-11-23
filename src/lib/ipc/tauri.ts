@@ -1438,6 +1438,63 @@ export async function invokeSandboxApply(input: {
   return invokeLogged<SandboxApplyReport>('agent_runtime_sandbox_apply', { input });
 }
 
+export interface AgentFileCheckpoint {
+  readonly checkpointId: string;
+  readonly taskId: string;
+  readonly targetId: string;
+  readonly targetKind: 'local' | 'remote';
+  readonly targetPath: string;
+  readonly originalSha256?: string;
+  readonly originalByteLength: number;
+  readonly createdAtUnixMs: number;
+  readonly expiresAtUnixMs: number;
+  readonly restoredAtUnixMs?: number;
+}
+
+export interface FileCheckpointDiffPreview {
+  readonly checkpointId: string;
+  readonly targetPath: string;
+  readonly targetKind: 'local' | 'remote';
+  readonly existedBefore: boolean;
+  readonly currentExists: boolean;
+  readonly unchanged: boolean;
+  readonly isBinary: boolean;
+  readonly truncated: boolean;
+  readonly unifiedDiff: string;
+}
+
+export interface FileCheckpointRestoreResult {
+  readonly checkpoint: AgentFileCheckpoint;
+  readonly action: 'restored' | 'trashed' | 'removed' | 'unchanged';
+}
+
+export async function invokeListFileCheckpoints(
+  sessionId: string,
+): Promise<readonly AgentFileCheckpoint[]> {
+  if (!isTauriRuntime()) return [];
+  return invokeLogged<AgentFileCheckpoint[]>('agent_runtime_list_file_checkpoints', { sessionId });
+}
+
+export async function invokePreviewFileCheckpoint(
+  sessionId: string,
+  checkpointId: string,
+): Promise<FileCheckpointDiffPreview> {
+  return invokeLogged<FileCheckpointDiffPreview>('agent_runtime_preview_file_checkpoint', {
+    sessionId,
+    checkpointId,
+  });
+}
+
+export async function invokeRestoreFileCheckpoint(
+  sessionId: string,
+  checkpointId: string,
+): Promise<FileCheckpointRestoreResult> {
+  return invokeLogged<FileCheckpointRestoreResult>('agent_runtime_restore_file_checkpoint', {
+    sessionId,
+    checkpointId,
+  });
+}
+
 export async function invokeRequestAppRestart(): Promise<void> {
   return invokeLogged('request_app_restart');
 }

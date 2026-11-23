@@ -17,6 +17,7 @@ import { AgentPermissionSelector } from '../agent-permission-selector';
 import { AgentExecutionSurfaceSelector } from '../agent-execution-surface-selector';
 import { SandboxStatusBadge } from './sandbox-status-badge';
 import { SandboxSyncDialog } from './sandbox-sync-dialog';
+import { FileCheckpointRollbackDialog } from './file-checkpoint-rollback-dialog';
 import { AgentTerminalBusyNotice } from '../agent-terminal-busy-notice';
 import { AiComposerModelSelector } from './ai-composer-model-selector';
 import { AiWorkspaceRoot } from './ai-workspace-root';
@@ -127,7 +128,14 @@ export function AiWorkspaceController({
   const openAiSettings = (): void => useAppStore.getState().openSettings('ai');
   const sandboxSyncAction = session?.header.target?.localSandboxRequired
     ? <SandboxSyncDialog sessionId={session.header.sessionId} />
-    : undefined;
+    : session?.header.target
+      ? (
+          <FileCheckpointRollbackDialog
+            sessionId={session.header.sessionId}
+            refreshSignal={`${controller.view?.status ?? 'idle'}:${controller.view?.nodes.length ?? 0}`}
+          />
+        )
+      : undefined;
   const headerActions = (focusMode && !terminalOpen) || sandboxSyncAction
     ? (
       <>
