@@ -802,12 +802,22 @@ impl NativeToolEngine {
         #[cfg(windows)]
         let sandbox_digest = windows_sandbox
             .as_ref()
-            .map(|binding| binding.digest.as_str())
+            .map(|binding| {
+                super::local_sandbox_digest(
+                    binding,
+                    crate::agent_runtime::LocalSandboxKind::WindowsAppContainer,
+                )
+            })
             .or(sandbox_digest);
         #[cfg(target_os = "macos")]
         let sandbox_digest = mac_sandbox
             .as_ref()
-            .map(|binding| binding.digest.as_str())
+            .map(|binding| {
+                super::local_sandbox_digest(
+                    binding,
+                    crate::agent_runtime::LocalSandboxKind::MacNono,
+                )
+            })
             .or(sandbox_digest);
         #[cfg(all(
             feature = "native-input-acceptance",

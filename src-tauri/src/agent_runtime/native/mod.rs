@@ -60,8 +60,17 @@ pub(crate) use terminal_interactive::*;
 pub(crate) use terminal_lease::*;
 pub(crate) use tool_progress::*;
 
-#[allow(dead_code)]
+#[cfg(any(target_os = "macos", windows))]
 pub(crate) trait LocalSandboxBackend {
     fn kind(&self) -> crate::agent_runtime::LocalSandboxKind;
     fn digest(&self) -> &str;
+}
+
+#[cfg(any(target_os = "macos", windows))]
+pub(super) fn local_sandbox_digest<T: LocalSandboxBackend>(
+    binding: &T,
+    expected: crate::agent_runtime::LocalSandboxKind,
+) -> &str {
+    debug_assert_eq!(binding.kind(), expected);
+    binding.digest()
 }

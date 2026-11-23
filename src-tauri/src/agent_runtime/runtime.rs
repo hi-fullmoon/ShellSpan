@@ -636,9 +636,7 @@ impl AgentRuntime {
             .agents
             .get(&session_id)?
             .ok_or("skill proposal Agent is not live")?;
-        let saved_file = self
-            .tools
-            .submit_skill_proposal_resolution(&entry, input)?;
+        let saved_file = self.tools.submit_skill_proposal_resolution(&entry, input)?;
         if saved_file {
             let _ = self.tools.skills.refresh(&session_id).await;
         }

@@ -177,7 +177,7 @@ impl SandboxPolicy {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn for_open_sandbox(
         workspace_root: impl Into<String>,
         filesystem_mode: SandboxFilesystemMode,
