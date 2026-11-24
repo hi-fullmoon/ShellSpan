@@ -67,7 +67,7 @@ describe('Terminal remote SSH runner contracts', () => {
     expect(runner).toContain('remote_integration_scope_cleans_resources_after_post_prepare_failure');
     expect(runner).toContain('isolated_ssh_sftp_end_to_end_reviewed_execution_uname');
     expect(sessionTests).toContain('.request_pty("xterm-256color"');
-    expect(sessionTests).toContain('.start_shell(&mut shell_channel, vim_source)');
+    expect(sessionTests).toMatch(/\.start_shell\(\s*&mut shell_channel,\s*vim_source/);
     expect(session).toContain('exec env HOME={} {} -il');
     expect(session).toContain('ZDOTDIR=');
     expect(session).toContain('.shellspan-terminal-integration-');

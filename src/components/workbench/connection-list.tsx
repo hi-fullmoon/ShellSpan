@@ -49,6 +49,7 @@ import {
   KeyRoundIcon,
   LockKeyholeIcon,
   FingerprintIcon,
+  ShieldCheckIcon,
   ShieldQuestionMarkIcon,
 } from 'lucide-react';
 import { WorkbenchPage, WorkbenchPageContent, WorkbenchPageHeader, WorkbenchSearchInput, WorkbenchPageToolbar } from './workbench-page';
@@ -449,6 +450,16 @@ const ConnectionCard = React.memo<ConnectionCardProps>(
               </TooltipTrigger>
               <TooltipContent>{authLabel}</TooltipContent>
             </Tooltip>
+            {profile.sandboxMode && (
+              <Badge
+                variant="secondary"
+                className="shrink-0 gap-1"
+                data-connection-sandbox-mode={profile.sandboxMode}
+              >
+                <ShieldCheckIcon aria-hidden="true" className="size-3 shrink-0" />
+                <span>{t(`connection.sandbox.badge.${profile.sandboxMode}`)}</span>
+              </Badge>
+            )}
             {profile.jumpHost && <Badge variant="outline" className={cn('min-w-0 max-w-24 shrink',
               profile.group && tags.length > 1 && 'hidden @min-[25rem]/connection-card:inline-flex',
             )}><span className="truncate">{t('connection.form.jumpHost')}</span></Badge>}

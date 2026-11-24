@@ -983,7 +983,9 @@ fn ancestor_can_inspect_descendant_but_cannot_mutate_it() {
     );
 
     assert_eq!(
-        manager.ensure_owned_child(parent_id, &grandchild_id).unwrap_err(),
+        manager
+            .ensure_owned_child(parent_id, &grandchild_id)
+            .unwrap_err(),
         "parent Session does not own the requested child"
     );
 
@@ -1005,7 +1007,9 @@ fn ancestor_can_inspect_descendant_but_cannot_mutate_it() {
         })
         .unwrap();
     assert_eq!(
-        manager.inspect_child(unrelated_id, &grandchild_id).unwrap_err(),
+        manager
+            .inspect_child(unrelated_id, &grandchild_id)
+            .unwrap_err(),
         "parent Session does not own the requested child"
     );
 }

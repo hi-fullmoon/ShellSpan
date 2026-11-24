@@ -915,6 +915,278 @@ pub(crate) fn test_executor(
     }
 }
 
+const MAX_DEPLOY_OUTPUT_BYTES: usize = 32 * 1024;
+const DEPLOY_TIMEOUT: Duration = Duration::from_secs(120);
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeployResult {
+    pub(crate) succeeded: bool,
+    pub(crate) root_required: bool,
+    pub(crate) cancelled: bool,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) output: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) report: Option<TestResult>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct DeployProbe {
+    pub(crate) is_root: bool,
+    pub(crate) sudo_noninteractive: bool,
+    pub(crate) install_command: Option<&'static str>,
+}
+
+fn noninteractive_install_command(manager: &str) -> Option<&'static str> {
+    match manager {
+        "apt-get" => {
+            Some("DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y bubblewrap python3 libseccomp2")
+        }
+        "apk" => Some("apk add --no-cache bubblewrap python3 libseccomp"),
+        "dnf" => Some("dnf install -y bubblewrap python3 libseccomp"),
+        "zypper" => Some("zypper --non-interactive install bubblewrap python3 libseccomp2"),
+        "pacman" => Some("pacman -Sy --noconfirm bubblewrap python libseccomp"),
+        _ => None,
+    }
+}
+
+pub(crate) fn parse_deploy_probe_output(output: &str) -> DeployProbe {
+    let mut is_root = false;
+    let mut sudo_noninteractive = false;
+    let mut manager: Option<&str> = None;
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if let Some(uid) = trimmed.strip_prefix("UID=") {
+            is_root = uid.trim() == "0";
+        } else if trimmed == "SUDO=1" {
+            sudo_noninteractive = true;
+        } else if let Some(pkg) = trimmed.strip_prefix("PKG=") {
+            let pkg = pkg.trim();
+            if !pkg.is_empty() && pkg != "none" {
+                manager = Some(pkg);
+            }
+        }
+    }
+    DeployProbe {
+        is_root,
+        sudo_noninteractive,
+        install_command: manager.and_then(noninteractive_install_command),
+    }
+}
+
+fn run_ssh_exec_with_stdin(
+    session: &ssh2::Session,
+    command: &str,
+    stdin_payload: Option<&[u8]>,
+    control: &Control,
+) -> Result<(i32, String), String> {
+    control.check()?;
+    session.set_blocking(true);
+    session.set_timeout(
+        control
+            .deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis()
+            .clamp(1, 5000) as u32,
+    );
+    let mut channel = session
+        .channel_session()
+        .map_err(|error| format!("SANDBOX_DEPLOY_CHANNEL_FAILED: {error}"))?;
+    let _ = channel.handle_extended_data(ssh2::ExtendedData::Merge);
+    channel
+        .exec(command)
+        .map_err(|error| format!("SANDBOX_DEPLOY_EXEC_FAILED: {error}"))?;
+    session.set_blocking(false);
+
+    if let Some(mut remaining) = stdin_payload {
+        while !remaining.is_empty() {
+            control.check()?;
+            match channel.write(remaining) {
+                Ok(n) if n > 0 => remaining = &remaining[n..],
+                Err(error) if error.kind() == ErrorKind::WouldBlock => std::thread::sleep(POLL),
+                _ => return Err("SANDBOX_DEPLOY_WRITE_FAILED".into()),
+            }
+        }
+        loop {
+            control.check()?;
+            match channel.send_eof() {
+                Ok(()) => break,
+                Err(error) if error.code() == ssh2::ErrorCode::Session(-37) => {
+                    std::thread::sleep(POLL);
+                }
+                Err(_) => break,
+            }
+        }
+    }
+
+    let mut output = Vec::new();
+    let mut buf = [0_u8; 4096];
+    let mut truncated = false;
+    loop {
+        control.check()?;
+        match channel.read(&mut buf) {
+            Ok(0) => {
+                if channel.eof() {
+                    break;
+                }
+                std::thread::sleep(POLL);
+            }
+            Ok(n) => {
+                if output.len() < MAX_DEPLOY_OUTPUT_BYTES {
+                    let keep = (MAX_DEPLOY_OUTPUT_BYTES - output.len()).min(n);
+                    output.extend_from_slice(&buf[..keep]);
+                    if keep < n {
+                        truncated = true;
+                    }
+                } else {
+                    truncated = true;
+                }
+            }
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                if channel.eof() {
+                    break;
+                }
+                std::thread::sleep(POLL);
+            }
+            Err(_) => break,
+        }
+    }
+
+    session.set_blocking(true);
+    let _ = channel.wait_close();
+    let exit_code = channel.exit_status().unwrap_or(-1);
+    let mut text = String::from_utf8_lossy(&output).into_owned();
+    if truncated {
+        text.push_str("\n...[output truncated]");
+    }
+    Ok((exit_code, text))
+}
+
+pub(crate) fn deploy_executor(
+    profile_id: &str,
+    connection: RemoteConnectionRequest,
+    policy: &Policy,
+    operation_id: String,
+    known_hosts: &Path,
+    flag: Arc<AtomicBool>,
+) -> DeployResult {
+    let control = Control::with_flag(Instant::now() + DEPLOY_TIMEOUT, Arc::clone(&flag));
+    if control.is_cancelled() {
+        return DeployResult {
+            succeeded: false,
+            root_required: false,
+            cancelled: true,
+            exit_code: None,
+            output: String::new(),
+            report: None,
+        };
+    }
+    let session = match setup(&connection, known_hosts, &control) {
+        Ok(session) => session,
+        Err(error) => {
+            return DeployResult {
+                succeeded: false,
+                root_required: false,
+                cancelled: control.is_cancelled(),
+                exit_code: None,
+                output: error,
+                report: None,
+            };
+        }
+    };
+
+    let probe_cmd = "printf 'UID=%s\\n' \"$(id -u)\"; \
+        if sudo -n true >/dev/null 2>&1; then printf 'SUDO=1\\n'; else printf 'SUDO=0\\n'; fi; \
+        for mgr in apt-get dnf zypper pacman apk; do \
+          if command -v \"$mgr\" >/dev/null 2>&1; then printf 'PKG=%s\\n' \"$mgr\"; break; fi; \
+        done";
+    let probe_output = match run_ssh_exec_with_stdin(&session.ssh.target, probe_cmd, None, &control)
+    {
+        Ok((_, out)) => out,
+        Err(error) => {
+            return DeployResult {
+                succeeded: false,
+                root_required: false,
+                cancelled: control.is_cancelled(),
+                exit_code: None,
+                output: error,
+                report: None,
+            };
+        }
+    };
+    let probe = parse_deploy_probe_output(&probe_output);
+    if !probe.is_root && !probe.sudo_noninteractive {
+        return DeployResult {
+            succeeded: false,
+            root_required: true,
+            cancelled: false,
+            exit_code: None,
+            output: "REMOTE_SANDBOX_ROOT_REQUIRED: root or passwordless sudo is required for one-click install; use Open Host Terminal instead.".into(),
+            report: None,
+        };
+    }
+
+    let script = deployment_script(policy, probe.install_command);
+    let exec_cmd = if probe.is_root {
+        "bash -s"
+    } else {
+        "sudo -n bash -s"
+    };
+    let (exit_code, output) = match run_ssh_exec_with_stdin(
+        &session.ssh.target,
+        exec_cmd,
+        Some(script.as_bytes()),
+        &control,
+    ) {
+        Ok(res) => res,
+        Err(error) => {
+            return DeployResult {
+                succeeded: false,
+                root_required: false,
+                cancelled: control.is_cancelled(),
+                exit_code: None,
+                output: error,
+                report: None,
+            };
+        }
+    };
+
+    drop(session);
+    invalidate_verify_cache(profile_id);
+
+    if control.is_cancelled() {
+        return DeployResult {
+            succeeded: false,
+            root_required: false,
+            cancelled: true,
+            exit_code: Some(exit_code),
+            output,
+            report: None,
+        };
+    }
+
+    let report = if exit_code == 0 {
+        Some(test_executor(
+            connection,
+            policy,
+            operation_id,
+            known_hosts,
+            flag,
+        ))
+    } else {
+        None
+    };
+    let succeeded = exit_code == 0 && report.as_ref().is_some_and(|r| r.passed);
+    DeployResult {
+        succeeded,
+        root_required: false,
+        cancelled: false,
+        exit_code: Some(exit_code),
+        output,
+        report,
+    }
+}
+
 pub(crate) fn execute_command(
     db: &Database,
     binding: &Binding,

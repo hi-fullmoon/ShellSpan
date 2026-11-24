@@ -513,8 +513,14 @@ fn change_plan_accepts_optional_non_sensitive_note_and_rejects_other_actions() {
     let mut events = selected("test -r /etc/hosts");
     events.push(answered(2, change, true));
     let record = records(&events).pop().unwrap();
-    assert_eq!(record.action_note(), Some("admin is not in the sudoers file"));
-    let AgentSessionEventPayload::ToolResult { data: Some(data), .. } = result(&record) else {
+    assert_eq!(
+        record.action_note(),
+        Some("admin is not in the sudoers file")
+    );
+    let AgentSessionEventPayload::ToolResult {
+        data: Some(data), ..
+    } = result(&record)
+    else {
         panic!("expected tool result data");
     };
     assert_eq!(

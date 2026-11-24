@@ -332,8 +332,11 @@ export function AiQuestionPanel({
   };
   return (
     <Card
-      className={cn('ai-question-panel min-h-0 max-h-[min(440px,40dvh)] shrink-0 gap-0 py-0',
-        submissionIssue && 'max-h-[min(600px,70dvh)]')}
+      className={cn(
+        'ai-question-panel min-h-0 max-h-[min(440px,40dvh)] shrink-0 gap-0 py-0',
+        userAction && 'max-h-[min(600px,65dvh)]',
+        submissionIssue && 'max-h-[min(600px,70dvh)]',
+      )}
       data-slot="ai-question-panel"
       data-question-id={question.identity.questionRequestId}
       data-collapsed={collapsed || undefined}
@@ -366,7 +369,13 @@ export function AiQuestionPanel({
       </CardHeader>
       {!collapsed && (
         <>
-          <CardContent ref={content} className="ai-question-panel-content max-h-65 min-h-0 overflow-x-hidden overflow-y-auto px-4 pt-px pb-1.5 @max-[421px]/ai-workspace:px-2.5 @max-[421px]/ai-workspace:pt-0">
+          <CardContent
+            ref={content}
+            className={cn(
+              'ai-question-panel-content min-h-0 overflow-x-hidden overflow-y-auto px-4 pt-px pb-1.5 @max-[421px]/ai-workspace:px-2.5 @max-[421px]/ai-workspace:pt-0',
+              userAction ? 'max-h-none' : 'max-h-65',
+            )}
+          >
             {userAction ? <FieldGroup className="gap-2" aria-live="polite">
               <MarkdownContent
                 copiedLabel={t('common.copied')}
@@ -378,6 +387,62 @@ export function AiQuestionPanel({
               >
                 {formatUserActionInstructions(userAction.instructions)}
               </MarkdownContent>
+              <div
+                className="ai-question-action-verification flex min-w-0 flex-col gap-2"
+                data-slot="ai-question-verification"
+              >
+                <Field className="gap-1">
+                  <FieldDescription>{t('ai.workspace.question.actionVerification')}</FieldDescription>
+                  <div className="ai-code-block flex min-w-0 items-baseline" data-ai-copy-region>
+                    <pre className={cn(AI_CONTENT_CODE_CLASS, 'flex-1 pr-12 whitespace-pre-wrap [overflow-wrap:anywhere]')}>
+                      <code>{userAction.verification_command}</code>
+                    </pre>
+                    {/* A zero-size box shares the first text baseline without taking space from the command. */}
+                    <span className="relative size-0 shrink-0" data-ai-copy-anchor>
+                      <AiToolCopyButton
+                        text={userAction.verification_command}
+                        label={copyCommandLabel}
+                        errorLabel={t('ai.workspace.question.actionCopyFailed')}
+                        className="-top-[0.5ex] -translate-y-1/2 [font:var(--ai-font-markdown-code-block)]"
+                      />
+                    </span>
+                  </div>
+                </Field>
+                {changePlanOpen && (
+                  <Field className="gap-1.5" data-invalid={actionNoteTooLong || undefined}>
+                    <FieldLabel htmlFor={`${question.identity.questionRequestId}-action-note`} className="text-xs text-muted-foreground">
+                      {t('ai.workspace.question.actionNoteLabel')}
+                    </FieldLabel>
+                    <InputGroup className="ai-question-custom-group min-h-[34px] items-start">
+                      <InputGroupTextarea
+                        ref={actionNoteInputRef}
+                        id={`${question.identity.questionRequestId}-action-note`}
+                        className="ai-question-custom-input min-h-[34px] max-h-24 resize-none px-2.5 py-[7px] text-xs leading-relaxed"
+                        rows={2}
+                        disabled={editingLocked}
+                        value={actionNote}
+                        aria-invalid={actionNoteTooLong || undefined}
+                        maxLength={2048}
+                        placeholder={t('ai.workspace.question.actionNotePlaceholder')}
+                        onChange={(event) => setActionNote(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                            event.preventDefault();
+                            if (!pending && onAnswer && !actionNoteTooLong) {
+                              void submit('change_plan', question.answers, actionNote);
+                            }
+                          }
+                        }}
+                      />
+                    </InputGroup>
+                    {actionNoteTooLong && (
+                      <FieldError>
+                        {t('ai.workspace.question.actionNoteTooLong')}
+                      </FieldError>
+                    )}
+                  </Field>
+                )}
+              </div>
             </FieldGroup> : <FieldGroup className="ai-question-list gap-0">
               <FieldSet
                 key={currentQuestion.id}
@@ -494,64 +559,6 @@ export function AiQuestionPanel({
               </pre>}
             </FieldError>}
           </CardContent>
-          {userAction && (
-            <div
-              className="ai-question-action-verification shrink-0 px-4 pt-1.5 pb-0.5 @max-[421px]/ai-workspace:px-2.5"
-              data-slot="ai-question-verification"
-            >
-              <Field className="gap-1">
-                <FieldDescription>{t('ai.workspace.question.actionVerification')}</FieldDescription>
-                <div className="ai-code-block flex min-w-0 items-baseline" data-ai-copy-region>
-                  <pre className={cn(AI_CONTENT_CODE_CLASS, 'flex-1 pr-12 whitespace-pre-wrap [overflow-wrap:anywhere]')}>
-                    <code>{userAction.verification_command}</code>
-                  </pre>
-                  {/* A zero-size box shares the first text baseline without taking space from the command. */}
-                  <span className="relative size-0 shrink-0" data-ai-copy-anchor>
-                    <AiToolCopyButton
-                      text={userAction.verification_command}
-                      label={copyCommandLabel}
-                      errorLabel={t('ai.workspace.question.actionCopyFailed')}
-                      className="-top-[0.5ex] -translate-y-1/2 [font:var(--ai-font-markdown-code-block)]"
-                    />
-                  </span>
-                </div>
-              </Field>
-              {changePlanOpen && (
-                <Field className="gap-1.5 pt-2" data-invalid={actionNoteTooLong || undefined}>
-                  <FieldLabel htmlFor={`${question.identity.questionRequestId}-action-note`} className="text-xs text-muted-foreground">
-                    {t('ai.workspace.question.actionNoteLabel')}
-                  </FieldLabel>
-                  <InputGroup className="ai-question-custom-group min-h-[34px] items-start">
-                    <InputGroupTextarea
-                      ref={actionNoteInputRef}
-                      id={`${question.identity.questionRequestId}-action-note`}
-                      className="ai-question-custom-input min-h-[34px] max-h-24 resize-none px-2.5 py-[7px] text-xs leading-relaxed"
-                      rows={2}
-                      disabled={editingLocked}
-                      value={actionNote}
-                      aria-invalid={actionNoteTooLong || undefined}
-                      maxLength={2048}
-                      placeholder={t('ai.workspace.question.actionNotePlaceholder')}
-                      onChange={(event) => setActionNote(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                          event.preventDefault();
-                          if (!pending && onAnswer && !actionNoteTooLong) {
-                            void submit('change_plan', question.answers, actionNote);
-                          }
-                        }
-                      }}
-                    />
-                  </InputGroup>
-                  {actionNoteTooLong && (
-                    <FieldError>
-                      {t('ai.workspace.question.actionNoteTooLong')}
-                    </FieldError>
-                  )}
-                </Field>
-              )}
-            </div>
-          )}
           <CardFooter className="ai-question-panel-footer min-h-12 shrink-0 justify-between gap-2.5 px-3.5 pt-1.5 pb-[7px] @max-[421px]/ai-workspace:flex-wrap @max-[421px]/ai-workspace:px-2.5">
             {!userAction && <div className="ai-question-pagination flex shrink-0 items-center gap-0.5">
               <Button

@@ -853,12 +853,14 @@ pub(crate) async fn agent_runtime_restore_file_checkpoint(
     credentials: State<'_, CredentialManager>,
     session_id: String,
     checkpoint_id: String,
+    allow_conflict_overwrite: Option<bool>,
 ) -> Result<super::FileCheckpointRestoreResult, String> {
     configure_runtime(&app, &runtime)?;
     let database = app.state::<crate::db::Database>().inner().clone();
     let credentials = credentials.inner().clone();
     let known_hosts_path = crate::known_hosts::known_hosts_path(&app)?;
     let runtime = runtime.inner().clone();
+    let force = allow_conflict_overwrite.unwrap_or(false);
     tokio::task::spawn_blocking(move || {
         let snapshot = runtime.session(&session_id)?;
         if snapshot.status != super::AgentSessionStatus::Idle
@@ -899,6 +901,69 @@ pub(crate) async fn agent_runtime_restore_file_checkpoint(
             &credentials,
             &known_hosts_path,
             sandbox.as_ref(),
+            force,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn agent_runtime_restore_file_checkpoints_batch(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    credentials: State<'_, CredentialManager>,
+    session_id: String,
+    checkpoint_ids: Vec<String>,
+    allow_conflict_overwrite: Option<bool>,
+) -> Result<super::FileCheckpointBatchRestoreResult, String> {
+    configure_runtime(&app, &runtime)?;
+    let database = app.state::<crate::db::Database>().inner().clone();
+    let credentials = credentials.inner().clone();
+    let known_hosts_path = crate::known_hosts::known_hosts_path(&app)?;
+    let runtime = runtime.inner().clone();
+    let force = allow_conflict_overwrite.unwrap_or(false);
+    tokio::task::spawn_blocking(move || {
+        let snapshot = runtime.session(&session_id)?;
+        if snapshot.status != super::AgentSessionStatus::Idle
+            || snapshot.uncertain_native_effects
+            || snapshot.recovery.kind == super::AgentRecoveryCheckpointKind::WaitingApproval
+        {
+            return Err(
+                "CHECKPOINT_RESTORE_BUSY: wait for the Agent session to become idle before rolling back files"
+                    .into(),
+            );
+        }
+        let target = snapshot
+            .header
+            .target
+            .as_ref()
+            .ok_or_else(|| "Agent Session has no target".to_string())?;
+        let native_target = super::native_adapter::target_native(target)?;
+        let sandbox = crate::remote_sandbox::binding_for_target(
+            &native_target,
+            &database,
+            &known_hosts_path,
+        )?;
+        if sandbox.as_ref().is_some_and(|b| {
+            b.state
+                .policy
+                .as_ref()
+                .is_some_and(|p| p.mode == crate::remote_sandbox::Mode::ClientReadOnly)
+        }) {
+            return Err(
+                "SANDBOX_READ_ONLY: read-only SSH sandbox does not permit file rollback".into(),
+            );
+        }
+        runtime.native_engine().restore_file_checkpoints_batch(
+            &snapshot.header.task_id,
+            &checkpoint_ids,
+            &native_target,
+            &database,
+            &credentials,
+            &known_hosts_path,
+            sandbox.as_ref(),
+            force,
         )
     })
     .await

@@ -5,10 +5,11 @@ import { ConnectionSandboxDialog } from '../connection-sandbox-dialog';
 import type { SandboxTestResult } from '@/types';
 
 vi.mock('@/hooks/useI18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 vi.mock('@/lib/ipc/tauri', async original => ({
   ...await original<typeof import('@/lib/ipc/tauri')>(),
   invokeGetProfileSandbox: vi.fn().mockResolvedValue({ binding: 'binding', policy: { mode: 'readOnly', workspace: '/srv/shellspan-workspaces/example' } }),
+  invokeDeployProfileSandbox: vi.fn(),
   invokeTestProfileSandbox: vi.fn().mockResolvedValue({
     ssh: { operationId: 'test', status: 'passed', checkedAt: 0, steps: [] },
     steps: [['bubblewrap', 'failed']], protocolVersion: null, passed: false,
@@ -70,5 +71,57 @@ describe('sandbox installation copy', () => {
     const save = await screen.findByRole('button', { name: 'common.save' });
     await waitFor(() => expect(save).toBeEnabled());
     expect(screen.getByText('connection.sandbox.workspaceHintClientReadOnly')).toBeInTheDocument();
+  });
+
+  it('confirms and runs online L3 deployment, then renders output and refreshed report', async () => {
+    const tauri = await import('@/lib/ipc/tauri');
+    vi.mocked(tauri.invokeTestProfileSandbox).mockResolvedValueOnce({
+      ssh: { operationId: 'test', status: 'passed', checkedAt: 0, steps: [] },
+      steps: [['executorProtocol', 'failed']],
+      protocolVersion: null,
+      passed: false,
+      cancelled: false,
+      packageMissing: false,
+      installCommand: null,
+      deployScript: '#!/usr/bin/env bash\n# Subsystem shellspan-bwrap-v1',
+    });
+    vi.mocked(tauri.invokeDeployProfileSandbox).mockResolvedValueOnce({
+      succeeded: true,
+      rootRequired: false,
+      cancelled: false,
+      exitCode: 0,
+      output: 'installed shellspan-bwrap-v1\n',
+      report: {
+        ssh: { operationId: 'deploy', status: 'passed', checkedAt: 0, steps: [] },
+        steps: [['executorProtocol', 'passed']],
+        protocolVersion: 1,
+        passed: true,
+        cancelled: false,
+        packageMissing: false,
+        installCommand: null,
+      },
+    });
+
+    render(<ConnectionSandboxDialog profileId="profile" />);
+    fireEvent.click(screen.getByRole('button', { name: 'connection.sandbox.manage' }));
+    const test = await screen.findByRole('button', { name: 'connection.sandbox.test' });
+    await waitFor(() => expect(test).toBeEnabled());
+    fireEvent.click(test);
+
+    fireEvent.click(await screen.findByTestId('connection-sandbox-deploy-now'));
+    fireEvent.click(await screen.findByRole('button', { name: 'connection.sandbox.deployConfirmAction' }));
+
+    await waitFor(() => {
+      expect(tauri.invokeDeployProfileSandbox).toHaveBeenCalledWith(
+        'profile',
+        'binding',
+        { mode: 'readOnly', workspace: '/srv/shellspan-workspaces/example' },
+        expect.stringMatching(/^sandbox-deploy-/),
+      );
+    });
+    expect(await screen.findByTestId('connection-sandbox-deploy-result')).toHaveTextContent(
+      'connection.sandbox.deploySuccess',
+    );
+    expect(screen.getByText(/installed shellspan-bwrap-v1/)).toBeInTheDocument();
   });
 });

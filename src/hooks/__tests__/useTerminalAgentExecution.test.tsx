@@ -16,16 +16,19 @@ vi.mock('@/lib/ipc/tauri', () => ({
 }));
 
 import { useTerminalAgentExecution } from '../useTerminalAgentExecution';
+import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 
 const originalTerminalState = useTerminalStore.getState();
 const originalAiSettings = useAiSettingsStore.getState();
+const originalPermissionState = useAgentPermissionStore.getState();
 
 afterEach(() => {
   vi.clearAllMocks();
   useTerminalStore.setState(originalTerminalState, true);
   useAiSettingsStore.setState(originalAiSettings, true);
+  useAgentPermissionStore.setState(originalPermissionState, true);
 });
 
 describe('useTerminalAgentExecution', () => {
@@ -88,5 +91,42 @@ describe('useTerminalAgentExecution', () => {
       expect(result.current.sandboxChecking).toBe(false);
     });
     expect(result.current.localSandboxKind).toBeUndefined();
+  });
+
+  it('defaults macOS local sandbox with visible PTY support to boundTerminal while respecting explicit direct preference', async () => {
+    invokeLocalSandboxStatus.mockResolvedValue({
+      supported: true,
+      supportsVisiblePty: true,
+      kind: 'macNono',
+    });
+    useAiSettingsStore.setState({
+      agentSandboxEnabled: true,
+      agentExecutionSurface: 'direct',
+    });
+
+    const session: TerminalSession = {
+      sessionId: 'local-mac-sandbox',
+      title: 'zsh',
+      host: 'local',
+      port: 0,
+      username: 'user',
+      status: 'connected',
+    };
+    useTerminalStore.setState({ sessions: [session], activeSessionId: session.sessionId });
+
+    const { result } = renderHook(() => useTerminalAgentExecution(session));
+
+    await waitFor(() => {
+      expect(result.current.sandboxChecking).toBe(false);
+      expect(result.current.localSandboxSupportsVisiblePty).toBe(true);
+    });
+    expect(result.current.creationSurface).toBe('boundTerminal');
+    expect(result.current.executionSurface).toBe('boundTerminal');
+
+    act(() => {
+      useAgentPermissionStore.getState().setExecutionSurface(session.sessionId, 'direct');
+    });
+    expect(result.current.creationSurface).toBe('direct');
+    expect(result.current.executionSurface).toBe('direct');
   });
 });

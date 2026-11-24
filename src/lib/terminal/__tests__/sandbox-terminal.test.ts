@@ -14,7 +14,11 @@ vi.mock('@/lib/ipc/tauri', async (importOriginal) => {
   };
 });
 
-import { ensureManagedSandboxTerminal, findManagedSandboxTerminal } from '@/lib/terminal/sandbox-terminal';
+import {
+  ensureManagedSandboxTerminal,
+  findManagedSandboxTerminal,
+  restartManagedSandboxTerminalIfOpen,
+} from '@/lib/terminal/sandbox-terminal';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import type { SessionSummary } from '@/types';
@@ -91,5 +95,26 @@ describe('ensureManagedSandboxTerminal', () => {
     expect(invokeOpenLocalSandboxTerminal).toHaveBeenLastCalledWith('agent-1', 120, 30, 'sandbox-term-1');
     expect(useTerminalStore.getState().sessions.map((s) => s.sessionId)).toEqual(['sandbox-term-2']);
     expect(useTerminalStore.getState().activeSessionId).toBe('sandbox-term-2');
+  });
+
+  it('auto-restarts an open managed sandbox terminal after allowlist update and degrades gracefully on failure', async () => {
+    expect(await restartManagedSandboxTerminalIfOpen('agent-1')).toBe('not_open');
+
+    const first = sandboxSummary('sandbox-term-1', 'agent-1');
+    const second = sandboxSummary('sandbox-term-2', 'agent-1');
+    invokeOpenLocalSandboxTerminal
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(second)
+      .mockRejectedValueOnce(new Error('busy'));
+
+    await ensureManagedSandboxTerminal('agent-1');
+    expect(
+      await restartManagedSandboxTerminalIfOpen('agent-1', {
+        formatTitle: (shell) => `Sandbox · ${shell}`,
+      }),
+    ).toBe('restarted');
+    expect(useTerminalStore.getState().sessions.map((s) => s.sessionId)).toEqual(['sandbox-term-2']);
+
+    expect(await restartManagedSandboxTerminalIfOpen('agent-1')).toBe('failed');
   });
 });

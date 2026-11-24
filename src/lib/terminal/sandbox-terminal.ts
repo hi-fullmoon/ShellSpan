@@ -89,3 +89,23 @@ export async function ensureManagedSandboxTerminal(
     }
   }
 }
+
+export async function restartManagedSandboxTerminalIfOpen(
+  agentSessionId: string,
+  options?: Pick<EnsureSandboxTerminalOptions, 'formatTitle' | 'activate'>,
+): Promise<'restarted' | 'not_open' | 'failed'> {
+  if (!isTauriRuntime()) return 'not_open';
+  const existing = findManagedSandboxTerminal(agentSessionId);
+  if (!existing) return 'not_open';
+  try {
+    const restarted = await ensureManagedSandboxTerminal(agentSessionId, {
+      replacesSessionId: existing.sessionId,
+      insertAfterId: existing.sessionId,
+      formatTitle: options?.formatTitle,
+      activate: options?.activate ?? false,
+    });
+    return restarted ? 'restarted' : 'failed';
+  } catch {
+    return 'failed';
+  }
+}

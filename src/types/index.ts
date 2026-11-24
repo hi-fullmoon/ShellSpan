@@ -210,6 +210,7 @@ export interface ConnectionProfile {
   notes?: string;
   portForwards?: PortForwardRule[];
   quickActions?: HostQuickAction[];
+  sandboxMode?: SandboxMode;
   createdAt: number;
   updatedAt: number;
 }
@@ -627,6 +628,15 @@ export interface SandboxTestResult {
   packageMissing: boolean;
   installCommand: string | null;
   deployScript?: string | null;
+}
+
+export interface SandboxDeployResult {
+  succeeded: boolean;
+  rootRequired: boolean;
+  cancelled: boolean;
+  exitCode: number | null;
+  output: string;
+  report?: SandboxTestResult | null;
 }
 
 export interface RemoteFileEntry {

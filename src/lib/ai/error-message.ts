@@ -60,6 +60,7 @@ export function aiErrorMessage(message: string, t: (key: LocaleKey, values?: Rec
   if (code === 'CHECKPOINT_RESTORE_BUSY') return t('ai.error.checkpointRestoreBusy');
   if (code === 'CHECKPOINT_NOT_FOUND') return t('ai.error.checkpointNotFound');
   if (code === 'CHECKPOINT_CORRUPTED') return t('ai.error.checkpointCorrupted');
+  if (code === 'CHECKPOINT_MANUAL_EDIT_CONFLICT') return t('ai.error.checkpointManualEditConflict');
   if (code === 'SANDBOX_READ_ONLY') return t('ai.error.sandboxReadOnly');
   if (code === 'SANDBOX_SESSION_POLICY_CHANGED') return t('ai.error.sandboxSessionPolicyChanged');
   if (code === 'AUTO_REVIEW_CHANGED') return t('ai.error.autoReviewChanged');

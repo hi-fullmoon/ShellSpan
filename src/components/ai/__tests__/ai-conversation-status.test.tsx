@@ -4,8 +4,10 @@ import { AiConversation } from '../workspace/ai-conversation';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
+import type { AiConversationNode } from '@/lib/ai/conversation-node';
 import type { AgentSessionEvent } from '@/types/agent-session';
 import capture from '@/tests/fixtures/agent-skills-runtime.json';
+import { conversationFoldRecording } from '@/tests/fixtures/conversation-fold-runtime';
 
 const events = capture as AgentSessionEvent[];
 const turnEnd = events.findIndex(event => event.type === 'turn/end');
@@ -42,6 +44,116 @@ it('uses the active process title while it is the last visible output', () => {
   expect(container.querySelector('.ai-turn-process-trigger')).toHaveTextContent('Processing');
   expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
   expect(container.querySelector('[data-ai-thinking-indicator]')).toBeNull();
+});
+
+it('does not flash a trailing processing indicator while streaming text precedes a tool call', () => {
+  const { events: progressEvents } = conversationFoldRecording.progress;
+  const toolDelta = progressEvents.map(event => event.type === 'assistant/chunk' && Boolean(event.data.toolCallDelta)).lastIndexOf(true);
+  expect(toolDelta).toBeGreaterThan(0);
+
+  const beforeToolDelta = projectAgentChatNodes(progressEvents.slice(0, toolDelta));
+  const lastBeforeToolDelta = beforeToolDelta[beforeToolDelta.length - 1];
+  expect(lastBeforeToolDelta?.kind).toBe('assistantMessage');
+  expect(lastBeforeToolDelta?.kind === 'assistantMessage' ? lastBeforeToolDelta.state : null).toBe('streaming');
+
+  const { container, rerender } = render(
+    <AiConversation nodes={beforeToolDelta} status="running" throughSeq={progressEvents[toolDelta - 1]?.seq ?? null} />,
+  );
+  expect(container.querySelector('.ai-turn-process-trigger')).toHaveTextContent('Processing');
+  expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+  expect(container.querySelector('[data-ai-thinking-indicator]')).toBeNull();
+
+  rerender(
+    <AiConversation nodes={projectAgentChatNodes(progressEvents.slice(0, toolDelta + 1))} status="running" throughSeq={progressEvents[toolDelta]?.seq ?? null} />,
+  );
+  expect(container.querySelector('.ai-turn-process-trigger')).toHaveTextContent('Processing');
+  expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+  expect(container.querySelector('[data-ai-thinking-indicator]')).toBeNull();
+});
+
+it('does not duplicate processing below trailing turn artifacts, partial outputs, or settled compactions', () => {
+  const prefix = events.findIndex((_, index) => projectAgentChatNodes(events.slice(0, index + 1))
+    .some(node => node.kind === 'turnProcess' && node.children.some(child => child.kind === 'contextInjection'
+      && child.provenance.kind === 'skill-invocation')));
+  const processNodes = projectAgentChatNodes(events.slice(0, prefix + 1)).filter(node => node.kind !== 'systemPrompt');
+  const process = processNodes.find(node => node.kind === 'turnProcess');
+  if (!process || process.kind !== 'turnProcess') throw new Error('Expected active turnProcess');
+
+  const trailingVariants: readonly AiConversationNode[][] = [
+    [
+      ...processNodes,
+      {
+        kind: 'artifact',
+        key: 'artifact:mid-turn',
+        sourceKind: 'agent',
+        sessionId: process.sessionId,
+        turnId: process.turnId,
+        stepId: 'step-1',
+        firstSeq: process.lastSeq + 1,
+        lastSeq: process.lastSeq + 1,
+        timestamp: process.timestamp,
+        artifactId: 'mid-turn',
+        artifactKind: 'tool-output',
+        title: 'Mid-turn output',
+        sizeBytes: 128,
+        mediaType: 'text/plain',
+        sha256: null,
+        sensitivity: null,
+      },
+    ],
+    [
+      ...processNodes,
+      {
+        kind: 'assistantMessage',
+        key: 'assistant:partial-retry',
+        sourceKind: 'agent',
+        sessionId: process.sessionId,
+        turnId: process.turnId,
+        stepId: 'step-1',
+        firstSeq: process.lastSeq + 1,
+        lastSeq: process.lastSeq + 1,
+        timestamp: process.timestamp,
+        messageId: 'partial-retry',
+        requestId: 'req-1',
+        blocks: [{ type: 'text', text: 'Partial output before retry' }],
+        state: 'failed',
+        partialReason: 'requestFailed',
+      },
+    ],
+    processNodes.map(node => (
+      node.kind === 'turnProcess'
+        ? {
+          ...node,
+          children: [
+            ...node.children,
+            {
+              kind: 'compaction',
+              key: 'compaction:mid-turn',
+              compactionId: 'mid-turn',
+              sourceKind: 'agent',
+              sessionId: node.sessionId,
+              turnId: node.turnId,
+              stepId: null,
+              firstSeq: node.lastSeq + 1,
+              lastSeq: node.lastSeq + 2,
+              timestamp: node.timestamp,
+              startedAtUnixMs: 0,
+              durationMs: 250,
+              state: 'completed',
+            },
+          ],
+        }
+        : node
+    )),
+  ];
+
+  for (const variant of trailingVariants) {
+    const { container, unmount } = render(<AiConversation nodes={variant} status="running" throughSeq={null} />);
+    expect(container.querySelector('.ai-turn-process-trigger')).toHaveTextContent('Processing');
+    expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+    expect(container.querySelector('[data-ai-thinking-indicator]')).toBeNull();
+    unmount();
+  }
 });
 
 it.each([

@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
+import * as sandboxTerminal from '@/lib/terminal/sandbox-terminal';
 import { initI18n } from '@/locales';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useAppStore } from '@/stores/appStore';
@@ -30,17 +31,22 @@ describe('SandboxStatusBadge', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('shows macOS sandbox posture details when opened', async () => {
+  it('shows macOS sandbox posture details with compact workspace path, copy action, and sandbox terminal button', async () => {
+    useAppStore.setState({ locale: 'en-US' });
+    await initI18n('en-US');
+    const onOpenSandboxTerminal = vi.fn();
     const user = userEvent.setup();
+    const fullPath = '/Users/demo/.shellspan/sandboxes/0123456789abcdef0123456789abcdef/workspace';
     render(
       <SandboxStatusBadge
         target={{
           kind: 'local',
           targetId: 'local-1',
           sessionId: 'term-1',
-          cwd: '/Users/demo/.shellspan/sandboxes/0123456789abcdef0123456789abcdef/workspace',
+          cwd: fullPath,
           localSandboxRequired: 'macNono',
         }}
+        onOpenSandboxTerminal={onOpenSandboxTerminal}
       />,
     );
 
@@ -48,9 +54,16 @@ describe('SandboxStatusBadge', () => {
     await user.click(trigger);
 
     expect(await screen.findByText('macOS nono')).toBeInTheDocument();
-    expect(
-      screen.getByText('/Users/demo/.shellspan/sandboxes/0123456789abcdef0123456789abcdef/workspace'),
-    ).toBeInTheDocument();
+    const compactPath = screen.getByText('sandbox/01234567…/workspace');
+    expect(compactPath).toHaveAttribute('title', fullPath);
+
+    await user.click(screen.getByRole('button', { name: 'Copy full workspace path' }));
+    await waitFor(async () => {
+      expect(await navigator.clipboard.readText()).toBe(fullPath);
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Open sandbox terminal' }));
+    expect(onOpenSandboxTerminal).toHaveBeenCalledTimes(1);
   });
 
   it('shows remote sandbox posture for sandboxed SSH sessions', async () => {
@@ -104,6 +117,9 @@ describe('SandboxStatusBadge', () => {
     useAppStore.setState({ locale: 'en-US' });
     await initI18n('en-US');
     const allowDomain = vi.fn().mockResolvedValue(undefined);
+    const restartSpy = vi
+      .spyOn(sandboxTerminal, 'restartManagedSandboxTerminalIfOpen')
+      .mockResolvedValue('restarted');
     useAiSettingsStore.setState({
       agentSandboxNetworkMode: 'devRegistries',
       agentSandboxNetworkAllowlist: [],
@@ -156,6 +172,8 @@ describe('SandboxStatusBadge', () => {
     await user.click(allowButton);
 
     await waitFor(() => expect(allowDomain).toHaveBeenCalledWith('registry.npmmirror.com'));
+    await waitFor(() => expect(restartSpy).toHaveBeenCalledWith('sess-1', expect.any(Object)));
+    restartSpy.mockRestore();
   });
 
   it('renders cleanly inside AiSessionHeader alongside the session title', async () => {

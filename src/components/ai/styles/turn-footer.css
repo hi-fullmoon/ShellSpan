@@ -203,18 +203,8 @@
 }
 
 .ai-turn-changes-dialog .ai-diff-body {
-  padding-block: 4px;
+  padding-block: 0;
   background: transparent;
-}
-
-.ai-turn-changes-dialog .ai-diff-body:has(.ai-diff-lines > [data-diff='fold']:first-child),
-.ai-turn-changes-dialog .ai-diff-body:has(.ai-diff-lines > [data-diff='gap']:first-child) {
-  padding-top: 0;
-}
-
-.ai-turn-changes-dialog .ai-diff-body:has(.ai-diff-lines > [data-diff='fold']:last-child),
-.ai-turn-changes-dialog .ai-diff-body:has(.ai-diff-lines > [data-diff='gap']:last-child) {
-  padding-bottom: 0;
 }
 
 .ai-turn-changes-dialog .ai-diff-fold-bar {

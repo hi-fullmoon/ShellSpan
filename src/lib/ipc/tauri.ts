@@ -1445,6 +1445,7 @@ export interface AgentFileCheckpoint {
   readonly targetKind: 'local' | 'remote';
   readonly targetPath: string;
   readonly originalSha256?: string;
+  readonly postWriteSha256?: string;
   readonly originalByteLength: number;
   readonly createdAtUnixMs: number;
   readonly expiresAtUnixMs: number;
@@ -1458,6 +1459,7 @@ export interface FileCheckpointDiffPreview {
   readonly existedBefore: boolean;
   readonly currentExists: boolean;
   readonly unchanged: boolean;
+  readonly modifiedAfterAgent: boolean;
   readonly isBinary: boolean;
   readonly truncated: boolean;
   readonly unifiedDiff: string;
@@ -1466,6 +1468,18 @@ export interface FileCheckpointDiffPreview {
 export interface FileCheckpointRestoreResult {
   readonly checkpoint: AgentFileCheckpoint;
   readonly action: 'restored' | 'trashed' | 'removed' | 'unchanged';
+}
+
+export interface FileCheckpointBatchFailure {
+  readonly checkpointId: string;
+  readonly targetPath?: string;
+  readonly error: string;
+}
+
+export interface FileCheckpointBatchRestoreResult {
+  readonly restored: readonly FileCheckpointRestoreResult[];
+  readonly conflicts: readonly string[];
+  readonly failed: readonly FileCheckpointBatchFailure[];
 }
 
 export async function invokeListFileCheckpoints(
@@ -1488,10 +1502,24 @@ export async function invokePreviewFileCheckpoint(
 export async function invokeRestoreFileCheckpoint(
   sessionId: string,
   checkpointId: string,
+  allowConflictOverwrite = false,
 ): Promise<FileCheckpointRestoreResult> {
   return invokeLogged<FileCheckpointRestoreResult>('agent_runtime_restore_file_checkpoint', {
     sessionId,
     checkpointId,
+    allowConflictOverwrite,
+  });
+}
+
+export async function invokeRestoreFileCheckpointsBatch(
+  sessionId: string,
+  checkpointIds: readonly string[],
+  allowConflictOverwrite = false,
+): Promise<FileCheckpointBatchRestoreResult> {
+  return invokeLogged<FileCheckpointBatchRestoreResult>('agent_runtime_restore_file_checkpoints_batch', {
+    sessionId,
+    checkpointIds,
+    allowConflictOverwrite,
   });
 }
 
@@ -1514,6 +1542,11 @@ export function invokeGetProfileSandbox(profileId: string): Promise<import('@/ty
   return invokeLogged('get_profile_sandbox', { profileId });
 }
 
+export async function invokeListProfileSandboxModes(): Promise<Record<string, import('@/types').SandboxMode>> {
+  if (!isTauriRuntime()) return {};
+  return invokeLogged('list_profile_sandbox_modes');
+}
+
 export async function invokeSaveProfileSandbox(profileId: string, binding: string, policy: import('@/types').SandboxPolicy | null): Promise<void> {
   await invokeLogged('save_profile_sandbox', { profileId, binding, policy });
   window.dispatchEvent(new CustomEvent('shellspan:connection-sandbox-changed', { detail: profileId }));
@@ -1521,6 +1554,15 @@ export async function invokeSaveProfileSandbox(profileId: string, binding: strin
 
 export function invokeTestProfileSandbox(profileId: string, binding: string, policy: import('@/types').SandboxPolicy, operationId: string): Promise<import('@/types').SandboxTestResult> {
   return invokeLogged('test_profile_sandbox', { profileId, binding, policy, operationId });
+}
+
+export function invokeDeployProfileSandbox(
+  profileId: string,
+  binding: string,
+  policy: import('@/types').SandboxPolicy,
+  operationId: string,
+): Promise<import('@/types').SandboxDeployResult> {
+  return invokeLogged('deploy_profile_sandbox', { profileId, binding, policy, operationId });
 }
 
 export function invokeSaveProfileSudoPolicy(

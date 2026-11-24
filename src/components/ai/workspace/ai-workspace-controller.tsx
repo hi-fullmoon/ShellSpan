@@ -11,8 +11,10 @@ import { FocusControls } from '@/components/focus/focus-controls';
 import { useAppStore } from '@/stores/appStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { useI18n } from '@/hooks/useI18n';
 import { useReconnectSession } from '@/hooks/useReconnectSession';
 import { isTauriRuntime } from '@/lib/ipc/tauri';
+import { ensureManagedSandboxTerminal } from '@/lib/terminal/sandbox-terminal';
 import { AgentPermissionSelector } from '../agent-permission-selector';
 import { AgentExecutionSurfaceSelector } from '../agent-execution-surface-selector';
 import { SandboxStatusBadge } from './sandbox-status-badge';
@@ -40,6 +42,7 @@ export function AiWorkspaceController({
   adapter,
   onClose,
 }: AiWorkspaceControllerProps): React.ReactNode {
+  const { t } = useI18n();
   const controller = useAiSessionController({ scope, adapter, focusMode });
   const sandboxEnabled = useAiSettingsStore((state) => state.agentSandboxEnabled);
   const displayedSessionId = controller.view?.summary.id ?? null;
@@ -81,6 +84,9 @@ export function AiWorkspaceController({
   const terminalSessionId = useTerminalStore((state) => state.sessions.find(
     (candidate) => candidate.sessionId === activeTerminalId,
   )?.terminalSessionId);
+  const activeSandboxAgentId = useTerminalStore((state) => state.sessions.find(
+    (candidate) => candidate.sessionId === activeTerminalId,
+  )?.ptyInfo?.sandboxBinding?.agentSessionId);
   const session = controller.view?.snapshot.value;
   const blockedAttempt = latestTerminalBusyAttempt(controller.view?.nodes ?? [], activeTerminalId);
   const configuringContinuation = controller.historicalContinuationAvailable;
@@ -144,10 +150,37 @@ export function AiWorkspaceController({
       </>
     )
     : undefined;
+  const canOpenSandboxTerminal = scope === 'terminal'
+    && !focusMode
+    && controller.sandboxVisiblePty
+    && session?.header.target?.localSandboxRequired === 'macNono'
+    && !controller.readOnlySession
+    && activeSandboxAgentId !== session.header.sessionId;
+  const openSandboxTerminalDisabled = controller.selectedExecutionSurface === 'direct'
+    ? executionSurfaceLocked
+    : false;
+  const handleOpenSandboxTerminal = canOpenSandboxTerminal && session
+    ? () => {
+      if (controller.selectedExecutionSurface === 'direct') {
+        controller.selectExecutionSurface('boundTerminal');
+        return;
+      }
+      void ensureManagedSandboxTerminal(session.header.sessionId, {
+        insertAfterId: activeTerminalId ?? undefined,
+        formatTitle: (shell) => t('terminal.sandbox.tabTitle', { shell }),
+      }).catch(() => undefined);
+    }
+    : undefined;
   return (
     <AiWorkspaceRoot
       headerActions={headerActions}
-      headerBadge={session?.header.target ? <SandboxStatusBadge target={session.header.target} /> : undefined}
+      headerBadge={session?.header.target ? (
+        <SandboxStatusBadge
+          target={session.header.target}
+          onOpenSandboxTerminal={handleOpenSandboxTerminal}
+          openSandboxTerminalDisabled={openSandboxTerminalDisabled}
+        />
+      ) : undefined}
       mode={scope === 'workbench' ? 'ask' : 'agent'}
       view={controller.view}
       contextWindow={activeModel?.contextWindow}
@@ -240,6 +273,7 @@ export function AiWorkspaceController({
         : undefined}
       executionSurfaceNotice={session?.header.subagent ? undefined : <>
         {focusMode && activeTerminalStatus !== 'connected' ? <FocusNoTarget /> : scope === 'terminal' && activeTerminalStatus === 'connected' && noticeState !== null
+        && !(controller.sandboxVisiblePty && !activeSandboxAgentId)
         && !(terminalNeedsRecovery && terminalRecovery)
         && (controller.selectedExecutionSurface === 'boundTerminal' || controller.glibcMismatch)
         && (!controller.readOnlySession || (focusMode && controller.historicalContinuationAvailable))

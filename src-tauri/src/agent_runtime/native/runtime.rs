@@ -1257,6 +1257,7 @@ impl NativeToolEngine {
         credentials: &CredentialManager,
         known_hosts_path: &Path,
         sandbox: Option<&crate::remote_sandbox::Binding>,
+        allow_conflict_overwrite: bool,
     ) -> Result<super::FileCheckpointRestoreResult, String> {
         let root = self.checkpoint_root()?;
         super::restore_file_checkpoint_native(
@@ -1270,6 +1271,35 @@ impl NativeToolEngine {
             credentials,
             known_hosts_path,
             sandbox,
+            allow_conflict_overwrite,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn restore_file_checkpoints_batch(
+        &self,
+        task_id: &str,
+        checkpoint_ids: &[String],
+        target: &AgentToolTargetNative,
+        database: &Database,
+        credentials: &CredentialManager,
+        known_hosts_path: &Path,
+        sandbox: Option<&crate::remote_sandbox::Binding>,
+        allow_conflict_overwrite: bool,
+    ) -> Result<super::FileCheckpointBatchRestoreResult, String> {
+        let root = self.checkpoint_root()?;
+        super::restore_file_checkpoints_batch_native(
+            &root,
+            &self.checkpoints,
+            &self.file_operations,
+            task_id,
+            checkpoint_ids,
+            target,
+            database,
+            credentials,
+            known_hosts_path,
+            sandbox,
+            allow_conflict_overwrite,
         )
     }
 

@@ -166,6 +166,7 @@ fn model_exposes_only_strict_runtime_pipeline_tools() {
         [
             "read_tool_result",
             "skill",
+            "propose_skill",
             "ask_user_question",
             "request_user_action",
             "run_terminal_command",

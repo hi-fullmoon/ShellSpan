@@ -63,6 +63,7 @@ describe.each([['zh-CN', zhCN], ['en-US', enUS]] as const)('AI error messages in
     ['CHECKPOINT_RESTORE_BUSY: session running', 'ai.error.checkpointRestoreBusy'],
     ['CHECKPOINT_NOT_FOUND: expired', 'ai.error.checkpointNotFound'],
     ['CHECKPOINT_CORRUPTED: digest mismatch', 'ai.error.checkpointCorrupted'],
+    ['CHECKPOINT_MANUAL_EDIT_CONFLICT: edited manually', 'ai.error.checkpointManualEditConflict'],
     ['SANDBOX_READ_ONLY: read-only SSH sandbox', 'ai.error.sandboxReadOnly'],
     ['TERMINAL_AGENT_CONFLICT: agent-owning-task', 'terminal.occupancy.conflict'],
     ['Error: TERMINAL_AGENT_CONFLICT', 'terminal.occupancy.conflict'],

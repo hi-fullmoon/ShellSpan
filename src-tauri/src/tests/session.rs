@@ -743,9 +743,11 @@
             integration
                 .start_shell(
                     &mut shell_channel,
-                    vim_source.map(|source_path| crate::terminal_vim_bridge::VimBridgeShellConfig {
-                        source_path,
-                        auto_attach: false,
+                    vim_source.map(|source_path| {
+                        crate::terminal_vim_bridge::VimBridgeShellConfig {
+                            source_path,
+                            auto_attach: false,
+                        }
                     }),
                 )
                 .expect("start integrated interactive SSH shell");

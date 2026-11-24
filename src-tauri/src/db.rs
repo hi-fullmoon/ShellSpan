@@ -439,6 +439,36 @@ impl Database {
         Self::read_profile_sandbox(&conn, id)
     }
 
+    pub(crate) fn list_profile_sandbox_modes(
+        &self,
+    ) -> Result<std::collections::HashMap<String, crate::remote_sandbox::Mode>, String> {
+        let conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT profile_id, policy_json FROM profile_sandbox WHERE policy_json IS NOT NULL",
+            )
+            .map_err(|e| format!("failed to query profile sandbox modes: {e}"))?;
+        let mut modes = std::collections::HashMap::new();
+        let rows = stmt
+            .query_map([], |row| {
+                let id: String = row.get(0)?;
+                let raw: Option<String> = row.get(1)?;
+                Ok((id, raw))
+            })
+            .map_err(|e| format!("failed to map profile sandbox modes: {e}"))?;
+        for row in rows {
+            let (id, raw) = row.map_err(|e| format!("failed to read profile sandbox mode: {e}"))?;
+            if let Some(raw) = raw {
+                if let Ok(Some(policy)) =
+                    serde_json::from_str::<Option<crate::remote_sandbox::Policy>>(&raw)
+                {
+                    modes.insert(id, policy.mode);
+                }
+            }
+        }
+        Ok(modes)
+    }
+
     pub(crate) fn save_profile_sandbox(
         &self,
         id: &str,

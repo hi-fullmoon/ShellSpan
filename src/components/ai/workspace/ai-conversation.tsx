@@ -223,8 +223,20 @@ export const AiConversation = memo(function AiConversation({
     !processResponseStarted &&
     !latestProcess?.hasEndBoundary;
   const lastNode = allNodes[allNodes.length - 1];
-  const processingAtTail = lastNode?.kind === 'turnProcess' && lastNode.status === 'running'
-    && lastNode.children.some(node => node.kind !== 'contextInjection' || isUserVisibleContextInjection(node));
+  const latestProcessRunning = latestProcess?.status === 'running' && !latestProcess.hasEndBoundary;
+  const sameActiveTurn = Boolean(
+    latestProcessRunning
+    && lastNode
+    && lastNode.sessionId === latestProcess.sessionId
+    && lastNode.turnId === latestProcess.turnId,
+  );
+  const processingAtTail =
+    (lastNode?.kind === 'turnProcess' && lastNode.status === 'running'
+      && lastNode.children.some(node => node.kind !== 'contextInjection' || isUserVisibleContextInjection(node)))
+    || (sameActiveTurn && lastNode?.kind === 'assistantMessage'
+      && (lastNode.state === 'streaming' || lastNode.partialReason !== undefined))
+    || (sameActiveTurn && Boolean(processResponseStarted)
+      && (lastNode?.kind === 'artifact' || lastNode?.kind === 'compaction'));
   const compacting = allNodes.some(node => node.kind === 'compaction' && node.state === 'running');
   const showAgentProcessing = status === 'running' && runningIndicator === 'agent' && !processingAtTail && !compacting;
   // Keep the trailing status in the last message row. A separate status item

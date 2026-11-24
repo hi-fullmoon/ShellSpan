@@ -827,3 +827,35 @@ fn bubblewrap_deployment_script_contains_subsystem_and_workspace() {
     assert!(script.contains("/var/lib/shellspan-sandbox/outside-probe"));
     assert!(script.contains("nodev,nosuid"));
 }
+
+#[test]
+fn parse_deploy_probe_and_list_profile_sandbox_modes_work() {
+    let root_probe = parse_deploy_probe_output("UID=0\nSUDO=0\nPKG=apt-get\n");
+    assert!(root_probe.is_root);
+    assert!(!root_probe.sudo_noninteractive);
+    assert!(root_probe
+        .install_command
+        .unwrap()
+        .contains("DEBIAN_FRONTEND=noninteractive"));
+
+    let sudo_probe = parse_deploy_probe_output("UID=1000\nSUDO=1\nPKG=dnf\n");
+    assert!(!sudo_probe.is_root);
+    assert!(sudo_probe.sudo_noninteractive);
+    assert_eq!(
+        sudo_probe.install_command,
+        Some("dnf install -y bubblewrap python3 libseccomp")
+    );
+
+    let unpriv_probe = parse_deploy_probe_output("UID=1000\nSUDO=0\nPKG=apk\n");
+    assert!(!unpriv_probe.is_root);
+    assert!(!unpriv_probe.sudo_noninteractive);
+
+    let temp = tempfile::tempdir().unwrap();
+    let db = Database::open(&temp.path().join("db")).unwrap();
+    let row = profile(22);
+    db.insert_profile(&row).unwrap();
+    assert!(db.list_profile_sandbox_modes().unwrap().is_empty());
+    set_policy(&db, &row, Mode::WorkspaceWrite);
+    let modes = db.list_profile_sandbox_modes().unwrap();
+    assert_eq!(modes.get(&row.id), Some(&Mode::WorkspaceWrite));
+}

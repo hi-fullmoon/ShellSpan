@@ -43,6 +43,7 @@ import { useToast } from '@/hooks/useToast';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { storedToolOutputId } from '@/lib/ai/conversation-tool';
 import { aiErrorMessage, httpProbeTimeoutKind } from '@/lib/ai/error-message';
+import { restartManagedSandboxTerminalIfOpen } from '@/lib/terminal/sandbox-terminal';
 import { renderTerminalTranscript } from '@/lib/terminal/terminal-output-buffer';
 import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
@@ -775,7 +776,20 @@ function TerminalSurface({ node, showCopyActions, scrollable, showInput, headerA
                 disabled={alreadyAllowed || networkSaving}
                 onClick={() => {
                   void allowSandboxDomain(domain)
-                    .then(() => showSuccess(t('ai.sandbox.violation.domainAllowed', { domain: normalized })))
+                    .then(async () => {
+                      const restartState = node.sessionId
+                        ? await restartManagedSandboxTerminalIfOpen(node.sessionId, {
+                            formatTitle: (shell) => t('terminal.sandbox.tabTitle', { shell }),
+                          })
+                        : 'not_open';
+                      if (restartState === 'restarted') {
+                        showSuccess(t('ai.sandbox.violation.domainAllowedAndRestarted', { domain: normalized }));
+                      } else if (restartState === 'failed') {
+                        showSuccess(t('ai.sandbox.violation.domainAllowedNeedsRestart', { domain: normalized }));
+                      } else {
+                        showSuccess(t('ai.sandbox.violation.domainAllowed', { domain: normalized }));
+                      }
+                    })
                     .catch(() => showError(t('settings.ai.agent.sandboxNetworkSaveFailed')));
                 }}
               >

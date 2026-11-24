@@ -145,7 +145,10 @@ export function useTerminalAgentExecution(terminal: TerminalSession | undefined)
   const glibcMismatch = remoteGlibcMismatch(terminal?.integrationReason);
   const localDirectOnly = localSandbox && !localSandboxSupportsVisiblePty;
   const creationSurface: AgentExecutionSurface = localDirectOnly || profileSandbox || glibcMismatch
-    ? 'direct' : preference?.surface ?? defaultSurface;
+    ? 'direct'
+    : localSandboxSupportsVisiblePty && !preference?.surfaceExplicit
+      ? 'boundTerminal'
+      : preference?.surface ?? defaultSurface;
   const reconnectingSurface = terminal?.reconnecting ? preference?.reconnectingSurface : undefined;
   return {
     creationSurface,

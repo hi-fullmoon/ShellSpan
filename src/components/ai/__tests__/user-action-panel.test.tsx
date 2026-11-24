@@ -118,12 +118,13 @@ describe('user operation within the existing question card', () => {
     expect(screen.queryByRole('group', { name: 'Choose access method' })).not.toBeInTheDocument();
     expect(screen.getByText(action.instructions)).toBeVisible();
     expect(screen.getByText(action.verification_command)).toBeVisible();
+    expect(container.querySelector('[data-slot="ai-question-panel"]')).toHaveClass('max-h-[min(600px,65dvh)]');
     expect(container.querySelector('.ai-question-panel-header [data-slot="card-action"]')).toBeInTheDocument();
-    expect(container.querySelector('.ai-question-panel-content')).toHaveClass('min-h-0', 'overflow-y-auto');
-    expect(container.querySelector('[data-slot="ai-question-verification"]')).toHaveClass('shrink-0');
+    expect(container.querySelector('.ai-question-panel-content')).toHaveClass('min-h-0', 'overflow-y-auto', 'max-h-none');
+    expect(container.querySelector('.ai-question-panel-content')).not.toHaveClass('max-h-65');
     expect(container.querySelector('.ai-question-panel-content')?.contains(
       container.querySelector('[data-slot="ai-question-verification"]'),
-    )).toBe(false);
+    )).toBe(true);
     expect(container.querySelector('.ai-question-panel-footer')).toHaveClass('shrink-0');
     const complete = screen.getByRole('button', { name: locale === 'en-US' ? 'Continue verification' : '继续验证' });
     fireEvent.click(complete);

@@ -6,9 +6,11 @@ import type {
   PortForwardRule,
   ProfileRow,
   ProfileSecretKind,
+  SandboxMode,
 } from '@/types';
 import {
   invokeListProfiles,
+  invokeListProfileSandboxModes,
   invokeAddProfile,
   invokeUpdateProfile,
   invokeRemoveProfile,
@@ -254,6 +256,7 @@ interface ProfileState {
   ensurePassword: (profile: ConnectionProfile) => Promise<ConnectionProfile>;
   clearKeychainKeyIds: (profileIds: string[], keyId?: string, persist?: boolean) => void;
   clearProfilePassword: (profileId: string) => void;
+  setProfileSandboxMode: (profileId: string, mode: SandboxMode | undefined) => void;
 }
 
 function profileToRow(profile: ConnectionProfile): ProfileRow {
@@ -417,13 +420,31 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
   hydrateFromDb: async () => {
     try {
       const rows = await invokeListProfiles();
-      const profiles = rows.map(rowToProfile);
+      let sandboxModes: Record<string, SandboxMode> = {};
+      try {
+        sandboxModes = await invokeListProfileSandboxModes();
+      } catch {
+        sandboxModes = {};
+      }
+      const profiles = rows.map((row) => {
+        const profile = rowToProfile(row);
+        const sandboxMode = sandboxModes?.[row.id];
+        return sandboxMode ? { ...profile, sandboxMode } : profile;
+      });
       set({ profiles, initialized: true });
       logger.info(`loaded ${profiles.length} profiles from database`);
     } catch (error) {
       logger.error('failed to hydrate profiles from database', error);
       set({ initialized: true });
     }
+  },
+
+  setProfileSandboxMode: (profileId, mode) => {
+    set((state) => ({
+      profiles: state.profiles.map((profile) => (
+        profile.id === profileId ? { ...profile, sandboxMode: mode } : profile
+      )),
+    }));
   },
 
   addProfile: async (profile) => {

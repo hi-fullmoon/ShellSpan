@@ -30,6 +30,8 @@ pub(crate) struct AgentFileCheckpointNative {
     pub(crate) target_path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) original_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) post_write_sha256: Option<String>,
     pub(crate) original_byte_length: u64,
     pub(crate) created_at_unix_ms: u64,
     pub(crate) expires_at_unix_ms: u64,
@@ -103,6 +105,7 @@ impl CheckpointStoreNative {
             target_kind,
             target_path: target_path.to_string(),
             original_sha256: original.map(sha256_hex),
+            post_write_sha256: None,
             original_byte_length: original.map_or(0, |content| content.len() as u64),
             created_at_unix_ms,
             expires_at_unix_ms: created_at_unix_ms.saturating_add(CHECKPOINT_TTL_MS),
@@ -200,6 +203,31 @@ impl CheckpointStoreNative {
             original_bytes,
             permissions: record.permissions,
         })
+    }
+
+    pub(crate) fn record_post_write_sha256(
+        &self,
+        root: &Path,
+        task_id: &str,
+        checkpoint_id: &str,
+        sha256: &str,
+    ) -> Result<AgentFileCheckpointNative, String> {
+        validate_checkpoint_id(checkpoint_id)?;
+        let _guard = self
+            .lock
+            .lock()
+            .map_err(|_| "checkpoint store is unavailable".to_string())?;
+        let directory = checkpoint_directory(root);
+        let record_path = directory.join(format!("{checkpoint_id}.json"));
+        let bytes = read_bounded(&record_path, 64 * 1024)?;
+        let mut record: PersistedCheckpointNative = serde_json::from_slice(&bytes)
+            .map_err(|error| format!("checkpoint metadata is invalid: {error}"))?;
+        if record.snapshot.checkpoint_id != checkpoint_id || record.snapshot.task_id != task_id {
+            return Err("CHECKPOINT_NOT_FOUND: checkpoint does not belong to this session".into());
+        }
+        record.snapshot.post_write_sha256 = Some(sha256.to_string());
+        write_record(&directory, &record)?;
+        Ok(record.snapshot)
     }
 
     pub(crate) fn mark_restored(

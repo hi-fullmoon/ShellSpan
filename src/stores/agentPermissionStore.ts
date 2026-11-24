@@ -22,6 +22,7 @@ interface TerminalConversationSurface {
 interface TerminalAgentPreference {
   mode: AgentPermissionMode;
   surface: AgentExecutionSurface;
+  surfaceExplicit?: boolean;
   reconnectingSurface?: AgentExecutionSurface;
 }
 
@@ -81,7 +82,12 @@ export const useAgentPermissionStore = create<AgentPermissionState>()((set, get)
       mode: useAiSettingsStore.getState().agentPermissionMode,
       surface,
     };
-    set((state) => ({ preferences: { ...state.preferences, [sessionId]: { ...base, surface } } }));
+    set((state) => ({
+      preferences: {
+        ...state.preferences,
+        [sessionId]: { ...base, surface, surfaceExplicit: true },
+      },
+    }));
     useAiSettingsStore.getState().setAgentExecutionSurface(surface);
   },
   conversationSurfaces: {},
@@ -167,6 +173,7 @@ useTerminalStore.subscribe((terminalState, previous) => {
     return [session.sessionId, {
       mode: defaults.agentPermissionMode,
       surface: previousPreference?.surface ?? defaults.agentExecutionSurface,
+      ...(previousPreference?.surfaceExplicit ? { surfaceExplicit: true } : {}),
       reconnectingSurface,
     }];
   }));
