@@ -784,7 +784,7 @@ function TerminalSurface({ node, showCopyActions, scrollable, showInput, headerA
                         : 'not_open';
                       if (restartState === 'restarted') {
                         showSuccess(t('ai.sandbox.violation.domainAllowedAndRestarted', { domain: normalized }));
-                      } else if (restartState === 'failed') {
+                      } else if (restartState === 'busy' || restartState === 'failed') {
                         showSuccess(t('ai.sandbox.violation.domainAllowedNeedsRestart', { domain: normalized }));
                       } else {
                         showSuccess(t('ai.sandbox.violation.domainAllowed', { domain: normalized }));

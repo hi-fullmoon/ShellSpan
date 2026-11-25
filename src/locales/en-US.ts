@@ -1912,6 +1912,8 @@ export default {
   'ai.checkpointRollback.batchPartial': 'Rolled back {restored} file(s); {failed} failed.',
   'ai.checkpointRollback.conflictBanner': 'This file was modified after the Agent wrote it. Rolling back will overwrite your subsequent edits.',
   'ai.checkpointRollback.confirmConflictRestore': 'Manual edits detected after the Agent wrote this file. Overwrite current contents with the pre-change snapshot: {path}',
+  'ai.checkpointRollback.confirmConflictTrashLocal': 'Manual edits detected on this newly created file after the Agent created it. Move it to the system Trash anyway: {path}',
+  'ai.checkpointRollback.confirmConflictRemoveRemote': 'Manual edits detected on this newly created remote file after the Agent created it. Delete it on the server anyway: {path}',
   'ai.checkpointRollback.confirmConflictOverwrite': 'Overwrite & Rollback',
   'ai.sandboxSync.loadFailed': 'Could not load sandbox workspace changes.',
   'ai.sandboxSync.previewLoading': 'Loading file diff…',

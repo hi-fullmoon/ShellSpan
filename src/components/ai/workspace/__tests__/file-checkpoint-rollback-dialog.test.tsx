@@ -185,4 +185,47 @@ describe('FileCheckpointRollbackDialog', () => {
       expect(invokeRestoreFileCheckpointsBatch).toHaveBeenLastCalledWith('session-batch', ['cp-1'], true);
     });
   });
+
+  it('skips streaming refreshes while refreshEnabled is false and uses created-file conflict copy', async () => {
+    const createdLocal = {
+      checkpointId: 'cp-new',
+      taskId: 'task-1',
+      targetId: 'local-1',
+      targetKind: 'local' as const,
+      targetPath: '/tmp/new-file.conf',
+      postWriteSha256: 'sha-after',
+      originalByteLength: 0,
+      createdAtUnixMs: 1_700_000_000_000,
+      expiresAtUnixMs: 1_700_604_800_000,
+    };
+    invokeListFileCheckpoints.mockResolvedValue([createdLocal]);
+    invokePreviewFileCheckpoint.mockResolvedValue({
+      checkpointId: 'cp-new',
+      targetPath: '/tmp/new-file.conf',
+      targetKind: 'local',
+      existedBefore: false,
+      currentExists: true,
+      unchanged: false,
+      modifiedAfterAgent: true,
+      isBinary: false,
+      truncated: false,
+      unifiedDiff: '@@ -1 +0,0 @@\n-manual edit\n',
+    });
+
+    const { rerender } = render(
+      <FileCheckpointRollbackDialog sessionId="session-stream" refreshSignal={1} refreshEnabled={false} />,
+    );
+    expect(invokeListFileCheckpoints).not.toHaveBeenCalled();
+
+    rerender(
+      <FileCheckpointRollbackDialog sessionId="session-stream" refreshSignal={2} refreshEnabled={true} />,
+    );
+    fireEvent.click(await screen.findByTestId('file-checkpoint-rollback-trigger'));
+    expect(await screen.findByTestId('file-checkpoint-conflict-alert')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'ai.checkpointRollback.restore' }));
+    expect(
+      await screen.findByText('ai.checkpointRollback.confirmConflictTrashLocal:{"path":"/tmp/new-file.conf"}'),
+    ).toBeInTheDocument();
+  });
 });

@@ -108,6 +108,21 @@ describe('ensureManagedSandboxTerminal', () => {
       .mockRejectedValueOnce(new Error('busy'));
 
     await ensureManagedSandboxTerminal('agent-1');
+    // When the sandbox terminal is still connecting or running a foreground command, do not disrupt it.
+    expect(await restartManagedSandboxTerminalIfOpen('agent-1')).toBe('busy');
+    useTerminalStore.setState((state) => ({
+      sessions: state.sessions.map((s) => (
+        s.sessionId === 'sandbox-term-1' ? { ...s, status: 'connected', promptReady: false } : s
+      )),
+    }));
+    expect(await restartManagedSandboxTerminalIfOpen('agent-1')).toBe('busy');
+    expect(invokeOpenLocalSandboxTerminal).toHaveBeenCalledTimes(1);
+
+    useTerminalStore.setState((state) => ({
+      sessions: state.sessions.map((s) => (
+        s.sessionId === 'sandbox-term-1' ? { ...s, status: 'connected', promptReady: true } : s
+      )),
+    }));
     expect(
       await restartManagedSandboxTerminalIfOpen('agent-1', {
         formatTitle: (shell) => `Sandbox · ${shell}`,
@@ -115,6 +130,11 @@ describe('ensureManagedSandboxTerminal', () => {
     ).toBe('restarted');
     expect(useTerminalStore.getState().sessions.map((s) => s.sessionId)).toEqual(['sandbox-term-2']);
 
+    useTerminalStore.setState((state) => ({
+      sessions: state.sessions.map((s) => (
+        s.sessionId === 'sandbox-term-2' ? { ...s, status: 'connected', promptReady: true } : s
+      )),
+    }));
     expect(await restartManagedSandboxTerminalIfOpen('agent-1')).toBe('failed');
   });
 });

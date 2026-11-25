@@ -12,6 +12,7 @@ import { useAppStore } from '@/stores/appStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useI18n } from '@/hooks/useI18n';
+import { useToast } from '@/hooks/useToast';
 import { useReconnectSession } from '@/hooks/useReconnectSession';
 import { isTauriRuntime } from '@/lib/ipc/tauri';
 import { ensureManagedSandboxTerminal } from '@/lib/terminal/sandbox-terminal';
@@ -43,6 +44,7 @@ export function AiWorkspaceController({
   onClose,
 }: AiWorkspaceControllerProps): React.ReactNode {
   const { t } = useI18n();
+  const { error: showError } = useToast();
   const controller = useAiSessionController({ scope, adapter, focusMode });
   const sandboxEnabled = useAiSettingsStore((state) => state.agentSandboxEnabled);
   const displayedSessionId = controller.view?.summary.id ?? null;
@@ -138,7 +140,8 @@ export function AiWorkspaceController({
       ? (
           <FileCheckpointRollbackDialog
             sessionId={session.header.sessionId}
-            refreshSignal={`${controller.view?.status ?? 'idle'}:${controller.view?.nodes.length ?? 0}`}
+            refreshEnabled={controller.view?.status === 'idle'}
+            refreshSignal={controller.view?.nodes.length ?? 0}
           />
         )
       : undefined;
@@ -168,7 +171,7 @@ export function AiWorkspaceController({
       void ensureManagedSandboxTerminal(session.header.sessionId, {
         insertAfterId: activeTerminalId ?? undefined,
         formatTitle: (shell) => t('terminal.sandbox.tabTitle', { shell }),
-      }).catch(() => undefined);
+      }).catch(() => showError(t('terminal.sandbox.restartFailed')));
     }
     : undefined;
   return (

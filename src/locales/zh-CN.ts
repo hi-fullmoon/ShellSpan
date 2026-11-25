@@ -1910,6 +1910,8 @@ export default {
   'ai.checkpointRollback.batchPartial': '已回滚 {restored} 个文件，{failed} 个失败。',
   'ai.checkpointRollback.conflictBanner': '检测到该文件在 Agent 修改后又被人工编辑过，回滚将会覆盖你之后的修改。',
   'ai.checkpointRollback.confirmConflictRestore': '检测到该文件在 Agent 修改后又被人工编辑过！确认覆盖当前文件并恢复至改前快照：{path}',
+  'ai.checkpointRollback.confirmConflictTrashLocal': '检测到该新建文件在 Agent 创建后又被人工编辑过！确认将其移入系统回收站：{path}',
+  'ai.checkpointRollback.confirmConflictRemoveRemote': '检测到该远端新建文件在 Agent 创建后又被人工编辑过！确认从远端主机删除：{path}',
   'ai.checkpointRollback.confirmConflictOverwrite': '仍然覆盖回滚',
   'ai.sandboxSync.loadFailed': '无法读取沙箱工作区变更。',
   'ai.sandboxSync.previewLoading': '正在加载文件 Diff…',

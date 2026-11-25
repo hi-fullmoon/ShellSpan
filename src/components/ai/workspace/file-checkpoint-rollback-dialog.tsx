@@ -29,6 +29,7 @@ import {
 interface FileCheckpointRollbackDialogProps {
   readonly sessionId: string;
   readonly refreshSignal?: string | number;
+  readonly refreshEnabled?: boolean;
 }
 
 interface SingleConfirmState {
@@ -44,6 +45,7 @@ interface BatchConfirmState {
 export function FileCheckpointRollbackDialog({
   sessionId,
   refreshSignal,
+  refreshEnabled = true,
 }: FileCheckpointRollbackDialogProps): React.ReactElement | null {
   const { t } = useI18n();
   const { error: showError, success: showSuccess } = useToast();
@@ -98,8 +100,9 @@ export function FileCheckpointRollbackDialog({
   }, [sessionId, showError, t]);
 
   useEffect(() => {
+    if (!refreshEnabled) return;
     void loadList(false);
-  }, [loadList, refreshSignal]);
+  }, [loadList, refreshSignal, refreshEnabled]);
 
   useEffect(() => {
     if (!open || !activeId) return;
@@ -205,7 +208,11 @@ export function FileCheckpointRollbackDialog({
 
   const singleConfirmDescription = singleConfirm
     ? singleConfirm.conflict
-      ? t('ai.checkpointRollback.confirmConflictRestore', { path: singleConfirm.checkpoint.targetPath })
+      ? singleConfirm.checkpoint.originalSha256
+        ? t('ai.checkpointRollback.confirmConflictRestore', { path: singleConfirm.checkpoint.targetPath })
+        : singleConfirm.checkpoint.targetKind === 'remote'
+          ? t('ai.checkpointRollback.confirmConflictRemoveRemote', { path: singleConfirm.checkpoint.targetPath })
+          : t('ai.checkpointRollback.confirmConflictTrashLocal', { path: singleConfirm.checkpoint.targetPath })
       : singleConfirm.checkpoint.originalSha256
         ? t('ai.checkpointRollback.confirmRestore', { path: singleConfirm.checkpoint.targetPath })
         : singleConfirm.checkpoint.targetKind === 'remote'

@@ -788,8 +788,8 @@ pub(crate) fn deployment_script(policy: &Policy, install_cmd: Option<&str>) -> S
         .collect::<Vec<_>>()
         .join("\n");
     format!(
-        "#!/usr/bin/env bash\n\
-set -euo pipefail\n\
+        "#!/usr/bin/env sh\n\
+set -eu\n\
 \n\
 # 1. Install Bubblewrap, Python 3, and libseccomp2\n\
 {install_line}\n\
@@ -817,7 +817,7 @@ chmod 0755 /usr/local/libexec/shellspan-bwrap-v1\n\
 if ! grep -Eq '^[[:space:]]*Subsystem[[:space:]]+shellspan-bwrap-v1([[:space:]]|$)' /etc/ssh/sshd_config; then\n\
   printf '\\nSubsystem shellspan-bwrap-v1 /usr/local/libexec/shellspan-bwrap-v1\\n' >> /etc/ssh/sshd_config\n\
 fi\n\
-sshd -t && (systemctl reload sshd || systemctl reload ssh)\n"
+sshd -t && (systemctl reload sshd || systemctl reload ssh || service sshd reload || service ssh reload || rc-service sshd reload)\n"
     )
 }
 
@@ -998,12 +998,36 @@ fn run_ssh_exec_with_stdin(
         .map_err(|error| format!("SANDBOX_DEPLOY_EXEC_FAILED: {error}"))?;
     session.set_blocking(false);
 
+    let mut output = Vec::new();
+    let mut buf = [0_u8; 4096];
+    let mut truncated = false;
+    let mut drain_once =
+        |channel: &mut ssh2::Channel, output: &mut Vec<u8>, truncated: &mut bool| {
+            while let Ok(n) = channel.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                if output.len() < MAX_DEPLOY_OUTPUT_BYTES {
+                    let keep = (MAX_DEPLOY_OUTPUT_BYTES - output.len()).min(n);
+                    output.extend_from_slice(&buf[..keep]);
+                    if keep < n {
+                        *truncated = true;
+                    }
+                } else {
+                    *truncated = true;
+                }
+            }
+        };
+
     if let Some(mut remaining) = stdin_payload {
         while !remaining.is_empty() {
             control.check()?;
             match channel.write(remaining) {
                 Ok(n) if n > 0 => remaining = &remaining[n..],
-                Err(error) if error.kind() == ErrorKind::WouldBlock => std::thread::sleep(POLL),
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                    drain_once(&mut channel, &mut output, &mut truncated);
+                    std::thread::sleep(POLL);
+                }
                 _ => return Err("SANDBOX_DEPLOY_WRITE_FAILED".into()),
             }
         }
@@ -1012,6 +1036,7 @@ fn run_ssh_exec_with_stdin(
             match channel.send_eof() {
                 Ok(()) => break,
                 Err(error) if error.code() == ssh2::ErrorCode::Session(-37) => {
+                    drain_once(&mut channel, &mut output, &mut truncated);
                     std::thread::sleep(POLL);
                 }
                 Err(_) => break,
@@ -1019,9 +1044,6 @@ fn run_ssh_exec_with_stdin(
         }
     }
 
-    let mut output = Vec::new();
-    let mut buf = [0_u8; 4096];
-    let mut truncated = false;
     loop {
         control.check()?;
         match channel.read(&mut buf) {
@@ -1128,9 +1150,9 @@ pub(crate) fn deploy_executor(
 
     let script = deployment_script(policy, probe.install_command);
     let exec_cmd = if probe.is_root {
-        "bash -s"
+        "sh -s"
     } else {
-        "sudo -n bash -s"
+        "sudo -n sh -s"
     };
     let (exit_code, output) = match run_ssh_exec_with_stdin(
         &session.ssh.target,

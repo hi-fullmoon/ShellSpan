@@ -90,13 +90,20 @@ export async function ensureManagedSandboxTerminal(
   }
 }
 
+export function isManagedSandboxTerminalBusy(session: TerminalSession): boolean {
+  return session.status === 'connecting'
+    || session.promptReady === false
+    || Boolean(session.foregroundHandoffActive);
+}
+
 export async function restartManagedSandboxTerminalIfOpen(
   agentSessionId: string,
   options?: Pick<EnsureSandboxTerminalOptions, 'formatTitle' | 'activate'>,
-): Promise<'restarted' | 'not_open' | 'failed'> {
+): Promise<'restarted' | 'not_open' | 'busy' | 'failed'> {
   if (!isTauriRuntime()) return 'not_open';
   const existing = findManagedSandboxTerminal(agentSessionId);
   if (!existing) return 'not_open';
+  if (isManagedSandboxTerminalBusy(existing)) return 'busy';
   try {
     const restarted = await ensureManagedSandboxTerminal(agentSessionId, {
       replacesSessionId: existing.sessionId,
