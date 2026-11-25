@@ -873,7 +873,7 @@ fn execute_transfer_file(
                 context.checkpoint_root,
                 context.task_id,
                 &checkpoint.checkpoint_id,
-                &expected,
+                expected,
             );
             (
                 local_source.to_string_lossy().to_string(),
@@ -915,7 +915,7 @@ fn execute_transfer_file(
                 context.checkpoint_root,
                 context.task_id,
                 &checkpoint.checkpoint_id,
-                &expected,
+                expected,
             );
             (
                 remote_source,

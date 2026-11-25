@@ -362,7 +362,7 @@ pub(in crate::llm) fn process_ollama_line(
                                 .pointer("/function/arguments")
                                 .is_some_and(|args| match args {
                                     Value::String(text) => text != &existing.arguments,
-                                    other => other.to_string() != existing.arguments,
+                                    other => *other != existing.arguments,
                                 });
                         id_differs || name_differs || complete_args_differs
                     });

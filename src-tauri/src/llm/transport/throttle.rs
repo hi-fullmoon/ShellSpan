@@ -1,6 +1,6 @@
 use crate::llm::{
     adapter::{ModelAdapter, ModelStreamSink, ReplayCodec},
-    config::{AiProviderConfig, AiProviderKind},
+    config::AiProviderKind,
     errors::{NormalizedModelError, NormalizedModelErrorKind},
     types::{ModelRequest, ModelResponse},
 };
@@ -418,6 +418,7 @@ fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
 mod tests {
     use super::*;
     use crate::llm::{
+        config::AiProviderConfig,
         registry::replay_codec,
         types::{ModelFinishReason, ModelUsage},
     };

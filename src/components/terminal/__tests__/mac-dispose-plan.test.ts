@@ -2,7 +2,7 @@ import {execFileSync} from 'node:child_process';
 import {expect,it} from 'vitest';
 import {macDisposePlan} from './mac-dispose-plan';
 
-it('executes the declared ordinary producers with exact NFD and composite-emoji bytes',()=>{
+it.skipIf(process.platform==='win32')('executes the declared ordinary producers with exact NFD and composite-emoji bytes',()=>{
  const plan=macDisposePlan('86765bcd-3821-4a50-8c77-648bdbda171c');
  const actual=execFileSync('/bin/sh',['-c',[plan.armed,plan.queued,plan.successor].join('; ')]);
  expect(actual.equals(Buffer.from(plan.shellStdout))).toBe(true);

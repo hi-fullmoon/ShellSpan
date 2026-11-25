@@ -59,11 +59,11 @@ impl SudoRunner {
                 .username
                 .bytes()
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_'))
-            || !self
+            || self
                 .host_key_sha256
                 .strip_prefix("SHA256:")
                 .and_then(|key| STANDARD_NO_PAD.decode(key).ok())
-                .is_some_and(|key| key.len() == 32)
+                .is_none_or(|key| key.len() != 32)
         {
             return Err("AGENT_SUDO_INVALID_RUNNER".into());
         }

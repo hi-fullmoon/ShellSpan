@@ -1424,6 +1424,7 @@ pub(crate) struct RemoteProcessStartNative {
     pub(crate) timeout: Duration,
 }
 
+#[cfg(test)]
 pub(crate) fn spawn_remote_process_native(
     start: RemoteProcessStartNative,
     database: crate::db::Database,

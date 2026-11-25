@@ -228,7 +228,8 @@ pub(crate) enum EditorError {
     UnsavedChanges,
     OperationExpired,
     UnsupportedOperation,
-    EditorError,
+    #[serde(rename = "editorError")]
+    Failed,
 }
 
 #[derive(Deserialize)]
@@ -511,6 +512,7 @@ impl RemoteVimBridge {
         format!("{}/bridge.vim", self.root)
     }
 
+    #[cfg(test)]
     pub(crate) fn attached(&self) -> bool {
         self.instance.is_some()
     }

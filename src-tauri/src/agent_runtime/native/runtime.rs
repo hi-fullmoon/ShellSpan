@@ -170,6 +170,9 @@ pub(crate) struct PreparedMcpAuthorizationNative {
     pub(crate) native_prompt: String,
 }
 
+#[cfg(target_os = "macos")]
+type MacSandboxPathsSlot = Arc<Mutex<Option<(PathBuf, Option<PathBuf>)>>>;
+
 #[derive(Clone)]
 pub(crate) struct NativeToolEngine {
     registry: Arc<ToolRegistryNative>,
@@ -185,7 +188,7 @@ pub(crate) struct NativeToolEngine {
     pub(crate) sudo_prompts: Arc<super::SudoPrompts>,
     pub(crate) tool_progress: ToolProgressHub,
     #[cfg(target_os = "macos")]
-    mac_sandbox_paths: Arc<Mutex<Option<(PathBuf, Option<PathBuf>)>>>,
+    mac_sandbox_paths: MacSandboxPathsSlot,
     session_sandbox_domains:
         Arc<Mutex<std::collections::HashMap<String, std::collections::BTreeSet<String>>>>,
     #[cfg(all(test, target_os = "linux"))]

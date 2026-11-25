@@ -16,7 +16,8 @@ it('separates a two-call launch turn from management only after independent obse
  expect(initial).toContain('exactly TWO');expect(initial).toContain('return HOLD');expect(initial).toContain(plan.sources[1]);expect(continuation).toContain('exactly FIVE');expect(continuation).toContain(handle);expect(continuation).toContain('timeoutMs=1000');expect(continuation).toContain('timeoutMs=10000');expect(continuation).toContain('close=false');expect(continuation).toContain(plan.sources[3]);expect(()=>nativeJobDescendantContinuationGoal(plan,'foreign-handle')).toThrow();
  expect(continuation).toContain('within this same runtime turn');expect(continuation).toContain('without waiting for another user message');expect(continuation).toContain('After the expected stdin rejection, continue directly to wait_process.');expect(continuation).toContain('Return final text only after HISTORY has returned.');
 });
-it.skipIf(process.platform!=='win32').each(['C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe','D:/Programs/PowerShell/7/pwsh.exe'])('parses the complete descendant source with the actual host without executing it: %s',async executable=>{
+const pwshExecutable=fs.existsSync('D:/Programs/PowerShell/7/pwsh.exe')?'D:/Programs/PowerShell/7/pwsh.exe':'pwsh.exe';
+it.skipIf(process.platform!=='win32').each(['C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',pwshExecutable])('parses the complete descendant source with the actual host without executing it: %s',async executable=>{
  const directory=path.resolve(import.meta.dirname,'../../../../artifacts/tests/native-job-descendant-parser',randomUUID());fs.mkdirSync(directory,{recursive:true});
  const source=path.join(directory,'source.ps1'),parser=path.join(directory,'parse.ps1'),home=path.join(directory,'home');fs.mkdirSync(home);
  fs.writeFileSync(source,nativeJobDescendantPlan(marker).sources[1]);

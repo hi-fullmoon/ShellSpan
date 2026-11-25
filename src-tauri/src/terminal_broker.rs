@@ -919,6 +919,15 @@ impl TerminalSessionBroker {
         Ok(())
     }
 
+    #[cfg(any(
+        test,
+        not(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))
+    ))]
     pub(crate) fn observe_raw_output_discard(
         &self,
         transport_session_id: &str,
@@ -1271,6 +1280,7 @@ impl TerminalSessionBroker {
         Ok(record.native_comments)
     }
 
+    #[cfg(test)]
     pub(crate) fn wait_terminal(
         &self,
         transport_session_id: &str,
@@ -1679,7 +1689,7 @@ impl TerminalSessionBroker {
             if let TerminalIntegrationControlEvent::CommandStart { command_line, .. }
             | TerminalIntegrationControlEvent::InputRejected { command_line, .. } = &event
             {
-                let operation = current_record_mut(&mut state, transport_session_id, &attachment)?
+                let operation = current_record_mut(&state, transport_session_id, &attachment)?
                     .active_command
                     .as_ref()
                     .map(|operation| {

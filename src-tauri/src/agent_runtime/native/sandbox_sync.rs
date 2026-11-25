@@ -202,9 +202,7 @@ pub(crate) fn is_importable_project_root(
         return None;
     }
     let canonical = fs::canonicalize(candidate).ok()?;
-    if canonical.parent().is_none() {
-        return None;
-    }
+    canonical.parent()?;
     if let Ok(home_canon) = fs::canonicalize(home) {
         if canonical == home_canon {
             return None;

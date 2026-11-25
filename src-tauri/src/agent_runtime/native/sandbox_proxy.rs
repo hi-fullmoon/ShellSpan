@@ -59,6 +59,7 @@ pub(crate) struct SandboxNetworkPolicy {
 }
 
 impl SandboxNetworkPolicy {
+    #[cfg(test)]
     pub(crate) fn blocked() -> Self {
         Self {
             mode: SandboxNetworkMode::Blocked,

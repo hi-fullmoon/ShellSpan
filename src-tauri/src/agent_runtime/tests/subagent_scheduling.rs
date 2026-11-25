@@ -157,7 +157,10 @@ async fn fleet_abort_cancels_the_durably_registered_child_and_prevents_next_role
     assert_eq!(finished.fleet.status.as_deref(), Some("aborted"));
     let checkpoint = last_fleet_checkpoint(&manager, &control);
     assert_eq!(checkpoint.status.as_deref(), Some("aborted"));
-    assert_eq!(checkpoint.targets[0].child_session_ids, [child.clone()]);
+    assert_eq!(
+        checkpoint.targets[0].child_session_ids,
+        std::slice::from_ref(child)
+    );
     assert_eq!(
         manager.sessions.snapshot(child).unwrap().status,
         AgentSessionStatus::Cancelled

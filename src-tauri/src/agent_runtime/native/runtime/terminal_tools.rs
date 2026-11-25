@@ -198,7 +198,6 @@ impl NativeToolEngine {
                 .wait(sessions, &session_id, &operation, timeout)
                 .map(|snapshot| (snapshot, false))
         };
-        drop(emit_progress);
         progress.finish();
         let (snapshot, handed_off) = match waited {
             Ok(snapshot) => snapshot,

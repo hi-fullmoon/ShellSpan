@@ -275,6 +275,6 @@ mod tests {
             .starts_with("MAC_SANDBOX_PREVIEW_DIRECT_ONLY"));
 
         call.arguments = serde_json::json!({ "command": "pwd" });
-        assert_eq!(guard_call(true, "session-1", &call).unwrap(), true);
+        assert!(guard_call(true, "session-1", &call).unwrap());
     }
 }

@@ -293,7 +293,7 @@ extern "C" fn answer_prompts(
                 text: if prompt.length > 0 && !prompt.text.is_null() {
                     prompt_text(std::slice::from_raw_parts(
                         prompt.text.cast(),
-                        prompt.length as usize,
+                        prompt.length,
                     ))
                 } else {
                     String::new()

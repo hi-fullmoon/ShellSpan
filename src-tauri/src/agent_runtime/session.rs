@@ -3602,9 +3602,11 @@ fn terminal_reconnect_settled(record: &AgentSessionRecord) -> Result<bool, Strin
         && snapshot.inbox.next_turn.is_empty())
 }
 
+type InterruptedTurnSettlement = (Option<String>, Option<String>, AgentSessionEventPayload);
+
 fn orphaned_interrupted_turn_settlement_payloads(
     record: &AgentSessionRecord,
-) -> Result<Vec<(Option<String>, Option<String>, AgentSessionEventPayload)>, String> {
+) -> Result<Vec<InterruptedTurnSettlement>, String> {
     if record.archived
         || record.ended
         || record.header.subagent.is_some()

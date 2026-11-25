@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { parseArgs } from 'node:util';
 
 export const recoveryScope = 'com.shellspan.validation.native-input-p3';
@@ -79,8 +79,8 @@ const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 export function readOwnedSshFixture(root, argument, bash = false) {
   const base = resolve(root, 'artifacts/tests/native-input/integration/ssh');
   const file = resolve(argument);
-  assert(file.startsWith(`${base}/`) && file.endsWith('/fixture.json'), 'Use a ZLE fixture from this sealed source root');
-  const id = file.slice(base.length + 1, -'/fixture.json'.length);
+  assert(file.startsWith(`${base}${sep}`) && file.endsWith(`${sep}fixture.json`), 'Use a ZLE fixture from this sealed source root');
+  const id = file.slice(base.length + 1, -(`${sep}fixture.json`).length);
   assert(uuid.test(id), 'Fixture directory must be its exact owner UUID');
   function readRecord(path) {
     const info = lstatSync(path);
@@ -109,7 +109,7 @@ export function requireSshRecoveryRunner(values, environment = process.env) {
   assert(Object.hasOwn(sshNativeCases, id) && values['no-model'] === true
     && (bash ? values['native-input-p3'] === undefined : values['native-input-p3'] === 'zsh')
     && values['data-scope'] === recoveryScope
-    && values['native-input-p3-ssh-recovery-fixture'] && directory?.startsWith('/')
+    && values['native-input-p3-ssh-recovery-fixture'] && directory && isAbsolute(directory)
     && environment.SHELLSPAN_LOCAL_HOME === resolve(directory, 'home')
     && environment.SHELLSPAN_DATA_DIR === resolve(directory, 'data')
     && Object.keys(values).every(key => ['native-input-p3-ssh-recovery', 'native-input-p3-ssh-recovery-fixture', bash ? 'native-input-p2' : 'native-input-p3', 'no-model', 'data-scope'].includes(key)),

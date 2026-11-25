@@ -1228,10 +1228,8 @@ fn boundary_is_safe(events: &[&AgentSessionEvent]) -> bool {
             },
             AgentSessionEventPayload::ToolResult {
                 call_id, status, ..
-            } => {
-                if *status != super::AgentToolResultStatus::Uncertain {
-                    results.insert((event.step_id.as_deref(), call_id.as_str()));
-                }
+            } if *status != super::AgentToolResultStatus::Uncertain => {
+                results.insert((event.step_id.as_deref(), call_id.as_str()));
             }
             AgentSessionEventPayload::TurnEnd { .. } => {
                 // Interrupted turns without a dispatched execution are closed synthetically

@@ -82,9 +82,9 @@ fn profile_identity_roundtrip_and_policy_roundtrip_invalidate_old_approval() {
         saved.binding,
         db.profile_sandbox(&profile.id).unwrap().binding
     );
-    assert!(!db
+    assert!(db
         .with_sandbox_dispatch(&profile.id, &saved.binding, || panic!("stale dispatch"))
-        .is_ok());
+        .is_err());
     let saved = db.profile_sandbox(&profile.id).unwrap();
     db.save_profile_sandbox(&profile.id, &saved.binding, None)
         .unwrap();

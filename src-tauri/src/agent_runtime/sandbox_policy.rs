@@ -133,6 +133,7 @@ impl SandboxPolicy {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn for_windows_app_container(workspace_root: impl Into<String>) -> Self {
         Self {
             version: SANDBOX_POLICY_CONTRACT_VERSION,

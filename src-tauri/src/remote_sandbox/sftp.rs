@@ -493,7 +493,7 @@ pub(crate) enum AgentFile<'a> {
 
 pub(crate) enum AgentSftpConnection {
     Host(crate::models::ConnectedSftp),
-    Sandbox(SandboxSftp),
+    Sandbox(Box<SandboxSftp>),
 }
 
 impl AgentSftpConnection {
@@ -513,6 +513,7 @@ impl AgentSftpConnection {
                 .is_some_and(|policy| policy.mode.uses_bubblewrap())
             {
                 return SandboxSftp::connect(db, binding, connection, known_hosts, control)
+                    .map(Box::new)
                     .map(Self::Sandbox);
             }
         }
