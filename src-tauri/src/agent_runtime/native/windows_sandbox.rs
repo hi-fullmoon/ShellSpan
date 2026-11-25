@@ -323,6 +323,87 @@ pub(crate) fn reclaim_orphaned_workspaces(
     }
 }
 
+pub(crate) fn storage_stats(
+    data: &Path,
+    active_cwds: &std::collections::HashSet<String>,
+) -> super::sandbox_sync::SandboxStorageStats {
+    let mut stats = super::sandbox_sync::SandboxStorageStats::default();
+    let base = data.join(WORKSPACES);
+    let Ok(entries) = fs::read_dir(&base) else {
+        return stats;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(OsStr::to_str) else {
+            continue;
+        };
+        if name.len() != 32 || uuid::Uuid::parse_str(name).is_err() {
+            continue;
+        }
+        if fs::symlink_metadata(&path).map_or(true, |m| m.file_type().is_symlink() || !m.is_dir()) {
+            continue;
+        }
+        let portable = crate::path_utils::portable_local_path(&path);
+        let bytes = super::sandbox_sync::directory_size_bytes(&path).saturating_add(
+            super::sandbox_sync::directory_size_bytes(&temp_root_for(&path)),
+        );
+        stats.total_count += 1;
+        stats.total_bytes = stats.total_bytes.saturating_add(bytes);
+        if active_cwds.contains(&portable) {
+            stats.active_count += 1;
+            stats.active_bytes = stats.active_bytes.saturating_add(bytes);
+        } else {
+            stats.reclaimable_count += 1;
+            stats.reclaimable_bytes = stats.reclaimable_bytes.saturating_add(bytes);
+        }
+    }
+    stats
+}
+
+pub(crate) fn cleanup_reclaimable_workspaces(
+    data: &Path,
+    active_cwds: &std::collections::HashSet<String>,
+) -> super::sandbox_sync::SandboxCleanupReport {
+    let mut report = super::sandbox_sync::SandboxCleanupReport::default();
+    let base = data.join(WORKSPACES);
+    let Ok(entries) = fs::read_dir(&base) else {
+        return report;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(OsStr::to_str) else {
+            continue;
+        };
+        if name.len() != 32 || uuid::Uuid::parse_str(name).is_err() {
+            continue;
+        }
+        if fs::symlink_metadata(&path).map_or(true, |m| m.file_type().is_symlink() || !m.is_dir()) {
+            continue;
+        }
+        let portable = crate::path_utils::portable_local_path(&path);
+        if active_cwds.contains(&portable) {
+            continue;
+        }
+        let bytes = super::sandbox_sync::directory_size_bytes(&path).saturating_add(
+            super::sandbox_sync::directory_size_bytes(&temp_root_for(&path)),
+        );
+        match remove_workspace(data, &path) {
+            Ok(()) => {
+                report.removed_count += 1;
+                report.freed_bytes = report.freed_bytes.saturating_add(bytes);
+            }
+            Err(error) => {
+                report.failed_count += 1;
+                log::warn!(
+                    "Failed to clean up Windows sandbox workspace: {}",
+                    crate::redaction::redact_sensitive_text(&error)
+                );
+            }
+        }
+    }
+    report
+}
+
 pub(super) struct Workspace {
     path: PathBuf,
     user: String,
@@ -534,6 +615,34 @@ impl Suspended {
 const MAX_ACTIVE_PROCESSES: u32 = 64;
 const MAX_JOB_MEMORY_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
+fn append_latest_python_dir(base: &Path, entries: &mut Vec<String>) {
+    let Ok(dir_entries) = fs::read_dir(base) else {
+        return;
+    };
+    let mut python_dirs: Vec<PathBuf> = dir_entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_dir()
+                && path
+                    .file_name()
+                    .and_then(OsStr::to_str)
+                    .is_some_and(|name| {
+                        name.starts_with("Python3") && name[7..].bytes().all(|b| b.is_ascii_digit())
+                    })
+        })
+        .collect();
+    python_dirs.sort();
+    python_dirs.reverse();
+    if let Some(python_root) = python_dirs.into_iter().next() {
+        entries.push(python_root.display().to_string());
+        let scripts = python_root.join("Scripts");
+        if scripts.is_dir() {
+            entries.push(scripts.display().to_string());
+        }
+    }
+}
+
 fn windows_sandbox_path_env(system: &Path) -> String {
     let mut entries = vec![system.display().to_string()];
     if let Some(program_files) = std::env::var_os("ProgramFiles").map(PathBuf::from) {
@@ -550,30 +659,32 @@ fn windows_sandbox_path_env(system: &Path) -> String {
                 entries.push(candidate.display().to_string());
             }
         }
-        if let Ok(dir_entries) = fs::read_dir(&program_files) {
-            let mut python_dirs: Vec<PathBuf> = dir_entries
-                .flatten()
-                .map(|entry| entry.path())
-                .filter(|path| {
-                    path.is_dir()
-                        && path
-                            .file_name()
-                            .and_then(OsStr::to_str)
-                            .is_some_and(|name| {
-                                name.starts_with("Python3")
-                                    && name[7..].bytes().all(|b| b.is_ascii_digit())
-                            })
-                })
-                .collect();
-            python_dirs.sort();
-            python_dirs.reverse();
-            if let Some(python_root) = python_dirs.into_iter().next() {
-                entries.push(python_root.display().to_string());
-                let scripts = python_root.join("Scripts");
-                if scripts.is_dir() {
-                    entries.push(scripts.display().to_string());
-                }
+        append_latest_python_dir(&program_files, &mut entries);
+    }
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) {
+        append_latest_python_dir(&local_app_data.join("Programs\\Python"), &mut entries);
+        let pnpm_dir = local_app_data.join("pnpm");
+        if pnpm_dir.is_dir() {
+            entries.push(pnpm_dir.display().to_string());
+        }
+    }
+    if let Some(user_profile) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
+        for relative in [".cargo\\bin", "go\\bin", "scoop\\shims"] {
+            let candidate = user_profile.join(relative);
+            if candidate.is_dir() {
+                entries.push(candidate.display().to_string());
             }
+        }
+    }
+    if let Some(app_data) = std::env::var_os("APPDATA").map(PathBuf::from) {
+        let npm_dir = app_data.join("npm");
+        if npm_dir.is_dir() {
+            entries.push(npm_dir.display().to_string());
+        }
+    }
+    if let Some(nvm_symlink) = std::env::var_os("NVM_SYMLINK").map(PathBuf::from) {
+        if nvm_symlink.is_dir() {
+            entries.push(nvm_symlink.display().to_string());
         }
     }
     entries.join(";")

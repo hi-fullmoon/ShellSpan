@@ -30,7 +30,7 @@ import { useAiDraftStore } from '@/stores/aiDraftStore';
 import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useFocusStore } from '@/stores/focusStore';
-import { ensureManagedSandboxTerminal } from '@/lib/terminal/sandbox-terminal';
+import { ensureManagedSandboxTerminal, hasSandboxPtyPolicyDrifted } from '@/lib/terminal/sandbox-terminal';
 import { SandboxSyncDialog } from '@/components/ai/workspace/sandbox-sync-dialog';
 import { eventMatchesShortcut } from '@/lib/shortcuts';
 import { terminalFontSizeAfterKey } from '@/lib/terminal/terminal-font';
@@ -270,12 +270,13 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const sandboxPolicyDrifted = Boolean(
     sandboxBinding
     && agentSandboxEnabled
-    && sandboxBinding.networkMode !== agentSandboxNetworkMode,
+    && hasSandboxPtyPolicyDrifted(sandboxBinding, agentSandboxNetworkMode, agentSandboxNetworkAllowlist),
   );
+  const sandboxBoundAllowlistCount = sandboxBinding?.allowedDomains?.length ?? agentSandboxNetworkAllowlist.length;
   const sandboxNetworkLabel = sandboxBinding?.networkMode === 'devRegistries'
     ? t('ai.sandboxStatus.networkDevRegistries')
-    : sandboxBinding?.networkMode === 'customAllowlist'
-      ? t('ai.sandboxStatus.networkCustomAllowlist', { count: agentSandboxNetworkAllowlist.length })
+    : sandboxBinding?.networkMode === 'customAllowlist' && sandboxBoundAllowlistCount > 0
+      ? t('ai.sandboxStatus.networkCustomAllowlist', { count: sandboxBoundAllowlistCount })
       : t('ai.sandboxStatus.networkBlocked');
   const handleRestartSandboxTerminal = useCallback(async () => {
     if (!sandboxBinding || !activeSession || sandboxRestarting) return;

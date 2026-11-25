@@ -165,10 +165,18 @@ impl AgentToolPipeline {
                         "Native approval expired",
                     )?;
                     self.native.abandon(&expired.preparation.token);
-                    match self.continue_after_pending(entry, &expired).await? {
-                        ToolPipelineSettlement::Completed => return Ok(true),
-                        ToolPipelineSettlement::Waiting => continue,
-                        ToolPipelineSettlement::Cancelled => return Ok(false),
+                    let driver_lease = ExpiryDriverLease::try_acquire(entry)?;
+                    if driver_lease.is_none() {
+                        return Ok(false);
+                    }
+                    let outcome = self.continue_after_pending(entry, &expired).await;
+                    drop(driver_lease);
+                    match outcome {
+                        Ok(ToolPipelineSettlement::Completed) => return Ok(true),
+                        Ok(ToolPipelineSettlement::Waiting) => continue,
+                        Ok(ToolPipelineSettlement::Cancelled) => return Ok(false),
+                        // `continue_after_pending` already durably settled fatal or recoverable errors.
+                        Err(_) => return Ok(false),
                     }
                 }
                 _ = changed => continue,
@@ -477,7 +485,9 @@ impl AgentToolPipeline {
                 resumable = true;
                 continue;
             }
-            let mut preparation = self.native.prepare(request.clone())?;
+            let mut preparation = self
+                .native
+                .prepare_with_approved_call(request.clone(), Some(call))?;
             let lease = Arc::new(PreparedLease::new(self.native.clone(), &preparation.token));
             if preparation.call != *call {
                 self.native.abandon(&preparation.token);
@@ -581,7 +591,9 @@ impl AgentToolPipeline {
             token: pending.preparation.token.clone(),
         };
         self.native.abandon(&pending.preparation.token);
-        let refreshed = match self.prepare_native(&pending.request) {
+        let refreshed = match self
+            .prepare_native_with_approved_call(&pending.request, Some(&pending.preparation.call))
+        {
             Ok(refreshed) => refreshed,
             Err(error) if is_terminal_call_blocked(&error) => {
                 self.append_terminal_approval(
@@ -658,5 +670,27 @@ impl AgentToolPipeline {
         )?;
         self.continue_after_pending(entry, &pending).await?;
         Ok(true)
+    }
+}
+
+struct ExpiryDriverLease(Arc<AgentEntry>);
+
+impl ExpiryDriverLease {
+    fn try_acquire(entry: &Arc<AgentEntry>) -> Result<Option<Self>, String> {
+        let acquired = entry
+            .with_input_admission(|| {
+                if entry.cancellation().is_cancelled() {
+                    return Ok(false);
+                }
+                Ok(entry.try_acquire_archive())
+            })?
+            .unwrap_or(false);
+        Ok(acquired.then(|| Self(Arc::clone(entry))))
+    }
+}
+
+impl Drop for ExpiryDriverLease {
+    fn drop(&mut self) {
+        self.0.release_driver();
     }
 }

@@ -575,3 +575,141 @@
             }]
         );
     }
+
+    #[tokio::test]
+    async fn empty_input_json_delta_preserves_zero_argument_tool_object() {
+        let events = vec![
+            json!({"type":"message_start","message":{"id":"msg_zero_arg","type":"message","role":"assistant","content":[],"model":"claude-sonnet-5","stop_reason":null,"usage":{"input_tokens":5,"output_tokens":1}}}),
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_zero","name":"list_tabs","input":{}}}),
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":""}}),
+            json!({"type":"content_block_stop","index":0}),
+            json!({"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":4}}),
+            json!({"type":"message_stop"}),
+        ];
+        let (base_url, server) = serve(sse(&events));
+        let adapter = AnthropicMessagesAdapter {
+            http: HttpConfig {
+                client: build_streaming_client().unwrap(),
+                provider: anthropic_provider(base_url),
+                api_key: Some("stage-e-secret".into()),
+                timeouts: ModelTimeoutPolicy::default(),
+                limiter: None,
+            },
+        };
+        let response = adapter
+            .stream(
+                basic_request(),
+                CancellationToken::new(),
+                Arc::new(Sink::default()),
+            )
+            .await
+            .unwrap();
+        let _ = server.join().unwrap();
+        assert_eq!(
+            response.content,
+            vec![ModelContentBlock::ToolCall {
+                call: ModelToolCall {
+                    call_id: "call-1".into(),
+                    provider_call_id: Some("toolu_zero".into()),
+                    name: "list_tabs".into(),
+                    arguments: json!({}),
+                }
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn anthropic_stream_closed_is_retryable_and_redacted_thinking_survives_whitespace_text() {
+        // 1. Premature EOF after message_start is Retryable STREAM_CLOSED.
+        let truncated = vec![
+            json!({"type":"message_start","message":{"id":"msg_eof","type":"message","role":"assistant","content":[],"model":"claude-sonnet-5","stop_reason":null,"usage":{"input_tokens":5,"output_tokens":1}}}),
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"half"}}),
+        ];
+        let (base_url, server) = serve(sse(&truncated));
+        let eof_error = AnthropicMessagesAdapter {
+            http: HttpConfig {
+                client: build_streaming_client().unwrap(),
+                provider: anthropic_provider(base_url),
+                api_key: Some("stage-e-secret".into()),
+                timeouts: ModelTimeoutPolicy::default(),
+                limiter: None,
+            },
+        }
+        .stream(
+            basic_request(),
+            CancellationToken::new(),
+            Arc::new(Sink::default()),
+        )
+        .await
+        .unwrap_err();
+        let _ = server.join().unwrap();
+        assert_eq!(eof_error.kind, NormalizedModelErrorKind::Retryable);
+        assert_eq!(eof_error.code.as_deref(), Some("STREAM_CLOSED"));
+
+        // 2. model_context_window_exceeded maps to ContextTooLarge.
+        let ctx_events = vec![
+            json!({"type":"message_start","message":{"id":"msg_ctx","type":"message","role":"assistant","content":[],"model":"claude-sonnet-5","stop_reason":null,"usage":{"input_tokens":5,"output_tokens":1}}}),
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}),
+            json!({"type":"content_block_stop","index":0}),
+            json!({"type":"message_delta","delta":{"stop_reason":"model_context_window_exceeded","stop_sequence":null},"usage":{"output_tokens":2}}),
+            json!({"type":"message_stop"}),
+        ];
+        let (base_url, server) = serve(sse(&ctx_events));
+        let ctx_error = AnthropicMessagesAdapter {
+            http: HttpConfig {
+                client: build_streaming_client().unwrap(),
+                provider: anthropic_provider(base_url),
+                api_key: Some("stage-e-secret".into()),
+                timeouts: ModelTimeoutPolicy::default(),
+                limiter: None,
+            },
+        }
+        .stream(
+            basic_request(),
+            CancellationToken::new(),
+            Arc::new(Sink::default()),
+        )
+        .await
+        .unwrap_err();
+        let _ = server.join().unwrap();
+        assert_eq!(ctx_error.kind, NormalizedModelErrorKind::ContextTooLarge);
+
+        // 3. redacted_thinking followed by whitespace-only text attaches to tool_use.
+        let redacted_events = vec![
+            json!({"type":"message_start","message":{"id":"msg_redacted","type":"message","role":"assistant","content":[],"model":"claude-sonnet-5","stop_reason":null,"usage":{"input_tokens":5,"output_tokens":1}}}),
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking","data":"opaque-redacted"}}),
+            json!({"type":"content_block_stop","index":0}),
+            json!({"type":"content_block_start","index":1,"content_block":{"type":"text","text":"\n\n"}}),
+            json!({"type":"content_block_stop","index":1}),
+            json!({"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_1","name":"list_tabs","input":{}}}),
+            json!({"type":"content_block_stop","index":2}),
+            json!({"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":4}}),
+            json!({"type":"message_stop"}),
+        ];
+        let (base_url, server) = serve(sse(&redacted_events));
+        let response = AnthropicMessagesAdapter {
+            http: HttpConfig {
+                client: build_streaming_client().unwrap(),
+                provider: anthropic_provider(base_url),
+                api_key: Some("stage-e-secret".into()),
+                timeouts: ModelTimeoutPolicy::default(),
+                limiter: None,
+            },
+        }
+        .stream(
+            basic_request(),
+            CancellationToken::new(),
+            Arc::new(Sink::default()),
+        )
+        .await
+        .unwrap();
+        let _ = server.join().unwrap();
+        assert_eq!(response.content.len(), 1);
+        let replay = response.replay.unwrap();
+        assert_eq!(
+            replay.blocks[0]["redactedThinkingBefore"],
+            json!([{"data": "opaque-redacted"}])
+        );
+    }

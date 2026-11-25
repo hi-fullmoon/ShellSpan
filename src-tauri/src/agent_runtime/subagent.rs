@@ -1135,6 +1135,11 @@ impl SubAgentManager {
             .handles
             .lock()
             .map_err(|_| "subagent handle registry is unavailable".to_string())?;
+        if handles.len() >= MAX_CONCURRENT_SUBAGENTS {
+            return Err(format!(
+                "concurrent subagent limit ({MAX_CONCURRENT_SUBAGENTS}) reached; wait for an active child to settle before spawning another"
+            ));
+        }
         // Stop closes this same gate before enumerating children. Publish the
         // descriptor and register the live handle together under admission.
         parent_entry
@@ -1455,6 +1460,12 @@ impl SubAgentManager {
         };
         if !parent.is_admitting() || parent.cancellation().is_cancelled() {
             return Err("child owner is stopping".into());
+        }
+        const MAX_CONCURRENT_SUBAGENTS: usize = 16;
+        if handles.len() >= MAX_CONCURRENT_SUBAGENTS {
+            return Err(format!(
+                "concurrent subagent limit ({MAX_CONCURRENT_SUBAGENTS}) reached; wait for an active child to settle before spawning another"
+            ));
         }
         let handle = Arc::new(self.agents.attach(
             self.sessions.clone(),
@@ -1836,17 +1847,21 @@ impl SubAgentManager {
     }
 
     async fn release_continuable(&self, child_session_id: &str) -> Result<(), String> {
-        if !self
-            .sessions
-            .child_session_ids(child_session_id)?
-            .is_empty()
-        {
-            return Ok(());
-        }
+        let grandchildren = self.sessions.child_session_ids(child_session_id)?;
         let mut handles = self
             .handles
             .lock()
             .map_err(|_| "subagent handle registry is unavailable".to_string())?;
+        let has_active_grandchild = grandchildren.iter().any(|grandchild_id| {
+            handles.contains_key(grandchild_id)
+                || self
+                    .sessions
+                    .snapshot(grandchild_id)
+                    .is_ok_and(|snapshot| !snapshot.ended && !snapshot.status.is_terminal())
+        });
+        if has_active_grandchild {
+            return Ok(());
+        }
         if let Some(handle) = handles.get(child_session_id) {
             if !handle.try_suspend()? {
                 return Ok(());
@@ -1994,7 +2009,12 @@ impl SubAgentManager {
                 data: Some(data.clone()),
             }),
         )?;
-        if continuable && snapshot.status == AgentSessionStatus::Idle {
+        if continuable
+            && matches!(
+                snapshot.status,
+                AgentSessionStatus::Idle | AgentSessionStatus::Failed
+            )
+        {
             self.release_continuable(child_session_id).await?;
         } else if !continuable {
             let handle = self

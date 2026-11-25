@@ -217,4 +217,36 @@ describe('tool live output subscription and terminal card presentation', () => {
     expect(toolLiveOutputStore.get('agent-sess-1', 'call-live-1')?.tail).toBe('fresh live output\n');
     expect(container.querySelector('.ai-terminal-block[data-live-output="true"]')).not.toBeNull();
   });
+
+  it('evicts cached live output on unmount so a reused callId starts cleanly at revision 1', () => {
+    const first = render(<AiToolRow node={makeTerminalTool({ turnId: 'turn-1' })} />);
+    act(() => {
+      toolLiveOutputStore.ingest({
+        sessionId: 'agent-sess-1',
+        callId: 'call-live-1',
+        revision: 5,
+        tail: 'old call output\n',
+        totalBytes: 16,
+        truncated: false,
+        alternateScreen: false,
+      });
+    });
+    expect(toolLiveOutputStore.get('agent-sess-1', 'call-live-1')?.revision).toBe(5);
+    first.unmount();
+    expect(toolLiveOutputStore.get('agent-sess-1', 'call-live-1')).toBeNull();
+
+    const second = render(<AiToolRow node={makeTerminalTool({ key: 'tool:turn-2', turnId: 'turn-2' })} />);
+    act(() => {
+      toolLiveOutputStore.ingest({
+        sessionId: 'agent-sess-1',
+        callId: 'call-live-1',
+        revision: 1,
+        tail: 'new call output\n',
+        totalBytes: 16,
+        truncated: false,
+        alternateScreen: false,
+      });
+    });
+    expect(second.container.querySelector('.ai-terminal-transcript')).toHaveTextContent('new call output');
+  });
 });

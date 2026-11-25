@@ -78,4 +78,29 @@ describe('durable mutation acknowledgement', () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it('does not emit unhandledRejection when a fast receipt wins before command or reconcile rejects', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      let resolveCommand!: () => void;
+      const commandPromise = new Promise<void>((resolve) => { resolveCommand = resolve; });
+      await withOperationDeadline(500, () => new Error('deadline'), (signal) => (
+        awaitMutationAcknowledgement(
+          () => commandPromise,
+          Promise.resolve(),
+          async () => {
+            signal.throwIfAborted();
+          },
+          { signal, backfillAfterMs: 500, backfillOnSuccess: true },
+        )
+      ));
+      resolveCommand();
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
 });

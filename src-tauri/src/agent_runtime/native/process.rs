@@ -1103,6 +1103,91 @@ pub(crate) fn mac_sandbox_readonly_toolchains() -> (Vec<PathBuf>, String) {
                 path_entries.push(bin_str.to_string());
             }
         }
+        // Common user-installed version managers and language toolchains (read-only).
+        let pick_latest_semver_child = |parent: &Path| -> Option<PathBuf> {
+            if !is_owned_safe_dir(parent) {
+                return None;
+            }
+            let parse_ver = |name: &str| -> (u32, u32, u32) {
+                let trimmed = name.strip_prefix('v').unwrap_or(name);
+                let mut parts = trimmed.split('.').map(|p| p.parse::<u32>().unwrap_or(0));
+                (
+                    parts.next().unwrap_or(0),
+                    parts.next().unwrap_or(0),
+                    parts.next().unwrap_or(0),
+                )
+            };
+            std::fs::read_dir(parent)
+                .ok()?
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| is_owned_safe_dir(path))
+                .max_by(|a, b| {
+                    let va = a.file_name().and_then(|s| s.to_str()).map(parse_ver);
+                    let vb = b.file_name().and_then(|s| s.to_str()).map(parse_ver);
+                    va.cmp(&vb).then_with(|| a.file_name().cmp(&b.file_name()))
+                })
+        };
+        let nvm_nodes = home.join(".nvm/versions/node");
+        if let Some(node_root) = pick_latest_semver_child(&nvm_nodes) {
+            let node_bin = node_root.join("bin");
+            if is_owned_safe_dir(&node_bin) {
+                if let Some(bin_str) = node_bin.to_str() {
+                    read_paths.push(node_root);
+                    path_entries.push(bin_str.to_string());
+                }
+            }
+        }
+        for fnm_versions in [
+            home.join("Library/Application Support/fnm/node-versions"),
+            home.join(".local/share/fnm/node-versions"),
+            home.join(".fnm/node-versions"),
+        ] {
+            if let Some(node_root) = pick_latest_semver_child(&fnm_versions) {
+                let node_bin = node_root.join("installation/bin");
+                if is_owned_safe_dir(&node_bin) {
+                    if let Some(bin_str) = node_bin.to_str() {
+                        read_paths.push(node_root);
+                        path_entries.push(bin_str.to_string());
+                        break;
+                    }
+                }
+            }
+        }
+        for (shims, backing) in [
+            (
+                home.join(".local/share/mise/shims"),
+                home.join(".local/share/mise/installs"),
+            ),
+            (home.join(".asdf/shims"), home.join(".asdf/installs")),
+            (home.join(".pyenv/shims"), home.join(".pyenv/versions")),
+        ] {
+            if is_owned_safe_dir(&shims) {
+                if let Some(bin_str) = shims.to_str() {
+                    read_paths.push(shims.clone());
+                    path_entries.push(bin_str.to_string());
+                    if is_owned_safe_dir(&backing) {
+                        read_paths.push(backing);
+                    }
+                }
+            }
+        }
+        let pyenv_libexec = home.join(".pyenv/libexec");
+        if is_owned_safe_dir(&pyenv_libexec) {
+            read_paths.push(pyenv_libexec);
+        }
+        for extra_bin in [
+            home.join("Library/pnpm"),
+            home.join(".bun/bin"),
+            home.join("go/bin"),
+        ] {
+            if is_owned_safe_dir(&extra_bin) {
+                if let Some(bin_str) = extra_bin.to_str() {
+                    read_paths.push(extra_bin.clone());
+                    path_entries.push(bin_str.to_string());
+                }
+            }
+        }
     }
     (read_paths, path_entries.join(":"))
 }

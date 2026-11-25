@@ -2505,25 +2505,41 @@ pub(crate) fn recover_open_scope(
         turn_id,
         step_id: step_id.clone(),
     }))?;
+    let snapshot = sessions.snapshot(&entry.session_id)?;
     let events = sessions.all_events(&entry.session_id)?;
-    if let Some(step_id) = step_id.as_deref() {
-        let step_events: Vec<_> = events
-            .iter()
-            .filter(|e| e.step_id.as_deref() == Some(step_id))
-            .collect();
-        if step_events
-            .iter()
-            .any(|e| matches!(e.payload, AgentSessionEventPayload::StepInputClaim { .. }))
-            && !step_events.iter().any(|e| {
-                matches!(
-                    e.payload,
-                    AgentSessionEventPayload::AssistantMessage { .. }
-                        | AgentSessionEventPayload::ToolCall { .. }
-                )
-            })
-        {
-            entry.set_phase(AgentLifecyclePhase::Running)?;
-            return Ok(());
+    let recovery_blocks_auto_resume = snapshot.recovery.status
+        == super::AgentRecoveryStatus::Required
+        || matches!(
+            snapshot.recovery.kind,
+            super::AgentRecoveryCheckpointKind::WaitingApproval
+                | super::AgentRecoveryCheckpointKind::WaitingQuestion
+                | super::AgentRecoveryCheckpointKind::WaitingSkillProposal
+                | super::AgentRecoveryCheckpointKind::CompactionInFlight
+                | super::AgentRecoveryCheckpointKind::ArtifactIntegrity
+                | super::AgentRecoveryCheckpointKind::ExecutionInFlight
+        );
+    if !recovery_blocks_auto_resume {
+        if let Some(step_id) = step_id.as_deref() {
+            let step_events: Vec<_> = events
+                .iter()
+                .filter(|e| e.step_id.as_deref() == Some(step_id))
+                .collect();
+            if step_events
+                .iter()
+                .any(|e| matches!(e.payload, AgentSessionEventPayload::StepInputClaim { .. }))
+                && !step_events.iter().any(|e| {
+                    matches!(
+                        e.payload,
+                        AgentSessionEventPayload::AssistantMessage { .. }
+                            | AgentSessionEventPayload::ToolCall { .. }
+                            | AgentSessionEventPayload::RequestStart { .. }
+                            | AgentSessionEventPayload::CompactionStart { .. }
+                    )
+                })
+            {
+                entry.set_phase(AgentLifecyclePhase::Running)?;
+                return Ok(());
+            }
         }
     }
     if entry.phase()? == AgentLifecyclePhase::Waiting

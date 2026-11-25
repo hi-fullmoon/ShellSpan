@@ -353,7 +353,11 @@ pub(in crate::llm) fn process_chat_event(
         ("model", "model"),
         ("system_fingerprint", "systemFingerprint"),
     ] {
-        if let Some(value) = value.get(source).and_then(Value::as_str) {
+        if let Some(value) = value
+            .get(source)
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
             accumulated
                 .replay_response
                 .insert(target.to_string(), json!(value));
@@ -375,6 +379,7 @@ pub(in crate::llm) fn process_chat_event(
     if let Some(reason) = value
         .pointer("/choices/0/finish_reason")
         .and_then(Value::as_str)
+        .filter(|reason| !reason.is_empty())
     {
         *completed = true;
         *finish_reason = normalize_finish_reason(reason);
@@ -475,11 +480,6 @@ pub(in crate::llm) fn process_chat_event(
                         if capabilities.cumulative_stream && id.starts_with(previous) =>
                     {
                         id.strip_prefix(previous).unwrap_or(id)
-                    }
-                    Some(previous)
-                        if capabilities.cumulative_stream && previous.starts_with(id) =>
-                    {
-                        ""
                     }
                     _ => id,
                 };

@@ -896,7 +896,7 @@ impl NativeToolEngine {
         }
         let live_policy = crate::agent_runtime::SandboxPolicy::for_mac_nono(
             &binding.workspace_root,
-            &database.agent_sandbox_network_policy()?,
+            &self.effective_sandbox_network_policy(database, agent_session_id)?,
         );
         if live_policy.digest() != binding.policy_digest {
             return Err(
@@ -943,7 +943,8 @@ impl NativeToolEngine {
             return Err("MAC_SANDBOX_DIRECT_REQUIRED".into());
         }
         let (data_dir, resource_dir) = self.mac_sandbox_paths()?;
-        let network_policy = database.agent_sandbox_network_policy()?;
+        let network_policy =
+            self.effective_sandbox_network_policy(database, &context.request.user_session_id)?;
         crate::agent_runtime::native::mac_sandbox::Workspace::open(
             &data_dir,
             Path::new(cwd),
@@ -1362,6 +1363,7 @@ mod tests {
                     workspace_root: workspace.into(),
                     policy_digest,
                     network_mode: SandboxNetworkMode::Blocked,
+                    allowed_domains: Vec::new(),
                 },
                 None,
             )

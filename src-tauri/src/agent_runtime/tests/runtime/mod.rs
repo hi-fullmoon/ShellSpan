@@ -4826,3 +4826,272 @@ fn restart_fails_closed_instead_of_replaying_an_open_model_step() {
     assert_eq!(snapshot.status, AgentSessionStatus::Failed);
     assert_eq!(adapter.request_count(), 0);
 }
+
+#[tokio::test]
+async fn parallel_native_tool_before_read_tool_result_commits_both_results() {
+    let root = tempfile::tempdir().unwrap();
+    let native = RecordingNativeRuntime::new(false);
+    let adapter = FakeAdapter::new(vec![
+        tool_response(vec![
+            ModelToolCall {
+                call_id: "call-parallel".into(),
+                provider_call_id: Some("provider-parallel".into()),
+                name: "list_directory".into(),
+                arguments: json!({"path": "."}),
+            },
+            ModelToolCall {
+                call_id: "call-read-result".into(),
+                provider_call_id: Some("provider-read-result".into()),
+                name: super::super::tool_output::READ_TOOL_RESULT.into(),
+                arguments: json!({"artifactId": "missing-artifact", "offset": 0, "maxBytes": 256}),
+            },
+        ]),
+        reply("done", &["done"]),
+    ]);
+    let runtime = AgentRuntimeBuilder::new()
+        .model_factory(Arc::new(FakeFactory(adapter.clone())))
+        .native_tool_runtime(native)
+        .build();
+    runtime.configure(root.path().to_path_buf()).unwrap();
+    create(&runtime, "session-read-result-barrier");
+    runtime
+        .start("session-read-result-barrier", provider(), None)
+        .unwrap();
+    runtime
+        .followup(
+            "session-read-result-barrier",
+            "msg-1".into(),
+            "inspect".into(),
+        )
+        .unwrap();
+    runtime
+        .await_idle("session-read-result-barrier")
+        .await
+        .unwrap();
+
+    let result_call_ids: Vec<String> = all_events(&runtime, "session-read-result-barrier")
+        .into_iter()
+        .filter_map(|event| match event.payload {
+            AgentSessionEventPayload::ToolResult { call_id, .. } => Some(call_id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        result_call_ids,
+        vec!["call-parallel".to_string(), "call-read-result".to_string()]
+    );
+    assert_eq!(adapter.request_count(), 2);
+}
+
+#[tokio::test]
+async fn restart_preserves_waiting_recovery_gate_when_step_has_input_claim() {
+    let root = tempfile::tempdir().unwrap();
+    let first = AgentRuntime::default();
+    first.configure(root.path().to_path_buf()).unwrap();
+    create(&first, "session-compaction-gate");
+    first
+        .followup("session-compaction-gate", "msg-1".into(), "hello".into())
+        .unwrap();
+    first
+        .sessions
+        .begin_turn_step("session-compaction-gate", "turn-1".into(), "step-1".into())
+        .unwrap()
+        .unwrap();
+    first
+        .append_for_driver(
+            "session-compaction-gate",
+            Some("turn-1".into()),
+            Some("step-1".into()),
+            AgentSessionEventPayload::CompactionStart {
+                reason: "budgetPressure".into(),
+                compaction_id: Some("compact-1".into()),
+            },
+        )
+        .unwrap();
+    drop(first);
+
+    let adapter = FakeAdapter::new(vec![reply("should not auto-run", &["should not auto-run"])]);
+    let restarted = AgentRuntimeBuilder::new()
+        .model_factory(Arc::new(FakeFactory(adapter.clone())))
+        .build();
+    restarted.configure(root.path().to_path_buf()).unwrap();
+    let snapshot = restarted
+        .start("session-compaction-gate", provider(), None)
+        .unwrap();
+    assert_eq!(
+        snapshot.recovery.kind,
+        super::super::AgentRecoveryCheckpointKind::CompactionInFlight
+    );
+    assert_eq!(snapshot.recovery.status, AgentRecoveryStatus::Required);
+    restarted
+        .await_idle("session-compaction-gate")
+        .await
+        .unwrap();
+    let entry = restarted
+        .agents
+        .get("session-compaction-gate")
+        .unwrap()
+        .unwrap();
+    assert_eq!(entry.phase().unwrap(), AgentLifecyclePhase::Waiting);
+    assert_eq!(adapter.request_count(), 0);
+}
+
+#[tokio::test]
+async fn restart_preserves_waiting_open_model_request_after_request_start() {
+    let root = tempfile::tempdir().unwrap();
+    let first_adapter = FakeAdapter::new(vec![FakeScript::Wait {
+        response: Some(response("never finishes")),
+    }]);
+    let first = AgentRuntimeBuilder::new()
+        .model_factory(Arc::new(FakeFactory(first_adapter.clone())))
+        .build();
+    first.configure(root.path().to_path_buf()).unwrap();
+    create(&first, "session-open-request-gate");
+    first
+        .start("session-open-request-gate", provider(), None)
+        .unwrap();
+    first
+        .followup("session-open-request-gate", "msg-1".into(), "hello".into())
+        .unwrap();
+    first_adapter.started.notified().await;
+    // Simulate process crash while the HTTP model request is in flight: copy
+    // the persisted JSONL into a fresh storage root without cancelling first.
+    let crashed = tempfile::tempdir().unwrap();
+    let crashed_sessions = crashed.path().join("agent-runtime/sessions");
+    std::fs::create_dir_all(&crashed_sessions).unwrap();
+    std::fs::copy(
+        root.path()
+            .join("agent-runtime/sessions/session-open-request-gate.jsonl"),
+        crashed_sessions.join("session-open-request-gate.jsonl"),
+    )
+    .unwrap();
+    first_adapter.release.notify_one();
+    first.await_idle("session-open-request-gate").await.unwrap();
+
+    let adapter = FakeAdapter::new(vec![reply(
+        "should not auto-replay",
+        &["should not auto-replay"],
+    )]);
+    let restarted = AgentRuntimeBuilder::new()
+        .model_factory(Arc::new(FakeFactory(adapter.clone())))
+        .build();
+    restarted.configure(crashed.path().to_path_buf()).unwrap();
+    let snapshot = restarted
+        .start("session-open-request-gate", provider(), None)
+        .unwrap();
+    assert_eq!(
+        snapshot.recovery.kind,
+        super::super::AgentRecoveryCheckpointKind::OpenModelRequest
+    );
+    assert_eq!(snapshot.recovery.status, AgentRecoveryStatus::Available);
+    restarted
+        .await_idle("session-open-request-gate")
+        .await
+        .unwrap();
+    let entry = restarted
+        .agents
+        .get("session-open-request-gate")
+        .unwrap()
+        .unwrap();
+    assert_eq!(entry.phase().unwrap(), AgentLifecyclePhase::Waiting);
+    assert_eq!(adapter.request_count(), 0);
+}
+
+#[tokio::test]
+async fn reconcile_recovery_on_unattached_session_settles_to_idle_instead_of_running() {
+    let root = tempfile::tempdir().unwrap();
+    let runtime = AgentRuntime::default();
+    runtime.configure(root.path().to_path_buf()).unwrap();
+    create(&runtime, "session-reconcile-idle");
+    runtime
+        .followup("session-reconcile-idle", "msg-1".into(), "run".into())
+        .unwrap();
+    runtime
+        .sessions
+        .begin_turn_step("session-reconcile-idle", "turn-1".into(), "step-1".into())
+        .unwrap()
+        .unwrap();
+    let target = runtime
+        .session("session-reconcile-idle")
+        .unwrap()
+        .header
+        .target;
+    let expires_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+        + 60_000;
+    runtime
+        .sessions
+        .append_batch(
+            "session-reconcile-idle",
+            vec![
+                super::super::AgentScopedPayload {
+                    turn_id: Some("turn-1".into()),
+                    step_id: Some("step-1".into()),
+                    payload: AgentSessionEventPayload::ToolCall {
+                        call: RecordedToolCall {
+                            call_id: "call-1".into(),
+                            provider_call_id: None,
+                            name: "exec_command".into(),
+                            native_name: Some("exec_command".into()),
+                            arguments: json!({"command": "echo hi"}),
+                            title: Some("exec_command".into()),
+                            effect: Some(AgentSessionEffect::ReadOnly),
+                            target,
+                        },
+                    },
+                },
+                super::super::AgentScopedPayload {
+                    turn_id: Some("turn-1".into()),
+                    step_id: Some("step-1".into()),
+                    payload: AgentSessionEventPayload::ToolApproval {
+                        request_id: "req-1".into(),
+                        call_id: "call-1".into(),
+                        approval_id: Some("approval-1".into()),
+                        status: AgentToolApprovalStatus::Requested,
+                        risk: Some(AgentSessionEffect::ReadOnly),
+                        reason: Some("requested".into()),
+                        expires_at_unix_ms: Some(expires_at),
+                        prompt: Some("run echo".into()),
+                    },
+                },
+                super::super::AgentScopedPayload {
+                    turn_id: Some("turn-1".into()),
+                    step_id: Some("step-1".into()),
+                    payload: AgentSessionEventPayload::ToolApproval {
+                        request_id: "req-1".into(),
+                        call_id: "call-1".into(),
+                        approval_id: Some("approval-1".into()),
+                        status: AgentToolApprovalStatus::Approved,
+                        risk: Some(AgentSessionEffect::ReadOnly),
+                        reason: Some("approved".into()),
+                        expires_at_unix_ms: Some(expires_at),
+                        prompt: None,
+                    },
+                },
+                super::super::AgentScopedPayload {
+                    turn_id: Some("turn-1".into()),
+                    step_id: Some("step-1".into()),
+                    payload: AgentSessionEventPayload::ToolExecution {
+                        call_id: "call-1".into(),
+                        idempotency: "yes".into(),
+                        status: super::super::AgentToolExecutionStatus::Dispatched,
+                    },
+                },
+            ],
+        )
+        .unwrap();
+
+    // No live driver is attached (`start` has not been called). Reconciling
+    // must settle to `Idle` rather than stranding durable status in `Running`.
+    let reconciled = runtime
+        .reconcile_recovery(super::super::AgentRecoveryReconcileInput {
+            session_id: "session-reconcile-idle".into(),
+            outcome: super::super::AgentRecoveryReconcileOutcome::ConfirmedApplied,
+            evidence: "verified externally".into(),
+        })
+        .unwrap();
+    assert_eq!(reconciled.status, AgentSessionStatus::Idle);
+    assert!(!reconciled.uncertain_native_effects);
+}

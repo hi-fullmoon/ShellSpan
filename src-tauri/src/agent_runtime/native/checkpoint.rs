@@ -67,7 +67,7 @@ pub(crate) struct LoadedCheckpointNative {
 
 #[derive(Clone, Default)]
 pub(crate) struct CheckpointStoreNative {
-    lock: Arc<Mutex<()>>,
+    lock: Arc<Mutex<u64>>,
 }
 
 impl CheckpointStoreNative {
@@ -81,7 +81,7 @@ impl CheckpointStoreNative {
         original: Option<&[u8]>,
         metadata: CheckpointOriginalMetadataNative,
     ) -> Result<AgentFileCheckpointNative, String> {
-        let _guard = self
+        let mut last_created_ms = self
             .lock
             .lock()
             .map_err(|_| "checkpoint store is unavailable".to_string())?;
@@ -93,7 +93,8 @@ impl CheckpointStoreNative {
         }
 
         let checkpoint_id = format!("checkpoint-{}", Uuid::new_v4().simple());
-        let created_at_unix_ms = current_unix_ms();
+        let created_at_unix_ms = current_unix_ms().max(last_created_ms.saturating_add(1));
+        *last_created_ms = created_at_unix_ms;
         let backup_file = original.map(|_| format!("{checkpoint_id}.bin"));
         if let (Some(content), Some(file_name)) = (original, backup_file.as_deref()) {
             write_private_atomic(&directory, file_name, content)?;

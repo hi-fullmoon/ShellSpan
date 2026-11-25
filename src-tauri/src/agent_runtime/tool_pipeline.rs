@@ -142,6 +142,10 @@ fn requires_runner_dispatch_journal(preparation: &NativeToolPreparation) -> bool
     if preparation.call.arguments["sandboxExecutor"] == super::native::windows_sandbox::EXECUTOR {
         return true;
     }
+    #[cfg(target_os = "macos")]
+    if preparation.call.arguments["sandboxExecutor"] == super::native::mac_sandbox::EXECUTOR {
+        return true;
+    }
     #[cfg(all(
         feature = "native-input-acceptance",
         debug_assertions,
@@ -496,6 +500,15 @@ impl NativeToolRuntime for NativeToolRuntimeSlot {
 
     fn prepare(&self, request: NativeToolRequest) -> Result<NativeToolPreparation, String> {
         self.runtime()?.prepare(request)
+    }
+
+    fn prepare_with_approved_call(
+        &self,
+        request: NativeToolRequest,
+        approved_call: Option<&RecordedToolCall>,
+    ) -> Result<NativeToolPreparation, String> {
+        self.runtime()?
+            .prepare_with_approved_call(request, approved_call)
     }
 
     fn execute(
@@ -1056,6 +1069,10 @@ impl AgentToolPipeline {
                         next += 1; committed += 1; continue;
                     }
                     if call.name == super::tool_output::READ_TOOL_RESULT {
+                        if !running.is_empty() {
+                            draining_barrier = true;
+                            continue;
+                        }
                         self.process_result_read(entry, turn_id, step_id, request_id, target.clone(), call.clone()).await?;
                         next += 1; committed += 1; continue;
                     }
@@ -3106,6 +3123,132 @@ mod ephemeral_terminal_result_tests {
         store.clear_session("session-1");
         assert_eq!(store.total_bytes, 0);
         assert!(store.entries.is_empty());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_production_sandbox_requires_runner_dispatch_journal() {
+        let preparation = NativeToolPreparation {
+            token: "tok-mac-nono".into(),
+            call: RecordedToolCall {
+                call_id: "call-1".into(),
+                provider_call_id: None,
+                name: "exec_command".into(),
+                native_name: Some("exec_command".into()),
+                arguments: serde_json::json!({
+                    "command": "echo hi",
+                    "sandboxExecutor": crate::agent_runtime::native::mac_sandbox::EXECUTOR,
+                }),
+                title: Some("exec_command".into()),
+                effect: Some(AgentSessionEffect::ReadOnly),
+                target: None,
+            },
+            requires_approval: false,
+            prompt: "run".into(),
+            expires_at_unix_ms: 0,
+            idempotency: NativeToolIdempotency::No,
+            parallel: false,
+            exclusive: false,
+        };
+        assert!(requires_runner_dispatch_journal(&preparation));
+    }
+
+    #[test]
+    fn native_tool_runtime_slot_forwards_prepare_with_approved_call() {
+        struct RecordingSlotRuntime {
+            saw_approved: std::sync::atomic::AtomicBool,
+        }
+        impl NativeToolRuntime for RecordingSlotRuntime {
+            fn prepare(&self, request: NativeToolRequest) -> Result<NativeToolPreparation, String> {
+                self.prepare_with_approved_call(request, None)
+            }
+            fn prepare_with_approved_call(
+                &self,
+                request: NativeToolRequest,
+                approved_call: Option<&RecordedToolCall>,
+            ) -> Result<NativeToolPreparation, String> {
+                if approved_call.is_some() {
+                    self.saw_approved
+                        .store(true, std::sync::atomic::Ordering::Release);
+                }
+                Ok(NativeToolPreparation {
+                    token: "tok-1".into(),
+                    call: RecordedToolCall {
+                        call_id: request.model_call.call_id,
+                        provider_call_id: None,
+                        name: request.model_call.name,
+                        native_name: Some("exec_command".into()),
+                        arguments: request.model_call.arguments,
+                        title: None,
+                        effect: Some(AgentSessionEffect::ReadOnly),
+                        target: Some(request.target),
+                    },
+                    requires_approval: false,
+                    prompt: String::new(),
+                    expires_at_unix_ms: 0,
+                    idempotency: NativeToolIdempotency::Yes,
+                    parallel: false,
+                    exclusive: false,
+                })
+            }
+            fn execute(
+                &self,
+                _token: &str,
+                _approved: bool,
+                _cancellation: CancellationToken,
+            ) -> Result<NativeToolResult, String> {
+                unreachable!()
+            }
+            fn abandon(&self, _token: &str) {}
+        }
+
+        let inner = Arc::new(RecordingSlotRuntime {
+            saw_approved: std::sync::atomic::AtomicBool::new(false),
+        });
+        let slot = NativeToolRuntimeSlot::default();
+        let dyn_inner: Arc<dyn NativeToolRuntime> = inner.clone();
+        slot.install(dyn_inner).unwrap();
+        let target: AgentSessionTarget = serde_json::from_value(serde_json::json!({
+            "kind": "local",
+            "targetId": "local-1",
+            "sessionId": "term-1",
+            "cwd": "/tmp"
+        }))
+        .unwrap();
+        let approved = RecordedToolCall {
+            call_id: "call-1".into(),
+            provider_call_id: None,
+            name: "exec_command".into(),
+            native_name: Some("exec_command".into()),
+            arguments: serde_json::json!({"command": "pwd", "cwd": "/tmp"}),
+            title: None,
+            effect: Some(AgentSessionEffect::ReadOnly),
+            target: Some(target.clone()),
+        };
+        let request = NativeToolRequest {
+            session_id: "session-1".into(),
+            task_id: "task-1".into(),
+            goal: "check".into(),
+            success_criteria: Vec::new(),
+            turn_id: "turn-1".into(),
+            step_id: "step-1".into(),
+            request_id: "req-1".into(),
+            model_call: ModelToolCall {
+                call_id: "call-1".into(),
+                provider_call_id: None,
+                name: "exec_command".into(),
+                arguments: serde_json::json!({"command": "pwd"}),
+            },
+            scratch_target: target.clone(),
+            target,
+            permission_mode: crate::agent_runtime::AgentSessionPermissionMode::RequestApproval,
+            execution_surface: crate::agent_runtime::AgentExecutionSurface::Direct,
+        };
+        slot.prepare_with_approved_call(request, Some(&approved))
+            .unwrap();
+        assert!(inner
+            .saw_approved
+            .load(std::sync::atomic::Ordering::Acquire));
     }
 }
 

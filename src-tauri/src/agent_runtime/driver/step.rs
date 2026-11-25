@@ -1127,6 +1127,20 @@ fn handle_retryable_step_error(
                     >= ctx.config.network_recovery_window_ms
             });
         if network_window_expired {
+            if !partial_is_empty {
+                let partial = collected
+                    .lock()
+                    .map_err(|_| "model stream accumulator is unavailable".to_string())?
+                    .content();
+                append_interrupted_message(
+                    ctx.sessions,
+                    ctx.entry,
+                    ctx.turn_id,
+                    ctx.step_id,
+                    partial,
+                    AgentStopReason::Other,
+                )?;
+            }
             return Ok(ErrorResolution::Settle(StepSettlement::Failed(format!(
                 "networkRecoveryTimeout: model network recovery window of {} ms expired",
                 ctx.config.network_recovery_window_ms
@@ -1158,6 +1172,20 @@ fn handle_retryable_step_error(
         }
     }
     if cancellation.is_cancelled() {
+        if !partial_is_empty {
+            let partial = collected
+                .lock()
+                .map_err(|_| "model stream accumulator is unavailable".to_string())?
+                .content();
+            append_interrupted_message(
+                ctx.sessions,
+                ctx.entry,
+                ctx.turn_id,
+                ctx.step_id,
+                partial,
+                AgentStopReason::Cancelled,
+            )?;
+        }
         return Ok(ErrorResolution::Settle(StepSettlement::Cancelled));
     }
     Ok(ErrorResolution::Settle(StepSettlement::Failed(

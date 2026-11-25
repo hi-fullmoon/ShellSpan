@@ -2317,3 +2317,325 @@ async fn tool_choice_none_wire_encoding_disables_tools_across_adapters() {
         }]
     );
 }
+
+#[test]
+fn cumulative_stream_preserves_incremental_prefix_tokens_and_nested_tool_json() {
+    let mut prose = String::new();
+    let mut emitted_prose = String::new();
+    for fragment in [
+        "#",
+        " Heading\n",
+        "#",
+        "# Subheading\n",
+        "The",
+        " quick ",
+        "The",
+    ] {
+        emitted_prose.push_str(&append_and_delta(&mut prose, fragment, true));
+    }
+    assert_eq!(prose, "# Heading\n## Subheading\nThe quick The");
+    assert_eq!(emitted_prose, prose);
+
+    let mut arguments = String::new();
+    let mut emitted_args = String::new();
+    for fragment in ["{", "\"nested\":", "{", "\"k\":1", "}", "}"] {
+        emitted_args.push_str(&append_and_delta(&mut arguments, fragment, true));
+    }
+    assert_eq!(arguments, "{\"nested\":{\"k\":1}}");
+    assert_eq!(emitted_args, arguments);
+
+    // Exact duplicate echoes and true cumulative prefixes still deduplicate cleanly.
+    let mut cumulative_text = String::new();
+    assert_eq!(
+        append_and_delta(&mut cumulative_text, "Hello", true),
+        "Hello"
+    );
+    assert_eq!(append_and_delta(&mut cumulative_text, "Hello", true), "");
+    assert_eq!(
+        append_and_delta(&mut cumulative_text, "Hello world", true),
+        " world"
+    );
+    assert_eq!(cumulative_text, "Hello world");
+
+    let mut calls = BTreeMap::new();
+    calls.insert(
+        0,
+        ToolCallAccumulator {
+            id: Some("call_empty".into()),
+            name: "list_tabs".into(),
+            arguments: String::new(),
+        },
+    );
+    let normalized = normalized_calls(calls, true).unwrap();
+    assert_eq!(normalized[&0].arguments, json!({}));
+}
+
+#[test]
+fn empty_metadata_and_empty_finish_reason_do_not_corrupt_completion_or_replay() {
+    let sink: Arc<dyn ModelStreamSink> = Arc::new(RecordingSink::default());
+    let mut accumulated = ChatAccumulator::default();
+    let mut usage = ProviderUsage::default();
+    let mut completed = false;
+    let mut reason = ModelFinishReason::Other;
+    let caps = ProviderCapabilities {
+        cumulative_stream: false,
+        supports_stream_usage: true,
+        native_reasoning: false,
+        split_reasoning: false,
+        replay_reasoning_content: false,
+        think_tag_fallback: false,
+        parallel_tool_calls: true,
+    };
+
+    // Intermediate empty finish_reason must not mark stream completed; empty metadata is skipped.
+    process_chat_event(
+        &format!(
+            "data: {}",
+            json!({
+                "id": "chatcmpl-1",
+                "model": "gpt-4o",
+                "system_fingerprint": "",
+                "choices": [{ "delta": { "content": "hi" }, "finish_reason": "" }]
+            })
+        ),
+        caps,
+        &sink,
+        &mut accumulated,
+        &mut usage,
+        &mut completed,
+        &mut reason,
+    )
+    .unwrap();
+    assert!(!completed);
+    assert!(!accumulated
+        .replay_response
+        .contains_key("systemFingerprint"));
+
+    // Real finish_reason "length" must not be overwritten by a trailing empty finish_reason.
+    process_chat_event(
+        &format!(
+            "data: {}",
+            json!({
+                "id": "",
+                "choices": [{ "delta": {}, "finish_reason": "length" }]
+            })
+        ),
+        caps,
+        &sink,
+        &mut accumulated,
+        &mut usage,
+        &mut completed,
+        &mut reason,
+    )
+    .unwrap();
+    process_chat_event(
+        &format!(
+            "data: {}",
+            json!({
+                "choices": [{ "delta": {}, "finish_reason": "" }]
+            })
+        ),
+        caps,
+        &sink,
+        &mut accumulated,
+        &mut usage,
+        &mut completed,
+        &mut reason,
+    )
+    .unwrap();
+    assert!(completed);
+    assert_eq!(reason, ModelFinishReason::Length);
+    assert_eq!(accumulated.replay_response["id"], json!("chatcmpl-1"));
+}
+
+#[test]
+fn ollama_multi_chunk_tool_calls_preserve_distinct_calls() {
+    let sink: Arc<dyn ModelStreamSink> = Arc::new(RecordingSink::default());
+    let mut accumulated = ChatAccumulator::default();
+    let mut usage = ProviderUsage::default();
+    let mut completed = false;
+    let mut reason = ModelFinishReason::Other;
+    for line in [
+        json!({
+            "model": "qwen3",
+            "done_reason": "",
+            "message": {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "",
+                    "function": { "name": "read_file", "arguments": { "path": "a.rs" } }
+                }]
+            },
+            "done": false
+        }),
+        json!({
+            "model": "qwen3",
+            "message": {
+                "role": "assistant",
+                "tool_calls": [{
+                    "function": { "name": "list_files", "arguments": { "path": "src" } }
+                }]
+            },
+            "done": true,
+            "done_reason": "stop"
+        }),
+    ] {
+        crate::llm::adapters::ollama::process_ollama_line(
+            &line.to_string(),
+            &sink,
+            &mut accumulated,
+            &mut usage,
+            &mut completed,
+            &mut reason,
+        )
+        .unwrap();
+    }
+    assert!(completed);
+    assert_eq!(accumulated.replay_response["doneReason"], json!("stop"));
+    let blocks = accumulated.finish(false, false).unwrap();
+    assert_eq!(blocks.len(), 2);
+    assert!(matches!(
+        &blocks[0],
+        ModelContentBlock::ToolCall { call }
+            if call.name == "read_file" && call.arguments == json!({"path": "a.rs"})
+    ));
+    assert!(matches!(
+        &blocks[1],
+        ModelContentBlock::ToolCall { call }
+            if call.name == "list_files" && call.arguments == json!({"path": "src"})
+    ));
+}
+
+#[test]
+fn responses_reasoning_null_fields_validate_cleanly() {
+    let mut output = BTreeMap::new();
+    let mut streamed_text = BTreeMap::new();
+    let mut streamed_reasoning = BTreeMap::new();
+    let mut streamed_calls = BTreeMap::new();
+    let mut replay_response = json!({});
+    let mut usage = ProviderUsage::default();
+    let mut completed = false;
+    let sink: Arc<dyn ModelStreamSink> = Arc::new(RecordingSink::default());
+    let payload = json!({
+        "type": "response.completed",
+        "response": {
+            "id": "resp_1",
+            "model": "o3",
+            "output": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "status": null,
+                    "encrypted_content": null,
+                    "summary": [{ "type": "summary_text", "text": "checked" }],
+                    "content": null
+                },
+                {
+                    "type": "message",
+                    "id": "msg_1",
+                    "content": [{ "type": "output_text", "text": "done" }]
+                }
+            ]
+        }
+    });
+    process_responses_event(
+        &format!("data: {payload}"),
+        &sink,
+        &mut output,
+        &mut streamed_text,
+        &mut streamed_reasoning,
+        &mut streamed_calls,
+        &mut usage,
+        &mut completed,
+        &mut replay_response,
+    )
+    .unwrap();
+    let blocks = responses_output_blocks(output).unwrap();
+    let reasoning_meta = match &blocks[0] {
+        ModelContentBlock::Reasoning {
+            provider_item: Some(item),
+            ..
+        } => json!({ "nativeItem": item }),
+        other => panic!("expected reasoning block, got {other:?}"),
+    };
+    crate::llm::adapter::ReplayCodec::validate_block_metadata(
+        &RESPONSES_REPLAY_CODEC,
+        crate::llm::replay::ReplayBlockKind::Reasoning,
+        &reasoning_meta,
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn oversized_http_503_error_body_remains_retryable_with_retry_after() {
+    let html = format!("<html>{}</html>", "x".repeat(8192));
+    let response_wire = format!(
+        "HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/html\r\nRetry-After: 2\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        html.len(),
+        html
+    );
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        use std::io::{Read, Write};
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut buf = [0u8; 4096];
+        let _ = stream.read(&mut buf);
+        let _ = stream.write_all(response_wire.as_bytes());
+    });
+    let client = build_streaming_client().unwrap();
+    let response = client
+        .get(format!("http://{address}/v1/chat/completions"))
+        .send()
+        .await
+        .unwrap();
+    let error = checked_stream_response(
+        response,
+        &CancellationToken::new(),
+        ModelTimeoutPolicy::default(),
+    )
+    .await
+    .unwrap_err();
+    server.join().unwrap();
+    assert_eq!(error.kind, NormalizedModelErrorKind::Retryable);
+    assert_eq!(error.status, Some(503));
+    assert_eq!(error.retry_after_ms, Some(2000));
+}
+
+#[test]
+fn openai_compatible_usage_deducts_cache_write_tokens_and_merge_latest_includes_them() {
+    let usage = provider_usage_from_value(
+        AiProviderKind::OpenAiCompatible,
+        &json!({
+            "usage": {
+                "prompt_tokens": 1000,
+                "prompt_cache_hit_tokens": 200,
+                "prompt_cache_creation_tokens": 300,
+                "completion_tokens": 50
+            }
+        }),
+    )
+    .unwrap();
+    assert_eq!(usage.uncached_input_tokens, Some(500));
+    assert_eq!(usage.cache_read_tokens, Some(200));
+    assert_eq!(usage.cache_write_tokens, Some(300));
+    assert_eq!(usage.total_tokens, Some(1050));
+
+    let mut merged = ProviderUsage {
+        uncached_input_tokens: Some(500),
+        cache_read_tokens: Some(200),
+        cache_write_tokens: Some(300),
+        output_tokens: Some(10),
+        reasoning_tokens: None,
+        total_tokens: Some(1010),
+    };
+    merged.merge_latest(ProviderUsage {
+        uncached_input_tokens: None,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        output_tokens: Some(50),
+        reasoning_tokens: None,
+        total_tokens: None,
+    });
+    assert_eq!(merged.total_tokens, Some(1050));
+}

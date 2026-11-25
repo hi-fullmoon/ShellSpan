@@ -1120,10 +1120,12 @@ fn create_local_session_blocking(
             })?;
         let database = app.state::<Database>();
         database.require_agent_sandbox_enabled()?;
-        let network_policy = database.agent_sandbox_network_policy()?;
         let runtime = app
             .try_state::<crate::agent_runtime::AgentRuntime>()
             .ok_or_else(|| "Agent runtime is unavailable".to_string())?;
+        let network_policy = runtime
+            .native_engine()
+            .effective_sandbox_network_policy(&database, agent_session_id)?;
         let snapshot = runtime.session(agent_session_id)?;
         let target = snapshot
             .header

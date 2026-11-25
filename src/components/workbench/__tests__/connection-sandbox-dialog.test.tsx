@@ -70,7 +70,25 @@ describe('sandbox installation copy', () => {
     fireEvent.click(screen.getByRole('button', { name: 'connection.sandbox.manage' }));
     const save = await screen.findByRole('button', { name: 'common.save' });
     await waitFor(() => expect(save).toBeEnabled());
+    expect(screen.getByText('connection.sandbox.descriptionClientReadOnly')).toBeInTheDocument();
     expect(screen.getByText('connection.sandbox.workspaceHintClientReadOnly')).toBeInTheDocument();
+
+    const input = screen.getByLabelText('connection.sandbox.workspace');
+    fireEvent.change(input, { target: { value: '/var/log/../etc' } });
+    expect(screen.getByRole('alert')).toHaveTextContent('connection.sandbox.workspaceInvalidClientReadOnly');
+    expect(save).toBeDisabled();
+  });
+
+  it('shows inline validation error when an L3 Bubblewrap workspace path is outside /srv/shellspan-workspaces', async () => {
+    render(<ConnectionSandboxDialog profileId="profile" />);
+    fireEvent.click(screen.getByRole('button', { name: 'connection.sandbox.manage' }));
+    const input = await screen.findByLabelText('connection.sandbox.workspace');
+    const save = screen.getByRole('button', { name: 'common.save' });
+    await waitFor(() => expect(save).toBeEnabled());
+
+    fireEvent.change(input, { target: { value: '/tmp/not-allowed' } });
+    expect(screen.getByRole('alert')).toHaveTextContent('connection.sandbox.workspaceInvalid');
+    expect(save).toBeDisabled();
   });
 
   it('confirms and runs online L3 deployment, then renders output and refreshed report', async () => {

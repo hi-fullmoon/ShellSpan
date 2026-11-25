@@ -20,14 +20,18 @@ import type { LocaleKey } from '@/locales';
 import {
   invokeArchiveAgentRuntimeSession,
   invokeCancelAgentRuntime,
+  invokeCleanupSandboxWorkspaces,
   invokeLocalSandboxStatus,
+  invokeSandboxStorageStats,
   isTauriRuntime,
   type LocalSandboxStatus,
+  type SandboxStorageStats,
 } from '@/lib/ipc/tauri';
 import { listAllAgentSessionRecords } from '@/lib/ai/session-records';
 import { modelDefinitionOf } from '@/lib/ai/provider-contract';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { type AgentSandboxNetworkMode, useAiSettingsStore } from '@/stores/aiSettingsStore';
+import { validateSandboxAllowlistInput } from '@/lib/terminal/sandbox-terminal';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import type { AiProviderPreset } from '@/types/ai';
 import {
@@ -82,6 +86,13 @@ function normalizeProviderPreset(presetId: string): AiProviderPreset {
     : 'custom';
 }
 
+function formatSandboxBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
+}
+
 export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded = false }) => {
   const { t } = useI18n();
   const { error: showError, success: showSuccess } = useToast();
@@ -112,10 +123,10 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
     { value: 'devRegistries', label: t('settings.ai.agent.sandboxNetwork.devRegistries') },
     { value: 'customAllowlist', label: t('settings.ai.agent.sandboxNetwork.customAllowlist') },
   ];
-  const parseSandboxAllowlist = (raw: string): string[] => raw
-    .split(/[\s,;]+/)
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
+  const allowlistValidation = React.useMemo(
+    () => validateSandboxAllowlistInput(allowlistDraft),
+    [allowlistDraft],
+  );
   const handleSaveSandboxNetworkPolicy = async (
     mode: AgentSandboxNetworkMode,
     allowlist: string[],
@@ -127,7 +138,15 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
       showError(t('settings.ai.agent.sandboxNetworkSaveFailed'));
     }
   };
+  const handleSaveCustomAllowlist = (): void => {
+    if (allowlistValidation.invalid.length > 0) return;
+    void handleSaveSandboxNetworkPolicy('customAllowlist', allowlistValidation.valid);
+  };
   const [localSandboxStatus, setLocalSandboxStatus] = React.useState<LocalSandboxStatus | null>(null);
+  const [sandboxStorage, setSandboxStorage] = React.useState<SandboxStorageStats | null>(null);
+  const [sandboxStorageLoading, setSandboxStorageLoading] = React.useState(false);
+  const [cleanupSandboxOpen, setCleanupSandboxOpen] = React.useState(false);
+  const [sandboxCleanupBusy, setSandboxCleanupBusy] = React.useState(false);
   React.useEffect(() => {
     if (!isTauriRuntime()) return;
     let cancelled = false;
@@ -138,6 +157,51 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
       cancelled = true;
     };
   }, []);
+  const supportsLocalSandbox = localSandboxStatus?.supported === true;
+  const supportsSandboxNetworkPolicy = supportsLocalSandbox && localSandboxStatus.kind === 'macNono';
+  const loadSandboxStorage = React.useCallback(async () => {
+    if (!isTauriRuntime()) return;
+    setSandboxStorageLoading(true);
+    try {
+      const stats = await invokeSandboxStorageStats();
+      setSandboxStorage(stats);
+    } catch {
+      setSandboxStorage(null);
+    } finally {
+      setSandboxStorageLoading(false);
+    }
+  }, []);
+  React.useEffect(() => {
+    if (!supportsLocalSandbox) {
+      setSandboxStorage(null);
+      return;
+    }
+    void loadSandboxStorage();
+  }, [loadSandboxStorage, supportsLocalSandbox]);
+  const handleCleanupSandboxStorage = async (): Promise<void> => {
+    if (sandboxCleanupBusy) return;
+    setSandboxCleanupBusy(true);
+    try {
+      const result = await invokeCleanupSandboxWorkspaces();
+      if (result.failedCount > 0) {
+        showError(t('settings.ai.agent.sandboxStorageCleanupPartial', {
+          removed: result.removedCount,
+          size: formatSandboxBytes(result.freedBytes),
+          failed: result.failedCount,
+        }));
+      } else {
+        showSuccess(t('settings.ai.agent.sandboxStorageCleanupSuccess', {
+          count: result.removedCount,
+          size: formatSandboxBytes(result.freedBytes),
+        }));
+      }
+      await loadSandboxStorage();
+    } catch {
+      showError(t('settings.ai.agent.sandboxStorageCleanupFailed'));
+    } finally {
+      setSandboxCleanupBusy(false);
+    }
+  };
   const sandboxDescription = localSandboxStatus?.supported && localSandboxStatus.kind === 'macNono'
     ? t('settings.ai.agent.sandboxDescriptionMac')
     : localSandboxStatus?.supported && localSandboxStatus.kind === 'windowsAppContainer'
@@ -380,7 +444,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
               }}
             />
           </SettingRow>
-          {agentSandboxEnabled && (
+          {agentSandboxEnabled && supportsSandboxNetworkPolicy && (
             <SettingRow
               controlId={sandboxNetworkControlId}
               label={t('settings.ai.agent.sandboxNetwork')}
@@ -395,7 +459,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
                   if (!value) return;
                   const nextMode = value as AgentSandboxNetworkMode;
                   const nextAllowlist = nextMode === 'customAllowlist'
-                    ? parseSandboxAllowlist(allowlistDraft)
+                    ? (allowlistValidation.invalid.length === 0 ? allowlistValidation.valid : agentSandboxNetworkAllowlist)
                     : agentSandboxNetworkAllowlist;
                   void handleSaveSandboxNetworkPolicy(nextMode, nextAllowlist);
                 }}
@@ -421,39 +485,82 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
               </Select>
             </SettingRow>
           )}
-          {agentSandboxEnabled && agentSandboxNetworkMode === 'customAllowlist' && (
+          {agentSandboxEnabled && supportsSandboxNetworkPolicy && agentSandboxNetworkMode === 'customAllowlist' && (
             <SettingRow
               controlId={sandboxAllowlistControlId}
               label={t('settings.ai.agent.sandboxAllowlist')}
               description={t('settings.ai.agent.sandboxAllowlistDescription')}
               descriptionId={`${sandboxAllowlistControlId}-description`}
             >
-              <div className="flex w-full items-center gap-2 @min-[32rem]:w-auto">
-                <Input
-                  id={sandboxAllowlistControlId}
-                  aria-label={t('settings.ai.agent.sandboxAllowlist')}
-                  aria-describedby={`${sandboxAllowlistControlId}-description`}
-                  className="h-8 min-w-0 flex-1 text-xs @min-[32rem]:w-56"
-                  value={allowlistDraft}
-                  placeholder={t('settings.ai.agent.sandboxAllowlistPlaceholder')}
-                  disabled={!preferencesReady || agentSandboxNetworkSaving}
-                  onChange={(event) => setAllowlistDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      void handleSaveSandboxNetworkPolicy('customAllowlist', parseSandboxAllowlist(allowlistDraft));
-                    }
-                  }}
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={!preferencesReady || agentSandboxNetworkSaving}
-                  onClick={() => void handleSaveSandboxNetworkPolicy('customAllowlist', parseSandboxAllowlist(allowlistDraft))}
-                >
-                  {t('common.save')}
-                </Button>
+              <div className="flex w-full flex-col gap-1.5 @min-[32rem]:w-auto">
+                <div className="flex w-full items-center gap-2 @min-[32rem]:w-auto">
+                  <Input
+                    id={sandboxAllowlistControlId}
+                    aria-label={t('settings.ai.agent.sandboxAllowlist')}
+                    aria-describedby={allowlistValidation.invalid.length > 0
+                      ? `${sandboxAllowlistControlId}-description ${sandboxAllowlistControlId}-error`
+                      : `${sandboxAllowlistControlId}-description`}
+                    aria-invalid={allowlistValidation.invalid.length > 0 || undefined}
+                    className="h-8 min-w-0 flex-1 text-xs @min-[32rem]:w-56"
+                    value={allowlistDraft}
+                    placeholder={t('settings.ai.agent.sandboxAllowlistPlaceholder')}
+                    disabled={!preferencesReady || agentSandboxNetworkSaving}
+                    onChange={(event) => setAllowlistDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        handleSaveCustomAllowlist();
+                      }
+                    }}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!preferencesReady || agentSandboxNetworkSaving || allowlistValidation.invalid.length > 0}
+                    onClick={handleSaveCustomAllowlist}
+                  >
+                    {t('common.save')}
+                  </Button>
+                </div>
+                {allowlistValidation.invalid.length > 0 && (
+                  <p
+                    id={`${sandboxAllowlistControlId}-error`}
+                    role="alert"
+                    className="text-xs text-destructive"
+                  >
+                    {t('settings.ai.agent.sandboxAllowlistInvalid', {
+                      domains: allowlistValidation.invalid.join(', '),
+                    })}
+                  </p>
+                )}
               </div>
+            </SettingRow>
+          )}
+          {supportsLocalSandbox && (
+            <SettingRow
+              label={t('settings.ai.agent.sandboxStorage')}
+              description={
+                sandboxStorageLoading && !sandboxStorage
+                  ? t('settings.ai.agent.sandboxStorageLoading')
+                  : !sandboxStorage || sandboxStorage.totalCount === 0
+                    ? t('settings.ai.agent.sandboxStorageEmpty')
+                    : t('settings.ai.agent.sandboxStorageSummary', {
+                        totalCount: sandboxStorage.totalCount,
+                        totalSize: formatSandboxBytes(sandboxStorage.totalBytes),
+                        reclaimableCount: sandboxStorage.reclaimableCount,
+                        reclaimableSize: formatSandboxBytes(sandboxStorage.reclaimableBytes),
+                      })
+              }
+            >
+              <Button
+                className="w-full @min-[32rem]:w-auto"
+                variant="outline"
+                size="sm"
+                disabled={sandboxStorageLoading || sandboxCleanupBusy || !sandboxStorage || sandboxStorage.reclaimableCount === 0}
+                onClick={() => setCleanupSandboxOpen(true)}
+              >
+                {t(sandboxCleanupBusy ? 'settings.ai.agent.sandboxStorageCleaning' : 'settings.ai.agent.sandboxStorageCleanup')}
+              </Button>
             </SettingRow>
           )}
           <SettingRow
@@ -542,6 +649,25 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
               setDeleteOpen(true);
             }
           : undefined}
+      />
+
+      <ConfirmationDialog
+        textOnlyActions
+        open={cleanupSandboxOpen}
+        onOpenChange={setCleanupSandboxOpen}
+        title={t('settings.ai.agent.sandboxStorageCleanupTitle')}
+        description={t('settings.ai.agent.sandboxStorageCleanupDescription', {
+          count: sandboxStorage?.reclaimableCount ?? 0,
+          size: formatSandboxBytes(sandboxStorage?.reclaimableBytes ?? 0),
+        })}
+        confirmLabel={t('settings.ai.agent.sandboxStorageCleanupConfirm')}
+        confirmVariant="warning"
+        media={<Trash2Icon />}
+        mediaVariant="warning"
+        onConfirm={() => {
+          setCleanupSandboxOpen(false);
+          void handleCleanupSandboxStorage();
+        }}
       />
 
       <ConfirmationDialog

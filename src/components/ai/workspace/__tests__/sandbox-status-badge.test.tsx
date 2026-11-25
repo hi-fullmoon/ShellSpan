@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
+import * as tauri from '@/lib/ipc/tauri';
 import * as sandboxTerminal from '@/lib/terminal/sandbox-terminal';
 import { initI18n } from '@/locales';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
@@ -111,6 +112,75 @@ describe('SandboxStatusBadge', () => {
 
     await user.click(screen.getByRole('button', { name: /macOS nono/i }));
     expect(await screen.findByText('Filtered proxy · 2 custom domain(s)')).toBeInTheDocument();
+  });
+
+  it('prefers the bound sandbox terminal policy and shows a drift hint when global allowlist changes', async () => {
+    useAppStore.setState({ locale: 'en-US' });
+    await initI18n('en-US');
+    useAiSettingsStore.setState({
+      agentSandboxNetworkMode: 'customAllowlist',
+      agentSandboxNetworkAllowlist: ['registry.npmjs.org', 'api.example.com'],
+    });
+    const user = userEvent.setup();
+    render(
+      <SandboxStatusBadge
+        target={{
+          kind: 'local',
+          targetId: 'local-1',
+          sessionId: 'term-1',
+          cwd: '/Users/demo/.shellspan/sandboxes/0123456789abcdef0123456789abcdef/workspace',
+          localSandboxRequired: 'macNono',
+        }}
+        boundSandbox={{
+          agentSessionId: 'agent-1',
+          kind: 'macNono',
+          workspaceRoot: '/Users/demo/.shellspan/sandboxes/0123456789abcdef0123456789abcdef/workspace',
+          policyDigest: 'digest-1',
+          networkMode: 'customAllowlist',
+          allowedDomains: ['registry.npmjs.org'],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /macOS nono/i }));
+    expect(await screen.findByText('Filtered proxy · 1 custom domain(s)')).toBeInTheDocument();
+    expect(screen.getByTestId('sandbox-status-drift-hint')).toBeInTheDocument();
+  });
+
+  it('shows blank workspace source notice and reveals the workspace directory in the file manager', async () => {
+    useAppStore.setState({ locale: 'en-US' });
+    await initI18n('en-US');
+    const tauriSpy = vi.spyOn(tauri, 'isTauriRuntime').mockReturnValue(true);
+    const infoSpy = vi.spyOn(tauri, 'invokeSandboxWorkspaceInfo').mockResolvedValue({ skippedCount: 0 });
+    const revealSpy = vi.spyOn(tauri, 'invokeRevealPath').mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const fullPath = '/Users/demo/.shellspan/sandboxes/0123456789abcdef0123456789abcdef/workspace';
+
+    render(
+      <SandboxStatusBadge
+        sessionId="agent-blank"
+        target={{
+          kind: 'local',
+          targetId: 'local-1',
+          sessionId: 'term-1',
+          cwd: fullPath,
+          localSandboxRequired: 'macNono',
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /macOS nono/i }));
+    await waitFor(() => expect(infoSpy).toHaveBeenCalledWith('agent-blank'));
+    expect(await screen.findByTestId('sandbox-status-source')).toHaveTextContent(
+      'Blank managed workspace (no project imported)',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Reveal in file manager' }));
+    await waitFor(() => expect(revealSpy).toHaveBeenCalledWith(fullPath));
+
+    tauriSpy.mockRestore();
+    infoSpy.mockRestore();
+    revealSpy.mockRestore();
   });
 
   it('renders blocked domains and allows adding a blocked domain from the tool violation banner', async () => {

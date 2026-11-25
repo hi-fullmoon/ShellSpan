@@ -60,6 +60,7 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
   const valid = isClientReadOnly
     ? validClientPath
     : /^\/srv\/shellspan-workspaces\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(selectedPath);
+  const showWorkspaceError = mode !== 'off' && selectedPath.length > 0 && !valid;
   const busy = saving || loading || testing || deploying || trusting;
   const ready = Boolean(saved) && !busy;
   const modes = (['off', 'clientReadOnly', 'readOnly', 'workspaceWrite'] as const).map((value) => ({ value, label: t(`connection.sandbox.mode.${value}`) }));
@@ -204,7 +205,10 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
           {t('connection.sandbox.manage')}
         </DialogTrigger>
         <CompactDialogContent className="h-[min(560px,calc(100dvh-2rem))] max-w-lg" showCloseButton={false}>
-          <CompactDialogHeader title={t('connection.sandbox.title')} description={t('connection.sandbox.description')} />
+          <CompactDialogHeader
+            title={t('connection.sandbox.title')}
+            description={t(isClientReadOnly ? 'connection.sandbox.descriptionClientReadOnly' : 'connection.sandbox.description')}
+          />
           <CompactDialogBody className="flex-1" aria-busy={loading || testing || deploying || trusting}>
             {loading && <p role="status" className="text-sm text-muted-foreground">{t('connection.sandbox.loading')}</p>}
             {loadFailed && <Alert variant="destructive"><AlertDescription>{t('connection.sandbox.loadFailed')}</AlertDescription></Alert>}
@@ -218,11 +222,23 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
               </Field>
               {mode !== 'off' && <Field>
                 <FieldLabel htmlFor={`${id}-workspace`}>{t('connection.sandbox.workspace')}</FieldLabel>
-                <Input id={`${id}-workspace`} aria-describedby={`${id}-workspace-hint`} value={workspace} disabled={!ready}
-                  autoComplete="off" onChange={(event) => { setWorkspace(event.target.value); clearReport(); }} />
+                <Input
+                  id={`${id}-workspace`}
+                  aria-describedby={showWorkspaceError ? `${id}-workspace-hint ${id}-workspace-error` : `${id}-workspace-hint`}
+                  aria-invalid={showWorkspaceError || undefined}
+                  value={workspace}
+                  disabled={!ready}
+                  autoComplete="off"
+                  onChange={(event) => { setWorkspace(event.target.value); clearReport(); }}
+                />
                 <FieldDescription id={`${id}-workspace-hint`}>
                   {t(isClientReadOnly ? 'connection.sandbox.workspaceHintClientReadOnly' : 'connection.sandbox.workspaceHint')}
                 </FieldDescription>
+                {showWorkspaceError && (
+                  <p id={`${id}-workspace-error`} role="alert" className="text-xs text-destructive">
+                    {t(isClientReadOnly ? 'connection.sandbox.workspaceInvalidClientReadOnly' : 'connection.sandbox.workspaceInvalid')}
+                  </p>
+                )}
               </Field>}
             </FieldGroup>}
             {testing && <p role="status" className="text-sm text-muted-foreground">{t('connection.sandbox.testing')}</p>}

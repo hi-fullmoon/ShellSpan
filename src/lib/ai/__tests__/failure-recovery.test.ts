@@ -94,4 +94,70 @@ describe('failure recovery', () => {
     expect(modelFailureRecovery(error!)).toBe(expected);
     expect(modelFailureRecovery({ ...error!, message: 'contextBudgetExceeded: completed work is preserved' })).toBe('input');
   });
+
+  it('derives live uncertainNativeEffects from committed tool events and supports steered failed turns', () => {
+    const base = failedEvents({ kind: 'transport', message: 'connection dropped' });
+    // Live tool execution with uncertain result updates snapshot.uncertainNativeEffects without snapshot refresh.
+    const withUncertain = viewFor([
+      ...base.slice(0, 5),
+      sessionEvent(5, {
+        turnId: 'turn-failed',
+        stepId: 'step-failed',
+        type: 'tool/call',
+        data: { call: { callId: 'call-1', name: 'exec_command', arguments: { command: 'ls' }, effect: 'readOnly' } },
+      }),
+      sessionEvent(6, {
+        turnId: 'turn-failed',
+        stepId: 'step-failed',
+        type: 'tool/execution',
+        data: { callId: 'call-1', idempotency: 'no', status: 'dispatched' },
+      }),
+      sessionEvent(7, {
+        turnId: 'turn-failed',
+        stepId: 'step-failed',
+        type: 'tool/result',
+        data: { callId: 'call-1', name: 'exec_command', status: 'uncertain', summary: 'unknown' },
+      }),
+      sessionEvent(8, {
+        turnId: 'turn-failed',
+        stepId: 'step-failed',
+        type: 'request/failure',
+        data: { requestId: 'failed', attempt: 1, maxAttempts: 1, cumulativeDelayMs: 0, interrupted: false, failure: { kind: 'transport', message: 'dropped' } },
+      }),
+      sessionEvent(9, { turnId: 'turn-failed', stepId: 'step-failed', type: 'step/end', data: { reason: 'failed' } }),
+      sessionEvent(10, { turnId: 'turn-failed', type: 'turn/end', data: { reason: 'failed' } }),
+      sessionEvent(11, { type: 'session/ended', data: { status: 'failed', reason: 'failed' } }),
+    ]);
+    expect(withUncertain.snapshot.value.uncertainNativeEffects).toBe(true);
+    expect(latestFailureRecovery(withUncertain)).toMatchObject({ kind: 'verify', turnId: 'turn-failed' });
+
+    // A turn split by mid-turn steer still offers failure recovery.
+    const steeredEvents: AgentSessionEvent[] = [
+      ...base.slice(0, 5),
+      sessionEvent(5, {
+        turnId: 'turn-failed',
+        stepId: 'step-2',
+        type: 'user/message',
+        data: {
+          message: {
+            messageId: 'steer-1',
+            content: 'adjust course',
+            source: { kind: 'user', producerId: 'user' },
+          },
+          inputKind: 'steer',
+        } as unknown as Extract<AgentSessionEvent, { type: 'user/message' }>['data'],
+      }),
+      sessionEvent(6, {
+        turnId: 'turn-failed',
+        stepId: 'step-2',
+        type: 'request/failure',
+        data: { requestId: 'failed-2', attempt: 1, maxAttempts: 1, cumulativeDelayMs: 0, interrupted: false, failure: { kind: 'transport', message: 'dropped after steer' } },
+      }),
+      sessionEvent(7, { turnId: 'turn-failed', stepId: 'step-2', type: 'step/end', data: { reason: 'failed' } }),
+      sessionEvent(8, { turnId: 'turn-failed', type: 'turn/end', data: { reason: 'failed' } }),
+      sessionEvent(9, { type: 'session/ended', data: { status: 'failed', reason: 'failed' } }),
+    ];
+    const steeredView = viewFor(steeredEvents);
+    expect(latestFailureRecovery(steeredView)).toMatchObject({ kind: 'retry', turnId: 'turn-failed' });
+  });
 });

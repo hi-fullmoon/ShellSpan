@@ -50,7 +50,7 @@ describe('SandboxSyncDialog', () => {
     await waitFor(() => expect(fileDiffSpy).toHaveBeenCalledWith('session-imported', 'src/app.ts'));
     expect(await screen.findByText('+export const v = 2;')).toBeInTheDocument();
 
-    const applyButton = screen.getByRole('button', { name: /\(1\)/ });
+    const applyButton = screen.getByRole('button', { name: /回写 \(1\)|Apply \(1\)/i });
     await user.click(applyButton);
 
     await waitFor(() => {
@@ -92,7 +92,7 @@ describe('SandboxSyncDialog', () => {
     expect(readmeCheckbox).not.toHaveAttribute('aria-disabled', 'true');
 
     await user.click(readmeCheckbox);
-    await user.click(screen.getByRole('button', { name: /\(1\)/ }));
+    await user.click(screen.getByRole('button', { name: /回写 \(1\)|Apply \(1\)/i }));
 
     await waitFor(() => {
       expect(applySpy).toHaveBeenCalledWith({
@@ -102,5 +102,67 @@ describe('SandboxSyncDialog', () => {
       });
     });
     expect(await screen.findByText('README.md: permission denied')).toBeInTheDocument();
+  });
+
+  it('shows skipped import count, supports select-all toggle, and refreshes on signal or peer update', async () => {
+    const user = userEvent.setup();
+    const diffSpy = vi.spyOn(tauri, 'invokeSandboxDiff').mockResolvedValue({
+      sourceRoot: '/Users/demo/project',
+      totalChanges: 2,
+      conflictCount: 0,
+      skippedCount: 14,
+      changes: [
+        { path: 'a.ts', kind: 'added', conflict: false, sandboxSize: 10 },
+        { path: 'b.ts', kind: 'modified', conflict: false, sandboxSize: 20, sourceSize: 18 },
+      ],
+    });
+
+    const { rerender } = render(
+      <SandboxSyncDialog sessionId="session-sync" refreshEnabled refreshSignal={1} />,
+    );
+    await user.click(await screen.findByRole('button', { name: /2/ }));
+    expect(await screen.findByTestId('sandbox-sync-skipped-hint')).toHaveTextContent('14');
+
+    const toggleAll = screen.getByRole('button', { name: /取消全选|Clear/i });
+    await user.click(toggleAll);
+    expect(screen.getByRole('button', { name: /回写 \(0\)|Apply \(0\)/i })).toBeDisabled();
+
+    const selectAll = screen.getByRole('button', { name: /全选|Select all/i });
+    await user.click(selectAll);
+    expect(screen.getByRole('button', { name: /回写 \(2\)|Apply \(2\)/i })).toBeEnabled();
+
+    const callsBeforeSignal = diffSpy.mock.calls.length;
+    rerender(<SandboxSyncDialog sessionId="session-sync" refreshEnabled refreshSignal={2} />);
+    await waitFor(() => expect(diffSpy.mock.calls.length).toBeGreaterThan(callsBeforeSignal));
+  });
+
+  it('confirms and discards selected sandbox changes without touching source files', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(tauri, 'invokeSandboxDiff').mockResolvedValue({
+      sourceRoot: '/Users/demo/project',
+      totalChanges: 1,
+      conflictCount: 0,
+      skippedCount: 0,
+      changes: [
+        { path: 'src/app.ts', kind: 'modified', conflict: false, sandboxSize: 42, sourceSize: 40 },
+      ],
+    });
+    const discardSpy = vi.spyOn(tauri, 'invokeSandboxDiscard').mockResolvedValue({
+      discarded: ['src/app.ts'],
+      errors: [],
+    });
+
+    render(<SandboxSyncDialog sessionId="session-discard" />);
+    await user.click(await screen.findByRole('button', { name: /1/ }));
+
+    await user.click(screen.getByRole('button', { name: /丢弃所选 \(1\)|Discard \(1\)/i }));
+    await user.click(await screen.findByRole('button', { name: /确认丢弃|^Discard$/i }));
+
+    await waitFor(() => {
+      expect(discardSpy).toHaveBeenCalledWith({
+        sessionId: 'session-discard',
+        paths: ['src/app.ts'],
+      });
+    });
   });
 });

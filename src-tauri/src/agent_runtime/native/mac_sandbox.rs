@@ -101,6 +101,10 @@ fn candidate_launcher_paths(resource_dir: Option<&Path>) -> Vec<PathBuf> {
     candidates
 }
 
+pub(crate) fn is_launcher_bundled() -> bool {
+    LAUNCHER_SHA256.is_some()
+}
+
 pub(crate) fn resolve_verified_launcher(
     resource_dir: Option<&Path>,
 ) -> Result<(PathBuf, String), String> {
@@ -363,6 +367,93 @@ pub(crate) fn reclaim_orphaned_workspaces(data_dir: &Path, known_cwds: &HashSet<
     }
 }
 
+pub(crate) fn storage_stats(
+    data_dir: &Path,
+    active_cwds: &HashSet<String>,
+) -> super::sandbox_sync::SandboxStorageStats {
+    let mut stats = super::sandbox_sync::SandboxStorageStats::default();
+    let Ok(parent) = data_dir.join(SANDBOXES_DIR).canonicalize() else {
+        return stats;
+    };
+    let Ok(entries) = fs::read_dir(&parent) else {
+        return stats;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !is_valid_anchor_name(name) {
+            continue;
+        }
+        let anchor = entry.path();
+        if fs::symlink_metadata(&anchor).map_or(true, |m| m.file_type().is_symlink() || !m.is_dir())
+        {
+            continue;
+        }
+        let workspace = anchor.join("workspace");
+        let portable = crate::path_utils::portable_local_path(&workspace);
+        let bytes = super::sandbox_sync::directory_size_bytes(&anchor);
+        stats.total_count += 1;
+        stats.total_bytes = stats.total_bytes.saturating_add(bytes);
+        if active_cwds.contains(&portable) {
+            stats.active_count += 1;
+            stats.active_bytes = stats.active_bytes.saturating_add(bytes);
+        } else {
+            stats.reclaimable_count += 1;
+            stats.reclaimable_bytes = stats.reclaimable_bytes.saturating_add(bytes);
+        }
+    }
+    stats
+}
+
+pub(crate) fn cleanup_reclaimable_workspaces(
+    data_dir: &Path,
+    active_cwds: &HashSet<String>,
+) -> super::sandbox_sync::SandboxCleanupReport {
+    let mut report = super::sandbox_sync::SandboxCleanupReport::default();
+    let Ok(parent) = data_dir.join(SANDBOXES_DIR).canonicalize() else {
+        return report;
+    };
+    let Ok(entries) = fs::read_dir(&parent) else {
+        return report;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !is_valid_anchor_name(name) {
+            continue;
+        }
+        let anchor = entry.path();
+        if fs::symlink_metadata(&anchor).map_or(true, |m| m.file_type().is_symlink() || !m.is_dir())
+        {
+            continue;
+        }
+        let workspace = anchor.join("workspace");
+        let portable = crate::path_utils::portable_local_path(&workspace);
+        if active_cwds.contains(&portable) {
+            continue;
+        }
+        let bytes = super::sandbox_sync::directory_size_bytes(&anchor);
+        match remove_workspace(data_dir, &workspace) {
+            Ok(()) => {
+                report.removed_count += 1;
+                report.freed_bytes = report.freed_bytes.saturating_add(bytes);
+            }
+            Err(error) => {
+                report.failed_count += 1;
+                log::warn!(
+                    "Failed to clean up macOS sandbox workspace: {}",
+                    crate::redaction::redact_sensitive_text(&error)
+                );
+            }
+        }
+    }
+    report
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct Workspace {
     pub(super) parent: PathBuf,
@@ -468,6 +559,7 @@ pub(crate) struct PreparedMacSandboxPty {
     workspace_root: String,
     policy_digest: String,
     network_mode: super::sandbox_proxy::SandboxNetworkMode,
+    allowed_domains: Vec<String>,
     lease: Option<Lease>,
     proxy: Option<super::sandbox_proxy::SandboxProxy>,
     temp_dir: Option<tempfile::TempDir>,
@@ -490,6 +582,7 @@ impl PreparedMacSandboxPty {
         let policy = binding.sandbox_policy();
         let policy_digest = policy.digest();
         let network_mode = binding.network_policy.mode;
+        let allowed_domains = binding.network_policy.effective_rules();
         let temporary_root = binding.anchor.join("temporary");
         if !fs::symlink_metadata(&temporary_root)
             .map_err(|error| format!("{START_FAILED}: {error}"))?
@@ -575,6 +668,7 @@ impl PreparedMacSandboxPty {
                 workspace_root,
                 policy_digest,
                 network_mode,
+                allowed_domains,
                 lease: Some(lease),
                 proxy,
                 temp_dir: Some(temp_dir),
@@ -592,6 +686,7 @@ impl PreparedMacSandboxPty {
             workspace_root: self.workspace_root.clone(),
             policy_digest: self.policy_digest.clone(),
             network_mode: self.network_mode,
+            allowed_domains: self.allowed_domains.clone(),
         }
     }
 
@@ -824,6 +919,31 @@ mod tests {
         fs::set_permissions(data_dir.path(), fs::Permissions::from_mode(0o775)).unwrap();
         let error = create_workspace(data_dir.path(), "group-writable-session").unwrap_err();
         assert!(error.contains("group or world writable"), "got {error}");
+    }
+
+    #[test]
+    fn storage_stats_distinguishes_active_and_reclaimable_workspaces() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let active_ws = create_workspace(data_dir.path(), "active-session").unwrap();
+        let idle_ws = create_workspace(data_dir.path(), "idle-session").unwrap();
+        fs::write(Path::new(&active_ws).join("active.bin"), vec![1u8; 1024]).unwrap();
+        fs::write(Path::new(&idle_ws).join("idle.bin"), vec![2u8; 2048]).unwrap();
+
+        let mut active = HashSet::new();
+        active.insert(crate::path_utils::portable_local_path(Path::new(
+            &active_ws,
+        )));
+
+        let stats = storage_stats(data_dir.path(), &active);
+        assert_eq!(stats.total_count, 2);
+        assert_eq!(stats.active_count, 1);
+        assert_eq!(stats.reclaimable_count, 1);
+        assert!(stats.active_bytes >= 1024);
+        assert!(stats.reclaimable_bytes >= 2048);
+        assert_eq!(
+            stats.total_bytes,
+            stats.active_bytes + stats.reclaimable_bytes
+        );
     }
 
     #[test]

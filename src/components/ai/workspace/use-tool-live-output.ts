@@ -75,7 +75,10 @@ class ToolLiveOutputStore {
       const current = this.listeners.get(key);
       if (current) {
         current.delete(listener);
-        if (current.size === 0) this.listeners.delete(key);
+        if (current.size === 0) {
+          this.listeners.delete(key);
+          this.entries.delete(key);
+        }
       }
       this.activeSubscribers = Math.max(0, this.activeSubscribers - 1);
       if (this.activeSubscribers === 0) this.stopListening();

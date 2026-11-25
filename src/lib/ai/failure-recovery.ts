@@ -46,8 +46,17 @@ export function latestFailureRecovery(view: AiSessionView, now = Date.now()): Ai
     if (node?.kind === 'turnProcess') { latest = node; break; }
   }
   if (latest?.kind !== 'turnProcess' || latest.status !== 'failed'
-    || !latest.hasStartBoundary || !latest.hasEndBoundary || !latest.turnId) return null;
-  const error = [...latest.children].reverse().find((node): node is AiErrorNode => node.kind === 'error' && node.state === 'failed');
+    || !latest.hasEndBoundary || !latest.turnId) return null;
+  const segments = latest.hasInterleavedInput
+    ? view.nodes.filter(
+        (node): node is Extract<AiConversationNode, { kind: 'turnProcess' }> =>
+          node.kind === 'turnProcess' && node.turnId === latest.turnId,
+      )
+    : [latest];
+  const firstSegment = segments[0];
+  if (!firstSegment?.hasStartBoundary) return null;
+  const allChildren = segments.flatMap((segment) => segment.children);
+  const error = [...allChildren].reverse().find((node): node is AiErrorNode => node.kind === 'error' && node.state === 'failed');
   if (!error) return null;
   if (snapshot.header.subagent) {
     const child = snapshot.header.subagent;
@@ -62,7 +71,7 @@ export function latestFailureRecovery(view: AiSessionView, now = Date.now()): Ai
   }
   const kind = modelFailureRecovery(error);
   if (kind !== 'retry') return { turnId: latest.turnId, kind };
-  if (snapshot.uncertainNativeEffects || latest.children.some(node => node.kind === 'tool' || node.kind === 'question')) {
+  if (snapshot.uncertainNativeEffects || allChildren.some(node => node.kind === 'tool' || node.kind === 'question')) {
     return { turnId: latest.turnId, kind: 'verify' };
   }
   const pending = view.inbox.filter(item => !item.consumed);

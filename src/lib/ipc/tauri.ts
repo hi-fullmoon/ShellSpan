@@ -1403,12 +1403,38 @@ export interface SandboxDiffReport {
   readonly changes: readonly SandboxFileChange[];
   readonly totalChanges: number;
   readonly conflictCount: number;
+  readonly skippedCount?: number;
 }
 
 export interface SandboxApplyReport {
   readonly applied: readonly string[];
   readonly skippedConflicts: readonly string[];
   readonly errors: readonly string[];
+}
+
+export interface SandboxDiscardReport {
+  readonly discarded: readonly string[];
+  readonly errors: readonly string[];
+}
+
+export interface SandboxWorkspaceSourceInfo {
+  readonly sourceRoot?: string;
+  readonly skippedCount: number;
+}
+
+export interface SandboxStorageStats {
+  readonly totalCount: number;
+  readonly totalBytes: number;
+  readonly activeCount: number;
+  readonly activeBytes: number;
+  readonly reclaimableCount: number;
+  readonly reclaimableBytes: number;
+}
+
+export interface SandboxCleanupReport {
+  readonly removedCount: number;
+  readonly freedBytes: number;
+  readonly failedCount: number;
 }
 
 export interface SandboxFileDiffPreview {
@@ -1421,6 +1447,11 @@ export interface SandboxFileDiffPreview {
 export async function invokeSandboxDiff(sessionId: string): Promise<SandboxDiffReport | null> {
   if (!isTauriRuntime()) return null;
   return invokeLogged<SandboxDiffReport | null>('agent_runtime_sandbox_diff', { sessionId });
+}
+
+export async function invokeSandboxWorkspaceInfo(sessionId: string): Promise<SandboxWorkspaceSourceInfo> {
+  if (!isTauriRuntime()) return { skippedCount: 0 };
+  return invokeLogged<SandboxWorkspaceSourceInfo>('agent_runtime_sandbox_workspace_info', { sessionId });
 }
 
 export async function invokeSandboxFileDiff(
@@ -1436,6 +1467,31 @@ export async function invokeSandboxApply(input: {
   allowOverwriteConflicts?: boolean;
 }): Promise<SandboxApplyReport> {
   return invokeLogged<SandboxApplyReport>('agent_runtime_sandbox_apply', { input });
+}
+
+export async function invokeSandboxDiscard(input: {
+  sessionId: string;
+  paths?: readonly string[];
+}): Promise<SandboxDiscardReport> {
+  return invokeLogged<SandboxDiscardReport>('agent_runtime_sandbox_discard', { input });
+}
+
+export async function invokeSandboxStorageStats(): Promise<SandboxStorageStats> {
+  if (!isTauriRuntime()) {
+    return {
+      totalCount: 0,
+      totalBytes: 0,
+      activeCount: 0,
+      activeBytes: 0,
+      reclaimableCount: 0,
+      reclaimableBytes: 0,
+    };
+  }
+  return invokeLogged<SandboxStorageStats>('agent_runtime_sandbox_storage_stats');
+}
+
+export async function invokeCleanupSandboxWorkspaces(): Promise<SandboxCleanupReport> {
+  return invokeLogged<SandboxCleanupReport>('agent_runtime_cleanup_sandbox_workspaces');
 }
 
 export interface AgentFileCheckpoint {

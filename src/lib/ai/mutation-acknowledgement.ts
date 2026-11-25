@@ -27,6 +27,8 @@ export async function awaitMutationAcknowledgement(
       error => ({ kind: 'error', error } as const),
     ),
   ]).then(reconcile);
+  void confirmation.catch(() => undefined);
+  void cancelled.catch(() => undefined);
   try {
     await Promise.race([receipt, confirmation, cancelled]);
   } finally {
@@ -46,8 +48,11 @@ export async function withOperationDeadline<T>(
   const deadline = new Promise<never>((_, reject) => {
     scope.signal.addEventListener('abort', () => reject(scope.signal.reason), { once: true });
   });
+  const running = Promise.resolve().then(() => operation(scope.signal));
+  void running.catch(() => undefined);
+  void deadline.catch(() => undefined);
   try {
-    return await Promise.race([Promise.resolve().then(() => operation(scope.signal)), deadline]);
+    return await Promise.race([running, deadline]);
   } finally {
     clearTimeout(timer);
     scope.abort();

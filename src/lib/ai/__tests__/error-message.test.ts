@@ -60,6 +60,7 @@ describe.each([['zh-CN', zhCN], ['en-US', enUS]] as const)('AI error messages in
     ['LOCAL_SANDBOX_TERMINAL_REQUIRED: open sandbox terminal', 'ai.error.localSandboxTerminalRequired'],
     ['LOCAL_SANDBOX_POLICY_DRIFT: policy changed', 'ai.error.localSandboxPolicyDrift'],
     ['SANDBOX_SYNC_BUSY: wait for the Agent session to become idle', 'ai.error.sandboxSyncBusy'],
+    ['SANDBOX_IMPORT_LIMIT: project exceeds 5000 file limit', 'ai.error.sandboxImportLimit'],
     ['CHECKPOINT_RESTORE_BUSY: session running', 'ai.error.checkpointRestoreBusy'],
     ['CHECKPOINT_NOT_FOUND: expired', 'ai.error.checkpointNotFound'],
     ['CHECKPOINT_CORRUPTED: digest mismatch', 'ai.error.checkpointCorrupted'],

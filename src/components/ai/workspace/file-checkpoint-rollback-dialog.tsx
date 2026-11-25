@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangleIcon, HistoryIcon, RefreshCwIcon, RotateCcwIcon } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -59,27 +59,38 @@ export function FileCheckpointRollbackDialog({
   const [restoring, setRestoring] = useState(false);
   const [singleConfirm, setSingleConfirm] = useState<SingleConfirmState | null>(null);
   const [batchConfirm, setBatchConfirm] = useState<BatchConfirmState | null>(null);
+  const listRequestSeqRef = useRef(0);
+  const previewRequestSeqRef = useRef(0);
+  const activeIdRef = useRef<string | null>(null);
+  activeIdRef.current = activeId;
 
   const loadPreview = useCallback(async (checkpointId: string) => {
+    const seq = ++previewRequestSeqRef.current;
     setActiveId(checkpointId);
     setPreviewLoading(true);
     try {
       const next = await invokePreviewFileCheckpoint(sessionId, checkpointId);
+      if (seq !== previewRequestSeqRef.current) return;
       setPreview(next);
     } catch (error) {
+      if (seq !== previewRequestSeqRef.current) return;
       setPreview(null);
       const raw = error instanceof Error ? error.message : String(error);
       const translated = aiErrorMessage(raw, t);
       showError(translated !== raw ? translated : t('ai.checkpointRollback.previewFailed'));
     } finally {
-      setPreviewLoading(false);
+      if (seq === previewRequestSeqRef.current) {
+        setPreviewLoading(false);
+      }
     }
   }, [sessionId, showError, t]);
 
-  const loadList = useCallback(async (showFailureToast: boolean) => {
+  const loadList = useCallback(async (showFailureToast: boolean): Promise<string | null> => {
+    const seq = ++listRequestSeqRef.current;
     setLoading(true);
     try {
       const raw = await invokeListFileCheckpoints(sessionId);
+      if (seq !== listRequestSeqRef.current) return activeIdRef.current;
       const items = Array.isArray(raw) ? raw : [];
       setCheckpoints(items);
       const validIds = new Set(items.map((item) => item.checkpointId));
@@ -87,15 +98,23 @@ export function FileCheckpointRollbackDialog({
       if (items.length === 0) {
         setActiveId(null);
         setPreview(null);
-      } else {
-        setActiveId((current) => (
-          current && items.some((item) => item.checkpointId === current) ? current : items[0].checkpointId
-        ));
+        return null;
       }
+      const current = activeIdRef.current;
+      const nextActiveId = current && items.some((item) => item.checkpointId === current)
+        ? current
+        : items[0].checkpointId;
+      setActiveId(nextActiveId);
+      return nextActiveId;
     } catch {
-      if (showFailureToast) showError(t('ai.checkpointRollback.loadFailed'));
+      if (seq === listRequestSeqRef.current && showFailureToast) {
+        showError(t('ai.checkpointRollback.loadFailed'));
+      }
+      return activeIdRef.current;
     } finally {
-      setLoading(false);
+      if (seq === listRequestSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, [sessionId, showError, t]);
 
@@ -187,9 +206,9 @@ export function FileCheckpointRollbackDialog({
       } else if (result.restored.length > 0 && result.conflicts.length > 0) {
         showSuccess(t('ai.checkpointRollback.batchSuccess', { count: result.restored.length }));
       }
-      await loadList(false);
-      if (activeId) {
-        await loadPreview(activeId);
+      const nextActiveId = await loadList(false);
+      if (nextActiveId) {
+        await loadPreview(nextActiveId);
       }
       if (result.conflicts.length > 0 && !conflictOverwrite) {
         setSelectedIds(result.conflicts);

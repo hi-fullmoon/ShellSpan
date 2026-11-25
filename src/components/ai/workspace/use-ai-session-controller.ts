@@ -416,6 +416,9 @@ export function useAiSessionController({
     if(isTauriRuntime())throw new Error('INVALID_MODEL_SELECTION: no default route');
     return useAiSettingsStore.getState().getProviderConfig();
   }, []);
+  const lastSentTerminalContextRef = useRef(
+    new Map<string, { readonly version: number; readonly maxLines: number; readonly maxBytes: number }>(),
+  );
   const captureTerminalContext = (
     model: AiProviderConfig,
     agentSessionId: string | null,
@@ -450,7 +453,21 @@ export function useAiSessionController({
       && previous.source.metadata?.version === snapshot.version
       && previous.source.metadata?.maxLines === maxLines
       && previous.source.metadata?.maxBytes === maxBytes) return undefined;
-    return { sessionId: activeTerminal.sessionId, version: snapshot.version, maxLines, maxBytes, content };
+    const dedupeKey = boundView ? `${boundView.summary.id}\u0000${activeTerminal.sessionId}` : null;
+    const previousLive = dedupeKey ? lastSentTerminalContextRef.current.get(dedupeKey) : undefined;
+    if (previousLive
+      && previousLive.version === snapshot.version
+      && previousLive.maxLines === maxLines
+      && previousLive.maxBytes === maxBytes) return undefined;
+    const captured = { sessionId: activeTerminal.sessionId, version: snapshot.version, maxLines, maxBytes, content };
+    if (dedupeKey) {
+      lastSentTerminalContextRef.current.set(dedupeKey, {
+        version: snapshot.version,
+        maxLines,
+        maxBytes,
+      });
+    }
+    return captured;
   };
   const changeSettings = async (change: (sessionId: string) => Promise<void>): Promise<void> => {
     const sessionId = viewRef.current?.summary.id;
@@ -762,12 +779,25 @@ export function useAiSessionController({
   ): Promise<Extract<AiCreateSessionInput, { kind: 'agent' }>> => {
     const input = createInput(documentMessageSummary(content));
     const target = input.request.target;
-    if (!target || input.request.permissionMode !== 'operator'
-      || (target.kind !== 'local' && target.kind !== 'remote')
+    if (!target || (target.kind !== 'local' && target.kind !== 'remote')) return input;
+    if (target.kind === 'local' && newLocalSandbox) {
+      // Preview builds use a fixed managed root and must not override it.
+      if (localSandboxPreview) return input;
+      // Pass the terminal's current working directory so the backend can
+      // automatically import a real project into the managed sandbox copy
+      // (non-project dirs like $HOME or / fall back to an empty workspace).
+      const root = await resolveProjectRoot();
+      if (!root) return input;
+      return {
+        ...input,
+        request: {
+          ...input.request,
+          target: { ...target, cwd: root },
+        },
+      };
+    }
+    if (input.request.permissionMode !== 'operator'
       || (target.kind === 'remote' && !target.profileId)) return input;
-    // The sandbox backend supplies its managed root. A pre-existing terminal
-    // may still report the ordinary shell directory.
-    if (target.kind === 'local' && newLocalSandbox) return input;
     const root = await resolveProjectRoot();
     if (!root) {
       // The directory enables structured file tools; full-access shell execution
@@ -783,7 +813,7 @@ export function useAiSessionController({
           : { ...target, rootPath: root },
       },
     };
-  }, [createInput, newLocalSandbox, resolveProjectRoot]);
+  }, [createInput, localSandboxPreview, newLocalSandbox, resolveProjectRoot]);
   const ensureProjectSession = useCallback(async (root?: string): Promise<string> => {
     if (focusMode && viewRef.current && !matchesActiveTerminalTarget(viewRef.current, activeTerminal)) {
       throw new Error(t('focus.continueFirst'));
@@ -1012,7 +1042,11 @@ export function useAiSessionController({
           adapter.subscribe(sessionId, next => {
             if (!next.committedOperationIds?.includes(payload.clientOperationId)) return;
             queueMicrotask(() => {
-              committed(next.status === 'failed' || next.snapshot.value.inbox.pausedIds?.includes(payload.clientOperationId));
+              const pausedInInbox = next.inbox.some((item) => (
+                item.paused
+                && (item.clientSubmissionId === payload.clientOperationId || item.id === payload.clientOperationId)
+              ));
+              committed(next.status === 'failed' || pausedInInbox);
               settle({ type: 'submit.committed', clientOperationId: payload.clientOperationId, sessionId });
               if (submissionInputs.current.get(payload.clientOperationId)?.images?.length) {
                 void acknowledgeDetachedImageDraft(payload.clientOperationId).then(() => {
@@ -1591,7 +1625,7 @@ export function useAiSessionController({
   const subagentDirectoryKey = view
     ? [
         view.snapshot.value.header.parentSessionId ?? '',
-        ...(view.subagents ?? []).map((subagent) => subagent.sessionId),
+        ...(view.subagents ?? []).map((subagent) => `${subagent.sessionId}:${subagent.status}`),
       ].join('\u0000')
     : '';
   useEffect(() => {

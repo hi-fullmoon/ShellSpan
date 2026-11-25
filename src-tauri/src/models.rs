@@ -38,6 +38,8 @@ pub(crate) struct LocalSandboxPtyBinding {
     pub(crate) workspace_root: String,
     pub(crate) policy_digest: String,
     pub(crate) network_mode: crate::agent_runtime::SandboxNetworkMode,
+    #[serde(default)]
+    pub(crate) allowed_domains: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

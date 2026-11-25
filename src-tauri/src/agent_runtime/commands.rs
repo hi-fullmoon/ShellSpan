@@ -326,12 +326,14 @@ pub(crate) fn agent_runtime_create_session(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,
     mut request: CreateAgentSessionRequest,
+    bypass_local_sandbox: Option<bool>,
 ) -> Result<AgentSessionSnapshot, String> {
     if request.parent_session_id.is_some() || request.subagent.is_some() {
         return Err("Create child Agent Sessions through the delegation command".into());
     }
     configure_runtime(&app, &runtime)?;
-    let created_sandbox = apply_connection_sandbox(&app, &mut request)?;
+    let created_sandbox =
+        apply_connection_sandbox(&app, &mut request, bypass_local_sandbox.unwrap_or(false))?;
     let result = runtime.create_session(request);
     if result.is_err() {
         rollback_created_local_sandbox(&app, created_sandbox);
@@ -344,9 +346,11 @@ pub(crate) fn agent_runtime_continue_on_target(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,
     mut request: CreateAgentSessionRequest,
+    bypass_local_sandbox: Option<bool>,
 ) -> Result<AgentSessionSnapshot, String> {
     configure_runtime(&app, &runtime)?;
-    let created_sandbox = apply_connection_sandbox(&app, &mut request)?;
+    let created_sandbox =
+        apply_connection_sandbox(&app, &mut request, bypass_local_sandbox.unwrap_or(false))?;
     let result = runtime.continue_on_target(request);
     if result.is_err() {
         rollback_created_local_sandbox(&app, created_sandbox);
@@ -357,6 +361,7 @@ pub(crate) fn agent_runtime_continue_on_target(
 fn apply_connection_sandbox(
     app: &AppHandle,
     request: &mut CreateAgentSessionRequest,
+    bypass_local_sandbox: bool,
 ) -> Result<Option<(super::LocalSandboxKind, String)>, String> {
     #[cfg(all(
         feature = "native-input-acceptance",
@@ -392,7 +397,11 @@ fn apply_connection_sandbox(
     let mut created_local_sandbox: Option<(super::LocalSandboxKind, String)> = None;
     target.remote_sandbox_required = None;
     #[cfg(windows)]
-    if target.kind == "local" && target.target_id != "workbench-ai" {
+    if target.kind == "local"
+        && target.target_id != "workbench-ai"
+        && !bypass_local_sandbox
+        && target.local_sandbox_required.is_none()
+    {
         let db = app.state::<crate::db::Database>();
         if db.agent_sandbox_enabled()? {
             target.local_sandbox_required = Some(super::LocalSandboxKind::WindowsAppContainer);
@@ -418,21 +427,19 @@ fn apply_connection_sandbox(
                 false
             }
         };
-        if !trial_active && target.local_sandbox_required.is_none() {
+        if !trial_active && !bypass_local_sandbox && target.local_sandbox_required.is_none() {
             let db = app.state::<crate::db::Database>();
-            if db.agent_sandbox_enabled()? {
+            if db.agent_sandbox_enabled()? && super::native::mac_sandbox::is_launcher_bundled() {
                 let resource_dir = app.path().resource_dir().ok();
-                if let Ok(home) = app.path().home_dir() {
-                    let data_dir = crate::shellspan_data_dir(&home);
-                    if super::native::mac_sandbox::probe_local_sandbox(
-                        &data_dir,
-                        resource_dir.as_deref(),
-                    )
-                    .is_ok()
-                    {
-                        target.local_sandbox_required = Some(super::LocalSandboxKind::MacNono);
-                    }
-                }
+                let home = app.path().home_dir().map_err(|error| {
+                    format!("LOCAL_SANDBOX_UNAVAILABLE: failed to resolve home directory: {error}")
+                })?;
+                let data_dir = crate::shellspan_data_dir(&home);
+                super::native::mac_sandbox::probe_local_sandbox(
+                    &data_dir,
+                    resource_dir.as_deref(),
+                )?;
+                target.local_sandbox_required = Some(super::LocalSandboxKind::MacNono);
             }
         }
     }
@@ -720,6 +727,14 @@ pub(crate) struct SandboxApplyInput {
     allow_overwrite_conflicts: bool,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SandboxDiscardInput {
+    session_id: String,
+    #[serde(default)]
+    paths: Option<Vec<String>>,
+}
+
 fn resolve_local_sandbox_workspace_for_session(
     runtime: &AgentRuntime,
     session_id: &str,
@@ -786,6 +801,135 @@ pub(crate) fn agent_runtime_sandbox_apply(
         input.paths.as_deref(),
         input.allow_overwrite_conflicts,
     )
+}
+
+#[tauri::command]
+pub(crate) fn agent_runtime_sandbox_workspace_info(
+    runtime: State<'_, AgentRuntime>,
+    session_id: String,
+) -> Result<super::native::sandbox_sync::SandboxWorkspaceSourceInfo, String> {
+    let workspace = resolve_local_sandbox_workspace_for_session(&runtime, &session_id, false)?;
+    let baseline = super::native::sandbox_sync::baseline_path_for_workspace(&workspace);
+    Ok(super::native::sandbox_sync::read_workspace_source_info(
+        &baseline,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn agent_runtime_sandbox_discard(
+    runtime: State<'_, AgentRuntime>,
+    input: SandboxDiscardInput,
+) -> Result<super::native::sandbox_sync::SandboxDiscardReport, String> {
+    let workspace = resolve_local_sandbox_workspace_for_session(&runtime, &input.session_id, true)?;
+    let baseline = super::native::sandbox_sync::baseline_path_for_workspace(&workspace);
+    let paths = input.paths;
+    tokio::task::spawn_blocking(move || {
+        super::native::sandbox_sync::discard_workspace_changes(
+            &workspace,
+            &baseline,
+            paths.as_deref(),
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub(crate) fn agent_runtime_allow_session_sandbox_domain(
+    runtime: State<'_, AgentRuntime>,
+    session_id: String,
+    domain: String,
+) -> Result<Vec<String>, String> {
+    let snapshot = runtime.session(&session_id)?;
+    let is_local_sandbox = snapshot
+        .header
+        .target
+        .as_ref()
+        .is_some_and(super::AgentSessionTarget::requires_local_sandbox);
+    if !is_local_sandbox {
+        return Err("Agent Session is not using a managed local sandbox".into());
+    }
+    runtime
+        .native_engine()
+        .allow_session_sandbox_domain(&session_id, &domain)
+}
+
+#[tauri::command]
+pub(crate) fn agent_runtime_session_sandbox_domains(
+    runtime: State<'_, AgentRuntime>,
+    session_id: String,
+) -> Result<Vec<String>, String> {
+    Ok(runtime.native_engine().session_sandbox_domains(&session_id))
+}
+
+#[tauri::command]
+pub(crate) async fn agent_runtime_sandbox_storage_stats(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+) -> Result<super::native::sandbox_sync::SandboxStorageStats, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let home = app.path().home_dir().map_err(|error| error.to_string())?;
+        let data_dir = crate::shellspan_data_dir(&home);
+        let active_cwds = runtime.active_local_sandbox_cwds(super::LocalSandboxKind::MacNono)?;
+        tokio::task::spawn_blocking(move || {
+            super::native::mac_sandbox::storage_stats(&data_dir, &active_cwds)
+        })
+        .await
+        .map_err(|error| error.to_string())
+    }
+    #[cfg(windows)]
+    {
+        let home = app.path().home_dir().map_err(|error| error.to_string())?;
+        let data_dir = crate::shellspan_data_dir(&home);
+        let active_cwds =
+            runtime.active_local_sandbox_cwds(super::LocalSandboxKind::WindowsAppContainer)?;
+        tokio::task::spawn_blocking(move || {
+            super::native::windows_sandbox::storage_stats(&data_dir, &active_cwds)
+        })
+        .await
+        .map_err(|error| error.to_string())
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = (app, runtime);
+        Ok(super::native::sandbox_sync::SandboxStorageStats::default())
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn agent_runtime_cleanup_sandbox_workspaces(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+) -> Result<super::native::sandbox_sync::SandboxCleanupReport, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let home = app.path().home_dir().map_err(|error| error.to_string())?;
+        let data_dir = crate::shellspan_data_dir(&home);
+        let active_cwds = runtime.active_local_sandbox_cwds(super::LocalSandboxKind::MacNono)?;
+        tokio::task::spawn_blocking(move || {
+            super::native::mac_sandbox::cleanup_reclaimable_workspaces(&data_dir, &active_cwds)
+        })
+        .await
+        .map_err(|error| error.to_string())
+    }
+    #[cfg(windows)]
+    {
+        let home = app.path().home_dir().map_err(|error| error.to_string())?;
+        let data_dir = crate::shellspan_data_dir(&home);
+        let active_cwds =
+            runtime.active_local_sandbox_cwds(super::LocalSandboxKind::WindowsAppContainer)?;
+        tokio::task::spawn_blocking(move || {
+            super::native::windows_sandbox::cleanup_reclaimable_workspaces(&data_dir, &active_cwds)
+        })
+        .await
+        .map_err(|error| error.to_string())
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = (app, runtime);
+        Ok(super::native::sandbox_sync::SandboxCleanupReport::default())
+    }
 }
 
 #[tauri::command]
@@ -862,16 +1006,7 @@ pub(crate) async fn agent_runtime_restore_file_checkpoint(
     let runtime = runtime.inner().clone();
     let force = allow_conflict_overwrite.unwrap_or(false);
     tokio::task::spawn_blocking(move || {
-        let snapshot = runtime.session(&session_id)?;
-        if snapshot.status != super::AgentSessionStatus::Idle
-            || snapshot.uncertain_native_effects
-            || snapshot.recovery.kind == super::AgentRecoveryCheckpointKind::WaitingApproval
-        {
-            return Err(
-                "CHECKPOINT_RESTORE_BUSY: wait for the Agent session to become idle before rolling back files"
-                    .into(),
-            );
-        }
+        let (_guard, snapshot) = runtime.acquire_checkpoint_restore_guard(&session_id)?;
         let target = snapshot
             .header
             .target
@@ -924,16 +1059,7 @@ pub(crate) async fn agent_runtime_restore_file_checkpoints_batch(
     let runtime = runtime.inner().clone();
     let force = allow_conflict_overwrite.unwrap_or(false);
     tokio::task::spawn_blocking(move || {
-        let snapshot = runtime.session(&session_id)?;
-        if snapshot.status != super::AgentSessionStatus::Idle
-            || snapshot.uncertain_native_effects
-            || snapshot.recovery.kind == super::AgentRecoveryCheckpointKind::WaitingApproval
-        {
-            return Err(
-                "CHECKPOINT_RESTORE_BUSY: wait for the Agent session to become idle before rolling back files"
-                    .into(),
-            );
-        }
+        let (_guard, snapshot) = runtime.acquire_checkpoint_restore_guard(&session_id)?;
         let target = snapshot
             .header
             .target

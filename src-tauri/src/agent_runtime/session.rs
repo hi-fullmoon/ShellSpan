@@ -463,6 +463,42 @@ pub(crate) fn validate_session_events(events: Vec<AgentSessionEvent>) -> Result<
 }
 
 #[derive(Default)]
+struct SessionPublishQueue {
+    publish_lock: Mutex<()>,
+    pending: Mutex<std::collections::VecDeque<(EventPublisher, Vec<AgentSessionEvent>)>>,
+}
+
+struct OrderedPublishDrain(Arc<SessionPublishQueue>);
+
+impl OrderedPublishDrain {
+    fn drain(&self) {
+        let _guard = self
+            .0
+            .publish_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        loop {
+            let next = {
+                let mut pending = self
+                    .0
+                    .pending
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                pending.pop_front()
+            };
+            let Some((publisher, events)) = next else {
+                break;
+            };
+            for event in &events {
+                let mut public_event = event.clone();
+                crate::llm::replay::public_event_projection(&mut public_event);
+                publisher(&public_event);
+            }
+        }
+    }
+}
+
+#[derive(Default)]
 struct AgentSessionStoreInner {
     root: Option<PathBuf>,
     archive_root: Option<PathBuf>,
@@ -472,9 +508,33 @@ struct AgentSessionStoreInner {
     sessions: HashMap<String, AgentSessionRecord>,
     recovery_notices: Vec<AgentSessionRecoveryNotice>,
     publisher: Option<EventPublisher>,
+    publish_queues: HashMap<String, Arc<SessionPublishQueue>>,
     petdex: super::petdex::PetdexActivities,
     #[cfg(test)]
     append_failure: Option<fn(&AgentSessionEventPayload) -> bool>,
+}
+
+fn enqueue_publish_locked(
+    inner: &mut AgentSessionStoreInner,
+    session_id: &str,
+    events: &[AgentSessionEvent],
+) -> Option<OrderedPublishDrain> {
+    if events.is_empty() {
+        return None;
+    }
+    let publisher = inner.publisher.clone()?;
+    let queue = Arc::clone(
+        inner
+            .publish_queues
+            .entry(session_id.to_string())
+            .or_default(),
+    );
+    queue
+        .pending
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .push_back((publisher, events.to_vec()));
+    Some(OrderedPublishDrain(queue))
 }
 
 impl AgentSessionStoreInner {
@@ -828,9 +888,10 @@ impl AgentSessionStore {
         inner.log_bytes = None;
         write_new_log(&root, &request.session_id, &events)?;
         inner.log_bytes = Some(log_bytes.saturating_add(encoded_len));
+        let session_id = request.session_id.clone();
         let snapshot = record.snapshot()?;
         inner.sessions.insert(request.session_id, record);
-        let publisher = inner.publisher.clone();
+        let publisher = enqueue_publish_locked(&mut inner, &session_id, &events);
         drop(inner);
         publish_events(publisher, &events);
         Ok(snapshot)
@@ -935,7 +996,8 @@ impl AgentSessionStore {
         inner
             .sessions
             .insert(request.session_id.clone(), child_record);
-        let child_publisher = inner.publisher.clone();
+        let child_publisher =
+            enqueue_publish_locked(&mut inner, &request.session_id, &child_events);
         drop(inner);
         publish_events(child_publisher, &child_events);
         publish_events(parent_publisher, &parent_events);
@@ -3018,7 +3080,7 @@ impl AgentSessionStore {
             return Err("Agent archive target already exists".into());
         }
         let (events, publisher) = if ended {
-            (Vec::new(), inner.publisher.clone())
+            (Vec::new(), None)
         } else {
             append_payloads_locked(
                 &mut inner,
@@ -3339,7 +3401,7 @@ fn append_settlement_locked(
     inner: &mut AgentSessionStoreInner,
     session_id: &str,
     payloads: Vec<(Option<String>, Option<String>, AgentSessionEventPayload)>,
-) -> Result<(Vec<AgentSessionEvent>, Option<EventPublisher>), String> {
+) -> Result<(Vec<AgentSessionEvent>, Option<OrderedPublishDrain>), String> {
     append_payloads_locked(inner, session_id, payloads).inspect_err(|error| {
         if error.starts_with(JOURNAL_WRITE_FAILED) {
             inner
@@ -3355,7 +3417,7 @@ fn append_payloads_locked(
     inner: &mut AgentSessionStoreInner,
     session_id: &str,
     payloads: Vec<(Option<String>, Option<String>, AgentSessionEventPayload)>,
-) -> Result<(Vec<AgentSessionEvent>, Option<EventPublisher>), String> {
+) -> Result<(Vec<AgentSessionEvent>, Option<OrderedPublishDrain>), String> {
     #[cfg(test)]
     if inner
         .append_failure
@@ -3509,7 +3571,8 @@ fn append_payloads_locked(
     inner
         .petdex
         .observe(session_id, &record.events, &appended, record.status, false);
-    Ok((appended, inner.publisher.clone()))
+    let publisher = enqueue_publish_locked(inner, session_id, &appended);
+    Ok((appended, publisher))
 }
 
 fn target_switch_settled(record: &AgentSessionRecord) -> Result<bool, String> {
@@ -5837,13 +5900,9 @@ fn current_unix_ms() -> u64 {
         .as_millis() as u64
 }
 
-fn publish_events(publisher: Option<EventPublisher>, events: &[AgentSessionEvent]) {
-    if let Some(publisher) = publisher {
-        for event in events {
-            let mut public_event = event.clone();
-            crate::llm::replay::public_event_projection(&mut public_event);
-            publisher(&public_event);
-        }
+fn publish_events(publisher: Option<OrderedPublishDrain>, _events: &[AgentSessionEvent]) {
+    if let Some(drain) = publisher {
+        drain.drain();
     }
 }
 

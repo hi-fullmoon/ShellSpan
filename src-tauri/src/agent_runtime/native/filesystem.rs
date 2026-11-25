@@ -30,6 +30,7 @@ use crate::remote_sandbox::{AgentSftp, AgentSftpConnection, Binding, Control};
 use super::{
     connection_for_remote_target, sha256_hex, AgentFileCheckpointNative,
     CheckpointOriginalMetadataNative, CheckpointStoreNative, CheckpointTargetKindNative,
+    LoadedCheckpointNative,
 };
 
 const DEFAULT_READ_BYTES: u64 = 256 * 1024;
@@ -1217,6 +1218,33 @@ pub(crate) struct FileCheckpointBatchRestoreResult {
     pub(crate) failed: Vec<FileCheckpointBatchFailure>,
 }
 
+fn validate_checkpoint_target(
+    snapshot: &AgentFileCheckpointNative,
+    target: &AgentToolTargetNative,
+) -> Result<(), String> {
+    let (expected_kind, expected_target_id) = match target {
+        AgentToolTargetNative::Local { target_id, .. } => {
+            (CheckpointTargetKindNative::Local, target_id.as_str())
+        }
+        AgentToolTargetNative::Remote { target_id, .. } => {
+            (CheckpointTargetKindNative::Remote, target_id.as_str())
+        }
+        AgentToolTargetNative::Process { .. } => {
+            return Err(format!(
+                "CHECKPOINT_TARGET_MISMATCH: checkpoint {} requires a local or remote file target",
+                snapshot.checkpoint_id
+            ));
+        }
+    };
+    if snapshot.target_kind != expected_kind || snapshot.target_id != expected_target_id {
+        return Err(format!(
+            "CHECKPOINT_TARGET_MISMATCH: checkpoint {} does not match the active session target",
+            snapshot.checkpoint_id
+        ));
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn preview_file_checkpoint_native(
     checkpoint_root: &Path,
@@ -1231,6 +1259,7 @@ pub(crate) fn preview_file_checkpoint_native(
     sandbox: Option<&Binding>,
 ) -> Result<FileCheckpointDiffPreview, String> {
     let loaded = checkpoints.load(checkpoint_root, task_id, checkpoint_id)?;
+    validate_checkpoint_target(&loaded.snapshot, target)?;
     let operation = operations.begin_with_policy(
         task_id,
         &format!("checkpoint-preview-{checkpoint_id}"),
@@ -1324,6 +1353,40 @@ pub(crate) fn restore_file_checkpoint_native(
     allow_conflict_overwrite: bool,
 ) -> Result<FileCheckpointRestoreResult, String> {
     let loaded = checkpoints.load(checkpoint_root, task_id, checkpoint_id)?;
+    let expected_post_write_sha = loaded.snapshot.post_write_sha256.clone();
+    restore_loaded_checkpoint_native(
+        checkpoint_root,
+        checkpoints,
+        operations,
+        task_id,
+        &loaded,
+        expected_post_write_sha.as_deref(),
+        target,
+        database,
+        credentials,
+        known_hosts_path,
+        sandbox,
+        allow_conflict_overwrite,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn restore_loaded_checkpoint_native(
+    checkpoint_root: &Path,
+    checkpoints: &CheckpointStoreNative,
+    operations: &FileOperationRegistryNative,
+    task_id: &str,
+    loaded: &LoadedCheckpointNative,
+    expected_post_write_sha: Option<&str>,
+    target: &AgentToolTargetNative,
+    database: &Database,
+    credentials: &CredentialManager,
+    known_hosts_path: &Path,
+    sandbox: Option<&Binding>,
+    allow_conflict_overwrite: bool,
+) -> Result<FileCheckpointRestoreResult, String> {
+    let checkpoint_id = loaded.snapshot.checkpoint_id.as_str();
+    validate_checkpoint_target(&loaded.snapshot, target)?;
     let operation = operations.begin_with_policy(
         task_id,
         &format!("checkpoint-restore-{checkpoint_id}"),
@@ -1346,11 +1409,8 @@ pub(crate) fn restore_file_checkpoint_native(
         });
     }
     let current_sha = current_bytes.as_deref().map(sha256_hex);
-    let modified_after_agent = loaded
-        .snapshot
-        .post_write_sha256
-        .as_deref()
-        .is_some_and(|expected| current_sha.as_deref() != Some(expected));
+    let modified_after_agent =
+        expected_post_write_sha.is_some_and(|expected| current_sha.as_deref() != Some(expected));
     if modified_after_agent && !allow_conflict_overwrite {
         return Err(format!(
             "CHECKPOINT_MANUAL_EDIT_CONFLICT: {} was modified after the Agent wrote it",
@@ -1388,6 +1448,16 @@ pub(crate) fn restore_file_checkpoint_native(
                 if meta.file_type().is_symlink() || !meta.is_file() {
                     return Err("Checkpoint rollback only removes regular files".into());
                 }
+                if let Some(expected) = current_sha.as_deref() {
+                    let latest = fs::read(&path)
+                        .map_err(|error| format!("Failed to re-verify local file: {error}"))?;
+                    if sha256_hex(&latest) != expected {
+                        return Err(format!(
+                            "CHECKPOINT_MANUAL_EDIT_CONFLICT: {} changed during rollback",
+                            loaded.snapshot.target_path
+                        ));
+                    }
+                }
                 trash::TrashContext::new()
                     .delete(&path)
                     .map_err(|error| format!("Failed to move file to Trash: {error}"))?;
@@ -1408,6 +1478,22 @@ pub(crate) fn restore_file_checkpoint_native(
                     .map_err(|error| format!("Failed to inspect remote file: {error}"))?;
                 if remote_kind(stat.perm) != "file" {
                     return Err("Checkpoint rollback only removes regular remote files".into());
+                }
+                if let Some(expected) = current_sha.as_deref() {
+                    let (_, latest_bytes, _) = read_write_destination(
+                        target,
+                        &loaded.snapshot.target_path,
+                        database,
+                        credentials,
+                        known_hosts_path,
+                        &operation,
+                    )?;
+                    if latest_bytes.as_deref().map(sha256_hex).as_deref() != Some(expected) {
+                        return Err(format!(
+                            "CHECKPOINT_MANUAL_EDIT_CONFLICT: {} changed during rollback",
+                            loaded.snapshot.target_path
+                        ));
+                    }
                 }
                 sftp.unlink(Path::new(&remote_file))
                     .map_err(|error| format!("Failed to remove remote file: {error}"))?;
@@ -1441,13 +1527,16 @@ pub(crate) fn restore_file_checkpoints_batch_native(
             failed: Vec::new(),
         });
     }
-    // Load metadata to deduplicate multiple checkpoints for the same file, keeping
-    // the earliest pre-change snapshot for each distinct (target_kind, target_path).
-    let mut chosen_by_path: std::collections::BTreeMap<(u8, String), (u64, String, String)> =
-        std::collections::BTreeMap::new();
+    // Group all selected checkpoints per distinct (target_kind, target_path) so
+    // multi-edit files restore to the earliest baseline, validate conflict against
+    // the latest post-write digest, and mark the entire chain restored.
+    let mut grouped_by_path: std::collections::BTreeMap<
+        (u8, String),
+        Vec<(usize, LoadedCheckpointNative)>,
+    > = std::collections::BTreeMap::new();
     let mut failed = Vec::new();
     let mut seen_ids = std::collections::HashSet::new();
-    for checkpoint_id in checkpoint_ids {
+    for (input_index, checkpoint_id) in checkpoint_ids.iter().enumerate() {
         if !seen_ids.insert(checkpoint_id.clone()) {
             continue;
         }
@@ -1458,19 +1547,10 @@ pub(crate) fn restore_file_checkpoints_batch_native(
                     CheckpointTargetKindNative::Remote => 1_u8,
                 };
                 let key = (kind_key, loaded.snapshot.target_path.clone());
-                let replace = chosen_by_path.get(&key).is_none_or(|(existing_ts, _, _)| {
-                    loaded.snapshot.created_at_unix_ms < *existing_ts
-                });
-                if replace {
-                    chosen_by_path.insert(
-                        key,
-                        (
-                            loaded.snapshot.created_at_unix_ms,
-                            loaded.snapshot.checkpoint_id,
-                            loaded.snapshot.target_path,
-                        ),
-                    );
-                }
+                grouped_by_path
+                    .entry(key)
+                    .or_default()
+                    .push((input_index, loaded));
             }
             Err(error) => failed.push(FileCheckpointBatchFailure {
                 checkpoint_id: checkpoint_id.clone(),
@@ -1482,13 +1562,40 @@ pub(crate) fn restore_file_checkpoints_batch_native(
 
     let mut restored = Vec::new();
     let mut conflicts = Vec::new();
-    for (_, (_, checkpoint_id, target_path)) in chosen_by_path {
-        match restore_file_checkpoint_native(
+    for (_, mut group) in grouped_by_path {
+        group.sort_by(|(left_idx, left), (right_idx, right)| {
+            left.snapshot
+                .created_at_unix_ms
+                .cmp(&right.snapshot.created_at_unix_ms)
+                .then_with(|| {
+                    if left.snapshot.post_write_sha256.is_some()
+                        && left.snapshot.post_write_sha256 == right.snapshot.original_sha256
+                        && right.snapshot.post_write_sha256 != left.snapshot.original_sha256
+                    {
+                        std::cmp::Ordering::Less
+                    } else if right.snapshot.post_write_sha256.is_some()
+                        && right.snapshot.post_write_sha256 == left.snapshot.original_sha256
+                        && left.snapshot.post_write_sha256 != right.snapshot.original_sha256
+                    {
+                        std::cmp::Ordering::Greater
+                    } else {
+                        // `list_for_task` returns newest-first, so larger input index is older.
+                        right_idx.cmp(left_idx)
+                    }
+                })
+        });
+        let earliest = &group[0].1;
+        let latest = &group[group.len() - 1].1;
+        let checkpoint_id = earliest.snapshot.checkpoint_id.clone();
+        let target_path = earliest.snapshot.target_path.clone();
+        let expected_post_write_sha = latest.snapshot.post_write_sha256.as_deref();
+        match restore_loaded_checkpoint_native(
             checkpoint_root,
             checkpoints,
             operations,
             task_id,
-            &checkpoint_id,
+            earliest,
+            expected_post_write_sha,
             target,
             database,
             credentials,
@@ -1496,7 +1603,16 @@ pub(crate) fn restore_file_checkpoints_batch_native(
             sandbox,
             allow_conflict_overwrite,
         ) {
-            Ok(result) => restored.push(result),
+            Ok(result) => {
+                for (_, newer) in group.iter().skip(1) {
+                    let _ = checkpoints.mark_restored(
+                        checkpoint_root,
+                        task_id,
+                        &newer.snapshot.checkpoint_id,
+                    );
+                }
+                restored.push(result);
+            }
             Err(error) if error.starts_with("CHECKPOINT_MANUAL_EDIT_CONFLICT") => {
                 conflicts.push(checkpoint_id);
             }
@@ -3987,5 +4103,148 @@ mod tests {
         assert_eq!(batch_force.restored.len(), 1);
         assert!(batch_force.conflicts.is_empty());
         assert_eq!(fs::read_to_string(&file_b).unwrap(), "server 10.0.0.1;\n");
+    }
+
+    #[test]
+    fn batch_checkpoint_rollback_handles_multi_edit_chain_and_validates_target_match() {
+        let workspace = tempfile::tempdir().unwrap();
+        let runtime_root = tempfile::tempdir().unwrap();
+        let file_path = workspace.path().join("multi.conf");
+        fs::write(&file_path, "v0\n").unwrap();
+
+        let target = AgentToolTargetNative::Local {
+            target_id: "local-multi".into(),
+            session_id: "term-multi".into(),
+            cwd: Some(workspace.path().to_string_lossy().to_string()),
+        };
+        let checkpoints = CheckpointStoreNative::default();
+        let operations = FileOperationRegistryNative::default();
+        let database = Database::open(&runtime_root.path().join("db.sqlite")).unwrap();
+        let credentials = CredentialManager::in_memory_for_tests();
+        let known_hosts_path = runtime_root.path().join("known_hosts");
+
+        let write_v1 = AgentToolCallNative {
+            request_id: "req-1".into(),
+            call_id: "call-1".into(),
+            tool_name: "write_file".into(),
+            arguments: json!({
+                "path": "multi.conf",
+                "content": "v1\n",
+                "precondition": { "sha256": sha256_hex(b"v0\n") }
+            }),
+            target: target.clone(),
+            capability_id: "cap-1".into(),
+        };
+        let cp1 = execute_file_tool_native(FileExecutionContextNative {
+            task_id: "task-multi",
+            call: &write_v1,
+            database: &database,
+            credentials: &credentials,
+            known_hosts_path: &known_hosts_path,
+            checkpoint_root: runtime_root.path(),
+            checkpoints: &checkpoints,
+            operations: &operations,
+        })
+        .unwrap()
+        .data["checkpointId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let write_v2 = AgentToolCallNative {
+            request_id: "req-2".into(),
+            call_id: "call-2".into(),
+            tool_name: "write_file".into(),
+            arguments: json!({
+                "path": "multi.conf",
+                "content": "v2\n",
+                "precondition": { "sha256": sha256_hex(b"v1\n") }
+            }),
+            target: target.clone(),
+            capability_id: "cap-1".into(),
+        };
+        let cp2 = execute_file_tool_native(FileExecutionContextNative {
+            task_id: "task-multi",
+            call: &write_v2,
+            database: &database,
+            credentials: &credentials,
+            known_hosts_path: &known_hosts_path,
+            checkpoint_root: runtime_root.path(),
+            checkpoints: &checkpoints,
+            operations: &operations,
+        })
+        .unwrap()
+        .data["checkpointId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // Target mismatch is rejected on both preview and restore.
+        let wrong_target = AgentToolTargetNative::Remote {
+            target_id: "remote-other".into(),
+            session_id: "term-remote".into(),
+            profile_id: Some("conn-1".into()),
+            host: "127.0.0.1".into(),
+            port: 22,
+            username: "root".into(),
+            root_path: Some("/tmp".into()),
+            local_root: None,
+        };
+        assert!(preview_file_checkpoint_native(
+            runtime_root.path(),
+            &checkpoints,
+            &operations,
+            "task-multi",
+            &cp1,
+            &wrong_target,
+            &database,
+            &credentials,
+            &known_hosts_path,
+            None,
+        )
+        .unwrap_err()
+        .starts_with("CHECKPOINT_TARGET_MISMATCH"));
+        assert!(restore_file_checkpoint_native(
+            runtime_root.path(),
+            &checkpoints,
+            &operations,
+            "task-multi",
+            &cp1,
+            &wrong_target,
+            &database,
+            &credentials,
+            &known_hosts_path,
+            None,
+            true,
+        )
+        .unwrap_err()
+        .starts_with("CHECKPOINT_TARGET_MISMATCH"));
+
+        // Passing newest-first (as `list_for_task` returns) restores to v0 without
+        // false conflict and marks both checkpoints restored.
+        let batch = restore_file_checkpoints_batch_native(
+            runtime_root.path(),
+            &checkpoints,
+            &operations,
+            "task-multi",
+            &[cp2.clone(), cp1.clone()],
+            &target,
+            &database,
+            &credentials,
+            &known_hosts_path,
+            None,
+            false,
+        )
+        .unwrap();
+        assert_eq!(batch.restored.len(), 1);
+        assert!(batch.conflicts.is_empty());
+        assert!(batch.failed.is_empty());
+        assert_eq!(fs::read_to_string(&file_path).unwrap(), "v0\n");
+
+        let listed = checkpoints
+            .list_for_task(runtime_root.path(), "task-multi")
+            .unwrap();
+        assert_eq!(listed.len(), 2);
+        assert!(listed.iter().all(|item| item.restored_at_unix_ms.is_some()));
     }
 }

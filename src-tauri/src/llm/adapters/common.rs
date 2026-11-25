@@ -44,11 +44,14 @@ pub(in crate::llm) struct ToolCallAccumulator {
 }
 
 pub(in crate::llm) fn append_fragment(accumulated: &mut String, fragment: &str, cumulative: bool) {
+    if fragment.is_empty() {
+        return;
+    }
     if !cumulative {
         accumulated.push_str(fragment);
-    } else if fragment.starts_with(accumulated.as_str()) {
+    } else if !accumulated.is_empty() && fragment.starts_with(accumulated.as_str()) {
         *accumulated = fragment.to_string();
-    } else if !accumulated.starts_with(fragment) {
+    } else {
         accumulated.push_str(fragment);
     }
 }
@@ -58,17 +61,19 @@ pub(in crate::llm) fn append_and_delta(
     fragment: &str,
     cumulative: bool,
 ) -> String {
+    if fragment.is_empty() {
+        return String::new();
+    }
     if !cumulative {
         accumulated.push_str(fragment);
         return fragment.to_string();
     }
-    if let Some(delta) = fragment.strip_prefix(accumulated.as_str()) {
-        let delta = delta.to_string();
-        *accumulated = fragment.to_string();
-        return delta;
-    }
-    if accumulated.starts_with(fragment) {
-        return String::new();
+    if !accumulated.is_empty() {
+        if let Some(delta) = fragment.strip_prefix(accumulated.as_str()) {
+            let delta = delta.to_string();
+            *accumulated = fragment.to_string();
+            return delta;
+        }
     }
     accumulated.push_str(fragment);
     fragment.to_string()
@@ -110,12 +115,16 @@ pub(in crate::llm) fn normalized_calls(
                     "provider tool arguments exceeded the 64 KiB limit",
                 ));
             }
-            let arguments = serde_json::from_str::<Value>(&call.arguments).map_err(|error| {
-                NormalizedModelError::new(
-                    NormalizedModelErrorKind::Protocol,
-                    format!("provider returned invalid tool arguments: {error}"),
-                )
-            })?;
+            let arguments = if call.arguments.trim().is_empty() {
+                Value::Object(serde_json::Map::new())
+            } else {
+                serde_json::from_str::<Value>(&call.arguments).map_err(|error| {
+                    NormalizedModelError::new(
+                        NormalizedModelErrorKind::Protocol,
+                        format!("provider returned invalid tool arguments: {error}"),
+                    )
+                })?
+            };
             if !arguments.is_object() {
                 return Err(NormalizedModelError::new(
                     NormalizedModelErrorKind::Protocol,

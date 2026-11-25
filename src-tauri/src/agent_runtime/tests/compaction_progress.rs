@@ -267,3 +267,59 @@ fn dropped_compaction_closes_its_progress_and_restart_requires_explicit_resume()
     ));
     assert_eq!(reopened.snapshot("progress").unwrap().surface.generation, 0);
 }
+
+#[test]
+fn session_resume_clears_historical_required_recovery_compaction_boundary() {
+    let root = tempfile::tempdir().unwrap();
+    let sessions = AgentSessionStore::default();
+    sessions.configure(root.path().to_path_buf()).unwrap();
+    sessions
+        .create(super::super::CreateAgentSessionRequest {
+            session_id: "recover-clear".into(),
+            task_id: "task-recover-clear".into(),
+            goal: "clear recovery boundary on resume".into(),
+            success_criteria: Vec::new(),
+            target: None,
+            permission_mode: None,
+            execution_surface: super::super::AgentExecutionSurface::Direct,
+            continued_from_session_id: None,
+            capability_scope: None,
+            parent_session_id: None,
+            subagent: None,
+        })
+        .unwrap();
+    sessions
+        .append(
+            "recover-clear",
+            None,
+            None,
+            AgentSessionEventPayload::TaskState {
+                status: "waiting".into(),
+                phase: Some("recovery".into()),
+                progress: None,
+                recovery: Some(super::super::AgentRecoveryState {
+                    status: AgentRecoveryStatus::Required,
+                    summary: Some("historical failure".into()),
+                }),
+                fleet: None,
+            },
+        )
+        .unwrap();
+    let before_resume = sessions.all_events("recover-clear").unwrap();
+    let before_refs: Vec<_> = before_resume.iter().collect();
+    assert!(first_unresolved_recovery_seq(&before_resume).is_some());
+    assert!(!boundary_is_safe(&before_refs));
+
+    sessions
+        .end(
+            "recover-clear",
+            super::super::AgentSessionStatus::Failed,
+            Some("interrupted".into()),
+        )
+        .unwrap();
+    sessions.resume("recover-clear").unwrap();
+    let after_resume = sessions.all_events("recover-clear").unwrap();
+    let after_refs: Vec<_> = after_resume.iter().collect();
+    assert_eq!(first_unresolved_recovery_seq(&after_resume), None);
+    assert!(boundary_is_safe(&after_refs));
+}

@@ -73,6 +73,8 @@ pub(crate) struct SandboxDiffReport {
     pub(crate) changes: Vec<SandboxFileChange>,
     pub(crate) total_changes: usize,
     pub(crate) conflict_count: usize,
+    #[serde(default)]
+    pub(crate) skipped_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +83,85 @@ pub(crate) struct SandboxApplyReport {
     pub(crate) applied: Vec<String>,
     pub(crate) skipped_conflicts: Vec<String>,
     pub(crate) errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SandboxDiscardReport {
+    pub(crate) discarded: Vec<String>,
+    pub(crate) errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SandboxWorkspaceSourceInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) source_root: Option<String>,
+    pub(crate) skipped_count: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SandboxStorageStats {
+    pub(crate) total_count: usize,
+    pub(crate) total_bytes: u64,
+    pub(crate) active_count: usize,
+    pub(crate) active_bytes: u64,
+    pub(crate) reclaimable_count: usize,
+    pub(crate) reclaimable_bytes: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SandboxCleanupReport {
+    pub(crate) removed_count: usize,
+    pub(crate) freed_bytes: u64,
+    pub(crate) failed_count: usize,
+}
+
+#[cfg(any(windows, target_os = "macos", test))]
+pub(crate) fn directory_size_bytes(root: &Path) -> u64 {
+    let mut total = 0u64;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+            if meta.is_dir() {
+                stack.push(path);
+            } else if meta.is_file() {
+                total = total.saturating_add(meta.len());
+            }
+        }
+    }
+    total
+}
+
+pub(crate) fn read_workspace_source_info(baseline_path: &Path) -> SandboxWorkspaceSourceInfo {
+    if !baseline_path.exists() {
+        return SandboxWorkspaceSourceInfo {
+            source_root: None,
+            skipped_count: 0,
+        };
+    }
+    match load_baseline(baseline_path) {
+        Ok(baseline) => SandboxWorkspaceSourceInfo {
+            source_root: Some(baseline.source_root),
+            skipped_count: baseline.skipped_count,
+        },
+        Err(_) => SandboxWorkspaceSourceInfo {
+            source_root: None,
+            skipped_count: 0,
+        },
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -706,6 +787,7 @@ pub(crate) fn diff_workspace_against_baseline(
         changes,
         total_changes,
         conflict_count,
+        skipped_count: baseline.skipped_count,
     })
 }
 
@@ -885,6 +967,171 @@ pub(crate) fn apply_workspace_changes(
         skipped_conflicts,
         errors,
     })
+}
+
+pub(crate) fn discard_workspace_changes(
+    workspace: &Path,
+    baseline_path: &Path,
+    selected_paths: Option<&[String]>,
+) -> Result<SandboxDiscardReport, String> {
+    let mut baseline = load_baseline(baseline_path)?;
+    let report = diff_workspace_against_baseline(workspace, baseline_path)?;
+    let source_root = PathBuf::from(&baseline.source_root);
+    let source_meta = fs::symlink_metadata(&source_root)
+        .map_err(|error| format!("Invalid sandbox source directory: {error}"))?;
+    if source_meta.file_type().is_symlink() || !source_meta.is_dir() {
+        return Err("Sandbox source root must be a real directory".into());
+    }
+    let selected: Option<BTreeSet<&str>> =
+        selected_paths.map(|list| list.iter().map(String::as_str).collect());
+
+    let mut discarded = Vec::new();
+    let mut errors = Vec::new();
+
+    for change in report.changes {
+        if let Some(filter) = &selected {
+            if !filter.contains(change.path.as_str()) {
+                continue;
+            }
+        }
+        let clean = match validate_relative_path(&change.path) {
+            Ok(path) => path,
+            Err(error) => {
+                errors.push(format!("{}: {error}", change.path));
+                continue;
+            }
+        };
+        let ws_path = match ensure_no_symlink_components(workspace, &clean) {
+            Ok(path) => path,
+            Err(error) => {
+                errors.push(format!("{}: {error}", change.path));
+                continue;
+            }
+        };
+        match change.kind {
+            SandboxChangeKind::Added => {
+                match fs::symlink_metadata(&ws_path) {
+                    Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
+                        errors.push(format!(
+                            "{}: refusing to discard non-regular or symbolic link file",
+                            change.path
+                        ));
+                        continue;
+                    }
+                    Ok(_) => {
+                        if let Err(error) = trash::TrashContext::new().delete(&ws_path) {
+                            errors.push(format!("{}: {error}", change.path));
+                            continue;
+                        }
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        errors.push(format!("{}: {error}", change.path));
+                        continue;
+                    }
+                }
+                discarded.push(change.path);
+            }
+            SandboxChangeKind::Modified | SandboxChangeKind::Deleted => {
+                let src_path = match ensure_no_symlink_components(&source_root, &clean) {
+                    Ok(path) => path,
+                    Err(error) => {
+                        errors.push(format!("{}: {error}", change.path));
+                        continue;
+                    }
+                };
+                match fs::symlink_metadata(&src_path) {
+                    Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
+                        errors.push(format!(
+                            "{}: source path is not a regular file",
+                            change.path
+                        ));
+                        continue;
+                    }
+                    Ok(_) => {
+                        if let Some(parent) = ws_path.parent() {
+                            if let Err(error) = fs::create_dir_all(parent) {
+                                errors.push(format!("{}: {error}", change.path));
+                                continue;
+                            }
+                        }
+                        let restore_result = (|| -> io::Result<BaselineEntry> {
+                            let parent = ws_path
+                                .parent()
+                                .ok_or_else(|| io::Error::other("Missing workspace parent"))?;
+                            let mut reader = open_regular_nofollow(&src_path)?;
+                            let src_meta = reader.metadata()?;
+                            let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+                            let mut hasher = Sha256::new();
+                            let mut buf = [0u8; 64 * 1024];
+                            let mut size = 0u64;
+                            loop {
+                                let n = reader.read(&mut buf)?;
+                                if n == 0 {
+                                    break;
+                                }
+                                temp.write_all(&buf[..n])?;
+                                hasher.update(&buf[..n]);
+                                size += n as u64;
+                            }
+                            copy_file_mode(&src_meta, temp.as_file())?;
+                            temp.flush()?;
+                            temp.as_file().sync_all()?;
+                            if let Ok(ws_meta) = fs::symlink_metadata(&ws_path) {
+                                if ws_meta.file_type().is_symlink() || !ws_meta.is_file() {
+                                    return Err(io::Error::other(
+                                        "Refusing to overwrite non-regular or symbolic link workspace file",
+                                    ));
+                                }
+                            }
+                            temp.persist(&ws_path).map_err(|e| e.error)?;
+                            Ok(BaselineEntry {
+                                sha256: hex::encode(hasher.finalize()),
+                                size,
+                            })
+                        })();
+                        match restore_result {
+                            Ok(entry) => {
+                                baseline.files.insert(change.path.clone(), entry);
+                                discarded.push(change.path);
+                            }
+                            Err(error) => errors.push(format!("{}: {error}", change.path)),
+                        }
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                        match fs::symlink_metadata(&ws_path) {
+                            Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
+                                errors.push(format!(
+                                    "{}: refusing to remove non-regular workspace file",
+                                    change.path
+                                ));
+                                continue;
+                            }
+                            Ok(_) => {
+                                if let Err(error) = trash::TrashContext::new().delete(&ws_path) {
+                                    errors.push(format!("{}: {error}", change.path));
+                                    continue;
+                                }
+                            }
+                            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                            Err(err) => {
+                                errors.push(format!("{}: {err}", change.path));
+                                continue;
+                            }
+                        }
+                        baseline.files.remove(&change.path);
+                        discarded.push(change.path);
+                    }
+                    Err(error) => {
+                        errors.push(format!("{}: {error}", change.path));
+                    }
+                }
+            }
+        }
+    }
+
+    save_baseline(baseline_path, &baseline)?;
+    Ok(SandboxDiscardReport { discarded, errors })
 }
 
 fn read_preview_text(path: &Path) -> Result<Option<(String, bool, bool)>, String> {
@@ -1139,5 +1386,56 @@ mod tests {
         let report = diff_workspace_against_baseline(&workspace, &baseline_path).unwrap();
         assert_eq!(report.total_changes, 1);
         assert_eq!(report.changes[0].path, "app.txt");
+        assert!(report.skipped_count >= 1);
+    }
+
+    #[test]
+    fn read_workspace_source_info_and_discard_restore_modified_and_deleted_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("project");
+        let workspace = dir.path().join("sandbox-ws");
+        let baseline_path = dir.path().join("source-baseline.json");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&workspace).unwrap();
+        fs::write(source.join("a.txt"), "original a\n").unwrap();
+        fs::write(source.join("b.txt"), "original b\n").unwrap();
+
+        assert_eq!(
+            read_workspace_source_info(&baseline_path),
+            SandboxWorkspaceSourceInfo {
+                source_root: None,
+                skipped_count: 0,
+            }
+        );
+
+        import_source_into_workspace(&source, &workspace, &baseline_path).unwrap();
+        let info = read_workspace_source_info(&baseline_path);
+        assert!(info.source_root.is_some());
+
+        fs::write(workspace.join("a.txt"), "changed in sandbox\n").unwrap();
+        fs::remove_file(workspace.join("b.txt")).unwrap();
+
+        let before = diff_workspace_against_baseline(&workspace, &baseline_path).unwrap();
+        assert_eq!(before.total_changes, 2);
+
+        let discard = discard_workspace_changes(
+            &workspace,
+            &baseline_path,
+            Some(&["a.txt".to_string(), "b.txt".to_string()]),
+        )
+        .unwrap();
+        assert!(discard.errors.is_empty());
+        assert_eq!(discard.discarded, vec!["a.txt", "b.txt"]);
+        assert_eq!(
+            fs::read_to_string(workspace.join("a.txt")).unwrap(),
+            "original a\n"
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.join("b.txt")).unwrap(),
+            "original b\n"
+        );
+
+        let after = diff_workspace_against_baseline(&workspace, &baseline_path).unwrap();
+        assert_eq!(after.total_changes, 0);
     }
 }

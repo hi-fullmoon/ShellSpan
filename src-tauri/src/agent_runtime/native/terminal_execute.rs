@@ -90,6 +90,36 @@ impl Drop for TerminalStartGuard {
     }
 }
 
+struct TerminalWaitGuard<'a> {
+    registry: &'a TerminalExecuteRegistry,
+    session_id: &'a str,
+    operation: &'a Arc<TerminalCommandOperation>,
+    armed: bool,
+}
+
+impl Drop for TerminalWaitGuard<'_> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let registration = self.registry.operations.lock().ok().and_then(|operations| {
+            operations
+                .get(self.session_id)
+                .filter(|registration| Arc::ptr_eq(&registration.operation, self.operation))
+                .cloned()
+        });
+        if let Some(registration) = registration {
+            let _ = self.registry.finish_registration(
+                self.session_id,
+                &registration.agent_session_id,
+                &registration.task_id,
+                &registration.operation_id,
+                TerminalLeaseReleaseReason::Failed,
+            );
+        }
+    }
+}
+
 impl TerminalExecuteRegistry {
     #[allow(clippy::too_many_arguments)]
     fn start_native_inline(
@@ -1103,6 +1133,12 @@ impl TerminalExecuteRegistry {
         cancelled: impl Fn() -> bool,
         mut on_progress: Option<&mut dyn FnMut(&TerminalCommandSnapshot)>,
     ) -> Result<(TerminalCommandSnapshot, bool), String> {
+        let mut guard = TerminalWaitGuard {
+            registry: self,
+            session_id: session,
+            operation,
+            armed: true,
+        };
         let deadline = Instant::now() + timeout;
         let mut last_revision = 0u64;
         loop {
@@ -1135,6 +1171,7 @@ impl TerminalExecuteRegistry {
                             &registration.operation_id,
                             operation,
                         )? {
+                            guard.armed = false;
                             return Ok((snapshot, true));
                         }
                     }
@@ -1149,6 +1186,7 @@ impl TerminalExecuteRegistry {
         } else {
             Duration::ZERO
         };
+        guard.armed = false;
         self.wait_bounded(sessions, session, operation, wait, false, on_progress)
             .map(|snapshot| (snapshot, false))
     }
@@ -1162,6 +1200,12 @@ impl TerminalExecuteRegistry {
         hard_deadline: bool,
         mut on_progress: Option<&mut dyn FnMut(&TerminalCommandSnapshot)>,
     ) -> Result<TerminalCommandSnapshot, String> {
+        let mut guard = TerminalWaitGuard {
+            registry: self,
+            session_id,
+            operation,
+            armed: true,
+        };
         let deadline = Instant::now() + timeout;
         let mut interrupt_deadline = None;
         let mut capture_drain_deadline = None;
@@ -1287,6 +1331,7 @@ impl TerminalExecuteRegistry {
             // Unknown is a completed wait, not a completed operation. Keep its
             // capture fence, coordinator and revoking lease for late receipts.
             let _ = operation.mark_retained_for_late_receipts();
+            guard.armed = false;
             return Ok(snapshot);
         }
         self.broker.settle_submission(operation)?;
@@ -1321,6 +1366,7 @@ impl TerminalExecuteRegistry {
                 reason,
             );
         }
+        guard.armed = false;
         if hard_deadline && snapshot.state == TerminalCommandState::Completed {
             self.broker.wait_command_prompt(
                 operation,

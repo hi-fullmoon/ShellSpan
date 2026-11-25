@@ -1233,21 +1233,23 @@ fn boundary_is_safe(events: &[&AgentSessionEvent]) -> bool {
                     results.insert((event.step_id.as_deref(), call_id.as_str()));
                 }
             }
-            AgentSessionEventPayload::TurnEnd { .. }
-            | AgentSessionEventPayload::SessionResumed {}
-            | AgentSessionEventPayload::SubagentRecoveryStarted { .. } => {
+            AgentSessionEventPayload::TurnEnd { .. } => {
                 // Interrupted turns without a dispatched execution are closed synthetically
                 // by surface derivation; keep dispatched-but-unsettled calls blocking compaction.
                 calls.retain(|key| results.contains(key) || dispatched.contains(key));
             }
-            AgentSessionEventPayload::TaskState {
-                recovery: Some(recovery),
-                ..
-            } => {
-                recovery_pending = matches!(
-                    recovery.status,
-                    AgentRecoveryStatus::Required | AgentRecoveryStatus::Reconciling
-                );
+            AgentSessionEventPayload::SessionResumed {}
+            | AgentSessionEventPayload::SubagentRecoveryStarted { .. } => {
+                calls.retain(|key| results.contains(key) || dispatched.contains(key));
+                recovery_pending = false;
+            }
+            AgentSessionEventPayload::TaskState { recovery, .. } => {
+                recovery_pending = recovery.as_ref().is_some_and(|recovery| {
+                    matches!(
+                        recovery.status,
+                        AgentRecoveryStatus::Required | AgentRecoveryStatus::Reconciling
+                    )
+                });
             }
             _ => {}
         }
@@ -1321,16 +1323,20 @@ fn first_unresolved_recovery_seq(events: &[AgentSessionEvent]) -> Option<u64> {
                     call_id.as_str(),
                 ));
             }
-            AgentSessionEventPayload::TaskState {
-                recovery: Some(recovery),
-                ..
-            } => match recovery.status {
-                AgentRecoveryStatus::Required | AgentRecoveryStatus::Reconciling => {
+            AgentSessionEventPayload::SessionResumed {}
+            | AgentSessionEventPayload::SubagentRecoveryStarted { .. } => {
+                state_boundary = None;
+            }
+            AgentSessionEventPayload::TaskState { recovery, .. } => match recovery.as_ref() {
+                Some(recovery)
+                    if matches!(
+                        recovery.status,
+                        AgentRecoveryStatus::Required | AgentRecoveryStatus::Reconciling
+                    ) =>
+                {
                     state_boundary.get_or_insert(event.seq);
                 }
-                AgentRecoveryStatus::None
-                | AgentRecoveryStatus::Available
-                | AgentRecoveryStatus::Completed => state_boundary = None,
+                _ => state_boundary = None,
             },
             _ => {}
         }

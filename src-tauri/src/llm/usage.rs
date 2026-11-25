@@ -46,6 +46,7 @@ impl ProviderUsage {
                     .and_then(|(input, output)| {
                         input
                             .checked_add(self.cache_read_tokens.unwrap_or_default())?
+                            .checked_add(self.cache_write_tokens.unwrap_or_default())?
                             .checked_add(output)
                     });
         }
@@ -126,8 +127,11 @@ pub(crate) fn provider_usage_from_value(
             .get("prompt_cache_miss_tokens")
             .and_then(Value::as_u64)
             .or_else(|| {
-                input_tokens
-                    .map(|input| input.saturating_sub(cache_read_tokens.unwrap_or_default()))
+                input_tokens.map(|input| {
+                    input
+                        .saturating_sub(cache_read_tokens.unwrap_or_default())
+                        .saturating_sub(cache_write_tokens.unwrap_or_default())
+                })
             })
     };
     let total_tokens = explicit_total.or_else(|| match (input_tokens, output_tokens) {

@@ -864,11 +864,13 @@ fn process_anthropic_event(
                                 "ANTHROPIC_BLOCK_DELTA",
                             )
                         })?;
-                    if !*saw_delta {
-                        arguments.clear();
-                        *saw_delta = true;
+                    if !fragment.is_empty() {
+                        if !*saw_delta {
+                            arguments.clear();
+                            *saw_delta = true;
+                        }
+                        arguments.push_str(fragment);
                     }
-                    arguments.push_str(fragment);
                     if arguments.len() > MAX_PROVIDER_TOOL_ARGUMENT_BYTES {
                         return Err(protocol(
                             "Anthropic tool arguments exceeded the 64 KiB limit",
@@ -1038,7 +1040,8 @@ async fn stream_anthropic(
     }
     if !state.stopped {
         return Err(if deadline.first_byte_seen {
-            protocol(
+            coded_error(
+                NormalizedModelErrorKind::Retryable,
                 "Anthropic stream ended before message_stop",
                 "STREAM_CLOSED",
             )
@@ -1046,10 +1049,17 @@ async fn stream_anthropic(
             deadline.empty_response_error("Anthropic stream")
         });
     }
+    if state.stop_reason.as_deref() == Some("model_context_window_exceeded") {
+        return Err(coded_error(
+            NormalizedModelErrorKind::ContextTooLarge,
+            "Anthropic context window exceeded",
+            "CONTEXT_TOO_LARGE",
+        ));
+    }
     let finish_reason = match state.stop_reason.as_deref() {
         Some("end_turn" | "stop_sequence") => ModelFinishReason::Stop,
         Some("tool_use") => ModelFinishReason::ToolCalls,
-        Some("max_tokens" | "model_context_window_exceeded") => ModelFinishReason::Length,
+        Some("max_tokens") => ModelFinishReason::Length,
         Some("refusal") => ModelFinishReason::ContentFilter,
         Some(_) => ModelFinishReason::Other,
         None => unreachable!(),
@@ -1069,13 +1079,13 @@ async fn stream_anthropic(
         match block {
             BlockState::Redacted { data } => pending_redacted.push(json!({"data":data})),
             BlockState::Text { text } => {
-                if !text.is_empty() {
+                if !text.trim().is_empty() {
                     content.push(ModelContentBlock::Text { text });
                     metadata.push(metadata_with_redacted(Map::new(), &mut pending_redacted));
                 }
             }
             BlockState::Thinking { text, signature } => {
-                if !text.is_empty() {
+                if !text.trim().is_empty() {
                     content.push(ModelContentBlock::Reasoning {
                         text,
                         provider_item: Some(

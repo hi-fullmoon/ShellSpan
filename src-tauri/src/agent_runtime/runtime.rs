@@ -225,6 +225,7 @@ impl AgentRuntimeBuilder {
             app_configured: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             terminal_submission_gate: Arc::new(Mutex::new(())),
             stopping_sessions: Arc::new(Mutex::new(HashSet::new())),
+            recovering_sessions: Arc::new(Mutex::new(HashSet::new())),
             closing_terminals: Arc::new(Mutex::new(HashSet::new())),
             models: self.models,
             hooks: self.hooks,
@@ -249,6 +250,7 @@ pub(crate) struct AgentRuntime {
     app_configured: Arc<std::sync::atomic::AtomicBool>,
     terminal_submission_gate: Arc<Mutex<()>>,
     stopping_sessions: Arc<Mutex<HashSet<String>>>,
+    recovering_sessions: Arc<Mutex<HashSet<String>>>,
     closing_terminals: Arc<Mutex<HashSet<String>>>,
     models: ModelRegistry,
     hooks: AgentHookBus,
@@ -262,6 +264,41 @@ pub(crate) struct AgentRuntime {
 }
 
 struct ActiveDriverLease(Arc<super::AgentEntry>);
+
+struct SessionRecoveryGuard {
+    sessions: Arc<Mutex<HashSet<String>>>,
+    session_id: String,
+}
+
+impl Drop for SessionRecoveryGuard {
+    fn drop(&mut self) {
+        if let Ok(mut sessions) = self.sessions.lock() {
+            sessions.remove(&self.session_id);
+        }
+    }
+}
+
+pub(crate) struct CheckpointRestoreGuard {
+    runtime: AgentRuntime,
+    session_id: String,
+    entry: Option<Arc<super::AgentEntry>>,
+}
+
+impl Drop for CheckpointRestoreGuard {
+    fn drop(&mut self) {
+        if let Some(entry) = self.entry.take() {
+            entry.release_driver();
+            if self
+                .runtime
+                .sessions
+                .has_ready_input(&self.session_id)
+                .unwrap_or(false)
+            {
+                let _ = self.runtime.wake(&self.session_id);
+            }
+        }
+    }
+}
 
 fn terminal_turn_ancestors(
     sessions: &AgentSessionStore,
@@ -2938,14 +2975,16 @@ impl AgentRuntime {
                 );
             }
         }
+        self.native_engine.clear_session_sandbox_domains(session_id);
         self.cleanup_images();
         Ok(())
     }
 
     #[cfg(any(windows, target_os = "macos"))]
-    fn known_local_sandbox_cwds(
+    fn local_sandbox_cwds(
         &self,
         kind: super::LocalSandboxKind,
+        active_only: bool,
     ) -> Result<std::collections::HashSet<String>, String> {
         let mut known_cwds = std::collections::HashSet::new();
         let mut cursor = None;
@@ -2954,6 +2993,9 @@ impl AgentRuntime {
                 .sessions
                 .list_page(super::AgentSessionListRequest { cursor, limit: 256 })?;
             for item in page.sessions {
+                if active_only && item.archived {
+                    continue;
+                }
                 if let Some(target) = item.header.target {
                     if target.local_sandbox_required == Some(kind) {
                         if let Some(cwd) = target.cwd {
@@ -2972,10 +3014,18 @@ impl AgentRuntime {
         Ok(known_cwds)
     }
 
+    #[cfg(any(windows, target_os = "macos"))]
+    pub(crate) fn active_local_sandbox_cwds(
+        &self,
+        kind: super::LocalSandboxKind,
+    ) -> Result<std::collections::HashSet<String>, String> {
+        self.local_sandbox_cwds(kind, true)
+    }
+
     #[cfg(windows)]
     pub(crate) fn reclaim_orphaned_windows_sandboxes(&self, data_root: &std::path::Path) {
         let Ok(known_cwds) =
-            self.known_local_sandbox_cwds(super::LocalSandboxKind::WindowsAppContainer)
+            self.local_sandbox_cwds(super::LocalSandboxKind::WindowsAppContainer, false)
         else {
             return;
         };
@@ -2984,7 +3034,8 @@ impl AgentRuntime {
 
     #[cfg(target_os = "macos")]
     pub(crate) fn reclaim_orphaned_mac_sandboxes(&self, data_dir: &std::path::Path) {
-        let Ok(known_cwds) = self.known_local_sandbox_cwds(super::LocalSandboxKind::MacNono) else {
+        let Ok(known_cwds) = self.local_sandbox_cwds(super::LocalSandboxKind::MacNono, false)
+        else {
             return;
         };
         super::native::mac_sandbox::reclaim_orphaned_workspaces(data_dir, &known_cwds);
@@ -3185,10 +3236,62 @@ impl AgentRuntime {
         Ok(self.sessions.snapshot(session_id)?.recovery)
     }
 
+    fn begin_session_recovery(&self, session_id: &str) -> Result<SessionRecoveryGuard, String> {
+        let mut recovering = self
+            .recovering_sessions
+            .lock()
+            .map_err(|_| "Agent recovery registry is unavailable".to_string())?;
+        if !recovering.insert(session_id.to_string()) {
+            return Err("Agent Session recovery is already in progress".into());
+        }
+        Ok(SessionRecoveryGuard {
+            sessions: Arc::clone(&self.recovering_sessions),
+            session_id: session_id.to_string(),
+        })
+    }
+
+    pub(crate) fn acquire_checkpoint_restore_guard(
+        &self,
+        session_id: &str,
+    ) -> Result<(CheckpointRestoreGuard, AgentSessionSnapshot), String> {
+        self.require_session_not_stopping(session_id)?;
+        let entry = self.agents.get(session_id)?;
+        let guarded_entry = match entry {
+            Some(entry) => {
+                if !entry.try_acquire_driver()? {
+                    return Err(
+                        "CHECKPOINT_RESTORE_BUSY: wait for the Agent session to become idle before rolling back files"
+                            .into(),
+                    );
+                }
+                Some(entry)
+            }
+            None => None,
+        };
+        let guard = CheckpointRestoreGuard {
+            runtime: self.clone(),
+            session_id: session_id.to_string(),
+            entry: guarded_entry,
+        };
+        let snapshot = self.sessions.snapshot(session_id)?;
+        if snapshot.status != super::AgentSessionStatus::Idle
+            || snapshot.uncertain_native_effects
+            || snapshot.recovery.kind == super::AgentRecoveryCheckpointKind::WaitingApproval
+        {
+            return Err(
+                "CHECKPOINT_RESTORE_BUSY: wait for the Agent session to become idle before rolling back files"
+                    .into(),
+            );
+        }
+        Ok((guard, snapshot))
+    }
+
     pub(crate) async fn resume_recovery(
         &self,
         session_id: &str,
     ) -> Result<AgentSessionSnapshot, String> {
+        self.require_session_not_stopping(session_id)?;
+        let _recovery_guard = self.begin_session_recovery(session_id)?;
         let snapshot = self.sessions.snapshot(session_id)?;
         if snapshot.header.subagent.is_some() {
             self.subagents.require_open_fleet_for_child(session_id)?;
@@ -3275,6 +3378,7 @@ impl AgentRuntime {
         input: super::AgentRecoveryReconcileInput,
     ) -> Result<AgentSessionSnapshot, String> {
         self.require_session_not_stopping(&input.session_id)?;
+        let _recovery_guard = self.begin_session_recovery(&input.session_id)?;
         let snapshot = self.sessions.snapshot(&input.session_id)?;
         let checkpoint = snapshot.recovery;
         if checkpoint.kind != super::AgentRecoveryCheckpointKind::ExecutionInFlight {
@@ -3412,11 +3516,25 @@ impl AgentRuntime {
                 },
             });
         }
+        let entry = self.agents.get(&input.session_id)?;
+        let turn_already_ended = events.iter().any(|event| {
+            event.turn_id == turn_id
+                && matches!(
+                    event.payload,
+                    super::AgentSessionEventPayload::TurnEnd { .. }
+                )
+        });
+        let should_resume_running = entry.is_some() && !turn_already_ended && turn_id.is_some();
         completion_payloads.push(super::AgentScopedPayload {
             turn_id: None,
             step_id: None,
             payload: super::AgentSessionEventPayload::TaskState {
-                status: "running".into(),
+                status: if should_resume_running {
+                    "running"
+                } else {
+                    "idle"
+                }
+                .into(),
                 phase: Some("recovered".into()),
                 progress: None,
                 recovery: Some(super::AgentRecoveryState {
@@ -3430,30 +3548,28 @@ impl AgentRuntime {
             turn_id: None,
             step_id: None,
             payload: super::AgentSessionEventPayload::AgentStatus {
-                status: super::AgentSessionStatus::Running,
+                status: if should_resume_running {
+                    super::AgentSessionStatus::Running
+                } else {
+                    super::AgentSessionStatus::Idle
+                },
                 reason: Some("reconciliationCompleted".into()),
             },
         });
         self.sessions
             .append_batch(&input.session_id, completion_payloads)?;
-        if let Some(entry) = self.agents.get(&input.session_id)? {
-            let turn_already_ended = events.iter().any(|event| {
-                event.turn_id == turn_id
-                    && matches!(
-                        event.payload,
-                        super::AgentSessionEventPayload::TurnEnd { .. }
-                    )
-            });
+        if let Some(entry) = entry {
             if turn_already_ended {
                 entry.set_scope(None)?;
+                entry.set_phase(AgentLifecyclePhase::Idle)?;
             } else if let Some(turn_id) = turn_id {
                 entry.set_scope(Some(super::AgentActiveScope {
                     turn_id,
                     step_id: None,
                 }))?;
+                entry.set_phase(AgentLifecyclePhase::Running)?;
+                self.wake(&input.session_id)?;
             }
-            entry.set_phase(AgentLifecyclePhase::Running)?;
-            self.wake(&input.session_id)?;
         }
         self.sessions.snapshot(&input.session_id)
     }
@@ -3548,6 +3664,18 @@ impl AgentRuntime {
                     };
                     if resume {
                         continue;
+                    }
+                    // Recheck after releasing the driver lease so concurrent approval/recovery
+                    // wakes or new inputs arriving after `pause_context_budget` are never lost.
+                    if !entry.cancellation().is_cancelled() {
+                        let phase = entry.phase().ok();
+                        let should_reacquire = phase == Some(super::AgentLifecyclePhase::Running)
+                            || (phase == Some(super::AgentLifecyclePhase::Idle)
+                                && sessions.has_ready_input(&entry.session_id).unwrap_or(false));
+                        if should_reacquire && entry.try_acquire_driver().unwrap_or(false) {
+                            lease = Some(ActiveDriverLease(Arc::clone(&entry)));
+                            continue;
+                        }
                     }
                     match tools.wait_for_expiry(&entry).await {
                         Ok(true) if !entry.cancellation().is_cancelled() => {

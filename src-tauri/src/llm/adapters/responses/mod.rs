@@ -12,16 +12,35 @@ pub(in crate::llm) static RESPONSES_REPLAY_CODEC: ResponsesReplayCodec = Respons
 
 fn sanitized_reasoning_item(value: &Value) -> Value {
     let mut output = serde_json::Map::new();
-    for key in [
-        "type",
-        "id",
-        "status",
-        "encrypted_content",
-        "summary",
-        "content",
-    ] {
-        if let Some(value) = value.get(key) {
-            output.insert(key.to_string(), value.clone());
+    for key in ["type", "id", "status", "encrypted_content"] {
+        if let Some(text) = value
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|text| !text.is_empty())
+        {
+            output.insert(key.to_string(), Value::String(text.to_string()));
+        }
+    }
+    for key in ["summary", "content"] {
+        if let Some(parts) = value.get(key).and_then(Value::as_array) {
+            let cleaned: Vec<Value> = parts
+                .iter()
+                .filter_map(|part| {
+                    let obj = part.as_object()?;
+                    let mut cleaned_part = serde_json::Map::new();
+                    for field in ["type", "text"] {
+                        if let Some(text) = obj
+                            .get(field)
+                            .and_then(Value::as_str)
+                            .filter(|text| !text.is_empty())
+                        {
+                            cleaned_part.insert(field.to_string(), Value::String(text.to_string()));
+                        }
+                    }
+                    (!cleaned_part.is_empty()).then_some(Value::Object(cleaned_part))
+                })
+                .collect();
+            output.insert(key.to_string(), Value::Array(cleaned));
         }
     }
     Value::Object(output)
@@ -546,12 +565,16 @@ pub(in crate::llm) fn response_function_call(
             "OpenAI function arguments exceeded the 64 KiB limit",
         ));
     }
-    let arguments = serde_json::from_str::<Value>(arguments).map_err(|error| {
-        NormalizedModelError::new(
-            NormalizedModelErrorKind::Protocol,
-            format!("OpenAI returned invalid tool arguments: {error}"),
-        )
-    })?;
+    let arguments = if arguments.trim().is_empty() {
+        Value::Object(serde_json::Map::new())
+    } else {
+        serde_json::from_str::<Value>(arguments).map_err(|error| {
+            NormalizedModelError::new(
+                NormalizedModelErrorKind::Protocol,
+                format!("OpenAI returned invalid tool arguments: {error}"),
+            )
+        })?
+    };
     if !arguments.is_object() {
         return Err(NormalizedModelError::new(
             NormalizedModelErrorKind::Protocol,
@@ -603,7 +626,7 @@ pub(in crate::llm) fn responses_output_blocks(
                     .collect::<String>();
                 blocks.push(ModelContentBlock::Reasoning {
                     text,
-                    provider_item: Some(item),
+                    provider_item: Some(sanitized_reasoning_item(&item)),
                 });
             }
             Some("function_call") => blocks.push(ModelContentBlock::ToolCall {
@@ -760,10 +783,18 @@ pub(in crate::llm) fn process_responses_event(
         Some("response.completed") => {
             *completed = true;
             if let Some(response) = value.get("response") {
-                if let Some(id) = response.get("id").and_then(Value::as_str) {
+                if let Some(id) = response
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+                {
                     replay_response["responseId"] = json!(id);
                 }
-                if let Some(model) = response.get("model").and_then(Value::as_str) {
+                if let Some(model) = response
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .filter(|model| !model.is_empty())
+                {
                     replay_response["model"] = json!(model);
                 }
             }

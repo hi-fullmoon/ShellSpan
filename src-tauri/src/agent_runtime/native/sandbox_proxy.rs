@@ -102,6 +102,28 @@ impl SandboxNetworkPolicy {
         rules.iter().any(|rule| domain_rule_matches(rule, &host))
     }
 
+    /// Returns an effective network policy combining this global policy with
+    /// session-scoped temporary domain allowances without mutating global mode.
+    pub(crate) fn with_extra_domains(&self, extra: &[String]) -> Self {
+        let mut normalized_extra = Vec::new();
+        for raw in extra {
+            if let Some(rule) = normalize_domain_rule(raw) {
+                normalized_extra.push(rule);
+            }
+        }
+        if normalized_extra.is_empty() {
+            return self.clone();
+        }
+        let mut merged: BTreeSet<String> = self.effective_rules().into_iter().collect();
+        for rule in normalized_extra {
+            merged.insert(rule);
+        }
+        Self {
+            mode: SandboxNetworkMode::CustomAllowlist,
+            custom_domains: merged.into_iter().collect(),
+        }
+    }
+
     pub(crate) fn prompt_summary(&self) -> String {
         match self.mode {
             SandboxNetworkMode::Blocked => "Outbound network is blocked.".into(),

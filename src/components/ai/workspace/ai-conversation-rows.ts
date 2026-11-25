@@ -67,9 +67,19 @@ export function groupTurnProcessChildren(
 export function conversationRows(nodes: readonly AiConversationNode[]): AiConversationRow[] {
   const rows: AiConversationRow[] = [];
   let process: AiConversationNodeOf<'turnProcess'> | undefined;
+  let turnProcesses: AiConversationNodeOf<'turnProcess'>[] = [];
   let controlIndex = -1;
   for (const node of nodes) {
     if (node.kind === 'turnProcess') {
+      if (
+        turnProcesses.length === 0
+        || turnProcesses[0].sessionId !== node.sessionId
+        || turnProcesses[0].turnId !== node.turnId
+      ) {
+        turnProcesses = [node];
+      } else {
+        turnProcesses.push(node);
+      }
       process = node;
       controlIndex = rows.length;
       const entries = groupTurnProcessChildren(node.children);
@@ -93,13 +103,32 @@ export function conversationRows(nodes: readonly AiConversationNode[]): AiConver
       }
     } else {
       if (process && (process.sessionId !== node.sessionId || process.turnId !== node.turnId
-        || node.kind === 'userMessage')) process = undefined;
+        || node.kind === 'userMessage')) {
+        if (process.sessionId !== node.sessionId || process.turnId !== node.turnId
+          || (node.kind === 'userMessage' && node.inputKind !== 'steer')) {
+          turnProcesses = [];
+        }
+        process = undefined;
+      }
       if (node.kind === 'assistantMessage' && process) {
         rows[controlIndex] = { ...rows[controlIndex], hasResponse: true };
       }
+      const tailProcess = node.kind === 'turnTail' && process && turnProcesses.length > 1
+        ? {
+            ...process,
+            firstSeq: turnProcesses[0].firstSeq,
+            hasStartBoundary: turnProcesses[0].hasStartBoundary,
+            children: turnProcesses.flatMap((segment) => segment.children),
+            childKeys: turnProcesses.flatMap((segment) => segment.childKeys),
+          }
+        : process;
       rows.push({
         node,
-        process: node.kind === 'assistantMessage' || node.kind === 'turnTail' ? process : undefined,
+        process: node.kind === 'assistantMessage'
+          ? process
+          : node.kind === 'turnTail'
+            ? tailProcess
+            : undefined,
       });
     }
   }

@@ -186,6 +186,7 @@ pub(crate) struct NativeToolEngine {
     pub(crate) tool_progress: ToolProgressHub,
     #[cfg(target_os = "macos")]
     mac_sandbox_paths: Arc<Mutex<Option<(PathBuf, Option<PathBuf>)>>>,
+    session_sandbox_domains: Arc<Mutex<std::collections::HashMap<String, std::collections::BTreeSet<String>>>>,
     #[cfg(all(test, target_os = "linux"))]
     local_sandbox: Option<local_sandbox_acceptance::Launcher>,
 }
@@ -220,6 +221,7 @@ impl NativeToolEngine {
             tool_progress: ToolProgressHub::default(),
             #[cfg(target_os = "macos")]
             mac_sandbox_paths: Arc::new(Mutex::new(None)),
+            session_sandbox_domains: Arc::new(Mutex::new(std::collections::HashMap::new())),
             #[cfg(all(test, target_os = "linux"))]
             local_sandbox: None,
         }
@@ -227,6 +229,45 @@ impl NativeToolEngine {
 }
 
 impl NativeToolEngine {
+    pub(crate) fn allow_session_sandbox_domain(
+        &self,
+        session_id: &str,
+        domain: &str,
+    ) -> Result<Vec<String>, String> {
+        let normalized = super::sandbox_proxy::normalize_domain_rule(domain)
+            .ok_or_else(|| format!("Invalid sandbox domain rule: {domain}"))?;
+        let mut guard = self
+            .session_sandbox_domains
+            .lock()
+            .map_err(|_| "Session sandbox domain store is unavailable".to_string())?;
+        let entry = guard.entry(session_id.to_string()).or_default();
+        entry.insert(normalized);
+        Ok(entry.iter().cloned().collect())
+    }
+
+    pub(crate) fn session_sandbox_domains(&self, session_id: &str) -> Vec<String> {
+        self.session_sandbox_domains
+            .lock()
+            .ok()
+            .and_then(|guard| guard.get(session_id).map(|set| set.iter().cloned().collect()))
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn clear_session_sandbox_domains(&self, session_id: &str) {
+        if let Ok(mut guard) = self.session_sandbox_domains.lock() {
+            guard.remove(session_id);
+        }
+    }
+
+    pub(crate) fn effective_sandbox_network_policy(
+        &self,
+        database: &Database,
+        session_id: &str,
+    ) -> Result<super::sandbox_proxy::SandboxNetworkPolicy, String> {
+        let global = database.agent_sandbox_network_policy()?;
+        let extra = self.session_sandbox_domains(session_id);
+        Ok(global.with_extra_domains(&extra))
+    }
     pub(crate) fn set_tool_progress_publisher(
         &self,
         publisher: ToolProgressPublisher,

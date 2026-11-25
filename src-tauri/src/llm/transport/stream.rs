@@ -218,7 +218,11 @@ pub(in crate::llm) async fn checked_stream_response(
         error.retry_after_ms = retry_after_ms;
         error
     })?
-    .map_err(|error| NormalizedModelError::new(NormalizedModelErrorKind::Terminal, error))?
+    .map_err(|error| {
+        let mut normalized = normalize_provider_error(status.as_u16(), &error);
+        normalized.retry_after_ms = retry_after_ms;
+        normalized
+    })?
     .ok_or_else(NormalizedModelError::cancelled)?;
     let text = String::from_utf8_lossy(&body).into_owned();
     let mut error = normalize_provider_error(status.as_u16(), &text);

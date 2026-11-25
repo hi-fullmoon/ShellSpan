@@ -267,6 +267,7 @@ export interface LocalSandboxPtyBinding {
   readonly workspaceRoot: string;
   readonly policyDigest: string;
   readonly networkMode: import('@/stores/aiSettingsStore').AgentSandboxNetworkMode;
+  readonly allowedDomains?: readonly string[];
 }
 
 export interface SessionPtyInfo {

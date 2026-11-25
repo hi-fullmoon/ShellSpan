@@ -436,6 +436,26 @@ impl TerminalInteractiveRegistry {
             task_id,
             &registration.operation_id,
         )?;
+        {
+            let mut state = self
+                .state
+                .lock()
+                .map_err(|_| "TERMINAL_INTERACTIVE_REGISTRY_UNAVAILABLE".to_string())?;
+            if state.active.contains_key(session_id) {
+                drop(state);
+                let _ = self.leases.release(
+                    session_id,
+                    agent_session_id,
+                    task_id,
+                    &registration.operation_id,
+                    TerminalLeaseReleaseReason::Failed,
+                );
+                return Err("TERMINAL_INTERACTIVE_BUSY".into());
+            }
+            state
+                .active
+                .insert(session_id.to_string(), registration.clone());
+        }
         if let Err(error) = self.leases.wait_frontend_ready(
             session_id,
             agent_session_id,
@@ -443,6 +463,15 @@ impl TerminalInteractiveRegistry {
             &registration.operation_id,
             FRONTEND_READY_TIMEOUT,
         ) {
+            if let Ok(mut state) = self.state.lock() {
+                if state
+                    .active
+                    .get(session_id)
+                    .is_some_and(|active| active.operation_id == registration.operation_id)
+                {
+                    state.active.remove(session_id);
+                }
+            }
             let _ = self.leases.release(
                 session_id,
                 agent_session_id,
@@ -452,24 +481,16 @@ impl TerminalInteractiveRegistry {
             );
             return Err(error);
         }
-        let mut state = self
+        let still_active = self
             .state
             .lock()
-            .map_err(|_| "TERMINAL_INTERACTIVE_REGISTRY_UNAVAILABLE".to_string())?;
-        if state.active.contains_key(session_id) {
-            drop(state);
-            let _ = self.leases.release(
-                session_id,
-                agent_session_id,
-                task_id,
-                &registration.operation_id,
-                TerminalLeaseReleaseReason::Failed,
-            );
-            return Err("TERMINAL_INTERACTIVE_BUSY".into());
-        }
-        state
+            .map_err(|_| "TERMINAL_INTERACTIVE_REGISTRY_UNAVAILABLE".to_string())?
             .active
-            .insert(session_id.to_string(), registration.clone());
+            .get(session_id)
+            .is_some_and(|active| active.operation_id == registration.operation_id);
+        if !still_active {
+            return Err("TERMINAL_INTERACTIVE_CANCELLED".into());
+        }
         Ok(registration)
     }
 

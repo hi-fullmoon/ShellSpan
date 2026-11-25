@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { FolderSyncIcon, RefreshCwIcon, AlertTriangleIcon } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { FolderSyncIcon, RefreshCwIcon, AlertTriangleIcon, Undo2Icon } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import {
   Dialog,
   DialogContent,
@@ -19,16 +20,27 @@ import { aiErrorMessage } from '@/lib/ai/error-message';
 import {
   invokeSandboxApply,
   invokeSandboxDiff,
+  invokeSandboxDiscard,
   invokeSandboxFileDiff,
   type SandboxDiffReport,
   type SandboxFileDiffPreview,
 } from '@/lib/ipc/tauri';
+import {
+  notifySandboxSyncUpdated,
+  SANDBOX_SYNC_UPDATED_EVENT,
+} from '@/lib/terminal/sandbox-terminal';
 
 interface SandboxSyncDialogProps {
   readonly sessionId: string;
+  readonly refreshEnabled?: boolean;
+  readonly refreshSignal?: number;
 }
 
-export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.ReactElement | null {
+export function SandboxSyncDialog({
+  sessionId,
+  refreshEnabled = true,
+  refreshSignal,
+}: SandboxSyncDialogProps): React.ReactElement | null {
   const { t } = useI18n();
   const { error: showError, success: showSuccess } = useToast();
   const [open, setOpen] = useState(false);
@@ -36,31 +48,42 @@ export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.
   const [available, setAvailable] = useState(false);
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [allowOverwriteConflicts, setAllowOverwriteConflicts] = useState(false);
   const [applyErrors, setApplyErrors] = useState<readonly string[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
   const [preview, setPreview] = useState<SandboxFileDiffPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const diffRequestSeqRef = useRef(0);
+  const previewRequestSeqRef = useRef(0);
 
   const loadPreview = useCallback(async (path: string) => {
+    const seq = ++previewRequestSeqRef.current;
     setActivePath(path);
     setPreviewLoading(true);
     try {
       const next = await invokeSandboxFileDiff(sessionId, path);
+      if (seq !== previewRequestSeqRef.current) return;
       setPreview(next);
     } catch {
+      if (seq !== previewRequestSeqRef.current) return;
       setPreview(null);
       showError(t('ai.sandboxSync.previewFailed'));
     } finally {
-      setPreviewLoading(false);
+      if (seq === previewRequestSeqRef.current) {
+        setPreviewLoading(false);
+      }
     }
   }, [sessionId, showError, t]);
 
   const loadDiff = useCallback(async (showFailureToast: boolean) => {
+    const seq = ++diffRequestSeqRef.current;
     setLoading(true);
     try {
       const next = await invokeSandboxDiff(sessionId);
+      if (seq !== diffRequestSeqRef.current) return;
       setReport(next);
       setAvailable(next !== null);
       if (next) {
@@ -81,15 +104,32 @@ export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.
         setPreview(null);
       }
     } catch {
-      if (showFailureToast) showError(t('ai.sandboxSync.loadFailed'));
+      if (seq === diffRequestSeqRef.current && showFailureToast) {
+        showError(t('ai.sandboxSync.loadFailed'));
+      }
     } finally {
-      setLoading(false);
+      if (seq === diffRequestSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, [sessionId, showError, t]);
 
   useEffect(() => {
+    if (!refreshEnabled && refreshSignal !== undefined) return;
     void loadDiff(false);
-  }, [loadDiff]);
+  }, [loadDiff, refreshEnabled, refreshSignal]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onUpdated = (event: Event): void => {
+      const updatedSessionId: unknown = (event as CustomEvent).detail;
+      if (updatedSessionId === sessionId) {
+        void loadDiff(false);
+      }
+    };
+    window.addEventListener(SANDBOX_SYNC_UPDATED_EVENT, onUpdated);
+    return () => window.removeEventListener(SANDBOX_SYNC_UPDATED_EVENT, onUpdated);
+  }, [loadDiff, sessionId]);
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
@@ -120,8 +160,10 @@ export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.
     }
   };
 
+  const busy = applying || discarding;
+
   const handleApply = async () => {
-    if (!report || selected.size === 0 || applying) return;
+    if (!report || selected.size === 0 || busy) return;
     setApplying(true);
     setApplyErrors([]);
     const hasSelectedConflicts = report.changes.some((item) => item.conflict && selected.has(item.path));
@@ -136,7 +178,11 @@ export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.
       } else if (result.applied.length > 0) {
         showSuccess(t('ai.sandboxSync.applySuccess', { count: result.applied.length }));
       }
-      await loadDiff(false);
+      if (result.applied.length > 0) {
+        notifySandboxSyncUpdated(sessionId);
+      } else {
+        await loadDiff(false);
+      }
     } catch (error) {
       const raw = error instanceof Error ? error.message : String(error);
       const translated = aiErrorMessage(raw, t);
@@ -146,9 +192,51 @@ export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.
     }
   };
 
+  const handleDiscard = async () => {
+    if (!report || selected.size === 0 || busy) return;
+    setDiscarding(true);
+    setApplyErrors([]);
+    try {
+      const result = await invokeSandboxDiscard({
+        sessionId,
+        paths: [...selected],
+      });
+      if (result.errors.length > 0) {
+        setApplyErrors(result.errors);
+      } else if (result.discarded.length > 0) {
+        showSuccess(t('ai.sandboxSync.discardSuccess', { count: result.discarded.length }));
+      }
+      if (result.discarded.length > 0) {
+        notifySandboxSyncUpdated(sessionId);
+      } else {
+        await loadDiff(false);
+      }
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : String(error);
+      const translated = aiErrorMessage(raw, t);
+      showError(translated !== raw ? translated : t('ai.sandboxSync.discardFailed'));
+    } finally {
+      setDiscarding(false);
+    }
+  };
+
   if (!available) return null;
 
   const pendingCount = report?.totalChanges ?? 0;
+  const skippedCount = report?.skippedCount ?? 0;
+  const selectablePaths = (report?.changes ?? [])
+    .filter((item) => allowOverwriteConflicts || !item.conflict)
+    .map((item) => item.path);
+  const allSelectableChecked = selectablePaths.length > 0
+    && selectablePaths.every((path) => selected.has(path));
+
+  const handleToggleSelectAll = () => {
+    if (allSelectableChecked) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(selectablePaths));
+    }
+  };
 
   return (
     <>
@@ -181,6 +269,11 @@ export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.
             <DialogDescription>
               {report ? t('ai.sandboxSync.description', { sourceRoot: report.sourceRoot }) : t('ai.sandboxSync.loading')}
             </DialogDescription>
+            {skippedCount > 0 && (
+              <p className="text-xs text-muted-foreground" data-testid="sandbox-sync-skipped-hint">
+                {t('ai.sandboxSync.skippedHint', { count: skippedCount })}
+              </p>
+            )}
           </DialogHeader>
 
           <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -216,8 +309,23 @@ export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.
             )}
 
             <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 sm:grid-cols-[minmax(0,240px)_minmax(0,1fr)]">
-              <ScrollArea className="min-h-0 rounded-md border">
-                <div className="flex flex-col gap-1 p-2">
+              <div className="flex min-h-0 flex-col rounded-md border">
+                {report && report.changes.length > 0 && (
+                  <div className="flex shrink-0 items-center justify-between gap-2 border-b px-2.5 py-1.5 text-xs text-muted-foreground">
+                    <span>{t('ai.sandboxSync.selectedCount', { selected: selected.size, total: report.changes.length })}</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      disabled={applying || selectablePaths.length === 0}
+                      onClick={handleToggleSelectAll}
+                    >
+                      {t(allSelectableChecked ? 'ai.sandboxSync.clearSelection' : 'ai.sandboxSync.selectAll')}
+                    </Button>
+                  </div>
+                )}
+                <ScrollArea className="min-h-0 flex-1">
+                  <div className="flex flex-col gap-1 p-2">
                   {loading && !report ? (
                     <p className="py-6 text-center text-xs text-muted-foreground">
                       {t('ai.sandboxSync.loading')}
@@ -260,8 +368,9 @@ export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.
                       );
                     })
                   )}
-                </div>
-              </ScrollArea>
+                  </div>
+                </ScrollArea>
+              </div>
 
               <ScrollArea className="min-h-0 rounded-md border bg-muted/20">
                 <div className="p-2 font-mono text-[11px] leading-5">
@@ -313,7 +422,7 @@ export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.
               variant="outline"
               size="sm"
               className="gap-1"
-              disabled={loading || applying}
+              disabled={loading || busy}
               onClick={() => void loadDiff(true)}
             >
               <RefreshCwIcon className="size-3.5" />
@@ -321,8 +430,23 @@ export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.
             </Button>
             <Button
               type="button"
+              variant="destructiveOutline"
               size="sm"
-              disabled={loading || applying || selected.size === 0}
+              className="gap-1"
+              disabled={loading || busy || selected.size === 0}
+              onClick={() => setDiscardConfirmOpen(true)}
+            >
+              <Undo2Icon className="size-3.5" />
+              <span>
+                {discarding
+                  ? t('ai.sandboxSync.discarding')
+                  : t('ai.sandboxSync.discard', { count: selected.size })}
+              </span>
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={loading || busy || selected.size === 0}
               onClick={() => void handleApply()}
             >
               {applying
@@ -332,6 +456,19 @@ export function SandboxSyncDialog({ sessionId }: SandboxSyncDialogProps): React.
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ConfirmationDialog
+        textOnlyActions
+        open={discardConfirmOpen}
+        onOpenChange={setDiscardConfirmOpen}
+        title={t('ai.sandboxSync.discardConfirmTitle', { count: selected.size })}
+        description={t('ai.sandboxSync.discardConfirmDescription')}
+        confirmLabel={t('ai.sandboxSync.discardConfirmAction')}
+        confirmVariant="destructive"
+        onConfirm={() => {
+          setDiscardConfirmOpen(false);
+          void handleDiscard();
+        }}
+      />
     </>
   );
 }

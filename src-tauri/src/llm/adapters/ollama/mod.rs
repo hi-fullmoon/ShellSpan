@@ -267,7 +267,11 @@ pub(in crate::llm) fn process_ollama_line(
         ("created_at", "createdAt"),
         ("done_reason", "doneReason"),
     ] {
-        if let Some(value) = value.get(source).and_then(Value::as_str) {
+        if let Some(value) = value
+            .get(source)
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
             accumulated
                 .replay_response
                 .insert(target.to_string(), json!(value));
@@ -325,20 +329,67 @@ pub(in crate::llm) fn process_ollama_line(
         .pointer("/message/tool_calls")
         .and_then(Value::as_array)
     {
-        for (index, call) in tool_calls.iter().enumerate() {
+        for (position, call) in tool_calls.iter().enumerate() {
+            let incoming_id = call
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty());
+            let incoming_name = call.pointer("/function/name").and_then(Value::as_str);
+            let explicit_index = call
+                .pointer("/function/index")
+                .and_then(Value::as_u64)
+                .or_else(|| call.get("index").and_then(Value::as_u64))
+                .map(|index| index as usize);
+            let index = match explicit_index {
+                Some(index) => index,
+                None => {
+                    let collides = accumulated.calls.get(&position).is_some_and(|existing| {
+                        let id_differs = match (existing.id.as_deref(), incoming_id) {
+                            (Some(prev), Some(next)) if !prev.is_empty() => {
+                                !next.starts_with(prev) && !prev.starts_with(next)
+                            }
+                            _ => false,
+                        };
+                        let name_differs = incoming_name.is_some_and(|next| {
+                            !existing.name.is_empty()
+                                && !next.is_empty()
+                                && !next.starts_with(&existing.name)
+                                && !existing.name.starts_with(next)
+                        });
+                        let complete_args_differs = !existing.arguments.is_empty()
+                            && serde_json::from_str::<Value>(&existing.arguments).is_ok()
+                            && call
+                                .pointer("/function/arguments")
+                                .is_some_and(|args| match args {
+                                    Value::String(text) => text != &existing.arguments,
+                                    other => other.to_string() != existing.arguments,
+                                });
+                        id_differs || name_differs || complete_args_differs
+                    });
+                    if collides {
+                        accumulated
+                            .calls
+                            .keys()
+                            .next_back()
+                            .map_or(0, |last| last + 1)
+                    } else {
+                        position
+                    }
+                }
+            };
             let block_index = accumulated.index_for(ChatBlockKey::Tool(index));
             let accumulator = accumulated.calls.entry(index).or_default();
             let mut call_id = None;
             let mut name_delta = None;
             let mut arguments_delta = None;
-            if let Some(id) = call.get("id").and_then(Value::as_str) {
+            if let Some(id) = incoming_id {
                 let prior = accumulator.id.get_or_insert_with(String::new);
                 let delta = append_and_delta(prior, id, true);
                 if !delta.is_empty() {
                     call_id = Some(delta);
                 }
             }
-            if let Some(name) = call.pointer("/function/name").and_then(Value::as_str) {
+            if let Some(name) = incoming_name {
                 let delta = append_and_delta(&mut accumulator.name, name, true);
                 if !delta.is_empty() {
                     name_delta = Some(delta);

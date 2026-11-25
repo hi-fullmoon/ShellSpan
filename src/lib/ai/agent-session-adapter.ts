@@ -449,11 +449,24 @@ interface DerivedSessionMetadata {
   readonly header: AgentSessionSnapshot['header'];
   readonly recovery: import('@/types/agent-session').AgentSessionRecoveryState;
   readonly ended: boolean;
+  readonly uncertainNativeEffects: boolean;
   readonly inbox: ReturnType<typeof projectAgentInbox>;
   readonly pendingQuestion: ReturnType<typeof projectQuestions>[number] | null;
   readonly pendingSkillProposal: ReturnType<typeof projectSkillProposals>[number] | null;
   readonly committedOperationIds: readonly string[];
   readonly contextUsage: ReturnType<typeof projectContextUsage>;
+}
+
+function hasRetainedImagesInEvents(events: readonly AgentSessionEvent[]): boolean {
+  let retained = false;
+  for (const event of events) {
+    if (event.type === 'compaction/summary') {
+      retained = false;
+    } else if (event.type === 'user/message' && (event.data.message.images?.length ?? 0) > 0) {
+      retained = true;
+    }
+  }
+  return retained;
 }
 
 function deriveSessionMetadata(
@@ -463,6 +476,7 @@ function deriveSessionMetadata(
   const header = { ...snapshot.header };
   let recovery: import('@/types/agent-session').AgentSessionRecoveryState = snapshot.recovery;
   let ended = false;
+  const unresolvedExecutions = new Set<string>();
   for (const event of events) {
     if (event.type === 'task/state' && event.data.recovery) recovery = event.data.recovery;
     if (event.type === 'session/model_selected') header.modelSelection = event.data.provider;
@@ -473,6 +487,11 @@ function deriveSessionMetadata(
       header.permissionMode = 'requestApproval';
       recovery = { status: 'none' };
     }
+    if (event.type === 'tool/execution') {
+      unresolvedExecutions.add(`${event.stepId ?? ''}\u0000${event.data.callId}`);
+    } else if (event.type === 'tool/result' && event.data.status !== 'uncertain') {
+      unresolvedExecutions.delete(`${event.stepId ?? ''}\u0000${event.data.callId}`);
+    }
     if (event.type === 'session/ended') ended = true;
     else if (event.type === 'session/resumed' || event.type === 'subagent/recovery_started') ended = false;
   }
@@ -480,6 +499,9 @@ function deriveSessionMetadata(
     header,
     recovery,
     ended,
+    uncertainNativeEffects: events.length > 0
+      ? unresolvedExecutions.size > 0
+      : Boolean(snapshot.uncertainNativeEffects),
     inbox: projectAgentInbox(events),
     pendingQuestion: projectQuestions(events).find((q) => q.status === 'pending') ?? null,
     pendingSkillProposal: projectSkillProposals(events).find((p) => p.status === 'pending') ?? null,
@@ -540,6 +562,7 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
         ...state.snapshot,
         status: activity.status,
         ended: derived.ended,
+        uncertainNativeEffects: derived.uncertainNativeEffects,
         header,
         task,
       },
@@ -981,9 +1004,10 @@ export function createAgentSessionAdapter(
       const view = await openEntry(sessionId);
       if (defersSettings(view)) {
         const value = view.snapshot.value;
+        const liveEvents = entries.get(sessionId)?.client.state().events ?? [];
         const retainedImages = value.surface.messages.some(m => m.role === 'userImages')
-          || value.inbox.nextTurn.some(m => (m.images?.length ?? 0) > 0)
-          || value.inbox.nextStep.some(m => (m.images?.length ?? 0) > 0);
+          || view.inbox.some(m => !m.consumed && (m.images?.length ?? 0) > 0)
+          || hasRetainedImagesInEvents(liveEvents);
         if (retainedImages) requireVision(provider);
         recordDeferredSetting(sessionId, { model: selection });
         return;
@@ -1108,7 +1132,9 @@ export function createAgentSessionAdapter(
       // An idle restored Session needs an owning runtime before its next input. start is idempotent.
       // A text follow-up still sends retained image bytes. Reattach after process restart
       // and apply the same vision preflight before accepting more Inbox content.
-      const retainedImages = view.snapshot.value.surface.messages.some(m => m.role === 'userImages');
+      const liveEvents = entries.get(resolvedSessionId)?.client.state().events ?? [];
+      const retainedImages = view.snapshot.value.surface.messages.some(m => m.role === 'userImages')
+        || hasRetainedImagesInEvents(liveEvents);
       if (retainedImages) requireVision(input.provider);
       if (hasImages || (!paused && (input.mode === 'start' || view.status === 'idle' || retainedImages))) {
         const selection = deferredModel

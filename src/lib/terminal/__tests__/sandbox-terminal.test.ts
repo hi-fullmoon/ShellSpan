@@ -17,7 +17,10 @@ vi.mock('@/lib/ipc/tauri', async (importOriginal) => {
 import {
   ensureManagedSandboxTerminal,
   findManagedSandboxTerminal,
+  hasSandboxPtyPolicyDrifted,
+  normalizeSandboxDomainRule,
   restartManagedSandboxTerminalIfOpen,
+  validateSandboxAllowlistInput,
 } from '@/lib/terminal/sandbox-terminal';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useTerminalStore } from '@/stores/terminalStore';
@@ -136,5 +139,37 @@ describe('ensureManagedSandboxTerminal', () => {
       )),
     }));
     expect(await restartManagedSandboxTerminalIfOpen('agent-1')).toBe('failed');
+  });
+});
+
+describe('sandbox allowlist validation and policy drift detection', () => {
+  it('validates domain rules and flags schemes, ports, IPs, and invalid wildcards', () => {
+    expect(normalizeSandboxDomainRule('Registry.NPMjs.org.')).toBe('registry.npmjs.org');
+    expect(normalizeSandboxDomainRule('*.corp.internal')).toBe('*.corp.internal');
+    expect(normalizeSandboxDomainRule('https://registry.npmjs.org')).toBeNull();
+    expect(normalizeSandboxDomainRule('127.0.0.1')).toBeNull();
+    expect(normalizeSandboxDomainRule('*.com')).toBeNull();
+    expect(normalizeSandboxDomainRule('localhost')).toBeNull();
+
+    const parsed = validateSandboxAllowlistInput(
+      'registry.npmmirror.com, https://bad.example.com, *.corp.internal; 10.0.0.1',
+    );
+    expect(parsed.valid).toEqual(['registry.npmmirror.com', '*.corp.internal']);
+    expect(parsed.invalid).toEqual(['https://bad.example.com', '10.0.0.1']);
+  });
+
+  it('detects drift when custom allowlist domains change even if network mode stays customAllowlist', () => {
+    const binding = {
+      agentSessionId: 'agent-1',
+      kind: 'macNono' as const,
+      workspaceRoot: '/Users/demo/.shellspan/sandboxes/ws-1/workspace',
+      policyDigest: 'digest-1',
+      networkMode: 'customAllowlist' as const,
+      allowedDomains: ['a.example.com', 'b.example.com'],
+    };
+    expect(hasSandboxPtyPolicyDrifted(binding, 'customAllowlist', ['b.example.com', 'a.example.com'])).toBe(false);
+    expect(hasSandboxPtyPolicyDrifted(binding, 'customAllowlist', ['a.example.com'])).toBe(true);
+    expect(hasSandboxPtyPolicyDrifted(binding, 'customAllowlist', ['a.example.com', 'b.example.com', 'c.example.com'])).toBe(true);
+    expect(hasSandboxPtyPolicyDrifted(binding, 'devRegistries', ['a.example.com', 'b.example.com'])).toBe(true);
   });
 });

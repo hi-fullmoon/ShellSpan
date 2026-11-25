@@ -493,3 +493,33 @@ it.each([
   expect(client.state().events).toEqual([created]);
   client.disconnect();
 });
+
+it('serializes concurrent reconnect calls instead of aborting earlier callers', async () => {
+  const source = transport([created]);
+  let resolveFirstSnapshot!: () => void;
+  const firstSnapshotGate = new Promise<void>((resolve) => {
+    resolveFirstSnapshot = resolve;
+  });
+  let calls = 0;
+  const client = createClient('session-fixture', {
+    ...source,
+    snapshot: async (sessionId) => {
+      calls += 1;
+      if (calls === 2) {
+        await firstSnapshotGate;
+      }
+      return source.snapshot(sessionId);
+    },
+  });
+  await client.connect();
+
+  const first = client.reconnect();
+  const second = client.reconnect();
+  resolveFirstSnapshot();
+
+  const [firstState, secondState] = await Promise.all([first, second]);
+  expect(firstState.lastCommittedSeq).toBe(0);
+  expect(secondState.lastCommittedSeq).toBe(0);
+  expect(calls).toBe(3);
+  client.disconnect();
+});

@@ -1,17 +1,27 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { CheckIcon, CopyIcon, ShieldCheckIcon, TerminalIcon } from 'lucide-react';
+import { CheckIcon, CopyIcon, FolderOpenIcon, ShieldCheckIcon, TerminalIcon } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useI18n } from '@/hooks/useI18n';
-import { invokeGetProfileSandbox, isTauriRuntime } from '@/lib/ipc/tauri';
+import { useToast } from '@/hooks/useToast';
+import {
+  invokeGetProfileSandbox,
+  invokeRevealPath,
+  invokeSandboxWorkspaceInfo,
+  isTauriRuntime,
+  type SandboxWorkspaceSourceInfo,
+} from '@/lib/ipc/tauri';
+import { hasSandboxPtyPolicyDrifted } from '@/lib/terminal/sandbox-terminal';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
-import type { SandboxMode } from '@/types';
+import type { LocalSandboxPtyBinding, SandboxMode } from '@/types';
 import type { AgentSessionTarget } from '@/types/agent-session';
 
 interface SandboxStatusBadgeProps {
+  readonly sessionId?: string | null;
   readonly target?: AgentSessionTarget | null;
   readonly remoteSandboxMode?: SandboxMode | null;
+  readonly boundSandbox?: LocalSandboxPtyBinding | null;
   readonly onOpenSandboxTerminal?: () => void;
   readonly openSandboxTerminalDisabled?: boolean;
 }
@@ -32,15 +42,19 @@ function formatSandboxWorkspacePath(path: string, isLocalManaged: boolean): stri
 }
 
 export function SandboxStatusBadge({
+  sessionId,
   target,
   remoteSandboxMode,
+  boundSandbox,
   onOpenSandboxTerminal,
   openSandboxTerminalDisabled = false,
 }: SandboxStatusBadgeProps): React.ReactElement | null {
   const { t } = useI18n();
+  const { error: showError } = useToast();
   const networkMode = useAiSettingsStore((state) => state.agentSandboxNetworkMode);
   const networkAllowlist = useAiSettingsStore((state) => state.agentSandboxNetworkAllowlist);
   const [loadedRemoteMode, setLoadedRemoteMode] = useState<SandboxMode | null>(null);
+  const [workspaceInfo, setWorkspaceInfo] = useState<SandboxWorkspaceSourceInfo | null>(null);
   const [open, setOpen] = useState(false);
   const [copiedPath, setCopiedPath] = useState(false);
   const copyTimerRef = useRef<number | null>(null);
@@ -73,6 +87,25 @@ export function SandboxStatusBadge({
     };
   }, [remoteProfileId, remoteSandboxMode]);
 
+  useEffect(() => {
+    setWorkspaceInfo(null);
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!open || !localKind || !sessionId || !isTauriRuntime()) return;
+    let cancelled = false;
+    void invokeSandboxWorkspaceInfo(sessionId)
+      .then((info) => {
+        if (!cancelled) setWorkspaceInfo(info);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaceInfo(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [localKind, open, sessionId]);
+
   if (!target) return null;
   if (!localKind && !isRemoteSandbox) return null;
 
@@ -90,10 +123,22 @@ export function SandboxStatusBadge({
             ? t('ai.sandboxStatus.backend.remoteBubblewrapWrite')
             : t('ai.sandboxStatus.backend.remote');
 
-  const networkLabel = localKind === 'macNono' && networkMode === 'devRegistries'
+  const effectiveLocalNetworkMode = localKind === 'macNono'
+    ? (boundSandbox?.networkMode ?? networkMode)
+    : 'blocked';
+  const effectiveLocalAllowlistCount = localKind === 'macNono'
+    ? (boundSandbox?.allowedDomains?.length ?? networkAllowlist.length)
+    : 0;
+  const boundPolicyDrifted = Boolean(
+    localKind === 'macNono'
+    && boundSandbox
+    && hasSandboxPtyPolicyDrifted(boundSandbox, networkMode, networkAllowlist),
+  );
+
+  const networkLabel = localKind === 'macNono' && effectiveLocalNetworkMode === 'devRegistries'
     ? t('ai.sandboxStatus.networkDevRegistries')
-    : localKind === 'macNono' && networkMode === 'customAllowlist' && networkAllowlist.length > 0
-      ? t('ai.sandboxStatus.networkCustomAllowlist', { count: networkAllowlist.length })
+    : localKind === 'macNono' && effectiveLocalNetworkMode === 'customAllowlist' && effectiveLocalAllowlistCount > 0
+      ? t('ai.sandboxStatus.networkCustomAllowlist', { count: effectiveLocalAllowlistCount })
       : !localKind && effectiveRemoteMode === 'clientReadOnly'
         ? t('ai.sandboxStatus.networkClientReadOnly')
         : t('ai.sandboxStatus.networkBlocked');
@@ -119,6 +164,13 @@ export function SandboxStatusBadge({
         copyTimerRef.current = null;
       }, 1500);
     }).catch(() => undefined);
+  };
+
+  const handleRevealWorkspacePath = (): void => {
+    if (!workspacePath || !localKind || !isTauriRuntime()) return;
+    void invokeRevealPath(workspacePath).catch(() => {
+      showError(t('ai.sandboxStatus.revealFailed'));
+    });
   };
 
   return (
@@ -153,6 +205,17 @@ export function SandboxStatusBadge({
               <dt className="shrink-0">{t('ai.sandboxStatus.networkLabel')}</dt>
               <dd className="text-right text-foreground">{networkLabel}</dd>
             </div>
+            {localKind && workspaceInfo && (
+              <div className="flex items-start justify-between gap-2" data-testid="sandbox-status-source">
+                <dt className="shrink-0">{t('ai.sandboxStatus.sourceLabel')}</dt>
+                <dd
+                  className="min-w-0 truncate text-right text-foreground"
+                  title={workspaceInfo.sourceRoot ?? t('ai.sandboxStatus.blankWorkspace')}
+                >
+                  {workspaceInfo.sourceRoot ?? t('ai.sandboxStatus.blankWorkspace')}
+                </dd>
+              </div>
+            )}
             {workspacePath && (
               <div className="flex flex-col gap-0.5">
                 <dt>{t('ai.sandboxStatus.workspaceLabel')}</dt>
@@ -160,6 +223,19 @@ export function SandboxStatusBadge({
                   <span className="min-w-0 flex-1 break-all" title={workspacePath}>
                     {displayWorkspacePath}
                   </span>
+                  {localKind && isTauriRuntime() && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      className="size-5 shrink-0 text-muted-foreground hover:text-foreground"
+                      aria-label={t('ai.sandboxStatus.revealWorkspace')}
+                      title={t('ai.sandboxStatus.revealWorkspace')}
+                      onClick={handleRevealWorkspacePath}
+                    >
+                      <FolderOpenIcon aria-hidden="true" className="size-3" />
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     variant="ghost"
@@ -182,6 +258,11 @@ export function SandboxStatusBadge({
           <p className="text-[11px] leading-relaxed text-muted-foreground">
             {boundaryHint}
           </p>
+          {boundPolicyDrifted && (
+            <p className="text-[11px] leading-relaxed text-amber-600 dark:text-amber-400" data-testid="sandbox-status-drift-hint">
+              {t('ai.sandboxStatus.policyDriftHint')}
+            </p>
+          )}
           {onOpenSandboxTerminal && (
             <Button
               type="button"

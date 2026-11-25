@@ -171,12 +171,30 @@ export class AgentSessionCommittedClient {
     }
   }
 
+  private reconnectQueue: Promise<unknown> = Promise.resolve();
+  private disconnectEpoch = 0;
+
   async reconnect(): Promise<AgentSessionStreamState> {
-    this.disconnect();
-    return this.connect();
+    const epoch = this.disconnectEpoch;
+    const next = this.reconnectQueue.then(() => {
+      if (epoch !== this.disconnectEpoch) {
+        const controller = new AbortController();
+        controller.abort();
+        controller.signal.throwIfAborted();
+      }
+      this.resetConnection();
+      return this.connect();
+    });
+    this.reconnectQueue = next.catch(() => undefined);
+    return next;
   }
 
   disconnect(): void {
+    this.disconnectEpoch += 1;
+    this.resetConnection();
+  }
+
+  private resetConnection(): void {
     this.connection?.abort();
     this.connection = undefined;
     this.connecting = undefined;

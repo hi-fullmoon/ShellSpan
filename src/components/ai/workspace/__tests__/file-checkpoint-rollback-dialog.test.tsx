@@ -228,4 +228,64 @@ describe('FileCheckpointRollbackDialog', () => {
       await screen.findByText('ai.checkpointRollback.confirmConflictTrashLocal:{"path":"/tmp/new-file.conf"}'),
     ).toBeInTheDocument();
   });
+
+  it('discards stale preview responses when switching between checkpoints rapidly', async () => {
+    const cp1 = {
+      checkpointId: 'cp-1',
+      taskId: 'task-1',
+      targetId: 'local-1',
+      targetKind: 'local' as const,
+      targetPath: '/tmp/first.conf',
+      originalSha256: 'sha-1',
+      postWriteSha256: 'sha-1b',
+      originalByteLength: 10,
+      createdAtUnixMs: 1_700_000_000_000,
+      expiresAtUnixMs: 1_700_604_800_000,
+    };
+    const cp2 = {
+      ...cp1,
+      checkpointId: 'cp-2',
+      targetPath: '/tmp/second.conf',
+    };
+    invokeListFileCheckpoints.mockResolvedValue([cp1, cp2]);
+
+    let resolveFirstPreview!: (value: unknown) => void;
+    invokePreviewFileCheckpoint
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirstPreview = resolve; }))
+      .mockResolvedValueOnce({
+        checkpointId: 'cp-2',
+        targetPath: '/tmp/second.conf',
+        targetKind: 'local',
+        existedBefore: true,
+        currentExists: true,
+        unchanged: false,
+        modifiedAfterAgent: false,
+        isBinary: false,
+        truncated: false,
+        unifiedDiff: '@@ -1 +1 @@\n-second-new\n+second-old\n',
+      });
+
+    render(<FileCheckpointRollbackDialog sessionId="session-race" />);
+    fireEvent.click(await screen.findByTestId('file-checkpoint-rollback-trigger'));
+    await waitFor(() => expect(invokePreviewFileCheckpoint).toHaveBeenCalledWith('session-race', 'cp-1'));
+
+    fireEvent.click(await screen.findByText('/tmp/second.conf'));
+    expect(await screen.findByText(/-second-new/)).toBeInTheDocument();
+
+    resolveFirstPreview({
+      checkpointId: 'cp-1',
+      targetPath: '/tmp/first.conf',
+      targetKind: 'local',
+      existedBefore: true,
+      currentExists: true,
+      unchanged: false,
+      modifiedAfterAgent: true,
+      isBinary: false,
+      truncated: false,
+      unifiedDiff: '@@ -1 +1 @@\n-first-new\n+first-old\n',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByTestId('file-checkpoint-conflict-alert')).toBeNull();
+    expect(screen.getByText(/-second-new/)).toBeInTheDocument();
+  });
 });

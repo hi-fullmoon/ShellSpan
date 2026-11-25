@@ -90,6 +90,16 @@ export function AiWorkspaceController({
     (candidate) => candidate.sessionId === activeTerminalId,
   )?.ptyInfo?.sandboxBinding?.agentSessionId);
   const session = controller.view?.snapshot.value;
+  const boundSandbox = useTerminalStore((state) => {
+    const id = session?.header.sessionId;
+    if (!id) return null;
+    const match = state.sessions.find(
+      (candidate) => candidate.ptyInfo?.sandboxBinding?.agentSessionId === id
+        && candidate.status !== 'disconnected'
+        && candidate.status !== 'error',
+    );
+    return match?.ptyInfo?.sandboxBinding ?? null;
+  });
   const blockedAttempt = latestTerminalBusyAttempt(controller.view?.nodes ?? [], activeTerminalId);
   const configuringContinuation = controller.historicalContinuationAvailable;
   const existingSessionLocked = !configuringContinuation
@@ -135,10 +145,18 @@ export function AiWorkspaceController({
   );
   const openAiSettings = (): void => useAppStore.getState().openSettings('ai');
   const sandboxSyncAction = session?.header.target?.localSandboxRequired
-    ? <SandboxSyncDialog sessionId={session.header.sessionId} />
+    ? (
+        <SandboxSyncDialog
+          key={session.header.sessionId}
+          sessionId={session.header.sessionId}
+          refreshEnabled={controller.view?.status === 'idle'}
+          refreshSignal={controller.view?.nodes.length ?? 0}
+        />
+      )
     : session?.header.target
       ? (
           <FileCheckpointRollbackDialog
+            key={session.header.sessionId}
             sessionId={session.header.sessionId}
             refreshEnabled={controller.view?.status === 'idle'}
             refreshSignal={controller.view?.nodes.length ?? 0}
@@ -179,7 +197,9 @@ export function AiWorkspaceController({
       headerActions={headerActions}
       headerBadge={session?.header.target ? (
         <SandboxStatusBadge
+          sessionId={session.header.sessionId}
           target={session.header.target}
+          boundSandbox={boundSandbox}
           onOpenSandboxTerminal={handleOpenSandboxTerminal}
           openSandboxTerminalDisabled={openSandboxTerminalDisabled}
         />
