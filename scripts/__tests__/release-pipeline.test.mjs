@@ -5,8 +5,8 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { parse } from 'yaml';
 import { parse as parseToml } from 'smol-toml';
-import { editTomlVersion, generateCandidates } from '../release/bump-version.mjs';
-import { command, validateNotes, updateChangelog, changelogSection, assertBaseline, validVersion, readVersions, REVIEW_MARKER } from '../release/release-notes.mjs';
+import { editTomlVersion, generateCandidates, latestAncestorStableTag } from '../release/bump-version.mjs';
+import { command, validateNotes, updateChangelog, changelogSection, assertBaseline, latestStable, validVersion, readVersions, REVIEW_MARKER } from '../release/release-notes.mjs';
 import { assertDraft, findReleaseByTag } from '../release/publish-release.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
@@ -42,9 +42,43 @@ describe('release notes', () => {
   it('rejects stale baselines, downgrade versions, and build metadata', () => {
     expect(() => assertBaseline({ version: '2.1.0', baseTag: 'v2.0.57' }, 'v2.0.59')).toThrow(/changed/);
     expect(() => assertBaseline({ version: '2.0.56', baseTag: 'v2.0.57' }, 'v2.0.57')).toThrow(/newer/);
+    expect(() => assertBaseline({ version: '3.0.0-rc.1', baseTag: null }, null)).not.toThrow();
+    expect(() => assertBaseline({ version: '3.0.0-rc.1', baseTag: null }, 'v2.5.0')).toThrow(/changed from none to v2\.5\.0/);
+    expect(() => assertBaseline({ version: '3.0.0-rc.1', baseTag: 'v2.5.0' }, null)).toThrow(/changed from v2\.5\.0 to none/);
+    expect(() => assertBaseline({ version: '3.0.0-rc.1' }, null)).toThrow(/changed/);
     expect(() => validVersion('2.1.0+build.1')).toThrow();
     expect(() => validVersion('2.1.0-rc.01')).toThrow();
     expect(validVersion('2.1.0-rc.1')).toBe('2.1.0-rc.1');
+  });
+
+  it('returns null from latestStable only when releases/latest is 404 on a reachable repository', () => {
+    const validRelease = { tag_name: 'v2.5.0', draft: false, prerelease: false, assets: [{ name: 'latest.json' }] };
+    expect(latestStable(() => validRelease)).toBe('v2.5.0');
+    expect(() => latestStable(() => ({ ...validRelease, prerelease: true }))).toThrow(/updater manifest/);
+    expect(() => latestStable(() => ({ ...validRelease, assets: [] }))).toThrow(/updater manifest/);
+
+    const notFoundStderr = Object.assign(new Error('not found'), { stderr: 'gh: Not Found (HTTP 404)' });
+    expect(latestStable(endpoint => {
+      if (endpoint.endsWith('/releases/latest')) throw notFoundStderr;
+      return { full_name: 'hi-fullmoon/ShellSpan' };
+    })).toBeNull();
+
+    const notFoundJson = Object.assign(new Error('not found'), { stdout: JSON.stringify({ status: '404' }) });
+    expect(latestStable(endpoint => {
+      if (endpoint.endsWith('/releases/latest')) throw notFoundJson;
+      return { full_name: 'hi-fullmoon/ShellSpan' };
+    })).toBeNull();
+
+    expect(() => latestStable(() => {
+      throw notFoundStderr;
+    })).toThrow(/not found/);
+
+    const calls = [];
+    expect(() => latestStable(endpoint => {
+      calls.push(endpoint);
+      throw Object.assign(new Error('server error'), { stderr: 'gh: Internal Server Error (HTTP 500)' });
+    })).toThrow(/server error/);
+    expect(calls).toHaveLength(1);
   });
 
   it('includes changes across failed and prerelease tags using real git-cliff and Git history', async () => {
@@ -85,8 +119,9 @@ describe('release notes', () => {
     git(['reset', '--hard', '--quiet', 'HEAD']);
     expect(git(['rev-list', '--count', 'HEAD'])).toBe('6');
     expect(git(['tag', '--list']).split(/\r?\n/)).toEqual(['v1.0.0', 'v1.1.0', 'v1.1.1-rc.1']);
+    const head = git(['rev-parse', 'HEAD']);
     const base = git(['rev-parse', 'v1.0.0']);
-    const notes = generateCandidates(base, git(['rev-parse', 'HEAD']), directory);
+    const notes = generateCandidates(base, head, directory);
     expect(notes).toContain('expose SSH reconnect action');
     expect(notes).toContain('retain active connection after retry');
     expect(notes).toContain('remove obsolete connection settings');
@@ -94,6 +129,14 @@ describe('release notes', () => {
     expect(notes).toContain('Improve connection accessibility');
     expect(notes).not.toContain('update developer instructions');
     expect(notes.match(/### 新增功能/g)).toHaveLength(1);
+
+    expect(latestAncestorStableTag(head, directory)).toEqual({ tag: 'v1.1.0', sha: git(['rev-parse', 'v1.1.0^{commit}']) });
+    const fullNotes = generateCandidates(null, head, directory);
+    expect(fullNotes).toContain('expose SSH reconnect action');
+    expect(fullNotes).toContain('remove obsolete connection settings');
+
+    git(['tag', '-d', 'v1.0.0', 'v1.1.0']);
+    expect(latestAncestorStableTag(head, directory)).toBeNull();
   });
 
   it('preserves TOML comments and dependency versions when updating the real root package', async () => {

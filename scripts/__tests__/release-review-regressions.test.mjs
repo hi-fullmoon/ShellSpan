@@ -27,7 +27,7 @@ async function copyManifests() {
   return directory;
 }
 
-async function reviewedRepository(unicodeManifests = false) {
+async function reviewedRepository(unicodeManifests = false, noBaseline = false) {
   const directory = await copyManifests();
   if (unicodeManifests) {
     const file=path.join(directory,'package.json');
@@ -50,10 +50,10 @@ async function reviewedRepository(unicodeManifests = false) {
   commit();
   const { version: current, packageName } = readVersions(directory);
   const version = semver.inc(current, 'patch');
-  const baseTag = `v${current}`;
-  git(['tag', baseTag]);
+  const baseTag = noBaseline ? null : `v${current}`;
+  if (baseTag) git(['tag', baseTag]);
   const sha = git(['rev-parse', 'HEAD']);
-  const meta = { version, repository: REPOSITORY, date: '2026-09-21', baseTag, baseSha: sha, headSha: sha };
+  const meta = { version, repository: REPOSITORY, date: '2026-09-21', baseTag, baseSha: noBaseline ? null : sha, headSha: sha };
   for (const file of VERSION_FILES) {
     const target = path.join(directory, file);
     const source = await readFile(target, 'utf8');
@@ -104,6 +104,24 @@ describe('reviewed release boundary', () => {
     await mkdir(path.join(directory, 'src-tauri/target/releases/inputs'), { recursive: true });
     await copyFile(path.join(root, 'src/lib/update.ts'), path.join(directory, 'src-tauri/target/releases/inputs/update.ts'));
     expect(checkNotes(version, directory).notes).toBe(notes);
+  });
+
+  it('supports null baseline metadata when no Latest release exists and rejects partial baselines', async () => {
+    const { directory, version, git, commit } = await reviewedRepository(false, true);
+    expect(checkNotes(version, directory).meta).toMatchObject({ baseTag: null, baseSha: null });
+    commit();
+    expect(checkNotes(version, directory).notes).toBe(notes);
+
+    const metaPath = path.join(directory, `release-notes/${version}.json`);
+    const validMeta = JSON.parse(await readFile(metaPath, 'utf8'));
+    await writeFile(metaPath, JSON.stringify({ ...validMeta, baseSha: validMeta.headSha }));
+    expect(() => checkNotes(version, directory)).toThrow(/stable release/);
+    await writeFile(metaPath, JSON.stringify({ ...validMeta, baseTag: 'v1.0.0' }));
+    expect(() => checkNotes(version, directory)).toThrow(/exact commits/);
+    await writeFile(metaPath, JSON.stringify(validMeta));
+
+    await writeFile(path.join(directory, 'update.ts'), '\n// Unreviewed code\n', { flag: 'a' });
+    expect(() => checkNotes(version, directory)).toThrow(/Code changed after notes/);
   });
 
   it.each(['worktree', 'index', 'HEAD', 'untracked'])('rejects additional code in %s', async location => {

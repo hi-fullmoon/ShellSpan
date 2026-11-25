@@ -22,8 +22,8 @@ pnpm release:prepare 2.1.0-rc.1
 
 不带参数的 `pnpm release:prepare` 提供交互入口。不要使用包管理器内置的 `pnpm version` 或 `npm version`；`preversion` 会在其修改版本之前拒绝执行并提示正确命令。准备命令不会创建 commit 或 tag，它会：
 
-1. 在写入文件前核验当前 HEAD 的完整 Quality Gate，固定提交 SHA 和成功运行 ID（`qualityRunId`）。再从 GitHub Latest 获取已经公开且包含 `latest.json` 的稳定版，固定其 tag 和提交 SHA。
-2. 对该提交到当前 HEAD 的完整范围生成候选说明。范围内的失败发布和预发布标签不会截断变更。
+1. 在写入文件前核验当前 HEAD 的完整 Quality Gate，固定提交 SHA 和成功运行 ID（`qualityRunId`）。再从 GitHub Latest 获取已经公开且包含 `latest.json` 的稳定版，固定其 tag 和提交 SHA；如果仓库尚无已公开的 Latest 稳定版（`releases/latest` 返回 404 且仓库本身可访问），则在元数据中记录 `baseTag: null` 和 `baseSha: null`。
+2. 对该提交到当前 HEAD 的完整范围生成候选说明。范围内的失败发布和预发布标签不会截断变更；无 Latest 基线时，候选说明优先从当前提交祖先链中最新的稳定版标签起生成，不存在稳定版标签时覆盖到 `HEAD` 的完整历史。发布前如果仓库新增了 Latest 稳定版，基线校验会拒绝继续发布，需要重新准备和审核。
 3. 同步 `package.json`、Tauri 配置、Cargo 清单及锁文件的版本；使用 Cargo 验证锁文件。
 4. 创建 `release-notes/<version>.md` 和对应 `.json` 元数据。已有说明不会被覆盖。
 

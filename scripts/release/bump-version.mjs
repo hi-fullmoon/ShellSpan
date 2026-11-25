@@ -26,9 +26,20 @@ export function editTomlVersion(source, current, next, selectVersion) {
 
 export function generateCandidates(baseSha, headSha, cwd = process.cwd()) {
   const cli = fileURLToPath(import.meta.resolve('git-cliff/cli'));
+  const range = baseSha ? `${baseSha}..${headSha}` : headSha;
   return command(process.execPath, [
-    cli, '--offline', '--ignore-tags', '.*', '--strip', 'all', `${baseSha}..${headSha}`,
+    cli, '--offline', '--ignore-tags', '.*', '--strip', 'all', range,
   ], cwd);
+}
+
+export function latestAncestorStableTag(headSha, cwd = process.cwd()) {
+  const output = command('git', ['tag', '--merged', headSha], cwd);
+  const tags = output.split(/\r?\n/)
+    .filter(tag => /^v\d/.test(tag) && semver.valid(tag) && !semver.prerelease(tag))
+    .sort(semver.rcompare);
+  if (!tags.length) return null;
+  const tag = tags[0];
+  return { tag, sha: command('git', ['rev-parse', `${tag}^{commit}`], cwd) };
 }
 
 export async function prepareVersion(requested, reuse = false) {
@@ -58,14 +69,27 @@ export async function prepareVersion(requested, reuse = false) {
     if (command('git', ['ls-remote', '--tags', 'origin', `refs/tags/v${next}`])) throw new Error('The release tag already exists remotely');
   }
   const baseTag = latestStable();
-  command('git', ['fetch', 'origin', `refs/tags/${baseTag}:refs/tags/${baseTag}`]);
-  const baseSha = command('git', ['rev-parse', `${baseTag}^{commit}`]);
-  command('git', ['merge-base', '--is-ancestor', baseSha, headSha]);
+  let baseSha = null;
+  let candidateBaseSha = null;
+  let rangeLabel = `initial..${headSha.slice(0, 7)}（无 Latest 基线）`;
+  if (baseTag) {
+    command('git', ['fetch', 'origin', `refs/tags/${baseTag}:refs/tags/${baseTag}`]);
+    baseSha = command('git', ['rev-parse', `${baseTag}^{commit}`]);
+    command('git', ['merge-base', '--is-ancestor', baseSha, headSha]);
+    candidateBaseSha = baseSha;
+    rangeLabel = `${baseTag}..${headSha.slice(0, 7)}`;
+  } else {
+    const fallback = latestAncestorStableTag(headSha);
+    if (fallback) {
+      candidateBaseSha = fallback.sha;
+      rangeLabel = `${fallback.tag}..${headSha.slice(0, 7)}（无 Latest 基线）`;
+    }
+  }
   const meta = { version: next, repository: REPOSITORY, baseTag, baseSha, headSha, qualityRunId, date: new Date().toISOString().slice(0, 10) };
   assertBaseline(meta, baseTag);
-  const candidates = generateCandidates(baseSha, headSha);
+  const candidates = generateCandidates(candidateBaseSha, headSha);
   writePreparedVersion(next, meta, candidates, process.cwd(), reuse);
-  console.log(`已准备 v${next}，变更范围 ${baseTag}..${headSha.slice(0, 7)}。\n编辑 release-notes/${next}.md 后运行 pnpm changelog 和 pnpm release:check。\n未创建提交、标签或推送。`);
+  console.log(`已准备 v${next}，变更范围 ${rangeLabel}。\n编辑 release-notes/${next}.md 后运行 pnpm changelog 和 pnpm release:check。\n未创建提交、标签或推送。`);
 }
 
 export function writePreparedVersion(next, meta, candidates, root = process.cwd(), reuse = false) {

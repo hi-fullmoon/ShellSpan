@@ -92,12 +92,14 @@ export function loadNotes(version, root = process.cwd()) {
   if (meta.version !== version || meta.repository !== REPOSITORY || !/^\d{4}-\d{2}-\d{2}$/.test(meta.date)) {
     throw new Error('Release note metadata does not match this release');
   }
-  if (!/^v\d/.test(meta.baseTag) || !semver.valid(meta.baseTag) || semver.prerelease(meta.baseTag)) {
-    throw new Error('Release notes must start from a stable release');
+  const hasBaseline = meta.baseTag !== null || meta.baseSha !== null;
+  if (hasBaseline) {
+    if (typeof meta.baseTag !== 'string' || !/^v\d/.test(meta.baseTag) || !semver.valid(meta.baseTag) || semver.prerelease(meta.baseTag)) {
+      throw new Error('Release notes must start from a stable release');
+    }
+    if (!/^[a-f0-9]{40}$/.test(meta.baseSha)) throw new Error('Release notes must record exact commits');
   }
-  for (const sha of [meta.baseSha, meta.headSha]) {
-    if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('Release notes must record exact commits');
-  }
+  if (!/^[a-f0-9]{40}$/.test(meta.headSha)) throw new Error('Release notes must record exact commits');
   const notes = validateNotes(readFileSync(path.join(root, `release-notes/${version}.md`), 'utf8'));
   return { meta, notes };
 }
@@ -109,9 +111,11 @@ export function checkNotes(version, root = process.cwd()) {
   if (changelogSection(changelog, version)?.notes !== notes) {
     throw new Error('CHANGELOG.md differs from reviewed notes; run pnpm changelog');
   }
-  const base = command('git', ['rev-parse', `${meta.baseTag}^{commit}`], root);
-  if (base !== meta.baseSha) throw new Error('The release baseline tag has moved');
-  command('git', ['merge-base', '--is-ancestor', meta.baseSha, meta.headSha], root);
+  if (meta.baseTag !== null) {
+    const base = command('git', ['rev-parse', `${meta.baseTag}^{commit}`], root);
+    if (base !== meta.baseSha) throw new Error('The release baseline tag has moved');
+    command('git', ['merge-base', '--is-ancestor', meta.baseSha, meta.headSha], root);
+  }
   command('git', ['merge-base', '--is-ancestor', meta.headSha, 'HEAD'], root);
   const allowed = new Set([...VERSION_FILES,
     'CHANGELOG.md', `release-notes/${version}.md`, `release-notes/${version}.json`]);
@@ -175,8 +179,34 @@ function manifestContent(file, source, packageName) {
   return { version, content };
 }
 
-export function latestStable() {
-  const release = JSON.parse(command('gh', ['api', `repos/${REPOSITORY}/releases/latest`]));
+function isNotFoundError(error) {
+  const stderr = String(error?.stderr ?? '');
+  if (/\bHTTP 404\b/.test(stderr)) return true;
+  try {
+    return String(JSON.parse(String(error?.stdout ?? '')).status) === '404';
+  } catch {
+    return false;
+  }
+}
+
+function defaultLatestApi(endpoint) {
+  return JSON.parse(execFileSync('gh', ['api', endpoint], {
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim());
+}
+
+export function latestStable(fetchApi = defaultLatestApi) {
+  let release;
+  try {
+    release = fetchApi(`repos/${REPOSITORY}/releases/latest`);
+  } catch (error) {
+    if (!isNotFoundError(error)) throw error;
+    // Confirm the repository itself is reachable; do not confuse auth/repo 404 with missing Latest.
+    fetchApi(`repos/${REPOSITORY}`);
+    return null;
+  }
   if (release.draft || release.prerelease || !semver.valid(release.tag_name) || semver.prerelease(release.tag_name)
     || !release.assets?.some(asset => asset.name === 'latest.json')) {
     throw new Error('Latest must be a published stable release with an updater manifest');
@@ -185,8 +215,12 @@ export function latestStable() {
 }
 
 export function assertBaseline(meta, latestTag) {
-  if (meta.baseTag !== latestTag) throw new Error(`Stable release changed from ${meta.baseTag} to ${latestTag}; prepare and review notes again`);
-  if (!semver.gt(meta.version, latestTag)) throw new Error('Release version must be newer than the latest stable release');
+  if (meta.baseTag !== latestTag) {
+    throw new Error(`Stable release changed from ${meta.baseTag ?? 'none'} to ${latestTag ?? 'none'}; prepare and review notes again`);
+  }
+  if (latestTag !== null && !semver.gt(meta.version, latestTag)) {
+    throw new Error('Release version must be newer than the latest stable release');
+  }
 }
 
 export function assertRemoteTag(tag) {
