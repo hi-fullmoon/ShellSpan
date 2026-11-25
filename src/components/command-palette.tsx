@@ -418,7 +418,7 @@ export function findEnabledItemIndex(
   return 0;
 }
 
-export const CommandPalette: React.FC = () => {
+export const CommandPalette: React.FC<{ defaultOpen?: boolean }> = ({ defaultOpen = false }) => {
   const { t } = useI18n();
   const { error: showError, info } = useToast();
   const profiles = useProfileStore((state) => state.profiles);
@@ -427,7 +427,7 @@ export const CommandPalette: React.FC = () => {
   const terminalSplit = useTerminalStore((state) => state.workspaceSplit);
   const sftpConnections = useSftpStore((state) => state.connections);
   const portForwardRuntimes = usePortForwardStore((state) => state.runtimes);
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen] = React.useState(defaultOpen);
   const [query, setQuery] = React.useState('');
   const [activeIndex, setActiveIndex] = React.useState(0);
   const [bookmarks, setBookmarks] = React.useState<ProfileBookmark[]>([]);

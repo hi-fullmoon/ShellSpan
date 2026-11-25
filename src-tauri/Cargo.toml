@@ -8,7 +8,7 @@ edition = "2021"
 
 [lib]
 name = "shell_span_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [features]
 # Opt-in observation for isolated debug acceptance runs; absent from release.
@@ -63,12 +63,13 @@ keyring-core = "1"
 sysinfo = "0.39"
 futures-util = "0.3"
 async-trait = "0.1"
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls-no-provider", "stream"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 bytes = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
-tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt", "sync", "time", "test-util"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 httpdate = "1"
 tempfile = "3.27.0"
@@ -125,6 +126,15 @@ dbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] 
 
 [dev-dependencies]
 httparse = "1.10.1"
+tokio = { version = "1", features = ["test-util"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+[profile.dev.package."*"]
+opt-level = 2
 
 [patch.crates-io]
 portable-pty = { path = "vendor/portable-pty" }

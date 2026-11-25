@@ -298,7 +298,14 @@ pub(crate) fn emit_session_error(app: &AppHandle, event: SessionErrorEvent) -> R
         .map_err(|error| format!("failed to emit session error event: {error}"))
 }
 
+pub(crate) fn ensure_rustls_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+}
+
 pub fn run() {
+    ensure_rustls_provider();
     let log_level = if cfg!(debug_assertions) {
         LevelFilter::Debug
     } else {

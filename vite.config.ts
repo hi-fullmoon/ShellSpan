@@ -5,14 +5,19 @@ import tailwindcss from '@tailwindcss/vite';
 import { codeInspectorPlugin } from 'code-inspector-plugin';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
-export default defineConfig({
-  plugins: [codeInspectorPlugin({ bundler: 'vite' }), tailwindcss(), react(), viteStaticCopy({
-    targets: ['cmaps', 'standard_fonts'].map(directory => ({
-      src: `node_modules/pdfjs-dist/${directory}/*`,
-      dest: `pdfjs/${directory}`,
-      rename: { stripBase: true as const },
-    })),
-  })],
+export default defineConfig(({ command }) => ({
+  plugins: [
+    ...(command === 'serve' ? [codeInspectorPlugin({ bundler: 'vite' })] : []),
+    tailwindcss(),
+    react(),
+    viteStaticCopy({
+      targets: ['cmaps', 'standard_fonts'].map(directory => ({
+        src: `node_modules/pdfjs-dist/${directory}/*`,
+        dest: `pdfjs/${directory}`,
+        rename: { stripBase: true as const },
+      })),
+    }),
+  ],
   resolve: {
     alias: {
       '@': resolve(import.meta.dirname, './src'),
@@ -45,9 +50,24 @@ export default defineConfig({
               test: /node_modules[\\/]@xterm[\\/]/,
               priority: 30,
             },
+            {
+              name: 'vendor-ui',
+              test: /node_modules[\\/](?:@base-ui|lucide-react)[\\/]/,
+              priority: 25,
+            },
+            {
+              name: 'vendor-lexical',
+              test: /node_modules[\\/](?:lexical|@lexical|@lezer)[\\/]/,
+              priority: 25,
+            },
+            {
+              name: 'vendor-markdown',
+              test: /node_modules[\\/](?:react-markdown|remark-|rehype-|mdast-|micromark|unist-|hast-|highlight\.js)[\\/]/,
+              priority: 25,
+            },
           ],
         },
       },
     },
   },
-});
+}));

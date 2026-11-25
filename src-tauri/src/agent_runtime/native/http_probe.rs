@@ -127,6 +127,7 @@ fn send_http_probe(
     max_bytes: u64,
     cancellation: &CancellationToken,
 ) -> Result<HttpProbeOutputNative, String> {
+    crate::ensure_rustls_provider();
     let client = Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())

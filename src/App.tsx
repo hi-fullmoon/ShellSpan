@@ -7,18 +7,30 @@ import { useI18n } from '@/hooks/useI18n';
 import { useDisableContextMenu } from '@/hooks/useDisableContextMenu';
 import { Spinner } from '@/components/ui/empty-state';
 import { Toaster } from '@/components/ui/sonner';
-import { SettingsPanel } from '@/components/workbench/settings-panel';
+import { useAiPanelStore } from '@/stores/aiPanelStore';
+import type { AppSection } from '@/types';
 
 const Workbench = React.memo(React.lazy(() => import('@/components/workbench')));
 const Terminal = React.memo(React.lazy(() => import('@/components/terminal')));
 const Sftp = React.memo(React.lazy(() => import('@/components/sftp')));
+const SettingsPanel = React.lazy(() =>
+  import('@/components/workbench/settings-panel').then((m) => ({ default: m.SettingsPanel })),
+);
+const AboutDialog = React.lazy(() =>
+  import('@/components/about-dialog').then((m) => ({ default: m.AboutDialog })),
+);
+const AiPanel = React.lazy(() =>
+  import('@/components/ai/ai-panel').then((m) => ({ default: m.AiPanel })),
+);
+const CommandPalette = React.lazy(() =>
+  import('@/components/command-palette').then((m) => ({ default: m.CommandPalette })),
+);
 
 import { useTransferListeners } from '@/hooks/useTransferListeners';
 import { useMonitorEvents } from '@/hooks/useMonitorEvents';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
-import { AboutDialog } from '@/components/about-dialog';
 import { UpdateRestartDialog } from '@/components/update-restart-dialog';
 import { useUpdateStore } from '@/stores/updateStore';
 import { isTauriRuntime } from '@/lib/ipc/tauri';
@@ -31,13 +43,11 @@ import { KeychainKeyPromptDialog } from '@/components/terminal/keychain-key-prom
 import { HostKeyDialogHost } from '@/components/terminal/host-key-dialog-host';
 import { SshInteractiveAuthDialogHost } from '@/components/terminal/ssh-interactive-auth-dialog';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
-import { AiPanel } from '@/components/ai/ai-panel';
 import { FocusLayout } from '@/components/focus/focus-layout';
 import { flushTerminalWorkspace } from '@/lib/terminal/terminal-workspace-persistence';
 import { flushSftpWorkspace } from '@/lib/sftp/sftp-workspace-persistence';
 import { flushAiSettingsPreferences } from '@/stores/aiSettingsStore';
 import { flushLocalState } from '@/lib/preferences/local-state';
-import { CommandPalette } from '@/components/command-palette';
 import { isTransferActive, useTransferStore } from '@/stores/transferStore';
 import {
   isPortForwardActive,
@@ -52,12 +62,63 @@ interface AppSectionsProps {
   onRequestExit: () => void;
 }
 
+const LazyCommandPalette: React.FC = () => {
+  const [mounted, setMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    if (mounted) return;
+    const handleOpen = (): void => setMounted(true);
+    document.addEventListener('shellspan:open-command-palette', handleOpen);
+    return () => document.removeEventListener('shellspan:open-command-palette', handleOpen);
+  }, [mounted]);
+
+  if (!mounted) {
+    return null;
+  }
+
+  return (
+    <Suspense fallback={null}>
+      <CommandPalette defaultOpen />
+    </Suspense>
+  );
+};
+
+const LazyAiPanel: React.FC = () => {
+  const workbenchOpen = useAiPanelStore((state) => state.panelOpenBySection.workbench);
+  const terminalOpen = useAiPanelStore((state) => state.panelOpenBySection.terminal);
+  const isOpen = workbenchOpen || terminalOpen;
+  const [mounted, setMounted] = React.useState(isOpen);
+
+  if (isOpen && !mounted) {
+    setMounted(true);
+  }
+
+  if (!mounted) {
+    return null;
+  }
+
+  return (
+    <Suspense fallback={null}>
+      <AiPanel />
+    </Suspense>
+  );
+};
+
 const AppSections: React.FC<AppSectionsProps> = ({
   onCheckForUpdates,
   onOpenAbout,
   onRequestExit,
 }) => {
   const activeSection = useAppStore((state) => state.activeSection);
+  const [mountedSections, setMountedSections] = React.useState<Set<AppSection>>(
+    () => new Set<AppSection>([activeSection]),
+  );
+
+  if (!mountedSections.has(activeSection)) {
+    const next = new Set(mountedSections);
+    next.add(activeSection);
+    setMountedSections(next);
+  }
 
   return (
     <Suspense
@@ -67,34 +128,40 @@ const AppSections: React.FC<AppSectionsProps> = ({
         </div>
       }
     >
-      <div
-        className={cn(
-          'h-full',
-          activeSection !== 'workbench' && 'hidden',
-        )}
-      >
-        <Workbench
-          onCheckForUpdates={onCheckForUpdates}
-          onOpenAbout={onOpenAbout}
-          onRequestExit={onRequestExit}
-        />
-      </div>
-      <div
-        className={cn(
-          'h-full',
-          activeSection !== 'terminal' && 'hidden',
-        )}
-      >
-        <Terminal />
-      </div>
-      <div
-        className={cn(
-          'h-full',
-          activeSection !== 'sftp' && 'hidden',
-        )}
-      >
-        <Sftp />
-      </div>
+      {mountedSections.has('workbench') && (
+        <div
+          className={cn(
+            'h-full',
+            activeSection !== 'workbench' && 'hidden',
+          )}
+        >
+          <Workbench
+            onCheckForUpdates={onCheckForUpdates}
+            onOpenAbout={onOpenAbout}
+            onRequestExit={onRequestExit}
+          />
+        </div>
+      )}
+      {mountedSections.has('terminal') && (
+        <div
+          className={cn(
+            'h-full',
+            activeSection !== 'terminal' && 'hidden',
+          )}
+        >
+          <Terminal />
+        </div>
+      )}
+      {mountedSections.has('sftp') && (
+        <div
+          className={cn(
+            'h-full',
+            activeSection !== 'sftp' && 'hidden',
+          )}
+        >
+          <Sftp />
+        </div>
+      )}
     </Suspense>
   );
 };
@@ -246,13 +313,19 @@ export const App: React.FC = () => {
             onRequestExit={requestUserExit}
           />
         </MainContent></FocusLayout>
-        <AiPanel />
+        <LazyAiPanel />
       </div>
 
-      <AboutDialog open={aboutDialogOpen} onClose={() => setAboutDialogOpen(false)} />
+      {aboutDialogOpen && (
+        <Suspense fallback={null}>
+          <AboutDialog open onClose={() => setAboutDialogOpen(false)} />
+        </Suspense>
+      )}
 
       {settingsDialogOpen && (
-        <SettingsPanel open onOpenChange={setSettingsDialogOpen} />
+        <Suspense fallback={null}>
+          <SettingsPanel open onOpenChange={setSettingsDialogOpen} />
+        </Suspense>
       )}
 
       <ConfirmationDialog
@@ -293,7 +366,7 @@ export const App: React.FC = () => {
       <KeychainKeyPromptDialog />
       <HostKeyDialogHost />
       <SshInteractiveAuthDialogHost />
-      <CommandPalette />
+      <LazyCommandPalette />
 
       <Toaster />
     </AppShell>

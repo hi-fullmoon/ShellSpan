@@ -24,6 +24,7 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  npm_config_registry: https://registry.npmjs.org
 
 concurrency:
   group: quality-${{ github.workflow }}-${{ inputs.ref || github.ref }}
@@ -54,7 +55,7 @@ jobs:
           toolchain: 1.95.0
           components: rustfmt
       - name: Install ripgrep
-        run: sudo apt-get update && sudo apt-get install -y ripgrep
+        run: command -v rg >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y ripgrep)
 
       - name: Run static checks
         run: pnpm check:ci:static

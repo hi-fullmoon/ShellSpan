@@ -592,6 +592,7 @@ async fn unsupported_tool_capability_is_rejected_before_connecting() {
 #[test]
 fn unknown_tool_capability_passes_transport_validation() {
     use super::adapter::ModelAdapterFactory;
+    crate::ensure_rustls_provider();
     let mut p = provider("private");
     p.model_definition = Some(declaration_template(&p).unwrap());
     let config = super::transport::HttpConfig {

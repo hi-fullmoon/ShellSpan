@@ -141,6 +141,7 @@ impl PetdexAdapter {
     }
 
     fn build(endpoint: Option<Url>, token_path: PathBuf) -> Self {
+        crate::ensure_rustls_provider();
         let client = Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())

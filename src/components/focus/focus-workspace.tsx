@@ -1,15 +1,25 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useFocusStore } from '@/stores/focusStore';
 import { useI18n } from '@/hooks/useI18n';
-import { AiWorkspaceController } from '@/components/ai/workspace/ai-workspace-controller';
 import '@/components/ai/styles/styles.css';
 import { RESIZABLE_HANDLE_CLASS_NAME } from '@/components/ui/resizable';
 import { splitPaneDividerClassName } from '@/components/ui/split-pane';
 import { cn } from '@/lib/utils';
 
+const AiWorkspaceController = lazy(() =>
+  import('@/components/ai/workspace/ai-workspace-controller').then((m) => ({
+    default: m.AiWorkspaceController,
+  })),
+);
+
 export function FocusAgent(): React.ReactNode {
   const { hasOpened } = useFocusStore();
-  return hasOpened ? <AiWorkspaceController scope="terminal" focusMode /> : null;
+  if (!hasOpened) return null;
+  return (
+    <Suspense fallback={null}>
+      <AiWorkspaceController scope="terminal" focusMode />
+    </Suspense>
+  );
 }
 
 /** The existing terminal stays at the same React position while this gutter resizes its columns. */

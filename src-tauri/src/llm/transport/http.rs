@@ -46,6 +46,7 @@ pub(crate) async fn read_bounded_response_body(
 }
 
 pub(crate) fn build_client() -> Result<Client, String> {
+    crate::ensure_rustls_provider();
     Client::builder()
         .user_agent(concat!("ShellSpan/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(10))
@@ -56,6 +57,7 @@ pub(crate) fn build_client() -> Result<Client, String> {
 }
 
 pub(crate) fn build_streaming_client() -> Result<Client, String> {
+    crate::ensure_rustls_provider();
     Client::builder()
         .user_agent(concat!("ShellSpan/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(10))
