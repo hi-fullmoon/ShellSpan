@@ -63,11 +63,14 @@ workspace paths are read or migrated. Native storage protection admits only the
 exact registered root for the owning session, with ordinary no-follow, digest
 and dispatch validation.
 Credential-backed remote files use
-`{accountHome}/.shellspan-agent-scratch-{installationId}/{sessionTargetDigest}/files`.
+`{accountHome}/.shellspan-server/scratch/{installationId}/{sessionTargetDigest}/files`.
 SFTP resolves the account home and checks private directory ownership. Managed
 directories may be allocated during preparation; script contents are written only
 after the existing approval gate. Targets without SFTP credentials do not receive
 this capability. Native shell execution is not a fallback for scratch provisioning.
+Existing records using the legacy
+`{accountHome}/.shellspan-agent-scratch-{installationId}/{sessionTargetDigest}/files`
+layout remain eligible for cleanup.
 
 File results add `fileScope: "scratch"`, `scratchRoot` and `temporary: true` at the
 model facade, without changing the native v3 argument schemas. The model uses the
@@ -78,7 +81,8 @@ format. On Windows this removes the internal `\\?\` canonical-path prefix and
 uses forward slashes, so the returned path can be passed directly to PowerShell
 script authorization. Canonical paths remain in filesystem validation, I/O and
 checkpoints; remote POSIX paths are returned unchanged.
-Workspace-scope file tools reject access to either managed local tree with
+Workspace-scope file tools reject access to managed local scratch trees as well
+as remote `.shellspan-server` (and legacy `.shellspan-agent-scratch-*`) paths with
 `AGENT_SCRATCH_SCOPE_DENIED` before approval or dispatch. Storage-policy checks
 resolve local paths and their nearest existing ancestors, so portable Windows
 paths and canonical paths receive the same ownership protection. This does not
@@ -119,13 +123,17 @@ executing operations and uncertain uses cannot be evicted to satisfy capacity.
 
 Collection and lease acquisition share one registry lock. Local collection uses
 the system trash and never purges it. Remote collection uses SFTP unlink/rmdir
-only inside the validated owned workspace; symlinks, special files, ownership
-changes, bounded-inspection failures or disconnection defer collection. A later
-maintenance pass retries eligible collection, never execution. Session events,
-redacted output artifacts and file checkpoints keep their existing retention and
-are not removed by scratch collection. Expired script files must be recreated,
-not automatically rerun. There is no claim of protection against hostile same-user
-path replacement or unregistered detached processes.
+only inside the validated owned workspace and then best-effort removes now-empty
+managed ancestor directories (`{installationId}`, `scratch`, `.shellspan-server`);
+symlinks, special files, ownership changes, bounded-inspection failures or
+disconnection defer collection. A later maintenance pass retries eligible
+collection, never execution. Session events, redacted output artifacts and file
+checkpoints keep their existing retention and are not removed by scratch
+collection. Temporary `scratch-*` writes do not create user file-rollback
+checkpoints, and task checkpoint listings exclude historical `scratch-*` entries.
+Expired script files must be recreated, not automatically rerun. There is no
+claim of protection against hostile same-user path replacement or unregistered
+detached processes.
 
 The local scratch regression executes real scripts through Direct and the
 accepted native GNU Bash transport. Build its source-verified shell/module with

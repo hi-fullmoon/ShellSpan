@@ -83,7 +83,7 @@ fn scratch_remote_account_roots_execute_and_collect_without_project_writes() {
         )
         .unwrap();
     assert_ne!(parent.root, child.root);
-    assert!(parent.root.contains("/.shellspan-agent-scratch-"));
+    assert!(parent.root.contains("/.shellspan-server/scratch/"));
     assert!(!Path::new(&parent.root).starts_with(project));
     for root in [&parent.root, &child.root] {
         assert_eq!(
@@ -192,16 +192,18 @@ fn scratch_remote_account_roots_execute_and_collect_without_project_writes() {
     assert_missing(&connected.sftp, &parent_root);
     assert_missing(&connected.sftp, &child_root);
     let base = Path::new(&parent_root).parent().unwrap().parent().unwrap();
-    connected.sftp.rmdir(base).unwrap();
+    assert_missing(&connected.sftp, base.to_str().unwrap());
     drop(second_lease);
     second_store
         .cleanup_at(now() + FAILURE_TTL_MS * 2, &services)
         .unwrap();
     assert_missing(&connected.sftp, &second_files);
-    connected
-        .sftp
-        .rmdir(Path::new(&second_files).parent().unwrap().parent().unwrap())
-        .unwrap();
+    let second_instance = Path::new(&second_files).parent().unwrap().parent().unwrap();
+    let scratch_root = second_instance.parent().unwrap();
+    let server_root = scratch_root.parent().unwrap();
+    assert_missing(&connected.sftp, second_instance.to_str().unwrap());
+    assert_missing(&connected.sftp, scratch_root.to_str().unwrap());
+    assert_missing(&connected.sftp, server_root.to_str().unwrap());
     let project_after = connected
         .sftp
         .readdir(project)

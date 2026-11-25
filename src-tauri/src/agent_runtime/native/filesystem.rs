@@ -687,24 +687,29 @@ fn execute_write_file(
     if sha256_hex(&verified) != preview.after_sha256 || verified != preview.after {
         return Err("write_file write verification failed".into());
     }
-    let _ = context.checkpoints.record_post_write_sha256(
-        context.checkpoint_root,
-        context.task_id,
-        &checkpoint.checkpoint_id,
-        &preview.after_sha256,
-    );
+    if let Some(checkpoint) = &checkpoint {
+        let _ = context.checkpoints.record_post_write_sha256(
+            context.checkpoint_root,
+            context.task_id,
+            &checkpoint.checkpoint_id,
+            &preview.after_sha256,
+        );
+    }
+    let mut data = json!({
+        "written": true,
+        "operation": operation_name,
+        "path": public_file_path(&context.call.target, &preview.path),
+        "byteLength": preview.after.len(),
+        "beforeSha256": preview.before_sha256,
+        "afterSha256": preview.after_sha256,
+        "verified": true
+    });
+    if let (Some(map), Some(checkpoint)) = (data.as_object_mut(), checkpoint) {
+        map.insert("checkpointId".into(), json!(checkpoint.checkpoint_id));
+    }
     Ok(FileToolOutputNative {
         summary: "Wrote, re-read, and verified the exact UTF-8 file.".into(),
-        data: json!({
-            "written": true,
-            "operation": operation_name,
-            "path": public_file_path(&context.call.target, &preview.path),
-            "byteLength": preview.after.len(),
-            "beforeSha256": preview.before_sha256,
-            "afterSha256": preview.after_sha256,
-            "checkpointId": checkpoint.checkpoint_id,
-            "verified": true
-        }),
+        data,
         truncated: false,
         paths: vec![preview.path],
     })
@@ -770,25 +775,30 @@ fn execute_apply_patch(
             context.call.tool_name
         ));
     }
-    let _ = context.checkpoints.record_post_write_sha256(
-        context.checkpoint_root,
-        context.task_id,
-        &checkpoint.checkpoint_id,
-        &preview.after_sha256,
-    );
+    if let Some(checkpoint) = &checkpoint {
+        let _ = context.checkpoints.record_post_write_sha256(
+            context.checkpoint_root,
+            context.task_id,
+            &checkpoint.checkpoint_id,
+            &preview.after_sha256,
+        );
+    }
+    let mut data = json!({
+        "applied": true,
+        "diff": preview.diff,
+        "verified": true,
+        "files": [{
+            "path": preview.path,
+            "beforeSha256": preview.before_sha256,
+            "afterSha256": preview.after_sha256
+        }]
+    });
+    if let (Some(map), Some(checkpoint)) = (data.as_object_mut(), checkpoint) {
+        map.insert("checkpointId".into(), json!(checkpoint.checkpoint_id));
+    }
     Ok(FileToolOutputNative {
         summary: "Applied, re-read, and verified the exact native patch.".into(),
-        data: json!({
-            "applied": true,
-            "diff": preview.diff,
-            "checkpointId": checkpoint.checkpoint_id,
-            "verified": true,
-            "files": [{
-                "path": preview.path,
-                "beforeSha256": preview.before_sha256,
-                "afterSha256": preview.after_sha256
-            }]
-        }),
+        data,
         truncated: false,
         paths: vec![preview.path],
     })
@@ -1635,13 +1645,16 @@ fn checkpoint_target_file(
     path: &str,
     original: Option<&[u8]>,
     metadata: CheckpointOriginalMetadataNative,
-) -> Result<AgentFileCheckpointNative, String> {
+) -> Result<Option<AgentFileCheckpointNative>, String> {
+    if super::checkpoint::is_scratch_target_id(context.call.target.target_id()) {
+        return Ok(None);
+    }
     let kind = match context.call.target {
         AgentToolTargetNative::Local { .. } => CheckpointTargetKindNative::Local,
         AgentToolTargetNative::Remote { .. } => CheckpointTargetKindNative::Remote,
         _ => return Err("File checkpoint requires a host target".into()),
     };
-    checkpoint_target_file_with_kind(context, path, original, metadata, kind)
+    checkpoint_target_file_with_kind(context, path, original, metadata, kind).map(Some)
 }
 
 fn checkpoint_target_file_with_kind(
@@ -4246,5 +4259,82 @@ mod tests {
             .unwrap();
         assert_eq!(listed.len(), 2);
         assert!(listed.iter().all(|item| item.restored_at_unix_ms.is_some()));
+    }
+
+    #[test]
+    fn scratch_target_writes_and_edits_do_not_create_user_file_checkpoints() {
+        let scratch_dir = tempfile::tempdir().unwrap();
+        let runtime_root = tempfile::tempdir().unwrap();
+        let database = Database::open(&runtime_root.path().join("test.db")).unwrap();
+        let credentials = CredentialManager::in_memory_for_tests();
+        let known_hosts_path = runtime_root.path().join("known_hosts");
+        let checkpoints = CheckpointStoreNative::default();
+        let operations = FileOperationRegistryNative::default();
+        let target = AgentToolTargetNative::Local {
+            target_id: "scratch-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                .into(),
+            session_id: "term-1".into(),
+            cwd: Some(scratch_dir.path().to_string_lossy().to_string()),
+        };
+
+        let write_call = AgentToolCallNative {
+            request_id: "req-scratch-1".into(),
+            call_id: "call-scratch-1".into(),
+            tool_name: "write_file".into(),
+            arguments: json!({
+                "path": "probe.sh",
+                "content": "echo v1\n",
+                "precondition": { "mustNotExist": true }
+            }),
+            target: target.clone(),
+            capability_id: "cap-1".into(),
+        };
+        let written = execute_file_tool_native(FileExecutionContextNative {
+            task_id: "task-scratch",
+            call: &write_call,
+            database: &database,
+            credentials: &credentials,
+            known_hosts_path: &known_hosts_path,
+            checkpoint_root: runtime_root.path(),
+            checkpoints: &checkpoints,
+            operations: &operations,
+        })
+        .unwrap();
+        assert!(written.data.get("checkpointId").is_none());
+        let written_sha = written.data["afterSha256"].as_str().unwrap().to_string();
+
+        let edit_call = AgentToolCallNative {
+            request_id: "req-scratch-2".into(),
+            call_id: "call-scratch-2".into(),
+            tool_name: "edit_file".into(),
+            arguments: json!({
+                "path": "probe.sh",
+                "oldString": "v1",
+                "newString": "v2",
+                "precondition": { "sha256": written_sha }
+            }),
+            target,
+            capability_id: "cap-2".into(),
+        };
+        let edited = execute_file_tool_native(FileExecutionContextNative {
+            task_id: "task-scratch",
+            call: &edit_call,
+            database: &database,
+            credentials: &credentials,
+            known_hosts_path: &known_hosts_path,
+            checkpoint_root: runtime_root.path(),
+            checkpoints: &checkpoints,
+            operations: &operations,
+        })
+        .unwrap();
+        assert!(edited.data.get("checkpointId").is_none());
+        assert_eq!(
+            fs::read_to_string(scratch_dir.path().join("probe.sh")).unwrap(),
+            "echo v2\n"
+        );
+        assert!(checkpoints
+            .list_for_task(runtime_root.path(), "task-scratch")
+            .unwrap()
+            .is_empty());
     }
 }

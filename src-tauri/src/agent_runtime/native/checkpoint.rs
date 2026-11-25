@@ -139,7 +139,10 @@ impl CheckpointStoreNative {
         cleanup_locked(&directory, current_unix_ms())?;
         let mut items: Vec<AgentFileCheckpointNative> = load_records(&directory)?
             .into_iter()
-            .filter(|record| record.snapshot.task_id == task_id)
+            .filter(|record| {
+                record.snapshot.task_id == task_id
+                    && !is_scratch_target_id(&record.snapshot.target_id)
+            })
             .map(|record| record.snapshot)
             .collect();
         items.sort_by(|left, right| {
@@ -400,6 +403,10 @@ fn validate_backup_file(file_name: &str, checkpoint_id: &str) -> Result<(), Stri
     }
 }
 
+pub(super) fn is_scratch_target_id(target_id: &str) -> bool {
+    target_id.starts_with("scratch-")
+}
+
 pub(super) fn sha256_hex(content: &[u8]) -> String {
     Sha256::digest(content)
         .iter()
@@ -507,5 +514,37 @@ mod tests {
             .load(directory.path(), "task-a", &cp1.checkpoint_id)
             .unwrap_err()
             .contains("CHECKPOINT_CORRUPTED"));
+    }
+
+    #[test]
+    fn list_for_task_excludes_historical_scratch_checkpoints() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = CheckpointStoreNative::default();
+        let workspace_cp = store
+            .create(
+                directory.path(),
+                "task-mixed",
+                "remote-1",
+                CheckpointTargetKindNative::Remote,
+                "/srv/app/config.toml",
+                Some(b"port = 8080\n"),
+                CheckpointOriginalMetadataNative::default(),
+            )
+            .unwrap();
+        let _scratch_cp = store
+            .create(
+                directory.path(),
+                "task-mixed",
+                "scratch-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                CheckpointTargetKindNative::Remote,
+                "/root/.shellspan-agent-scratch-demo/key/files/check.sh",
+                None,
+                CheckpointOriginalMetadataNative::default(),
+            )
+            .unwrap();
+
+        let listed = store.list_for_task(directory.path(), "task-mixed").unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].checkpoint_id, workspace_cp.checkpoint_id);
     }
 }

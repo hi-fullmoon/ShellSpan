@@ -38,7 +38,33 @@ fn with_sftp<T>(
     operation(&connected.sftp, home)
 }
 
-fn paths(home: &str, instance: &str, key: &str) -> (String, String) {
+struct RemoteScratchPaths {
+    server_root: String,
+    scratch_root: String,
+    instance_root: String,
+    workspace: String,
+}
+
+struct ValidatedWorkspace {
+    workspace: String,
+    empty_ancestors: Vec<String>,
+}
+
+fn paths(home: &str, instance: &str, key: &str) -> RemoteScratchPaths {
+    let home = home.trim_end_matches('/');
+    let server_root = format!("{home}/.shellspan-server");
+    let scratch_root = format!("{server_root}/scratch");
+    let instance_root = format!("{scratch_root}/{instance}");
+    let workspace = format!("{instance_root}/{key}");
+    RemoteScratchPaths {
+        server_root,
+        scratch_root,
+        instance_root,
+        workspace,
+    }
+}
+
+fn legacy_paths(home: &str, instance: &str, key: &str) -> (String, String) {
     let base = format!(
         "{}/.shellspan-agent-scratch-{instance}",
         home.trim_end_matches('/')
@@ -54,13 +80,20 @@ pub(super) fn provision(
     services: &ScratchServices<'_>,
 ) -> Result<String, String> {
     with_sftp(record, services, |sftp, home| {
-        let (base, workspace) = paths(home, instance, key);
+        let layout = paths(home, instance, key);
         let uid = sftp
             .stat(Path::new(home))
             .map_err(|e| e.to_string())?
             .uid
             .ok_or("missing remote owner")?;
-        for path in [&base, &workspace, &format!("{workspace}/files")] {
+        let files = format!("{}/files", layout.workspace);
+        for path in [
+            &layout.server_root,
+            &layout.scratch_root,
+            &layout.instance_root,
+            &layout.workspace,
+            &files,
+        ] {
             match sftp.lstat(Path::new(path)) {
                 Ok(stat) => private_directory(&stat, uid)?,
                 Err(e) if missing(&e) => {
@@ -74,11 +107,10 @@ pub(super) fn provision(
                 Err(e) => return Err(e.to_string()),
             }
         }
-        let root = format!("{workspace}/files");
-        if record.remote_root.as_ref().is_some_and(|old| old != &root) {
+        if record.remote_root.as_ref().is_some_and(|old| old != &files) {
             return Err("remote scratch home changed; existing files were retained".into());
         }
-        Ok(root)
+        Ok(files)
     })
 }
 
@@ -91,11 +123,10 @@ pub(super) fn bytes(
         return Ok(0);
     }
     with_sftp(record, services, |sftp, home| {
-        let workspace = validate(sftp, home, instance, record)?;
-        let Some(workspace) = workspace else {
+        let Some(validated) = validate(sftp, home, instance, record)? else {
             return Ok(0);
         };
-        let entries = tree(sftp, &workspace)?;
+        let entries = tree(sftp, &validated.workspace)?;
         Ok(entries.iter().fold(0_u64, |total, (_, stat)| {
             total.saturating_add(stat.size.unwrap_or(0))
         }))
@@ -111,10 +142,10 @@ pub(super) fn cleanup(
         return Ok(());
     }
     with_sftp(record, services, |sftp, home| {
-        let Some(workspace) = validate(sftp, home, instance, record)? else {
+        let Some(validated) = validate(sftp, home, instance, record)? else {
             return Ok(());
         };
-        let entries = tree(sftp, &workspace)?;
+        let entries = tree(sftp, &validated.workspace)?;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         // Validate the complete tree first. A symlink or special file leaves the
         // workspace pending cleanup instead of following a path outside it.
@@ -129,6 +160,15 @@ pub(super) fn cleanup(
             }
             .map_err(|e| format!("remote scratch cleanup deferred: {e}"))?;
         }
+        // Best-effort prune empty managed ancestors so no empty shell directories remain.
+        for ancestor in validated.empty_ancestors {
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            if sftp.rmdir(Path::new(&ancestor)).is_err() {
+                break;
+            }
+        }
         Ok(())
     })
 }
@@ -138,24 +178,48 @@ fn validate(
     home: &str,
     instance: &str,
     record: &Record,
-) -> Result<Option<String>, String> {
-    let (base, workspace) = paths(home, instance, &record.key);
-    if record.remote_root.as_deref() != Some(&format!("{workspace}/files")) {
-        return Err("remote scratch ownership mismatch".into());
-    }
+) -> Result<Option<ValidatedWorkspace>, String> {
+    let layout = paths(home, instance, &record.key);
+    let (legacy_base, legacy_workspace) = legacy_paths(home, instance, &record.key);
+    let (required_dirs, validated) = match record.remote_root.as_deref() {
+        Some(root) if root == format!("{}/files", layout.workspace) => (
+            vec![
+                layout.server_root.clone(),
+                layout.scratch_root.clone(),
+                layout.instance_root.clone(),
+                layout.workspace.clone(),
+            ],
+            ValidatedWorkspace {
+                workspace: layout.workspace,
+                empty_ancestors: vec![
+                    layout.instance_root,
+                    layout.scratch_root,
+                    layout.server_root,
+                ],
+            },
+        ),
+        Some(root) if root == format!("{legacy_workspace}/files") => (
+            vec![legacy_base.clone(), legacy_workspace.clone()],
+            ValidatedWorkspace {
+                workspace: legacy_workspace,
+                empty_ancestors: vec![legacy_base],
+            },
+        ),
+        _ => return Err("remote scratch ownership mismatch".into()),
+    };
     let uid = sftp
         .stat(Path::new(home))
         .map_err(|e| e.to_string())?
         .uid
         .ok_or("missing remote owner")?;
-    for path in [&base, &workspace] {
+    for path in &required_dirs {
         match sftp.lstat(Path::new(path)) {
             Ok(stat) => private_directory(&stat, uid)?,
             Err(e) if missing(&e) => return Ok(None),
             Err(e) => return Err(e.to_string()),
         }
     }
-    Ok(Some(workspace))
+    Ok(Some(validated))
 }
 
 fn private_directory(stat: &FileStat, uid: u32) -> Result<(), String> {
@@ -204,4 +268,31 @@ fn tree(sftp: &Sftp, root: &str) -> Result<Vec<(String, FileStat)>, String> {
 
 fn missing(error: &ssh2::Error) -> bool {
     matches!(error.code(), ssh2::ErrorCode::SFTP(2 | 10))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remote_scratch_paths_converge_under_shellspan_server() {
+        let layout = paths("/root/", "inst123", "key456");
+        assert_eq!(layout.server_root, "/root/.shellspan-server");
+        assert_eq!(layout.scratch_root, "/root/.shellspan-server/scratch");
+        assert_eq!(
+            layout.instance_root,
+            "/root/.shellspan-server/scratch/inst123"
+        );
+        assert_eq!(
+            layout.workspace,
+            "/root/.shellspan-server/scratch/inst123/key456"
+        );
+
+        let (legacy_base, legacy_workspace) = legacy_paths("/root/", "inst123", "key456");
+        assert_eq!(legacy_base, "/root/.shellspan-agent-scratch-inst123");
+        assert_eq!(
+            legacy_workspace,
+            "/root/.shellspan-agent-scratch-inst123/key456"
+        );
+    }
 }

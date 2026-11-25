@@ -1390,8 +1390,8 @@ impl NativeToolEngine {
                 }
             }
             if scope.paths.iter().any(|path| {
-                path.split('/')
-                    .any(|p| p.starts_with(".shellspan-agent-scratch-"))
+                path.split(['/', '\\'])
+                    .any(|p| p == ".shellspan-server" || p.starts_with(".shellspan-agent-scratch-"))
             }) {
                 return Err(
                     "AGENT_SCRATCH_SCOPE_DENIED: use this session's fileScope=scratch target"
@@ -2607,6 +2607,67 @@ mod tests {
                 );
                 assert_eq!(std::fs::read_to_string(&file).unwrap(), "owner-only");
             }
+        }
+    }
+
+    #[test]
+    fn remote_shellspan_server_and_legacy_scratch_paths_are_denied_for_workspace_tools() {
+        let engine = NativeToolEngine::default();
+        let root = tempfile::tempdir().unwrap();
+        engine
+            .configure_checkpoint_root(root.path().to_path_buf())
+            .unwrap();
+        let target = AgentToolTargetNative::Remote {
+            target_id: "remote-terminal".into(),
+            session_id: "term-remote".into(),
+            profile_id: Some("conn-1".into()),
+            host: "127.0.0.1".into(),
+            port: 22,
+            username: "root".into(),
+            root_path: Some("/root".into()),
+            local_root: None,
+        };
+        let context = NativeExecutionContext {
+            #[cfg(windows)]
+            windows_sandbox_required: false,
+            #[cfg(target_os = "macos")]
+            mac_sandbox_required: false,
+            bound_terminal_surface: false,
+            request: AgentRequestNative {
+                contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
+                request_id: "request".into(),
+                user_session_id: "remote-reader".into(),
+                task_id: "remote-reader".into(),
+                goal: "Inspect remote file".into(),
+                success_criteria: vec![],
+                targets: vec![target.clone()],
+                permission_mode: AgentPermissionModeNative::RequestApproval,
+            },
+            turn_id: "turn".into(),
+            step_id: "step".into(),
+        };
+        for path in [
+            "/root/.shellspan-server/scratch/inst/key/files/probe.sh",
+            ".shellspan-server/scratch/inst/key/files/probe.sh",
+            "/root/.shellspan-agent-scratch-legacy/key/files/probe.sh",
+        ] {
+            let call = AgentToolCallNative {
+                request_id: "request".into(),
+                call_id: "reader-remote".into(),
+                tool_name: "read_file".into(),
+                arguments: json!({"path": path, "encoding": "utf8"}),
+                target: target.clone(),
+                capability_id: "pending-native-capability".into(),
+            };
+            let effect =
+                assess_effect_native(&engine.tool("read_file").unwrap().descriptor, &call).unwrap();
+            let scope = inspect_call_policy_scope_native(&call).unwrap();
+            let result = engine
+                .enforce_runtime_storage_policy_for_session(&context, &call, &effect, &scope, None);
+            assert!(
+                result.is_err_and(|error| error.starts_with("AGENT_SCRATCH_SCOPE_DENIED")),
+                "remote scratch path reached approval policy: {path}"
+            );
         }
     }
 
