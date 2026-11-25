@@ -787,6 +787,23 @@ fn cleanup(sftp: &ssh2::Sftp, root: &str) {
         }
     }
     let _ = sftp.rmdir(Path::new(root));
+    if let Some((run_dir, server_dir)) = managed_run_ancestors(root) {
+        if sftp.rmdir(run_dir).is_ok() {
+            let _ = sftp.rmdir(server_dir);
+        }
+    }
+}
+
+fn managed_run_ancestors(root: &str) -> Option<(&Path, &Path)> {
+    let run_dir = Path::new(root).parent()?;
+    if run_dir.file_name().and_then(|name| name.to_str()) != Some("run") {
+        return None;
+    }
+    let server_dir = run_dir.parent()?;
+    if server_dir.file_name().and_then(|name| name.to_str()) != Some(".shellspan-server") {
+        return None;
+    }
+    Some((run_dir, server_dir))
 }
 
 fn is_valid_staging_parent(path: &str) -> bool {
@@ -827,8 +844,10 @@ fn resolve_staging_parent(session: &Session) -> (String, Option<u64>) {
   [ -n "$dir" ] || return 1
   [ "${{#dir}}" -le {max_len} ] || return 1
   if [ "$create" = "1" ]; then
-    command mkdir -p "$dir" 2>/dev/null || return 1
-    command chmod 700 "$dir" 2>/dev/null || true
+    [ ! -L "${{dir%/*}}" ] && [ ! -L "$dir" ] || return 1
+    (umask 077 && command mkdir -p "$dir") 2>/dev/null || return 1
+    [ ! -L "${{dir%/*}}" ] && [ ! -L "$dir" ] || return 1
+    command chmod 700 "${{dir%/*}}" "$dir" 2>/dev/null || return 1
   fi
   [ -d "$dir" ] && [ -w "$dir" ] || return 1
   p="$dir/.ss-probe-{probe_id}"
@@ -841,8 +860,8 @@ fn resolve_staging_parent(session: &Session) -> (String, Option<u64>) {
   return 0
 }}
 ss_try_dir "${{XDG_RUNTIME_DIR:-}}" 0 && exit 0
-if [ -n "${{HOME:-}}" ]; then
-  ss_try_dir "${{HOME}}/.cache/shellspan" 1 && exit 0
+if [ -n "${{HOME:-}}" ] && [ "${{HOME}}" != "/" ]; then
+  ss_try_dir "${{HOME%/}}/.shellspan-server/run" 1 && exit 0
 fi
 ss_try_dir "/tmp" 0 && exit 0
 exit 1"#,
@@ -910,8 +929,8 @@ mod staging_tests {
             Some(("/run/user/1000".into(), Some(1_700_000_000)))
         );
         assert_eq!(
-            parse_staging_parent("tag", b"tag\t/home/u/.cache/shellspan\t\n"),
-            Some(("/home/u/.cache/shellspan".into(), None))
+            parse_staging_parent("tag", b"tag\t/home/u/.shellspan-server/run\t\n"),
+            Some(("/home/u/.shellspan-server/run".into(), None))
         );
         assert_eq!(parse_staging_parent("tag", b"tag\t/\t1700000000\n"), None);
         assert_eq!(
@@ -943,5 +962,18 @@ mod staging_tests {
             ".ss-nip-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
         ));
         assert!(!is_staging_dir_name("other-dir"));
+    }
+
+    #[test]
+    fn managed_run_ancestors_only_matches_shellspan_server_run() {
+        assert_eq!(
+            managed_run_ancestors("/root/.shellspan-server/run/.ss-nip-0123"),
+            Some((
+                Path::new("/root/.shellspan-server/run"),
+                Path::new("/root/.shellspan-server"),
+            ))
+        );
+        assert_eq!(managed_run_ancestors("/tmp/.ss-nip-0123"), None);
+        assert_eq!(managed_run_ancestors("/run/user/1000/.ss-nip-0123"), None);
     }
 }
