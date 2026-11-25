@@ -59,37 +59,39 @@
     opacity: 0;
   }
 
-  .ai-panel-shell :is(.ai-code-block, .ai-read-block, .ai-search-block, .ai-web-block):not(:hover) ::-webkit-scrollbar-thumb {
+  .ai-panel-shell :is(.ai-code-block, .ai-search-block, .ai-web-block):not(:hover) ::-webkit-scrollbar-thumb {
     background: transparent;
   }
 
-  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'], .ai-markdown-table-scroll) {
+  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'], .ai-markdown-table-scroll, .ai-read-lines) {
     --ai-scrollbar: transparent;
     --ai-scrollbar-hover: transparent;
     transition: --ai-scrollbar var(--ai-transition-duration-slow) ease-out,
       --ai-scrollbar-hover var(--ai-transition-duration-slow) ease-out;
   }
 
-  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'], .ai-markdown-table-scroll):hover {
+  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'], .ai-markdown-table-scroll):hover,
+  .ai-panel-shell .ai-read-block:hover .ai-read-lines,
+  .ai-panel-shell .ai-read-lines:focus-visible {
     --ai-scrollbar: var(--app-scrollbar-thumb);
     --ai-scrollbar-hover: var(--app-scrollbar-thumb-hover);
     transition-duration: var(--ai-transition-duration);
   }
 
-  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'], .ai-markdown-table-scroll)::-webkit-scrollbar-thumb {
+  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'], .ai-markdown-table-scroll, .ai-read-lines)::-webkit-scrollbar-thumb {
     background: var(--ai-scrollbar);
   }
 
-  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'], .ai-markdown-table-scroll)::-webkit-scrollbar-thumb:hover {
+  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'], .ai-markdown-table-scroll, .ai-read-lines)::-webkit-scrollbar-thumb:hover {
     background: var(--ai-scrollbar-hover);
   }
 
   @supports not selector(::-webkit-scrollbar) {
-    .ai-panel-shell :is(.ai-code-block, .ai-read-block, .ai-search-block, .ai-web-block):not(:hover) :is(pre, .ai-search-results, .ai-web-content) {
+    .ai-panel-shell :is(.ai-code-block, .ai-search-block, .ai-web-block):not(:hover) :is(pre, .ai-search-results, .ai-web-content) {
       scrollbar-color: transparent transparent;
     }
 
-    .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'], .ai-markdown-table-scroll) {
+    .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'], .ai-markdown-table-scroll, .ai-read-lines) {
       scrollbar-color: var(--ai-scrollbar) transparent;
     }
   }
@@ -109,7 +111,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .ai-tool-scroll-area > [data-slot='scroll-area-scrollbar'],
-  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'], .ai-markdown-table-scroll) {
+  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'], .ai-markdown-table-scroll, .ai-read-lines) {
     transition: none;
   }
 

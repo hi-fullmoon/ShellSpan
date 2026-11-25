@@ -586,29 +586,27 @@ describe('AI tool presentation', () => {
     expect(screen.queryByText('No output')).not.toBeInTheDocument();
   });
 
-  it.each(['read_file'])('separates the %s path and output copy actions', (name) => {
+  it.each(['read_file'])('keeps only the %s output copy action in the content region', (name) => {
     const input = { path: 'package.json' };
     const output = readFileSync(input.path, 'utf8');
     const { container, rerender } = render(<AiToolExpandedContent node={{ ...node, name, input, output }} compact />);
     const copy = screen.getByRole('button', { name: 'Copy output' });
-    const inputCopy = screen.getByRole('button', { name: 'Copy input' });
-    expect(container.querySelectorAll('.ai-tool-copy-button')).toHaveLength(2);
-    expect(inputCopy).toHaveClass('static', 'shrink-0');
-    expect(inputCopy.closest('.ai-tool-surface-header')).toHaveClass('ai-content-header', 'min-h-6', 'px-3.5');
+    expect(screen.queryByRole('button', { name: 'Copy input' })).not.toBeInTheDocument();
+    expect(container.querySelectorAll('.ai-tool-copy-button')).toHaveLength(1);
     expect(copy.closest('.ai-tool-surface-header')).not.toBeInTheDocument();
     expect(copy.parentElement).toHaveAttribute('data-ai-copy-region');
     expect(copy.parentElement).toHaveClass('relative');
     expect(container.querySelectorAll('.ai-tool-surface-header')).toHaveLength(1);
+    expect(container.querySelector('.ai-tool-surface-header')).toHaveClass('ai-content-header', 'min-h-6', 'px-3.5');
     expect(screen.queryByText('OUT', { exact: true })).not.toBeInTheDocument();
     expect([...container.querySelectorAll('.ai-read-line > span:last-child')].map(line => line.textContent)).toEqual(output.split('\n').map(line => line || '\u00a0'));
-    expect(copy.closest('[data-ai-copy-region]')).not.toBe(inputCopy.closest('[data-ai-copy-region]'));
     expect(screen.queryByRole('button', { name: 'Copy command' })).not.toBeInTheDocument();
 
     rerender(<AiToolExpandedContent node={{ ...node, name }} showCopyActions={false} />);
     expect(container.querySelector('.ai-tool-copy-button')).not.toBeInTheDocument();
     rerender(<AiToolExpandedContent node={{ ...node, name, output: '' }} />);
     expect(screen.queryByRole('button', { name: 'Copy output' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy input' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy input' })).not.toBeInTheDocument();
     rerender(<AiToolExpandedContent node={{ ...node, name, state: 'running' }} />);
     expect(screen.getByRole('button', { name: 'Copy output' })).toBeInTheDocument();
     rerender(<AiToolExpandedContent node={{ ...node, name, input: null, output: null }} />);
@@ -643,7 +641,7 @@ describe('AI tool presentation', () => {
     expect(new Set(titles).size).toBe(titles.length);
   });
 
-  it('opens stored tool outputs directly from the expanded tool row without a details page', async () => {
+  it('omits stored output actions and header input copy buttons on expanded tool rows while preserving horizontal read scrolling', async () => {
     const user = userEvent.setup();
     const onOpenStoredOutput = vi.fn();
     const read = capturedRead(true);
@@ -661,10 +659,7 @@ describe('AI tool presentation', () => {
     };
     rerender(<AiToolRow node={storedNode} onOpenStoredOutput={onOpenStoredOutput} />);
     await user.click(screen.getByRole('button', { name: /^Web:/u }));
-    const openStoredButton = screen.getByRole('button', { name: 'View saved output' });
-    expect(openStoredButton.closest('.ai-web-block .ai-tool-surface-header')).not.toBeNull();
-    await user.click(openStoredButton);
-    expect(onOpenStoredOutput).toHaveBeenCalledExactlyOnceWith(storedNode, storedArtifactId);
+    expect(screen.queryByRole('button', { name: 'View saved output' })).not.toBeInTheDocument();
 
     const storedTerminalNode: AiConversationNodeOf<'tool'> = {
       ...node,
@@ -684,10 +679,36 @@ describe('AI tool presentation', () => {
       },
     };
     rerender(<AiToolRow node={storedTerminalNode} onOpenStoredOutput={onOpenStoredOutput} />);
-    const terminalButton = screen.getByRole('button', { name: 'View saved output' });
-    expect(terminalButton.closest('.ai-terminal-block .ai-tool-surface-header')).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'View saved output' })).not.toBeInTheDocument();
     expect(screen.getByText(/=== CWD: \/root ===/u)).toBeInTheDocument();
     expect(screen.queryByText('No output')).not.toBeInTheDocument();
+
+    const storedReadNode: AiConversationNodeOf<'tool'> = {
+      ...node,
+      key: 'tool:stored-read',
+      name: 'read_tool_result',
+      summary: 'Read stored tool result range',
+      input: { artifactId: storedArtifactId, offset: 0 },
+      output: {
+        artifactRef: storedArtifactId,
+        hasMore: true,
+        nextOffset: 8192,
+        readWith: 'read_tool_result',
+        sha256: 'a'.repeat(64),
+        sizeBytes: 8514,
+        truncated: true,
+      },
+    };
+    const { container: readContainer } = render(<AiToolRow node={storedReadNode} onOpenStoredOutput={onOpenStoredOutput} />);
+    await user.click(readContainer.querySelector('.ai-tool-row')!);
+    const readHeader = readContainer.querySelector('.ai-read-block .ai-tool-surface-header');
+    expect(readHeader).not.toBeNull();
+    expect(readHeader?.querySelectorAll('button')).toHaveLength(0);
+    const readLines = readContainer.querySelector('.ai-read-lines');
+    expect(readLines).toHaveClass('overflow-auto', 'overscroll-x-contain', 'pr-0');
+    const firstReadLine = readContainer.querySelector('.ai-read-line');
+    expect(firstReadLine).toHaveClass('w-max', 'min-w-full', 'pr-3.5', 'first:pr-12');
+    expect(readContainer.querySelectorAll('.ai-read-block .ai-tool-copy-button')).toHaveLength(1);
   });
 
   it('retains the target summary and shows an inline status label when a tool is rejected or fails without a localized error message', async () => {

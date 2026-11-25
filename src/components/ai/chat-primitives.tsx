@@ -93,6 +93,20 @@ function canNestedViewportScroll(viewport: HTMLElement, target: EventTarget, del
   return false;
 }
 
+function canNestedViewportScrollX(viewport: HTMLElement, target: EventTarget, deltaX: number): boolean {
+  if (deltaX === 0) return false;
+  for (let element = target instanceof Element ? target : null;
+    element && element !== viewport; element = element.parentElement) {
+    if (element.clientWidth === 0 || element.scrollWidth <= element.clientWidth) continue;
+    const remaining = deltaX < 0 ? element.scrollLeft
+      : element.scrollWidth - element.clientWidth - element.scrollLeft;
+    if (remaining <= 0.5) continue;
+    const overflow = getComputedStyle(element).overflowX;
+    if (overflow === 'auto' || overflow === 'scroll' || overflow === 'overlay') return true;
+  }
+  return false;
+}
+
 function wantsScrollAnchor(child: React.ReactNode): boolean {
   return React.isValidElement<{ role?: string; scrollAnchor?: boolean }>(child)
     && (child.props.scrollAnchor ?? child.props.role === 'user');
@@ -465,6 +479,10 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   const handleWheelCapture = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
     if (pauseForSelection()) return;
     const viewport = viewportRef.current;
+    if (viewport && Math.abs(event.deltaX) > Math.abs(event.deltaY)
+      && canNestedViewportScrollX(viewport, event.target, event.deltaX)) {
+      return;
+    }
     if (viewport && canNestedViewportScroll(viewport, event.target, event.deltaY)) {
       wheelScrollStartRef.current = null;
       resumeFollowOnScrollRef.current = false;

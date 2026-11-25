@@ -41,7 +41,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
-import { storedToolOutputId } from '@/lib/ai/conversation-tool';
 import { aiErrorMessage, httpProbeTimeoutKind } from '@/lib/ai/error-message';
 import {
   EMPTY_SANDBOX_DOMAINS,
@@ -863,7 +862,6 @@ function ReadSurface({ node, showCopyActions, showInput, scrollable, headerActio
   const { t } = useI18n();
   const input = asRecord(node.input);
   const path = firstString(input, ['path', 'file_path', 'filePath']);
-  const inputText = path ?? formatToolValue(node.input);
   const label = path
     ?? (node.state === 'failed' || node.state === 'rejected' ? t('ai.workspace.tool.title.read') : node.summary || node.name);
   const outputRecord = asRecord(node.output);
@@ -902,7 +900,7 @@ function ReadSurface({ node, showCopyActions, showInput, scrollable, headerActio
   return (
     <div className="ai-read-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="read">
       {(showInput || Boolean(headerAction)) && (
-        <ToolSurfaceHeader title={label} copyText={showInput && showCopyActions ? inputText : undefined} copyLabel={t('ai.workspace.tool.copyInput')}>
+        <ToolSurfaceHeader title={label}>
           {headerAction}
         </ToolSurfaceHeader>
       )}
@@ -918,9 +916,9 @@ function ReadSurface({ node, showCopyActions, showInput, scrollable, headerActio
           </div>
         ) : (
           <>
-            <pre ref={viewportRef} className={cn(AI_CONTENT_CODE_CLASS, 'ai-read-lines pr-12 whitespace-pre', scrollable ? 'max-h-65 overflow-auto' : 'overflow-visible')} tabIndex={0}>
+            <pre ref={viewportRef} className={cn(AI_CONTENT_CODE_CLASS, 'ai-read-lines pr-0 whitespace-pre overscroll-x-contain', scrollable ? 'max-h-65 overflow-auto' : 'overflow-visible')} tabIndex={0}>
               {lines.map((line, index) => (
-                <span key={index} className="ai-read-line grid min-h-[18px] grid-cols-[34px_minmax(max-content,1fr)]">
+                <span key={index} className="ai-read-line grid min-h-[18px] w-max min-w-full grid-cols-[34px_minmax(max-content,1fr)] pr-3.5 first:pr-12">
                   <span className="ai-read-line-number" aria-hidden="true">{index + 1}</span>
                   <span>{line || '\u00a0'}</span>
                 </span>
@@ -1986,7 +1984,7 @@ export function AiToolExpandedContent({
 
 export function AiToolRow({
   node,
-  onOpenStoredOutput,
+  onOpenStoredOutput: _onOpenStoredOutput,
 }: {
   readonly node: ToolNode;
   readonly onOpenStoredOutput?: (node: ToolNode, artifactId: string) => void;
@@ -1994,7 +1992,7 @@ export function AiToolRow({
   if (isSubagentDelegationTool(node.name, node.nativeName)) {
     return <AiSubagentToolCard node={node} />;
   }
-  return <StandardAiToolRow node={node} onOpenStoredOutput={onOpenStoredOutput} />;
+  return <StandardAiToolRow node={node} />;
 }
 
 function toolGroupTargetLabel(node: ToolNode, variant: 'read' | 'search'): string | null {
@@ -2125,10 +2123,8 @@ export function AiToolGroupRow({
 
 function StandardAiToolRow({
   node,
-  onOpenStoredOutput,
 }: {
   readonly node: ToolNode;
-  readonly onOpenStoredOutput?: (node: ToolNode, artifactId: string) => void;
 }) {
   const { t } = useI18n();
   const variant = classifyAiTool(node.name, node.nativeName);
@@ -2194,19 +2190,7 @@ function StandardAiToolRow({
     : toolTitle(node, variant, t);
   const model = useMemo(() => variant === 'write' || variant === 'edit' ? diffModel(node) : null, [node, variant]);
   const changeStat = model ? diffStat(model) : null;
-  const storedOutputId = storedToolOutputId(node);
-  const storedOutputAction = storedOutputId && onOpenStoredOutput ? (
-    <Button
-      type="button"
-      size="xs"
-      variant="ghost"
-      className="shrink-0"
-      onClick={() => onOpenStoredOutput(node, storedOutputId)}
-    >
-      {t('ai.workspace.details.openStoredOutput')}
-    </Button>
-  ) : undefined;
-  if (linkedJob && !hasError && node.state !== 'uncertain' && !storedOutputId) {
+  if (linkedJob && !hasError && node.state !== 'uncertain') {
     return (
       <div
         className="ai-tool-row-root flex min-w-0 flex-col"
@@ -2285,7 +2269,6 @@ function StandardAiToolRow({
               node={node}
               compact
               diffModel={model ?? undefined}
-              headerAction={storedOutputAction}
             />
           </div>
         </CollapsibleContent>
