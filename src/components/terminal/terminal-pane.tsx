@@ -30,7 +30,12 @@ import { useAiDraftStore } from '@/stores/aiDraftStore';
 import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useFocusStore } from '@/stores/focusStore';
-import { ensureManagedSandboxTerminal, hasSandboxPtyPolicyDrifted } from '@/lib/terminal/sandbox-terminal';
+import {
+  EMPTY_SANDBOX_DOMAINS,
+  ensureManagedSandboxTerminal,
+  hasSandboxPtyPolicyDrifted,
+  useSessionSandboxDomainsStore,
+} from '@/lib/terminal/sandbox-terminal';
 import { SandboxSyncDialog } from '@/components/ai/workspace/sandbox-sync-dialog';
 import { eventMatchesShortcut } from '@/lib/shortcuts';
 import { terminalFontSizeAfterKey } from '@/lib/terminal/terminal-font';
@@ -266,11 +271,19 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const agentSandboxNetworkAllowlist = useAiSettingsStore((state) => state.agentSandboxNetworkAllowlist);
   const [sandboxRestarting, setSandboxRestarting] = useState(false);
   const sandboxBinding = activeSession?.ptyInfo?.sandboxBinding;
+  const sessionSandboxDomains = useSessionSandboxDomainsStore((state) => (
+    sandboxBinding ? (state.domainsBySession[sandboxBinding.agentSessionId] ?? EMPTY_SANDBOX_DOMAINS) : EMPTY_SANDBOX_DOMAINS
+  ));
   const sandboxDisabled = Boolean(sandboxBinding && !agentSandboxEnabled);
   const sandboxPolicyDrifted = Boolean(
     sandboxBinding
     && agentSandboxEnabled
-    && hasSandboxPtyPolicyDrifted(sandboxBinding, agentSandboxNetworkMode, agentSandboxNetworkAllowlist),
+    && hasSandboxPtyPolicyDrifted(
+      sandboxBinding,
+      agentSandboxNetworkMode,
+      agentSandboxNetworkAllowlist,
+      sessionSandboxDomains,
+    ),
   );
   const sandboxBoundAllowlistCount = sandboxBinding?.allowedDomains?.length ?? agentSandboxNetworkAllowlist.length;
   const sandboxNetworkLabel = sandboxBinding?.networkMode === 'devRegistries'

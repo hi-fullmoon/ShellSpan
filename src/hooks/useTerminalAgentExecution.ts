@@ -105,7 +105,10 @@ import.meta.hot?.dispose(() => {
   window.removeEventListener('shellspan:connection-sandbox-changed', refreshProfileSandbox);
 });
 
-export function useTerminalAgentExecution(terminal: TerminalSession | undefined) {
+export function useTerminalAgentExecution(
+  terminal: TerminalSession | undefined,
+  options?: { readonly localSandboxOptOut?: boolean },
+) {
   const terminalId = terminal?.sessionId ?? '';
   const preference = useAgentPermissionStore(state => state.preferences[terminalId]);
   const conversation = useAgentPermissionStore(state => state.conversationSurfaces[terminalId]);
@@ -127,9 +130,13 @@ export function useTerminalAgentExecution(terminal: TerminalSession | undefined)
   }, [local, platform, profileId]);
 
   const localSandboxPreview = localCheck?.configured === true;
-  const windowsSandbox = local && platform === 'windows' && sandboxEnabled;
-  const macSandbox = local && platform === 'macos' && sandboxEnabled
+  const localSandboxOptOut = !localSandboxPreview && options?.localSandboxOptOut === true;
+  const windowsSandboxSupported = local && platform === 'windows' && sandboxEnabled;
+  const macSandboxSupported = local && platform === 'macos' && sandboxEnabled
     && localStatusState.status?.supported === true && localStatusState.status.kind === 'macNono';
+  const canToggleLocalSandbox = !localSandboxPreview && (windowsSandboxSupported || macSandboxSupported);
+  const windowsSandbox = windowsSandboxSupported && !localSandboxOptOut;
+  const macSandbox = macSandboxSupported && !localSandboxOptOut;
   const localSandboxKind: LocalSandboxKind | undefined = windowsSandbox
     ? 'windowsAppContainer' : macSandbox ? 'macNono' : undefined;
   const localSandbox = localSandboxPreview || Boolean(localSandboxKind);
@@ -155,6 +162,7 @@ export function useTerminalAgentExecution(terminal: TerminalSession | undefined)
     executionSurface: conversation?.surface ?? reconnectingSurface ?? creationSurface,
     conversationId: conversation?.agentSessionId,
     localSandboxPreview,
+    canToggleLocalSandbox,
     windowsSandbox,
     localSandboxKind,
     localSandbox,

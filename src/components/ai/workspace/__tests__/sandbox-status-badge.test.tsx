@@ -183,13 +183,17 @@ describe('SandboxStatusBadge', () => {
     revealSpy.mockRestore();
   });
 
-  it('renders blocked domains and allows adding a blocked domain from the tool violation banner', async () => {
+  it('renders blocked domains and supports session-scoped and global allow actions from the tool violation banner', async () => {
     useAppStore.setState({ locale: 'en-US' });
     await initI18n('en-US');
     const allowDomain = vi.fn().mockResolvedValue(undefined);
+    const allowSessionSpy = vi
+      .spyOn(tauri, 'invokeAllowSessionSandboxDomain')
+      .mockResolvedValue(['registry.npmmirror.com']);
     const restartSpy = vi
       .spyOn(sandboxTerminal, 'restartManagedSandboxTerminalIfOpen')
       .mockResolvedValue('restarted');
+    sandboxTerminal.useSessionSandboxDomainsStore.setState({ domainsBySession: {} });
     useAiSettingsStore.setState({
       agentSandboxNetworkMode: 'devRegistries',
       agentSandboxNetworkAllowlist: [],
@@ -238,12 +242,18 @@ describe('SandboxStatusBadge', () => {
 
     await user.click(screen.getByRole('button', { name: /Command/i }));
     expect(await screen.findByText('Blocked domains: registry.npmmirror.com')).toBeInTheDocument();
-    const allowButton = screen.getByRole('button', { name: 'Allow registry.npmmirror.com' });
-    await user.click(allowButton);
 
-    await waitFor(() => expect(allowDomain).toHaveBeenCalledWith('registry.npmmirror.com'));
+    await user.click(screen.getByRole('button', { name: 'Allow registry.npmmirror.com for session' }));
+    await waitFor(() => expect(allowSessionSpy).toHaveBeenCalledWith('sess-1', 'registry.npmmirror.com'));
+    expect(allowDomain).not.toHaveBeenCalled();
     await waitFor(() => expect(restartSpy).toHaveBeenCalledWith('sess-1', expect.any(Object)));
+
+    await user.click(screen.getByRole('button', { name: 'Always allow' }));
+    await waitFor(() => expect(allowDomain).toHaveBeenCalledWith('registry.npmmirror.com'));
+
+    allowSessionSpy.mockRestore();
     restartSpy.mockRestore();
+    sandboxTerminal.useSessionSandboxDomainsStore.setState({ domainsBySession: {} });
   });
 
   it('renders cleanly inside AiSessionHeader alongside the session title', async () => {

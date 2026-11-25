@@ -43,7 +43,12 @@ import { useToast } from '@/hooks/useToast';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { storedToolOutputId } from '@/lib/ai/conversation-tool';
 import { aiErrorMessage, httpProbeTimeoutKind } from '@/lib/ai/error-message';
-import { restartManagedSandboxTerminalIfOpen } from '@/lib/terminal/sandbox-terminal';
+import {
+  EMPTY_SANDBOX_DOMAINS,
+  restartManagedSandboxTerminalIfOpen,
+  useSessionSandboxDomainsStore,
+} from '@/lib/terminal/sandbox-terminal';
+import { invokeAllowSessionSandboxDomain } from '@/lib/ipc/tauri';
 import { renderTerminalTranscript } from '@/lib/terminal/terminal-output-buffer';
 import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
@@ -654,6 +659,11 @@ function TerminalSurface({ node, showCopyActions, scrollable, showInput, headerA
   const networkAllowlist = useAiSettingsStore((state) => state.agentSandboxNetworkAllowlist);
   const networkSaving = useAiSettingsStore((state) => state.agentSandboxNetworkSaving);
   const allowSandboxDomain = useAiSettingsStore((state) => state.allowSandboxDomain);
+  const sessionSandboxDomains = useSessionSandboxDomainsStore((state) => (
+    node.sessionId ? (state.domainsBySession[node.sessionId] ?? EMPTY_SANDBOX_DOMAINS) : EMPTY_SANDBOX_DOMAINS
+  ));
+  const setSessionDomains = useSessionSandboxDomainsStore((state) => state.setSessionDomains);
+  const [sessionAllowSaving, setSessionAllowSaving] = useState(false);
   const sandboxViolationKey: LocaleKey | null = rawViolationCategory === 'networkBlocked'
     ? 'ai.sandbox.violation.networkBlocked'
     : rawViolationCategory === 'filesystemDenied'
@@ -764,39 +774,78 @@ function TerminalSurface({ node, showCopyActions, scrollable, showInput, headerA
           )}
           {rawViolationCategory === 'networkBlocked' && blockedDomains.map((domain) => {
             const normalized = domain.trim().toLowerCase();
-            const alreadyAllowed = networkMode === 'customAllowlist'
+            const alreadyGlobal = networkMode === 'customAllowlist'
               && networkAllowlist.includes(normalized);
+            const alreadySession = sessionSandboxDomains.includes(normalized);
+            const alreadyAllowed = alreadyGlobal || alreadySession;
             return (
-              <Button
-                key={domain}
-                type="button"
-                variant="outline"
-                size="xs"
-                className="text-foreground"
-                disabled={alreadyAllowed || networkSaving}
-                onClick={() => {
-                  void allowSandboxDomain(domain)
-                    .then(async () => {
-                      const restartState = node.sessionId
-                        ? await restartManagedSandboxTerminalIfOpen(node.sessionId, {
+              <span key={domain} className="inline-flex flex-wrap items-center gap-1">
+                {node.sessionId && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    className="text-foreground"
+                    disabled={alreadyAllowed || sessionAllowSaving || networkSaving}
+                    onClick={() => {
+                      const sessionId = node.sessionId;
+                      if (!sessionId) return;
+                      setSessionAllowSaving(true);
+                      void invokeAllowSessionSandboxDomain(sessionId, normalized)
+                        .then(async (updatedDomains) => {
+                          setSessionDomains(sessionId, updatedDomains);
+                          const restartState = await restartManagedSandboxTerminalIfOpen(sessionId, {
                             formatTitle: (shell) => t('terminal.sandbox.tabTitle', { shell }),
-                          })
-                        : 'not_open';
-                      if (restartState === 'restarted') {
-                        showSuccess(t('ai.sandbox.violation.domainAllowedAndRestarted', { domain: normalized }));
-                      } else if (restartState === 'busy' || restartState === 'failed') {
-                        showSuccess(t('ai.sandbox.violation.domainAllowedNeedsRestart', { domain: normalized }));
-                      } else {
-                        showSuccess(t('ai.sandbox.violation.domainAllowed', { domain: normalized }));
-                      }
-                    })
-                    .catch(() => showError(t('settings.ai.agent.sandboxNetworkSaveFailed')));
-                }}
-              >
-                {alreadyAllowed
-                  ? t('ai.sandbox.violation.domainAlreadyAllowed', { domain: normalized })
-                  : t('ai.sandbox.violation.allowDomain', { domain: normalized })}
-              </Button>
+                          });
+                          if (restartState === 'restarted') {
+                            showSuccess(t('ai.sandbox.violation.domainAllowedSessionAndRestarted', { domain: normalized }));
+                          } else if (restartState === 'busy' || restartState === 'failed') {
+                            showSuccess(t('ai.sandbox.violation.domainAllowedSessionNeedsRestart', { domain: normalized }));
+                          } else {
+                            showSuccess(t('ai.sandbox.violation.domainAllowedSession', { domain: normalized }));
+                          }
+                        })
+                        .catch(() => showError(t('settings.ai.agent.sandboxNetworkSaveFailed')))
+                        .finally(() => setSessionAllowSaving(false));
+                    }}
+                  >
+                    {alreadyAllowed
+                      ? t('ai.sandbox.violation.domainAlreadyAllowed', { domain: normalized })
+                      : t('ai.sandbox.violation.allowDomainSession', { domain: normalized })}
+                  </Button>
+                )}
+                {!alreadyGlobal && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    className="text-foreground"
+                    disabled={networkSaving || sessionAllowSaving}
+                    onClick={() => {
+                      void allowSandboxDomain(domain)
+                        .then(async () => {
+                          const restartState = node.sessionId
+                            ? await restartManagedSandboxTerminalIfOpen(node.sessionId, {
+                                formatTitle: (shell) => t('terminal.sandbox.tabTitle', { shell }),
+                              })
+                            : 'not_open';
+                          if (restartState === 'restarted') {
+                            showSuccess(t('ai.sandbox.violation.domainAllowedAndRestarted', { domain: normalized }));
+                          } else if (restartState === 'busy' || restartState === 'failed') {
+                            showSuccess(t('ai.sandbox.violation.domainAllowedNeedsRestart', { domain: normalized }));
+                          } else {
+                            showSuccess(t('ai.sandbox.violation.domainAllowed', { domain: normalized }));
+                          }
+                        })
+                        .catch(() => showError(t('settings.ai.agent.sandboxNetworkSaveFailed')));
+                    }}
+                  >
+                    {node.sessionId
+                      ? t('ai.sandbox.violation.allowDomainGlobal')
+                      : t('ai.sandbox.violation.allowDomain', { domain: normalized })}
+                  </Button>
+                )}
+              </span>
             );
           })}
         </div>

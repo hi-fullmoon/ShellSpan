@@ -832,6 +832,7 @@ export interface CreateAgentSessionRequest {
   readonly executionSurface: AgentExecutionSurface;
   readonly successCriteria?: readonly string[];
   readonly capabilityScope?: AgentCapabilityScope;
+  readonly bypassLocalSandbox?: boolean;
 }
 
 export interface AgentSessionListRequest {

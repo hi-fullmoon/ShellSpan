@@ -212,6 +212,7 @@ export interface AiWorkspaceRootProps {
   readonly modelControl?: React.ReactNode;
   readonly permissionControl?: React.ReactNode;
   readonly executionSurfaceControl?: React.ReactNode;
+  readonly sandboxToggleControl?: React.ReactNode;
   readonly executionSurfaceNotice?: React.ReactNode;
   readonly composerState?: AiComposerState;
   readonly pendingNodes?: readonly AiConversationNode[];
@@ -316,6 +317,7 @@ export function AiWorkspaceRoot({
   modelControl,
   permissionControl,
   executionSurfaceControl,
+  sandboxToggleControl,
   executionSurfaceNotice,
   composerState,
   pendingNodes = [],
@@ -1051,6 +1053,7 @@ export function AiWorkspaceRoot({
             ? contextUsageForModel(view?.contextUsage, contextWindow) : undefined}
           permissionControl={surfaceMode === 'agent' ? permissionControl : undefined}
           executionSurfaceControl={surfaceMode === 'agent' ? executionSurfaceControl : undefined}
+          sandboxToggleControl={surfaceMode === 'agent' ? sandboxToggleControl : undefined}
           executionSurfaceNotice={surfaceMode === 'agent' && !subagent ? executionSurfaceNotice : undefined}
           composerState={activeComposerState}
           submissionDisabled={submissionDisabled}

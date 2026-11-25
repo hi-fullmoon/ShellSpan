@@ -1,3 +1,4 @@
+import { create } from 'zustand';
 import { invokeOpenLocalSandboxTerminal, isTauriRuntime } from '@/lib/ipc/tauri';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import type { AgentSandboxNetworkMode } from '@/stores/aiSettingsStore';
@@ -7,6 +8,44 @@ import type { LocalSandboxPtyBinding, SessionSummary } from '@/types';
 const pendingOpens = new Map<string, Promise<SessionSummary | null>>();
 
 export const SANDBOX_SYNC_UPDATED_EVENT = 'shellspan:sandbox-sync-updated';
+export const EMPTY_SANDBOX_DOMAINS: readonly string[] = [];
+
+const DEV_REGISTRY_DOMAINS = [
+  'registry.npmjs.org',
+  'pypi.org',
+  'files.pythonhosted.org',
+  'crates.io',
+  'index.crates.io',
+  'static.crates.io',
+  'proxy.golang.org',
+  'sum.golang.org',
+  'github.com',
+  'api.github.com',
+  'objects.githubusercontent.com',
+  'raw.githubusercontent.com',
+  'codeload.github.com',
+  'rubygems.org',
+  'repo.maven.apache.org',
+] as const;
+
+interface SessionSandboxDomainsState {
+  readonly domainsBySession: Readonly<Record<string, readonly string[]>>;
+  readonly setSessionDomains: (sessionId: string, domains: readonly string[]) => void;
+  readonly clearSessionDomains: (sessionId: string) => void;
+}
+
+export const useSessionSandboxDomainsStore = create<SessionSandboxDomainsState>()((set) => ({
+  domainsBySession: {},
+  setSessionDomains: (sessionId, domains) => set((state) => ({
+    domainsBySession: { ...state.domainsBySession, [sessionId]: domains },
+  })),
+  clearSessionDomains: (sessionId) => set((state) => {
+    if (!(sessionId in state.domainsBySession)) return state;
+    const next = { ...state.domainsBySession };
+    delete next[sessionId];
+    return { domainsBySession: next };
+  }),
+}));
 
 export function notifySandboxSyncUpdated(sessionId: string): void {
   if (typeof window === 'undefined') return;
@@ -58,25 +97,50 @@ export function validateSandboxAllowlistInput(raw: string): {
   return { valid: Array.from(validSet), invalid };
 }
 
+export function effectiveSandboxNetworkPolicy(
+  liveMode: AgentSandboxNetworkMode,
+  liveAllowlist: readonly string[],
+  sessionExtraDomains: readonly string[] = EMPTY_SANDBOX_DOMAINS,
+): {
+  readonly mode: AgentSandboxNetworkMode;
+  readonly rules: readonly string[];
+} {
+  const baseRules = liveMode === 'devRegistries'
+    ? [...DEV_REGISTRY_DOMAINS]
+    : liveMode === 'customAllowlist'
+      ? liveAllowlist
+          .map((d) => normalizeSandboxDomainRule(d))
+          .filter((d): d is string => d !== null)
+      : [];
+  const extraRules = sessionExtraDomains
+    .map((d) => normalizeSandboxDomainRule(d))
+    .filter((d): d is string => d !== null);
+  if (extraRules.length === 0) {
+    return {
+      mode: liveMode,
+      rules: Array.from(new Set(baseRules)).sort(),
+    };
+  }
+  return {
+    mode: 'customAllowlist',
+    rules: Array.from(new Set([...baseRules, ...extraRules])).sort(),
+  };
+}
+
 export function hasSandboxPtyPolicyDrifted(
   binding: LocalSandboxPtyBinding,
   liveMode: AgentSandboxNetworkMode,
   liveAllowlist: readonly string[],
+  sessionExtraDomains: readonly string[] = EMPTY_SANDBOX_DOMAINS,
 ): boolean {
-  if (binding.networkMode !== liveMode) return true;
-  if (liveMode === 'customAllowlist' && binding.allowedDomains !== undefined) {
+  const effective = effectiveSandboxNetworkPolicy(liveMode, liveAllowlist, sessionExtraDomains);
+  if (binding.networkMode !== effective.mode) return true;
+  if (effective.mode === 'customAllowlist' && binding.allowedDomains !== undefined) {
     const boundRules = Array.from(
       new Set(binding.allowedDomains.map((d) => d.trim().toLowerCase()).filter(Boolean)),
     ).sort();
-    const liveRules = Array.from(
-      new Set(
-        liveAllowlist
-          .map((d) => normalizeSandboxDomainRule(d))
-          .filter((d): d is string => d !== null),
-      ),
-    ).sort();
-    if (boundRules.length !== liveRules.length) return true;
-    return boundRules.some((rule, idx) => rule !== liveRules[idx]);
+    if (boundRules.length !== effective.rules.length) return true;
+    return boundRules.some((rule, idx) => rule !== effective.rules[idx]);
   }
   return false;
 }

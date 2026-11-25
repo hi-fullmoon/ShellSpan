@@ -620,13 +620,21 @@ export function invokeResolveAiSelection(selection: import('@/types/ai').ModelSe
   return invokeLogged('ai_resolve_selection', { input: { selection, expectedRevision } });
 }
 export async function invokeCreateAgentRuntimeSession(
-  request: CreateAgentSessionRequest,
+  input: CreateAgentSessionRequest,
 ): Promise<AgentSessionSnapshot> {
-  return invokeLogged<AgentSessionSnapshot>('agent_runtime_create_session', { request });
+  const { bypassLocalSandbox, ...request } = input;
+  return invokeLogged<AgentSessionSnapshot>('agent_runtime_create_session', {
+    request,
+    ...(bypassLocalSandbox ? { bypassLocalSandbox: true } : {}),
+  });
 }
 
-export function invokeContinueAgentRuntimeOnTarget(request: CreateAgentSessionRequest): Promise<AgentSessionSnapshot> {
-  return invokeLogged<AgentSessionSnapshot>('agent_runtime_continue_on_target', { request });
+export function invokeContinueAgentRuntimeOnTarget(input: CreateAgentSessionRequest): Promise<AgentSessionSnapshot> {
+  const { bypassLocalSandbox, ...request } = input;
+  return invokeLogged<AgentSessionSnapshot>('agent_runtime_continue_on_target', {
+    request,
+    ...(bypassLocalSandbox ? { bypassLocalSandbox: true } : {}),
+  });
 }
 
 export function invokeReconnectAgentTerminal(input: { sessionId: string; previousSessionId: string; terminalSessionId: string }): Promise<AgentSessionSnapshot> {
@@ -1492,6 +1500,18 @@ export async function invokeSandboxStorageStats(): Promise<SandboxStorageStats> 
 
 export async function invokeCleanupSandboxWorkspaces(): Promise<SandboxCleanupReport> {
   return invokeLogged<SandboxCleanupReport>('agent_runtime_cleanup_sandbox_workspaces');
+}
+
+export async function invokeAllowSessionSandboxDomain(
+  sessionId: string,
+  domain: string,
+): Promise<string[]> {
+  return invokeLogged<string[]>('agent_runtime_allow_session_sandbox_domain', { sessionId, domain });
+}
+
+export async function invokeSessionSandboxDomains(sessionId: string): Promise<string[]> {
+  if (!isTauriRuntime()) return [];
+  return invokeLogged<string[]>('agent_runtime_session_sandbox_domains', { sessionId });
 }
 
 export interface AgentFileCheckpoint {

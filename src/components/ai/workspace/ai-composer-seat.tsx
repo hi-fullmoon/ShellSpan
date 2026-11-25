@@ -86,6 +86,7 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly contextUsage?: AiContextUsage;
   readonly permissionControl?: React.ReactNode;
   readonly executionSurfaceControl?: React.ReactNode;
+  readonly sandboxToggleControl?: React.ReactNode;
   readonly executionSurfaceNotice?: React.ReactNode;
   readonly statusNotices?: React.ReactNode;
   readonly composerState?: AiComposerState;
@@ -156,6 +157,7 @@ export function AiComposerSeat({
   contextUsage,
   permissionControl,
   executionSurfaceControl,
+  sandboxToggleControl,
   executionSurfaceNotice,
   statusNotices,
   composerState,
@@ -769,6 +771,7 @@ export function AiComposerSeat({
                   </span>
                 ) : permissionControl}
                 {mode === 'agent' && executionSurfaceControl}
+                {mode === 'agent' && sandboxToggleControl}
                 {mode === 'agent' && running && (
                   <DropdownMenu>
                     <Tooltip>

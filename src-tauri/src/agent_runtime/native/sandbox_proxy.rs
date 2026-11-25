@@ -803,4 +803,22 @@ mod tests {
         assert!(resp.ends_with("ok"), "{resp}");
         server.join().unwrap();
     }
+
+    #[test]
+    fn with_extra_domains_layers_session_allowances_without_mutating_global_policy() {
+        let blocked = SandboxNetworkPolicy::blocked();
+        assert_eq!(blocked.with_extra_domains(&[]), blocked);
+        let layered = blocked.with_extra_domains(&["Registry.NpmMirror.com".into()]);
+        assert_eq!(layered.mode, SandboxNetworkMode::CustomAllowlist);
+        assert!(layered.allows_host("registry.npmmirror.com"));
+        assert!(!blocked.uses_proxy());
+
+        let dev = SandboxNetworkPolicy {
+            mode: SandboxNetworkMode::DevRegistries,
+            custom_domains: Vec::new(),
+        };
+        let layered_dev = dev.with_extra_domains(&["api.internal.example".into()]);
+        assert!(layered_dev.allows_host("registry.npmjs.org"));
+        assert!(layered_dev.allows_host("api.internal.example"));
+    }
 }

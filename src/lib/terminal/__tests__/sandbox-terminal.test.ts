@@ -171,5 +171,7 @@ describe('sandbox allowlist validation and policy drift detection', () => {
     expect(hasSandboxPtyPolicyDrifted(binding, 'customAllowlist', ['a.example.com'])).toBe(true);
     expect(hasSandboxPtyPolicyDrifted(binding, 'customAllowlist', ['a.example.com', 'b.example.com', 'c.example.com'])).toBe(true);
     expect(hasSandboxPtyPolicyDrifted(binding, 'devRegistries', ['a.example.com', 'b.example.com'])).toBe(true);
+    expect(hasSandboxPtyPolicyDrifted(binding, 'customAllowlist', ['a.example.com'], ['b.example.com'])).toBe(false);
+    expect(hasSandboxPtyPolicyDrifted(binding, 'customAllowlist', ['a.example.com', 'b.example.com'], ['session.example.com'])).toBe(true);
   });
 });

@@ -12,7 +12,12 @@ import {
   isTauriRuntime,
   type SandboxWorkspaceSourceInfo,
 } from '@/lib/ipc/tauri';
-import { hasSandboxPtyPolicyDrifted } from '@/lib/terminal/sandbox-terminal';
+import {
+  effectiveSandboxNetworkPolicy,
+  EMPTY_SANDBOX_DOMAINS,
+  hasSandboxPtyPolicyDrifted,
+  useSessionSandboxDomainsStore,
+} from '@/lib/terminal/sandbox-terminal';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import type { LocalSandboxPtyBinding, SandboxMode } from '@/types';
 import type { AgentSessionTarget } from '@/types/agent-session';
@@ -53,6 +58,9 @@ export function SandboxStatusBadge({
   const { error: showError } = useToast();
   const networkMode = useAiSettingsStore((state) => state.agentSandboxNetworkMode);
   const networkAllowlist = useAiSettingsStore((state) => state.agentSandboxNetworkAllowlist);
+  const sessionSandboxDomains = useSessionSandboxDomainsStore((state) => (
+    sessionId ? (state.domainsBySession[sessionId] ?? EMPTY_SANDBOX_DOMAINS) : EMPTY_SANDBOX_DOMAINS
+  ));
   const [loadedRemoteMode, setLoadedRemoteMode] = useState<SandboxMode | null>(null);
   const [workspaceInfo, setWorkspaceInfo] = useState<SandboxWorkspaceSourceInfo | null>(null);
   const [open, setOpen] = useState(false);
@@ -123,16 +131,21 @@ export function SandboxStatusBadge({
             ? t('ai.sandboxStatus.backend.remoteBubblewrapWrite')
             : t('ai.sandboxStatus.backend.remote');
 
+  const liveLocalEffective = effectiveSandboxNetworkPolicy(
+    networkMode,
+    networkAllowlist,
+    sessionSandboxDomains,
+  );
   const effectiveLocalNetworkMode = localKind === 'macNono'
-    ? (boundSandbox?.networkMode ?? networkMode)
+    ? (boundSandbox?.networkMode ?? liveLocalEffective.mode)
     : 'blocked';
   const effectiveLocalAllowlistCount = localKind === 'macNono'
-    ? (boundSandbox?.allowedDomains?.length ?? networkAllowlist.length)
+    ? (boundSandbox?.allowedDomains?.length ?? liveLocalEffective.rules.length)
     : 0;
   const boundPolicyDrifted = Boolean(
     localKind === 'macNono'
     && boundSandbox
-    && hasSandboxPtyPolicyDrifted(boundSandbox, networkMode, networkAllowlist),
+    && hasSandboxPtyPolicyDrifted(boundSandbox, networkMode, networkAllowlist, sessionSandboxDomains),
   );
 
   const networkLabel = localKind === 'macNono' && effectiveLocalNetworkMode === 'devRegistries'

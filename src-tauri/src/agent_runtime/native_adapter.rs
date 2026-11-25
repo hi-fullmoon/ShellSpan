@@ -532,9 +532,7 @@ impl NativeToolRuntime for NativeToolAdapter {
             }
             let live_policy = super::SandboxPolicy::for_mac_nono(
                 &binding.workspace_root,
-                &runtime
-                    .native_engine()
-                    .effective_sandbox_network_policy(&database, &request.session_id)?,
+                &runtime.effective_sandbox_network_policy(&database, &request.session_id)?,
             );
             if live_policy.digest() != binding.policy_digest {
                 return Err(

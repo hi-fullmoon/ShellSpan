@@ -186,7 +186,8 @@ pub(crate) struct NativeToolEngine {
     pub(crate) tool_progress: ToolProgressHub,
     #[cfg(target_os = "macos")]
     mac_sandbox_paths: Arc<Mutex<Option<(PathBuf, Option<PathBuf>)>>>,
-    session_sandbox_domains: Arc<Mutex<std::collections::HashMap<String, std::collections::BTreeSet<String>>>>,
+    session_sandbox_domains:
+        Arc<Mutex<std::collections::HashMap<String, std::collections::BTreeSet<String>>>>,
     #[cfg(all(test, target_os = "linux"))]
     local_sandbox: Option<local_sandbox_acceptance::Launcher>,
 }
@@ -249,7 +250,11 @@ impl NativeToolEngine {
         self.session_sandbox_domains
             .lock()
             .ok()
-            .and_then(|guard| guard.get(session_id).map(|set| set.iter().cloned().collect()))
+            .and_then(|guard| {
+                guard
+                    .get(session_id)
+                    .map(|set| set.iter().cloned().collect())
+            })
             .unwrap_or_default()
     }
 
@@ -2202,6 +2207,7 @@ mod tests {
             tool_progress: ToolProgressHub::default(),
             #[cfg(target_os = "macos")]
             mac_sandbox_paths: Arc::new(Mutex::new(None)),
+            session_sandbox_domains: Arc::new(Mutex::new(std::collections::HashMap::new())),
             #[cfg(target_os = "linux")]
             local_sandbox: None,
         }

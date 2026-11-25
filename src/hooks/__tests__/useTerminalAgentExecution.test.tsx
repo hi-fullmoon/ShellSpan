@@ -129,4 +129,44 @@ describe('useTerminalAgentExecution', () => {
     expect(result.current.creationSurface).toBe('direct');
     expect(result.current.executionSurface).toBe('direct');
   });
+
+  it('allows opting out of local sandbox for a new session while preserving canToggleLocalSandbox', async () => {
+    invokeLocalSandboxStatus.mockResolvedValue({
+      supported: true,
+      supportsVisiblePty: true,
+      kind: 'macNono',
+    });
+    useAiSettingsStore.setState({
+      agentSandboxEnabled: true,
+      agentExecutionSurface: 'direct',
+    });
+
+    const session: TerminalSession = {
+      sessionId: 'local-opt-out',
+      title: 'zsh',
+      host: 'local',
+      port: 0,
+      username: 'user',
+      status: 'connected',
+    };
+    useTerminalStore.setState({ sessions: [session], activeSessionId: session.sessionId });
+
+    const { result, rerender } = renderHook(
+      ({ optOut }: { optOut: boolean }) => useTerminalAgentExecution(session, { localSandboxOptOut: optOut }),
+      { initialProps: { optOut: false } },
+    );
+
+    await waitFor(() => {
+      expect(result.current.sandboxChecking).toBe(false);
+      expect(result.current.localSandboxKind).toBe('macNono');
+    });
+    expect(result.current.canToggleLocalSandbox).toBe(true);
+    expect(result.current.localSandbox).toBe(true);
+
+    rerender({ optOut: true });
+    expect(result.current.canToggleLocalSandbox).toBe(true);
+    expect(result.current.localSandbox).toBe(false);
+    expect(result.current.localSandboxKind).toBeUndefined();
+    expect(result.current.creationSurface).toBe('direct');
+  });
 });

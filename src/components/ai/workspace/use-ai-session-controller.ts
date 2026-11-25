@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useFocusStore } from '@/stores/focusStore';
-import { ensureManagedSandboxTerminal } from '@/lib/terminal/sandbox-terminal';
+import { ensureManagedSandboxTerminal, useSessionSandboxDomainsStore } from '@/lib/terminal/sandbox-terminal';
 import { agentTerminalLeaseState, type AgentTerminalLeaseView } from '@/components/terminal/agent-terminal-lease-state';
 import { useTerminalTaskNavigation } from '@/components/terminal/agent-terminal-task-navigation';
 import { canSwitchFocusTarget } from '@/lib/ai/focus-target';
@@ -128,6 +128,9 @@ export interface AiSessionController {
   readonly sandboxDirectOnly: 'local' | 'remote' | undefined;
   readonly localSandbox: boolean;
   readonly sandboxVisiblePty: boolean;
+  readonly canToggleLocalSandbox: boolean;
+  readonly localSandboxOptOut: boolean;
+  readonly setLocalSandboxOptOut: (optOut: boolean) => void;
   readonly glibcMismatch: RemoteGlibcMismatch | null;
   readonly settingsBusy: boolean;
   readonly selectModel: (provider: AiProviderConfig) => Promise<void>;
@@ -306,9 +309,15 @@ export function useAiSessionController({
   const initialFocusSessionId = useRef(focusMode ? useFocusStore.getState().conversationSessionId : null).current;
   const focusRestored = useRef(false);
   const activeTerminal = useTerminalStore((state) => state.sessions.find(item => item.sessionId === (focusMode ? focusTargetId : state.activeSessionId)));
-  const terminalExecution = useTerminalAgentExecution(scope === 'terminal' ? activeTerminal : undefined);
+  const [localSandboxOptOutByTerminal, setLocalSandboxOptOutByTerminal] = useState<Readonly<Record<string, boolean>>>({});
+  const localSandboxOptOut = Boolean(activeTerminal?.sessionId && localSandboxOptOutByTerminal[activeTerminal.sessionId]);
+  const terminalExecution = useTerminalAgentExecution(
+    scope === 'terminal' ? activeTerminal : undefined,
+    { localSandboxOptOut },
+  );
   const {
-    localSandboxPreview, localSandboxKind: newLocalSandboxKind, localSandbox: newLocalSandbox,
+    localSandboxPreview, canToggleLocalSandbox: executionCanToggleLocalSandbox,
+    localSandboxKind: newLocalSandboxKind, localSandbox: newLocalSandbox,
     localSandboxSupportsVisiblePty,
     profileSandbox: sandboxConfigured, profileSandboxResolved, sandboxChecking, sandboxEnabled: agentSandboxEnabled,
   } = terminalExecution;
@@ -752,9 +761,10 @@ export function useAiSessionController({
         ),
         executionSurface: terminalCreationSurface,
         successCriteria: intent.successCriteria,
+        ...(localSandboxOptOut && executionCanToggleLocalSandbox ? { bypassLocalSandbox: true } : {}),
       },
     };
-  }, [activeTerminal, focusMode, localSandboxPreview, newLocalSandboxKind, operationId, scope, t, terminalCreationSurface]);
+  }, [activeTerminal, executionCanToggleLocalSandbox, focusMode, localSandboxOptOut, localSandboxPreview, newLocalSandboxKind, operationId, scope, t, terminalCreationSurface]);
 
   const projectKey = `${workspaceScopeKey}:${openedSessionId ?? 'new'}:${skillNavigation}:${focusMode ? activeTerminal?.sessionId ?? '' : ''}`;
   const projectEpoch = useRef({ key: projectKey });
@@ -1666,6 +1676,12 @@ export function useAiSessionController({
     resetComposer();
     if (scope === 'terminal' && !focusMode && activeTerminalId) {
       useAgentPermissionStore.getState().setConversationSurface(activeTerminalId);
+      setLocalSandboxOptOutByTerminal((prev) => {
+        if (!prev[activeTerminalId]) return prev;
+        const next = { ...prev };
+        delete next[activeTerminalId];
+        return next;
+      });
     }
     setOpenedSessionId(null);
     setView(null);
@@ -1798,6 +1814,7 @@ export function useAiSessionController({
     void adapter.delete(summary.id).then(
       () => {
         forgetSessionVisits(summary.id);
+        useSessionSandboxDomainsStore.getState().clearSessionDomains(summary.id);
         setSessions((current) => current.filter((session) => session.id !== summary.id));
         if (viewRef.current?.summary.id === summary.id) newSession();
         void refreshSessions();
@@ -2176,6 +2193,17 @@ export function useAiSessionController({
     sandboxDirectOnly,
     localSandbox,
     sandboxVisiblePty,
+    canToggleLocalSandbox: scope === 'terminal'
+      && !focusMode
+      && !visibleView
+      && !openedSessionId
+      && executionCanToggleLocalSandbox,
+    localSandboxOptOut,
+    setLocalSandboxOptOut: (optOut: boolean) => {
+      const terminalId = activeTerminal?.sessionId;
+      if (!terminalId) return;
+      setLocalSandboxOptOutByTerminal((prev) => ({ ...prev, [terminalId]: optOut }));
+    },
     glibcMismatch,
     settingsBusy,
     selectModel: (provider) => changeSettings(async (sessionId) => {

@@ -1,5 +1,8 @@
 import { useLayoutEffect } from 'react';
+import { ShieldCheckIcon, ShieldOffIcon } from 'lucide-react';
 import type { AppSection } from '@/types';
+import { Button } from '@/components/ui/button';
+import { AiControlTooltip } from '../ai-control-tooltip';
 import { useTerminalTaskNavigation } from '@/components/terminal/agent-terminal-task-navigation';
 import { latestTerminalBusyAttempt } from '@/lib/ai/terminal-busy-feedback';
 import { terminalExecutionRecovery } from '@/lib/ai/terminal-execution-recovery';
@@ -292,6 +295,33 @@ export function AiWorkspaceController({
               disabled={executionSurfaceLocked}
               onSurfaceChange={controller.selectExecutionSurface}
             />
+          )
+        : undefined}
+      sandboxToggleControl={controller.canToggleLocalSandbox
+        ? (
+            <AiControlTooltip
+              controlDisabled={executionSurfaceLocked}
+              label={t(controller.localSandboxOptOut ? 'ai.composer.sandbox.offTooltip' : 'ai.composer.sandbox.onTooltip')}
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                className="h-7 shrink-0 gap-1 px-[7px]"
+                disabled={executionSurfaceLocked}
+                aria-pressed={!controller.localSandboxOptOut}
+                aria-label={t(controller.localSandboxOptOut ? 'ai.composer.sandbox.off' : 'ai.composer.sandbox.on')}
+                data-slot="ai-composer-sandbox-toggle"
+                onClick={() => controller.setLocalSandboxOptOut(!controller.localSandboxOptOut)}
+              >
+                {controller.localSandboxOptOut
+                  ? <ShieldOffIcon data-icon="inline-start" className="text-muted-foreground" strokeWidth={1.75} />
+                  : <ShieldCheckIcon data-icon="inline-start" className="text-emerald-600 dark:text-emerald-400" strokeWidth={1.75} />}
+                <span className="truncate">
+                  {t(controller.localSandboxOptOut ? 'ai.composer.sandbox.off' : 'ai.composer.sandbox.on')}
+                </span>
+              </Button>
+            </AiControlTooltip>
           )
         : undefined}
       executionSurfaceNotice={session?.header.subagent ? undefined : <>
