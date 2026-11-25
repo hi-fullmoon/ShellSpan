@@ -42,6 +42,8 @@ export function SandboxSyncDialog({
   refreshSignal,
 }: SandboxSyncDialogProps): React.ReactElement | null {
   const { t } = useI18n();
+  const tRef = useRef(t);
+  tRef.current = t;
   const { error: showError, success: showSuccess } = useToast();
   const [open, setOpen] = useState(false);
   const [report, setReport] = useState<SandboxDiffReport | null>(null);
@@ -70,13 +72,13 @@ export function SandboxSyncDialog({
     } catch {
       if (seq !== previewRequestSeqRef.current) return;
       setPreview(null);
-      showError(t('ai.sandboxSync.previewFailed'));
+      showError(tRef.current('ai.sandboxSync.previewFailed'));
     } finally {
       if (seq === previewRequestSeqRef.current) {
         setPreviewLoading(false);
       }
     }
-  }, [sessionId, showError, t]);
+  }, [sessionId, showError]);
 
   const loadDiff = useCallback(async (showFailureToast: boolean) => {
     const seq = ++diffRequestSeqRef.current;
@@ -105,14 +107,14 @@ export function SandboxSyncDialog({
       }
     } catch {
       if (seq === diffRequestSeqRef.current && showFailureToast) {
-        showError(t('ai.sandboxSync.loadFailed'));
+        showError(tRef.current('ai.sandboxSync.loadFailed'));
       }
     } finally {
       if (seq === diffRequestSeqRef.current) {
         setLoading(false);
       }
     }
-  }, [sessionId, showError, t]);
+  }, [sessionId, showError]);
 
   useEffect(() => {
     if (!refreshEnabled && refreshSignal !== undefined) return;

@@ -8,6 +8,7 @@ const {
   invokeRestoreFileCheckpointsBatch,
   showSuccess,
   showError,
+  useI18nMock,
 } = vi.hoisted(() => ({
   invokeListFileCheckpoints: vi.fn(),
   invokePreviewFileCheckpoint: vi.fn(),
@@ -15,6 +16,7 @@ const {
   invokeRestoreFileCheckpointsBatch: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn(),
+  useI18nMock: vi.fn(),
 }));
 
 const mockT = (key: string, values?: Record<string, string | number>) => (
@@ -22,7 +24,7 @@ const mockT = (key: string, values?: Record<string, string | number>) => (
 );
 
 vi.mock('@/hooks/useI18n', () => ({
-  useI18n: () => ({ t: mockT }),
+  useI18n: () => useI18nMock() ?? { t: mockT },
 }));
 
 vi.mock('@/hooks/useToast', () => ({
@@ -287,5 +289,42 @@ describe('FileCheckpointRollbackDialog', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(screen.queryByTestId('file-checkpoint-conflict-alert')).toBeNull();
     expect(screen.getByText(/-second-new/)).toBeInTheDocument();
+  });
+
+  it('does not refetch checkpoints when translator or count callback identity changes', async () => {
+    invokeListFileCheckpoints.mockResolvedValue([
+      {
+        checkpointId: 'cp-1',
+        taskId: 'task-1',
+        targetId: 'local-1',
+        targetKind: 'local',
+        targetPath: '/tmp/app.conf',
+        originalSha256: 'sha-1',
+        originalByteLength: 10,
+        createdAtUnixMs: 1_700_000_000_000,
+        expiresAtUnixMs: 1_700_604_800_000,
+      },
+    ]);
+
+    useI18nMock.mockReturnValue({ t: (key: string, values?: Record<string, string | number>) => mockT(key, values) });
+    const { rerender } = render(
+      <FileCheckpointRollbackDialog
+        sessionId="session-locale"
+        onCheckpointsCountChange={() => {}}
+      />,
+    );
+    await screen.findByTestId('file-checkpoint-rollback-trigger');
+    expect(invokeListFileCheckpoints).toHaveBeenCalledTimes(1);
+
+    useI18nMock.mockReturnValue({ t: (key: string, values?: Record<string, string | number>) => `en:${mockT(key, values)}` });
+    rerender(
+      <FileCheckpointRollbackDialog
+        sessionId="session-locale"
+        onCheckpointsCountChange={() => {}}
+      />,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(invokeListFileCheckpoints).toHaveBeenCalledTimes(1);
+    useI18nMock.mockReset();
   });
 });

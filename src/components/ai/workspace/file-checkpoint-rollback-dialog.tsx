@@ -81,6 +81,10 @@ export function FileCheckpointRollbackDialog({
   onCheckpointsCountChange,
 }: FileCheckpointRollbackDialogProps): React.ReactElement | null {
   const { t } = useI18n();
+  const tRef = useRef(t);
+  tRef.current = t;
+  const onCheckpointsCountChangeRef = useRef(onCheckpointsCountChange);
+  onCheckpointsCountChangeRef.current = onCheckpointsCountChange;
   const { error: showError, success: showSuccess } = useToast();
   const [open, setOpen] = useState(false);
   const [checkpoints, setCheckpoints] = useState<readonly AgentFileCheckpoint[]>([]);
@@ -109,14 +113,14 @@ export function FileCheckpointRollbackDialog({
       if (seq !== previewRequestSeqRef.current) return;
       setPreview(null);
       const raw = error instanceof Error ? error.message : String(error);
-      const translated = aiErrorMessage(raw, t);
-      showError(translated !== raw ? translated : t('ai.checkpointRollback.previewFailed'));
+      const translated = aiErrorMessage(raw, tRef.current);
+      showError(translated !== raw ? translated : tRef.current('ai.checkpointRollback.previewFailed'));
     } finally {
       if (seq === previewRequestSeqRef.current) {
         setPreviewLoading(false);
       }
     }
-  }, [sessionId, showError, t]);
+  }, [sessionId, showError]);
 
   const loadList = useCallback(async (
     showFailureToast: boolean,
@@ -129,7 +133,7 @@ export function FileCheckpointRollbackDialog({
       if (seq !== listRequestSeqRef.current) return activeIdRef.current;
       const items = Array.isArray(raw) ? raw : [];
       setCheckpoints(items);
-      onCheckpointsCountChange?.(items.length);
+      onCheckpointsCountChangeRef.current?.(items.length);
       const validIds = new Set(items.map((item) => item.checkpointId));
       setSelectedIds((prev) => prev.filter((id) => validIds.has(id)));
       if (items.length === 0) {
@@ -147,7 +151,7 @@ export function FileCheckpointRollbackDialog({
       return nextActiveId;
     } catch {
       if (seq === listRequestSeqRef.current && showFailureToast) {
-        showError(t('ai.checkpointRollback.loadFailed'));
+        showError(tRef.current('ai.checkpointRollback.loadFailed'));
       }
       return activeIdRef.current;
     } finally {
@@ -155,7 +159,7 @@ export function FileCheckpointRollbackDialog({
         setLoading(false);
       }
     }
-  }, [onCheckpointsCountChange, sessionId, showError, t]);
+  }, [sessionId, showError]);
 
   useEffect(() => {
     if (!refreshEnabled) return;

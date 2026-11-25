@@ -1,7 +1,8 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as tauri from '@/lib/ipc/tauri';
+import { useAppStore } from '@/stores/appStore';
 import { SandboxSyncDialog } from '../sandbox-sync-dialog';
 
 describe('SandboxSyncDialog', () => {
@@ -164,5 +165,32 @@ describe('SandboxSyncDialog', () => {
         paths: ['src/app.ts'],
       });
     });
+  });
+
+  it('does not refetch sandbox diff when UI locale changes', async () => {
+    const diffSpy = vi.spyOn(tauri, 'invokeSandboxDiff').mockResolvedValue({
+      sourceRoot: '/Users/demo/project',
+      totalChanges: 1,
+      conflictCount: 0,
+      changes: [
+        { path: 'src/app.ts', kind: 'modified', conflict: false, sandboxSize: 42, sourceSize: 40 },
+      ],
+    });
+
+    render(<SandboxSyncDialog sessionId="session-locale" />);
+    await screen.findByRole('button', { name: /1/ });
+    expect(diffSpy).toHaveBeenCalledTimes(1);
+
+    const previousLocale = useAppStore.getState().locale;
+    try {
+      act(() => {
+        useAppStore.setState({ locale: previousLocale === 'zh-CN' ? 'en-US' : 'zh-CN' });
+      });
+      await waitFor(() => expect(diffSpy).toHaveBeenCalledTimes(1));
+    } finally {
+      act(() => {
+        useAppStore.setState({ locale: previousLocale });
+      });
+    }
   });
 });
