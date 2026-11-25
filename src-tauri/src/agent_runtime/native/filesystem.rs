@@ -1272,7 +1272,10 @@ pub(crate) fn preview_file_checkpoint_native(
     validate_checkpoint_target(&loaded.snapshot, target)?;
     let operation = operations.begin_with_policy(
         task_id,
-        &format!("checkpoint-preview-{checkpoint_id}"),
+        &format!(
+            "checkpoint-preview-{checkpoint_id}-{}",
+            Uuid::new_v4().simple()
+        ),
         sandbox,
         CancellationToken::new(),
     )?;
@@ -2014,6 +2017,7 @@ fn search_target(
             ..
         } => {
             let connected = operation.connect(target, database, credentials, known_hosts_path)?;
+            connected.set_host_timeout_ms(60_000);
             let sftp = connected.sftp();
             let root = resolve_remote_root(&sftp, root)?;
             let search_root = resolve_remote_path(&sftp, &root, &arguments.path, false)?;
@@ -2055,12 +2059,18 @@ fn search_target(
                     arguments.mode,
                     SearchModeNative::Content | SearchModeNative::Both
                 ) {
-                    if bytes_read.saturating_add(size) > MAX_SEARCH_BYTES || size > MAX_FILE_BYTES {
+                    if size > MAX_FILE_BYTES {
+                        bounds_hit = true;
+                        continue;
+                    }
+                    let remaining = MAX_SEARCH_BYTES.saturating_sub(bytes_read);
+                    if size > remaining {
                         bounds_hit = true;
                         break;
                     }
-                    bytes_read = bytes_read.saturating_add(size);
-                    let bytes = read_remote_bounded(&sftp, &file, size, operation)?;
+                    let read_limit = remaining.min(MAX_FILE_BYTES);
+                    let bytes = read_remote_open_bounded(&sftp, &file, read_limit, operation)?;
+                    bytes_read = bytes_read.saturating_add(bytes.len() as u64);
                     append_content_matches(&file, &bytes, arguments, None, &mut matches);
                 }
             }
@@ -2554,6 +2564,16 @@ fn read_remote_bounded(
     if remote_kind(stat.perm) != "file" || stat.size.unwrap_or(0) > limit {
         return Err("Remote file failed native type or size bounds".into());
     }
+    read_remote_open_bounded(sftp, path, limit, operation)
+}
+
+fn read_remote_open_bounded(
+    sftp: &AgentSftp<'_>,
+    path: &str,
+    limit: u64,
+    operation: &FileOperationGuardNative,
+) -> Result<Vec<u8>, String> {
+    operation.ensure_active()?;
     let mut file = sftp
         .open(Path::new(path))
         .map_err(|error| format!("Failed to open remote file: {error}"))?;
@@ -4336,5 +4356,71 @@ mod tests {
             .list_for_task(runtime_root.path(), "task-scratch")
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn concurrent_checkpoint_previews_for_same_checkpoint_do_not_conflict() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path().join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let workspace = fs::canonicalize(&workspace).unwrap();
+        let file = workspace.join("note.txt");
+        fs::write(&file, "before\n").unwrap();
+        let database = Database::open(&dir.path().join("preview.sqlite")).unwrap();
+        let credentials = CredentialManager::new();
+        let known_hosts_path = dir.path().join("known_hosts");
+        let checkpoints = CheckpointStoreNative::default();
+        let operations = FileOperationRegistryNative::default();
+        let target = AgentToolTargetNative::Local {
+            target_id: "local-preview".into(),
+            session_id: "terminal-preview".into(),
+            cwd: Some(workspace.to_string_lossy().to_string()),
+        };
+        let checkpoint = checkpoints
+            .create(
+                dir.path(),
+                "task-preview",
+                "local-preview",
+                CheckpointTargetKindNative::Local,
+                &file.to_string_lossy(),
+                Some(b"before\n"),
+                CheckpointOriginalMetadataNative::default(),
+            )
+            .unwrap();
+        fs::write(&file, "after\n").unwrap();
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let mut handles = Vec::new();
+        for _ in 0..2 {
+            let barrier = std::sync::Arc::clone(&barrier);
+            let root = dir.path().to_path_buf();
+            let checkpoints = checkpoints.clone();
+            let operations = operations.clone();
+            let target = target.clone();
+            let database = database.clone();
+            let credentials = credentials.clone();
+            let known_hosts_path = known_hosts_path.clone();
+            let checkpoint_id = checkpoint.checkpoint_id.clone();
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                preview_file_checkpoint_native(
+                    &root,
+                    &checkpoints,
+                    &operations,
+                    "task-preview",
+                    &checkpoint_id,
+                    &target,
+                    &database,
+                    &credentials,
+                    &known_hosts_path,
+                    None,
+                )
+            }));
+        }
+        for handle in handles {
+            let preview = handle.join().unwrap().unwrap();
+            assert_eq!(preview.checkpoint_id, checkpoint.checkpoint_id);
+            assert!(!preview.unchanged);
+        }
     }
 }

@@ -1162,8 +1162,92 @@ impl AgentToolPipeline {
                                 target.clone(),
                                 call.clone(),
                             )?;
-                        } else {
-                            if !self.process_orchestration_call(
+                            next += 1;
+                            committed += 1;
+                            continue;
+                        }
+                        if call.name == "spawn_one_shot_agent" && limit > 1 {
+                            let mut batch = vec![call.clone()];
+                            let max_batch = limit.min(calls.len() - next);
+                            let mut used_budget = if let Some(subagent) = &entry.subagent {
+                                let events = self.sessions.all_events(&entry.session_id)?;
+                                let first_reserved = events.iter().any(|event| {
+                                    event.step_id.as_deref() == Some(step_id)
+                                        && matches!(&event.payload, AgentSessionEventPayload::ToolCall { call: previous } if previous.call_id == call.call_id)
+                                });
+                                let unreserved = u32::from(!first_reserved);
+                                Some((
+                                    subagent.budget.max_tool_calls,
+                                    admitted_tool_calls(&events),
+                                    unreserved,
+                                    events,
+                                ))
+                            } else {
+                                None
+                            };
+                            while batch.len() < max_batch {
+                                let candidate = &calls[next + batch.len()];
+                                if candidate.name != "spawn_one_shot_agent" {
+                                    break;
+                                }
+                                if super::user_questions::check_target(
+                                    &interaction_events,
+                                    turn_id,
+                                    &target,
+                                )
+                                .and_then(|()| {
+                                    super::user_questions::check_queue(
+                                        &interaction_events,
+                                        step_id,
+                                        candidate,
+                                    )
+                                })
+                                .and_then(|()| {
+                                    super::user_questions::check_call(
+                                        &interaction_events,
+                                        turn_id,
+                                        candidate,
+                                        calls.len(),
+                                    )
+                                })
+                                .is_err()
+                                {
+                                    break;
+                                }
+                                if let Some((Some(max_calls), used, unreserved, events)) =
+                                    &mut used_budget
+                                {
+                                    let reserved = events.iter().any(|event| {
+                                        event.step_id.as_deref() == Some(step_id)
+                                            && matches!(&event.payload, AgentSessionEventPayload::ToolCall { call: previous } if previous.call_id == candidate.call_id)
+                                    });
+                                    if !reserved {
+                                        if used.saturating_add(*unreserved) >= *max_calls {
+                                            break;
+                                        }
+                                        *unreserved = unreserved.saturating_add(1);
+                                    }
+                                }
+                                batch.push(candidate.clone());
+                            }
+                            if batch.len() > 1 {
+                                let completed = self
+                                    .process_parallel_one_shot_spawns(
+                                        entry,
+                                        turn_id,
+                                        step_id,
+                                        request_id,
+                                        target.clone(),
+                                        batch,
+                                    )
+                                    .await?;
+                                next += completed;
+                                committed += completed;
+                                continue;
+                            }
+                        }
+                        if !self
+                            .process_orchestration_call(
                                 entry,
                                 turn_id,
                                 step_id,
@@ -1171,7 +1255,9 @@ impl AgentToolPipeline {
                                 target.clone(),
                                 call.clone(),
                             )
-                            .await? { continue; }
+                            .await?
+                        {
+                            continue;
                         }
                         next += 1;
                         committed += 1;
@@ -1984,6 +2070,124 @@ impl AgentToolPipeline {
             )?;
         }
         Ok(true)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn process_parallel_one_shot_spawns(
+        &self,
+        entry: &Arc<AgentEntry>,
+        turn_id: &str,
+        step_id: &str,
+        request_id: &str,
+        target: AgentSessionTarget,
+        calls: Vec<ModelToolCall>,
+    ) -> Result<usize, String> {
+        let effect = orchestration_effect("spawn_one_shot_agent");
+        for call in &calls {
+            self.ensure_capability(entry, &call.name, effect, &target.target_id)?;
+        }
+        let expires_at_unix_ms = current_unix_ms().saturating_add(DEFAULT_NATIVE_APPROVAL_TTL_MS);
+        let mut admitted = Vec::with_capacity(calls.len());
+        for call in calls {
+            let recorded = RecordedToolCall {
+                call_id: call.call_id.clone(),
+                provider_call_id: call.provider_call_id.clone(),
+                name: call.name.clone(),
+                native_name: Some(call.name.clone()),
+                arguments: call.arguments.clone(),
+                title: Some("Agent orchestration".into()),
+                effect: Some(effect),
+                target: Some(target.clone()),
+            };
+            let inserted = entry.with_input_admission(|| {
+                self.sessions.append_batch(
+                    &entry.session_id,
+                    vec![
+                        AgentScopedPayload {
+                            turn_id: Some(turn_id.into()),
+                            step_id: Some(step_id.into()),
+                            payload: AgentSessionEventPayload::ToolCall { call: recorded },
+                        },
+                        AgentScopedPayload {
+                            turn_id: Some(turn_id.into()),
+                            step_id: Some(step_id.into()),
+                            payload: AgentSessionEventPayload::ToolApproval {
+                                request_id: request_id.into(),
+                                call_id: call.call_id.clone(),
+                                approval_id: None,
+                                status: AgentToolApprovalStatus::Approved,
+                                risk: Some(effect),
+                                reason: Some("orchestrationCapabilityAuthorized".into()),
+                                expires_at_unix_ms: Some(expires_at_unix_ms),
+                                prompt: None,
+                            },
+                        },
+                        AgentScopedPayload {
+                            turn_id: Some(turn_id.into()),
+                            step_id: Some(step_id.into()),
+                            payload: AgentSessionEventPayload::ToolExecution {
+                                call_id: call.call_id.clone(),
+                                status: AgentToolExecutionStatus::Dispatched,
+                                idempotency: "conditional".into(),
+                            },
+                        },
+                    ],
+                )
+            })?;
+            if inserted.is_none() {
+                if admitted.is_empty() {
+                    return Ok(0);
+                }
+                break;
+            }
+            admitted.push(call);
+        }
+        let completed = admitted.len();
+        let runtime = self.orchestration.runtime()?;
+        let cancellation = entry.cancellation();
+        let tasks = admitted.into_iter().map(|call| {
+            let runtime = Arc::clone(&runtime);
+            let cancellation = cancellation.clone();
+            let request = OrchestrationToolRequest {
+                parent_session_id: entry.session_id.clone(),
+                turn_id: turn_id.into(),
+                step_id: step_id.into(),
+                call: call.clone(),
+            };
+            async move {
+                let result = runtime
+                    .execute(request, cancellation)
+                    .await
+                    .unwrap_or_else(|error| OrchestrationToolResult {
+                        status: AgentToolResultStatus::Failed,
+                        summary: error,
+                        data: None,
+                        evidence_refs: Vec::new(),
+                        result_committed: false,
+                    });
+                (call, result)
+            }
+        });
+        let settled = futures_util::future::join_all(tasks).await;
+        for (call, result) in settled {
+            if !result.result_committed {
+                self.sessions.append(
+                    &entry.session_id,
+                    Some(turn_id.into()),
+                    Some(step_id.into()),
+                    AgentSessionEventPayload::ToolResult {
+                        call_id: call.call_id,
+                        name: call.name,
+                        status: result.status,
+                        summary: result.summary,
+                        data: result.data,
+                        duration_ms: None,
+                        evidence_refs: result.evidence_refs,
+                    },
+                )?;
+            }
+        }
+        Ok(completed)
     }
 
     fn ensure_capability(
@@ -3304,6 +3508,128 @@ mod ephemeral_terminal_result_tests {
         }))
         .unwrap();
         assert_eq!(with_reason.reason.as_deref(), Some("check config first"));
+    }
+
+    #[tokio::test]
+    async fn parallel_one_shot_spawns_overlap_and_preserve_result_order() {
+        struct BarrierOrchestration {
+            barrier: Arc<tokio::sync::Barrier>,
+        }
+
+        #[async_trait]
+        impl OrchestrationToolRuntime for BarrierOrchestration {
+            async fn execute(
+                &self,
+                request: OrchestrationToolRequest,
+                _cancellation: CancellationToken,
+            ) -> Result<OrchestrationToolResult, String> {
+                self.barrier.wait().await;
+                Ok(OrchestrationToolResult {
+                    status: AgentToolResultStatus::Completed,
+                    summary: format!("done {}", request.call.call_id),
+                    data: Some(serde_json::json!({ "callId": request.call.call_id })),
+                    evidence_refs: Vec::new(),
+                    result_committed: false,
+                })
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let sessions = AgentSessionStore::default();
+        sessions.configure(dir.path().to_path_buf()).unwrap();
+        let target: AgentSessionTarget = serde_json::from_value(serde_json::json!({
+            "kind": "local",
+            "targetId": "local-1",
+            "sessionId": "terminal-1",
+            "cwd": dir.path().to_string_lossy().to_string(),
+        }))
+        .unwrap();
+        sessions
+            .create(super::super::CreateAgentSessionRequest {
+                session_id: "parent-parallel".into(),
+                task_id: "task-parallel".into(),
+                goal: "parallel spawn test".into(),
+                parent_session_id: None,
+                continued_from_session_id: None,
+                target: Some(target),
+                permission_mode: Some(super::super::AgentSessionPermissionMode::Operator),
+                execution_surface: super::super::AgentExecutionSurface::Direct,
+                success_criteria: vec![],
+                capability_scope: None,
+                subagent: None,
+            })
+            .unwrap();
+        let registry = super::super::AgentRegistry::default();
+        let provider: crate::ai::AiProviderConfig = serde_json::from_value(serde_json::json!({
+            "profile": "ollama",
+            "id": "ollama",
+            "kind": "ollama",
+            "baseUrl": "http://127.0.0.1:11434",
+            "model": "qwen3",
+            "requiresApiKey": false,
+        }))
+        .unwrap();
+        use crate::llm::adapter::ModelAdapterFactory;
+        let adapter = crate::llm::registry::HttpModelAdapterFactory
+            .create(provider.clone(), None)
+            .unwrap();
+        let _handle = registry
+            .attach(
+                sessions.clone(),
+                "parent-parallel".into(),
+                provider,
+                adapter,
+            )
+            .unwrap();
+        let entry = registry.get("parent-parallel").unwrap().unwrap();
+        let orchestration_impl: Arc<dyn OrchestrationToolRuntime> =
+            Arc::new(BarrierOrchestration {
+                barrier: Arc::new(tokio::sync::Barrier::new(2)),
+            });
+        let orchestration = OrchestrationToolRuntimeSlot::default();
+        *orchestration.inner.lock().unwrap() = Some(Arc::downgrade(&orchestration_impl));
+        let pipeline = AgentToolPipeline::new(
+            registry,
+            sessions.clone(),
+            Default::default(),
+            Arc::new(NativeToolRuntimeSlot::default()),
+            Default::default(),
+            orchestration,
+            Default::default(),
+        );
+        let calls = vec![
+            ModelToolCall {
+                call_id: "spawn-1".into(),
+                provider_call_id: None,
+                name: "spawn_one_shot_agent".into(),
+                arguments: serde_json::json!({ "goal": "a" }),
+            },
+            ModelToolCall {
+                call_id: "spawn-2".into(),
+                provider_call_id: None,
+                name: "spawn_one_shot_agent".into(),
+                arguments: serde_json::json!({ "goal": "b" }),
+            },
+        ];
+
+        let settlement = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            pipeline.process_model_calls(&entry, "turn-1", "step-1", "req-1", calls),
+        )
+        .await
+        .expect("two spawn_one_shot_agent calls must execute concurrently without deadlock")
+        .unwrap();
+        assert!(matches!(settlement, ToolPipelineSettlement::Completed));
+
+        let events = sessions.all_events("parent-parallel").unwrap();
+        let results: Vec<String> = events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                AgentSessionEventPayload::ToolResult { call_id, .. } => Some(call_id.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(results, vec!["spawn-1", "spawn-2"]);
     }
 }
 

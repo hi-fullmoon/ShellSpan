@@ -4,10 +4,28 @@ use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent_runtime::native::{
-    current_unix_ms, literal_sudo_command, spawn_local_process_native, spawn_remote_process_native,
-    spawn_reviewed_local_process_native, ProcessLifecycleNative, ProcessSnapshotNative,
-    RemoteProcessStartNative, ReviewedReadCommand,
+    current_unix_ms, literal_sudo_command, spawn_local_process_native,
+    spawn_remote_process_with_pid_file_native, spawn_reviewed_local_process_native,
+    ProcessLifecycleNative, ProcessSnapshotNative, RemoteProcessStartNative, ReviewedReadCommand,
 };
+
+const DEFAULT_BACKGROUND_PROCESS_TIMEOUT_MS: u64 = 3_600_000;
+
+fn effective_direct_timeout_ms(
+    explicit_timeout_ms: Option<u64>,
+    default_timeout_ms: u64,
+    background: bool,
+) -> u64 {
+    explicit_timeout_ms.unwrap_or(if background {
+        DEFAULT_BACKGROUND_PROCESS_TIMEOUT_MS
+    } else {
+        default_timeout_ms
+    })
+}
+
+fn wrap_posix_remote_pid_command(command: &str, pid_file: &str) -> String {
+    format!("printf '%s\\n' \"$$\" > '{pid_file}' 2>/dev/null || true\n{command}")
+}
 use crate::agent_runtime::{
     AgentObservedEffectNative, AgentRequestNative, AgentToolCallNative, AgentToolResultNative,
     AgentToolResultStatusNative, AgentToolTargetNative, ExecCommandArgumentsNative,
@@ -65,7 +83,11 @@ impl NativeToolEngine {
                 runner_journal,
             );
         }
-        let timeout = Duration::from_millis(arguments.timeout_ms.unwrap_or(default_timeout_ms));
+        let timeout = Duration::from_millis(effective_direct_timeout_ms(
+            arguments.timeout_ms,
+            default_timeout_ms,
+            arguments.background == Some(true),
+        ));
         let timeout = if reviewed_command.is_some() {
             timeout.min(Duration::from_secs(30))
         } else {
@@ -419,6 +441,7 @@ impl NativeToolEngine {
             AgentToolTargetNative::Remote {
                 target_id,
                 session_id,
+                root_path,
                 ..
             } => {
                 let connection = connection_for_remote_target(&call.target, database, credentials)?;
@@ -441,7 +464,20 @@ impl NativeToolEngine {
                     } else {
                         arguments.command
                     };
-                spawn_remote_process_native(
+                let (command, pid_file) = if root_path
+                    .as_deref()
+                    .is_some_and(|path| path.starts_with('/'))
+                {
+                    let pid_file =
+                        format!("/tmp/.shellspan-proc-{}.pid", uuid::Uuid::new_v4().simple());
+                    (
+                        wrap_posix_remote_pid_command(&command, &pid_file),
+                        Some(pid_file),
+                    )
+                } else {
+                    (command, None)
+                };
+                spawn_remote_process_with_pid_file_native(
                     RemoteProcessStartNative {
                         task_id: context.request.task_id.clone(),
                         request_id: context.request.request_id.clone(),
@@ -451,6 +487,7 @@ impl NativeToolEngine {
                         known_hosts_path: known_hosts_path.to_path_buf(),
                         timeout,
                     },
+                    pid_file,
                     database.clone(),
                     binding.clone(),
                 )?
@@ -1412,5 +1449,27 @@ mod tests {
             disabled.contains("AGENT_SANDBOX_DISABLED"),
             "got {disabled}"
         );
+    }
+
+    #[test]
+    fn background_direct_commands_use_extended_default_timeout_and_preserve_explicit_timeout() {
+        assert_eq!(
+            super::effective_direct_timeout_ms(None, 30_000, false),
+            30_000
+        );
+        assert_eq!(
+            super::effective_direct_timeout_ms(None, 30_000, true),
+            super::DEFAULT_BACKGROUND_PROCESS_TIMEOUT_MS
+        );
+        assert_eq!(
+            super::effective_direct_timeout_ms(Some(120_000), 30_000, true),
+            120_000
+        );
+        let wrapped = super::wrap_posix_remote_pid_command(
+            "exec python3 -u /tmp/server.py",
+            "/tmp/.shellspan-proc-abc.pid",
+        );
+        assert!(wrapped.starts_with("printf '%s\\n' \"$$\" > '/tmp/.shellspan-proc-abc.pid'"));
+        assert!(wrapped.ends_with("\nexec python3 -u /tmp/server.py"));
     }
 }

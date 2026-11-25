@@ -534,6 +534,12 @@ impl AgentSftpConnection {
             Self::Sandbox(s) => AgentSftp::Sandbox(s),
         }
     }
+
+    pub(crate) fn set_host_timeout_ms(&self, timeout_ms: u32) {
+        if let Self::Host(connected) = self {
+            connected.session.set_timeout(timeout_ms);
+        }
+    }
 }
 
 impl Read for AgentFile<'_> {

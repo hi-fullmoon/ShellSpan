@@ -1429,7 +1429,16 @@ pub(crate) fn spawn_remote_process_native(
     database: crate::db::Database,
     binding: crate::remote_sandbox::Binding,
 ) -> Result<Arc<ManagedProcessNative>, String> {
-    spawn_remote_process_with_io(start, None, Some((database, binding)))
+    spawn_remote_process_with_io(start, None, None, Some((database, binding)))
+}
+
+pub(crate) fn spawn_remote_process_with_pid_file_native(
+    start: RemoteProcessStartNative,
+    pid_file: Option<String>,
+    database: crate::db::Database,
+    binding: crate::remote_sandbox::Binding,
+) -> Result<Arc<ManagedProcessNative>, String> {
+    spawn_remote_process_with_io(start, pid_file, None, Some((database, binding)))
 }
 
 struct DiagnosticProcessIo {
@@ -1452,11 +1461,12 @@ pub(super) fn spawn_remote_diagnostic_process_native(
         runtime: tokio::runtime::Handle::try_current()
             .map_err(|_| "Remote diagnostics require the native async runtime")?,
     };
-    spawn_remote_process_with_io(start, Some(io), None)
+    spawn_remote_process_with_io(start, None, Some(io), None)
 }
 
 fn spawn_remote_process_with_io(
     start: RemoteProcessStartNative,
+    pid_file: Option<String>,
     io: Option<DiagnosticProcessIo>,
     dispatch: Option<(crate::db::Database, crate::remote_sandbox::Binding)>,
 ) -> Result<Arc<ManagedProcessNative>, String> {
@@ -1482,10 +1492,10 @@ fn spawn_remote_process_with_io(
             crate::connection::with_scoped_connection_io(
                 io.cancellation.clone(),
                 io.deadline,
-                || run_remote_worker(worker, start, control_rx, Some(&io), dispatch),
+                || run_remote_worker(worker, start, pid_file, control_rx, Some(&io), dispatch),
             );
         } else {
-            run_remote_worker(worker, start, control_rx, None, dispatch);
+            run_remote_worker(worker, start, pid_file, control_rx, None, dispatch);
         }
     });
     Ok(process)
@@ -1951,6 +1961,7 @@ impl Drop for RemoteBlockingModeGuard<'_> {
 fn run_remote_worker(
     process: Arc<ManagedProcessNative>,
     start: RemoteProcessStartNative,
+    pid_file: Option<String>,
     controls: mpsc::Receiver<ProcessControlNative>,
     io: Option<&DiagnosticProcessIo>,
     dispatch: Option<(crate::db::Database, crate::remote_sandbox::Binding)>,
@@ -2061,21 +2072,38 @@ fn run_remote_worker(
                     let _ = response.send(result);
                 }
                 ProcessControlNative::Kill { signal } => {
-                    let _ = signal;
-                    let _ = channel.close();
-                    process.finish(ProcessLifecycleNative::Cancelled, None, false, None);
+                    terminate_remote_channel(
+                        &session.target,
+                        &process,
+                        &mut channel,
+                        pid_file.as_deref(),
+                        signal,
+                        ProcessLifecycleNative::Cancelled,
+                    );
                     return;
                 }
             }
         }
         if Instant::now() >= deadline {
-            let _ = channel.close();
-            process.finish(ProcessLifecycleNative::TimedOut, None, false, None);
+            terminate_remote_channel(
+                &session.target,
+                &process,
+                &mut channel,
+                pid_file.as_deref(),
+                ProcessSignalNative::Kill,
+                ProcessLifecycleNative::TimedOut,
+            );
             return;
         }
         if let Err(error) = read_remote_stream(&mut channel, &process, true) {
             if remote_diagnostic_interrupted(&process, io) {
                 return;
+            }
+            if let Some(pid_file) = pid_file.as_deref() {
+                run_remote_auxiliary_command(
+                    &session.target,
+                    &remote_cleanup_pid_file_command(pid_file),
+                );
             }
             process.finish(ProcessLifecycleNative::Failed, None, false, Some(error));
             return;
@@ -2084,21 +2112,149 @@ fn run_remote_worker(
             if remote_diagnostic_interrupted(&process, io) {
                 return;
             }
+            if let Some(pid_file) = pid_file.as_deref() {
+                run_remote_auxiliary_command(
+                    &session.target,
+                    &remote_cleanup_pid_file_command(pid_file),
+                );
+            }
             process.finish(ProcessLifecycleNative::Failed, None, false, Some(error));
             return;
         }
         if channel.eof() {
             set_diagnostic_phase(io, "finalization");
             finish_remote_channel(&process, &mut channel, &controls, deadline, io);
+            if let Some(pid_file) = pid_file.as_deref() {
+                run_remote_auxiliary_command(
+                    &session.target,
+                    &remote_cleanup_pid_file_command(pid_file),
+                );
+            }
             return;
         }
         if Instant::now() >= deadline {
-            let _ = channel.close();
-            process.finish(ProcessLifecycleNative::TimedOut, None, false, None);
+            terminate_remote_channel(
+                &session.target,
+                &process,
+                &mut channel,
+                pid_file.as_deref(),
+                ProcessSignalNative::Kill,
+                ProcessLifecycleNative::TimedOut,
+            );
             return;
         }
         thread::sleep(PROCESS_POLL_INTERVAL);
     }
+}
+
+fn remote_signal_name(signal: ProcessSignalNative) -> &'static str {
+    match signal {
+        ProcessSignalNative::Interrupt => "INT",
+        ProcessSignalNative::Terminate => "TERM",
+        ProcessSignalNative::Kill => "KILL",
+    }
+}
+
+fn remote_signal_command(pid_file: &str, signal: ProcessSignalNative, cleanup: bool) -> String {
+    let sig = remote_signal_name(signal);
+    let tail = if cleanup {
+        format!("; rm -f '{pid_file}' 2>/dev/null || true")
+    } else {
+        String::new()
+    };
+    format!(
+        "p=$(cat '{pid_file}' 2>/dev/null); case \"$p\" in ''|*[!0-9]*) ;; *) pkill -{sig} -P \"$p\" 2>/dev/null || true; kill -{sig} \"$p\" 2>/dev/null || true ;; esac{tail}"
+    )
+}
+
+fn remote_cleanup_pid_file_command(pid_file: &str) -> String {
+    format!("rm -f '{pid_file}' 2>/dev/null || true")
+}
+
+fn run_remote_auxiliary_command(session: &ssh2::Session, command: &str) {
+    let was_blocking = session.is_blocking();
+    let prev_timeout = session.timeout();
+    session.set_blocking(true);
+    session.set_timeout(3_000);
+    if let Ok(mut aux) = session.channel_session() {
+        if aux.exec(command).is_ok() {
+            let _ = aux.wait_eof();
+            let _ = aux.wait_close();
+        }
+    }
+    session.set_timeout(prev_timeout);
+    session.set_blocking(was_blocking);
+}
+
+fn wait_remote_channel_eof(
+    process: &ManagedProcessNative,
+    channel: &mut ssh2::Channel,
+    timeout: Duration,
+) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        let _ = read_remote_stream(channel, process, true);
+        let _ = read_remote_stream(&mut channel.stderr(), process, false);
+        if channel.eof() {
+            return true;
+        }
+        thread::sleep(PROCESS_POLL_INTERVAL);
+    }
+    channel.eof()
+}
+
+fn terminate_remote_channel(
+    session: &ssh2::Session,
+    process: &ManagedProcessNative,
+    channel: &mut ssh2::Channel,
+    pid_file: Option<&str>,
+    signal: ProcessSignalNative,
+    lifecycle: ProcessLifecycleNative,
+) {
+    let Some(pid_file) = pid_file else {
+        let _ = channel.close();
+        process.finish(lifecycle, None, false, None);
+        return;
+    };
+    let mut exited = {
+        run_remote_auxiliary_command(session, &remote_signal_command(pid_file, signal, false));
+        wait_remote_channel_eof(process, channel, Duration::from_secs(2))
+    };
+    if !exited && signal != ProcessSignalNative::Kill {
+        run_remote_auxiliary_command(
+            session,
+            &remote_signal_command(pid_file, ProcessSignalNative::Kill, true),
+        );
+        exited = wait_remote_channel_eof(process, channel, Duration::from_secs(2));
+    } else {
+        run_remote_auxiliary_command(session, &remote_cleanup_pid_file_command(pid_file));
+    }
+    if exited {
+        let close_deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < close_deadline {
+            match channel.wait_close() {
+                Ok(()) => break,
+                Err(error) if error.code() == ErrorCode::Session(LIBSSH2_ERROR_EAGAIN) => {
+                    thread::sleep(PROCESS_POLL_INTERVAL);
+                }
+                Err(_) => break,
+            }
+        }
+        let exit_code = if channel
+            .exit_signal()
+            .ok()
+            .and_then(|signal| signal.exit_signal)
+            .is_some()
+        {
+            None
+        } else {
+            channel.exit_status().ok()
+        };
+        process.finish(lifecycle, exit_code, true, None);
+        return;
+    }
+    let _ = channel.close();
+    process.finish(lifecycle, None, false, None);
 }
 
 fn set_diagnostic_phase(io: Option<&DiagnosticProcessIo>, phase: &'static str) {
@@ -2632,5 +2788,35 @@ mod tests {
                 variant
             );
         }
+    }
+
+    #[test]
+    fn remote_signal_commands_target_pid_children_and_cleanup() {
+        let term = super::remote_signal_command(
+            "/tmp/.shellspan-proc-123.pid",
+            ProcessSignalNative::Terminate,
+            false,
+        );
+        assert!(term.contains("pkill -TERM -P \"$p\""));
+        assert!(term.contains("kill -TERM \"$p\""));
+        assert!(!term.contains("rm -f"));
+
+        let kill = super::remote_signal_command(
+            "/tmp/.shellspan-proc-123.pid",
+            ProcessSignalNative::Kill,
+            true,
+        );
+        assert!(kill.contains("pkill -KILL -P \"$p\""));
+        assert!(kill.contains("kill -KILL \"$p\""));
+        assert!(kill.contains("rm -f '/tmp/.shellspan-proc-123.pid'"));
+
+        assert_eq!(
+            super::remote_signal_name(ProcessSignalNative::Interrupt),
+            "INT"
+        );
+        assert_eq!(
+            super::remote_cleanup_pid_file_command("/tmp/.shellspan-proc-123.pid"),
+            "rm -f '/tmp/.shellspan-proc-123.pid' 2>/dev/null || true"
+        );
     }
 }
