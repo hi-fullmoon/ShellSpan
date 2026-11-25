@@ -60,11 +60,12 @@ impl AgentToolPipeline {
         }
 
         if decision == AgentToolDecision::Reject {
+            let reason = format_approval_rejection_reason(input.reason.as_deref())?;
             self.append_terminal_approval(
                 &pending,
                 AgentToolApprovalStatus::Rejected,
                 AgentToolResultStatus::Rejected,
-                "Native approval was rejected",
+                &reason,
             )?;
             self.native.abandon(&pending.preparation.token);
             self.changed.notify_waiters();

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDownIcon, ShieldAlertIcon } from 'lucide-react';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -15,20 +15,25 @@ import {
 } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Spinner } from '@/components/ui/empty-state';
+import { Field, FieldError, FieldLabel } from '@/components/ui/field';
+import { InputGroup, InputGroupTextarea } from '@/components/ui/input-group';
 import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { useI18n } from '@/hooks/useI18n';
 import { approvalIdentityKey, type ApprovalDecision } from '@/lib/ai/approval-decision';
+import type { AiToolNode } from '@/lib/ai/conversation-node';
 import { aiErrorMessage } from '@/lib/ai/error-message';
 import { cn } from '@/lib/utils';
 import type { AiPendingApproval } from '@/lib/ai/session-adapter';
 import type { LocaleKey } from '@/locales';
 import type { AgentSessionEffect } from '@/types/agent-session';
 import { AiErrorNotice } from './ai-error-notice';
-import { AiToolCopyButton } from './ai-tool-presentation';
+import { AiToolCopyButton, AiToolExpandedContent, classifyAiTool, toolDiffPreview } from './ai-tool-presentation';
 import { AiContentTitle } from './ai-content-title';
 import { AiNativeCodeFade } from './ai-native-code-fade';
 import { AiSubmissionButtonLabel, submissionFeedbackMs } from './ai-submission-button-label';
 import { AI_CONTENT_CODE_CLASS } from './ai-style-classes';
+
+const MAX_REJECT_NOTE_BYTES = 2048;
 
 export interface AiApprovalPanelProps {
   readonly approval: AiPendingApproval;
@@ -37,14 +42,14 @@ export interface AiApprovalPanelProps {
   readonly argumentsLoading?: boolean;
   readonly argumentsError?: string | null;
   readonly onApprove: () => void;
-  readonly onReject: () => void;
+  readonly onReject: (reason?: string) => void;
 }
 
 export function AiApprovalSeat({ approval, decision, error, argumentsLoading, argumentsError,
   onApprove, onReject }: Omit<AiApprovalPanelProps, 'approval' | 'onApprove' | 'onReject'> & {
   readonly approval?: AiPendingApproval | null;
   readonly onApprove?: () => void;
-  readonly onReject?: () => void;
+  readonly onReject?: (reason?: string) => void;
 }): React.ReactNode {
   const [feedback, setFeedback] = useState<(Pick<AiApprovalPanelProps, 'approval' | 'argumentsLoading' | 'argumentsError'> & {
     readonly key: string;
@@ -85,7 +90,7 @@ export function AiApprovalSeat({ approval, decision, error, argumentsLoading, ar
       argumentsLoading={retained ? retained.argumentsLoading : argumentsLoading}
       argumentsError={retained ? retained.argumentsError : argumentsError}
       onApprove={() => submit('approve', onApprove)}
-      onReject={() => submit('reject', onReject)}
+      onReject={(reason) => submit('reject', onReject ? () => onReject(reason) : undefined)}
     />
   </div>;
 }
@@ -207,8 +212,12 @@ export function AiApprovalPanel({
 }: AiApprovalPanelProps): React.ReactNode {
   const { t } = useI18n();
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const rejectNoteRef = useRef<HTMLTextAreaElement>(null);
   const [parametersOpen, setParametersOpen] = useState(false);
+  const [rejectNoteOpen, setRejectNoteOpen] = useState(false);
+  const [rejectNote, setRejectNote] = useState('');
   const pending = decision !== null;
+  const rejectNoteTooLong = new TextEncoder().encode(rejectNote.trim()).length > MAX_REJECT_NOTE_BYTES;
   const command = argumentString(approval, 'command');
   const vimInsertion = approval.toolName === 'insert_vim_text';
   const inputKind = argumentString(approval, 'inputKind');
@@ -279,6 +288,59 @@ export function AiApprovalPanel({
   const riskKeys = APPROVAL_RISK_KEYS[approval.risk];
   const recoverableDeletion = approval.toolName === 'trash_file';
   const destructive = approval.risk === 'destructive' && !recoverableDeletion;
+  const diffPreview = useMemo(() => {
+    if (volatileArgumentsMissing) return null;
+    const variant = classifyAiTool(approval.toolName);
+    if (variant !== 'edit' && variant !== 'write') return null;
+    const syntheticNode: AiToolNode = {
+      kind: 'tool',
+      key: `approval-preview:${approval.approvalId}`,
+      sourceKind: 'agent',
+      sessionId: approval.sessionId,
+      turnId: approval.turnId,
+      stepId: approval.stepId,
+      firstSeq: 0,
+      lastSeq: 0,
+      timestamp: '',
+      callId: approval.callId,
+      name: approval.toolName,
+      nativeName: approval.toolName,
+      title: approval.toolName,
+      summary: '',
+      state: 'approval',
+      effect: approval.effect,
+      durationMs: null,
+      detailRef: {
+        kind: 'agentTool',
+        sessionId: approval.sessionId,
+        callId: approval.callId,
+        turnId: approval.turnId,
+        stepId: approval.stepId,
+      },
+      evidenceRefs: approval.evidenceRefs,
+      input: approval.arguments,
+      output: null,
+      error: null,
+      target: approval.target,
+      idempotency: null,
+      approval: null,
+    };
+    const model = toolDiffPreview(syntheticNode);
+    return model ? { node: syntheticNode, model } : null;
+  }, [approval, volatileArgumentsMissing]);
+
+  const openRejectNote = (): void => {
+    setRejectNoteOpen(true);
+    requestAnimationFrame(() => {
+      rejectNoteRef.current?.scrollIntoView?.({ block: 'nearest' });
+      rejectNoteRef.current?.focus({ preventScroll: true });
+    });
+  };
+  const submitRejectWithNote = (): void => {
+    if (pending || rejectNoteTooLong) return;
+    const trimmed = rejectNote.trim();
+    onReject(trimmed || undefined);
+  };
 
   useEffect(() => {
     headingRef.current?.focus({ preventScroll: true });
@@ -364,6 +426,22 @@ export function AiApprovalPanel({
               </AiErrorNotice>
             )}
 
+            {diffPreview && (
+              <div className="flex min-w-0 flex-col gap-1" data-slot="ai-approval-diff-preview">
+                <p className="text-xs font-medium text-muted-foreground">{t('ai.workspace.approval.changesPreview')}</p>
+                <AiToolExpandedContent
+                  node={diffPreview.node}
+                  compact
+                  showCopyActions={false}
+                  showInput={false}
+                  hideHeader
+                  foldContext
+                  scrollable
+                  diffModel={diffPreview.model}
+                />
+              </div>
+            )}
+
             {intent && (
               <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-2">
                 <p className="text-xs font-medium text-muted-foreground">{t('ai.workspace.approval.intent')}</p>
@@ -383,6 +461,37 @@ export function AiApprovalPanel({
                 {command && <span>{t(commandImpactKey)}</span>}
               </AlertDescription>
             </Alert>
+
+            {rejectNoteOpen && (
+              <Field className="gap-1.5" data-invalid={rejectNoteTooLong || undefined} data-slot="ai-approval-reject-note">
+                <FieldLabel htmlFor={`${approval.approvalId}-reject-note`} className="text-xs text-muted-foreground">
+                  {t('ai.workspace.approval.rejectNoteLabel')}
+                </FieldLabel>
+                <InputGroup className="ai-question-custom-group min-h-[34px] items-start">
+                  <InputGroupTextarea
+                    ref={rejectNoteRef}
+                    id={`${approval.approvalId}-reject-note`}
+                    className="ai-question-custom-input min-h-[34px] max-h-24 resize-none px-2.5 py-[7px] text-xs leading-relaxed"
+                    rows={2}
+                    disabled={pending}
+                    value={rejectNote}
+                    aria-invalid={rejectNoteTooLong || undefined}
+                    maxLength={MAX_REJECT_NOTE_BYTES}
+                    placeholder={t('ai.workspace.approval.rejectNotePlaceholder')}
+                    onChange={(event) => setRejectNote(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                        event.preventDefault();
+                        submitRejectWithNote();
+                      }
+                    }}
+                  />
+                </InputGroup>
+                {rejectNoteTooLong && (
+                  <FieldError>{t('ai.workspace.approval.rejectNoteTooLong')}</FieldError>
+                )}
+              </Field>
+            )}
 
             {!volatileArgumentsMissing && approval.arguments !== undefined && approval.arguments !== null && (
               <Collapsible open={parametersOpen} onOpenChange={setParametersOpen}>
@@ -417,21 +526,55 @@ export function AiApprovalPanel({
         </ScrollAreaContent>
       </ScrollArea>
 
-      <CardFooter className="ai-approval-panel-footer shrink-0 justify-end gap-2 px-4 pt-2 pb-3">
-        <Button size="sm" variant="outline" disabled={pending} aria-busy={decision === 'reject' || undefined} onClick={onReject} aria-label={t('ai.workspace.approval.reject')}>
-          <AiSubmissionButtonLabel label={t('ai.workspace.approval.reject')} busy={decision === 'reject'} />
-        </Button>
-        <Button
-          size="sm"
-          variant="warning"
-          data-remote-allow-once={remoteAllowOnce || undefined}
-          disabled={pending || volatileArgumentsMissing}
-          aria-busy={decision === 'approve' || argumentsLoading || undefined}
-          onClick={onApprove}
-          aria-label={approveLabel}
-        >
-          <AiSubmissionButtonLabel label={approveLabel} busy={decision === 'approve'} />
-        </Button>
+      <CardFooter className="ai-approval-panel-footer shrink-0 flex-wrap justify-end gap-2 px-4 pt-2 pb-3">
+        {rejectNoteOpen ? (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={() => setRejectNoteOpen(false)}
+            >
+              {t('ai.workspace.approval.rejectBack')}
+            </Button>
+            <Button
+              size="sm"
+              variant="default"
+              disabled={pending || rejectNoteTooLong}
+              aria-busy={decision === 'reject' || undefined}
+              onClick={submitRejectWithNote}
+              aria-label={t('ai.workspace.approval.rejectSubmit')}
+            >
+              <AiSubmissionButtonLabel label={t('ai.workspace.approval.rejectSubmit')} busy={decision === 'reject'} />
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button size="sm" variant="outline" disabled={pending} aria-busy={decision === 'reject' || undefined} onClick={() => onReject()} aria-label={t('ai.workspace.approval.reject')}>
+              <AiSubmissionButtonLabel label={t('ai.workspace.approval.reject')} busy={decision === 'reject'} />
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={openRejectNote}
+              aria-label={t('ai.workspace.approval.rejectWithNote')}
+            >
+              {t('ai.workspace.approval.rejectWithNote')}
+            </Button>
+            <Button
+              size="sm"
+              variant="warning"
+              data-remote-allow-once={remoteAllowOnce || undefined}
+              disabled={pending || volatileArgumentsMissing}
+              aria-busy={decision === 'approve' || argumentsLoading || undefined}
+              onClick={onApprove}
+              aria-label={approveLabel}
+            >
+              <AiSubmissionButtonLabel label={approveLabel} busy={decision === 'approve'} />
+            </Button>
+          </>
+        )}
       </CardFooter>
       <span className="sr-only" aria-live="polite">
         {pending ? t('ai.workspace.approval.pending') : error}

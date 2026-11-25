@@ -136,7 +136,8 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly onReorderQueueLane?: (lane: AiInboxItem['lane'], orderedItemIds: readonly string[]) => void;
   readonly onOpenModel?: () => void;
   readonly onApprove?: () => void;
-  readonly onReject?: () => void;
+  readonly onReject?: (reason?: string) => void;
+  readonly promptHistory?: readonly string[];
 }
 
 /** ShellSpan composer surface backed by the existing workspace state machine. */
@@ -206,6 +207,7 @@ export function AiComposerSeat({
   onOpenModel,
   onApprove,
   onReject,
+  promptHistory = [],
 }: AiComposerSeatProps): React.ReactNode {
   const { t } = useI18n();
   const toast = useToast();
@@ -278,7 +280,16 @@ export function AiComposerSeat({
     if (composerState === undefined && controlledDraft === undefined) setLocalDraft(value);
     onDraftChange?.(value);
   };
+  const promptHistoryNav = useRef<{ owner: string; index: number | null; savedDraft: string; applying: boolean }>({
+    owner: attachmentOwner, index: null, savedDraft: '', applying: false,
+  });
+  if (promptHistoryNav.current.owner !== attachmentOwner) {
+    promptHistoryNav.current = { owner: attachmentOwner, index: null, savedDraft: '', applying: false };
+  }
   const updateDraft = (value: string, selectedSkill?: string): void => {
+    if (!promptHistoryNav.current.applying) {
+      promptHistoryNav.current.index = null;
+    }
     try {
       const current = decodeDocumentMessage(rawDraftRef.current);
       const files = current.documents.filter(document => document.chatTitle === undefined);
@@ -724,6 +735,52 @@ export function AiComposerSeat({
                   || Date.now() < composingUntilRef.current
                 ) return;
                 if (skillCompletion.keyDown(event) || completion.keyDown(event)) return;
+                if (
+                  (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+                  && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey
+                  && promptHistory.length > 0
+                ) {
+                  const editor = completion.editor.current;
+                  const collapsedSelection = !editor || editor.selectionStart === editor.selectionEnd;
+                  if (collapsedSelection) {
+                    const start = editor?.selectionStart ?? 0;
+                    const end = editor?.selectionEnd ?? draft.length;
+                    const onFirstLine = !draft.slice(0, start).includes('\n');
+                    const onLastLine = !draft.slice(end).includes('\n');
+                    const nav = promptHistoryNav.current;
+                    if (event.key === 'ArrowUp' && onFirstLine && (nav.index !== null || draft.length === 0)) {
+                      event.preventDefault();
+                      const nextIndex = nav.index === null
+                        ? promptHistory.length - 1
+                        : Math.max(0, nav.index - 1);
+                      if (nav.index === null) nav.savedDraft = draft;
+                      nav.index = nextIndex;
+                      const nextValue = promptHistory[nextIndex] ?? '';
+                      nav.applying = true;
+                      updateDraft(nextValue);
+                      nav.applying = false;
+                      requestAnimationFrame(() => {
+                        completion.editor.current?.setSelectionRange(nextValue.length, nextValue.length);
+                      });
+                      return;
+                    }
+                    if (event.key === 'ArrowDown' && onLastLine && nav.index !== null) {
+                      event.preventDefault();
+                      const nextIndex = nav.index + 1;
+                      const nextValue = nextIndex < promptHistory.length
+                        ? (promptHistory[nextIndex] ?? '')
+                        : nav.savedDraft;
+                      nav.index = nextIndex < promptHistory.length ? nextIndex : null;
+                      nav.applying = true;
+                      updateDraft(nextValue);
+                      nav.applying = false;
+                      requestAnimationFrame(() => {
+                        completion.editor.current?.setSelectionRange(nextValue.length, nextValue.length);
+                      });
+                      return;
+                    }
+                  }
+                }
                 if (event.key !== 'Enter' || event.shiftKey) return;
                 event.preventDefault();
                 if (event.repeat) return;

@@ -204,6 +204,10 @@ export interface AiApprovalDecisionInput {
   readonly approvalId: string;
 }
 
+export interface AiApprovalRejectionInput extends AiApprovalDecisionInput {
+  readonly rejectionReason?: string;
+}
+
 export type AiSessionListener = (view: AiSessionView) => void;
 
 /** UI-facing operations backed exclusively by the Agent Runtime. */
@@ -231,7 +235,7 @@ export interface AiSessionAdapter<Kind extends AiSessionKind = AiSessionKind> {
   submit(sessionId: string | null, input: AiSubmitInput<Kind>): Promise<AiSubmitReceipt>;
   stop(sessionId: string): Promise<void>;
   approve(input: AiApprovalDecisionInput): Promise<void>;
-  reject(input: AiApprovalDecisionInput): Promise<void>;
+  reject(input: AiApprovalRejectionInput): Promise<void>;
   loadApprovalArguments?(input: AiApprovalDecisionInput): Promise<unknown | null>;
   archive(sessionId: string): Promise<void>;
   delete(sessionId: string): Promise<void>;

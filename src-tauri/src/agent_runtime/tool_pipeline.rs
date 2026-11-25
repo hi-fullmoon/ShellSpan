@@ -531,6 +531,18 @@ impl NativeToolRuntime for NativeToolRuntimeSlot {
     }
 }
 
+pub(crate) const MAX_APPROVAL_REJECTION_REASON_BYTES: usize = 2048;
+
+pub(crate) fn format_approval_rejection_reason(reason: Option<&str>) -> Result<String, String> {
+    let Some(trimmed) = reason.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok("Native approval was rejected".to_string());
+    };
+    if trimmed.len() > MAX_APPROVAL_REJECTION_REASON_BYTES {
+        return Err("Approval rejection reason exceeds 2048 bytes".into());
+    }
+    Ok(format!("Native approval was rejected: {trimmed}"))
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentToolDecisionInput {
@@ -540,6 +552,8 @@ pub(crate) struct AgentToolDecisionInput {
     pub(crate) request_id: String,
     pub(crate) call_id: String,
     pub(crate) approval_id: String,
+    #[serde(default)]
+    pub(crate) reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -3249,6 +3263,47 @@ mod ephemeral_terminal_result_tests {
         assert!(inner
             .saw_approved
             .load(std::sync::atomic::Ordering::Acquire));
+    }
+
+    #[test]
+    fn approval_rejection_reason_normalizes_and_bounds_user_notes() {
+        assert_eq!(
+            format_approval_rejection_reason(None).unwrap(),
+            "Native approval was rejected"
+        );
+        assert_eq!(
+            format_approval_rejection_reason(Some("   ")).unwrap(),
+            "Native approval was rejected"
+        );
+        assert_eq!(
+            format_approval_rejection_reason(Some("  use --dry-run first  ")).unwrap(),
+            "Native approval was rejected: use --dry-run first"
+        );
+        let oversized = "a".repeat(MAX_APPROVAL_REJECTION_REASON_BYTES + 1);
+        assert!(format_approval_rejection_reason(Some(&oversized)).is_err());
+
+        let without_reason: AgentToolDecisionInput = serde_json::from_value(serde_json::json!({
+            "sessionId": "s",
+            "turnId": "t",
+            "stepId": "st",
+            "requestId": "r",
+            "callId": "c",
+            "approvalId": "a"
+        }))
+        .unwrap();
+        assert_eq!(without_reason.reason, None);
+
+        let with_reason: AgentToolDecisionInput = serde_json::from_value(serde_json::json!({
+            "sessionId": "s",
+            "turnId": "t",
+            "stepId": "st",
+            "requestId": "r",
+            "callId": "c",
+            "approvalId": "a",
+            "reason": "check config first"
+        }))
+        .unwrap();
+        assert_eq!(with_reason.reason.as_deref(), Some("check config first"));
     }
 }
 

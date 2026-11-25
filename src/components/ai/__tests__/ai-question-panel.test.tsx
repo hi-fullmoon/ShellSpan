@@ -597,4 +597,62 @@ describe('Question form', () => {
     expect(footer).toHaveClass('@max-[421px]/ai-workspace:flex-wrap');
     expect(footer).not.toHaveClass('max-[421px]:flex-wrap');
   });
+
+  it('selects options with 1-9 keys and submits custom answers with Enter', async () => {
+    const submissions: AnswerQuestionInput[] = [];
+    render(
+      <AiQuestionPanel
+        question={{
+          ...question,
+          questions: [
+            question.questions[0],
+            {
+              id: 'multi',
+              question: 'Pick features',
+              multi_select: true,
+              options: [
+                { label: 'Logs' },
+                { label: 'Metrics' },
+              ],
+            },
+          ],
+        }}
+        onAnswer={async (input) => { submissions.push(input); }}
+      />,
+    );
+    const panel = document.querySelector<HTMLElement>('[data-slot="ai-question-panel"]')!;
+    fireEvent.keyDown(panel, { key: '2' });
+    expect(screen.getAllByText('Pick features')[0]).toBeVisible();
+    fireEvent.keyDown(panel, { key: '1' });
+    fireEvent.keyDown(panel, { key: '2' });
+    expect(screen.getByRole('button', { name: 'Logs' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Metrics' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.keyDown(panel, { key: 'Enter', metaKey: true });
+    await waitFor(() => expect(submissions).toHaveLength(1));
+    expect(submissions[0].answers).toEqual([
+      { id: 'choice', selected: ['B'] },
+      { id: 'multi', selected: ['Logs', 'Metrics'] },
+    ]);
+  });
+
+  it('does not intercept 1-9 keys while typing in custom answer and submits on Enter', async () => {
+    const submissions: AnswerQuestionInput[] = [];
+    render(
+      <AiQuestionPanel
+        question={question}
+        onAnswer={async (input) => { submissions.push(input); }}
+      />,
+    );
+    const textbox = screen.getByRole('textbox');
+    fireEvent.keyDown(textbox, { key: '1' });
+    expect(screen.getByRole('button', { name: 'A (Recommended)' })).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.change(textbox, { target: { value: 'Option 1 custom' } });
+    fireEvent.keyDown(textbox, { key: 'Enter', shiftKey: true });
+    expect(submissions).toHaveLength(0);
+    fireEvent.keyDown(textbox, { key: 'Enter' });
+    await waitFor(() => expect(submissions).toHaveLength(1));
+    expect(submissions[0].answers).toEqual([
+      { id: 'choice', selected: [], custom: 'Option 1 custom' },
+    ]);
+  });
 });

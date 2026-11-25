@@ -30,8 +30,11 @@ import { pendingUserAction } from '@/types/agent-question';
 import type { AppSection } from '@/types';
 import { AiComposerSeat } from './ai-composer-seat';
 import { useFirstSubmitTransition } from './use-first-submit-transition';
-import { AiEmptyHero } from './ai-empty-hero';
+import { AiEmptyHero, type AiEmptyHeroQuickAction } from './ai-empty-hero';
 import { AiConversation } from './ai-conversation';
+import { AiTurnRollbackContext } from './ai-turn-changes-summary';
+import { builtinSkills } from '@/lib/ai/builtin-skills';
+import { decodeDocumentMessage, encodeDocumentMessage } from '@/lib/ai/document-message';
 import { AiFailureRecoveryContext } from './ai-failure-recovery';
 import { latestFailureRecovery } from '@/lib/ai/failure-recovery';
 import { childBudgetExhausted } from '@/lib/ai/subagent-continuation';
@@ -292,7 +295,8 @@ export interface AiWorkspaceRootProps {
   readonly onScrollAnchorChange?: (anchor: AiScrollAnchor) => void;
   readonly onRouteReturnComplete?: () => void;
   readonly onApprove?: () => void;
-  readonly onReject?: () => void;
+  readonly onReject?: (reason?: string) => void;
+  readonly onOpenRollback?: (paths: readonly string[]) => void;
   readonly onLoadOlder?: () => void;
   readonly loadArtifact?: (sessionId: string, artifactId: string, maxBytes: number) => Promise<AgentArtifactResponse>;
 }
@@ -398,10 +402,11 @@ export function AiWorkspaceRoot({
   onRouteReturnComplete,
   onApprove,
   onReject,
+  onOpenRollback,
   onLoadOlder,
   loadArtifact,
 }: AiWorkspaceRootProps): React.ReactNode {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const profileName = useAppStore((state) => state.profileName);
   const agentUnavailableReason = rawAgentUnavailableReason === null
     ? null : aiErrorMessage(rawAgentUnavailableReason, t);
@@ -528,6 +533,50 @@ export function AiWorkspaceRoot({
   }, [historicalTargetUnavailable, surfaceMode, view?.snapshot, visibleNodes]);
   const hero = !sessionLoading && conversationNodes.length === 0
     && status === 'idle' && composerState?.phase !== 'submitting';
+  const promptHistory = useMemo(() => {
+    const history: string[] = [];
+    for (const node of conversationNodes) {
+      if (node.kind !== 'userMessage' || node.delivery === 'failed') continue;
+      const text = decodeDocumentMessage(node.content).text.trim();
+      if (!text) continue;
+      if (history[history.length - 1] !== text) history.push(text);
+    }
+    return history;
+  }, [conversationNodes]);
+  const quickHeroActions = useMemo<readonly AiEmptyHeroQuickAction[]>(() => {
+    if (surfaceMode !== 'agent' || readOnlySession || submissionDisabled || !onDraftChange) return [];
+    const curated = [
+      { command: 'system-status', labelKey: 'agent.emptyQuickSkill.systemStatus' as const },
+      { command: 'service-diagnosis', labelKey: 'agent.emptyQuickSkill.serviceDiagnosis' as const },
+      { command: 'docker-diagnosis', labelKey: 'agent.emptyQuickSkill.dockerDiagnosis' as const },
+      { command: 'log-triage', labelKey: 'agent.emptyQuickSkill.logTriage' as const },
+    ];
+    return curated.flatMap(({ command, labelKey }) => {
+      const skill = builtinSkills.find((entry) => entry.name === command);
+      if (!skill) return [];
+      return [{
+        id: command,
+        command,
+        label: t(labelKey),
+        description: locale === 'zh-CN' ? skill.descriptionZh : skill.description,
+      }];
+    });
+  }, [locale, onDraftChange, readOnlySession, submissionDisabled, surfaceMode, t]);
+  const handleSelectHeroQuickAction = (action: AiEmptyHeroQuickAction): void => {
+    if (!onDraftChange) return;
+    const currentRaw = composerState?.draft ?? draft ?? '';
+    const current = decodeDocumentMessage(currentRaw);
+    const trimmed = current.text.trim();
+    const nextText = trimmed ? `${current.text}${/\s$/u.test(current.text) ? '' : ' '}/${action.command} ` : `/${action.command} `;
+    const nextSkills = current.skills?.includes(action.command)
+      ? current.skills
+      : [...(current.skills ?? []), action.command];
+    onDraftChange(encodeDocumentMessage(nextText, current.documents, false, nextSkills));
+    requestAnimationFrame(() => {
+      const editorEl = rootRef.current?.querySelector<HTMLElement>('[data-testid="ai-workspace-composer"]');
+      editorEl?.focus();
+    });
+  };
   const firstSubmitTransition = useFirstSubmitTransition(hero, imageBusy, submissionContext);
   const sessionLedgerKey = view ? sessionRouteKey(view.summary.kind, view.summary.id) : null;
   const [conversationIdentity, setConversationIdentity] = useState({
@@ -906,6 +955,9 @@ export function AiWorkspaceRoot({
               icon={surfaceMode === 'ask'
                 ? <MessageCircleQuestionIcon />
                 : <ShellSpanGlyph />}
+              quickActions={quickHeroActions}
+              quickActionsLabel={t('agent.emptyQuickSkills')}
+              onSelectQuickAction={handleSelectHeroQuickAction}
             />
           ) : (
             <AiFailureRecoveryContext.Provider value={{
@@ -924,6 +976,7 @@ export function AiWorkspaceRoot({
             <AiTerminalInsertContext.Provider value={terminalInsertContext}>
             <AiContinueGenerationContext.Provider value={continueGenerationContext}>
             <AiSubagentContext.Provider value={subagentContextValue}>
+            <AiTurnRollbackContext.Provider value={onOpenRollback}>
             <AiConversation
               key={conversationIdentity.generation}
               nodes={conversationNodes}
@@ -948,6 +1001,7 @@ export function AiWorkspaceRoot({
               loadingOlder={loadingOlder}
               onLoadOlder={onLoadOlder}
             />
+            </AiTurnRollbackContext.Provider>
             </AiSubagentContext.Provider>
             </AiContinueGenerationContext.Provider>
             </AiTerminalInsertContext.Provider>
@@ -1124,6 +1178,7 @@ export function AiWorkspaceRoot({
           onOpenModel={onOpenModel}
           onApprove={canResolveApproval ? onApprove : undefined}
           onReject={canResolveApproval ? onReject : undefined}
+          promptHistory={promptHistory}
         />
       </div>
       </Activity>

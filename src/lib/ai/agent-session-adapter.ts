@@ -60,6 +60,7 @@ import { findConversationTool } from './conversation-tool';
 import type { AiConversationNode } from './conversation-node';
 import type {
   AiApprovalDecisionInput,
+  AiApprovalRejectionInput,
   AiCreateSessionInput,
   AiInboxMutationInput,
   AiInboxItem,
@@ -893,13 +894,14 @@ export function createAgentSessionAdapter(
     }
   };
 
-  const decision = (input: AiApprovalDecisionInput) => ({
+  const decision = (input: AiApprovalRejectionInput) => ({
     sessionId: input.sessionId,
     turnId: input.turnId,
     stepId: input.stepId,
     requestId: input.requestId,
     callId: input.callId,
     approvalId: input.approvalId,
+    ...(input.rejectionReason?.trim() ? { reason: input.rejectionReason.trim() } : {}),
   });
 
   const createSession = async (
@@ -1185,7 +1187,7 @@ export function createAgentSessionAdapter(
     async approve(input: AiApprovalDecisionInput): Promise<void> {
       await dependencies.approve(decision(input));
     },
-    async reject(input: AiApprovalDecisionInput): Promise<void> {
+    async reject(input: AiApprovalRejectionInput): Promise<void> {
       await dependencies.reject(decision(input));
     },
     async loadApprovalArguments(input: AiApprovalDecisionInput): Promise<unknown | null> {

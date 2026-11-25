@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeftIcon, ChevronDownIcon, ChevronRightIcon, FileCodeIcon, FileCogIcon, FileTextIcon, Trash2Icon } from 'lucide-react';
+import { ArrowLeftIcon, ChevronDownIcon, ChevronRightIcon, FileCodeIcon, FileCogIcon, FileTextIcon, HistoryIcon, Trash2Icon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -19,6 +19,7 @@ import {
 } from './ai-tool-presentation';
 
 export const AiTurnFileBaselinesContext = createContext<ReadonlyMap<string, ReadonlyMap<string, string>> | null>(null);
+export const AiTurnRollbackContext = createContext<((paths: readonly string[]) => void) | undefined>(undefined);
 
 export interface TurnChangedFileEntry extends ToolFileChangeEntry {
   readonly tools: readonly ToolFileChangeEntry['tool'][];
@@ -454,12 +455,14 @@ function TurnChangedFilesOverlay({
   title,
   initialFilePath,
   portalContainer,
+  onOpenRollback,
   onClose,
 }: {
   readonly summary: TurnFileChangesSummary;
   readonly title: string;
   readonly initialFilePath: string | null;
   readonly portalContainer: HTMLElement | null;
+  readonly onOpenRollback?: (paths: readonly string[]) => void;
   readonly onClose: () => void;
 }) {
   const { t } = useI18n();
@@ -524,12 +527,33 @@ function TurnChangedFilesOverlay({
           </Tooltip>
           <h2 id={titleId} className="ai-turn-changes-title m-0 min-w-0 truncate text-sm">{title}</h2>
         </div>
-        {summary.totalAdded !== null && summary.totalRemoved !== null && (
-          <span className="ai-turn-changes-counts inline-flex shrink-0 items-center gap-1 tabular-nums">
-            <span data-diff-count="added">+{summary.totalAdded}</span>
-            <span data-diff-count="removed">-{summary.totalRemoved}</span>
-          </span>
-        )}
+        <div className="flex shrink-0 items-center gap-2">
+          {summary.totalAdded !== null && summary.totalRemoved !== null && (
+            <span className="ai-turn-changes-counts inline-flex shrink-0 items-center gap-1 tabular-nums">
+              <span data-diff-count="added">+{summary.totalAdded}</span>
+              <span data-diff-count="removed">-{summary.totalRemoved}</span>
+            </span>
+          )}
+          {onOpenRollback && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              className="h-7 gap-1 px-2 text-xs"
+              aria-label={t('ai.workspace.turnChanges.rollbackAria')}
+              onClick={() => {
+                const paths = initialFilePath
+                  ? [initialFilePath, ...summary.files.map((file) => file.path)]
+                  : summary.files.map((file) => file.path);
+                onClose();
+                onOpenRollback(paths);
+              }}
+            >
+              <HistoryIcon data-icon="inline-start" aria-hidden="true" />
+              <span>{t('ai.workspace.turnChanges.rollback')}</span>
+            </Button>
+          )}
+        </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex min-w-0 flex-col">
@@ -567,6 +591,7 @@ export function AiTurnChangesSummary({
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
   const baselinesByTurn = useContext(AiTurnFileBaselinesContext);
+  const onOpenRollback = useContext(AiTurnRollbackContext);
   const priorBaselines = process ? baselinesByTurn?.get(process.key) : undefined;
   const summary = useMemo(() => summarizeTurnFileChanges(process, priorBaselines), [process, priorBaselines]);
   if (!summary) return null;
@@ -589,26 +614,49 @@ export function AiTurnChangesSummary({
           data-expanded={open || undefined}
           data-ai-turn-changes=""
         >
-          <CollapsibleTrigger
-            render={(
-              <Button
-                type="button"
-                variant="plain"
-                size="sm"
-                className="ai-turn-changes-trigger flex h-9 w-full min-w-0 items-center justify-start gap-2 px-3.5 text-left"
-                aria-expanded={open}
-              />
+          <div className="flex min-w-0 items-center">
+            <CollapsibleTrigger
+              render={(
+                <Button
+                  type="button"
+                  variant="plain"
+                  size="sm"
+                  className="ai-turn-changes-trigger flex h-9 min-w-0 flex-1 items-center justify-start gap-2 px-3.5 text-left"
+                  aria-expanded={open}
+                />
+              )}
+            >
+              <span className="ai-turn-changes-title min-w-0 truncate">{title}</span>
+              {summary.totalAdded !== null && summary.totalRemoved !== null && (
+                <span className="ai-turn-changes-counts inline-flex shrink-0 items-center gap-1 tabular-nums" data-ai-turn-changes-totals="">
+                  <span data-diff-count="added">+{summary.totalAdded}</span>
+                  <span data-diff-count="removed">-{summary.totalRemoved}</span>
+                </span>
+              )}
+              <ChevronDownIcon className={cn('ai-turn-changes-chevron size-3.5 shrink-0', open && 'rotate-180')} aria-hidden="true" />
+            </CollapsibleTrigger>
+            {onOpenRollback && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={(
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      className="mr-1.5 h-7 shrink-0 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+                      data-testid="turn-changes-rollback-trigger"
+                      aria-label={t('ai.workspace.turnChanges.rollbackAria')}
+                      onClick={() => onOpenRollback(summary.files.map((file) => file.path))}
+                    />
+                  )}
+                >
+                  <HistoryIcon data-icon="inline-start" aria-hidden="true" />
+                  <span>{t('ai.workspace.turnChanges.rollback')}</span>
+                </TooltipTrigger>
+                <TooltipContent>{t('ai.workspace.turnChanges.rollbackAria')}</TooltipContent>
+              </Tooltip>
             )}
-          >
-            <span className="ai-turn-changes-title min-w-0 truncate">{title}</span>
-            {summary.totalAdded !== null && summary.totalRemoved !== null && (
-              <span className="ai-turn-changes-counts inline-flex shrink-0 items-center gap-1 tabular-nums" data-ai-turn-changes-totals="">
-                <span data-diff-count="added">+{summary.totalAdded}</span>
-                <span data-diff-count="removed">-{summary.totalRemoved}</span>
-              </span>
-            )}
-            <ChevronDownIcon className={cn('ai-turn-changes-chevron size-3.5 shrink-0', open && 'rotate-180')} aria-hidden="true" />
-          </CollapsibleTrigger>
+          </div>
           <CollapsibleContent>
             <ul className="ai-turn-changes-list m-0 flex list-none flex-col p-0">
               {summary.files.map((file) => (
@@ -623,6 +671,7 @@ export function AiTurnChangesSummary({
         title={title}
         initialFilePath={selectedFilePath}
         portalContainer={portalContainer}
+        onOpenRollback={onOpenRollback}
         onClose={() => setSelectedFilePath(null)}
       />
     </>

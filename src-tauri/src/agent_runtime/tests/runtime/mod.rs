@@ -1579,6 +1579,7 @@ fn pending_approval(runtime: &AgentRuntime, session_id: &str) -> AgentToolDecisi
                 request_id: request_id.clone(),
                 call_id: call_id.clone(),
                 approval_id: approval_id.clone(),
+                reason: None,
             }),
             _ => None,
         })

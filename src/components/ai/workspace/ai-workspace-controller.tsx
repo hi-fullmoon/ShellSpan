@@ -1,4 +1,4 @@
-import { useLayoutEffect } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import { ShieldCheckIcon, ShieldOffIcon } from 'lucide-react';
 import type { AppSection } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -23,7 +23,7 @@ import { AgentPermissionSelector } from '../agent-permission-selector';
 import { AgentExecutionSurfaceSelector } from '../agent-execution-surface-selector';
 import { SandboxStatusBadge } from './sandbox-status-badge';
 import { SandboxSyncDialog } from './sandbox-sync-dialog';
-import { FileCheckpointRollbackDialog } from './file-checkpoint-rollback-dialog';
+import { FileCheckpointRollbackDialog, type FileCheckpointOpenRequest } from './file-checkpoint-rollback-dialog';
 import { AgentTerminalBusyNotice } from '../agent-terminal-busy-notice';
 import { AiComposerModelSelector } from './ai-composer-model-selector';
 import { AiWorkspaceRoot } from './ai-workspace-root';
@@ -147,6 +147,22 @@ export function AiWorkspaceController({
     controller.imageDraft.draft?.images.length || controller.imageDraft.pendingFiles.length,
   );
   const openAiSettings = (): void => useAppStore.getState().openSettings('ai');
+  const activeSessionId = session?.header.sessionId ?? null;
+  const [checkpointCount, setCheckpointCount] = useState(0);
+  const [rollbackRequest, setRollbackRequest] = useState<FileCheckpointOpenRequest | null>(null);
+  useEffect(() => {
+    setCheckpointCount(0);
+    setRollbackRequest(null);
+  }, [activeSessionId]);
+  const handleOpenRollback = useCallback((focusPaths: readonly string[]) => {
+    setRollbackRequest((current) => ({ nonce: (current?.nonce ?? 0) + 1, focusPaths }));
+  }, []);
+  const canRollbackCheckpoints = Boolean(
+    session?.header.target
+    && !session.header.target.localSandboxRequired
+    && !controller.readOnlySession
+    && checkpointCount > 0,
+  );
   const sandboxSyncAction = session?.header.target?.localSandboxRequired
     ? (
         <SandboxSyncDialog
@@ -163,6 +179,8 @@ export function AiWorkspaceController({
             sessionId={session.header.sessionId}
             refreshEnabled={controller.view?.status === 'idle'}
             refreshSignal={controller.view?.nodes.length ?? 0}
+            openRequest={rollbackRequest}
+            onCheckpointsCountChange={setCheckpointCount}
           />
         )
       : undefined;
@@ -386,6 +404,7 @@ export function AiWorkspaceController({
       onRouteReturnComplete={controller.completeRouteReturn}
       onApprove={controller.approve}
       onReject={controller.reject}
+      onOpenRollback={canRollbackCheckpoints ? handleOpenRollback : undefined}
       onLoadOlder={controller.loadOlder}
       loadArtifact={controller.loadArtifact}
       onClose={onClose}

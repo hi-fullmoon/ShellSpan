@@ -927,6 +927,7 @@ export interface AgentRuntimeToolDecisionInput {
   readonly requestId: string;
   readonly callId: string;
   readonly approvalId: string;
+  readonly reason?: string;
 }
 
 export interface AgentSubagentSpawnRequest {

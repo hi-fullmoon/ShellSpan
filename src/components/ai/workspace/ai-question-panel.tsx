@@ -330,6 +330,41 @@ export function AiQuestionPanel({
       setCurrentIndex(nextIndex);
     }
   };
+  const handlePanelKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (collapsed || userAction || editingLocked || showRecovery || event.defaultPrevented || event.nativeEvent.isComposing) {
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && !event.shiftKey && !event.altKey) {
+      if (!invalid && onAnswer) {
+        event.preventDefault();
+        void submit('answer');
+      }
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+    const target = event.target;
+    if (
+      target instanceof HTMLElement
+      && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable)
+    ) {
+      return;
+    }
+    if (/^[1-9]$/u.test(event.key) && currentQuestion.options?.length) {
+      const optionIndex = Number(event.key) - 1;
+      const option = currentQuestion.options[optionIndex];
+      if (!option) return;
+      event.preventDefault();
+      if (currentQuestion.multi_select) {
+        const exists = currentAnswer.selected.includes(option.label);
+        const nextSelected = exists
+          ? currentAnswer.selected.filter((label) => label !== option.label)
+          : [...currentAnswer.selected, option.label];
+        updateSelection(nextSelected);
+      } else {
+        updateSelection([option.label]);
+      }
+    }
+  };
   return (
     <Card
       className={cn(
@@ -340,6 +375,7 @@ export function AiQuestionPanel({
       data-slot="ai-question-panel"
       data-question-id={question.identity.questionRequestId}
       data-collapsed={collapsed || undefined}
+      onKeyDown={handlePanelKeyDown}
     >
       <CardHeader className="ai-question-panel-header min-h-[70px] shrink-0 gap-[3px] px-[18px] pt-[11px] pb-2 @max-[421px]/ai-workspace:min-h-[66px] @max-[421px]/ai-workspace:px-3 @max-[421px]/ai-workspace:pt-2.5 @max-[421px]/ai-workspace:pb-[7px]">
         <CardDescription>
@@ -528,6 +564,22 @@ export function AiQuestionPanel({
                       aria-invalid={tooLong || undefined}
                       maxLength={8192}
                       placeholder={t('ai.workspace.question.answerPlaceholder')}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+                        event.preventDefault();
+                        if (editingLocked || tooLong || !onAnswer) return;
+                        if (!invalid) {
+                          void submit('answer');
+                          return;
+                        }
+                        if (!isAnswerInvalid(currentAnswer)) {
+                          const nextIndex = answers.findIndex(isAnswerInvalid);
+                          if (nextIndex >= 0 && nextIndex !== currentIndex) {
+                            focusNextQuestion.current = true;
+                            setCurrentIndex(nextIndex);
+                          }
+                        }
+                      }}
                       onChange={(event) =>
                         update({
                           id: currentQuestion.id,

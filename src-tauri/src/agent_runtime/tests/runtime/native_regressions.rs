@@ -595,6 +595,7 @@ impl Scenario {
                             request_id: request_id.clone(),
                             call_id: call_id.clone(),
                             approval_id: approval_id.clone(),
+                            reason: None,
                         })
                     } else {
                         None

@@ -216,7 +216,7 @@ export interface AiSessionController {
   readonly saveScrollAnchor: (anchor: AiScrollAnchor) => void;
   readonly completeRouteReturn: () => void;
   readonly approve: () => void;
-  readonly reject: () => void;
+  readonly reject: (reason?: string) => void;
   readonly loadOlder: () => void;
   readonly loadArtifact: AiSessionAdapter['loadArtifact'];
 }
@@ -1995,7 +1995,7 @@ export function useAiSessionController({
     scrollAnchorsRef.current[key] = anchor;
   }, []);
 
-  const decideApproval = useCallback((decision: 'approve' | 'reject'): void => {
+  const decideApproval = useCallback((decision: 'approve' | 'reject', reason?: string): void => {
     const approval = viewRef.current?.pendingApproval;
     if (!approval) return;
     const request = approvalGuard.begin(submissionContextRef.current, approvalIdentityKey(approval), decision);
@@ -2010,7 +2010,10 @@ export function useAiSessionController({
       setApprovalError(normalizeAiSessionError(error).message);
     };
     try {
-      const operation = decision === 'approve' ? adapter.approve(approval) : adapter.reject(approval);
+      const trimmedReason = reason?.trim();
+      const operation = decision === 'approve'
+        ? adapter.approve(approval)
+        : adapter.reject(trimmedReason ? { ...approval, rejectionReason: trimmedReason } : approval);
       void operation.catch(failed);
     } catch (error) {
       failed(error);
@@ -2537,7 +2540,7 @@ export function useAiSessionController({
     saveScrollAnchor,
     completeRouteReturn: () => setNavigation((current) => ({ ...current, returnFocus: null })),
     approve: () => decideApproval('approve'),
-    reject: () => decideApproval('reject'),
+    reject: (reason?: string) => decideApproval('reject', reason),
     loadOlder,
     loadArtifact,
   };

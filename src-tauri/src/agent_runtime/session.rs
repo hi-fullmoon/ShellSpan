@@ -2392,26 +2392,27 @@ impl AgentSessionStore {
                     && pending.approval_id == input.approval_id
             })
             .ok_or("Approval identity or state is stale")?;
-        let (approval, result, reason, settlement) =
-            if current_unix_ms() >= pending.expires_at_unix_ms {
-                (
-                    AgentToolApprovalStatus::Expired,
-                    AgentToolResultStatus::TimedOut,
-                    "Native approval expired while the app was not running",
-                    AgentToolDecisionSettlement::Expired,
-                )
-            } else if decision == AgentToolDecision::Reject {
-                (
-                    AgentToolApprovalStatus::Rejected,
-                    AgentToolResultStatus::Rejected,
-                    "Native approval was rejected",
-                    AgentToolDecisionSettlement::Resolved,
-                )
-            } else {
-                return Ok(None);
-            };
+        let (approval, result, reason, settlement) = if current_unix_ms()
+            >= pending.expires_at_unix_ms
+        {
+            (
+                AgentToolApprovalStatus::Expired,
+                AgentToolResultStatus::TimedOut,
+                "Native approval expired while the app was not running".to_string(),
+                AgentToolDecisionSettlement::Expired,
+            )
+        } else if decision == AgentToolDecision::Reject {
+            (
+                AgentToolApprovalStatus::Rejected,
+                AgentToolResultStatus::Rejected,
+                super::tool_pipeline::format_approval_rejection_reason(input.reason.as_deref())?,
+                AgentToolDecisionSettlement::Resolved,
+            )
+        } else {
+            return Ok(None);
+        };
         let mut payloads = Vec::new();
-        pending.settle(&mut payloads, approval, result, reason);
+        pending.settle(&mut payloads, approval, result, &reason);
         pending.skip_unadmitted_calls(&record.events, &mut payloads);
         let (events, publisher) =
             append_settlement_locked(&mut inner, &input.session_id, payloads)?;

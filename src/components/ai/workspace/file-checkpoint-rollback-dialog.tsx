@@ -26,10 +26,41 @@ import {
   type FileCheckpointDiffPreview,
 } from '@/lib/ipc/tauri';
 
+export interface FileCheckpointOpenRequest {
+  readonly nonce: number;
+  readonly focusPaths?: readonly string[];
+}
+
 interface FileCheckpointRollbackDialogProps {
   readonly sessionId: string;
   readonly refreshSignal?: string | number;
   readonly refreshEnabled?: boolean;
+  readonly openRequest?: FileCheckpointOpenRequest | null;
+  readonly onCheckpointsCountChange?: (count: number) => void;
+}
+
+function normalizeCheckpointPath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/^\.\//, '');
+}
+
+function findMatchingCheckpointId(
+  items: readonly AgentFileCheckpoint[],
+  focusPaths?: readonly string[],
+): string | null {
+  if (!focusPaths?.length) return null;
+  const normalizedFocus = focusPaths.map(normalizeCheckpointPath).filter(Boolean);
+  for (const focus of normalizedFocus) {
+    const exact = items.find((item) => normalizeCheckpointPath(item.targetPath) === focus);
+    if (exact) return exact.checkpointId;
+  }
+  for (const focus of normalizedFocus) {
+    const suffix = items.find((item) => {
+      const candidate = normalizeCheckpointPath(item.targetPath);
+      return candidate.endsWith(`/${focus}`) || focus.endsWith(`/${candidate}`);
+    });
+    if (suffix) return suffix.checkpointId;
+  }
+  return null;
 }
 
 interface SingleConfirmState {
@@ -46,6 +77,8 @@ export function FileCheckpointRollbackDialog({
   sessionId,
   refreshSignal,
   refreshEnabled = true,
+  openRequest = null,
+  onCheckpointsCountChange,
 }: FileCheckpointRollbackDialogProps): React.ReactElement | null {
   const { t } = useI18n();
   const { error: showError, success: showSuccess } = useToast();
@@ -85,7 +118,10 @@ export function FileCheckpointRollbackDialog({
     }
   }, [sessionId, showError, t]);
 
-  const loadList = useCallback(async (showFailureToast: boolean): Promise<string | null> => {
+  const loadList = useCallback(async (
+    showFailureToast: boolean,
+    focusPaths?: readonly string[],
+  ): Promise<string | null> => {
     const seq = ++listRequestSeqRef.current;
     setLoading(true);
     try {
@@ -93,6 +129,7 @@ export function FileCheckpointRollbackDialog({
       if (seq !== listRequestSeqRef.current) return activeIdRef.current;
       const items = Array.isArray(raw) ? raw : [];
       setCheckpoints(items);
+      onCheckpointsCountChange?.(items.length);
       const validIds = new Set(items.map((item) => item.checkpointId));
       setSelectedIds((prev) => prev.filter((id) => validIds.has(id)));
       if (items.length === 0) {
@@ -100,10 +137,12 @@ export function FileCheckpointRollbackDialog({
         setPreview(null);
         return null;
       }
+      const matchedId = findMatchingCheckpointId(items, focusPaths);
       const current = activeIdRef.current;
-      const nextActiveId = current && items.some((item) => item.checkpointId === current)
-        ? current
-        : items[0].checkpointId;
+      const nextActiveId = matchedId
+        ?? (current && items.some((item) => item.checkpointId === current)
+          ? current
+          : items[0].checkpointId);
       setActiveId(nextActiveId);
       return nextActiveId;
     } catch {
@@ -116,12 +155,24 @@ export function FileCheckpointRollbackDialog({
         setLoading(false);
       }
     }
-  }, [sessionId, showError, t]);
+  }, [onCheckpointsCountChange, sessionId, showError, t]);
 
   useEffect(() => {
     if (!refreshEnabled) return;
     void loadList(false);
   }, [loadList, refreshSignal, refreshEnabled]);
+
+  const lastHandledOpenNonceRef = useRef<number>(0);
+  useEffect(() => {
+    if (!openRequest || openRequest.nonce === 0 || openRequest.nonce === lastHandledOpenNonceRef.current) {
+      return;
+    }
+    lastHandledOpenNonceRef.current = openRequest.nonce;
+    setOpen(true);
+    const matchedLocal = findMatchingCheckpointId(checkpoints, openRequest.focusPaths);
+    if (matchedLocal) setActiveId(matchedLocal);
+    void loadList(true, openRequest.focusPaths);
+  }, [checkpoints, loadList, openRequest]);
 
   useEffect(() => {
     if (!open || !activeId) return;
