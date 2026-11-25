@@ -405,9 +405,13 @@ try {
                 right: element.getBoundingClientRect().right };
             }));
             const reference = surfaces.find(surface => surface.label === 'terminal');
+            const lightDiffBackground = await page.locator('#details .ai-details-root').evaluate(element => getComputedStyle(element).backgroundColor);
             assert.ok(surfaces.length >= 15);
             for (const surface of surfaces) {
-              assert.equal(surface.background, reference.background, `${engine.name()}/${locale}/${theme}/${width}/${surface.label}: neutral background`);
+              const expectedBackground = theme === 'light' && surface.label === 'diff'
+                ? lightDiffBackground
+                : reference.background;
+              assert.equal(surface.background, expectedBackground, `${engine.name()}/${locale}/${theme}/${width}/${surface.label}: neutral background`);
               assert.equal(surface.border, '1px', `${surface.label}: thin border`);
               assert.equal(surface.borderColor, reference.borderColor, `${surface.label}: border color`);
               assert.deepEqual(surface.radii, ['12px', '12px', '12px', '12px'], `${surface.label}: every content border must use the same corner radius`);

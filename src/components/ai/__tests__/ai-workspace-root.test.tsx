@@ -2008,4 +2008,44 @@ describe('AiWorkspaceRoot conversation structure', () => {
     expect(container.querySelector('[data-slot="ai-editor-attached-badge"]')).toHaveTextContent('Neovim attached');
     useTerminalStore.getState().removeSession(remoteSessionId);
   });
+
+  it('places the composer caret at the end after clicking an empty-hero quick skill button', async () => {
+    const user = userEvent.setup();
+    const frames: FrameRequestCallback[] = [];
+    const rafSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => frames.push(cb));
+    try {
+      function Harness() {
+        const [draft, setDraft] = useState('');
+        return (
+          <AiWorkspaceRoot
+            scope="terminal"
+            mode="agent"
+            view={null}
+            draft={draft}
+            onDraftChange={setDraft}
+          />
+        );
+      }
+
+      render(<Harness />);
+      const button = screen.getByRole('button', { name: 'Service diagnosis' });
+      await user.click(button);
+
+      const editor = screen.getByTestId('ai-workspace-composer');
+      expect(editor.textContent).toBe('/service-diagnosis ');
+      expect(editor.querySelector('[data-composer-command="service-diagnosis"]')).toHaveTextContent('/service-diagnosis');
+
+      await act(async () => {
+        frames.splice(0).forEach((cb) => cb(performance.now()));
+      });
+
+      expect(document.activeElement).toBe(editor);
+      const selection = window.getSelection();
+      expect(selection?.isCollapsed).toBe(true);
+      expect(selection?.anchorNode?.textContent).toBe(' ');
+      expect(selection?.anchorOffset).toBe(1);
+    } finally {
+      rafSpy.mockRestore();
+    }
+  });
 });

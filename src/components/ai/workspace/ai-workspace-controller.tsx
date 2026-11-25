@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { ShieldCheckIcon, ShieldOffIcon } from 'lucide-react';
 import type { AppSection } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -70,9 +70,20 @@ export function AiWorkspaceController({
   const focusTargetId = useFocusStore(state => state.targetSessionId);
   const terminalOpen = useFocusStore(state => state.terminalOpen);
   const activeTerminalId = useTerminalStore((state) => focusMode ? focusTargetId : state.activeSessionId);
-  const activeTerminalStatus = useTerminalStore((state) => state.sessions.find(
+  const activeTerminal = useTerminalStore((state) => state.sessions.find(
     (candidate) => candidate.sessionId === activeTerminalId,
-  )?.status);
+  ));
+  const activeTerminalTargetIds = useMemo(() => {
+    if (scope !== 'terminal' || focusMode) return undefined;
+    if (!activeTerminal) return [];
+    const ids = new Set<string>([`terminal-${activeTerminal.sessionId}`]);
+    if (activeTerminal.replacesSessionId) ids.add(`terminal-${activeTerminal.replacesSessionId}`);
+    for (const previous of activeTerminal.replacedSessionIds ?? []) {
+      ids.add(`terminal-${previous}`);
+    }
+    return [...ids];
+  }, [activeTerminal, focusMode, scope]);
+  const activeTerminalStatus = activeTerminal?.status;
   const nativeStartupTimedOut = useTerminalStore((state) => state.sessions.find(
     (candidate) => candidate.sessionId === activeTerminalId,
   )?.integrationReason === 'nativeStartupTimedOut');
@@ -184,14 +195,7 @@ export function AiWorkspaceController({
           />
         )
       : undefined;
-  const headerActions = (focusMode && !terminalOpen) || sandboxSyncAction
-    ? (
-      <>
-        {sandboxSyncAction}
-        {focusMode && !terminalOpen ? <FocusControls /> : null}
-      </>
-    )
-    : undefined;
+  const headerActions = focusMode && !terminalOpen ? <FocusControls /> : undefined;
   const canOpenSandboxTerminal = scope === 'terminal'
     && !focusMode
     && controller.sandboxVisiblePty
@@ -215,6 +219,7 @@ export function AiWorkspaceController({
     : undefined;
   return (
     <AiWorkspaceRoot
+      headerSessionActions={sandboxSyncAction}
       headerActions={headerActions}
       headerBadge={session?.header.target ? (
         <SandboxStatusBadge
@@ -256,6 +261,8 @@ export function AiWorkspaceController({
       announcement={controller.announcement}
       navigation={controller.navigation}
       sessions={controller.sessions}
+      activeTerminalTargetIds={activeTerminalTargetIds}
+      sandboxAgentSessionId={activeSandboxAgentId}
       sessionsLoading={controller.sessionsLoading}
       sessionsError={controller.sessionsError}
       archivingSessionId={controller.archivingSessionId}

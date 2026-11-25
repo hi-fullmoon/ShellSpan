@@ -11,6 +11,10 @@
   font: var(--ai-font-markdown-code-block);
 }
 
+:root:not([data-theme='dark']) .ai-diff-block {
+  --ai-code-block: var(--ai-surface);
+}
+
 .ai-block-banner,
 .ai-tool-surface-header .ai-io-label {
   color: var(--ai-text-secondary);

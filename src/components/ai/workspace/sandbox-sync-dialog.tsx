@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import { aiErrorMessage } from '@/lib/ai/error-message';
@@ -29,6 +30,7 @@ import {
   notifySandboxSyncUpdated,
   SANDBOX_SYNC_UPDATED_EVENT,
 } from '@/lib/terminal/sandbox-terminal';
+import { AiHeaderIconButton } from './ai-header-icon-button';
 
 interface SandboxSyncDialogProps {
   readonly sessionId: string;
@@ -240,30 +242,30 @@ export function SandboxSyncDialog({
     }
   };
 
+  const triggerLabel = pendingCount > 0
+    ? t('ai.sandboxSync.triggerWithCount', { count: pendingCount })
+    : t('ai.sandboxSync.trigger');
+  const badgeTone = (report?.conflictCount ?? 0) > 0 ? 'destructive' : 'primary';
+
   return (
     <>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="h-7 gap-1 px-2 text-xs"
-        aria-label={pendingCount > 0
-          ? t('ai.sandboxSync.triggerWithCount', { count: pendingCount })
-          : t('ai.sandboxSync.trigger')}
-        onClick={() => handleOpenChange(true)}
-      >
-        <FolderSyncIcon className="size-3.5 shrink-0" />
-        <span className="hidden truncate @min-[420px]/ai-workspace:inline">
-          {pendingCount > 0
-            ? t('ai.sandboxSync.triggerWithCount', { count: pendingCount })
-            : t('ai.sandboxSync.trigger')}
-        </span>
-        {pendingCount > 0 && (
-          <span className="tabular-nums @min-[420px]/ai-workspace:hidden" aria-hidden="true">
-            {pendingCount}
-          </span>
-        )}
-      </Button>
+      <Tooltip disabled={open}>
+        <TooltipTrigger
+          render={(
+            <AiHeaderIconButton
+              type="button"
+              badgeCount={pendingCount}
+              badgeTone={badgeTone}
+              aria-label={triggerLabel}
+              data-testid="sandbox-sync-trigger"
+              onClick={() => handleOpenChange(true)}
+            />
+          )}
+        >
+          <FolderSyncIcon aria-hidden="true" />
+        </TooltipTrigger>
+        <TooltipContent>{triggerLabel}</TooltipContent>
+      </Tooltip>
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-3xl">
           <DialogHeader className="shrink-0">

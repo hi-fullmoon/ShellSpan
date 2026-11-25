@@ -326,4 +326,33 @@ describe('AiSessionHeader', () => {
     expect(screen.getByRole('button', { name: 'Conversation history' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'New conversation' })).toBeVisible();
   });
+
+  it('places sessionActions before persistent chrome icons while keeping extraActions and close anchored right', () => {
+    const { container } = render(
+      <AiSessionHeader
+        title="Deploy API"
+        context="Terminal"
+        status="idle"
+        sessionActions={<button type="button" aria-label="Snapshots (2)">2</button>}
+        extraActions={<button type="button" aria-label="Expand terminal" />}
+        onNewSession={vi.fn()}
+        onHistory={vi.fn()}
+        onExportMarkdown={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const buttons = screen.getAllByRole('button');
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Snapshots (2)',
+      'New conversation',
+      'Conversation history',
+      'Export as Markdown',
+      'Expand terminal',
+      'Close AI assistant',
+    ]);
+    const leadingGroup = container.querySelector('[data-slot="ai-session-leading-actions"]');
+    expect(leadingGroup).toHaveClass('empty:hidden');
+    expect(leadingGroup?.className).toContain('after:w-px');
+  });
 });

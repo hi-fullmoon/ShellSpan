@@ -42,6 +42,11 @@ describe('SandboxSyncDialog', () => {
 
     render(<SandboxSyncDialog sessionId="session-imported" />);
     const trigger = await screen.findByRole('button', { name: /2/ });
+    expect(trigger).toHaveClass('size-7', 'relative');
+    expect(trigger.querySelector('svg')).not.toBeNull();
+    const triggerBadge = trigger.querySelector('[data-slot="ai-header-icon-badge"]');
+    expect(triggerBadge).toHaveTextContent('2');
+    expect(triggerBadge).toHaveAttribute('data-tone', 'destructive');
     await user.click(trigger);
 
     const fileRowButton = await screen.findByRole('button', { name: /src\/app\.ts/ });
@@ -154,7 +159,9 @@ describe('SandboxSyncDialog', () => {
     });
 
     render(<SandboxSyncDialog sessionId="session-discard" />);
-    await user.click(await screen.findByRole('button', { name: /1/ }));
+    const discardTrigger = await screen.findByRole('button', { name: /1/ });
+    expect(discardTrigger.querySelector('[data-slot="ai-header-icon-badge"]')).toHaveAttribute('data-tone', 'primary');
+    await user.click(discardTrigger);
 
     await user.click(screen.getByRole('button', { name: /丢弃所选 \(1\)|Discard \(1\)/i }));
     await user.click(await screen.findByRole('button', { name: /确认丢弃|^Discard$/i }));

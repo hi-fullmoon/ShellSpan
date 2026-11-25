@@ -614,7 +614,7 @@ export function AiTurnChangesSummary({
           data-expanded={open || undefined}
           data-ai-turn-changes=""
         >
-          <div className="flex min-w-0 items-center">
+          <div className="ai-turn-changes-header flex min-w-0 items-center transition-colors">
             <CollapsibleTrigger
               render={(
                 <Button

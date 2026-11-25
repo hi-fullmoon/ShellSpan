@@ -46,4 +46,9 @@ describe('AI panel shell divider contract', () => {
     const foundationCss = readFileSync('src/components/ai/styles/foundation.css', 'utf8');
     expect(foundationCss).toContain('box-shadow: inset 1px 0 var(--app-resize-divider)');
   });
+
+  it('uses the white card surface for diff blocks in light mode while keeping dark mode on the code block token', () => {
+    const toolResultsCss = readFileSync('src/components/ai/styles/tool-results.css', 'utf8');
+    expect(toolResultsCss).toMatch(/:root:not\(\[data-theme='dark'\]\)\s+\.ai-diff-block\s*\{\s*--ai-code-block:\s*var\(--ai-surface\);\s*\}/);
+  });
 });

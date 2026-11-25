@@ -155,3 +155,60 @@
   flex: 0 1 auto;
   justify-content: flex-end;
 }
+
+.ai-active-tasks-trigger {
+  background: color-mix(in srgb, var(--ai-accent) 9%, transparent);
+  color: var(--ai-text);
+  font-weight: 500;
+}
+
+.ai-active-tasks-trigger[data-attention='waiting'] {
+  background: color-mix(in srgb, var(--ai-warning) 13%, transparent);
+}
+
+.ai-active-tasks-trigger:is(:hover, [aria-expanded='true'], [data-popup-open]):not(:disabled) {
+  background: var(--accent);
+  color: var(--ai-text);
+}
+
+.ai-active-tasks-popover {
+  border-radius: 10px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow:
+    var(--shadow-dialog),
+    0 0 0 0.5px var(--ai-border-soft);
+}
+
+.ai-active-tasks-row {
+  border-radius: 8px;
+}
+
+.ai-active-tasks-row[aria-current='page'] {
+  background: var(--ai-action-hover);
+}
+
+.ai-active-tasks-row[aria-current='page'] .ai-active-tasks-current-badge {
+  border-color: var(--ai-border-soft);
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+
+.ai-active-tasks-status-icon > svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ai-active-tasks-status-icon [data-status='running'] {
+  color: var(--ai-accent);
+  animation: ai-task-spin 1.1s linear infinite;
+}
+
+.ai-active-tasks-status-icon [data-status='waiting'] {
+  color: var(--ai-warning);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-active-tasks-status-icon [data-status='running'] {
+    animation: none;
+  }
+}

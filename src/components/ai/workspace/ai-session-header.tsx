@@ -13,6 +13,7 @@ import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/compone
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiSessionStatus } from '@/lib/ai/conversation-node';
+import { cn } from '@/lib/utils';
 import { AiHeaderIconButton } from './ai-header-icon-button';
 import { ShellSpanGlyph } from '@/components/brand/shellspan-mark';
 
@@ -32,9 +33,11 @@ export interface AiSessionHeaderProps {
   readonly status: AiSessionStatus;
   readonly mode?: 'ask' | 'agent';
   readonly lineage?: React.ReactNode;
+  readonly activeTasksSwitcher?: React.ReactNode;
   readonly editorBadge?: React.ReactNode;
   readonly sandboxBadge?: React.ReactNode;
   readonly subagentNav?: AiSessionHeaderSubagentNav;
+  readonly sessionActions?: React.ReactNode;
   readonly extraActions?: React.ReactNode;
   readonly onClose?: () => void;
   readonly onHistory?: () => void;
@@ -51,9 +54,11 @@ export function AiSessionHeader({
   status,
   mode = 'agent',
   lineage,
+  activeTasksSwitcher,
   editorBadge,
   sandboxBadge,
   subagentNav,
+  sessionActions,
   extraActions,
   onClose,
   onHistory,
@@ -71,6 +76,8 @@ export function AiSessionHeader({
       : t(`agent.outcome.${status}`);
   const showHistory = !(subagentNav?.hideSessionChrome) && (onHistory || historyOpen);
   const showNewSession = !(subagentNav?.hideSessionChrome) && Boolean(onNewSession);
+  const showExport = !(subagentNav?.hideSessionChrome) && Boolean(onExportMarkdown);
+  const hasTrailingChrome = showNewSession || showHistory || showExport || Boolean(extraActions) || Boolean(onClose);
 
   return (
     <header
@@ -142,7 +149,23 @@ export function AiSessionHeader({
       )}
 
       <div className="ai-session-actions flex min-w-0 shrink-0 items-center gap-1 @min-[400px]/ai-workspace:gap-2">
-        {subagentNav ? subagentNav.switcher : lineage}
+        {subagentNav ? subagentNav.switcher : (
+          <>
+            {lineage}
+            {activeTasksSwitcher}
+          </>
+        )}
+        {sessionActions && (
+          <div
+            data-slot="ai-session-leading-actions"
+            className={cn(
+              'flex shrink-0 items-center gap-1 empty:hidden @min-[400px]/ai-workspace:gap-2',
+              hasTrailingChrome && "after:ml-0.5 after:h-3.5 after:w-px after:bg-app-border/70 after:content-['']",
+            )}
+          >
+            {sessionActions}
+          </div>
+        )}
         {showNewSession && (
           <Tooltip>
             <TooltipTrigger
@@ -191,7 +214,7 @@ export function AiSessionHeader({
           </Popover>
         )}
 
-        {!subagentNav?.hideSessionChrome && onExportMarkdown && (
+        {showExport && (
           <Tooltip>
             <TooltipTrigger
               render={(

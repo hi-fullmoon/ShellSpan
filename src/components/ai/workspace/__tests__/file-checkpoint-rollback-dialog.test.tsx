@@ -327,4 +327,57 @@ describe('FileCheckpointRollbackDialog', () => {
     expect(invokeListFileCheckpoints).toHaveBeenCalledTimes(1);
     useI18nMock.mockReset();
   });
+
+  it('renders text-only action buttons without icons and structured diff stats', async () => {
+    const cp = {
+      checkpointId: 'cp-ui-1',
+      taskId: 'task-1',
+      targetId: 'remote-1',
+      targetKind: 'remote' as const,
+      targetPath: '/root/agent-smoke-test.md',
+      originalSha256: 'sha-1',
+      originalByteLength: 42,
+      createdAtUnixMs: 1_700_000_000_000,
+      expiresAtUnixMs: 1_700_604_800_000,
+    };
+    invokeListFileCheckpoints.mockResolvedValue([cp]);
+    invokePreviewFileCheckpoint.mockResolvedValue({
+      checkpointId: 'cp-ui-1',
+      targetPath: '/root/agent-smoke-test.md',
+      targetKind: 'remote',
+      existedBefore: true,
+      currentExists: true,
+      unchanged: false,
+      modifiedAfterAgent: false,
+      isBinary: false,
+      truncated: false,
+      unifiedDiff: '@@ -1,2 +1,2 @@\n-old line\n+new line\n context\n',
+    });
+
+    render(<FileCheckpointRollbackDialog sessionId="session-ui" />);
+    const trigger = await screen.findByTestId('file-checkpoint-rollback-trigger');
+    expect(trigger).toHaveClass('size-7', 'relative');
+    expect(trigger).toHaveAttribute('aria-label', 'ai.checkpointRollback.buttonWithCount:{"count":1}');
+    expect(trigger.querySelector('svg')).not.toBeNull();
+    const badge = trigger.querySelector('[data-slot="ai-header-icon-badge"]');
+    expect(badge).toHaveTextContent('1');
+    expect(badge).toHaveAttribute('data-tone', 'neutral');
+
+    fireEvent.click(trigger);
+    const diffViewer = await screen.findByTestId('file-checkpoint-diff-viewer');
+    expect(diffViewer.querySelectorAll('[data-diff-line="removed"]')).toHaveLength(1);
+    expect(diffViewer.querySelectorAll('[data-diff-line="added"]')).toHaveLength(1);
+    expect(screen.getByTestId('file-checkpoint-diff-stats')).toHaveTextContent('+1-1');
+
+    const selectAllBtn = screen.getByRole('button', { name: 'ai.checkpointRollback.selectAll' });
+    const refreshBtn = screen.getByRole('button', { name: 'ai.checkpointRollback.refresh' });
+    const restoreBtn = screen.getByRole('button', { name: 'ai.checkpointRollback.restore' });
+    expect(selectAllBtn.querySelector('svg')).toBeNull();
+    expect(refreshBtn.querySelector('svg')).toBeNull();
+    expect(restoreBtn.querySelector('svg')).toBeNull();
+
+    fireEvent.click(selectAllBtn);
+    const batchBtn = await screen.findByTestId('file-checkpoint-batch-restore');
+    expect(batchBtn.querySelector('svg')).toBeNull();
+  });
 });

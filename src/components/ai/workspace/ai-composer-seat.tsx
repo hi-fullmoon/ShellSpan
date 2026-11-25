@@ -1,4 +1,4 @@
-import { AiComposerEditor } from './ai-composer-editor';
+import { AiComposerEditor, type ComposerEditorHandle } from './ai-composer-editor';
 import { observeComposerToolbar } from './composer-toolbar-layout';
 import { AiControlTooltip } from '../ai-control-tooltip';
 import { AiCompletionPopover } from './ai-completion-popover';
@@ -138,6 +138,7 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly onApprove?: () => void;
   readonly onReject?: (reason?: string) => void;
   readonly promptHistory?: readonly string[];
+  readonly editorRef?: React.RefObject<ComposerEditorHandle | null>;
 }
 
 /** ShellSpan composer surface backed by the existing workspace state machine. */
@@ -208,6 +209,7 @@ export function AiComposerSeat({
   onApprove,
   onReject,
   promptHistory = [],
+  editorRef,
 }: AiComposerSeatProps): React.ReactNode {
   const { t } = useI18n();
   const toast = useToast();
@@ -464,6 +466,10 @@ export function AiComposerSeat({
       sessions, sessionsLoading, sessionsError, currentSessionId: currentSessionId ?? composerState?.sessionId, onRefreshSessions },
   });
   const skillCompletion = useSkillCompletion({ text: draft, update: updateDraft, query: mode === 'agent' ? onListSkills : undefined, scopeKey: skillsScopeKey, editor: completion.editor, disabled: Boolean(terminal || waitingApproval || waitingQuestion || unavailable || imageLocked || submitting) });
+  const setComposerEditorRef = useCallback((handle: ComposerEditorHandle | null) => {
+    completion.editor.current = handle;
+    if (editorRef) editorRef.current = handle;
+  }, [completion.editor, editorRef]);
   const wasStopping = useRef(false);
   useEffect(() => {
     if (!running || stopping || terminal || !onStop) return;
@@ -681,6 +687,7 @@ export function AiComposerSeat({
             </div>}
             <AiComposerEditor
               {...completion.editorProps}
+              ref={setComposerEditorRef}
               markdown={mode === 'agent'}
               {...(skillCompletion.open ? {
                 'aria-controls': skillCompletion.editorProps['aria-controls'],

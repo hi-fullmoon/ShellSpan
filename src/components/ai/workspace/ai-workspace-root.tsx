@@ -29,6 +29,7 @@ import type { AgentArtifactResponse } from '@/types/agent-session';
 import { pendingUserAction } from '@/types/agent-question';
 import type { AppSection } from '@/types';
 import { AiComposerSeat } from './ai-composer-seat';
+import type { ComposerEditorHandle } from './ai-composer-editor';
 import { useFirstSubmitTransition } from './use-first-submit-transition';
 import { AiEmptyHero, type AiEmptyHeroQuickAction } from './ai-empty-hero';
 import { AiConversation } from './ai-conversation';
@@ -49,6 +50,11 @@ import {
 import { invokeExportLogFile, invokeRevealPath, isTauriRuntime } from '@/lib/ipc/tauri';
 import { getPlatform } from '@/lib/platform';
 import { AiSessionHeader, type AiSessionHeaderSubagentNav } from './ai-session-header';
+import {
+  AiActiveTasksSwitcher,
+  selectActiveWorkspaceTasks,
+  shouldShowActiveTasksSwitcher,
+} from './ai-active-tasks-switcher';
 import { AiSessionBrowser } from './ai-session-browser';
 import { AiSubagentCatalog } from './ai-subagent-catalog';
 import { AiSubagentContext } from './ai-subagent-context';
@@ -191,6 +197,7 @@ function historicalOutput<Node extends AiConversationNode>(node: Node): Node {
 }
 
 export interface AiWorkspaceRootProps {
+  readonly headerSessionActions?: React.ReactNode;
   readonly headerActions?: React.ReactNode;
   readonly headerBadge?: React.ReactNode;
   readonly mode?: 'ask' | 'agent';
@@ -222,6 +229,8 @@ export interface AiWorkspaceRootProps {
   readonly announcement?: string | null;
   readonly navigation?: AiWorkspaceNavigationState;
   readonly sessions?: readonly AiSessionSummary[];
+  readonly activeTerminalTargetIds?: readonly string[];
+  readonly sandboxAgentSessionId?: string;
   readonly sessionsLoading?: boolean;
   readonly sessionsError?: string | null;
   readonly archivingSessionId?: string | null;
@@ -303,6 +312,7 @@ export interface AiWorkspaceRootProps {
 
 export function AiWorkspaceRoot({
   mode,
+  headerSessionActions,
   headerActions,
   headerBadge,
   imageControls, onPasteImages, hasImages, imageBusy, imageSubmissionId, imageLocked,
@@ -328,6 +338,8 @@ export function AiWorkspaceRoot({
   announcement,
   navigation = createAiWorkspaceNavigationState(view?.summary.id ?? null),
   sessions = [],
+  activeTerminalTargetIds,
+  sandboxAgentSessionId,
   sessionsLoading = false,
   sessionsError = null,
   archivingSessionId = null,
@@ -411,6 +423,7 @@ export function AiWorkspaceRoot({
   const agentUnavailableReason = rawAgentUnavailableReason === null
     ? null : aiErrorMessage(rawAgentUnavailableReason, t);
   const rootRef = useRef<HTMLElement>(null);
+  const composerEditorRef = useRef<ComposerEditorHandle>(null);
   const route = navigation.route;
   const sessionKind = view?.summary.kind ?? 'agent';
   const status = view?.status ?? composerState?.runtimeStatus ?? 'idle';
@@ -573,8 +586,12 @@ export function AiWorkspaceRoot({
       : [...(current.skills ?? []), action.command];
     onDraftChange(encodeDocumentMessage(nextText, current.documents, false, nextSkills));
     requestAnimationFrame(() => {
-      const editorEl = rootRef.current?.querySelector<HTMLElement>('[data-testid="ai-workspace-composer"]');
-      editorEl?.focus();
+      const editor = composerEditorRef.current;
+      if (!editor) return;
+      editor.element?.focus({ preventScroll: true });
+      editor.focus();
+      const end = editor.value.length;
+      editor.setSelectionRange(end, end);
     });
   };
   const firstSubmitTransition = useFirstSubmitTransition(hero, imageBusy, submissionContext);
@@ -621,6 +638,28 @@ export function AiWorkspaceRoot({
     () => (lineage ? filterActiveSubagentEntries(lineage.currentChildren) : []),
     [lineage],
   );
+  const activeWorkspaceTasks = useMemo(
+    () => selectActiveWorkspaceTasks({
+      sessions,
+      currentView: view,
+      activeTargetIds: activeTerminalTargetIds,
+      sandboxAgentSessionId,
+    }),
+    [activeTerminalTargetIds, sandboxAgentSessionId, sessions, view],
+  );
+  const activeTasksSwitcher = useMemo(() => {
+    if (subagent || !onOpenSession || !shouldShowActiveTasksSwitcher(activeWorkspaceTasks, selectedSessionId)) {
+      return undefined;
+    }
+    return (
+      <AiActiveTasksSwitcher
+        tasks={activeWorkspaceTasks}
+        currentSessionId={selectedSessionId}
+        onOpen={onOpenSession}
+        onRefresh={onRefreshSessions}
+      />
+    );
+  }, [activeWorkspaceTasks, onOpenSession, onRefreshSessions, selectedSessionId, subagent]);
   const [expandedDockStrips, setExpandedDockStrips] = useState<Readonly<Record<string, 'tasks' | 'subagents'>>>({});
   const dockStripScopeId = lineage?.current.id ?? selectedSessionId ?? '__default__';
   const expandedDockStrip = expandedDockStrips[dockStripScopeId] ?? null;
@@ -890,7 +929,9 @@ export function AiWorkspaceRoot({
       ) : null}
       <Activity mode={route.kind === 'artifactDetails' ? 'hidden' : 'visible'}>
       <AiSessionHeader
+        sessionActions={headerSessionActions}
         extraActions={headerActions}
+        activeTasksSwitcher={activeTasksSwitcher}
         editorBadge={editorAttachedBadge}
         sandboxBadge={headerBadge}
         title={resolvedTitle}
@@ -1179,6 +1220,7 @@ export function AiWorkspaceRoot({
           onApprove={canResolveApproval ? onApprove : undefined}
           onReject={canResolveApproval ? onReject : undefined}
           promptHistory={promptHistory}
+          editorRef={composerEditorRef}
         />
       </div>
       </Activity>

@@ -71,7 +71,7 @@ import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
 import { documentMessageSummary } from '@/lib/ai/document-message';
 import { chatReferenceFile } from '@/lib/ai/chat-reference';
 import { routeProviderConfigs, useLlmRoutesStore } from '@/stores/llmRoutesStore';
-import { invokeAgentImagePreview, isTauriRuntime } from '@/lib/ipc/tauri';
+import { invokeAgentImagePreview, isTauriRuntime, listenToAgentRuntimeSession } from '@/lib/ipc/tauri';
 import { imageErrorKey } from '@/lib/ai/image-error';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { readTerminalCurrentDirectory } from '@/lib/terminal/terminal-current-directory';
@@ -89,6 +89,7 @@ import type { AgentImageRef, AgentImageUpload, AgentInboxImageEdit } from '@/typ
 import type {
   AgentExecutionSurface,
   AgentInboxMutation,
+  AgentSessionEvent,
   AgentSessionPermissionMode,
   AgentSessionTarget,
   AgentTerminalContextSnapshot,
@@ -291,6 +292,69 @@ function sameOptimistic(
   right: readonly AiOptimisticSubmission[],
 ): boolean {
   return left.length === right.length && left.every((item, index) => item === right[index]);
+}
+
+function mergeSessionSummaries(
+  current: readonly AiSessionSummary[],
+  incoming: readonly AiSessionSummary[],
+): readonly AiSessionSummary[] {
+  if (incoming.length === 0) return current;
+  const byKey = new Map<string, AiSessionSummary>();
+  for (const summary of current) byKey.set(`${summary.kind}:${summary.id}`, summary);
+  let changed = false;
+  for (const summary of incoming) {
+    const key = `${summary.kind}:${summary.id}`;
+    const existing = byKey.get(key);
+    if (
+      !existing
+      || existing.title !== summary.title
+      || existing.status !== summary.status
+      || existing.updatedAt !== summary.updatedAt
+      || existing.archived !== summary.archived
+      || existing.targetId !== summary.targetId
+      || existing.revision !== summary.revision
+    ) {
+      byKey.set(key, summary);
+      changed = true;
+    }
+  }
+  if (!changed) return current;
+  return [...byKey.values()].sort((left, right) => (
+    right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id)
+  ));
+}
+
+function patchSessionSummariesFromEvent(
+  current: readonly AiSessionSummary[],
+  event: AgentSessionEvent,
+): { readonly next: readonly AiSessionSummary[]; readonly found: boolean } {
+  const index = current.findIndex((summary) => summary.kind === 'agent' && summary.id === event.sessionId);
+  if (index < 0) return { next: current, found: false };
+  const existing = current[index];
+  const updatedAt = new Date(event.timeUnixMs).toISOString();
+  let updated: AiSessionSummary | null = null;
+  if (event.type === 'agent/status') {
+    if (existing.status !== event.data.status || existing.updatedAt !== updatedAt) {
+      updated = { ...existing, status: event.data.status, updatedAt };
+    }
+  } else if (event.type === 'session/ended') {
+    if (existing.status !== event.data.status || existing.updatedAt !== updatedAt) {
+      updated = { ...existing, status: event.data.status, updatedAt };
+    }
+  } else if (event.type === 'session/renamed') {
+    if (existing.title !== event.data.title || existing.updatedAt !== updatedAt) {
+      updated = { ...existing, title: event.data.title, updatedAt };
+    }
+  } else if (event.type === 'session/terminal_reconnected') {
+    if (existing.targetId !== event.data.target.targetId || existing.updatedAt !== updatedAt) {
+      updated = { ...existing, targetId: event.data.target.targetId, updatedAt };
+    }
+  }
+  if (!updated) return { next: current, found: true };
+  const next = current.slice();
+  next[index] = updated;
+  next.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id));
+  return { next, found: true };
 }
 
 /** Interpret Composer effects against the Agent adapter while committed views stay adapter-owned. */
@@ -1264,6 +1328,12 @@ export function useAiSessionController({
             if (summaries?.length) break;
           }
         }
+        if (summaries?.length) {
+          const scopedSummaries = summaries.filter((summary) => belongsToAiWorkspace(summary, scope, focusMode, summaries));
+          if (scopedSummaries.length > 0 && canPublish()) {
+            setSessions((current) => mergeSessionSummaries(current, scopedSummaries));
+          }
+        }
         sessionId = summaries?.find((summary) => belongsToAiWorkspace(summary, scope, focusMode, summaries)
           && isTopLevelAiSession(summary, summaries))?.id ?? null;
       }
@@ -1642,6 +1712,87 @@ export function useAiSessionController({
     if (!subagentDirectoryKey) return;
     void refreshSessions();
   }, [refreshSessions, subagentDirectoryKey]);
+
+  useEffect(() => {
+    if (!view || workspaceChanging) return;
+    const liveSummary: AiSessionSummary = {
+      ...view.summary,
+      status: view.status,
+      archived: view.summary.archived || view.snapshot.value.archived,
+      targetId: view.summary.targetId ?? view.snapshot.value.header.target?.targetId,
+    };
+    if (!belongsToAiWorkspace(liveSummary, scope, focusMode, sessionsRef.current)) return;
+    setSessions((current) => mergeSessionSummaries(current, [liveSummary]));
+  }, [
+    focusMode,
+    scope,
+    view?.snapshot.value.archived,
+    view?.snapshot.value.header.target?.targetId,
+    view?.status,
+    view?.summary.archived,
+    view?.summary.id,
+    view?.summary.revision,
+    view?.summary.status,
+    view?.summary.targetId,
+    view?.summary.title,
+    view?.summary.updatedAt,
+    workspaceChanging,
+  ]);
+
+  useEffect(() => {
+    if (workspaceChanging || !isTauriRuntime()) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    let refreshTimer: number | undefined;
+    const scheduleRefresh = (): void => {
+      if (disposed || refreshTimer !== undefined) return;
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = undefined;
+        if (!disposed) void refreshSessions();
+      }, 150);
+    };
+    void listenToAgentRuntimeSession(({ payload }) => {
+      if (disposed) return;
+      if (
+        payload.type === 'agent/status'
+        || payload.type === 'session/ended'
+        || payload.type === 'session/renamed'
+        || payload.type === 'session/terminal_reconnected'
+      ) {
+        const foundInCurrent = sessionsRef.current.some(
+          (summary) => summary.kind === 'agent' && summary.id === payload.sessionId,
+        );
+        setSessions((current) => patchSessionSummariesFromEvent(current, payload).next);
+        for (const [key, visit] of workspaceVisits.current) {
+          const patched = patchSessionSummariesFromEvent(visit.sessions, payload);
+          if (patched.next !== visit.sessions) {
+            workspaceVisits.current.set(key, { ...visit, sessions: patched.next });
+          }
+        }
+        if (
+          !foundInCurrent
+          && (
+            (payload.type === 'agent/status' && (payload.data.status === 'running' || payload.data.status === 'waiting'))
+            || payload.type === 'session/terminal_reconnected'
+          )
+        ) {
+          scheduleRefresh();
+        }
+        return;
+      }
+      if (payload.type === 'session/created' || payload.type === 'session/resumed') {
+        scheduleRefresh();
+      }
+    }).then((disposeListener) => {
+      if (disposed) disposeListener();
+      else unlisten = disposeListener;
+    }).catch(() => undefined);
+    return () => {
+      disposed = true;
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+      unlisten?.();
+    };
+  }, [refreshSessions, workspaceChanging]);
 
   const openSession = useCallback((summary: AiSessionSummary): void => {
     if (!belongsToAiWorkspace(summary, scope, focusMode, sessionsRef.current)) return;

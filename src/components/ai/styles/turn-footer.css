@@ -101,7 +101,7 @@
   font-weight: 500;
 }
 
-.ai-turn-changes-trigger:hover,
+.ai-turn-changes-header:has(.ai-turn-changes-trigger:hover),
 .ai-turn-changes-file:hover {
   background: var(--ai-action-hover);
   color: var(--ai-text);

@@ -1,19 +1,19 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangleIcon, HistoryIcon, RefreshCwIcon, RotateCcwIcon } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangleIcon, FileDiffIcon } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  CompactDialogContent,
+  CompactDialogFooter,
+  CompactDialogHeader,
+} from '@/components/ui/compact-dialog';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { Dialog } from '@/components/ui/dialog';
+import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import { aiErrorMessage } from '@/lib/ai/error-message';
@@ -25,6 +25,8 @@ import {
   type AgentFileCheckpoint,
   type FileCheckpointDiffPreview,
 } from '@/lib/ipc/tauri';
+import { cn } from '@/lib/utils';
+import { AiHeaderIconButton } from './ai-header-icon-button';
 
 export interface FileCheckpointOpenRequest {
   readonly nonce: number;
@@ -39,8 +41,96 @@ interface FileCheckpointRollbackDialogProps {
   readonly onCheckpointsCountChange?: (count: number) => void;
 }
 
+interface DiffPreviewLine {
+  readonly kind: 'added' | 'removed' | 'hunk' | 'meta' | 'context';
+  readonly oldLine: number | null;
+  readonly newLine: number | null;
+  readonly text: string;
+}
+
+interface ParsedUnifiedDiff {
+  readonly lines: readonly DiffPreviewLine[];
+  readonly addedCount: number;
+  readonly removedCount: number;
+}
+
 function normalizeCheckpointPath(path: string): string {
   return path.replace(/\\/g, '/').replace(/^\.\//, '');
+}
+
+function splitCheckpointPath(targetPath: string): { readonly fileName: string; readonly dirPath: string } {
+  const slashIndex = Math.max(targetPath.lastIndexOf('/'), targetPath.lastIndexOf('\\'));
+  if (slashIndex < 0) {
+    return { fileName: targetPath, dirPath: '' };
+  }
+  const fileName = targetPath.slice(slashIndex + 1) || targetPath;
+  const dirPath = slashIndex === 0 ? targetPath.slice(0, 1) : targetPath.slice(0, slashIndex);
+  return { fileName, dirPath };
+}
+
+function formatCheckpointTime(unixMs: number, locale?: string): string {
+  if (!Number.isFinite(unixMs) || unixMs <= 0) return '';
+  try {
+    return new Date(unixMs).toLocaleTimeString(locale || undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+  } catch {
+    return '';
+  }
+}
+
+const HUNK_HEADER_RE = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
+
+function parseUnifiedDiff(unifiedDiff: string): ParsedUnifiedDiff {
+  const rawLines = unifiedDiff.replace(/\r\n/g, '\n').split('\n');
+  if (rawLines.length > 1 && rawLines[rawLines.length - 1] === '') {
+    rawLines.pop();
+  }
+  const lines: DiffPreviewLine[] = [];
+  let oldLine: number | null = null;
+  let newLine: number | null = null;
+  let addedCount = 0;
+  let removedCount = 0;
+
+  for (const text of rawLines) {
+    const hunkMatch = HUNK_HEADER_RE.exec(text);
+    if (hunkMatch) {
+      oldLine = Number.parseInt(hunkMatch[1], 10);
+      newLine = Number.parseInt(hunkMatch[2], 10);
+      lines.push({ kind: 'hunk', oldLine: null, newLine: null, text });
+      continue;
+    }
+    if (
+      text.startsWith('--- ')
+      || text.startsWith('+++ ')
+      || text.startsWith('diff --git ')
+      || text.startsWith('index ')
+      || text.startsWith('\\ ')
+    ) {
+      lines.push({ kind: 'meta', oldLine: null, newLine: null, text });
+      continue;
+    }
+    if (text.startsWith('+')) {
+      addedCount += 1;
+      lines.push({ kind: 'added', oldLine: null, newLine, text });
+      if (newLine !== null) newLine += 1;
+      continue;
+    }
+    if (text.startsWith('-')) {
+      removedCount += 1;
+      lines.push({ kind: 'removed', oldLine, newLine: null, text });
+      if (oldLine !== null) oldLine += 1;
+      continue;
+    }
+    lines.push({ kind: 'context', oldLine, newLine, text });
+    if (oldLine !== null) oldLine += 1;
+    if (newLine !== null) newLine += 1;
+  }
+
+  return { lines, addedCount, removedCount };
 }
 
 function findMatchingCheckpointId(
@@ -80,7 +170,7 @@ export function FileCheckpointRollbackDialog({
   openRequest = null,
   onCheckpointsCountChange,
 }: FileCheckpointRollbackDialogProps): React.ReactElement | null {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const tRef = useRef(t);
   tRef.current = t;
   const onCheckpointsCountChangeRef = useRef(onCheckpointsCountChange);
@@ -194,6 +284,11 @@ export function FileCheckpointRollbackDialog({
   const unrestoredIds = checkpoints.filter((item) => !item.restoredAtUnixMs).map((item) => item.checkpointId);
   const allUnrestoredSelected = unrestoredIds.length > 0 && unrestoredIds.every((id) => selectedIds.includes(id));
 
+  const parsedDiff = useMemo<ParsedUnifiedDiff | null>(() => {
+    if (!preview || preview.unchanged || preview.isBinary) return null;
+    return parseUnifiedDiff(preview.unifiedDiff);
+  }, [preview]);
+
   const toggleSelection = (checkpointId: string, checked: boolean) => {
     setSelectedIds((prev) => (
       checked
@@ -300,174 +395,300 @@ export function FileCheckpointRollbackDialog({
         .join(', ')
     : '';
 
+  const activePathParts = activeCheckpoint ? splitCheckpointPath(activeCheckpoint.targetPath) : null;
+  const triggerLabel = t('ai.checkpointRollback.buttonWithCount', { count: checkpoints.length });
+
   return (
     <>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="h-7 gap-1 px-2 text-xs"
-        data-testid="file-checkpoint-rollback-trigger"
-        onClick={() => handleOpenChange(true)}
-      >
-        <HistoryIcon aria-hidden="true" className="size-3.5" />
-        <span>{t('ai.checkpointRollback.button')}</span>
-        <Badge variant="secondary" size="sm">
-          {checkpoints.length}
-        </Badge>
-      </Button>
+      <Tooltip disabled={open}>
+        <TooltipTrigger
+          render={(
+            <AiHeaderIconButton
+              type="button"
+              badgeCount={checkpoints.length}
+              badgeTone="neutral"
+              aria-label={triggerLabel}
+              data-testid="file-checkpoint-rollback-trigger"
+              onClick={() => handleOpenChange(true)}
+            />
+          )}
+        >
+          <FileDiffIcon aria-hidden="true" />
+        </TooltipTrigger>
+        <TooltipContent>{triggerLabel}</TooltipContent>
+      </Tooltip>
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="flex h-[min(78vh,620px)] max-w-3xl flex-col gap-3 overflow-hidden">
-          <DialogHeader className="shrink-0">
-            <DialogTitle>{t('ai.checkpointRollback.title')}</DialogTitle>
-            <DialogDescription>{t('ai.checkpointRollback.description')}</DialogDescription>
-          </DialogHeader>
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 md:grid-cols-[260px_1fr]">
-            <div className="flex min-h-0 flex-col rounded-md border">
-              {unrestoredIds.length > 0 && (
-                <div className="flex shrink-0 items-center justify-between border-b px-2 py-1.5">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    disabled={loading || restoring}
-                    onClick={handleToggleSelectAll}
-                  >
-                    {t(allUnrestoredSelected ? 'ai.checkpointRollback.clearSelection' : 'ai.checkpointRollback.selectAll')}
-                  </Button>
-                  {selectedIds.length > 0 && (
-                    <Badge variant="secondary" size="sm">{selectedIds.length}</Badge>
+        <CompactDialogContent className="h-[min(78vh,640px)] w-[min(58rem,calc(100vw-2rem))] max-w-none">
+          <CompactDialogHeader
+            title={t('ai.checkpointRollback.title')}
+            description={t('ai.checkpointRollback.description')}
+          />
+          <div className="flex min-h-0 flex-1 flex-col px-4 pt-3 pb-2">
+            <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(150px,38%)_minmax(0,1fr)] divide-y divide-app-border/70 overflow-hidden rounded-lg border border-app-border/80 bg-background sm:grid-cols-[276px_minmax(0,1fr)] sm:grid-rows-1 sm:divide-x sm:divide-y-0">
+              <div className="flex min-h-0 min-w-0 flex-col bg-muted/15">
+                <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-app-border/60 bg-muted/30 px-3">
+                  <span className="truncate text-xs font-medium tabular-nums text-muted-foreground">
+                    {selectedIds.length > 0
+                      ? t('ai.checkpointRollback.selectedCount', {
+                          selected: selectedIds.length,
+                          total: checkpoints.length,
+                        })
+                      : t('ai.checkpointRollback.listCount', { count: checkpoints.length })}
+                  </span>
+                  {unrestoredIds.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      className="shrink-0"
+                      disabled={loading || restoring}
+                      onClick={handleToggleSelectAll}
+                    >
+                      {t(allUnrestoredSelected ? 'ai.checkpointRollback.clearSelection' : 'ai.checkpointRollback.selectAll')}
+                    </Button>
                   )}
                 </div>
-              )}
-              <ScrollArea className="min-h-0 flex-1">
-                <div className="flex flex-col gap-1 p-1.5">
-                  {loading && checkpoints.length === 0 ? (
-                    <p className="p-2 text-xs text-muted-foreground">{t('ai.checkpointRollback.loading')}</p>
-                  ) : checkpoints.map((item) => {
-                    const selected = item.checkpointId === activeId;
-                    const checked = selectedIds.includes(item.checkpointId);
-                    return (
-                      <div
-                        key={item.checkpointId}
-                        className={`flex items-start gap-2 rounded-md px-2 py-1.5 text-xs transition-colors ${
-                          selected ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
-                        }`}
-                      >
-                        <Checkbox
-                          aria-label={item.targetPath}
-                          checked={checked}
-                          disabled={restoring}
-                          className="mt-0.5"
-                          onCheckedChange={(next) => toggleSelection(item.checkpointId, Boolean(next))}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setActiveId(item.checkpointId)}
-                          className="flex min-w-0 flex-1 flex-col gap-1 text-left"
-                        >
-                          <span className="truncate font-mono" title={item.targetPath}>
-                            {item.targetPath}
-                          </span>
-                          <span className="flex flex-wrap items-center gap-1">
-                            <Badge variant="outline" size="sm">
-                              {t(item.originalSha256 ? 'ai.checkpointRollback.badgeModified' : 'ai.checkpointRollback.badgeCreated')}
-                            </Badge>
-                            {item.restoredAtUnixMs && (
-                              <Badge variant="secondary" size="sm">
-                                {t('ai.checkpointRollback.badgeRestored')}
-                              </Badge>
-                            )}
-                          </span>
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </ScrollArea>
-            </div>
-            <div className="flex min-h-0 flex-col rounded-md border">
-              {previewLoading ? (
-                <p className="p-3 text-xs text-muted-foreground">{t('ai.checkpointRollback.previewLoading')}</p>
-              ) : !preview ? (
-                <p className="p-3 text-xs text-muted-foreground">{t('ai.checkpointRollback.selectPrompt')}</p>
-              ) : preview.unchanged ? (
-                <p className="p-3 text-xs text-muted-foreground">{t('ai.checkpointRollback.unchanged')}</p>
-              ) : (
                 <ScrollArea className="min-h-0 flex-1">
-                  <div className="flex flex-col gap-2 p-3">
+                  <div className="flex flex-col gap-1 p-2">
+                    {loading && checkpoints.length === 0 ? (
+                      <p className="p-3 text-center text-xs text-muted-foreground">
+                        {t('ai.checkpointRollback.loading')}
+                      </p>
+                    ) : checkpoints.map((item) => {
+                      const selected = item.checkpointId === activeId;
+                      const checked = selectedIds.includes(item.checkpointId);
+                      const { fileName, dirPath } = splitCheckpointPath(item.targetPath);
+                      const timeLabel = formatCheckpointTime(item.createdAtUnixMs, locale);
+                      const isModified = Boolean(item.originalSha256);
+
+                      return (
+                        <div
+                          key={item.checkpointId}
+                          data-active={selected || undefined}
+                          className={cn(
+                            'flex items-start gap-2 rounded-md border px-2.5 py-2 transition-colors',
+                            selected
+                              ? 'border-app-border bg-background shadow-2xs'
+                              : 'border-transparent hover:bg-muted/50',
+                          )}
+                        >
+                          <Checkbox
+                            aria-label={item.targetPath}
+                            checked={checked}
+                            disabled={restoring}
+                            className="mt-0.5 shrink-0"
+                            onCheckedChange={(next) => toggleSelection(item.checkpointId, Boolean(next))}
+                          />
+                          <button
+                            type="button"
+                            aria-pressed={selected}
+                            onClick={() => setActiveId(item.checkpointId)}
+                            className="flex min-w-0 flex-1 flex-col gap-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50 rounded-xs"
+                          >
+                            <span className="flex min-w-0 items-center justify-between gap-2">
+                              <span className="min-w-0 truncate text-xs font-medium text-foreground">
+                                {fileName}
+                              </span>
+                              {timeLabel && (
+                                <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                                  {timeLabel}
+                                </span>
+                              )}
+                            </span>
+                            {dirPath && (
+                              <span
+                                className="truncate font-mono text-[11px] leading-4 text-muted-foreground"
+                                title={item.targetPath}
+                              >
+                                {item.targetPath}
+                              </span>
+                            )}
+                            <span className="flex flex-wrap items-center gap-1 pt-0.5">
+                              <Badge
+                                variant="outline"
+                                size="sm"
+                                className={cn(
+                                  isModified
+                                    ? 'border-app-warning/35 bg-app-warning/10 text-app-warning'
+                                    : 'border-app-success/35 bg-app-success/10 text-app-success',
+                                )}
+                              >
+                                {t(isModified ? 'ai.checkpointRollback.badgeModified' : 'ai.checkpointRollback.badgeCreated')}
+                              </Badge>
+                              {item.restoredAtUnixMs && (
+                                <Badge variant="secondary" size="sm">
+                                  {t('ai.checkpointRollback.badgeRestored')}
+                                </Badge>
+                              )}
+                            </span>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </ScrollArea>
+              </div>
+
+              <div className="flex min-h-0 min-w-0 flex-col bg-background">
+                {activeCheckpoint && activePathParts && (
+                  <div className="flex min-h-9 shrink-0 items-center justify-between gap-3 border-b border-app-border/60 bg-muted/30 px-3 py-1.5">
+                    <div className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                      <span className="shrink-0 text-xs font-medium text-foreground">
+                        {activePathParts.fileName}
+                      </span>
+                      {activePathParts.dirPath && (
+                        <span
+                          className="min-w-0 truncate font-mono text-[11px] text-muted-foreground"
+                          title={activeCheckpoint.targetPath}
+                        >
+                          {activePathParts.dirPath}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {!previewLoading && parsedDiff && (parsedDiff.addedCount > 0 || parsedDiff.removedCount > 0) && (
+                        <span
+                          className="inline-flex items-center gap-1.5 font-mono text-[11px] font-medium tabular-nums"
+                          data-testid="file-checkpoint-diff-stats"
+                        >
+                          {parsedDiff.addedCount > 0 && (
+                            <span className="text-app-success">+{parsedDiff.addedCount}</span>
+                          )}
+                          {parsedDiff.removedCount > 0 && (
+                            <span className="text-destructive">-{parsedDiff.removedCount}</span>
+                          )}
+                        </span>
+                      )}
+                      {!previewLoading && preview?.modifiedAfterAgent && !preview.unchanged && (
+                        <Badge variant="destructive" size="sm">
+                          {t('ai.checkpointRollback.badgeConflict')}
+                        </Badge>
+                      )}
+                      <Badge variant="outline" size="sm" className="text-muted-foreground">
+                        {t(activeCheckpoint.targetKind === 'remote'
+                          ? 'ai.checkpointRollback.targetRemote'
+                          : 'ai.checkpointRollback.targetLocal')}
+                      </Badge>
+                    </div>
+                  </div>
+                )}
+
+                {previewLoading ? (
+                  <PanelLoadingState label={t('ai.checkpointRollback.previewLoading')} />
+                ) : !preview ? (
+                  <PanelEmptyState size="sm" title={t('ai.checkpointRollback.selectPrompt')} />
+                ) : preview.unchanged ? (
+                  <PanelEmptyState size="sm" title={t('ai.checkpointRollback.unchanged')} />
+                ) : (
+                  <div className="flex min-h-0 flex-1 flex-col">
                     {preview.modifiedAfterAgent && (
-                      <Alert variant="destructive" data-testid="file-checkpoint-conflict-alert">
-                        <AlertTriangleIcon aria-hidden="true" className="size-4" />
-                        <AlertDescription>
-                          {t('ai.checkpointRollback.conflictBanner')}
-                        </AlertDescription>
-                      </Alert>
+                      <div className="shrink-0 px-3 pt-3 pb-2">
+                        <Alert variant="destructive" size="sm" data-testid="file-checkpoint-conflict-alert">
+                          <AlertTriangleIcon aria-hidden="true" />
+                          <AlertDescription>
+                            {t('ai.checkpointRollback.conflictBanner')}
+                          </AlertDescription>
+                        </Alert>
+                      </div>
                     )}
                     {preview.isBinary ? (
-                      <p className="text-xs text-muted-foreground">{t('ai.checkpointRollback.binaryPreview')}</p>
+                      <PanelEmptyState size="sm" title={t('ai.checkpointRollback.binaryPreview')} />
                     ) : (
                       <>
                         {preview.truncated && (
-                          <p className="text-xs text-muted-foreground">{t('ai.checkpointRollback.truncatedDiff')}</p>
+                          <div className="shrink-0 border-b border-app-border/50 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground">
+                            {t('ai.checkpointRollback.truncatedDiff')}
+                          </div>
                         )}
-                        <pre className="whitespace-pre-wrap break-all font-mono text-[11px] leading-5">
-                          {preview.unifiedDiff}
-                        </pre>
+                        <ScrollArea horizontal className="min-h-0 flex-1">
+                          <div
+                            className="table min-w-full pb-2 font-mono text-[11.5px] leading-5"
+                            data-testid="file-checkpoint-diff-viewer"
+                          >
+                            {(parsedDiff?.lines ?? []).map((line, idx) => (
+                              <div
+                                key={idx}
+                                data-diff-line={line.kind}
+                                className={cn(
+                                  'table-row',
+                                  line.kind === 'added' && 'bg-app-success/10 text-app-success',
+                                  line.kind === 'removed' && 'bg-destructive/10 text-destructive',
+                                  line.kind === 'hunk' && 'bg-muted/50 text-muted-foreground',
+                                  line.kind === 'meta' && 'bg-muted/25 text-muted-foreground',
+                                  line.kind === 'context' && 'text-foreground/85',
+                                )}
+                              >
+                                <span
+                                  aria-hidden="true"
+                                  className="table-cell w-[1%] min-w-9 select-none pl-2.5 pr-2 text-right text-[11px] tabular-nums opacity-55"
+                                >
+                                  {line.oldLine ?? ''}
+                                </span>
+                                <span
+                                  aria-hidden="true"
+                                  className="table-cell w-[1%] min-w-9 select-none border-r border-app-border/50 pr-2 text-right text-[11px] tabular-nums opacity-55"
+                                >
+                                  {line.newLine ?? ''}
+                                </span>
+                                <span className="table-cell whitespace-pre px-3">
+                                  {line.text || '\u00a0'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </ScrollArea>
                       </>
                     )}
                   </div>
-                </ScrollArea>
-              )}
+                )}
+              </div>
             </div>
           </div>
-          <DialogFooter className="shrink-0">
+          <CompactDialogFooter className="flex-row items-center justify-between sm:justify-between">
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="gap-1"
               disabled={loading || restoring}
               onClick={() => void loadList(true)}
             >
-              <RefreshCwIcon aria-hidden="true" className={`size-3.5 ${loading ? 'animate-spin' : ''}`} />
-              <span>{t('ai.checkpointRollback.refresh')}</span>
+              {t('ai.checkpointRollback.refresh')}
             </Button>
-            {selectedIds.length > 0 && (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {selectedIds.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={restoring}
+                  data-testid="file-checkpoint-batch-restore"
+                  onClick={() => setBatchConfirm({ checkpointIds: selectedIds, conflictOverwrite: false })}
+                >
+                  {t('ai.checkpointRollback.batchRestore', { count: selectedIds.length })}
+                </Button>
+              )}
               <Button
                 type="button"
-                variant="outline"
+                variant={preview?.modifiedAfterAgent ? 'destructive' : 'default'}
                 size="sm"
-                className="gap-1"
-                disabled={restoring}
-                data-testid="file-checkpoint-batch-restore"
-                onClick={() => setBatchConfirm({ checkpointIds: selectedIds, conflictOverwrite: false })}
+                disabled={!activeCheckpoint || restoring || Boolean(preview?.unchanged)}
+                onClick={() => {
+                  if (activeCheckpoint) {
+                    setSingleConfirm({
+                      checkpoint: activeCheckpoint,
+                      conflict: Boolean(preview?.modifiedAfterAgent),
+                    });
+                  }
+                }}
               >
-                <RotateCcwIcon aria-hidden="true" className="size-3.5" />
-                <span>{t('ai.checkpointRollback.batchRestore', { count: selectedIds.length })}</span>
+                {t(restoring ? 'ai.checkpointRollback.restoring' : 'ai.checkpointRollback.restore')}
               </Button>
-            )}
-            <Button
-              type="button"
-              size="sm"
-              className="gap-1"
-              disabled={!activeCheckpoint || restoring || Boolean(preview?.unchanged)}
-              onClick={() => {
-                if (activeCheckpoint) {
-                  setSingleConfirm({
-                    checkpoint: activeCheckpoint,
-                    conflict: Boolean(preview?.modifiedAfterAgent),
-                  });
-                }
-              }}
-            >
-              <RotateCcwIcon aria-hidden="true" className="size-3.5" />
-              <span>{t(restoring ? 'ai.checkpointRollback.restoring' : 'ai.checkpointRollback.restore')}</span>
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+            </div>
+          </CompactDialogFooter>
+        </CompactDialogContent>
       </Dialog>
       <ConfirmationDialog
+        textOnlyActions
         open={Boolean(singleConfirm)}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) setSingleConfirm(null);
@@ -483,6 +704,7 @@ export function FileCheckpointRollbackDialog({
         onConfirm={() => void handleConfirmSingleRestore()}
       />
       <ConfirmationDialog
+        textOnlyActions
         open={Boolean(batchConfirm)}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) setBatchConfirm(null);

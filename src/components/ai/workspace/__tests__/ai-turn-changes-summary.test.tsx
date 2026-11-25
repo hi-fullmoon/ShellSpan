@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AiToolNode, AiTurnProcessNode } from '@/lib/ai/conversation-node';
@@ -7,6 +8,7 @@ import { AiToolExpandedContent } from '../ai-tool-presentation';
 import {
   AiTurnChangesSummary,
   AiTurnFileBaselinesContext,
+  AiTurnRollbackContext,
   buildConversationTurnBaselines,
   summarizeTurnFileChanges,
 } from '../ai-turn-changes-summary';
@@ -427,5 +429,33 @@ describe('AiTurnChangesSummary', () => {
     expect(crossTurnDialog.querySelector('.ai-diff-fold-main')).toHaveTextContent('+25 more lines');
     expect(crossTurnDialog.querySelector('button[aria-label="Expand 10 lines down"]')).toBeInTheDocument();
     expect(crossTurnDialog.querySelector('button[aria-label="Expand 10 lines up"]')).toBeInTheDocument();
+  });
+
+  it('highlights the full summary header row when hovering the collapse trigger alongside the rollback action', () => {
+    const editTool = makeTool({
+      input: { path: 'src/app.ts', old_string: 'a\n', new_string: 'b\nc\n' },
+    });
+    const process = makeProcess({
+      children: [editTool],
+      childKeys: [editTool.key],
+    });
+    const onOpenRollback = vi.fn();
+
+    const { container } = render(
+      <AiTurnRollbackContext.Provider value={onOpenRollback}>
+        <AiTurnChangesSummary process={process} />
+      </AiTurnRollbackContext.Provider>,
+    );
+
+    const header = container.querySelector('.ai-turn-changes-header');
+    const trigger = container.querySelector('.ai-turn-changes-trigger');
+    const rollbackButton = container.querySelector('[data-testid="turn-changes-rollback-trigger"]');
+    expect(header).toBeInTheDocument();
+    expect(header?.contains(trigger)).toBe(true);
+    expect(header?.contains(rollbackButton)).toBe(true);
+
+    const turnFooterCss = readFileSync('src/components/ai/styles/turn-footer.css', 'utf8');
+    expect(turnFooterCss).toContain('.ai-turn-changes-header:has(.ai-turn-changes-trigger:hover)');
+    expect(turnFooterCss).not.toMatch(/^\.ai-turn-changes-trigger:hover\b/m);
   });
 });
