@@ -34,8 +34,8 @@
     "macos-arm64": {
       "mainSha256": "abc56520c469fa4985fca02c5f55621932ad79de4f36440a64a27526f4b535ef",
       "unicode9Default": true,
-      "privateMainSha256": "330f10b8e506f2e7e8a693ce8ebf942c3e2e0aa0b007bd9770ea1120bcfc41e4",
-      "privateCoreSha256": "9ed979f0f6665c6eab49e070612aeb98f6a9c4801de3c09f8530e99ad67fe487"
+      "privateMainSha256": "a3c85d25add435958026431efc35ba03cb829b744e8ffbe08bf417e5ca6c6136",
+      "privateCoreSha256": "f62dd763cbb7cb2ff174b71457c130d1c0ab66e8e640d2bba96fe53d293b9818"
     },
     "linux-aarch64-glibc-2.36": {
       "mainSha256": "1ebc9b7012541bdc45fe8cbb9f752c0dc49aeb47dea0fd76d755639e7554e6d3",
