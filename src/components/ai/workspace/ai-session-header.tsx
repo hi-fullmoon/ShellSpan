@@ -160,7 +160,7 @@ export function AiSessionHeader({
             data-slot="ai-session-leading-actions"
             className={cn(
               'flex shrink-0 items-center gap-1 empty:hidden @min-[400px]/ai-workspace:gap-2',
-              hasTrailingChrome && "after:ml-0.5 after:h-3.5 after:w-px after:bg-app-border/70 after:content-['']",
+              hasTrailingChrome && "after:h-3.5 after:w-px after:bg-app-border/70 after:content-['']",
             )}
           >
             {sessionActions}
