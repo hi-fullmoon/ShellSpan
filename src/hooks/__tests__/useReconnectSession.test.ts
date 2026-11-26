@@ -1,5 +1,6 @@
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { describe, expect, it, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
+import { initI18n } from '@/locales';
 import { useReconnectSession } from '../useReconnectSession';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
@@ -71,8 +72,21 @@ const initialPortForward = usePortForwardStore.getState();
 const initialApp = useAppStore.getState();
 
 describe('useReconnectSession', () => {
-  beforeEach(() => {
+  beforeAll(async () => {
+    await initI18n('zh-CN');
+  });
+
+  beforeEach(async () => {
     vi.clearAllMocks();
+    const { invokeCreateSession } = await import('@/lib/ipc/tauri');
+    vi.mocked(invokeCreateSession).mockReset();
+    vi.mocked(invokeCreateSession).mockResolvedValue({
+      sessionId: 's2',
+      title: 'New',
+      host: 'h',
+      port: 22,
+      username: 'u',
+    });
     useTerminalStore.setState(initialTerminal, true);
     useProfileStore.setState(initialProfile, true);
     usePortForwardStore.setState(initialPortForward, true);
