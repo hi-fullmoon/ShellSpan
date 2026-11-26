@@ -362,10 +362,7 @@ impl SubAgentManager {
                 return;
             };
             let mut changes = entry.subscribe_changes();
-            loop {
-                let Ok(snapshot) = manager.sessions.snapshot(&child_session_id) else {
-                    break;
-                };
+            while let Ok(snapshot) = manager.sessions.snapshot(&child_session_id) {
                 let settled = !entry.is_driver_active()
                     && (snapshot.ended
                         || snapshot.status.is_terminal()

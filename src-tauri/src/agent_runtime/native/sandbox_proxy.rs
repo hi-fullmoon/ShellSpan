@@ -267,9 +267,7 @@ fn is_blocked_ipv6(ip: Ipv6Addr) -> bool {
         return true;
     }
     // NAT64 well-known (64:ff9b::/96) and local-use (64:ff9b:1::/48)
-    if (segs[0] == 0x0064 && segs[1] == 0xff9b && segs[2..6] == [0, 0, 0, 0])
-        || (segs[0] == 0x0064 && segs[1] == 0xff9b && segs[2] == 0x0001)
-    {
+    if segs[0] == 0x0064 && segs[1] == 0xff9b && (segs[2..6] == [0, 0, 0, 0] || segs[2] == 0x0001) {
         return true;
     }
     // 6to4 (2002::/16), Teredo (2001::/32), Documentation (2001:db8::/32)

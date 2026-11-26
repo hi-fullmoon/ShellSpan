@@ -453,7 +453,7 @@ fn wrapper_option_takes_value(wrapper: &str, option: &str) -> bool {
                     && option.ends_with('a'))
         }
         "sudo" | "doas" => {
-            bundled_short_option_takes_value(&long, &[b'c', b'g', b'h', b'p', b'r', b't', b'u'])
+            bundled_short_option_takes_value(&long, b"cghprtu")
                 || matches!(
                     long.as_str(),
                     "--chdir"
@@ -468,49 +468,47 @@ fn wrapper_option_takes_value(wrapper: &str, option: &str) -> bool {
                 )
         }
         "env" => {
-            bundled_short_option_takes_value(option, &[b'C', b'S', b'u'])
+            bundled_short_option_takes_value(option, b"CSu")
                 || matches!(long.as_str(), "--chdir" | "--split-string" | "--unset")
         }
-        "nice" => bundled_short_option_takes_value(option, &[b'n']) || long == "--adjustment",
+        "nice" => bundled_short_option_takes_value(option, b"n") || long == "--adjustment",
         "timeout" => {
-            bundled_short_option_takes_value(option, &[b'k', b's'])
+            bundled_short_option_takes_value(option, b"ks")
                 || matches!(long.as_str(), "--kill-after" | "--signal")
         }
-        "watch" => bundled_short_option_takes_value(option, &[b'n']) || long == "--interval",
+        "watch" => bundled_short_option_takes_value(option, b"n") || long == "--interval",
         "stdbuf" => {
-            bundled_short_option_takes_value(option, &[b'i', b'o', b'e'])
+            bundled_short_option_takes_value(option, b"ioe")
                 || matches!(long.as_str(), "--input" | "--output" | "--error")
         }
         "ionice" => {
-            bundled_short_option_takes_value(option, &[b'c', b'n', b'p'])
+            bundled_short_option_takes_value(option, b"cnp")
                 || matches!(long.as_str(), "--class" | "--classdata" | "--pid")
         }
         "taskset" => {
-            bundled_short_option_takes_value(option, &[b'c', b'p'])
+            bundled_short_option_takes_value(option, b"cp")
                 || matches!(long.as_str(), "--cpu-list" | "--pid")
         }
         "flock" => {
-            bundled_short_option_takes_value(option, &[b'w', b'E'])
+            bundled_short_option_takes_value(option, b"wE")
                 || matches!(
                     long.as_str(),
                     "--timeout" | "--wait" | "--conflict-exit-code"
                 )
         }
         "xargs" => {
-            bundled_short_option_takes_value(
-                option,
-                &[b'a', b'd', b'E', b'I', b'L', b'n', b'P', b's'],
-            ) || matches!(
-                long.as_str(),
-                "--arg-file"
-                    | "--delimiter"
-                    | "--eof"
-                    | "--replace"
-                    | "--max-lines"
-                    | "--max-args"
-                    | "--max-procs"
-                    | "--max-chars"
-            )
+            bundled_short_option_takes_value(option, b"adEILnPs")
+                || matches!(
+                    long.as_str(),
+                    "--arg-file"
+                        | "--delimiter"
+                        | "--eof"
+                        | "--replace"
+                        | "--max-lines"
+                        | "--max-args"
+                        | "--max-procs"
+                        | "--max-chars"
+                )
         }
         _ => false,
     }
