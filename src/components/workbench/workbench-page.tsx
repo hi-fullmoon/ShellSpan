@@ -97,7 +97,7 @@ export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
           <Icon className="size-4" aria-hidden />
         </div>
         <div className="min-w-0">
-          <div className="flex h-5 min-w-0 items-center gap-2 [&>[data-slot=popover-trigger]]:size-5">
+          <div className="flex h-5 min-w-0 items-center gap-2 [&>[data-slot=popover-trigger]]:-ml-2 [&>[data-slot=popover-trigger]]:size-5 [&>[data-slot=popover-trigger]]:shrink-0 [&>[data-slot=popover-trigger]_svg]:-translate-y-[0.5px]">
             <h1 className="truncate text-sm font-semibold text-foreground">{title}</h1>
             {titleMeta}
           </div>

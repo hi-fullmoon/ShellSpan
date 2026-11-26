@@ -49,6 +49,27 @@ describe('WorkbenchPageHeader', () => {
     expect(container.querySelector('[data-slot="workbench-page-header-copy"] .size-8')).not.toBeNull();
     expect(container.querySelector('.size-9')).toBeNull();
   });
+
+  it('aligns title help popover triggers with 4px icon spacing and optical vertical centering', () => {
+    const { getByRole } = render(
+      <WorkbenchPageHeader
+        icon={ServerIcon}
+        title="Credentials"
+        titleMeta={<button type="button" data-slot="popover-trigger">Help</button>}
+      />,
+    );
+
+    const titleRow = getByRole('heading', { level: 1 }).parentElement;
+    expect(titleRow).toHaveClass(
+      'h-5',
+      'items-center',
+      'gap-2',
+      '[&>[data-slot=popover-trigger]]:-ml-2',
+      '[&>[data-slot=popover-trigger]]:size-5',
+      '[&>[data-slot=popover-trigger]]:shrink-0',
+      '[&>[data-slot=popover-trigger]_svg]:-translate-y-[0.5px]',
+    );
+  });
 });
 
 describe('WorkbenchPageToolbar', () => {
