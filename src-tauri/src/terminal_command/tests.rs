@@ -735,6 +735,7 @@ fn cold_recovery_does_not_replace_a_real_legacy_submission_with_an_empty_ledger(
     let previous = SubmissionJournal::unconfigured();
     previous.configure(root.path()).unwrap();
     previous.record(&identity()).unwrap();
+    drop(previous);
     let current = root.path().join("terminal-submissions");
     let legacy = root.path().join("terminal-submissions-obsolete");
     std::fs::rename(&current, &legacy).unwrap();
@@ -790,6 +791,8 @@ fn cold_recovery_keeps_a_legacy_call_fence_when_a_current_ledger_also_exists() {
     let mut another = identity();
     another.operation_id = "different-operation".into();
     current.record(&another).unwrap();
+    drop(old);
+    drop(current);
     std::fs::rename(
         old_root.path().join("terminal-submissions"),
         root.path().join("terminal-submissions-obsolete"),

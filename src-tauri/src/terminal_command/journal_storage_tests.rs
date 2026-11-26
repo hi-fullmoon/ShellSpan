@@ -54,8 +54,11 @@ fn database_loss_refuses_live_and_restarted_operations_without_recreation() {
     let journal = configured(root.path());
     journal.record(&identity()).unwrap();
     let backup = root.path().join("saved-database");
+    #[cfg(not(unix))]
+    drop(journal);
     fs::rename(database(root.path()), &backup).unwrap();
     let original = fs::read(&backup).unwrap();
+    #[cfg(unix)]
     assert!(journal
         .ensure_new_operation("agent", "task", "new")
         .is_err());

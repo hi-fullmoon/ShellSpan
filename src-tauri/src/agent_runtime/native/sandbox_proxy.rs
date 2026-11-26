@@ -807,15 +807,23 @@ mod tests {
         let upstream_port = upstream.local_addr().unwrap().port();
         let server = thread::spawn(move || {
             let (mut stream, _) = upstream.accept().unwrap();
-            let mut req = [0u8; 2048];
-            let n = stream.read(&mut req).unwrap();
-            let req_text = String::from_utf8_lossy(&req[..n]).to_string();
+            let mut req = Vec::new();
+            let mut buf = [0u8; 512];
+            while !req.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = stream.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                req.extend_from_slice(&buf[..n]);
+            }
+            let req_text = String::from_utf8_lossy(&req).to_string();
             assert!(!req_text
                 .to_ascii_lowercase()
                 .contains("proxy-authorization"));
             stream
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
                 .unwrap();
+            let _ = stream.shutdown(std::net::Shutdown::Write);
         });
 
         let policy = SandboxNetworkPolicy {

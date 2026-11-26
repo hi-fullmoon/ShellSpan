@@ -441,10 +441,8 @@ mod tests {
 
     #[test]
     fn plain_retry_after_native_rejection_preserves_the_original_reason() {
-        let (mut client, _peer) = socket_pair();
-        client
-            .set_read_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
+        let (client, mut peer) = socket_pair();
+        peer.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
         let reason = "remoteGlibcTooOld:2.27:2.28";
         let mut attempts = Vec::new();
         let (result, failure) = run_with_plain_ssh_fallback(
@@ -456,7 +454,7 @@ mod tests {
                     register(&client)?;
                     mark_native_startup_started(Duration::from_millis(150))?;
                     finish_native_probe_without_startup(reason);
-                    assert_eq!(client.read(&mut [0]).unwrap(), 0);
+                    assert_eq!(peer.read(&mut [0]).unwrap(), 0);
                     return Err("plain startup interrupted".into());
                 }
                 complete()
