@@ -817,7 +817,7 @@ impl TerminalSessionBroker {
         Ok(state.sessions.get(terminal_session_id).cloned())
     }
 
-    #[cfg(any(target_os = "macos", test))]
+    #[cfg(target_os = "macos")]
     pub(crate) fn attach_local_sandbox_binding(
         &self,
         transport_session_id: &str,
@@ -830,14 +830,7 @@ impl TerminalSessionBroker {
         };
         let mut record = slot.lock_current(transport_session_id, &attachment)?;
         record.sandbox_binding = Some(binding);
-        #[cfg(target_os = "macos")]
-        {
-            record.sandbox_blocked_domains = blocked_domains;
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = blocked_domains;
-        }
+        record.sandbox_blocked_domains = blocked_domains;
         Ok(())
     }
 
