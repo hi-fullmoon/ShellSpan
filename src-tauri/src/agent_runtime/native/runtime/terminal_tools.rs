@@ -23,7 +23,7 @@ impl NativeToolEngine {
         call: &AgentToolCallNative,
         effect: &AgentObservedEffectNative,
         sessions: &SessionManager,
-        database: Option<&Database>,
+        #[cfg_attr(not(target_os = "macos"), allow(unused_variables))] database: Option<&Database>,
         default_timeout_ms: u64,
         cancellation: &CancellationToken,
         dispatch_policy: Option<&VisibleTerminalDispatch<'_>>,
@@ -233,6 +233,7 @@ impl NativeToolEngine {
         // sensitive-output boundary, including secrets split by ANSI sequences,
         // while stripping shell-chrome OSC sequences (title/integration markers)
         // so models do not mistake them for truncated output.
+        #[cfg(target_os = "macos")]
         let violation_text = redacted_plain.clone();
         let model_output = if operation.is_native_protocol()? && redacted_plain == plain_output {
             let cleaned = strip_shell_control_osc(&snapshot.combined_output);
@@ -259,6 +260,7 @@ impl NativeToolEngine {
                 None => format!("Visible terminal command reached {state}."),
             },
         });
+        #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
         let mut data = json!({
             "contractVersion": 1,
             "channel": "terminal",

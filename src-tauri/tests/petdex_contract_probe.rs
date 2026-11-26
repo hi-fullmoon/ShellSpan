@@ -47,6 +47,9 @@ struct ContractProbe {
 impl ContractProbe {
     fn fixture(endpoint: Url, token_path: PathBuf) -> Result<Self, ProbeFailure> {
         validate_loopback_state_endpoint(&endpoint)?;
+        if rustls::crypto::CryptoProvider::get_default().is_none() {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+        }
         let client = Client::builder()
             .no_proxy()
             .connect_timeout(Duration::from_millis(250))

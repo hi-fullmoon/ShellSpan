@@ -95,7 +95,15 @@ async fn stopping_blocks_new_tool_calls_while_a_child_is_draining() {
     assert!(child.with_input_admission(|| Ok(())).unwrap().is_none());
     assert!(!child.cancellation().is_cancelled());
     let mut stop = Box::pin(runtime.interrupt(&entry.session_id));
-    assert!(poll_fn(|cx| Poll::Ready(stop.as_mut().poll(cx).is_pending())).await);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !child.cancellation().is_cancelled() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "child cancellation never started while draining"
+        );
+        assert!(poll_fn(|cx| Poll::Ready(stop.as_mut().poll(cx).is_pending())).await);
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
     assert!(child.cancellation().is_cancelled());
     assert!(!entry.cancellation().is_cancelled());
 

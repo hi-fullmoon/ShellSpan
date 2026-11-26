@@ -481,7 +481,6 @@ mod tests {
         assert!(review(AgentPermissionModeNative::Operator, &call).requires_approval);
     }
 
-    #[cfg(unix)]
     fn command(root: &Path, script: &str) -> AgentToolCallNative {
         call(
             root,

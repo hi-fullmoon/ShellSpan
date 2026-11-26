@@ -399,7 +399,7 @@ async fn rejected_background_launch_does_not_restrict_later_execution_or_reopen_
 #[tokio::test]
 async fn background_launch_deadline_before_accept_line_reports_not_started() {
     for shell in [TerminalShellKind::Bash, TerminalShellKind::Zsh] {
-        let scenario = Scenario::new(shell);
+        let scenario = Scenario::with_native_input(shell, true);
         let session = "launch-deadline";
         let entry = scenario.root(
             session,

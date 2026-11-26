@@ -1192,7 +1192,7 @@ fn create_local_session_blocking(
         (cmd, None, None, None)
     };
     #[cfg(not(target_os = "macos"))]
-    let mut command = {
+    let command = {
         let mut command = CommandBuilder::new(executable);
         #[cfg(windows)]
         command.set_start_suspended(true);
