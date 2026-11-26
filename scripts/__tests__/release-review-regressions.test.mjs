@@ -50,7 +50,7 @@ async function reviewedRepository(unicodeManifests = false, noBaseline = false) 
   commit();
   const { version: current, packageName } = readVersions(directory);
   const version = semver.inc(current, 'patch');
-  const baseTag = noBaseline ? null : `v${current}`;
+  const baseTag = noBaseline ? null : (semver.prerelease(current) ? 'v0.0.1' : `v${current}`);
   if (baseTag) git(['tag', baseTag]);
   const sha = git(['rev-parse', 'HEAD']);
   const meta = { version, repository: REPOSITORY, date: '2026-09-21', baseTag, baseSha: noBaseline ? null : sha, headSha: sha };
