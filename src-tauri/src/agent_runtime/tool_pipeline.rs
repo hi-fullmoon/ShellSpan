@@ -786,6 +786,7 @@ impl AgentToolPipeline {
     pub(crate) fn sync_terminal_execution_context(
         &self,
         header: &super::AgentSessionHeader,
+        surface: &super::AgentSurfaceSnapshot,
         assembly: &mut super::prompt::ModelInputAssembly,
     ) -> Result<(), String> {
         super::prompt::apply_ui_locale_context(
@@ -806,6 +807,7 @@ impl AgentToolPipeline {
             });
         }
         if header.execution_surface != super::AgentExecutionSurface::BoundTerminal {
+            super::prompt::supersede_bound_terminal_execution_context(header, surface, assembly);
             return Ok(());
         }
         let state = header.target.as_ref().and_then(|target| {

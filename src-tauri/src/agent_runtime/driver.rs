@@ -1055,7 +1055,7 @@ async fn apply_pre_step_hooks(
         ),
     );
     scope_current_task_context(sessions, &snapshot, &mut assembly)?;
-    tools.sync_terminal_execution_context(&snapshot.header, &mut assembly)?;
+    tools.sync_terminal_execution_context(&snapshot.header, &snapshot.surface, &mut assembly)?;
     append_current_task_plan_context(sessions, &snapshot, turn_id, &mut assembly)?;
     let mut request = ModelRequest::from_surface(
         "pre-step-budget".into(),

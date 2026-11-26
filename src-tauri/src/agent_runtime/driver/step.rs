@@ -299,8 +299,11 @@ async fn assemble_fresh_step_request(
         ),
     );
     scope_current_task_context(ctx.sessions, &snapshot, &mut assembly)?;
-    ctx.tools
-        .sync_terminal_execution_context(&snapshot.header, &mut assembly)?;
+    ctx.tools.sync_terminal_execution_context(
+        &snapshot.header,
+        &snapshot.surface,
+        &mut assembly,
+    )?;
     append_current_task_plan_context(ctx.sessions, &snapshot, ctx.turn_id, &mut assembly)?;
     ensure_model_context(
         ctx.sessions,
