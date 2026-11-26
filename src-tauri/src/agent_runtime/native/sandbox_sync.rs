@@ -530,6 +530,25 @@ fn validate_relative_path(rel: &str) -> Result<PathBuf, String> {
     Ok(clean)
 }
 
+fn scoped_relative_path(clean: &Path) -> io::Result<String> {
+    let mut parts = Vec::new();
+    for component in clean.components() {
+        match component {
+            Component::Normal(part) => {
+                let segment = part
+                    .to_str()
+                    .ok_or_else(|| io::Error::other("Relative path is not valid UTF-8"))?;
+                parts.push(segment);
+            }
+            _ => return Err(io::Error::other("Unsafe relative path component")),
+        }
+    }
+    if parts.is_empty() {
+        return Err(io::Error::other("Empty relative path"));
+    }
+    Ok(parts.join("/"))
+}
+
 fn hash_file(path: &Path) -> io::Result<(String, u64)> {
     let mut file = open_regular_nofollow(path)?;
     let mut hasher = Sha256::new();
@@ -886,10 +905,8 @@ pub(crate) fn apply_workspace_changes(
                             scoped_ws.insert(opened)
                         }
                     };
-                    let clean_str = clean.to_str().ok_or_else(|| {
-                        io::Error::other("Relative workspace path is not valid UTF-8")
-                    })?;
-                    let mut reader = reader_root.open_regular_file(clean_str).map_err(|e| {
+                    let scoped_rel = scoped_relative_path(&clean)?;
+                    let mut reader = reader_root.open_regular_file(&scoped_rel).map_err(|e| {
                         io::Error::other(format!("Failed to open workspace file safely: {e}"))
                     })?;
                     let src_meta = reader.metadata()?;
@@ -1092,11 +1109,9 @@ pub(crate) fn discard_workspace_changes(
                                     scoped_src.insert(opened)
                                 }
                             };
-                            let clean_str = clean.to_str().ok_or_else(|| {
-                                io::Error::other("Relative source path is not valid UTF-8")
-                            })?;
+                            let scoped_rel = scoped_relative_path(&clean)?;
                             let mut reader =
-                                reader_root.open_regular_file(clean_str).map_err(|e| {
+                                reader_root.open_regular_file(&scoped_rel).map_err(|e| {
                                     io::Error::other(format!(
                                         "Failed to open source file safely: {e}"
                                     ))
@@ -1480,5 +1495,35 @@ mod tests {
 
         let after = diff_workspace_against_baseline(&workspace, &baseline_path).unwrap();
         assert_eq!(after.total_changes, 0);
+    }
+
+    #[test]
+    fn scoped_relative_path_uses_forward_slashes_for_nested_paths() {
+        let nested = PathBuf::from("src").join("nested").join("file.ts");
+        assert_eq!(scoped_relative_path(&nested).unwrap(), "src/nested/file.ts");
+
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("project");
+        let workspace = dir.path().join("sandbox-ws");
+        let baseline_path = dir.path().join("source-baseline.json");
+        fs::create_dir_all(source.join("src")).unwrap();
+        fs::create_dir_all(&workspace).unwrap();
+        fs::write(source.join("src").join("nested.txt"), "original nested\n").unwrap();
+
+        import_source_into_workspace(&source, &workspace, &baseline_path).unwrap();
+        fs::write(workspace.join("src").join("nested.txt"), "edited nested\n").unwrap();
+
+        let discard = discard_workspace_changes(
+            &workspace,
+            &baseline_path,
+            Some(&["src/nested.txt".to_string()]),
+        )
+        .unwrap();
+        assert!(discard.errors.is_empty());
+        assert_eq!(discard.discarded, vec!["src/nested.txt"]);
+        assert_eq!(
+            fs::read_to_string(workspace.join("src").join("nested.txt")).unwrap(),
+            "original nested\n"
+        );
     }
 }
