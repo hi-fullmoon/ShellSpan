@@ -13,15 +13,15 @@ use crate::ai::AiProviderConfig;
 use crate::keychain::CredentialManager;
 
 use super::{
-    default_model_tools, drive_agent, AgentCapabilityScope, AgentCompactionManager,
-    AgentDriverConfig, AgentDriverSettlement, AgentEntry, AgentFleetState, AgentFleetTargetState,
-    AgentHandle, AgentHookBus, AgentInboxLane, AgentInboxMessage, AgentLifecyclePhase,
-    AgentMessageSource, AgentPlanStepStatus, AgentRecoveryState, AgentRecoveryStatus,
-    AgentRegistry, AgentSessionEffect, AgentSessionEventPayload, AgentSessionSnapshot,
-    AgentSessionStatus, AgentSessionStore, AgentSubagentBudget, AgentSubagentInheritance,
-    AgentSubagentModel, AgentSubagentRole, AgentSubagentSession, AgentSubagentToolSettlement,
-    AgentToolPipeline, AgentToolResultStatus, CreateAgentSessionRequest, ModelRegistry,
-    OrchestrationToolRequest, OrchestrationToolResult, OrchestrationToolRuntime,
+    default_model_tools, AgentCapabilityScope, AgentCompactionManager, AgentDriverConfig,
+    AgentEntry, AgentFleetState, AgentFleetTargetState, AgentHandle, AgentHookBus, AgentInboxLane,
+    AgentInboxMessage, AgentLifecyclePhase, AgentMessageSource, AgentPlanStepStatus,
+    AgentRecoveryState, AgentRecoveryStatus, AgentRegistry, AgentSessionEffect,
+    AgentSessionEventPayload, AgentSessionSnapshot, AgentSessionStatus, AgentSessionStore,
+    AgentSubagentBudget, AgentSubagentInheritance, AgentSubagentModel, AgentSubagentRole,
+    AgentSubagentSession, AgentSubagentToolSettlement, AgentToolPipeline, AgentToolResultStatus,
+    CreateAgentSessionRequest, ModelRegistry, OrchestrationToolRequest, OrchestrationToolResult,
+    OrchestrationToolRuntime,
 };
 
 pub(super) const DEFAULT_ONE_SHOT_MAX_STEPS_PER_TURN: u16 = 16;
@@ -209,14 +209,6 @@ struct FleetRuntime {
     runner: Arc<tokio::sync::Mutex<()>>,
 }
 
-struct DriverLease(Arc<AgentEntry>);
-
-impl Drop for DriverLease {
-    fn drop(&mut self) {
-        self.0.release_driver();
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct SubAgentManager {
     sessions: AgentSessionStore,
@@ -231,6 +223,7 @@ pub(crate) struct SubAgentManager {
     fleets: Arc<Mutex<HashMap<String, FleetRuntime>>>,
     recovery_gate: Arc<tokio::sync::Mutex<()>>,
     cancelled_children: Arc<Mutex<HashSet<String>>>,
+    active_reapers: Arc<Mutex<HashSet<String>>>,
 }
 
 struct ChildSettlement {
@@ -285,6 +278,7 @@ impl SubAgentManager {
             fleets: Arc::new(Mutex::new(HashMap::new())),
             recovery_gate: Arc::new(tokio::sync::Mutex::new(())),
             cancelled_children: Arc::new(Mutex::new(HashSet::new())),
+            active_reapers: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -301,6 +295,7 @@ impl SubAgentManager {
         &self,
         request: AgentSubagentSpawnRequest,
     ) -> Result<AgentSessionSnapshot, String> {
+        let continuable = request.continuable;
         let child = self
             .spawn_child(
                 &request.parent_session_id,
@@ -309,10 +304,12 @@ impl SubAgentManager {
                 &request.inheritance_mode,
                 request.target_ids,
                 request.budget.unwrap_or_else(default_subagent_budget),
-                request.continuable,
+                continuable,
             )
             .await?;
-        self.sessions.snapshot(&child)
+        let snapshot = self.sessions.snapshot(&child)?;
+        self.spawn_command_child_reaper(child, continuable);
+        Ok(snapshot)
     }
 
     pub(crate) async fn send_from_command(
@@ -326,7 +323,95 @@ impl SubAgentManager {
             request.client_submission_id,
         )
         .await?;
-        self.sessions.snapshot(&request.child_session_id)
+        let snapshot = self.sessions.snapshot(&request.child_session_id)?;
+        let continuable = snapshot
+            .header
+            .subagent
+            .as_ref()
+            .is_some_and(|meta| meta.continuable);
+        self.spawn_command_child_reaper(request.child_session_id, continuable);
+        Ok(snapshot)
+    }
+
+    fn spawn_command_child_reaper(&self, child_session_id: String, continuable: bool) {
+        let Ok(mut reapers) = self.active_reapers.lock() else {
+            return;
+        };
+        if !reapers.insert(child_session_id.clone()) {
+            return;
+        }
+        drop(reapers);
+        let manager = self.clone();
+        tauri::async_runtime::spawn(async move {
+            struct ReaperGuard {
+                active_reapers: Arc<Mutex<HashSet<String>>>,
+                session_id: String,
+            }
+            impl Drop for ReaperGuard {
+                fn drop(&mut self) {
+                    if let Ok(mut reapers) = self.active_reapers.lock() {
+                        reapers.remove(&self.session_id);
+                    }
+                }
+            }
+            let _guard = ReaperGuard {
+                active_reapers: Arc::clone(&manager.active_reapers),
+                session_id: child_session_id.clone(),
+            };
+            let Ok(Some(entry)) = manager.agents.get(&child_session_id) else {
+                return;
+            };
+            let mut changes = entry.subscribe_changes();
+            loop {
+                let Ok(snapshot) = manager.sessions.snapshot(&child_session_id) else {
+                    break;
+                };
+                let settled = !entry.is_driver_active()
+                    && (snapshot.ended
+                        || snapshot.status.is_terminal()
+                        || (snapshot.status == AgentSessionStatus::Idle
+                            && !manager
+                                .sessions
+                                .has_ready_input(&child_session_id)
+                                .unwrap_or(false)));
+                if settled {
+                    if !continuable
+                        && snapshot.status == AgentSessionStatus::Idle
+                        && !snapshot.ended
+                    {
+                        let incomplete = manager
+                            .sessions
+                            .all_events(&child_session_id)
+                            .map(|events| last_turn_incomplete(&events))
+                            .unwrap_or(false);
+                        let _ = manager.sessions.terminate(
+                            &child_session_id,
+                            if incomplete {
+                                AgentSessionStatus::Failed
+                            } else {
+                                AgentSessionStatus::Completed
+                            },
+                            if incomplete {
+                                "oneShotPlanIncomplete"
+                            } else {
+                                "oneShotTurnCompleted"
+                            }
+                            .into(),
+                        );
+                    }
+                    let _ = manager
+                        .release_or_dispose_child(&child_session_id, continuable)
+                        .await;
+                    break;
+                }
+                if changes.changed().await.is_err() {
+                    let _ = manager
+                        .release_or_dispose_child(&child_session_id, continuable)
+                        .await;
+                    break;
+                }
+            }
+        });
     }
 
     pub(crate) fn inspect_from_command(
@@ -544,10 +629,18 @@ impl SubAgentManager {
             runner: Default::default(),
         };
         let inspection = fleet_inspection(&fleet);
-        self.fleets
-            .lock()
-            .map_err(|_| "Fleet coordinator is unavailable".to_string())?
-            .insert(fleet_id, fleet);
+        {
+            let mut fleets = self
+                .fleets
+                .lock()
+                .map_err(|_| "Fleet coordinator is unavailable".to_string())?;
+            if fleets.len() >= 64 {
+                fleets.retain(|_, existing| {
+                    !matches!(existing.status.as_str(), "completed" | "failed" | "aborted")
+                });
+            }
+            fleets.insert(fleet_id, fleet);
+        }
         self.sessions.append(
             parent_session_id,
             None,
@@ -811,70 +904,71 @@ impl SubAgentManager {
         child_session_id: &str,
         cancellation: CancellationToken,
     ) -> Result<AgentSessionSnapshot, String> {
-        let settlement = self
-            .await_settlement(child_session_id, cancellation.clone())
-            .await?;
-        let mut snapshot = settlement.snapshot;
-        if snapshot.status == AgentSessionStatus::Idle {
-            let incomplete = last_turn_incomplete(&self.sessions.all_events(child_session_id)?);
-            snapshot = self.sessions.terminate(
-                child_session_id,
-                if incomplete {
-                    AgentSessionStatus::Failed
-                } else {
-                    AgentSessionStatus::Completed
-                },
-                if incomplete {
-                    "fleetRolePlanIncomplete"
-                } else {
-                    "fleetRoleTurnCompleted"
-                }
-                .into(),
-            )?;
+        let outcome = async {
+            let settlement = self
+                .await_settlement(child_session_id, cancellation.clone())
+                .await?;
+            let mut snapshot = settlement.snapshot;
+            if snapshot.status == AgentSessionStatus::Idle {
+                let incomplete = last_turn_incomplete(&self.sessions.all_events(child_session_id)?);
+                snapshot = self.sessions.terminate(
+                    child_session_id,
+                    if incomplete {
+                        AgentSessionStatus::Failed
+                    } else {
+                        AgentSessionStatus::Completed
+                    },
+                    if incomplete {
+                        "fleetRolePlanIncomplete"
+                    } else {
+                        "fleetRoleTurnCompleted"
+                    }
+                    .into(),
+                )?;
+            }
+            let subagent = snapshot
+                .header
+                .subagent
+                .clone()
+                .ok_or_else(|| "Fleet child lost subagent metadata".to_string())?;
+            let events = self.sessions.all_events(child_session_id)?;
+            let summary = settlement
+                .timeout_reason
+                .or_else(|| child_stop_reason(&events).map(str::to_string))
+                .or_else(|| assistant_summary(&events))
+                .unwrap_or_else(|| format!("Fleet child settled as {:?}", snapshot.status));
+            let fleet_aborted = self
+                .fleets
+                .lock()
+                .ok()
+                .and_then(|fleets| fleets.get(fleet_id).map(|fleet| fleet.status == "aborted"))
+                .unwrap_or(false);
+            let parent_ended = self
+                .sessions
+                .snapshot(parent_session_id)
+                .is_ok_and(|parent| parent.ended);
+            if !fleet_aborted && !cancellation.is_cancelled() && !parent_ended {
+                self.sessions.commit_subagent_settlement(
+                    parent_session_id,
+                    &subagent.descriptor_id,
+                    &format!("settlement-{}", Uuid::new_v4().simple()),
+                    child_session_id,
+                    snapshot.status,
+                    summary,
+                    Vec::new(),
+                    false,
+                    None,
+                )?;
+            }
+            Ok::<AgentSessionSnapshot, String>(snapshot)
         }
-        let subagent = snapshot
-            .header
-            .subagent
-            .clone()
-            .ok_or_else(|| "Fleet child lost subagent metadata".to_string())?;
-        let events = self.sessions.all_events(child_session_id)?;
-        let summary = settlement
-            .timeout_reason
-            .or_else(|| child_stop_reason(&events).map(str::to_string))
-            .or_else(|| assistant_summary(&events))
-            .unwrap_or_else(|| format!("Fleet child settled as {:?}", snapshot.status));
-        let fleet_aborted = self
-            .fleets
-            .lock()
-            .ok()
-            .and_then(|fleets| fleets.get(fleet_id).map(|fleet| fleet.status == "aborted"))
-            .unwrap_or(false);
-        let parent_ended = self
-            .sessions
-            .snapshot(parent_session_id)
-            .is_ok_and(|parent| parent.ended);
-        if !fleet_aborted && !cancellation.is_cancelled() && !parent_ended {
-            self.sessions.commit_subagent_settlement(
-                parent_session_id,
-                &subagent.descriptor_id,
-                &format!("settlement-{}", Uuid::new_v4().simple()),
-                child_session_id,
-                snapshot.status,
-                summary,
-                Vec::new(),
-                false,
-                None,
-            )?;
+        .await;
+        let cleanup = self.dispose_child_handle(child_session_id).await;
+        match (outcome, cleanup) {
+            (Ok(snapshot), Ok(())) => Ok(snapshot),
+            (Err(error), _) => Err(error),
+            (Ok(_), Err(error)) => Err(error),
         }
-        let handle = self
-            .handles
-            .lock()
-            .map_err(|_| "subagent handle registry is unavailable".to_string())?
-            .remove(child_session_id);
-        if let Some(handle) = handle {
-            handle.dispose().await?;
-        }
-        Ok(snapshot)
     }
 
     fn ensure_fleet_loaded(&self, parent_session_id: &str, fleet_id: &str) -> Result<(), String> {
@@ -1192,7 +1286,7 @@ impl SubAgentManager {
                     .map_err(|_| "MODEL_REGISTRY_UNAVAILABLE")? = Some(self.models.clone());
                 self.agents.set_owner(&handle.entry(), &parent_entry)?;
                 handles.insert(child_session_id.clone(), handle);
-                self.sessions.enqueue(
+                if let Err(error) = self.sessions.enqueue(
                     &child_session_id,
                     AgentInboxLane::NextTurn,
                     AgentInboxMessage {
@@ -1203,7 +1297,15 @@ impl SubAgentManager {
                         source: AgentMessageSource::session_reference(parent_session_id.into()),
                         terminal_context: None,
                     },
-                )?;
+                ) {
+                    if let Some(removed) = handles.remove(&child_session_id) {
+                        let _ = removed.entry().stop_admission();
+                        removed.entry().cancel();
+                    }
+                    let _ = self.agents.detach(&child_session_id);
+                    let _ = self.sessions.cancel(&child_session_id);
+                    return Err(error);
+                }
                 Ok(child_session_id)
             })?
             .ok_or_else(|| "parent Agent Session is stopping".into())
@@ -1644,55 +1746,14 @@ impl SubAgentManager {
         if !entry.try_acquire_driver()? {
             return Ok(());
         }
-        let sessions = self.sessions.clone();
-        let hooks = self.hooks.clone();
-        let tools = self.tools.clone();
-        let compactions = self.compactions.clone();
-        let config = self.driver_config;
-        tauri::async_runtime::spawn(async move {
-            loop {
-                let lease = DriverLease(Arc::clone(&entry));
-                let settlement = drive_agent(
-                    sessions.clone(),
-                    Arc::clone(&entry),
-                    hooks.clone(),
-                    tools.clone(),
-                    compactions.clone(),
-                    config,
-                )
-                .await;
-                drop(lease);
-                if settlement == AgentDriverSettlement::Waiting {
-                    match tools.wait_for_expiry(&entry).await {
-                        Ok(true) if !entry.cancellation().is_cancelled() => {
-                            if entry.try_acquire_driver().unwrap_or(false) {
-                                continue;
-                            }
-                        }
-                        Ok(_) => {}
-                        Err(error) => {
-                            let reason = format!("approvalExpiryFailure: {error}");
-                            let _ = entry.set_phase(AgentLifecyclePhase::Stopping);
-                            let _ = super::driver::close_open_scope(&sessions, &entry, &reason);
-                            let _ = sessions.terminate(
-                                &entry.session_id,
-                                AgentSessionStatus::Failed,
-                                reason,
-                            );
-                        }
-                    }
-                    break;
-                }
-                if settlement != AgentDriverSettlement::Idle || entry.cancellation().is_cancelled()
-                {
-                    break;
-                }
-                let has_work = sessions.has_ready_input(&entry.session_id).unwrap_or(false);
-                if !has_work || !entry.try_acquire_driver().unwrap_or(false) {
-                    break;
-                }
-            }
-        });
+        super::driver::spawn_driver_loop(
+            self.sessions.clone(),
+            entry,
+            self.hooks.clone(),
+            self.tools.clone(),
+            self.compactions.clone(),
+            self.driver_config,
+        );
         Ok(())
     }
 
@@ -1812,6 +1873,10 @@ impl SubAgentManager {
             handle
         };
         if let Some(handle) = handle {
+            // Always cancel the entry's token so in-flight model streams stop
+            // immediately even if native cancellation fails and leaves the
+            // handle reachable for retry.
+            handle.entry().cancel();
             self.tools.cancel_session_interactions(&handle.entry())?;
             native_result?;
             self.tools.await_pending_executions(&handle.entry()).await?;
@@ -1886,6 +1951,37 @@ impl SubAgentManager {
         Ok(())
     }
 
+    async fn dispose_child_handle(&self, child_session_id: &str) -> Result<(), String> {
+        let handle = self
+            .handles
+            .lock()
+            .map_err(|_| "subagent handle registry is unavailable".to_string())?
+            .remove(child_session_id);
+        if let Some(handle) = handle {
+            handle.dispose().await?;
+        }
+        Ok(())
+    }
+
+    async fn release_or_dispose_child(
+        &self,
+        child_session_id: &str,
+        continuable: bool,
+    ) -> Result<(), String> {
+        let can_suspend = continuable
+            && self
+                .sessions
+                .snapshot(child_session_id)
+                .is_ok_and(|snapshot| {
+                    !snapshot.ended && snapshot.status == AgentSessionStatus::Idle
+                });
+        if can_suspend {
+            self.release_continuable(child_session_id).await
+        } else {
+            self.dispose_child_handle(child_session_id).await
+        }
+    }
+
     async fn settle_spawn(
         &self,
         request: &OrchestrationToolRequest,
@@ -1897,13 +1993,16 @@ impl SubAgentManager {
         let settlement = match child {
             Ok(snapshot) => snapshot,
             Err(error) => {
+                let _ = self
+                    .release_or_dispose_child(child_session_id, continuable)
+                    .await;
                 return Ok(OrchestrationToolResult {
                     status: AgentToolResultStatus::Failed,
                     summary: error,
                     data: Some(json!({ "childSessionId": child_session_id })),
                     evidence_refs: Vec::new(),
                     result_committed: false,
-                })
+                });
             }
         };
         let timeout_reason = settlement.timeout_reason;
@@ -1991,7 +2090,7 @@ impl SubAgentManager {
                     Ok(AgentLifecyclePhase::Stopping | AgentLifecyclePhase::Disposed)
                 )
             });
-        self.sessions.commit_subagent_settlement(
+        let commit_result = self.sessions.commit_subagent_settlement(
             &request.parent_session_id,
             &subagent.descriptor_id,
             &format!("settlement-{}", Uuid::new_v4().simple()),
@@ -2008,24 +2107,12 @@ impl SubAgentManager {
                 status: tool_status,
                 data: Some(data.clone()),
             }),
-        )?;
-        if continuable
-            && matches!(
-                snapshot.status,
-                AgentSessionStatus::Idle | AgentSessionStatus::Failed
-            )
-        {
-            self.release_continuable(child_session_id).await?;
-        } else if !continuable {
-            let handle = self
-                .handles
-                .lock()
-                .map_err(|_| "subagent handle registry is unavailable".to_string())?
-                .remove(child_session_id);
-            if let Some(handle) = handle {
-                handle.dispose().await?;
-            }
-        }
+        );
+        let cleanup_result = self
+            .release_or_dispose_child(child_session_id, continuable)
+            .await;
+        commit_result?;
+        cleanup_result?;
         Ok(OrchestrationToolResult {
             status: tool_status,
             summary,

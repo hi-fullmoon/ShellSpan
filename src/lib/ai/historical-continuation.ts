@@ -44,14 +44,17 @@ export function withHistoricalConversation(
 export async function loadHistoricalSources(
   adapter: Pick<AiSessionAdapter<'agent'>, 'open'>,
   current: AiSessionView,
+  signal?: AbortSignal,
 ): Promise<readonly AiSessionView[]> {
   const visited = new Set([current.summary.id]);
   const sources: AiSessionView[] = [];
   let sourceId = current.snapshot?.value.header.continuedFromSessionId;
   while (sourceId) {
+    signal?.throwIfAborted();
     if (visited.has(sourceId)) throw new Error('Continuation history contains a cycle');
     visited.add(sourceId);
     const source = await adapter.open(sourceId);
+    signal?.throwIfAborted();
     sources.unshift(source);
     sourceId = source.snapshot.value.header.continuedFromSessionId;
   }

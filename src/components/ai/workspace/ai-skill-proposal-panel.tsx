@@ -185,6 +185,7 @@ export function AiSkillProposalPanel({
   const [revisionOpen, setRevisionOpen] = useState(false);
   const [revisionNote, setRevisionNote] = useState('');
   const [busyAction, setBusyAction] = useState<'save' | 'requestRevision' | 'cancel' | null>(null);
+  const busyActionRef = useRef(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const inspectSeqRef = useRef(0);
 
@@ -196,10 +197,23 @@ export function AiSkillProposalPanel({
     [t],
   );
 
+  useEffect(() => {
+    if (editorTab === 'diff' && !inspection.existingContent) {
+      setEditorTab('edit');
+    }
+  }, [editorTab, inspection.existingContent]);
+
   // Re-inspect target file whenever scope or valid name diverges from initial proposal.
   useEffect(() => {
+    const seq = ++inspectSeqRef.current;
+    let stale = false;
     const trimmed = name.trim();
-    if (!onInspectTarget || !SKILL_NAME_PATTERN.test(trimmed)) return;
+    if (!onInspectTarget || !SKILL_NAME_PATTERN.test(trimmed)) {
+      return () => {
+        stale = true;
+        inspectSeqRef.current += 1;
+      };
+    }
     if (scope === proposal.scope && trimmed === proposal.name) {
       setInspection({
         scope: proposal.scope,
@@ -210,17 +224,35 @@ export function AiSkillProposalPanel({
         overwritesBuiltin: proposal.overwritesBuiltin,
         shadowedByWorkspace: proposal.shadowedByWorkspace,
       });
-      return;
+      return () => {
+        stale = true;
+        inspectSeqRef.current += 1;
+      };
     }
-    const seq = ++inspectSeqRef.current;
     const timer = window.setTimeout(() => {
       void onInspectTarget({ sessionId: identity.sessionId, scope, name: trimmed })
         .then((result) => {
-          if (inspectSeqRef.current === seq) setInspection(result);
+          if (!stale && inspectSeqRef.current === seq) setInspection(result);
         })
-        .catch(() => undefined);
+        .catch(() => {
+          if (!stale && inspectSeqRef.current === seq) {
+            setInspection({
+              scope,
+              workspaceAllowed: proposal.workspaceAllowed,
+              exists: false,
+              existingContent: null,
+              existingFileHash: null,
+              overwritesBuiltin: false,
+              shadowedByWorkspace: false,
+            });
+          }
+        });
     }, 150);
-    return () => window.clearTimeout(timer);
+    return () => {
+      stale = true;
+      inspectSeqRef.current += 1;
+      window.clearTimeout(timer);
+    };
   }, [
     identity.sessionId,
     name,
@@ -266,7 +298,8 @@ export function AiSkillProposalPanel({
   }, [instructions]);
 
   const handleSave = async (): Promise<void> => {
-    if (!onResolve || busyAction || hasBlockingIssues) return;
+    if (!onResolve || busyAction || busyActionRef.current || hasBlockingIssues) return;
+    busyActionRef.current = true;
     setBusyAction('save');
     setSubmitError(null);
     try {
@@ -287,13 +320,15 @@ export function AiSkillProposalPanel({
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : String(error));
     } finally {
+      busyActionRef.current = false;
       setBusyAction(null);
     }
   };
 
   const handleRequestRevision = async (): Promise<void> => {
     const trimmed = revisionNote.trim();
-    if (!onResolve || busyAction || !trimmed) return;
+    if (!onResolve || busyAction || busyActionRef.current || !trimmed) return;
+    busyActionRef.current = true;
     setBusyAction('requestRevision');
     setSubmitError(null);
     try {
@@ -308,12 +343,14 @@ export function AiSkillProposalPanel({
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : String(error));
     } finally {
+      busyActionRef.current = false;
       setBusyAction(null);
     }
   };
 
   const handleCancel = async (): Promise<void> => {
-    if (!onResolve || busyAction) return;
+    if (!onResolve || busyAction || busyActionRef.current) return;
+    busyActionRef.current = true;
     setBusyAction('cancel');
     setSubmitError(null);
     try {
@@ -326,6 +363,7 @@ export function AiSkillProposalPanel({
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : String(error));
     } finally {
+      busyActionRef.current = false;
       setBusyAction(null);
     }
   };
@@ -515,7 +553,7 @@ export function AiSkillProposalPanel({
           className="flex h-[min(86vh,760px)] max-w-2xl flex-col gap-0 overflow-hidden p-0"
           data-slot="ai-skill-proposal-dialog"
         >
-          <DialogHeader className="shrink-0 px-4 pt-4 pb-3">
+          <DialogHeader className="shrink-0 pl-4 pr-10 pt-4 pb-3">
             <DialogTitle>
               {isUpdate
                 ? t('ai.workspace.skillProposal.dialogTitleUpdate')

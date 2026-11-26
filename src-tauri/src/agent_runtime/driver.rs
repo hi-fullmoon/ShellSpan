@@ -85,6 +85,122 @@ pub(crate) enum AgentDriverSettlement {
     Failed,
 }
 
+struct ActiveDriverLease(Arc<AgentEntry>);
+
+impl Drop for ActiveDriverLease {
+    fn drop(&mut self) {
+        self.0.release_driver();
+    }
+}
+
+/// Shared driver loop for both root and child Agent entries.
+/// Caller must have already acquired `entry.try_acquire_driver()`.
+pub(super) fn spawn_driver_loop(
+    sessions: AgentSessionStore,
+    entry: Arc<AgentEntry>,
+    hooks: AgentHookBus,
+    tools: AgentToolPipeline,
+    compactions: AgentCompactionManager,
+    config: AgentDriverConfig,
+) {
+    tauri::async_runtime::spawn(async move {
+        let mut lease = Some(ActiveDriverLease(Arc::clone(&entry)));
+        loop {
+            let settlement = drive_agent(
+                sessions.clone(),
+                Arc::clone(&entry),
+                hooks.clone(),
+                tools.clone(),
+                compactions.clone(),
+                config,
+            )
+            .await;
+            #[cfg(test)]
+            if settlement == AgentDriverSettlement::Waiting {
+                let pause = tools.question_lease_pause.lock().unwrap().take();
+                if let Some((entered, release)) = pause {
+                    entered.notify_one();
+                    release.notified().await;
+                }
+            }
+            if settlement == AgentDriverSettlement::Waiting {
+                // Keep the current lease if an answer already committed. Otherwise
+                // publish idle while holding the same gate used by answer/cancel,
+                // so no accepted answer can fall into a release/reacquire gap.
+                let resume = {
+                    let Ok(gate) = tools.question_gate(&entry.session_id) else {
+                        break;
+                    };
+                    let Ok(_gate) = gate.lock() else {
+                        break;
+                    };
+                    if entry.phase().ok() == Some(AgentLifecyclePhase::Running)
+                        && !entry.cancellation().is_cancelled()
+                    {
+                        true
+                    } else {
+                        drop(lease.take());
+                        false
+                    }
+                };
+                if resume {
+                    continue;
+                }
+                // Recheck after releasing the driver lease so concurrent approval/recovery
+                // wakes or new inputs arriving after `pause_context_budget` are never lost.
+                if !entry.cancellation().is_cancelled() {
+                    let phase = entry.phase().ok();
+                    let should_reacquire = phase == Some(AgentLifecyclePhase::Running)
+                        || (phase == Some(AgentLifecyclePhase::Idle)
+                            && sessions.has_ready_input(&entry.session_id).unwrap_or(false));
+                    if should_reacquire && entry.try_acquire_driver().unwrap_or(false) {
+                        lease = Some(ActiveDriverLease(Arc::clone(&entry)));
+                        continue;
+                    }
+                }
+                match tools.wait_for_expiry(&entry).await {
+                    Ok(true) if !entry.cancellation().is_cancelled() => {
+                        if entry.try_acquire_driver().unwrap_or(false) {
+                            lease = Some(ActiveDriverLease(Arc::clone(&entry)));
+                            continue;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        // Re-acquire exclusive driver ownership before terminating so we
+                        // never race a concurrently resumed driver or clobber a new turn.
+                        if !entry.cancellation().is_cancelled() && entry.try_acquire_archive() {
+                            let _termination_lease = ActiveDriverLease(Arc::clone(&entry));
+                            if entry.phase().ok() == Some(AgentLifecyclePhase::Waiting)
+                                && !entry.cancellation().is_cancelled()
+                            {
+                                let reason = format!("approvalExpiryFailure: {error}");
+                                let _ = entry.set_phase(AgentLifecyclePhase::Stopping);
+                                let _ = close_open_scope(&sessions, &entry, &reason);
+                                let _ = sessions.terminate(
+                                    &entry.session_id,
+                                    AgentSessionStatus::Failed,
+                                    reason,
+                                );
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+            drop(lease.take());
+            if settlement != AgentDriverSettlement::Idle || entry.cancellation().is_cancelled() {
+                break;
+            }
+            let has_work = sessions.has_ready_input(&entry.session_id).unwrap_or(false);
+            if !has_work || !entry.try_acquire_driver().unwrap_or(false) {
+                break;
+            }
+            lease = Some(ActiveDriverLease(Arc::clone(&entry)));
+        }
+    });
+}
+
 struct PetdexDriverLease<'a> {
     sessions: &'a AgentSessionStore,
     entry: &'a AgentEntry,
@@ -956,15 +1072,27 @@ async fn apply_pre_step_hooks(
                 content: injection.content,
             }),
     );
-    let pending = if entry.scope()?.is_some() {
-        snapshot.inbox.next_step
+    let pending: Vec<_> = if entry.scope()?.is_some() {
+        snapshot
+            .inbox
+            .next_step
+            .into_iter()
+            .filter(|message| !snapshot.inbox.paused_ids.contains(&message.message_id))
+            .collect()
     } else {
         snapshot
             .inbox
             .next_turn
             .into_iter()
+            .filter(|message| !snapshot.inbox.paused_ids.contains(&message.message_id))
             .take(1)
-            .chain(snapshot.inbox.next_step)
+            .chain(
+                snapshot
+                    .inbox
+                    .next_step
+                    .into_iter()
+                    .filter(|message| !snapshot.inbox.paused_ids.contains(&message.message_id)),
+            )
             .collect()
     };
     request
@@ -976,22 +1104,33 @@ async fn apply_pre_step_hooks(
                     content: context.model_content(),
                 });
             }
-            messages.push(ModelMessage::User {
-                content: crate::ai_attachment::model_content(&message.content),
-            });
+            if message.images.is_empty() {
+                messages.push(ModelMessage::User {
+                    content: crate::ai_attachment::model_content(&message.content),
+                });
+            } else {
+                messages.push(ModelMessage::UserImages {
+                    content: crate::ai_attachment::model_content(&message.content),
+                    images: message.images,
+                    data_urls: Vec::new(),
+                });
+            }
             messages
         }));
     let raw_budget = estimate_request_budget(sessions, &entry.session_id, model, &request)?;
-    if raw_budget.requires_compaction() {
+    let budget = if raw_budget.requires_compaction() {
         compactions.record_budget(&entry.session_id, turn_id, step_id, &request, &raw_budget)?;
-    }
-    let request = tools
-        .bound_request_results(&entry.session_id, turn_id, step_id, request, raw_budget)
-        .await?;
-    let budget = estimate_request_budget(sessions, &entry.session_id, model, &request)?;
-    if budget.requires_compaction() {
-        compactions.record_budget(&entry.session_id, turn_id, step_id, &request, &budget)?;
-    }
+        let request = tools
+            .bound_request_results(&entry.session_id, turn_id, step_id, request, raw_budget)
+            .await?;
+        let budget = estimate_request_budget(sessions, &entry.session_id, model, &request)?;
+        if budget.requires_compaction() {
+            compactions.record_budget(&entry.session_id, turn_id, step_id, &request, &budget)?;
+        }
+        budget
+    } else {
+        raw_budget
+    };
     let context = AgentPreStepContext {
         session_id: entry.session_id.clone(),
         turn_id: turn_id.to_string(),
@@ -1099,6 +1238,7 @@ fn is_assembled_context_source(source: &super::AgentMessageSource) -> bool {
         "shellspan.runtime-context.v1"
             | "shellspan.agent-instructions.v1"
             | "shellspan.task-plan.v1"
+            | "shellspan.terminal-execution-state.v1"
     )
 }
 

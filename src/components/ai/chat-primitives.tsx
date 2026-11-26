@@ -788,6 +788,19 @@ export const Marker: React.FC<{
   </MarkerPrimitive>
 );
 
+const messageTimeFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function formatMessageTime(timestamp: string, locale: string): string | null {
+  const parsed = Date.parse(timestamp);
+  if (!Number.isFinite(parsed)) return null;
+  let formatter = messageTimeFormatters.get(locale);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(locale || undefined, { hour: '2-digit', minute: '2-digit' });
+    messageTimeFormatters.set(locale, formatter);
+  }
+  return formatter.format(parsed);
+}
+
 export const MessageActions: React.FC<{
   text: string;
   align: 'start' | 'end';
@@ -797,13 +810,10 @@ export const MessageActions: React.FC<{
   children?: React.ReactNode;
   reveal?: 'hover' | 'always';
 }> = ({ text, align, timestamp, className, actionClassName, children, reveal = 'hover' }) => {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const { copied, copy } = useCopyFeedback();
 
-  const time = timestamp === undefined
-    ? null
-    : new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' })
-      .format(new Date(timestamp));
+  const time = timestamp === undefined ? null : formatMessageTime(timestamp, locale);
 
   return (
     <div

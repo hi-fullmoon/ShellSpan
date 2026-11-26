@@ -113,7 +113,7 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
       if (value.status === 'error') { setError(value.code ?? 'Unavailable'); return; }
       setRootOpen(false); setBrowsing(true); setFocused(true); editor.current?.focus();
     } catch (failure) { if (!abort.signal.aborted && currentKey.current === expected) setError(String(failure)); }
-    finally { if (!abort.signal.aborted && currentKey.current === expected) setBinding(false); }
+    finally { if (rootAbort.current === abort) setBinding(false); }
   };
   const scope = result?.scope;
   const target = scope?.target;

@@ -425,15 +425,52 @@ impl RouteStore {
             }
             return Err(error);
         }
+        let obsolete_refs = {
+            let next_refs: std::collections::HashSet<&str> = candidate
+                .routes
+                .iter()
+                .filter_map(|route| match &route.auth {
+                    RouteAuth::Keychain { reference } => Some(reference.as_str()),
+                    RouteAuth::None => None,
+                })
+                .collect();
+            current
+                .routes
+                .iter()
+                .filter_map(|route| match &route.auth {
+                    RouteAuth::Keychain { reference }
+                        if !next_refs.contains(reference.as_str()) =>
+                    {
+                        Some(reference.clone())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
         *current = Arc::new(candidate);
         // Commit and Arc publication are the success boundary. Journal cleanup
-        // is recoverable maintenance; reporting failure here would lie to the
-        // caller after the new revision is already durable and visible.
+        // and superseded credential scheduling are recoverable maintenance;
+        // reporting failure here would lie to the caller after the new revision
+        // is already durable and visible. Superseded references remain intact
+        // in Keychain for in-flight frozen routes and are reaped on next startup
+        // by `recover_credentials()`.
         let keys = staged
             .iter()
             .map(|(r, _)| format!("llm.pendingCredential.{r}"))
             .collect::<Vec<_>>();
         let _ = self.database.delete_preferences(&keys);
+        if !obsolete_refs.is_empty() {
+            let superseded = obsolete_refs
+                .into_iter()
+                .map(|reference| {
+                    (
+                        format!("llm.pendingCredential.{reference}"),
+                        "superseded".into(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let _ = self.database.save_preferences(&superseded);
+        }
         Ok(current.clone())
     }
     pub fn credential(&self, route: &ProviderRoute) -> Result<Option<String>, String> {

@@ -506,7 +506,7 @@ export type AgentSessionEvent =
       usage: AgentSessionTokenUsage;
       stopReason: AgentSessionStopReason;
       interrupted: boolean;
-      replay?: AgentReplayEnvelope;
+      replay?: AgentReplayEnvelope | { readonly kind: 'artifact'; readonly artifact: AgentArtifactMetadata };
     }>
   | AgentSessionEventWithData<'request/header', {
       requestId: string;

@@ -32,10 +32,15 @@ impl ModelRequest {
             )
         });
         for (index, message) in surface.messages.iter().enumerate() {
+            // Preserve append-only `Current task request` injections in place so
+            // multi-turn conversations and steering keep a stable prompt-cache
+            // prefix; only strip superseded legacy `ShellSpan Session instructions.`
+            // receipts from older logs.
             if Some(index) != latest_task_context
                 && matches!(
-                    message, AgentSurfaceMessage::User { source, .. }
+                    message, AgentSurfaceMessage::User { source, content, .. }
                         if source.producer_id == "shellspan.agent-instructions.v1"
+                            && content.starts_with("ShellSpan Session instructions.")
                 )
             {
                 continue;

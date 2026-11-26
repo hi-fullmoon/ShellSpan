@@ -25,6 +25,17 @@ function isActiveStatus(status: AiSessionStatus): status is 'running' | 'waiting
   return status === 'running' || status === 'waiting';
 }
 
+const activeTasksRelativeTimeFormatterCache = new Map<string, Intl.RelativeTimeFormat>();
+
+function getActiveTasksRelativeTimeFormatter(locale: string): Intl.RelativeTimeFormat {
+  let formatter = activeTasksRelativeTimeFormatterCache.get(locale);
+  if (!formatter) {
+    formatter = new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style: 'narrow' });
+    activeTasksRelativeTimeFormatterCache.set(locale, formatter);
+  }
+  return formatter;
+}
+
 function relativeTimeLabel(timestamp: string, locale: string): string {
   const then = Date.parse(timestamp);
   if (!Number.isFinite(then)) return timestamp;
@@ -37,7 +48,7 @@ function relativeTimeLabel(timestamp: string, locale: string): string {
       : absoluteSeconds < 86_400
         ? [Math.round(deltaSeconds / 3_600), 'hour']
         : [Math.round(deltaSeconds / 86_400), 'day'];
-  return new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style: 'narrow' }).format(value, unit);
+  return getActiveTasksRelativeTimeFormatter(locale).format(value, unit);
 }
 
 export function selectActiveWorkspaceTasks({

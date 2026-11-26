@@ -154,13 +154,19 @@ export const useAgentPermissionStore = create<AgentPermissionState>()((set, get)
 
 // Target bindings remain connection-scoped. New connected instances use the
 // remembered preference rather than reusing a previous target binding.
-useTerminalStore.subscribe((terminalState, previous) => {
+const unsubscribeTerminalStore = useTerminalStore.subscribe((terminalState, previous) => {
   if (terminalState.sessions === previous.sessions) return;
   const permissionState = useAgentPermissionStore.getState();
   const defaults = useAiSettingsStore.getState();
-  const preferences = Object.fromEntries(terminalState.sessions.map((session): [string, TerminalAgentPreference] => {
+  const nextPreferences: Record<string, TerminalAgentPreference> = {};
+  let preferencesChanged = Object.keys(permissionState.preferences).length !== terminalState.sessions.length;
+  for (const session of terminalState.sessions) {
     const current = permissionState.preferences[session.sessionId];
-    if (current) return [session.sessionId, current];
+    if (current) {
+      nextPreferences[session.sessionId] = current;
+      continue;
+    }
+    preferencesChanged = true;
     const predecessorId = session.replacesSessionId;
     const predecessor = predecessorId ? previous.sessions.find(item => item.sessionId === predecessorId) : undefined;
     const previousPreference = predecessor ? permissionState.preferences[predecessor.sessionId] : undefined;
@@ -170,18 +176,40 @@ useTerminalStore.subscribe((terminalState, previous) => {
       ? permissionState.conversationSurfaces[predecessor.sessionId]?.surface
         ?? (remoteGlibcMismatch(predecessor.integrationReason) ? 'direct' : previousPreference?.reconnectingSurface)
       : undefined;
-    return [session.sessionId, {
+    nextPreferences[session.sessionId] = {
       mode: defaults.agentPermissionMode,
       surface: previousPreference?.surface ?? defaults.agentExecutionSurface,
       ...(previousPreference?.surfaceExplicit ? { surfaceExplicit: true } : {}),
       reconnectingSurface,
-    }];
-  }));
-  const conversationSurfaces = Object.fromEntries(Object.entries(permissionState.conversationSurfaces)
-    .filter(([sessionId]) => Object.prototype.hasOwnProperty.call(preferences, sessionId)));
-  useAgentPermissionStore.setState({ preferences, conversationSurfaces });
+    };
+  }
+  const nextConversationSurfaces: Record<string, TerminalConversationSurface | undefined> = {};
+  let surfacesChanged = false;
+  for (const [sessionId, surface] of Object.entries(permissionState.conversationSurfaces)) {
+    if (Object.prototype.hasOwnProperty.call(nextPreferences, sessionId)) {
+      nextConversationSurfaces[sessionId] = surface;
+    } else {
+      surfacesChanged = true;
+    }
+  }
+  const nextBindings: Record<string, AgentPermissionBinding> = {};
+  let bindingsChanged = false;
   for (const [sessionId, binding] of Object.entries(permissionState.bindings)) {
     const session = terminalState.sessions.find((item) => item.sessionId === sessionId);
-    if (!sameTarget(binding.target, session)) permissionState.resetSession(sessionId);
+    if (sameTarget(binding.target, session)) {
+      nextBindings[sessionId] = binding;
+    } else {
+      bindingsChanged = true;
+    }
   }
+  if (!preferencesChanged && !surfacesChanged && !bindingsChanged) return;
+  useAgentPermissionStore.setState({
+    ...(preferencesChanged ? { preferences: nextPreferences } : {}),
+    ...(surfacesChanged ? { conversationSurfaces: nextConversationSurfaces } : {}),
+    ...(bindingsChanged ? { bindings: nextBindings } : {}),
+  });
+});
+
+import.meta.hot?.dispose(() => {
+  unsubscribeTerminalStore();
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChevronDownIcon, ShieldAlertIcon } from 'lucide-react';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -346,13 +346,15 @@ export function AiApprovalPanel({
     headingRef.current?.focus({ preventScroll: true });
   }, [approval.approvalId]);
 
+  const approvalTitleId = useId();
+  const approvalDescriptionId = useId();
   return (
     <Card
       className="ai-approval-panel grid min-h-0 max-h-[min(600px,72dvh)] min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 py-0"
       size="sm"
       role="group"
-      aria-labelledby="ai-approval-title"
-      aria-describedby="ai-approval-description"
+      aria-labelledby={approvalTitleId}
+      aria-describedby={approvalDescriptionId}
       data-slot="ai-approval-panel"
       data-approval-id={approval.approvalId}
     >
@@ -363,11 +365,11 @@ export function AiApprovalPanel({
           </span>
           <div className="flex min-w-0 flex-col gap-0.5">
             <CardTitle className="ai-approval-panel-title">
-              <h3 id="ai-approval-title" ref={headingRef} tabIndex={-1} className="outline-none">
+              <h3 id={approvalTitleId} ref={headingRef} tabIndex={-1} className="outline-none">
                 <AiContentTitle>{t(titleKey, { tool: approval.toolName })}</AiContentTitle>
               </h3>
             </CardTitle>
-            <CardDescription id="ai-approval-description" className="break-words">
+            <CardDescription id={approvalDescriptionId} className="break-words">
               <AiContentTitle>{t(descriptionKey, { target: targetDescription })}</AiContentTitle>
             </CardDescription>
           </div>

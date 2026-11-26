@@ -1,6 +1,6 @@
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::fs::{self, File};
+use std::fs;
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -2094,8 +2094,16 @@ fn append_content_matches(
         return;
     };
     let case_sensitive = arguments.case_sensitive.unwrap_or(false);
+    let lowered_query = (!case_sensitive).then(|| arguments.query.to_lowercase());
+    let sensitive = path_is_sensitive_in_root(path, managed_root);
     for (index, line) in text.lines().enumerate() {
-        let Some(column) = find_query(line, &arguments.query, case_sensitive) else {
+        let column = if case_sensitive {
+            line.find(&arguments.query)
+        } else {
+            line.to_lowercase()
+                .find(lowered_query.as_deref().unwrap_or_default())
+        };
+        let Some(column) = column else {
             continue;
         };
         let preview = truncate_utf8(line, MAX_SEARCH_LINE_BYTES);
@@ -2104,7 +2112,7 @@ fn append_content_matches(
             line: Some(index as u64 + 1),
             column: Some(column as u64 + 1),
             preview: Some(preview),
-            sensitive: path_is_sensitive_in_root(path, managed_root),
+            sensitive,
         });
     }
 }
@@ -2345,13 +2353,34 @@ fn read_local_bounded(
     operation: &FileOperationGuardNative,
 ) -> Result<Vec<u8>, String> {
     operation.ensure_active()?;
-    let metadata = fs::symlink_metadata(path)
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x0020_0000);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|error| format!("Failed to open local file: {error}"))?;
+    let metadata = file
+        .metadata()
         .map_err(|error| format!("Failed to inspect local file: {error}"))?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() > limit {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return Err("Local file failed native type or size bounds".into());
+        }
+    }
+    if !metadata.is_file() || metadata.len() > limit {
         return Err("Local file failed native type or size bounds".into());
     }
-    let mut file =
-        File::open(path).map_err(|error| format!("Failed to open local file: {error}"))?;
     read_stream_bounded(&mut file, limit, operation)
 }
 
@@ -2378,8 +2407,9 @@ fn write_local_atomic(
     }
     let mut temp = NamedTempFile::new_in(parent)
         .map_err(|error| format!("Failed to create local write temp file: {error}"))?;
-    let permissions = fs::metadata(destination)
+    let permissions = fs::symlink_metadata(destination)
         .ok()
+        .filter(|metadata| !metadata.file_type().is_symlink() && metadata.is_file())
         .map(|metadata| metadata.permissions());
     temp.write_all(content)
         .and_then(|()| temp.as_file().sync_all())

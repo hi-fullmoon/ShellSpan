@@ -303,7 +303,54 @@ struct AgentSessionRecord {
     inbox: AgentInbox,
     driver_metrics: super::driver_metrics::DriverMetrics,
     loop_progress: super::driver_progress::LoopProgress,
+    surface_generation: u64,
     snapshot_cache: Arc<OnceLock<AgentSessionSnapshot>>,
+}
+
+struct SessionRecordRollback {
+    header: AgentSessionHeader,
+    status: AgentSessionStatus,
+    ended: bool,
+    storage_fault_at_seq: Option<u64>,
+    archived: bool,
+    inbox: AgentInbox,
+    driver_metrics: super::driver_metrics::DriverMetrics,
+    loop_progress: super::driver_progress::LoopProgress,
+    surface_generation: u64,
+    snapshot_cache: Arc<OnceLock<AgentSessionSnapshot>>,
+    event_len: usize,
+}
+
+impl SessionRecordRollback {
+    fn capture(record: &AgentSessionRecord) -> Self {
+        Self {
+            header: record.header.clone(),
+            status: record.status,
+            ended: record.ended,
+            storage_fault_at_seq: record.storage_fault_at_seq,
+            archived: record.archived,
+            inbox: record.inbox.clone(),
+            driver_metrics: record.driver_metrics.clone(),
+            loop_progress: record.loop_progress.clone(),
+            surface_generation: record.surface_generation,
+            snapshot_cache: Arc::clone(&record.snapshot_cache),
+            event_len: record.events.len(),
+        }
+    }
+
+    fn restore(self, record: &mut AgentSessionRecord) {
+        record.header = self.header;
+        record.status = self.status;
+        record.ended = self.ended;
+        record.storage_fault_at_seq = self.storage_fault_at_seq;
+        record.archived = self.archived;
+        record.inbox = self.inbox;
+        record.driver_metrics = self.driver_metrics;
+        record.loop_progress = self.loop_progress;
+        record.surface_generation = self.surface_generation;
+        record.snapshot_cache = self.snapshot_cache;
+        record.events.truncate(self.event_len);
+    }
 }
 
 impl AgentSessionRecord {
@@ -358,6 +405,7 @@ impl AgentSessionRecord {
             inbox: AgentInbox::default(),
             driver_metrics: super::driver_metrics::DriverMetrics::default(),
             loop_progress: super::driver_progress::LoopProgress::default(),
+            surface_generation: 0,
             snapshot_cache: Arc::new(OnceLock::new()),
         };
         for event in events {
@@ -2292,6 +2340,25 @@ impl AgentSessionStore {
             .sessions
             .get(&input.session_id)
             .ok_or_else(|| "Agent Session rename target was not found".to_string())?;
+        if let Some(existing_title) =
+            record
+                .events
+                .iter()
+                .rev()
+                .find_map(|event| match &event.payload {
+                    AgentSessionEventPayload::SessionRenamed {
+                        title,
+                        client_operation_id,
+                        ..
+                    } if client_operation_id == &input.client_operation_id => Some(title),
+                    _ => None,
+                })
+        {
+            if existing_title == &title {
+                return record.snapshot();
+            }
+            return Err("clientOperationId was already used for a different Session rename".into());
+        }
         validate_mutable_session(record, "rename")?;
         validate_expected_revision(record, input.expected_revision)?;
         let (events, publisher) = append_payloads_locked(
@@ -3157,6 +3224,7 @@ impl AgentSessionStore {
         sync_parent(&path)?;
         inner.log_bytes = Some(log_bytes.saturating_sub(removed_bytes));
         inner.sessions.remove(session_id);
+        inner.publish_queues.remove(session_id);
         Ok(())
     }
 
@@ -3433,141 +3501,166 @@ fn append_payloads_locked(
     let log_bytes = inner
         .log_bytes()
         .map_err(|error| format!("{JOURNAL_WRITE_FAILED}: {error}"))?;
-    let record = inner
+    let mut record = inner
         .sessions
-        .get(session_id)
+        .remove(session_id)
         .ok_or_else(|| "Agent session was not found".to_string())?;
-    if record.archived {
-        return Err("archived Agent Session logs are read-only".into());
-    }
-    // Chunks do not alter the Model Surface, Inbox, or transition state. Validate
-    // the new batch independently, then advance observers only after disk commit.
-    // Other event types retain the transactional candidate and full validation.
-    let stream_only = payloads
-        .iter()
-        .all(|(_, _, payload)| matches!(payload, AgentSessionEventPayload::AssistantChunk { .. }));
-    let settlement = payloads.iter().all(|(_, _, payload)| match payload {
-        AgentSessionEventPayload::StepEnd { .. }
-        | AgentSessionEventPayload::TurnEnd { .. }
-        | AgentSessionEventPayload::InboxPaused { .. }
-        | AgentSessionEventPayload::InboxSpliced {
-            operation: AgentInboxOperation::Discarded,
-            ..
+    let outcome = (|| -> Result<Vec<AgentSessionEvent>, String> {
+        if record.archived {
+            return Err("archived Agent Session logs are read-only".into());
         }
-        | AgentSessionEventPayload::SessionEnded { .. } => true,
-        AgentSessionEventPayload::ToolApproval { status, .. } => matches!(
-            status,
-            AgentToolApprovalStatus::Cancelled
-                | AgentToolApprovalStatus::Expired
-                | AgentToolApprovalStatus::Rejected
-        ),
-        AgentSessionEventPayload::ToolResult { status, .. } => matches!(
-            status,
-            AgentToolResultStatus::Cancelled
-                | AgentToolResultStatus::TimedOut
-                | AgentToolResultStatus::Rejected
-        ),
-        AgentSessionEventPayload::AgentStatus { status, .. } => {
-            status.is_terminal() || *status == AgentSessionStatus::Idle
-        }
-        _ => false,
-    });
-    let mut candidate = (!stream_only).then(|| record.clone());
-    let first_seq = record.events.len() as u64;
-    let mut previous_time = record.events.last().map_or(1, |event| event.time_unix_ms);
-    let mut appended = Vec::with_capacity(payloads.len());
-    for (turn_id, step_id, payload) in payloads {
-        let seq = first_seq + appended.len() as u64;
-        let validation_record = candidate.as_ref().unwrap_or(record);
-        let mut raw_event = AgentSessionEvent::new(
-            session_id.to_string(),
-            seq,
-            current_unix_ms().max(previous_time),
-            turn_id,
-            step_id,
-            payload,
-        );
-        validate_event_envelope_at(validation_record, &raw_event, seq, previous_time)?;
-        validate_execution_admission(inner, validation_record, &raw_event)?;
-        validate_event_transition(validation_record, &raw_event)?;
-        validate_event_payload(&raw_event)?;
-        encoded_events(std::slice::from_ref(&raw_event))?;
-        if let AgentSessionEventPayload::AssistantMessage { content, .. } = &mut raw_event.payload {
-            for block in content {
-                if let AgentAssistantContentBlock::Text { text }
-                | AgentAssistantContentBlock::Reasoning { text, .. } = block
+        // Chunks do not alter the Model Surface, Inbox, or transition state. Validate
+        // the new batch independently, then advance observers only after disk commit.
+        // Other event types mutate the record in-place with a lightweight metadata
+        // rollback guard instead of cloning the full `events` vector.
+        let stream_only = payloads.iter().all(|(_, _, payload)| {
+            matches!(payload, AgentSessionEventPayload::AssistantChunk { .. })
+        });
+        let settlement = payloads.iter().all(|(_, _, payload)| match payload {
+            AgentSessionEventPayload::StepEnd { .. }
+            | AgentSessionEventPayload::TurnEnd { .. }
+            | AgentSessionEventPayload::InboxPaused { .. }
+            | AgentSessionEventPayload::InboxSpliced {
+                operation: AgentInboxOperation::Discarded,
+                ..
+            }
+            | AgentSessionEventPayload::SessionEnded { .. } => true,
+            AgentSessionEventPayload::ToolApproval { status, .. } => matches!(
+                status,
+                AgentToolApprovalStatus::Cancelled
+                    | AgentToolApprovalStatus::Expired
+                    | AgentToolApprovalStatus::Rejected
+            ),
+            AgentSessionEventPayload::ToolResult { status, .. } => matches!(
+                status,
+                AgentToolResultStatus::Cancelled
+                    | AgentToolResultStatus::TimedOut
+                    | AgentToolResultStatus::Rejected
+            ),
+            AgentSessionEventPayload::AgentStatus { status, .. } => {
+                status.is_terminal() || *status == AgentSessionStatus::Idle
+            }
+            _ => false,
+        });
+        let rollback = (!stream_only).then(|| SessionRecordRollback::capture(&record));
+        let first_seq = record.events.len() as u64;
+        let mut previous_time = record.events.last().map_or(1, |event| event.time_unix_ms);
+        let mut appended = Vec::with_capacity(payloads.len());
+        let mut has_compaction_event = false;
+
+        let commit_result = (|| -> Result<(), String> {
+            for (turn_id, step_id, payload) in payloads {
+                let seq = first_seq + appended.len() as u64;
+                let mut raw_event = AgentSessionEvent::new(
+                    session_id.to_string(),
+                    seq,
+                    current_unix_ms().max(previous_time),
+                    turn_id,
+                    step_id,
+                    payload,
+                );
+                validate_event_envelope_at(&record, &raw_event, seq, previous_time)?;
+                validate_execution_admission(inner, &record, &raw_event)?;
+                validate_event_transition(&record, &raw_event)?;
+                validate_event_payload(&raw_event)?;
+                if !stream_only {
+                    encoded_events(std::slice::from_ref(&raw_event))?;
+                }
+                if let AgentSessionEventPayload::AssistantMessage { content, .. } =
+                    &mut raw_event.payload
                 {
-                    *text = crate::redaction::redact_model_output_text(text);
+                    for block in content {
+                        if let AgentAssistantContentBlock::Text { text }
+                        | AgentAssistantContentBlock::Reasoning { text, .. } = block
+                        {
+                            *text = crate::redaction::redact_model_output_text(text);
+                        }
+                    }
+                }
+                // Redaction can expand an otherwise valid 4 KiB delta. Normalize the
+                // durable copy before final validation without changing live tool input.
+                for mut event in stream_chunks::split_sanitized_event(sanitize_event(raw_event)?) {
+                    let seq = first_seq + appended.len() as u64;
+                    event.seq = seq;
+                    validate_event_envelope_at(&record, &event, seq, previous_time)?;
+                    validate_event_transition(&record, &event)?;
+                    validate_event_payload(&event)?;
+                    if matches!(
+                        event.payload,
+                        AgentSessionEventPayload::CompactionSummary { .. }
+                            | AgentSessionEventPayload::CompactionEnd { .. }
+                    ) {
+                        has_compaction_event = true;
+                    }
+                    if !stream_only {
+                        apply_event(&mut record, &event)?;
+                        record.events.push(event.clone());
+                    }
+                    previous_time = event.time_unix_ms;
+                    appended.push(event);
                 }
             }
-        }
-        // Redaction can expand an otherwise valid 4 KiB delta. Normalize the
-        // durable copy before final validation without changing live tool input.
-        for mut event in stream_chunks::split_sanitized_event(sanitize_event(raw_event)?) {
-            let seq = first_seq + appended.len() as u64;
-            event.seq = seq;
-            let validation_record = candidate.as_ref().unwrap_or(record);
-            validate_event_envelope_at(validation_record, &event, seq, previous_time)?;
-            validate_event_transition(validation_record, &event)?;
-            validate_event_payload(&event)?;
-            if let Some(candidate) = &mut candidate {
-                apply_event(candidate, &event)?;
-                candidate.events.push(event.clone());
+            if !stream_only {
+                if has_compaction_event {
+                    derive_surface(&record.events)?;
+                }
+                validate_record_final(&record)?;
             }
-            previous_time = event.time_unix_ms;
-            appended.push(event);
+            let encoded = encoded_events(&appended)?;
+            let appended_bytes = encoded.len() as u64;
+            let total_limit = if settlement {
+                MAX_TOTAL_SESSION_LOG_BYTES
+            } else {
+                MAX_TOTAL_SESSION_LOG_BYTES - TOTAL_SETTLEMENT_RESERVE_BYTES
+            };
+            let session_limit = if settlement {
+                MAX_SESSION_LOG_BYTES
+            } else {
+                MAX_SESSION_LOG_BYTES - SESSION_SETTLEMENT_RESERVE_BYTES
+            };
+            if log_bytes.saturating_add(appended_bytes) > total_limit {
+                return Err(format!(
+                    "{JOURNAL_WRITE_FAILED}: Agent active and archived logs exceed the storage boundary"
+                ));
+            }
+            inner.log_bytes = None;
+            append_log_batch(&root, session_id, &encoded, session_limit)
+                .map_err(|error| format!("{JOURNAL_WRITE_FAILED}: {error}"))?;
+            inner.log_bytes = Some(log_bytes.saturating_add(appended_bytes));
+            Ok(())
+        })();
+
+        if let Err(error) = commit_result {
+            if let Some(rollback) = rollback {
+                rollback.restore(&mut record);
+            }
+            return Err(error);
         }
-    }
-    if let Some(candidate) = &candidate {
-        derive_surface(&candidate.events)?;
-        validate_record_final(candidate)?;
-    }
-    let encoded = encoded_events(&appended)?;
-    let appended_bytes = encoded.len() as u64;
-    let total_limit = if settlement {
-        MAX_TOTAL_SESSION_LOG_BYTES
-    } else {
-        MAX_TOTAL_SESSION_LOG_BYTES - TOTAL_SETTLEMENT_RESERVE_BYTES
-    };
-    let session_limit = if settlement {
-        MAX_SESSION_LOG_BYTES
-    } else {
-        MAX_SESSION_LOG_BYTES - SESSION_SETTLEMENT_RESERVE_BYTES
-    };
-    if log_bytes.saturating_add(appended_bytes) > total_limit {
-        return Err(format!(
-            "{JOURNAL_WRITE_FAILED}: Agent active and archived logs exceed the storage boundary"
-        ));
-    }
-    inner.log_bytes = None;
-    append_log_batch(&root, session_id, &encoded, session_limit)
-        .map_err(|error| format!("{JOURNAL_WRITE_FAILED}: {error}"))?;
-    inner.log_bytes = Some(log_bytes.saturating_add(appended_bytes));
-    if let Some(mut candidate) = candidate {
-        if candidate.ended
-            || appended.iter().any(|event| {
-                matches!(
-                    event.payload,
-                    AgentSessionEventPayload::AgentStatus {
-                        status: AgentSessionStatus::Idle,
-                        ..
-                    }
-                )
-            })
-        {
-            candidate.storage_fault_at_seq = None;
+
+        if !stream_only {
+            if record.ended
+                || appended.iter().any(|event| {
+                    matches!(
+                        event.payload,
+                        AgentSessionEventPayload::AgentStatus {
+                            status: AgentSessionStatus::Idle,
+                            ..
+                        }
+                    )
+                })
+            {
+                record.storage_fault_at_seq = None;
+            }
+        } else {
+            for event in &appended {
+                observe_event(&mut record, event);
+            }
+            record.events.extend(appended.iter().cloned());
         }
-        inner.sessions.insert(session_id.to_string(), candidate);
-    } else {
-        let record = inner
-            .sessions
-            .get_mut(session_id)
-            .expect("validated Session exists");
-        for event in &appended {
-            observe_event(record, event);
-        }
-        record.events.extend(appended.iter().cloned());
-    }
+        Ok(appended)
+    })();
+    inner.sessions.insert(session_id.to_string(), record);
+    let appended = outcome?;
     let record = &inner.sessions[session_id];
     inner
         .petdex
@@ -4561,7 +4654,7 @@ fn validate_event_transition(
         }
         AgentSessionEventPayload::RequestContext {
             surface_generation, ..
-        } if *surface_generation != derive_surface(&record.events)?.generation => {
+        } if *surface_generation != record.surface_generation => {
             Err("request/context referenced a stale Model Surface generation".into())
         }
         AgentSessionEventPayload::ToolCall { call } => {
@@ -5154,6 +5247,11 @@ fn apply_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) -> Re
         AgentSessionEventPayload::SessionRenamed { title, .. } => {
             record.header.title = Some(title.clone())
         }
+        AgentSessionEventPayload::CompactionSummary {
+            surface_generation, ..
+        } => {
+            record.surface_generation = *surface_generation;
+        }
         _ => {}
     }
     Ok(())
@@ -5682,7 +5780,46 @@ fn evidence_path(path: &Path, label: &str) -> Result<PathBuf, String> {
     Ok(path.with_file_name(format!("{file_name}.{label}-{}", Uuid::new_v4().simple())))
 }
 
-fn sanitize_event(event: AgentSessionEvent) -> Result<AgentSessionEvent, String> {
+fn sanitize_event(mut event: AgentSessionEvent) -> Result<AgentSessionEvent, String> {
+    // Fast-path high-frequency event types in-place without allocating a full
+    // `serde_json::Value` tree and round-tripping through serde.
+    let handled = match &mut event.payload {
+        AgentSessionEventPayload::AssistantChunk {
+            text_delta,
+            reasoning_delta,
+            tool_call_delta: None,
+            ..
+        } => {
+            if let Some(delta) = text_delta.as_mut() {
+                *delta = redact_sensitive_text(delta);
+            }
+            if let Some(delta) = reasoning_delta.as_mut() {
+                *delta = redact_sensitive_text(delta);
+            }
+            true
+        }
+        AgentSessionEventPayload::TurnStart
+        | AgentSessionEventPayload::StepStart
+        | AgentSessionEventPayload::SessionResumed {}
+        | AgentSessionEventPayload::RequestUsage { .. }
+        | AgentSessionEventPayload::RequestContext { .. } => true,
+        AgentSessionEventPayload::TurnEnd { reason }
+        | AgentSessionEventPayload::StepEnd { reason } => {
+            *reason = redact_sensitive_text(reason);
+            true
+        }
+        AgentSessionEventPayload::AgentStatus { reason, .. }
+        | AgentSessionEventPayload::SessionEnded { reason, .. } => {
+            if let Some(text) = reason.as_mut() {
+                *text = redact_sensitive_text(text);
+            }
+            true
+        }
+        _ => false,
+    };
+    if handled {
+        return Ok(event);
+    }
     let value = serde_json::to_value(event)
         .map_err(|error| format!("failed to encode Agent session event: {error}"))?;
     serde_json::from_value(redact_json_value(&value))

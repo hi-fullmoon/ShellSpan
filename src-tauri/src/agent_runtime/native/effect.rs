@@ -366,17 +366,27 @@ fn command_executable_names(command: &str) -> Vec<String> {
 pub(super) fn segment_executable_index(words: &[&str]) -> Option<usize> {
     const WRAPPERS: &[&str] = &[
         "builtin",
+        "busybox",
+        "chrt",
         "command",
         "doas",
         "env",
         "exec",
+        "flock",
+        "ionice",
         "nice",
         "nocorrect",
         "noglob",
         "nohup",
+        "script",
+        "setsid",
+        "stdbuf",
+        "strace",
         "sudo",
+        "taskset",
         "time",
         "timeout",
+        "unshare",
         "watch",
         "xargs",
     ];
@@ -395,6 +405,10 @@ pub(super) fn segment_executable_index(words: &[&str]) -> Option<usize> {
         let wrapper = name;
         index += 1;
         while let Some(candidate) = words.get(index) {
+            if *candidate == "--" {
+                index += 1;
+                break;
+            }
             let normalized = candidate.to_ascii_lowercase();
             if wrapper_option_takes_value(&wrapper, candidate) {
                 index += 2;
@@ -410,6 +424,22 @@ pub(super) fn segment_executable_index(words: &[&str]) -> Option<usize> {
     }
 }
 
+fn bundled_short_option_takes_value(option: &str, value_flags: &[u8]) -> bool {
+    if !option.starts_with('-') || option.starts_with("--") || option.len() < 2 {
+        return false;
+    }
+    let bytes = &option.as_bytes()[1..];
+    // If any earlier short flag in a bundle takes a value, the rest of the token is
+    // that flag's attached value (e.g., `-iSfoo` or `-n1`), so it does not consume the
+    // next argv element. Only when the *last* flag in the bundle takes a value does it
+    // consume the following argument (e.g., `env -iu VAR`, `env -iC /dir`, `xargs -0n 1`).
+    let (&last, prefix) = match bytes.split_last() {
+        Some(parts) => parts,
+        None => return false,
+    };
+    value_flags.contains(&last) && !prefix.iter().any(|flag| value_flags.contains(flag))
+}
+
 fn wrapper_option_takes_value(wrapper: &str, option: &str) -> bool {
     let long = option.to_ascii_lowercase();
     match wrapper {
@@ -422,37 +452,54 @@ fn wrapper_option_takes_value(wrapper: &str, option: &str) -> bool {
                         .all(|byte| matches!(byte, b'c' | b'l' | b'a'))
                     && option.ends_with('a'))
         }
-        "sudo" | "doas" => matches!(
-            long.as_str(),
-            "-c" | "--chdir"
-                | "--close-from"
-                | "--command-timeout"
-                | "-g"
-                | "--group"
-                | "-h"
-                | "--host"
-                | "-p"
-                | "--prompt"
-                | "-r"
-                | "--role"
-                | "-t"
-                | "--type"
-                | "-u"
-                | "--user"
-        ),
+        "sudo" | "doas" => {
+            bundled_short_option_takes_value(&long, &[b'c', b'g', b'h', b'p', b'r', b't', b'u'])
+                || matches!(
+                    long.as_str(),
+                    "--chdir"
+                        | "--close-from"
+                        | "--command-timeout"
+                        | "--group"
+                        | "--host"
+                        | "--prompt"
+                        | "--role"
+                        | "--type"
+                        | "--user"
+                )
+        }
         "env" => {
-            matches!(option, "-C" | "-S" | "-u")
+            bundled_short_option_takes_value(option, &[b'C', b'S', b'u'])
                 || matches!(long.as_str(), "--chdir" | "--split-string" | "--unset")
         }
-        "nice" => option == "-n" || long == "--adjustment",
+        "nice" => bundled_short_option_takes_value(option, &[b'n']) || long == "--adjustment",
         "timeout" => {
-            matches!(option, "-k" | "-s") || matches!(long.as_str(), "--kill-after" | "--signal")
+            bundled_short_option_takes_value(option, &[b'k', b's'])
+                || matches!(long.as_str(), "--kill-after" | "--signal")
         }
-        "watch" => option == "-n" || long == "--interval",
+        "watch" => bundled_short_option_takes_value(option, &[b'n']) || long == "--interval",
+        "stdbuf" => {
+            bundled_short_option_takes_value(option, &[b'i', b'o', b'e'])
+                || matches!(long.as_str(), "--input" | "--output" | "--error")
+        }
+        "ionice" => {
+            bundled_short_option_takes_value(option, &[b'c', b'n', b'p'])
+                || matches!(long.as_str(), "--class" | "--classdata" | "--pid")
+        }
+        "taskset" => {
+            bundled_short_option_takes_value(option, &[b'c', b'p'])
+                || matches!(long.as_str(), "--cpu-list" | "--pid")
+        }
+        "flock" => {
+            bundled_short_option_takes_value(option, &[b'w', b'E'])
+                || matches!(
+                    long.as_str(),
+                    "--timeout" | "--wait" | "--conflict-exit-code"
+                )
+        }
         "xargs" => {
-            matches!(
+            bundled_short_option_takes_value(
                 option,
-                "-a" | "-d" | "-E" | "-I" | "-L" | "-n" | "-P" | "-s"
+                &[b'a', b'd', b'E', b'I', b'L', b'n', b'P', b's'],
             ) || matches!(
                 long.as_str(),
                 "--arg-file"

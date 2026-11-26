@@ -600,16 +600,42 @@ impl SkillRuntime {
             return Err("invalid Skill name".into());
         }
         let result = self.observe(session_id, cancellation.clone()).await?;
+        self.load_from_observed(
+            session_id,
+            name,
+            invocation,
+            message_ids,
+            model_identity,
+            &result,
+            &cancellation,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn load_from_observed(
+        &self,
+        session_id: &str,
+        name: &str,
+        invocation: SkillInvocationKind,
+        message_ids: Vec<String>,
+        model_identity: Option<(String, String)>,
+        result: &SkillReadResult,
+        cancellation: &CancellationToken,
+    ) -> Result<LoadedSkill, String> {
+        if !valid_name(name) {
+            return Err("invalid Skill name".into());
+        }
         if result.observation.status != SkillObservationStatus::Complete {
             return Err("current Skill definition is unavailable; historical catalogue does not authorize loading".into());
         }
         let snapshot = result
             .observation
             .snapshot
+            .as_ref()
             .ok_or("Skill snapshot missing")?;
         let definition = result
             .definitions
-            .into_iter()
+            .iter()
             .find(|d| d.entry.name == name)
             .ok_or("Skill no longer exists")?;
         if !match invocation {
@@ -632,7 +658,7 @@ impl SkillRuntime {
         let (provider_identity, scope) = if is_builtin {
             (
                 super::builtin_skills::PROVIDER.into(),
-                super::builtin_skills::scope(snapshot.scope.target),
+                super::builtin_skills::scope(snapshot.scope.target.clone()),
             )
         } else if is_user {
             let root = self
@@ -640,28 +666,28 @@ impl SkillRuntime {
                 .unwrap_or_else(|| PathBuf::from("user"));
             (
                 USER_SKILLS_PROVIDER.into(),
-                user_skills_scope(snapshot.scope.target, &root),
+                user_skills_scope(snapshot.scope.target.clone(), &root),
             )
         } else {
             (
                 format!("shellspan.frozen-{}.v1", snapshot.scope.target.kind),
-                snapshot.scope,
+                snapshot.scope.clone(),
             )
         };
         LoadedSkill::new(
             name.into(),
-            definition.instructions,
+            definition.instructions.clone(),
             SkillProvenance {
                 protocol_version: SKILL_PROTOCOL,
                 renderer_version: 1,
                 provider_identity,
                 scope,
-                relative_path: definition.entry.relative_path,
-                resource_base: definition.entry.resource_base,
+                relative_path: definition.entry.relative_path.clone(),
+                resource_base: definition.entry.resource_base.clone(),
                 invocation,
-                catalog_revision: snapshot.snapshot_revision,
-                file_hash: definition.entry.file_hash,
-                instruction_hash: definition.entry.instruction_hash,
+                catalog_revision: snapshot.snapshot_revision.clone(),
+                file_hash: definition.entry.file_hash.clone(),
+                instruction_hash: definition.entry.instruction_hash.clone(),
                 message_ids,
                 request_id,
                 call_id,
@@ -692,7 +718,8 @@ impl SkillRuntime {
             .sessions
             .claimed_step(&entry.session_id, step_id)?
             .messages;
-        self.observe(&entry.session_id, entry.cancellation())
+        let observed = self
+            .observe(&entry.session_id, entry.cancellation())
             .await?;
         let snapshot = self.last_good(&entry.session_id)?;
         let candidates = slash_candidates(
@@ -702,17 +729,15 @@ impl SkillRuntime {
         let catalog = self.publication(&entry.session_id, snapshot.as_ref())?;
         let mut outcomes = Vec::new();
         for (name, message_ids) in candidates {
-            let (loaded, error) = match self
-                .load(
-                    &entry.session_id,
-                    &name,
-                    SkillInvocationKind::User,
-                    message_ids.clone(),
-                    None,
-                    entry.cancellation(),
-                )
-                .await
-            {
+            let (loaded, error) = match self.load_from_observed(
+                &entry.session_id,
+                &name,
+                SkillInvocationKind::User,
+                message_ids.clone(),
+                None,
+                &observed,
+                &entry.cancellation(),
+            ) {
                 Ok(loaded) => (Some(loaded), None),
                 Err(e) => (None, Some(e)),
             };

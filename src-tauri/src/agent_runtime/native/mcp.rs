@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
-use std::fs::{self, File};
+use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -39,24 +39,24 @@ pub(crate) enum McpToolPolicyNative {
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct McpCredentialReferenceNative {
-    env: String,
-    credential_id: String,
+pub(super) struct McpCredentialReferenceNative {
+    pub(super) env: String,
+    pub(super) credential_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct McpServerConfigNative {
-    id: String,
+    pub(super) id: String,
     transport: McpTransportNative,
-    command: String,
+    pub(super) command: String,
     #[serde(default)]
-    args: Vec<String>,
+    pub(super) args: Vec<String>,
     #[serde(default)]
-    cwd: Option<String>,
+    pub(super) cwd: Option<String>,
     enabled: bool,
     #[serde(default)]
-    credential_refs: Vec<McpCredentialReferenceNative>,
+    pub(super) credential_refs: Vec<McpCredentialReferenceNative>,
     #[serde(default)]
     tool_policies: HashMap<String, McpToolPolicyNative>,
 }
@@ -80,16 +80,23 @@ pub(super) fn load_mcp_server_native(
 ) -> Result<(PathBuf, McpServerConfigNative), String> {
     validate_identifier(server_id)?;
     let root = canonical_workspace_root(workspace_root)?;
-    let config_path = root.join(".shellspan").join("mcp.json");
-    let metadata = fs::symlink_metadata(&config_path)
+    let root_str = root
+        .to_str()
+        .ok_or_else(|| "MCP workspace path is not valid UTF-8".to_string())?;
+    let reader = super::scoped_read::LocalScopedReader::open(root_str)
+        .map_err(|error| format!("Failed to inspect MCP workspace: {error}"))?;
+    let file = reader
+        .open_regular_file(".shellspan/mcp.json")
         .map_err(|error| format!("Failed to inspect MCP config: {error}"))?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() > MAX_CONFIG_BYTES
-    {
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("Failed to inspect MCP config: {error}"))?;
+    if !metadata.is_file() || metadata.len() > MAX_CONFIG_BYTES {
         return Err("MCP config must be a bounded regular file".into());
     }
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    File::open(&config_path)
-        .and_then(|file| file.take(MAX_CONFIG_BYTES + 1).read_to_end(&mut bytes))
+    file.take(MAX_CONFIG_BYTES + 1)
+        .read_to_end(&mut bytes)
         .map_err(|error| format!("Failed to read MCP config: {error}"))?;
     if bytes.len() as u64 > MAX_CONFIG_BYTES {
         return Err("MCP config exceeded the native bound".into());
@@ -149,7 +156,7 @@ pub(super) fn execute_mcp_tool_native(
     {
         return Err("MCP arguments must be a bounded object".into());
     }
-    let result = discover_and_invoke_stdio_tool(
+    let (result, secrets) = discover_and_invoke_stdio_tool(
         server,
         root,
         credentials,
@@ -169,7 +176,13 @@ pub(super) fn execute_mcp_tool_native(
             true,
         ));
     }
-    Ok((redact_json_value(&result), false))
+    let redacted = redact_json_value(&result);
+    let redacted = if secrets.is_empty() {
+        redacted
+    } else {
+        crate::execution::redact_known_json_values(&redacted, &secrets)
+    };
+    Ok((redacted, false))
 }
 
 fn canonical_workspace_root(root: &Path) -> Result<PathBuf, String> {
@@ -184,6 +197,41 @@ fn canonical_workspace_root(root: &Path) -> Result<PathBuf, String> {
         return Err("Filesystem roots cannot be MCP workspaces".into());
     }
     Ok(root)
+}
+
+fn is_forbidden_mcp_credential_env(name: &str) -> bool {
+    name.starts_with("LD_")
+        || name.starts_with("DYLD_")
+        || matches!(
+            name,
+            "PATH"
+                | "BASH_ENV"
+                | "ENV"
+                | "IFS"
+                | "CDPATH"
+                | "SHELLOPTS"
+                | "PS4"
+                | "NODE_OPTIONS"
+                | "PYTHONPATH"
+                | "PYTHONSTARTUP"
+                | "PYTHONHOME"
+                | "RUBYOPT"
+                | "RUBYLIB"
+                | "PERL5OPT"
+                | "PERL5LIB"
+                | "GCONV_PATH"
+                | "GETCONF_DIR"
+                | "HOSTALIASES"
+                | "LOCALDOMAIN"
+                | "RES_OPTIONS"
+                | "TMPDIR"
+                | "HOME"
+                | "SHELL"
+                | "ZDOTDIR"
+                | "JAVA_TOOL_OPTIONS"
+                | "_JAVA_OPTIONS"
+                | "OPENSSL_CONF"
+        )
 }
 
 fn validate_server_config(root: &Path, server: &McpServerConfigNative) -> Result<(), String> {
@@ -215,6 +263,7 @@ fn validate_server_config(root: &Path, server: &McpServerConfigNative) -> Result
                 .env
                 .bytes()
                 .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_')
+            || is_forbidden_mcp_credential_env(&reference.env)
             || !envs.insert(&reference.env)
         {
             return Err("MCP credential environment binding is invalid".into());
@@ -278,7 +327,7 @@ fn discover_and_invoke_stdio_tool(
     arguments: &Value,
     cancellation: &CancellationToken,
     timeout: Duration,
-) -> Result<Value, String> {
+) -> Result<(Value, Vec<String>), String> {
     if cancellation.is_cancelled() {
         return Err("MCP stdio request cancelled".into());
     }
@@ -289,13 +338,22 @@ fn discover_and_invoke_stdio_tool(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
     command
         .env_clear()
         .envs(mcp_child_environment(std::env::vars_os()));
+    let mut secrets = Vec::with_capacity(config.credential_refs.len());
     for reference in &config.credential_refs {
         let value = credentials
             .get_credential(MCP_CREDENTIAL_SERVICE, &reference.credential_id)?
             .ok_or_else(|| "MCP native credential reference could not be resolved".to_string())?;
+        if !value.is_empty() {
+            secrets.push(value.clone());
+        }
         command.env(&reference.env, value);
     }
     let mut child = command
@@ -328,8 +386,38 @@ fn discover_and_invoke_stdio_tool(
             .ok_or_else(|| "MCP server stdout is unavailable".to_string())?;
         let (sender, receiver) = mpsc::sync_channel(64);
         std::thread::spawn(move || {
-            for line in BufReader::new(stdout).lines().take(1_024) {
-                let _ = sender.send(line);
+            let mut reader = BufReader::new(stdout);
+            for _ in 0..1_024 {
+                let mut buffer = Vec::new();
+                let result = match (&mut reader)
+                    .take((MAX_RESULT_BYTES + 1) as u64)
+                    .read_until(b'\n', &mut buffer)
+                {
+                    Ok(0) => break,
+                    Ok(_) if buffer.len() > MAX_RESULT_BYTES => Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "MCP server response exceeded the native size limit",
+                    )),
+                    Ok(_) => {
+                        if buffer.ends_with(b"\n") {
+                            buffer.pop();
+                            if buffer.ends_with(b"\r") {
+                                buffer.pop();
+                            }
+                        }
+                        String::from_utf8(buffer).map_err(|_| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                "MCP server emitted invalid UTF-8",
+                            )
+                        })
+                    }
+                    Err(error) => Err(error),
+                };
+                let failed = result.is_err();
+                if sender.send(result).is_err() || failed {
+                    break;
+                }
             }
         });
         send_json(
@@ -359,7 +447,7 @@ fn discover_and_invoke_stdio_tool(
             .into_iter()
             .find(|tool| tool.name == tool_name)
             .ok_or_else(|| "MCP server did not advertise the approved tool".to_string())?;
-        validate_json_shape(arguments, &tool.input_schema)?;
+        validate_json_shape_with_cancellation(arguments, &tool.input_schema, cancellation)?;
         send_json(
             &writer_tx,
             &json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":tool_name,"arguments":arguments}}),
@@ -369,6 +457,13 @@ fn discover_and_invoke_stdio_tool(
         wait_for_response(&receiver, 3, deadline, cancellation)
     })();
     drop(writer_tx);
+    #[cfg(unix)]
+    {
+        let pgid = child.id() as libc::pid_t;
+        if pgid > 0 {
+            let _ = unsafe { libc::kill(-pgid, libc::SIGKILL) };
+        }
+    }
     let _ = child.kill();
     let _ = child.wait();
     // A server child may leave another process holding the pipe open. Do not
@@ -376,7 +471,7 @@ fn discover_and_invoke_stdio_tool(
     if writer.is_finished() {
         let _ = writer.join();
     }
-    result
+    result.map(|value| (value, secrets))
 }
 
 fn mcp_child_environment(
@@ -544,11 +639,23 @@ fn resolve_cwd(config: &McpServerConfigNative, root: &Path) -> Result<PathBuf, S
     }
 }
 
+const MAX_SCHEMA_VALIDATION_STEPS: usize = 10_000;
+
+#[cfg(test)]
 fn validate_json_shape(arguments: &Value, schema: &Value) -> Result<(), String> {
+    validate_json_shape_with_cancellation(arguments, schema, &CancellationToken::new())
+}
+
+fn validate_json_shape_with_cancellation(
+    arguments: &Value,
+    schema: &Value,
+    cancellation: &CancellationToken,
+) -> Result<(), String> {
     if !arguments.is_object() {
         return Err("MCP arguments must be an object".into());
     }
-    validate_json_value(arguments, schema, schema, "$", 0)
+    let mut steps = 0_usize;
+    validate_json_value(arguments, schema, schema, "$", 0, &mut steps, cancellation)
 }
 
 fn validate_json_value(
@@ -557,7 +664,16 @@ fn validate_json_value(
     root: &Value,
     path: &str,
     depth: u8,
+    steps: &mut usize,
+    cancellation: &CancellationToken,
 ) -> Result<(), String> {
+    if cancellation.is_cancelled() {
+        return Err("MCP validation was cancelled".into());
+    }
+    *steps = steps.saturating_add(1);
+    if *steps > MAX_SCHEMA_VALIDATION_STEPS {
+        return Err("MCP schema validation exceeded the native complexity bound".into());
+    }
     if depth > 64 {
         return Err("MCP schema nesting exceeded the native bound".into());
     }
@@ -576,7 +692,7 @@ fn validate_json_value(
         let resolved = root
             .pointer(pointer)
             .ok_or_else(|| "MCP schema contains an unresolved local reference".to_string())?;
-        validate_json_value(value, resolved, root, path, depth + 1)?;
+        validate_json_value(value, resolved, root, path, depth + 1, steps, cancellation)?;
     }
     if let Some(expected) = schema.get("const") {
         if value != expected {
@@ -590,10 +706,21 @@ fn validate_json_value(
     }
     for keyword in ["allOf", "anyOf", "oneOf"] {
         if let Some(branches) = schema.get(keyword).and_then(Value::as_array) {
-            let successes = branches
-                .iter()
-                .filter(|branch| validate_json_value(value, branch, root, path, depth + 1).is_ok())
-                .count();
+            let mut successes = 0_usize;
+            for branch in branches {
+                match validate_json_value(value, branch, root, path, depth + 1, steps, cancellation)
+                {
+                    Ok(()) => successes += 1,
+                    Err(error)
+                        if error.contains("complexity bound")
+                            || error.contains("nesting exceeded")
+                            || error.contains("was cancelled") =>
+                    {
+                        return Err(error);
+                    }
+                    Err(_) => {}
+                }
+            }
             let valid = match keyword {
                 "allOf" => successes == branches.len(),
                 "anyOf" => successes > 0,
@@ -641,6 +768,8 @@ fn validate_json_value(
                     root,
                     &format!("{path}.{name}"),
                     depth + 1,
+                    steps,
+                    cancellation,
                 )?;
             } else if schema.get("additionalProperties") == Some(&Value::Bool(false)) {
                 return Err(format!("MCP arguments contain unknown field {name}"));
@@ -654,6 +783,8 @@ fn validate_json_value(
                     root,
                     &format!("{path}.{name}"),
                     depth + 1,
+                    steps,
+                    cancellation,
                 )?;
             }
         }
@@ -677,6 +808,8 @@ fn validate_json_value(
                     root,
                     &format!("{path}[{index}]"),
                     depth + 1,
+                    steps,
+                    cancellation,
                 )?;
             }
         }
@@ -924,5 +1057,92 @@ exec sleep 10"#
             &schema
         )
         .is_err());
+    }
+
+    #[test]
+    fn cyclic_branching_schema_hits_complexity_bound_instead_of_hanging() {
+        let cyclic = json!({
+            "anyOf": [
+                { "$ref": "#" },
+                { "$ref": "#" }
+            ]
+        });
+        let err = validate_json_shape(&json!({}), &cyclic).unwrap_err();
+        assert!(
+            err.contains("complexity bound") || err.contains("nesting exceeded"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn forbidden_mcp_credential_env_names_are_rejected() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join(".shellspan")).unwrap();
+        for env_name in [
+            "LD_PRELOAD",
+            "DYLD_INSERT_LIBRARIES",
+            "PATH",
+            "NODE_OPTIONS",
+        ] {
+            fs::write(
+                root.path().join(".shellspan/mcp.json"),
+                format!(
+                    r#"{{"version":1,"servers":[{{"id":"fixture","transport":"stdio","command":"fixture","enabled":true,"credentialRefs":[{{"env":"{env_name}","credentialId":"cred"}}],"toolPolicies":{{"read":"readOnly"}}}}]}}"#
+                ),
+            )
+            .unwrap();
+            let err = load_mcp_server_native(root.path(), "fixture").unwrap_err();
+            assert!(
+                err.contains("credential environment binding is invalid"),
+                "{env_name}: {err}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mcp_tool_output_scrubs_injected_credential_literals() {
+        let root = tempfile::tempdir().unwrap();
+        let credentials = CredentialManager::in_memory_for_tests();
+        let secret = "plain-unstructured-mcp-secret-987654";
+        credentials
+            .set_credential(MCP_CREDENTIAL_SERVICE, "fixture-cred", secret)
+            .unwrap();
+        let server = McpServerConfigNative {
+            id: "echo-secret".into(),
+            transport: McpTransportNative::Stdio,
+            command: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                r#"read -r line
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{}}'
+read -r line
+read -r line
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"echo","inputSchema":{"type":"object"}}]}}'
+read -r line
+printf '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"leaked=%s"}]}}\n' "$FIXTURE_SECRET""#
+                    .into(),
+            ],
+            cwd: None,
+            enabled: true,
+            credential_refs: vec![McpCredentialReferenceNative {
+                env: "FIXTURE_SECRET".into(),
+                credential_id: "fixture-cred".into(),
+            }],
+            tool_policies: HashMap::from([("echo".into(), McpToolPolicyNative::ReadOnly)]),
+        };
+        let (result, truncated) = execute_mcp_tool_native(
+            &server,
+            root.path(),
+            &credentials,
+            "echo",
+            &json!({}),
+            &CancellationToken::new(),
+        )
+        .unwrap();
+        assert!(!truncated);
+        let serialized = serde_json::to_string(&result).unwrap();
+        assert!(!serialized.contains(secret), "{serialized}");
+        assert!(serialized.contains("[REDACTED]"), "{serialized}");
     }
 }

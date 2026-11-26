@@ -386,6 +386,14 @@ function createChatProjection() {
     if (completedAt !== undefined) request.completedAt = completedAt;
   };
 
+  const firstLineSummary = (text: string): string => {
+    const trimmedStart = text.trimStart();
+    if (!trimmedStart) return '';
+    const nl = trimmedStart.indexOf('\n');
+    return (nl === -1 ? trimmedStart : trimmedStart.slice(0, nl)).trimEnd();
+  };
+  const activeReasoningKeys = new Map<string, { readonly turnId: string | null; readonly stepId: string | null; readonly state: AiReasoningNode['state'] }>();
+
   const upsertReasoning = (
     event: RuntimeEventLike,
     content: string,
@@ -406,6 +414,9 @@ function createChatProjection() {
       : previousReasoning
         ? (previousReasoning.durationMs ?? Math.max(0, event.timeUnixMs - startedAtUnixMs))
         : null;
+    const summary = !replace && previousReasoning && previousReasoning.summary.length > 0 && previousReasoning.content.includes('\n')
+      ? previousReasoning.summary
+      : firstLineSummary(nextContent);
     const node: AiReasoningNode = {
       kind: 'reasoning',
       key,
@@ -417,12 +428,17 @@ function createChatProjection() {
       lastSeq: event.seq,
       timestamp: previousReasoning?.timestamp ?? agentEventTimestamp(event.timeUnixMs),
       requestId: event.stepId ? activeRequestByStep.get(event.stepId) ?? null : null,
-      summary: nextContent.trim().split('\n')[0] ?? '',
+      summary,
       content: nextContent,
       state,
       startedAtUnixMs,
       durationMs,
     };
+    if (state === 'streaming' || state === 'settled') {
+      activeReasoningKeys.set(key, { turnId, stepId: node.stepId, state });
+    } else {
+      activeReasoningKeys.delete(key);
+    }
     putProcessChild(turnId, node);
   };
 
@@ -563,6 +579,7 @@ function createChatProjection() {
             state: status === 'failed' || status === 'cancelled' ? status : 'interrupted',
             partialReason: 'interrupted',
           });
+        if (node.kind === 'reasoning') activeReasoningKeys.delete(key);
         if (node.turnId) {
           const turn = turns.get(node.turnId);
           if (turn) turn.lastSeq = Math.max(turn.lastSeq, event.seq);
@@ -575,27 +592,35 @@ function createChatProjection() {
     event: RuntimeEventLike,
     state: Exclude<AiReasoningNode['state'], 'streaming'>,
   ): void => {
+    if (activeReasoningKeys.size === 0) return;
     const turnId = eventTurnId(event);
     const stepId = eventStepId(event);
     const turn = turnId ? turns.get(turnId) : undefined;
-    for (const nodes of [turn?.children, unscopedNodes]) {
-      if (!nodes) continue;
-      for (const [key, node] of nodes) {
-        if (node.kind !== 'reasoning') continue;
-        const canTransition = state === 'settled'
-          ? node.state === 'streaming'
-          : node.state === 'streaming' || node.state === 'settled';
-        if (!canTransition
-          || node.turnId !== turnId
-          || node.stepId !== stepId) continue;
-        nodes.set(key, {
-          ...node,
-          lastSeq: event.seq,
-          state,
-          durationMs: node.durationMs ?? (
-            node.startedAtUnixMs !== undefined ? Math.max(0, event.timeUnixMs - node.startedAtUnixMs) : null
-          ),
-        });
+    for (const [key, tracked] of activeReasoningKeys) {
+      if (tracked.turnId !== turnId || tracked.stepId !== stepId) continue;
+      const canTransition = state === 'settled'
+        ? tracked.state === 'streaming'
+        : tracked.state === 'streaming' || tracked.state === 'settled';
+      if (!canTransition) continue;
+      const nodes = tracked.turnId ? turn?.children : unscopedNodes;
+      const node = nodes?.get(key);
+      if (!nodes || node?.kind !== 'reasoning') {
+        activeReasoningKeys.delete(key);
+        continue;
+      }
+      nodes.set(key, {
+        ...node,
+        lastSeq: event.seq,
+        state,
+        durationMs: node.durationMs ?? (
+          node.startedAtUnixMs !== undefined ? Math.max(0, event.timeUnixMs - node.startedAtUnixMs) : null
+        ),
+      });
+      if (tracked.turnId) dirtyTurns.add(tracked.turnId);
+      if (state === 'settled') {
+        activeReasoningKeys.set(key, { turnId: tracked.turnId, stepId: tracked.stepId, state });
+      } else {
+        activeReasoningKeys.delete(key);
       }
     }
   };

@@ -202,6 +202,8 @@ struct State {
     records: BTreeMap<String, Record>,
     // A live approval cannot be evicted solely because wall time changed.
     live: BTreeMap<String, usize>,
+    // Keys undergoing lock-free cleanup cannot be reused by concurrent acquisitions.
+    cleaning: BTreeSet<String>,
 }
 
 #[derive(Clone)]
@@ -277,6 +279,7 @@ impl ScratchStore {
                 instance,
                 records,
                 live: BTreeMap::new(),
+                cleaning: BTreeSet::new(),
             })),
         })
     }
@@ -300,6 +303,11 @@ impl ScratchStore {
             .lock()
             .map_err(|_| "scratch registry unavailable")?;
         let key = key(session, target)?;
+        if state.cleaning.contains(&key) {
+            return Err(
+                "AGENT_SCRATCH_BUSY: temporary workspace is being cleaned up; retry shortly".into(),
+            );
+        }
         if !matches!(target.kind.as_str(), "local" | "remote") {
             return Err("scratch requires a host target".into());
         }
@@ -421,84 +429,119 @@ impl ScratchStore {
         services: &ScratchServices<'_>,
         group: Option<&AgentSessionTarget>,
     ) -> Result<(), String> {
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| "scratch registry unavailable")?;
-        let keys: Vec<_> = state.records.keys().cloned().collect();
-        let mut failure = None;
-        for key in keys {
-            if state.live.get(&key).copied().unwrap_or(0) > 0 {
-                continue;
-            }
-            let mut record = state.records[&key].clone();
-            if group.is_some_and(|target| !same_storage_group(target, &record.target)) {
-                continue;
-            }
-            let mut settled_process = false;
-            record.uses.retain(|_, usage| {
-                if let (
-                    Some(engine),
-                    Usage::Process {
-                        handle,
-                        task_id,
-                        execution_target,
-                    },
-                ) = (services.engine, usage)
-                {
-                    if let Some(failed) = engine.scratch_process_outcome(
-                        handle,
-                        &record.session_id,
-                        task_id,
-                        execution_target.as_deref().unwrap_or(&record.target),
-                    ) {
-                        record.failed |= failed;
-                        settled_process = true;
-                        return false;
-                    }
+        let mut expired = Vec::new();
+        {
+            let mut state = self
+                .state
+                .lock()
+                .map_err(|_| "scratch registry unavailable")?;
+            let keys: Vec<_> = state.records.keys().cloned().collect();
+            for key in keys {
+                if state.live.get(&key).copied().unwrap_or(0) > 0 || state.cleaning.contains(&key) {
+                    continue;
                 }
-                true
-            });
-            if settled_process {
-                record.touched_at = now();
-                persist(&state, &record)?;
-                state.records.insert(key.clone(), record.clone());
+                let mut record = state.records[&key].clone();
+                if group.is_some_and(|target| !same_storage_group(target, &record.target)) {
+                    continue;
+                }
+                let mut settled_process = false;
+                record.uses.retain(|_, usage| {
+                    if let (
+                        Some(engine),
+                        Usage::Process {
+                            handle,
+                            task_id,
+                            execution_target,
+                        },
+                    ) = (services.engine, usage)
+                    {
+                        if let Some(failed) = engine.scratch_process_outcome(
+                            handle,
+                            &record.session_id,
+                            task_id,
+                            execution_target.as_deref().unwrap_or(&record.target),
+                        ) {
+                            record.failed |= failed;
+                            settled_process = true;
+                            return false;
+                        }
+                    }
+                    true
+                });
+                if settled_process {
+                    record.touched_at = now();
+                    persist(&state, &record)?;
+                    state.records.insert(key.clone(), record.clone());
+                }
+                record.uses.retain(
+                    |_, usage| !matches!(usage, Usage::Pending { expires_at } if *expires_at <= time),
+                );
+                if !record.uses.is_empty() {
+                    continue;
+                }
+                let ttl = if record.failed {
+                    FAILURE_TTL_MS
+                } else {
+                    SUCCESS_TTL_MS
+                };
+                if time.saturating_sub(record.touched_at) < ttl {
+                    continue;
+                }
+                // Pin key in `live` and `cleaning` while releasing the store mutex so slow
+                // local trash or remote SSH cleanup never blocks unrelated acquisitions and
+                // concurrent acquisitions for the same key cannot race with deletion.
+                *state.live.entry(key.clone()).or_default() += 1;
+                state.cleaning.insert(key.clone());
+                expired.push((
+                    key,
+                    record,
+                    state.instance.clone(),
+                    state.temporary_root.clone(),
+                    state.root.clone(),
+                ));
             }
-            record.uses.retain(
-                |_, usage| !matches!(usage, Usage::Pending { expires_at } if *expires_at <= time),
-            );
-            if !record.uses.is_empty() {
-                continue;
-            }
-            let ttl = if record.failed {
-                FAILURE_TTL_MS
-            } else {
-                SUCCESS_TTL_MS
-            };
-            if time.saturating_sub(record.touched_at) < ttl {
-                continue;
-            }
+        }
+        let mut failure = None;
+        for (key, record, instance, temporary_root, root) in expired {
             let result = if record.target.kind == "local" {
-                let path = local_workspace_path(&state.temporary_root, &key);
+                let path = local_workspace_path(&temporary_root, &key);
                 match fs::symlink_metadata(&path) {
                     Ok(_) => local_tree_bytes(&path).and_then(|_| trash_workspace(&path)),
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
                     Err(e) => Err(e.to_string()),
                 }
             } else {
-                remote::cleanup(&state.instance, &record, services)
+                remote::cleanup(&instance, &record, services)
             };
-            if let Err(error) = result {
-                failure.get_or_insert(error);
-                continue;
+            let removed = match result {
+                Ok(()) => {
+                    // Ownership metadata is application state, not user data.
+                    let record_path = root.join("records").join(format!("{key}.json"));
+                    match trash_workspace(&record_path) {
+                        Ok(()) => true,
+                        Err(error) => {
+                            failure.get_or_insert(error);
+                            false
+                        }
+                    }
+                }
+                Err(error) => {
+                    failure.get_or_insert(error);
+                    false
+                }
+            };
+            if let Ok(mut state) = self.state.lock() {
+                state.cleaning.remove(&key);
+                if let Some(count) = state.live.get_mut(&key) {
+                    *count = count.saturating_sub(1);
+                    if *count == 0 {
+                        state.live.remove(&key);
+                    }
+                }
+                if removed {
+                    state.records.remove(&key);
+                }
             }
-            // Ownership metadata is application state, not user data.
-            let record_path = state.root.join("records").join(format!("{key}.json"));
-            if let Err(error) = trash_workspace(&record_path) {
-                failure.get_or_insert(error);
-                continue;
-            }
-            state.records.remove(&key);
         }
         failure.map_or(Ok(()), Err)
     }
@@ -694,6 +737,9 @@ impl Drop for ScratchLease {
         if let Ok(mut state) = self.store.state.lock() {
             if let Some(count) = state.live.get_mut(&self.key) {
                 *count = count.saturating_sub(1);
+                if *count == 0 {
+                    state.live.remove(&self.key);
+                }
             }
         }
     }

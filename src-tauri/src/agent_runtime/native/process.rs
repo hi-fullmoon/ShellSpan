@@ -155,9 +155,38 @@ impl CaptureBufferNative {
         serde_json::to_string(&crate::redaction::redact_json_value(&value)).unwrap_or_default()
     }
 
+    fn tail_bytes(&self, max_bytes: usize) -> Vec<u8> {
+        let total = self.head.len().saturating_add(self.tail.len());
+        if total <= max_bytes {
+            let mut bytes = Vec::with_capacity(total);
+            bytes.extend_from_slice(&self.head);
+            bytes.extend_from_slice(&self.tail);
+            return bytes;
+        }
+        if self.tail.len() >= max_bytes {
+            return self.tail[self.tail.len() - max_bytes..].to_vec();
+        }
+        let from_head = max_bytes - self.tail.len();
+        let mut bytes = Vec::with_capacity(max_bytes);
+        bytes.extend_from_slice(&self.head[self.head.len() - from_head..]);
+        bytes.extend_from_slice(&self.tail);
+        bytes
+    }
+
     fn truncated(&self) -> bool {
         self.bytes_read > self.limit as u64
     }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ProcessMetadataNative {
+    pub(crate) target_id: String,
+    pub(crate) owner_target_id: String,
+    pub(crate) task_id: String,
+    pub(crate) request_id: String,
+    pub(crate) state: ProcessLifecycleNative,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) termination_confirmed: bool,
 }
 
 #[derive(Debug)]
@@ -278,6 +307,30 @@ impl ManagedProcessNative {
         self.changed.notify_all();
     }
 
+    pub(crate) fn lifecycle(&self) -> Result<ProcessLifecycleNative, String> {
+        Ok(self
+            .state
+            .lock()
+            .map_err(|_| "Process state is unavailable".to_string())?
+            .lifecycle)
+    }
+
+    pub(crate) fn metadata(&self) -> Result<ProcessMetadataNative, String> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| "Process state is unavailable".to_string())?;
+        Ok(ProcessMetadataNative {
+            target_id: self.target_id.clone(),
+            owner_target_id: self.owner_target_id.clone(),
+            task_id: self.task_id.clone(),
+            request_id: self.request_id.clone(),
+            state: state.lifecycle,
+            exit_code: state.exit_code,
+            termination_confirmed: state.termination_confirmed,
+        })
+    }
+
     pub(crate) fn snapshot(&self) -> Result<ProcessSnapshotNative, String> {
         let state = self
             .state
@@ -362,13 +415,24 @@ impl ManagedProcessNative {
                 if state.lifecycle.is_terminal() || Instant::now() >= deadline {
                     return Ok(self.snapshot_from_state(&state));
                 }
+                const PROGRESS_TAIL_SLICE_BYTES: usize = 32 * 1024;
                 let current_bytes = (state.stdout.bytes_read, state.stderr.bytes_read);
                 if current_bytes != last_bytes {
                     last_bytes = current_bytes;
                     last_sample_at = Some(Instant::now());
+                    // Copy only a bounded tail slice while holding the mutex,
+                    // then run UTF-8 conversion and secret redaction outside the lock.
+                    let stdout_raw = if self.json_stdout {
+                        Vec::new()
+                    } else {
+                        state.stdout.tail_bytes(PROGRESS_TAIL_SLICE_BYTES)
+                    };
+                    let stderr_raw = state.stderr.tail_bytes(PROGRESS_TAIL_SLICE_BYTES);
+                    let json_stdout_text = self.json_stdout.then(|| self.stdout_text(&state));
                     Some((
-                        self.stdout_text(&state),
-                        state.stderr.text(&self.secrets),
+                        stdout_raw,
+                        stderr_raw,
+                        json_stdout_text,
                         current_bytes.0.saturating_add(current_bytes.1),
                         state.stdout.truncated() || state.stderr.truncated(),
                     ))
@@ -376,7 +440,14 @@ impl ManagedProcessNative {
                     None
                 }
             };
-            if let Some((stdout, stderr, total_bytes, truncated)) = progress_sample {
+            if let Some((stdout_raw, stderr_raw, json_stdout_text, total_bytes, truncated)) =
+                progress_sample
+            {
+                let stdout = json_stdout_text.unwrap_or_else(|| {
+                    redact_known_secrets(&String::from_utf8_lossy(&stdout_raw), &self.secrets)
+                });
+                let stderr =
+                    redact_known_secrets(&String::from_utf8_lossy(&stderr_raw), &self.secrets);
                 on_progress(&stdout, &stderr, total_bytes, truncated);
             }
         }
@@ -414,7 +485,7 @@ impl ManagedProcessNative {
     }
 
     pub(crate) fn write_stdin(&self, input: String, close: bool) -> Result<usize, String> {
-        if self.snapshot()?.state.is_terminal() {
+        if self.lifecycle()?.is_terminal() {
             return Err("Process is no longer running".into());
         }
         let (sender, receiver) = mpsc::sync_channel(1);
@@ -436,7 +507,7 @@ impl ManagedProcessNative {
         signal: ProcessSignalNative,
         timeout: Duration,
     ) -> Result<ProcessSnapshotNative, String> {
-        if self.snapshot()?.state.is_terminal() {
+        if self.lifecycle()?.is_terminal() {
             return self.snapshot();
         }
         self.controls
@@ -454,12 +525,53 @@ pub(crate) struct ProcessRegistryNative {
     processes: Arc<Mutex<HashMap<String, Arc<ManagedProcessNative>>>>,
 }
 
+const TERMINAL_PROCESS_RETENTION_MS: u64 = 5 * 60 * 1_000;
+
 impl ProcessRegistryNative {
+    fn reap_terminal_locked(
+        processes: &mut HashMap<String, Arc<ManagedProcessNative>>,
+        make_room: bool,
+    ) {
+        let now = current_unix_ms();
+        processes.retain(|_, process| {
+            let Ok(state) = process.state.lock() else {
+                return true;
+            };
+            if !state.lifecycle.is_terminal() {
+                return true;
+            }
+            state.completed_at_unix_ms.is_none_or(|completed| {
+                now.saturating_sub(completed) < TERMINAL_PROCESS_RETENTION_MS
+            })
+        });
+        if !make_room || processes.len() < MAX_TRACKED_PROCESSES {
+            return;
+        }
+        let mut terminal_entries = processes
+            .iter()
+            .filter_map(|(handle, process)| {
+                let state = process.state.lock().ok()?;
+                state
+                    .lifecycle
+                    .is_terminal()
+                    .then_some((state.completed_at_unix_ms.unwrap_or(0), handle.clone()))
+            })
+            .collect::<Vec<_>>();
+        terminal_entries.sort_by_key(|(completed, _)| *completed);
+        for (_, handle) in terminal_entries {
+            if processes.len() < MAX_TRACKED_PROCESSES {
+                break;
+            }
+            processes.remove(&handle);
+        }
+    }
+
     pub(crate) fn ensure_capacity(&self) -> Result<(), String> {
-        let processes = self
+        let mut processes = self
             .processes
             .lock()
             .map_err(|_| "Process registry is unavailable".to_string())?;
+        Self::reap_terminal_locked(&mut processes, true);
         if processes.len() >= MAX_TRACKED_PROCESSES {
             return Err("Native process registry reached its bounded capacity".into());
         }
@@ -471,6 +583,7 @@ impl ProcessRegistryNative {
             .processes
             .lock()
             .map_err(|_| "Process registry is unavailable".to_string())?;
+        Self::reap_terminal_locked(&mut processes, true);
         if processes.len() >= MAX_TRACKED_PROCESSES {
             return Err("Native process registry reached its bounded capacity".into());
         }
@@ -499,7 +612,7 @@ impl ProcessRegistryNative {
             .map_err(|_| "Process registry is unavailable".to_string())?;
         let mut running = 0;
         for process in processes.values() {
-            if process.snapshot()?.state == ProcessLifecycleNative::Running {
+            if process.lifecycle()? == ProcessLifecycleNative::Running {
                 running += 1;
             }
         }
@@ -1752,6 +1865,10 @@ fn run_local_worker(
     let mut pending_input: Option<PendingLocalInput> = None;
     let mut leader_exit = None;
     let mut group_stop = None;
+    let mut group_stop_started: Option<Instant> = None;
+    let mut last_group_kill: Option<Instant> = None;
+    const GROUP_KILL_RETRY_INTERVAL: Duration = Duration::from_millis(250);
+    const GROUP_KILL_GRACE_LIMIT: Duration = Duration::from_secs(5);
     loop {
         while let Ok(control) = controls.try_recv() {
             match control {
@@ -1778,6 +1895,9 @@ fn run_local_worker(
                         if group_stop.is_none() {
                             containment.terminate(&mut child, ProcessSignalNative::Kill);
                             group_stop = Some(ProcessLifecycleNative::Cancelled);
+                            let now = Instant::now();
+                            group_stop_started = Some(now);
+                            last_group_kill = Some(now);
                         }
                         continue;
                     }
@@ -1848,6 +1968,33 @@ fn run_local_worker(
                 // handle and temporary directory until remaining members exit.
                 containment.terminate(&mut child, ProcessSignalNative::Kill);
                 group_stop = Some(ProcessLifecycleNative::Exited);
+                let now = Instant::now();
+                group_stop_started = Some(now);
+                last_group_kill = Some(now);
+            } else if let Some(started) = group_stop_started {
+                let now = Instant::now();
+                if now.saturating_duration_since(started) >= GROUP_KILL_GRACE_LIMIT {
+                    drain_process_output(&process, &output_rx);
+                    let lifecycle = group_stop.unwrap_or(ProcessLifecycleNative::Exited);
+                    let code = if lifecycle == ProcessLifecycleNative::TimedOut {
+                        None
+                    } else {
+                        status.code()
+                    };
+                    process.finish(
+                        lifecycle,
+                        code,
+                        false,
+                        Some("Process group did not exit within kill grace period".into()),
+                    );
+                    return;
+                }
+                if last_group_kill.is_none_or(|last| {
+                    now.saturating_duration_since(last) >= GROUP_KILL_RETRY_INTERVAL
+                }) {
+                    containment.terminate(&mut child, ProcessSignalNative::Kill);
+                    last_group_kill = Some(now);
+                }
             }
         }
         if Instant::now() >= deadline {
@@ -1855,6 +2002,27 @@ fn run_local_worker(
                 if group_stop.is_none() {
                     containment.terminate(&mut child, ProcessSignalNative::Kill);
                     group_stop = Some(ProcessLifecycleNative::TimedOut);
+                    let now = Instant::now();
+                    group_stop_started = Some(now);
+                    last_group_kill = Some(now);
+                } else if let Some(started) = group_stop_started {
+                    let now = Instant::now();
+                    if now.saturating_duration_since(started) >= GROUP_KILL_GRACE_LIMIT {
+                        drain_process_output(&process, &output_rx);
+                        process.finish(
+                            group_stop.unwrap_or(ProcessLifecycleNative::TimedOut),
+                            None,
+                            false,
+                            Some("Process group did not exit within kill grace period".into()),
+                        );
+                        return;
+                    }
+                    if last_group_kill.is_none_or(|last| {
+                        now.saturating_duration_since(last) >= GROUP_KILL_RETRY_INTERVAL
+                    }) {
+                        containment.terminate(&mut child, ProcessSignalNative::Kill);
+                        last_group_kill = Some(now);
+                    }
                 }
             } else {
                 let confirmed = containment.terminate(&mut child, ProcessSignalNative::Kill);
@@ -1919,19 +2087,44 @@ fn read_remote_stream(
     reader: &mut impl Read,
     process: &ManagedProcessNative,
     stdout: bool,
-) -> Result<(), String> {
+) -> Result<usize, String> {
     let mut buffer = [0_u8; 8192];
+    let mut total = 0_usize;
     // A busy remote stream must yield to cancellation and the task deadline.
     for _ in 0..REMOTE_READS_PER_POLL {
         match reader.read(&mut buffer) {
-            Ok(0) => return Ok(()),
-            Ok(count) => process.push_output(if stdout {
-                ProcessOutputNative::Stdout(buffer[..count].to_vec())
-            } else {
-                ProcessOutputNative::Stderr(buffer[..count].to_vec())
-            }),
-            Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(()),
+            Ok(0) => return Ok(total),
+            Ok(count) => {
+                total = total.saturating_add(count);
+                process.push_output(if stdout {
+                    ProcessOutputNative::Stdout(buffer[..count].to_vec())
+                } else {
+                    ProcessOutputNative::Stderr(buffer[..count].to_vec())
+                });
+            }
+            Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(total),
             Err(error) => return Err(format!("Failed to read remote process output: {error}")),
+        }
+    }
+    Ok(total)
+}
+
+fn drain_remote_channel_eof(
+    channel: &mut ssh2::Channel,
+    process: &ManagedProcessNative,
+    deadline: Instant,
+    io: Option<&DiagnosticProcessIo>,
+) -> Result<(), String> {
+    // `read_remote_stream` reads at most 64 KiB per poll; once EOF is observed,
+    // keep draining buffered stdout/stderr so fast large outputs do not lose their tail.
+    for _ in 0..256 {
+        if Instant::now() >= deadline || remote_diagnostic_interrupted(process, io) {
+            break;
+        }
+        let stdout_bytes = read_remote_stream(channel, process, true)?;
+        let stderr_bytes = read_remote_stream(&mut channel.stderr(), process, false)?;
+        if stdout_bytes == 0 && stderr_bytes == 0 {
+            break;
         }
     }
     Ok(())
@@ -2123,6 +2316,19 @@ fn run_remote_worker(
             return;
         }
         if channel.eof() {
+            if let Err(error) = drain_remote_channel_eof(&mut channel, &process, deadline, io) {
+                if remote_diagnostic_interrupted(&process, io) {
+                    return;
+                }
+                if let Some(pid_file) = pid_file.as_deref() {
+                    run_remote_auxiliary_command(
+                        &session.target,
+                        &remote_cleanup_pid_file_command(pid_file),
+                    );
+                }
+                process.finish(ProcessLifecycleNative::Failed, None, false, Some(error));
+                return;
+            }
             set_diagnostic_phase(io, "finalization");
             finish_remote_channel(&process, &mut channel, &controls, deadline, io);
             if let Some(pid_file) = pid_file.as_deref() {
@@ -2819,5 +3025,34 @@ mod tests {
             super::remote_cleanup_pid_file_command("/tmp/.shellspan-proc-123.pid"),
             "rm -f '/tmp/.shellspan-proc-123.pid' 2>/dev/null || true"
         );
+    }
+
+    #[test]
+    fn process_registry_reaps_terminal_processes_when_at_capacity() {
+        let registry = ProcessRegistryNative::default();
+        for index in 0..MAX_TRACKED_PROCESSES {
+            let (tx, _rx) = mpsc::channel();
+            let process = ManagedProcessNative::new(
+                format!("task-{index}"),
+                format!("req-{index}"),
+                "local".into(),
+                AgentExecutionChannelNative::Direct,
+                Vec::new(),
+                tx,
+            );
+            process.finish(ProcessLifecycleNative::Exited, Some(0), true, None);
+            registry.insert(process).unwrap();
+        }
+        registry.ensure_capacity().unwrap();
+        let (tx, _rx) = mpsc::channel();
+        let next = ManagedProcessNative::new(
+            "task-next".into(),
+            "req-next".into(),
+            "local".into(),
+            AgentExecutionChannelNative::Direct,
+            Vec::new(),
+            tx,
+        );
+        registry.insert(next).unwrap();
     }
 }

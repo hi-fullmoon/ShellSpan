@@ -259,7 +259,7 @@ fn combine_stdout_stderr(stdout: &str, stderr: &str) -> String {
 fn redact_direct_progress(raw: &str) -> String {
     let plain = strip_ansi(raw);
     let redacted_plain = crate::redaction::redact_sensitive_text(&plain);
-    if redacted_plain == plain {
+    if redacted_plain == plain && plain != raw {
         crate::redaction::redact_sensitive_text(raw)
     } else {
         redacted_plain
@@ -271,7 +271,7 @@ pub(crate) fn redact_terminal_progress(raw: &str, is_native_protocol: bool) -> S
     let redacted_plain = crate::redaction::redact_sensitive_text(&plain);
     // Keep the exact same sensitive-output boundary as terminal_tools.rs,
     // including secrets split across ANSI escape sequences.
-    if is_native_protocol && redacted_plain == plain {
+    if is_native_protocol && redacted_plain == plain && plain != raw {
         crate::redaction::redact_sensitive_text(raw)
     } else {
         redacted_plain

@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -71,9 +71,17 @@ pub(crate) enum AgentArtifactIntegrity {
     Tampered,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct ArtifactQuota {
+    artifact_count: usize,
+    replay_count: usize,
+    total_bytes: u64,
+}
+
 #[derive(Default)]
 struct AgentArtifactStoreState {
     root: Option<PathBuf>,
+    quota: Option<ArtifactQuota>,
 }
 
 #[derive(Clone, Default)]
@@ -96,8 +104,13 @@ impl AgentArtifactStore {
             Some(_) => Ok(()),
             None => {
                 prepare_store_format(&root)?;
-                inspect_artifact_bounds(&root)?;
+                let (artifact_count, replay_count, total_bytes) = inspect_artifact_bounds(&root)?;
                 state.root = Some(root);
+                state.quota = Some(ArtifactQuota {
+                    artifact_count,
+                    replay_count,
+                    total_bytes,
+                });
                 Ok(())
             }
         }
@@ -232,9 +245,31 @@ impl AgentArtifactStore {
                 return Err("existing Agent artifact failed content-address verification".into());
             }
         } else {
-            ensure_capacity(&root, bytes.len() as u64, kind)?;
-            write_private_exclusive(&path, bytes)?;
-            sync_parent(&path)?;
+            self.ensure_capacity_cached(&root, bytes.len() as u64, kind)?;
+            let stage_dir = root.parent().unwrap_or(&session_root);
+            match write_private_exclusive_checked(stage_dir, &path, bytes) {
+                Ok(true) => {
+                    if let Err(error) = sync_parent(&path) {
+                        self.invalidate_quota();
+                        return Err(error);
+                    }
+                    self.record_added_quota(bytes.len() as u64, kind);
+                }
+                Ok(false) => {
+                    // Concurrent writer created the same content-addressed file.
+                    let existing = read_bounded(&path, MAX_ARTIFACT_BYTES)?;
+                    if sha256_hex(&existing) != sha256 {
+                        self.invalidate_quota();
+                        return Err(
+                            "existing Agent artifact failed content-address verification".into(),
+                        );
+                    }
+                }
+                Err(error) => {
+                    self.invalidate_quota();
+                    return Err(error);
+                }
+            }
         }
         Ok(AgentArtifactMetadata {
             artifact_id,
@@ -290,18 +325,53 @@ impl AgentArtifactStore {
         if max_bytes == 0 || max_bytes as u64 > MAX_ARTIFACT_BYTES {
             return Err("Agent artifact retrieval limit is invalid".into());
         }
-        match self.verify(session_id, metadata)? {
-            AgentArtifactIntegrity::Verified => {}
-            AgentArtifactIntegrity::Missing => return Err("Agent artifact is missing".into()),
-            AgentArtifactIntegrity::Tampered => return Err("Agent artifact was tampered".into()),
-        }
+        validate_identifier(session_id, "sessionId")?;
+        validate_identifier(&metadata.artifact_id, "artifactId")?;
         let path = self
             .root()?
             .join(session_id)
             .join(format!("{}.bin", metadata.artifact_id));
-        let mut bytes = read_bounded(&path, MAX_ARTIFACT_BYTES)?;
-        bytes.truncate(max_bytes);
-        Ok(bytes)
+        let file_metadata = match fs::symlink_metadata(&path) {
+            Ok(value) => value,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err("Agent artifact is missing".into());
+            }
+            Err(error) => return Err(format!("failed to inspect Agent artifact: {error}")),
+        };
+        if file_metadata.file_type().is_symlink()
+            || !file_metadata.is_file()
+            || file_metadata.len() != metadata.size_bytes
+            || file_metadata.len() > MAX_ARTIFACT_BYTES
+        {
+            return Err("Agent artifact was tampered".into());
+        }
+        let mut file =
+            File::open(&path).map_err(|error| format!("failed to read Agent artifact: {error}"))?;
+        let mut hasher = Sha256::new();
+        let mut output = Vec::with_capacity((file_metadata.len() as usize).min(max_bytes));
+        let mut total_read = 0_u64;
+        let mut chunk = [0_u8; 64 * 1024];
+        loop {
+            let n = file
+                .read(&mut chunk)
+                .map_err(|error| format!("failed to read Agent artifact: {error}"))?;
+            if n == 0 {
+                break;
+            }
+            total_read = total_read.saturating_add(n as u64);
+            if total_read > MAX_ARTIFACT_BYTES {
+                return Err("Agent artifact was tampered".into());
+            }
+            hasher.update(&chunk[..n]);
+            if output.len() < max_bytes {
+                let remaining = max_bytes - output.len();
+                output.extend_from_slice(&chunk[..n.min(remaining)]);
+            }
+        }
+        if total_read != metadata.size_bytes || hex::encode(hasher.finalize()) != metadata.sha256 {
+            return Err("Agent artifact was tampered".into());
+        }
+        Ok(output)
     }
 
     pub(crate) fn copy_tool_result(
@@ -385,13 +455,72 @@ impl AgentArtifactStore {
                     && now.saturating_sub(modified) >= ARTIFACT_RETENTION_MS
                 {
                     fs::remove_file(&path).map_err(|error| {
+                        self.invalidate_quota();
                         format!("failed to remove expired Agent artifact: {error}")
                     })?;
                     removed = removed.saturating_add(1);
                 }
             }
         }
+        if removed > 0 {
+            self.invalidate_quota();
+        }
         Ok(removed)
+    }
+
+    fn ensure_capacity_cached(
+        &self,
+        root: &Path,
+        additional: u64,
+        kind: &str,
+    ) -> Result<(), String> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Agent artifact store is unavailable".to_string())?;
+        let quota = match state.quota {
+            Some(quota) => quota,
+            None => {
+                let (artifact_count, replay_count, total_bytes) = inspect_artifact_bounds(root)?;
+                let scanned = ArtifactQuota {
+                    artifact_count,
+                    replay_count,
+                    total_bytes,
+                };
+                state.quota = Some(scanned);
+                scanned
+            }
+        };
+        let count_exhausted = if kind == AGENT_REPLAY_ARTIFACT_KIND {
+            quota.replay_count >= MAX_REPLAY_ARTIFACT_COUNT
+        } else {
+            quota.artifact_count >= MAX_ARTIFACT_COUNT
+        };
+        if count_exhausted
+            || quota.total_bytes.saturating_add(additional) > MAX_TOTAL_ARTIFACT_BYTES
+        {
+            return Err("Agent artifact store reached its lifecycle boundary".into());
+        }
+        Ok(())
+    }
+
+    fn record_added_quota(&self, size: u64, kind: &str) {
+        if let Ok(mut state) = self.state.lock() {
+            if let Some(quota) = state.quota.as_mut() {
+                if kind == AGENT_REPLAY_ARTIFACT_KIND {
+                    quota.replay_count = quota.replay_count.saturating_add(1);
+                } else {
+                    quota.artifact_count = quota.artifact_count.saturating_add(1);
+                }
+                quota.total_bytes = quota.total_bytes.saturating_add(size);
+            }
+        }
+    }
+
+    fn invalidate_quota(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.quota = None;
+        }
     }
 
     #[cfg(test)]
@@ -521,20 +650,34 @@ fn prepare_private_directory(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn write_private_exclusive(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
+fn write_private_exclusive_checked(
+    stage_dir: &Path,
+    path: &Path,
+    bytes: &[u8],
+) -> Result<bool, String> {
+    // Stage outside the artifact store root so quota scans never see temp files
+    // and publish via persist_noclobber so concurrent readers never observe partial writes.
+    let mut temporary = tempfile::Builder::new()
+        .prefix(".artifact-stage-")
+        .tempfile_in(stage_dir)
+        .map_err(|error| format!("failed to stage Agent artifact: {error}"))?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+        use std::os::unix::fs::PermissionsExt;
+        temporary
+            .as_file()
+            .set_permissions(fs::Permissions::from_mode(0o600))
+            .map_err(|error| format!("failed to restrict staged Agent artifact: {error}"))?;
     }
-    let mut file = options
-        .open(path)
-        .map_err(|error| format!("failed to create Agent artifact: {error}"))?;
-    file.write_all(bytes)
-        .and_then(|()| file.sync_all())
-        .map_err(|error| format!("failed to persist Agent artifact: {error}"))
+    temporary
+        .write_all(bytes)
+        .and_then(|()| temporary.as_file().sync_all())
+        .map_err(|error| format!("failed to persist Agent artifact: {error}"))?;
+    match temporary.persist_noclobber(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(error) => Err(format!("failed to publish Agent artifact: {}", error.error)),
+    }
 }
 
 fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
@@ -555,19 +698,6 @@ fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
         return Err("Agent artifact exceeded native read bounds".into());
     }
     Ok(bytes)
-}
-
-fn ensure_capacity(root: &Path, additional: u64, kind: &str) -> Result<(), String> {
-    let (artifact_count, replay_count, bytes) = inspect_artifact_bounds(root)?;
-    let count_exhausted = if kind == AGENT_REPLAY_ARTIFACT_KIND {
-        replay_count >= MAX_REPLAY_ARTIFACT_COUNT
-    } else {
-        artifact_count >= MAX_ARTIFACT_COUNT
-    };
-    if count_exhausted || bytes.saturating_add(additional) > MAX_TOTAL_ARTIFACT_BYTES {
-        return Err("Agent artifact store reached its lifecycle boundary".into());
-    }
-    Ok(())
 }
 
 fn inspect_artifact_bounds(root: &Path) -> Result<(usize, usize, u64), String> {
@@ -1007,5 +1137,38 @@ mod tests {
                 .unwrap_err(),
             "Agent artifact root contains an unsafe entry"
         );
+    }
+
+    #[test]
+    fn concurrent_writes_of_identical_artifact_never_fail_content_verification() {
+        let root = tempfile::tempdir().unwrap();
+        let store = AgentArtifactStore::default();
+        store.configure(root.path()).unwrap();
+        let payload = vec![b'z'; 256 * 1024];
+        std::thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for _ in 0..8 {
+                let store = store.clone();
+                let payload = payload.as_slice();
+                handles.push(scope.spawn(move || {
+                    store
+                        .store_bytes(
+                            "session-concurrent",
+                            "summary",
+                            "concurrent payload",
+                            "application/octet-stream",
+                            payload,
+                            AgentArtifactSensitivity::Internal,
+                        )
+                        .unwrap()
+                }));
+            }
+            let first = handles.remove(0).join().unwrap();
+            for handle in handles {
+                let next = handle.join().unwrap();
+                assert_eq!(next.artifact_id, first.artifact_id);
+                assert_eq!(next.sha256, first.sha256);
+            }
+        });
     }
 }

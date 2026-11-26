@@ -105,20 +105,36 @@ fn env_split_string_scripts(borrowed: &[&str]) -> Vec<String> {
                     }
                     cursor += 2;
                 } else if let Some(value) = arg
-                    .strip_prefix("-S")
-                    .filter(|rest| !rest.is_empty() && *rest != "<dynamic>")
-                {
-                    scripts.push(value.to_string());
-                    cursor += 1;
-                } else if let Some(value) = arg
                     .strip_prefix("--split-string=")
                     .filter(|rest| !rest.is_empty() && *rest != "<dynamic>")
                 {
                     scripts.push(value.to_string());
                     cursor += 1;
-                } else if matches!(*arg, "-C" | "-u")
-                    || arg.eq_ignore_ascii_case("--chdir")
-                    || arg.eq_ignore_ascii_case("--unset")
+                } else if arg.starts_with('-') && !arg.starts_with("--") && arg.len() >= 2 {
+                    let flags = &arg[1..];
+                    if let Some(s_pos) = flags.find('S') {
+                        let rest = &flags[s_pos + 1..];
+                        if !rest.is_empty() {
+                            if rest != "<dynamic>" {
+                                scripts.push(rest.to_string());
+                            }
+                            cursor += 1;
+                        } else {
+                            if let Some(value) = borrowed
+                                .get(cursor + 1)
+                                .copied()
+                                .filter(|candidate| *candidate != "<dynamic>")
+                            {
+                                scripts.push(value.to_string());
+                            }
+                            cursor += 2;
+                        }
+                    } else if flags.ends_with('C') || flags.ends_with('u') {
+                        cursor += 2;
+                    } else {
+                        cursor += 1;
+                    }
+                } else if arg.eq_ignore_ascii_case("--chdir") || arg.eq_ignore_ascii_case("--unset")
                 {
                     cursor += 2;
                 } else if arg.starts_with('-') || arg.contains('=') {
@@ -429,10 +445,29 @@ fn inspect(node: Node<'_>, script: &str, input: Cwds, depth: usize) -> Result<Fl
                 }
                 // Only a shell builtin can change this shell's cwd. sudo/env
                 // wrappers execute another process and must not change it here.
-                if executable == "cd" && (index == 0 || borrowed.first() == Some(&"command")) {
-                    let destination = match &borrowed[index + 1..] {
+                if matches!(executable, "cd" | "pushd")
+                    && (index == 0
+                        || matches!(borrowed.first().copied(), Some("command" | "builtin")))
+                {
+                    let mut args = &borrowed[index + 1..];
+                    while let Some(first) = args.first().copied() {
+                        if first == "--" {
+                            args = &args[1..];
+                            break;
+                        }
+                        if first.starts_with('-')
+                            && first.len() > 1
+                            && first[1..]
+                                .bytes()
+                                .all(|b| matches!(b, b'L' | b'P' | b'e' | b'@'))
+                        {
+                            args = &args[1..];
+                            continue;
+                        }
+                        break;
+                    }
+                    let destination = match args {
                         [path] if !path.starts_with('-') && *path != "<dynamic>" => Some(*path),
-                        ["--", path] if *path != "<dynamic>" => Some(*path),
                         _ => None,
                     };
                     let success = input
@@ -525,7 +560,78 @@ fn union(mut left: Cwds, right: Cwds) -> Result<Cwds, String> {
     Ok(left)
 }
 
+fn decode_ansi_c_literal(raw: &str) -> Option<String> {
+    let body = raw.strip_prefix("$'")?.strip_suffix('\'')?;
+    let mut out = String::with_capacity(body.len());
+    let mut chars = body.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+        match chars.next()? {
+            'a' => out.push('\x07'),
+            'b' => out.push('\x08'),
+            'e' | 'E' => out.push('\x1b'),
+            'f' => out.push('\x0c'),
+            'n' => out.push('\n'),
+            'r' => out.push('\r'),
+            't' => out.push('\t'),
+            'v' => out.push('\x0b'),
+            '\\' => out.push('\\'),
+            '\'' => out.push('\''),
+            '"' => out.push('"'),
+            '?' => out.push('?'),
+            'x' => {
+                let mut hex = String::new();
+                while hex.len() < 2 && chars.peek().is_some_and(|c| c.is_ascii_hexdigit()) {
+                    hex.push(chars.next()?);
+                }
+                if hex.is_empty() {
+                    return None;
+                }
+                let byte = u8::from_str_radix(&hex, 16).ok()?;
+                out.push(byte as char);
+            }
+            first @ '0'..='7' => {
+                let mut oct = String::from(first);
+                while oct.len() < 3 && chars.peek().is_some_and(|c| matches!(c, '0'..='7')) {
+                    oct.push(chars.next()?);
+                }
+                let val = u16::from_str_radix(&oct, 8).ok()?;
+                out.push((val & 0xff) as u8 as char);
+            }
+            kind @ ('u' | 'U') => {
+                let limit = if kind == 'u' { 4 } else { 8 };
+                let mut hex = String::new();
+                while hex.len() < limit && chars.peek().is_some_and(|c| c.is_ascii_hexdigit()) {
+                    hex.push(chars.next()?);
+                }
+                if hex.is_empty() {
+                    return None;
+                }
+                let code = u32::from_str_radix(&hex, 16).ok()?;
+                out.push(char::from_u32(code)?);
+            }
+            // Fail closed on unrecognized escapes so callers treat the word as dynamic.
+            _ => return None,
+        }
+    }
+    Some(out)
+}
+
 fn static_word(node: Node<'_>, script: &str) -> Option<String> {
+    if node.kind() == "ansi_c_string" {
+        return decode_ansi_c_literal(&script[node.byte_range()]);
+    }
+    if node.kind() == "translated_string" {
+        let raw = &script[node.byte_range()];
+        let inner = raw.strip_prefix("$\"")?.strip_suffix('"')?;
+        if !inner.contains(['$', '`']) {
+            return Some(inner.to_string());
+        }
+        return None;
+    }
     fn literal(node: Node<'_>, script: &str) -> bool {
         match node.kind() {
             "raw_string" | "number" | "string_content" => true,
@@ -771,5 +877,40 @@ mod tests {
             super::super::effect::classify_command_effect("env -S 'rm -rf /'"),
             crate::agent_runtime::AgentEffectKindNative::Destructive
         );
+    }
+
+    #[test]
+    fn bundled_wrapper_flags_extra_wrappers_cd_flags_and_ansi_c_strings_are_caught() {
+        for command in [
+            "env -iS 'rm -rf /'",
+            "env -iu FOO rm -rf /",
+            "env -iC /tmp rm -rf /etc",
+            "stdbuf -oL rm -rf /",
+            "setsid rm -rf /",
+            "cd -P / && rm -rf etc",
+            "cd -LP / && rm -rf etc",
+            "builtin cd / && rm -rf etc",
+            "pushd / && rm -rf etc",
+            "rm -rf $'/etc'",
+            "rm -rf $'\\057etc'",
+            "rm -rf $'\\u002fetc'",
+        ] {
+            assert!(
+                reject_destructive(command, Some("/workspace")).is_err(),
+                "{command}"
+            );
+        }
+        for command in [
+            "env -iS 'sudo id'",
+            "env -iu FOO sudo id",
+            "stdbuf -oL sudo id",
+            "setsid doas id",
+        ] {
+            assert_eq!(
+                reject_remote_privilege_command(command).unwrap_err(),
+                REMOTE_PRIVILEGE_DENIED,
+                "{command}"
+            );
+        }
     }
 }

@@ -48,7 +48,7 @@ function reportedInputTokens(
   usage: import('@/types/agent-session').AgentSessionTokenUsage,
 ): number | undefined {
   return usage.uncachedInputTokens !== undefined && usage.cacheReadTokens !== undefined
-    ? usage.uncachedInputTokens + usage.cacheReadTokens
+    ? usage.uncachedInputTokens + usage.cacheReadTokens + (usage.cacheWriteTokens ?? 0)
     : undefined;
 }
 
@@ -519,8 +519,9 @@ function createActivityNodesProjection() {
       }
       case 'tool/approval': {
         const key = `activity:tool:${agentToolEventKey(event, event.data.callId)}`;
+        const existingLabel = nodesByKey.get(key)?.current.label ?? event.data.callId;
         upsert(
-          key, 'tool', event, approvalToolStatus(event.data.status), event.data.callId,
+          key, 'tool', event, approvalToolStatus(event.data.status), existingLabel,
           event.data.reason ?? null, event.data, event.data.requestId,
         );
         const approvalId = event.data.approvalId ?? `${event.data.requestId}:${event.data.callId}`;
@@ -531,12 +532,15 @@ function createActivityNodesProjection() {
         );
         break;
       }
-      case 'tool/execution':
+      case 'tool/execution': {
+        const key = `activity:tool:${agentToolEventKey(event, event.data.callId)}`;
+        const existingLabel = nodesByKey.get(key)?.current.label ?? event.data.callId;
         upsert(
-          `activity:tool:${agentToolEventKey(event, event.data.callId)}`,
-          'tool', event, 'running', event.data.callId, event.data.idempotency, event.data,
+          key,
+          'tool', event, 'running', existingLabel, event.data.idempotency, event.data,
         );
         break;
+      }
       case 'tool/result':
         upsert(
           `activity:tool:${agentToolEventKey(event, event.data.callId)}`,
@@ -922,6 +926,11 @@ function createActivityProjection() {
         break;
       }
       case 'assistant/chunk': {
+        const currentLocation = requestLocation.get(event.data.requestId);
+        const existingRequest = currentLocation ? currentLocation.step.requests[currentLocation.index] : undefined;
+        const setsReasoning = Boolean(event.data.reasoningDelta) && existingRequest?.firstReasoningAt === undefined;
+        const setsText = Boolean(event.data.textDelta) && existingRequest?.firstTextAt === undefined;
+        if (!setsReasoning && !setsText && !event.data.usage) break;
         updateActivityRequest(event.data.requestId, event, (request) => (
           withRequestTiming({
             ...request,

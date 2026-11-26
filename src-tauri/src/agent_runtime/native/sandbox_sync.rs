@@ -809,6 +809,7 @@ pub(crate) fn apply_workspace_changes(
     let mut applied = Vec::new();
     let mut skipped_conflicts = Vec::new();
     let mut errors = Vec::new();
+    let mut scoped_ws: Option<super::scoped_read::LocalScopedReader> = None;
 
     for change in report.changes {
         if let Some(filter) = &selected {
@@ -836,13 +837,10 @@ pub(crate) fn apply_workspace_changes(
         };
         match change.kind {
             SandboxChangeKind::Added | SandboxChangeKind::Modified => {
-                let src = match ensure_no_symlink_components(workspace, &clean) {
-                    Ok(path) => path,
-                    Err(error) => {
-                        errors.push(format!("{}: {error}", change.path));
-                        continue;
-                    }
-                };
+                if let Err(error) = ensure_no_symlink_components(workspace, &clean) {
+                    errors.push(format!("{}: {error}", change.path));
+                    continue;
+                }
                 if !allow_overwrite_conflicts {
                     match source_entry_state(&source_root, &clean) {
                         Ok(Some(state))
@@ -875,8 +873,27 @@ pub(crate) fn apply_workspace_changes(
                     let parent = dest
                         .parent()
                         .ok_or_else(|| io::Error::other("Missing destination parent"))?;
-                    let mut reader = open_regular_nofollow(&src)?;
+                    let reader_root = match scoped_ws.as_ref() {
+                        Some(reader) => reader,
+                        None => {
+                            let ws_str = workspace.to_str().ok_or_else(|| {
+                                io::Error::other("Workspace path is not valid UTF-8")
+                            })?;
+                            let opened = super::scoped_read::LocalScopedReader::open(ws_str)
+                                .map_err(|e| {
+                                    io::Error::other(format!("Failed to anchor workspace: {e}"))
+                                })?;
+                            scoped_ws.insert(opened)
+                        }
+                    };
+                    let clean_str = clean.to_str().ok_or_else(|| {
+                        io::Error::other("Relative workspace path is not valid UTF-8")
+                    })?;
+                    let mut reader = reader_root.open_regular_file(clean_str).map_err(|e| {
+                        io::Error::other(format!("Failed to open workspace file safely: {e}"))
+                    })?;
                     let src_meta = reader.metadata()?;
+                    ensure_no_symlink_components(&source_root, &clean).map_err(io::Error::other)?;
                     let mut temp = tempfile::NamedTempFile::new_in(parent)?;
                     let mut hasher = Sha256::new();
                     let mut buf = [0u8; 64 * 1024];
@@ -986,6 +1003,8 @@ pub(crate) fn discard_workspace_changes(
     let mut discarded = Vec::new();
     let mut errors = Vec::new();
 
+    let mut scoped_src: Option<super::scoped_read::LocalScopedReader> = None;
+
     for change in report.changes {
         if let Some(filter) = &selected {
             if !filter.contains(change.path.as_str()) {
@@ -1057,8 +1076,34 @@ pub(crate) fn discard_workspace_changes(
                             let parent = ws_path
                                 .parent()
                                 .ok_or_else(|| io::Error::other("Missing workspace parent"))?;
-                            let mut reader = open_regular_nofollow(&src_path)?;
+                            let reader_root = match scoped_src.as_ref() {
+                                Some(reader) => reader,
+                                None => {
+                                    let src_root_str = source_root.to_str().ok_or_else(|| {
+                                        io::Error::other("Source path is not valid UTF-8")
+                                    })?;
+                                    let opened =
+                                        super::scoped_read::LocalScopedReader::open(src_root_str)
+                                            .map_err(|e| {
+                                            io::Error::other(format!(
+                                                "Failed to anchor source root: {e}"
+                                            ))
+                                        })?;
+                                    scoped_src.insert(opened)
+                                }
+                            };
+                            let clean_str = clean.to_str().ok_or_else(|| {
+                                io::Error::other("Relative source path is not valid UTF-8")
+                            })?;
+                            let mut reader =
+                                reader_root.open_regular_file(clean_str).map_err(|e| {
+                                    io::Error::other(format!(
+                                        "Failed to open source file safely: {e}"
+                                    ))
+                                })?;
                             let src_meta = reader.metadata()?;
+                            ensure_no_symlink_components(workspace, &clean)
+                                .map_err(io::Error::other)?;
                             let mut temp = tempfile::NamedTempFile::new_in(parent)?;
                             let mut hasher = Sha256::new();
                             let mut buf = [0u8; 64 * 1024];

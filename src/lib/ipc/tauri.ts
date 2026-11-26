@@ -785,8 +785,9 @@ export async function invokeGetAgentRuntimeEvents(
 
 export async function invokeGetCommittedAgentRuntimeEvents(
   request: AgentCommittedEventsRequest,
+  options?: { readonly logLifecycle?: boolean },
 ): Promise<AgentSessionEventPage> {
-  return invokeLogged<AgentSessionEventPage>('agent_runtime_get_committed_events', { request });
+  return invokeLogged<AgentSessionEventPage>('agent_runtime_get_committed_events', { request }, options);
 }
 
 export async function invokeGetAgentRuntimeArtifact(
@@ -1315,6 +1316,72 @@ export async function listenToSessionError(
   return listen<SessionErrorEvent>('ssh-session-error', (event) => {
     callback(event);
   });
+}
+
+const agentSessionEventSubscribers = new Map<string, Set<(event: AgentSessionEvent) => void>>();
+let agentSessionEventUnlisten: UnlistenFn | null = null;
+let agentSessionEventListenPromise: Promise<UnlistenFn> | null = null;
+let agentSessionEventListenerCount = 0;
+
+/**
+ * Multiplexed ref-counted subscription for `'agent-runtime-session-event'`.
+ * Shares a single Tauri event listener across all open/warm sessions and
+ * dispatches by `sessionId` in O(1).
+ */
+export async function subscribeAgentRuntimeSessionEvents(
+  sessionId: string,
+  callback: (event: AgentSessionEvent) => void,
+): Promise<UnlistenFn> {
+  let bucket = agentSessionEventSubscribers.get(sessionId);
+  if (!bucket) {
+    bucket = new Set();
+    agentSessionEventSubscribers.set(sessionId, bucket);
+  }
+  bucket.add(callback);
+  agentSessionEventListenerCount += 1;
+
+  if (!agentSessionEventUnlisten) {
+    agentSessionEventListenPromise ??= listen<AgentSessionEvent>('agent-runtime-session-event', (event) => {
+      const listeners = agentSessionEventSubscribers.get(event.payload.sessionId);
+      if (!listeners) return;
+      for (const listener of listeners) listener(event.payload);
+    }).then((unlisten) => {
+      if (agentSessionEventListenerCount === 0) {
+        unlisten();
+        agentSessionEventListenPromise = null;
+        return unlisten;
+      }
+      agentSessionEventUnlisten = unlisten;
+      agentSessionEventListenPromise = null;
+      return unlisten;
+    }).catch((error) => {
+      agentSessionEventListenPromise = null;
+      throw error;
+    });
+    try {
+      await agentSessionEventListenPromise;
+    } catch (error) {
+      bucket.delete(callback);
+      if (bucket.size === 0) agentSessionEventSubscribers.delete(sessionId);
+      agentSessionEventListenerCount = Math.max(0, agentSessionEventListenerCount - 1);
+      throw error;
+    }
+  }
+
+  let active = true;
+  return () => {
+    if (!active) return;
+    active = false;
+    const current = agentSessionEventSubscribers.get(sessionId);
+    current?.delete(callback);
+    if (current && current.size === 0) agentSessionEventSubscribers.delete(sessionId);
+    agentSessionEventListenerCount = Math.max(0, agentSessionEventListenerCount - 1);
+    if (agentSessionEventListenerCount === 0 && agentSessionEventUnlisten) {
+      const unlisten = agentSessionEventUnlisten;
+      agentSessionEventUnlisten = null;
+      unlisten();
+    }
+  };
 }
 
 export async function listenToAgentRuntimeSession(

@@ -4,8 +4,8 @@
 回答中的普通正文、Markdown 和代码示例不得因包含 `password:`、
 `token:` 等字段名而整段替换为 `[REDACTED]`。
 
-- 凭据赋值、命令行凭据参数、Authorization 值和 URL 密码替换为 `[REDACTED]`。
-- 已知格式的访问令牌仅替换令牌本身；私钥块替换为 `[REDACTED PRIVATE KEY]`。
+- 凭据赋值（含 `PGPASSWORD`、`DBPASS`、`MYSQL_PWD` 等常见环境变量）、命令行凭据参数（含 `curl -u`/`--user`、`sshpass -p`）、`Authorization`/`Cookie`/`Set-Cookie` 值和 URL 密码（含空用户名形式）替换为 `[REDACTED]`。
+- 已知格式的访问令牌（含 AWS `AKIA`/`ASIA`、GitHub `gh*`/`github_pat_`、JWT 等）仅替换令牌本身；私钥块（含 PGP 私钥块）替换为 `[REDACTED PRIVATE KEY]`。
 - 供 Agent 读取的终端屏幕模型在处理输出时识别私钥边界，将块内可打印 ASCII 字符替换为等宽的 `*`。识别状态跨输出分片、滚动、缩放和备用屏幕切换保留；起始标记滚出屏幕后仍隐藏正文，收到结束标记后恢复普通输出。未结束的块保持遮蔽，新终端模型重新初始化状态。
 - 原始输出帧和用户终端显示保持原样。快照脱敏仍跨行识别完整私钥块，作为补充保护；屏幕行数与光标坐标保持不变。
 - `${{ secrets.NAME }}` 及其带引号形式是 GitHub Actions 的凭据引用，文本中保留引用。

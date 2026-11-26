@@ -2170,3 +2170,72 @@
             AgentSessionEventPayload::CompactionSummary { .. }
         )));
     }
+
+    #[test]
+    fn semantic_compaction_bounds_inherited_extractive_sections_without_clipping_semantic_claims() {
+        let mut source = StructuredCheckpoint {
+            format: CHECKPOINT_FORMAT,
+            current_task_turn_id: Some("turn-1".into()),
+            goal: "Ship release".into(),
+            success_criteria: vec!["All checks green".into()],
+            latest_user_constraints: vec!["Keep API backward compatible".into()],
+            historical_user_constraints: Vec::new(),
+            completed_work: Vec::new(),
+            unfinished_work: Vec::new(),
+            key_decisions_and_reasons: Vec::new(),
+            related_files_symbols_commands: (0..32)
+                .map(|i| format!("src/module_{i}/{}", "x".repeat(900)))
+                .collect(),
+            tool_outcomes: (0..16)
+                .map(|i| StructuredToolOutcome {
+                    call_id: format!("call-{i}"),
+                    name: "run_terminal_command".into(),
+                    status: "completed".into(),
+                    summary: format!("command output {}", "y".repeat(2200)),
+                    evidence_refs: Vec::new(),
+                    data_bytes: None,
+                    data_sha256: None,
+                    data_truncated: false,
+                    data_preview: None,
+                })
+                .collect(),
+            todos_and_blockers: Vec::new(),
+            evidence_refs: (0..32).map(|i| format!("artifact-{i:032x}")).collect(),
+            next_steps: Vec::new(),
+            previous_surface_generation: 0,
+            replaced_through_seq: 100,
+            source_event_count: 100,
+            semantic_source: Vec::new(),
+            summary_mode: "extractive fallback".into(),
+        };
+        let semantic = SemanticSummary {
+            latest_user_constraints: vec!["SEMANTIC_CONSTRAINT_TOKEN".into()],
+            completed_work: vec!["SEMANTIC_COMPLETED_CLAIM".into()],
+            unfinished_work: vec!["SEMANTIC_UNFINISHED_CLAIM".into()],
+            key_decisions_and_reasons: vec!["SEMANTIC_DECISION_CLAIM".into()],
+            related_files_symbols_commands: vec!["src/semantic_target.rs".into()],
+            todos_and_blockers: vec!["SEMANTIC_BLOCKER_CLAIM".into()],
+            next_steps: vec!["SEMANTIC_NEXT_STEP_CLAIM".into()],
+        };
+        source = semantic.merge(&source);
+        let max_bytes = MAX_COMPACTION_SUMMARY_BYTES - ARTIFACT_REFERENCE_RESERVE_BYTES;
+        let rendered = render_checkpoint_with_preamble(&source, max_bytes, "Compacted checkpoint:");
+        assert!(
+            rendered.len() <= max_bytes,
+            "rendered semantic summary {} bytes exceeded limit {max_bytes}",
+            rendered.len()
+        );
+        for claim in [
+            "SEMANTIC_CONSTRAINT_TOKEN",
+            "SEMANTIC_COMPLETED_CLAIM",
+            "SEMANTIC_UNFINISHED_CLAIM",
+            "SEMANTIC_DECISION_CLAIM",
+            "SEMANTIC_BLOCKER_CLAIM",
+            "SEMANTIC_NEXT_STEP_CLAIM",
+        ] {
+            assert!(
+                rendered.contains(claim),
+                "validated semantic claim `{claim}` must not be clipped"
+            );
+        }
+    }

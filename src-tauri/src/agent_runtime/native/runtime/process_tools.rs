@@ -35,6 +35,7 @@ impl NativeToolEngine {
                 shell_guard::reject_remote_privilege_command(&arguments.input)?;
             }
         }
+        shell_guard::reject_destructive(&arguments.input, None)?;
         let accepted = self
             .processes
             .get(process_handle(&call.target)?)?

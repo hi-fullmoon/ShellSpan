@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use uuid::Uuid;
@@ -28,6 +28,7 @@ struct TerminalInteractiveRegistration {
     agent_session_id: String,
     task_id: String,
     operation_id: String,
+    ready: bool,
 }
 
 #[derive(Debug, Default)]
@@ -50,6 +51,7 @@ pub(crate) struct TerminalInteractiveWriteResult {
 #[derive(Clone)]
 pub(crate) struct TerminalInteractiveRegistry {
     state: Arc<Mutex<TerminalInteractiveState>>,
+    ready_changed: Arc<Condvar>,
     leases: TerminalLeaseManager,
     broker: TerminalSessionBroker,
 }
@@ -58,6 +60,7 @@ impl TerminalInteractiveRegistry {
     pub(crate) fn new(leases: TerminalLeaseManager, broker: TerminalSessionBroker) -> Self {
         Self {
             state: Arc::new(Mutex::new(TerminalInteractiveState::default())),
+            ready_changed: Arc::new(Condvar::new()),
             leases,
             broker,
         }
@@ -385,25 +388,42 @@ impl TerminalInteractiveRegistry {
         task_id: &str,
     ) -> Result<TerminalInteractiveRegistration, String> {
         {
-            let state = self
+            let mut state = self
                 .state
                 .lock()
                 .map_err(|_| "TERMINAL_INTERACTIVE_REGISTRY_UNAVAILABLE".to_string())?;
-            if state.taken_over.contains(&(
-                agent_session_id.to_string(),
-                task_id.to_string(),
-                session_id.to_string(),
-            )) {
-                return Err("TERMINAL_INTERACTIVE_TAKEN_OVER".into());
-            }
-            if let Some(existing) = state.active.get(session_id) {
-                return if existing.agent_session_id == agent_session_id
-                    && existing.task_id == task_id
-                {
-                    Ok(existing.clone())
-                } else {
-                    Err("TERMINAL_INTERACTIVE_BUSY".into())
-                };
+            let wait_deadline = Instant::now() + FRONTEND_READY_TIMEOUT;
+            loop {
+                if state.taken_over.contains(&(
+                    agent_session_id.to_string(),
+                    task_id.to_string(),
+                    session_id.to_string(),
+                )) {
+                    return Err("TERMINAL_INTERACTIVE_TAKEN_OVER".into());
+                }
+                if let Some(existing) = state.active.get(session_id) {
+                    if existing.agent_session_id != agent_session_id || existing.task_id != task_id
+                    {
+                        return Err("TERMINAL_INTERACTIVE_BUSY".into());
+                    }
+                    if existing.ready {
+                        return Ok(existing.clone());
+                    }
+                    let remaining = wait_deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() {
+                        return Err("TERMINAL_FRONTEND_READY_TIMEOUT".into());
+                    }
+                    let (guard, timeout) = self
+                        .ready_changed
+                        .wait_timeout(state, remaining)
+                        .map_err(|_| "TERMINAL_INTERACTIVE_REGISTRY_UNAVAILABLE".to_string())?;
+                    state = guard;
+                    if timeout.timed_out() {
+                        return Err("TERMINAL_FRONTEND_READY_TIMEOUT".into());
+                    }
+                    continue;
+                }
+                break;
             }
         }
         if !self.broker.interactive_tools_enabled()? {
@@ -423,10 +443,11 @@ impl TerminalInteractiveRegistry {
         if sessions.target_state(session_id)?.status != SessionStatus::Connected {
             return Err("TERMINAL_INTERACTIVE_NOT_CONNECTED".into());
         }
-        let registration = TerminalInteractiveRegistration {
+        let mut registration = TerminalInteractiveRegistration {
             agent_session_id: agent_session_id.to_string(),
             task_id: task_id.to_string(),
             operation_id: format!("interactive-{}", Uuid::new_v4().simple()),
+            ready: false,
         };
         // A retired command can still leave less, a REPL, or another foreground
         // program waiting for input. Only command submission requires a prompt.
@@ -471,6 +492,7 @@ impl TerminalInteractiveRegistry {
                 {
                     state.active.remove(session_id);
                 }
+                self.ready_changed.notify_all();
             }
             let _ = self.leases.release(
                 session_id,
@@ -481,16 +503,26 @@ impl TerminalInteractiveRegistry {
             );
             return Err(error);
         }
-        let still_active = self
-            .state
-            .lock()
-            .map_err(|_| "TERMINAL_INTERACTIVE_REGISTRY_UNAVAILABLE".to_string())?
-            .active
-            .get(session_id)
-            .is_some_and(|active| active.operation_id == registration.operation_id);
+        let still_active = {
+            let mut state = self
+                .state
+                .lock()
+                .map_err(|_| "TERMINAL_INTERACTIVE_REGISTRY_UNAVAILABLE".to_string())?;
+            let matched = state
+                .active
+                .get_mut(session_id)
+                .filter(|active| active.operation_id == registration.operation_id)
+                .map(|active| {
+                    active.ready = true;
+                })
+                .is_some();
+            self.ready_changed.notify_all();
+            matched
+        };
         if !still_active {
             return Err("TERMINAL_INTERACTIVE_CANCELLED".into());
         }
+        registration.ready = true;
         Ok(registration)
     }
 
@@ -566,6 +598,26 @@ pub(crate) fn sanitize_terminal_screen(
     (snapshot, credential_like)
 }
 
+fn contains_ascii_word(haystack: &str, word: &str) -> bool {
+    let bytes = haystack.as_bytes();
+    let needle = word.as_bytes();
+    if needle.is_empty() || needle.len() > bytes.len() {
+        return false;
+    }
+    let mut start = 0;
+    while let Some(pos) = haystack[start..].find(word) {
+        let abs = start + pos;
+        let left_ok = abs == 0 || !bytes[abs - 1].is_ascii_alphanumeric();
+        let right_pos = abs + needle.len();
+        let right_ok = right_pos == bytes.len() || !bytes[right_pos].is_ascii_alphanumeric();
+        if left_ok && right_ok {
+            return true;
+        }
+        start = abs + 1;
+    }
+    false
+}
+
 fn screen_looks_credential_like(snapshot: &TerminalScreenSnapshot) -> bool {
     let mut recent_nonempty = snapshot
         .content
@@ -583,12 +635,15 @@ fn screen_looks_credential_like(snapshot: &TerminalScreenSnapshot) -> bool {
         "one-time code",
         "verification code",
         "authentication code",
-        "otp",
         "secret:",
         "pin:",
+        "密码",
+        "口令",
+        "验证码",
     ]
     .iter()
     .any(|marker| visible.contains(marker))
+        || contains_ascii_word(&visible, "otp")
 }
 
 fn sanitize_bracketed_paste(text: &str) -> String {

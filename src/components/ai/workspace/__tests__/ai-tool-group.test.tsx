@@ -4,6 +4,7 @@ import type { AiConversationNode, AiConversationNodeOf } from '@/lib/ai/conversa
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { conversationRows, groupTurnProcessChildren } from '../ai-conversation-rows';
+import { aiConversationNodeRevision } from '../ai-conversation-node-seat';
 import { AiConversation } from '../ai-conversation';
 
 function toolNode(
@@ -156,5 +157,40 @@ describe('consecutive read-only tool grouping', () => {
     const trigger = container.querySelector<HTMLButtonElement>('[data-tool-group] button')!;
     expect(trigger).toHaveTextContent('已搜索');
     expect(trigger).toHaveTextContent('2 次 · worker_processes, proxy_pass');
+  });
+
+  it('changes tool node revision when backgroundJob, linkedBackgroundJob, or recoveredByToolKey updates without changing lastSeq', () => {
+    const base = toolNode('bg-1', 'run_terminal_command');
+    const withBackground = {
+      ...base,
+      backgroundJob: {
+        processHandle: 'proc-1',
+        state: 'running' as const,
+        exitCode: null,
+        output: 'line 1',
+        observing: true,
+        latestObserverToolKey: 'tool:wait-1',
+        observationCount: 1,
+      },
+    };
+    const withExitedBackground = {
+      ...base,
+      backgroundJob: {
+        ...withBackground.backgroundJob,
+        state: 'exited' as const,
+        exitCode: 0,
+        output: 'line 1\ndone',
+        observing: false,
+        observationCount: 2,
+      },
+    };
+    const withRecovery = {
+      ...base,
+      state: 'failed' as const,
+      recoveredByToolKey: 'tool:read-2',
+    };
+    expect(aiConversationNodeRevision(withBackground)).not.toBe(aiConversationNodeRevision(base));
+    expect(aiConversationNodeRevision(withExitedBackground)).not.toBe(aiConversationNodeRevision(withBackground));
+    expect(aiConversationNodeRevision(withRecovery)).not.toBe(aiConversationNodeRevision({ ...base, state: 'failed' }));
   });
 });

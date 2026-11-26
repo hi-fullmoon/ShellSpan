@@ -738,16 +738,12 @@ impl ImageStore {
         limits.max_alloc = Some(VISION.max_decode_bytes);
         reader.limits(limits);
         let decoder = reader.into_decoder().map_err(image_error)?;
-        if decoder.dimensions() != (reference.width, reference.height) {
-            return Err("IMAGE_BLOB_FACTS_MISMATCH".into());
-        }
-        let image = DynamicImage::from_decoder(decoder).map_err(image_error)?;
-        if image.width() != reference.width
-            || image.height() != reference.height
-            || image.color() != image::ColorType::Rgba8
+        if decoder.dimensions() != (reference.width, reference.height)
+            || decoder.color_type() != image::ColorType::Rgba8
         {
             return Err("IMAGE_BLOB_FACTS_MISMATCH".into());
         }
+        drop(decoder);
         Ok(bytes)
     }
     pub(crate) fn resolve_request(
@@ -765,6 +761,9 @@ impl ImageStore {
         let mut resolved = BTreeMap::new();
         for reference in refs {
             cancelled(token)?;
+            if resolved.contains_key(&reference.sha256) {
+                continue;
+            }
             resolved.insert(
                 reference.sha256.clone(),
                 format!(

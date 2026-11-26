@@ -313,6 +313,10 @@ const SANDBOX_DEV_REGISTRY_DOMAINS = [
   'repo.maven.apache.org',
 ] as const;
 
+let sandboxEnabledQueue: Promise<void> = Promise.resolve();
+let sandboxNetworkQueue: Promise<void> = Promise.resolve();
+let vimBridgeAutoAttachQueue: Promise<void> = Promise.resolve();
+
 export const useAiSettingsStore = create<AiSettingsState>()(
   subscribeWithSelector((set, get) => ({
     ...defaults,
@@ -343,7 +347,6 @@ export const useAiSettingsStore = create<AiSettingsState>()(
         set({ initialized: true });
       } catch (error) {
         logger.error('failed to load AI preferences', error);
-        set({ initialized: true });
       }
     },
     addProvider: (preset, changes) => {
@@ -391,52 +394,80 @@ export const useAiSettingsStore = create<AiSettingsState>()(
     setAgentPermissionMode: (agentPermissionMode) => set({ agentPermissionMode }),
     setAgentExecutionSurface: (agentExecutionSurface) => set({ agentExecutionSurface }),
     setAgentSandboxEnabled: async (agentSandboxEnabled) => {
-      if (get().agentSandboxSaving) return;
-      set({ agentSandboxSaving: true });
-      try {
-        await invokeSavePreferences([[AGENT_SANDBOX_ENABLED_KEY, String(agentSandboxEnabled)]]);
-        set({ agentSandboxEnabled });
-      } finally {
-        set({ agentSandboxSaving: false });
-      }
+      const next = sandboxEnabledQueue.then(async () => {
+        set({ agentSandboxSaving: true });
+        try {
+          await invokeSavePreferences([[AGENT_SANDBOX_ENABLED_KEY, String(agentSandboxEnabled)]]);
+          set({ agentSandboxEnabled });
+        } finally {
+          set({ agentSandboxSaving: false });
+        }
+      });
+      sandboxEnabledQueue = next.catch(() => undefined);
+      return next;
     },
     setAgentSandboxNetworkPolicy: async (agentSandboxNetworkMode, rawAllowlist) => {
-      if (get().agentSandboxNetworkSaving) return;
       const cleaned = Array.from(
         new Set(rawAllowlist.map((item) => item.trim().toLowerCase()).filter((item) => item.length > 0)),
       );
-      set({ agentSandboxNetworkSaving: true });
-      try {
-        await invokeSavePreferences([
-          [AGENT_SANDBOX_NETWORK_MODE_KEY, agentSandboxNetworkMode],
-          [AGENT_SANDBOX_NETWORK_ALLOWLIST_KEY, JSON.stringify(cleaned)],
-        ]);
-        set({
-          agentSandboxNetworkMode,
-          agentSandboxNetworkAllowlist: cleaned,
-        });
-      } finally {
-        set({ agentSandboxNetworkSaving: false });
-      }
+      const next = sandboxNetworkQueue.then(async () => {
+        set({ agentSandboxNetworkSaving: true });
+        try {
+          await invokeSavePreferences([
+            [AGENT_SANDBOX_NETWORK_MODE_KEY, agentSandboxNetworkMode],
+            [AGENT_SANDBOX_NETWORK_ALLOWLIST_KEY, JSON.stringify(cleaned)],
+          ]);
+          set({
+            agentSandboxNetworkMode,
+            agentSandboxNetworkAllowlist: cleaned,
+          });
+        } finally {
+          set({ agentSandboxNetworkSaving: false });
+        }
+      });
+      sandboxNetworkQueue = next.catch(() => undefined);
+      return next;
     },
     allowSandboxDomain: async (domain) => {
       const normalized = domain.trim().toLowerCase().replace(/\.+$/, '');
       if (!normalized || !normalized.includes('.') || /[\s/\\]/.test(normalized)) return;
-      const state = get();
-      const base = state.agentSandboxNetworkMode === 'devRegistries'
-        ? [...SANDBOX_DEV_REGISTRY_DOMAINS, ...state.agentSandboxNetworkAllowlist]
-        : state.agentSandboxNetworkAllowlist;
-      await state.setAgentSandboxNetworkPolicy('customAllowlist', [...base, normalized]);
+      const next = sandboxNetworkQueue.then(async () => {
+        const state = get();
+        const base = state.agentSandboxNetworkMode === 'devRegistries'
+          ? [...SANDBOX_DEV_REGISTRY_DOMAINS, ...state.agentSandboxNetworkAllowlist]
+          : state.agentSandboxNetworkAllowlist;
+        const cleaned = Array.from(
+          new Set([...base, normalized].map((item) => item.trim().toLowerCase()).filter((item) => item.length > 0)),
+        );
+        set({ agentSandboxNetworkSaving: true });
+        try {
+          await invokeSavePreferences([
+            [AGENT_SANDBOX_NETWORK_MODE_KEY, 'customAllowlist'],
+            [AGENT_SANDBOX_NETWORK_ALLOWLIST_KEY, JSON.stringify(cleaned)],
+          ]);
+          set({
+            agentSandboxNetworkMode: 'customAllowlist',
+            agentSandboxNetworkAllowlist: cleaned,
+          });
+        } finally {
+          set({ agentSandboxNetworkSaving: false });
+        }
+      });
+      sandboxNetworkQueue = next.catch(() => undefined);
+      return next;
     },
     setVimBridgeAutoAttach: async (vimBridgeAutoAttach) => {
-      if (get().vimBridgeAutoAttachSaving) return;
-      set({ vimBridgeAutoAttachSaving: true });
-      try {
-        await invokeSavePreferences([[VIM_BRIDGE_AUTO_ATTACH_KEY, String(vimBridgeAutoAttach)]]);
-        set({ vimBridgeAutoAttach });
-      } finally {
-        set({ vimBridgeAutoAttachSaving: false });
-      }
+      const next = vimBridgeAutoAttachQueue.then(async () => {
+        set({ vimBridgeAutoAttachSaving: true });
+        try {
+          await invokeSavePreferences([[VIM_BRIDGE_AUTO_ATTACH_KEY, String(vimBridgeAutoAttach)]]);
+          set({ vimBridgeAutoAttach });
+        } finally {
+          set({ vimBridgeAutoAttachSaving: false });
+        }
+      });
+      vimBridgeAutoAttachQueue = next.catch(() => undefined);
+      return next;
     },
     getProviderConfig: (id) => {
       const state = get();

@@ -963,49 +963,21 @@ impl TerminalExecuteRegistry {
             break result;
         };
         if let Err(error) = ready_result {
-            let _ = self.leases.release(
-                session_id,
-                agent_session_id,
-                task_id,
-                operation_id,
-                TerminalLeaseReleaseReason::Failed,
-            );
             return Err(error);
         }
         let terminal_connected = match sessions.target_state(session_id) {
             Ok(state) => state.status == SessionStatus::Connected,
             Err(error) => {
-                let _ = self.leases.release(
-                    session_id,
-                    agent_session_id,
-                    task_id,
-                    operation_id,
-                    TerminalLeaseReleaseReason::Failed,
-                );
                 return Err(error);
             }
         };
         if !terminal_connected {
-            let _ = self.leases.release(
-                session_id,
-                agent_session_id,
-                task_id,
-                operation_id,
-                TerminalLeaseReleaseReason::Failed,
-            );
             return Err("TERMINAL_EXECUTE_NOT_CONNECTED".into());
         }
         let command_creation = dispatch_policy
             .map_or(Ok(()), |policy| policy.write(|| Ok(())))
             .and_then(|()| revalidate(TerminalExecuteValidationStage::CommandCreation));
         if let Err(error) = command_creation {
-            let _ = self.leases.release(
-                session_id,
-                agent_session_id,
-                task_id,
-                operation_id,
-                TerminalLeaseReleaseReason::Failed,
-            );
             return Err(error);
         }
 

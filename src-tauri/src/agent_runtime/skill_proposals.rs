@@ -404,19 +404,40 @@ struct ExistingSkillFile {
     hash: String,
 }
 
+fn read_bounded_skill_file(base: &Path, relative_path: &str) -> Result<Option<Vec<u8>>, String> {
+    let Some(base_str) = base.to_str() else {
+        return Err("skill directory path is not valid UTF-8".into());
+    };
+    let reader = match super::native::scoped_read::LocalScopedReader::open(base_str) {
+        Ok(reader) => reader,
+        Err(super::native::scoped_read::ScopeReadError::Absent) => return Ok(None),
+        Err(error) => return Err(format!("failed to inspect skills directory: {error}")),
+    };
+    let file = match reader.open_regular_file(relative_path) {
+        Ok(file) => file,
+        Err(super::native::scoped_read::ScopeReadError::Absent) => return Ok(None),
+        Err(super::native::scoped_read::ScopeReadError::Denied) => {
+            return Err("skill path must not traverse symbolic links".into())
+        }
+        Err(error) => return Err(format!("failed to open existing skill: {error}")),
+    };
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    file.take((MAX_SKILL_FILE + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("failed to read existing skill: {e}"))?;
+    if bytes.len() > MAX_SKILL_FILE {
+        return Err("existing skill exceeds byte limit".into());
+    }
+    Ok(Some(bytes))
+}
+
 fn read_existing_skill_at(base: &Path, name: &str) -> Result<Option<ExistingSkillFile>, String> {
     if !valid_name(name) || !base.exists() {
         return Ok(None);
     }
     let flat_name = format!("{name}.md");
-    ensure_no_symlink_components(base, &[&flat_name])?;
-    let flat_file = base.join(&flat_name);
-    if flat_file.is_file() {
-        let bytes =
-            fs::read(&flat_file).map_err(|e| format!("failed to read existing skill: {e}"))?;
-        if bytes.len() > MAX_SKILL_FILE {
-            return Err("existing skill exceeds byte limit".into());
-        }
+    if let Some(bytes) = read_bounded_skill_file(base, &flat_name)? {
         let content = String::from_utf8(bytes)
             .map_err(|_| "existing skill is not valid UTF-8".to_string())?;
         let hash = digest(content.as_bytes());
@@ -426,14 +447,8 @@ fn read_existing_skill_at(base: &Path, name: &str) -> Result<Option<ExistingSkil
             hash,
         }));
     }
-    ensure_no_symlink_components(base, &[name, "SKILL.md"])?;
-    let dir_file = base.join(name).join("SKILL.md");
-    if dir_file.is_file() {
-        let bytes =
-            fs::read(&dir_file).map_err(|e| format!("failed to read existing skill: {e}"))?;
-        if bytes.len() > MAX_SKILL_FILE {
-            return Err("existing skill exceeds byte limit".into());
-        }
+    let dir_rel = format!("{name}/SKILL.md");
+    if let Some(bytes) = read_bounded_skill_file(base, &dir_rel)? {
         let content = String::from_utf8(bytes)
             .map_err(|_| "existing skill is not valid UTF-8".to_string())?;
         let hash = digest(content.as_bytes());
@@ -825,24 +840,25 @@ pub(crate) fn delete_user_skill(
     let flat_name = format!("{name}.md");
     let flat_file = dir.join(&flat_name);
 
-    let (actual_file, trash_target) = if dir_file.is_file() {
+    let (rel_file, trash_target) = if dir_file.is_file() {
         ensure_path_inside_root(dir, &dir_path)?;
         let only_skill_file = fs::read_dir(&dir_path)
             .map_err(|e| format!("failed to inspect skill directory: {e}"))?
             .filter_map(Result::ok)
             .all(|entry| entry.file_name() == "SKILL.md");
         (
-            dir_file.clone(),
+            format!("{name}/SKILL.md"),
             if only_skill_file { dir_path } else { dir_file },
         )
     } else if flat_file.is_file() {
         ensure_no_symlink_components(dir, &[&flat_name])?;
-        (flat_file.clone(), flat_file)
+        (flat_name.clone(), flat_file)
     } else {
         return Err("Skill no longer exists".into());
     };
 
-    let bytes = fs::read(&actual_file).map_err(|e| format!("failed to read skill file: {e}"))?;
+    let bytes = read_bounded_skill_file(dir, &rel_file)?
+        .ok_or_else(|| "Skill no longer exists".to_string())?;
     let current_hash = digest(&bytes);
     if current_hash != input.expected_file_hash {
         return Err("SKILL_CONFLICT: skill changed on disk before deletion; refresh first".into());
@@ -1681,5 +1697,31 @@ impl super::AgentToolPipeline {
         self.process_model_calls(entry, &scope.turn_id, &step_id, &request_id, remaining)
             .await
             .map(Some)
+    }
+}
+
+#[cfg(test)]
+mod wp4_tests {
+    use super::*;
+
+    #[test]
+    fn read_bounded_skill_file_rejects_oversized_files_without_unbounded_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let oversized = vec![b'a'; MAX_SKILL_FILE + 64];
+        fs::write(dir.path().join("huge.md"), oversized).unwrap();
+        let err = read_bounded_skill_file(dir.path(), "huge.md").unwrap_err();
+        assert!(err.contains("byte limit"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_bounded_skill_file_rejects_symlink_escape() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let secret = outside.path().join("secret.md");
+        fs::write(&secret, "top-secret").unwrap();
+        std::os::unix::fs::symlink(&secret, dir.path().join("link.md")).unwrap();
+        let err = read_bounded_skill_file(dir.path(), "link.md").unwrap_err();
+        assert!(err.contains("symbolic link"), "{err}");
     }
 }

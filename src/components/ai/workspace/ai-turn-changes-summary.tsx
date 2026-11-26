@@ -131,51 +131,85 @@ function extractFullWriteFileContent(
   return { paths, content };
 }
 
+const EMPTY_BASELINE_MAP: ReadonlyMap<string, string> = new Map();
+const turnBaselineStepCache = new WeakMap<
+  ReadonlyMap<string, string>,
+  WeakMap<AiConversationNodeOf<'turnProcess'>, ReadonlyMap<string, string>>
+>();
+
+function advanceTurnBaselineMap(
+  priorMap: ReadonlyMap<string, string>,
+  node: AiConversationNodeOf<'turnProcess'>,
+): ReadonlyMap<string, string> {
+  const byNode = turnBaselineStepCache.get(priorMap);
+  const cached = byNode?.get(node);
+  if (cached) return cached;
+
+  let nextMap: Map<string, string> | null = null;
+  const ensureMutable = (): Map<string, string> => {
+    if (!nextMap) nextMap = new Map(priorMap);
+    return nextMap;
+  };
+  for (const child of node.children) {
+    if (child.kind !== 'tool' || child.state !== 'succeeded') continue;
+    const readSnapshot = extractFullReadFileContent(child);
+    if (readSnapshot) {
+      storeBaseline(ensureMutable(), readSnapshot.paths, readSnapshot.content);
+      continue;
+    }
+    const writeSnapshot = extractFullWriteFileContent(child);
+    if (writeSnapshot) {
+      storeBaseline(ensureMutable(), writeSnapshot.paths, writeSnapshot.content);
+      continue;
+    }
+    if (child.name === 'trash_file' || child.nativeName === 'trash_file') {
+      const targetMap = ensureMutable();
+      for (const key of collectToolPathKeys(child)) targetMap.delete(key);
+      continue;
+    }
+    const changes = extractToolFileChanges(child);
+    if (changes.length === 0) continue;
+    const aliases = collectToolPathKeys(child);
+    for (const entry of changes) {
+      if (entry.kind === 'deleted') {
+        const targetMap = ensureMutable();
+        targetMap.delete(entry.path);
+        targetMap.delete(normalizePathKey(entry.path));
+        continue;
+      }
+      const current = lookupBaseline(nextMap ?? priorMap, entry.path, aliases);
+      if (current === null) continue;
+      const patched = applyToolEditToText(current, entry.path, child);
+      if (patched !== null) {
+        storeBaseline(ensureMutable(), [entry.path, normalizePathKey(entry.path), ...aliases], patched);
+      } else {
+        const targetMap = ensureMutable();
+        for (const key of [entry.path, normalizePathKey(entry.path), ...aliases]) {
+          targetMap.delete(key);
+        }
+      }
+    }
+  }
+
+  const result: ReadonlyMap<string, string> = nextMap ?? priorMap;
+  let nextByNode = byNode;
+  if (!nextByNode) {
+    nextByNode = new WeakMap();
+    turnBaselineStepCache.set(priorMap, nextByNode);
+  }
+  nextByNode.set(node, result);
+  return result;
+}
+
 export function buildConversationTurnBaselines(
   nodes: readonly AiConversationNode[],
 ): ReadonlyMap<string, ReadonlyMap<string, string>> {
   const byTurnKey = new Map<string, ReadonlyMap<string, string>>();
-  const knownByPath = new Map<string, string>();
+  let currentMap: ReadonlyMap<string, string> = EMPTY_BASELINE_MAP;
   for (const node of nodes) {
     if (node.kind !== 'turnProcess') continue;
-    byTurnKey.set(node.key, new Map(knownByPath));
-    for (const child of node.children) {
-      if (child.kind !== 'tool' || child.state !== 'succeeded') continue;
-      const readSnapshot = extractFullReadFileContent(child);
-      if (readSnapshot) {
-        storeBaseline(knownByPath, readSnapshot.paths, readSnapshot.content);
-        continue;
-      }
-      const writeSnapshot = extractFullWriteFileContent(child);
-      if (writeSnapshot) {
-        storeBaseline(knownByPath, writeSnapshot.paths, writeSnapshot.content);
-        continue;
-      }
-      if (child.name === 'trash_file' || child.nativeName === 'trash_file') {
-        for (const key of collectToolPathKeys(child)) knownByPath.delete(key);
-        continue;
-      }
-      const changes = extractToolFileChanges(child);
-      if (changes.length === 0) continue;
-      const aliases = collectToolPathKeys(child);
-      for (const entry of changes) {
-        if (entry.kind === 'deleted') {
-          knownByPath.delete(entry.path);
-          knownByPath.delete(normalizePathKey(entry.path));
-          continue;
-        }
-        const current = lookupBaseline(knownByPath, entry.path, aliases);
-        if (current === null) continue;
-        const patched = applyToolEditToText(current, entry.path, child);
-        if (patched !== null) {
-          storeBaseline(knownByPath, [entry.path, normalizePathKey(entry.path), ...aliases], patched);
-        } else {
-          for (const key of [entry.path, normalizePathKey(entry.path), ...aliases]) {
-            knownByPath.delete(key);
-          }
-        }
-      }
-    }
+    byTurnKey.set(node.key, currentMap);
+    currentMap = advanceTurnBaselineMap(currentMap, node);
   }
   return byTurnKey;
 }
@@ -467,8 +501,11 @@ function TurnChangedFilesOverlay({
 }) {
   const { t } = useI18n();
   const titleId = useId();
+  const overlayRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const filesRef = useRef(summary.files);
   filesRef.current = summary.files;
   const [expandedPaths, setExpandedPaths] = useState<ReadonlySet<string>>(() => new Set());
@@ -478,7 +515,41 @@ function TurnChangedFilesOverlay({
     setExpandedPaths(new Set(filesRef.current.map((file) => file.path)));
     previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     closeButtonRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const overlay = overlayRef.current;
+      if (!overlay) return;
+      if (event.key === 'Escape') {
+        if (event.defaultPrevented) return;
+        const targetEl = event.target instanceof Element ? event.target : null;
+        const topDialog = targetEl?.closest('[role="dialog"], [role="alertdialog"], [data-slot="popover-content"]');
+        if (topDialog && topDialog !== overlay && !overlay.contains(topDialog)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusables = overlay.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      if (!active || !overlay.contains(active)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, false);
     return () => {
+      window.removeEventListener('keydown', handleKeyDown, false);
       previousFocusRef.current?.focus();
       previousFocusRef.current = null;
     };
@@ -493,12 +564,14 @@ function TurnChangedFilesOverlay({
 
   return createPortal(
     <div
+      ref={overlayRef}
       role="dialog"
       aria-modal={!scopedToPanel}
       aria-labelledby={titleId}
       tabIndex={-1}
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
+          event.preventDefault();
           event.stopPropagation();
           onClose();
         }

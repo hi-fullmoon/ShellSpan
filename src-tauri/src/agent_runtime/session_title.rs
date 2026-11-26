@@ -21,8 +21,27 @@ struct TitleOutput {
     title: String,
 }
 
+fn strip_markdown_json_fence(text: &str) -> &str {
+    let trimmed = text.trim();
+    if let Some(rest) = trimmed.strip_prefix("```") {
+        let after_lang = rest
+            .strip_prefix("json")
+            .or_else(|| rest.strip_prefix("JSON"))
+            .unwrap_or(rest);
+        if let Some(body) = after_lang
+            .strip_prefix('\n')
+            .or_else(|| after_lang.strip_prefix("\r\n"))
+        {
+            if let Some(inner) = body.strip_suffix("```") {
+                return inner.trim();
+            }
+        }
+    }
+    trimmed
+}
+
 fn parse_title(text: &str) -> Option<String> {
-    let output: TitleOutput = serde_json::from_str(text.trim()).ok()?;
+    let output: TitleOutput = serde_json::from_str(strip_markdown_json_fence(text)).ok()?;
     let title = crate::redaction::redact_sensitive_text(output.title.trim());
     if title.is_empty() || title.chars().any(char::is_control) {
         return None;
@@ -121,6 +140,10 @@ mod tests {
         let title = parse_title(&text).unwrap();
         assert_eq!(title.chars().count(), 48);
         assert!(title.ends_with('…'));
+        assert_eq!(
+            parse_title("```json\n{\"title\":\"Fix SSH reconnect\"}\n```").as_deref(),
+            Some("Fix SSH reconnect")
+        );
     }
 
     #[test]

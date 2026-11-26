@@ -1,7 +1,7 @@
 import {
   invokeGetAgentRuntimeSession,
   invokeGetCommittedAgentRuntimeEvents,
-  listenToAgentRuntimeSession,
+  subscribeAgentRuntimeSessionEvents,
 } from '@/lib/ipc/tauri';
 import { CommittedEventBuffer } from './committed-event-buffer';
 import { withOperationDeadline } from './mutation-acknowledgement';
@@ -28,11 +28,26 @@ function readTransport<T>(
 ): Promise<T> {
   return withOperationDeadline(TRANSPORT_TIMEOUT_MS, () => new Error('Agent session IPC timed out'), async deadline => {
     signal.throwIfAborted();
-    const result = await read();
-    if (signal.aborted || deadline.aborted) disposeLate?.(result);
-    signal.throwIfAborted();
-    deadline.throwIfAborted();
-    return result;
+    let onAbort!: () => void;
+    const aborted = new Promise<never>((_, reject) => {
+      onAbort = () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+    const pending = read();
+    try {
+      const result = await Promise.race([pending, aborted]);
+      if (signal.aborted || deadline.aborted) disposeLate?.(result);
+      signal.throwIfAborted();
+      deadline.throwIfAborted();
+      return result;
+    } catch (error) {
+      if (disposeLate && (signal.aborted || deadline.aborted)) {
+        void pending.then(disposeLate).catch(() => undefined);
+      }
+      throw error;
+    } finally {
+      signal.removeEventListener('abort', onAbort);
+    }
   });
 }
 
@@ -40,9 +55,11 @@ export interface AgentSessionStreamTransport {
   readonly snapshot: (sessionId: string) => Promise<AgentSessionSnapshot>;
   readonly committedEvents: (
     request: AgentCommittedEventsRequest,
+    options?: { readonly logLifecycle?: boolean },
   ) => Promise<AgentSessionEventPage>;
   readonly subscribe: (
     listener: (event: AgentSessionEvent) => void,
+    sessionId?: string,
   ) => Promise<() => void>;
 }
 
@@ -59,7 +76,7 @@ export interface AgentSessionStreamState {
 const defaultTransport: AgentSessionStreamTransport = {
   snapshot: (sessionId) => invokeGetAgentRuntimeSession({ sessionId }),
   committedEvents: invokeGetCommittedAgentRuntimeEvents,
-  subscribe: (listener) => listenToAgentRuntimeSession((event) => listener(event.payload)),
+  subscribe: (listener, sessionId) => subscribeAgentRuntimeSessionEvents(sessionId ?? '', listener),
 };
 
 /**
@@ -97,6 +114,10 @@ export class AgentSessionCommittedClient {
     private readonly sessionId: string,
     private readonly transport: AgentSessionStreamTransport = defaultTransport,
   ) {}
+
+  get eventCount(): number {
+    return this.events.length;
+  }
 
   state(): AgentSessionStreamState {
     const last = this.events.last;
@@ -138,7 +159,7 @@ export class AgentSessionCommittedClient {
           return;
         }
         this.enqueue(signal, () => this.ingestLive(event, signal));
-      }), unlistenLate => unlistenLate());
+      }, this.sessionId), unlistenLate => unlistenLate());
       if (signal.aborted) unlisten();
       signal.throwIfAborted();
       this.unlisten = unlisten;
@@ -165,8 +186,9 @@ export class AgentSessionCommittedClient {
       return this.state();
     } catch (error) {
       // A rootless image draft may probe its durable ID before creating the Session.
-      // A failed probe must not leave connect() believing it is already connected.
-      if (!signal.aborted) this.disconnect();
+      // A failed probe must not leave connect() believing it is already connected
+      // and must not increment disconnectEpoch for callers waiting to reconnect.
+      if (!signal.aborted) this.resetConnection();
       throw error;
     }
   }
@@ -230,6 +252,24 @@ export class AgentSessionCommittedClient {
     if (!this.connection || !this.unlisten) return this.reconnect();
     if (this.recoveryWork) return this.reconnect();
     await this.recover(this.connection.signal);
+    return this.settled();
+  }
+
+  /** Lightweight committed-stream catch-up that avoids tearing down the live subscription. */
+  async refresh(): Promise<AgentSessionStreamState> {
+    if (!this.connection || !this.unlisten) return this.connect();
+    const signal = this.connection.signal;
+    await this.enqueue(signal, async () => {
+      try {
+        await this.refreshCommitted(signal);
+      } catch {
+        signal.throwIfAborted();
+        await this.fullResync(signal);
+      }
+      await this.refreshChildSnapshot(signal);
+      signal.throwIfAborted();
+      this.scheduleEmit();
+    });
     return this.settled();
   }
 
@@ -317,8 +357,8 @@ export class AgentSessionCommittedClient {
     }
   }
 
-  private async refreshCommitted(signal: AbortSignal): Promise<void> {
-    const storageFaultAtSeq = await this.fetchAfter(this.events.last?.seq, signal);
+  private async refreshCommitted(signal: AbortSignal, quiet = false): Promise<void> {
+    const storageFaultAtSeq = await this.fetchAfter(this.events.last?.seq, signal, this.events, quiet);
     signal.throwIfAborted();
     this.storageFaultAtSeq = storageFaultAtSeq;
     if (storageFaultAtSeq !== undefined) {
@@ -332,6 +372,7 @@ export class AgentSessionCommittedClient {
     afterSeq: number | undefined,
     signal: AbortSignal,
     events = this.events,
+    quiet = false,
   ): Promise<number | undefined> {
     let cursor = afterSeq;
     for (;;) {
@@ -340,7 +381,7 @@ export class AgentSessionCommittedClient {
         sessionId: this.sessionId,
         afterSeq: cursor,
         limit: PAGE_SIZE,
-      }));
+      }, quiet ? { logLifecycle: false } : undefined));
       signal.throwIfAborted();
       for (const event of page.events) this.merge(event, events);
       const last = page.events[page.events.length - 1];
@@ -444,7 +485,7 @@ export class AgentSessionCommittedClient {
       const previousSnapshot = this.snapshotValue;
       const previousStorageFault = this.storageFaultAtSeq;
       try {
-        await this.refreshCommitted(signal);
+        await this.refreshCommitted(signal, quiet);
       } catch {
         signal.throwIfAborted();
         await this.fullResync(signal);
@@ -513,7 +554,7 @@ export class AgentSessionCommittedClient {
   }
 
   private scheduleEmit(): void {
-    if (this.emitPending) return;
+    if (this.emitPending || this.buffering) return;
     this.emitPending = true;
     if (typeof globalThis.requestAnimationFrame === 'function') {
       const frame = globalThis.requestAnimationFrame(() => this.publishNow());

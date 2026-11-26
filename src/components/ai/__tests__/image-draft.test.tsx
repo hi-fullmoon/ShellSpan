@@ -219,6 +219,19 @@ describe('image draft ownership and transaction boundaries', async () => {
     await act(async () => { prepare.resolve([image]); await pending; }); expect(hook.result.current.draft?.images).toHaveLength(1);
     expect(hook.result.current.pendingFiles).toEqual([]);
   });
+  it('flushes pending debounced text save when switching owners before the debounce elapses', async () => {
+    const hook = renderHook(({ owner, text }) => useImageDraft(owner, text, vi.fn()), { initialProps: { owner: 'A', text: 'text' } });
+    await waitFor(() => expect(hook.result.current.draft?.owner).toBe('A'));
+    hook.rerender({ owner: 'A', text: 'typed quickly' });
+    // Immediately switch owner + text before the 300ms debounce timer fires.
+    hook.rerender({ owner: 'B', text: '' });
+    await waitFor(() => {
+      expect(mock.write).toHaveBeenCalledWith(
+        expect.objectContaining({ owner: 'A', text: 'typed quickly' }),
+        1,
+      );
+    });
+  });
 });
 it('vision uses exact backend DTOs and refuses unresolved or unknown models', async () => {
   const provider = { id: 'test', kind: 'openAiCompatible' as const, baseUrl: 'https://proxy.example', profile: 'qwen' as const, model: 'qwen3-vl-plus', requiresApiKey: false };

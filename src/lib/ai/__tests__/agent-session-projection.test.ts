@@ -490,4 +490,36 @@ describe('Agent committed Activity projection', () => {
     const unsupported = [{ ...agentSessionEventFixture[0], version: 99 }];
     expect(() => projectAgentActivity(unsupported as never)).toThrow('Unsupported');
   });
+
+  it('includes cacheWriteTokens in reported inputTokens and preserves tool label across approval and execution', () => {
+    const base = agentSessionEventFixture[0];
+    const v = base.version;
+    const events = [
+      { ...base, seq: 0, timeUnixMs: 1_000 },
+      { version: v, sessionId: base.sessionId, seq: 1, timeUnixMs: 1_001, turnId: 'turn-1', stepId: null, type: 'turn/start', data: {} },
+      { version: v, sessionId: base.sessionId, seq: 2, timeUnixMs: 1_002, turnId: 'turn-1', stepId: 'step-1', type: 'step/start', data: {} },
+      { version: v, sessionId: base.sessionId, seq: 3, timeUnixMs: 1_003, turnId: 'turn-1', stepId: 'step-1', type: 'request/start', data: {
+        requestId: 'req-1', headerRequestId: 'req-1', providerId: 'anthropic', model: 'claude', reason: 'initial', series: 'main', attempt: 1,
+      } },
+      { version: v, sessionId: base.sessionId, seq: 4, timeUnixMs: 1_004, turnId: 'turn-1', stepId: 'step-1', type: 'request/usage', data: {
+        requestId: 'req-1',
+        usage: { uncachedInputTokens: 100, cacheReadTokens: 200, cacheWriteTokens: 50, outputTokens: 25, totalTokens: 375 },
+        finishReason: 'toolCalls',
+      } },
+      { version: v, sessionId: base.sessionId, seq: 5, timeUnixMs: 1_005, turnId: 'turn-1', stepId: 'step-1', type: 'tool/call', data: {
+        call: { callId: 'call-xyz', name: 'edit_file', title: 'Edit config.ts', arguments: {}, effect: 'write' },
+      } },
+      { version: v, sessionId: base.sessionId, seq: 6, timeUnixMs: 1_006, turnId: 'turn-1', stepId: 'step-1', type: 'tool/approval', data: {
+        requestId: 'req-1', callId: 'call-xyz', approvalId: 'appr-1', status: 'requested',
+      } },
+      { version: v, sessionId: base.sessionId, seq: 7, timeUnixMs: 1_007, turnId: 'turn-1', stepId: 'step-1', type: 'tool/execution', data: {
+        callId: 'call-xyz', status: 'dispatched', idempotency: 'single',
+      } },
+    ] as unknown as typeof agentSessionEventFixture;
+
+    const activity = projectAgentActivity(events);
+    expect(activity.turns[0]?.steps[0]?.requests[0]?.inputTokens).toBe(350);
+    const toolNode = activity.nodes.find((node) => node.kind === 'tool' && node.key.includes('call-xyz'));
+    expect(toolNode?.label).toBe('edit_file');
+  });
 });

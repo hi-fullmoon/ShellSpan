@@ -1,4 +1,4 @@
-import { use, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type ReactNode, type RefObject } from 'react';
+import { memo, use, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type ReactNode, type RefObject } from 'react';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { applyPatch, diffLines, parsePatch } from 'diff';
 import hljs from 'highlight.js/lib/common';
@@ -1210,7 +1210,9 @@ function directDiffHunks(node: ToolNode): readonly DiffHunk[] {
     : [];
 }
 
-function diffModel(node: ToolNode): DiffModel {
+const diffModelCache = new WeakMap<ToolNode, DiffModel>();
+
+function computeDiffModel(node: ToolNode): DiffModel {
   const structured = structuredDiffHunks(node);
   if (structured.length > 0) return { hunks: structured, totalsKnown: structured.every((hunk) => hunk.exact) };
   const unified = unifiedDiffHunks(node);
@@ -1222,6 +1224,14 @@ function diffModel(node: ToolNode): DiffModel {
   const replacesUnknownContent = output?.operation === 'replace'
     || typeof precondition?.sha256 === 'string';
   return { hunks: direct, totalsKnown: direct.length > 0 && direct.every((hunk) => hunk.exact) && !replacesUnknownContent };
+}
+
+function diffModel(node: ToolNode): DiffModel {
+  const cached = diffModelCache.get(node);
+  if (cached) return cached;
+  const model = computeDiffModel(node);
+  diffModelCache.set(node, model);
+  return model;
 }
 
 export function toolDiffPreview(node: ToolNode): DiffModel | null {
@@ -1608,7 +1618,7 @@ function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAc
                         );
                       }
                       return (
-                        <span key={rowIndex} data-diff={row.line.kind}>
+                        <span key={`${row.line.kind}:${row.line.number ?? 'x'}:${rowIndex}`} data-diff={row.line.kind}>
                           <span className="ai-diff-line-number" aria-hidden="true">
                             {row.line.number ?? (row.line.kind === 'removed' ? '-' : row.line.kind === 'added' ? '+' : '\u00a0')}
                           </span>
@@ -1628,7 +1638,7 @@ function DiffSurface({ node, compact, model, showCopyActions, scrollable, copyAc
   );
 }
 
-function DiffCode({ text, path }: { text: string; path: string }) {
+const DiffCode = memo(function DiffCode({ text, path }: { text: string; path: string }) {
   const html = useMemo(() => {
     const extension = path.split('.').pop()?.toLowerCase() ?? '';
     const language = ({ tsx: 'typescript', jsx: 'javascript', vue: 'xml', svg: 'xml', mjs: 'javascript', cjs: 'javascript' } as Record<string, string>)[extension] ?? extension;
@@ -1638,7 +1648,7 @@ function DiffCode({ text, path }: { text: string; path: string }) {
   // Only highlight.js-generated, escaped markup is inserted; unknown languages stay plain text.
   return html === null ? <span className="ai-diff-code table-cell px-3">{text || '\u00a0'}</span>
     : <span className="ai-diff-code table-cell px-3" dangerouslySetInnerHTML={{ __html: html || '&nbsp;' }} />;
-}
+});
 
 function CodeSurface({ node, showCopyActions, scrollable, showInput, headerAction }: { node: ToolNode; showCopyActions: boolean; scrollable: boolean; showInput: boolean; headerAction?: ReactNode }) {
   const { t } = useI18n();
@@ -2139,8 +2149,8 @@ function StandardAiToolRow({
     ? Boolean(disclosure.open)
     : (autoOpenedRef.current && !node.recoveredByToolKey);
   const setOpen = (next: boolean) => setDisclosure({ open: next, recoveryKey: node.recoveredByToolKey });
-  const subagentContext = use(AiSubagentContext);
   const subagentAction = subagentToolAction(node.name, node.nativeName);
+  const subagentContext = subagentAction ? use(AiSubagentContext) : null;
   const Icon = subagentAction ? BotIcon : node.name === 'trash_file' ? Trash2Icon : iconFor(variant);
   const stateKey = `ai.workspace.tool.${node.state}` as LocaleKey;
   const subagentSummary = (subagentAction === 'inspect' || subagentAction === 'cancel')

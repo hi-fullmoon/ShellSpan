@@ -245,6 +245,8 @@ fn is_blocked_ipv4(ip: Ipv4Addr) -> bool {
         || ip.is_documentation()
         || ip.is_multicast()
         || ip.is_unspecified()
+        // "This network" (0.0.0.0/8)
+        || octets[0] == 0
         // Shared Address Space / CGNAT (100.64.0.0/10)
         || (octets[0] == 100 && (octets[1] & 0b1100_0000) == 64)
         // Benchmarking (198.18.0.0/15)
@@ -258,7 +260,25 @@ fn is_blocked_ipv6(ip: Ipv6Addr) -> bool {
     if let Some(mapped) = ip.to_ipv4_mapped() {
         return is_blocked_ipv4(mapped);
     }
-    let seg0 = ip.segments()[0];
+    let segs = ip.segments();
+    let seg0 = segs[0];
+    // IPv4-compatible (::/96)
+    if segs[0..6] == [0, 0, 0, 0, 0, 0] {
+        return true;
+    }
+    // NAT64 well-known (64:ff9b::/96) and local-use (64:ff9b:1::/48)
+    if (segs[0] == 0x0064 && segs[1] == 0xff9b && segs[2..6] == [0, 0, 0, 0])
+        || (segs[0] == 0x0064 && segs[1] == 0xff9b && segs[2] == 0x0001)
+    {
+        return true;
+    }
+    // 6to4 (2002::/16), Teredo (2001::/32), Documentation (2001:db8::/32)
+    if seg0 == 0x2002
+        || (seg0 == 0x2001 && segs[1] == 0x0000)
+        || (seg0 == 0x2001 && segs[1] == 0x0db8)
+    {
+        return true;
+    }
     ip.is_loopback()
         || ip.is_unspecified()
         || ip.is_multicast()
@@ -266,13 +286,19 @@ fn is_blocked_ipv6(ip: Ipv6Addr) -> bool {
         || (seg0 & 0xfe00) == 0xfc00
         // Link-local unicast (fe80::/10)
         || (seg0 & 0xffc0) == 0xfe80
+        // Deprecated site-local (fec0::/10)
+        || (seg0 & 0xffc0) == 0xfec0
 }
+
+#[cfg(any(target_os = "macos", test))]
+const MAX_CONCURRENT_PROXY_CONNECTIONS: usize = 64;
 
 #[cfg(any(target_os = "macos", test))]
 pub(crate) struct SandboxProxy {
     port: u16,
     token: String,
     shutdown: Arc<AtomicBool>,
+    active_streams: Arc<Mutex<std::collections::HashMap<u64, TcpStream>>>,
     blocked_domains: Arc<Mutex<Vec<String>>>,
     thread: Option<JoinHandle<()>>,
 }
@@ -289,16 +315,20 @@ impl SandboxProxy {
     ) -> io::Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0")?;
         let port = listener.local_addr()?.port();
-        listener.set_nonblocking(true)?;
         let token = uuid::Uuid::new_v4().simple().to_string();
         let expected_auth = format!(
             "Basic {}",
             STANDARD.encode(format!("ss:{token}").as_bytes())
         );
         let shutdown = Arc::new(AtomicBool::new(false));
+        let active_streams: Arc<Mutex<std::collections::HashMap<u64, TcpStream>>> =
+            Arc::new(Mutex::new(std::collections::HashMap::new()));
+        let active_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let next_conn_id = Arc::new(std::sync::atomic::AtomicU64::new(1));
         let blocked_domains = Arc::new(Mutex::new(Vec::new()));
 
         let worker_shutdown = Arc::clone(&shutdown);
+        let worker_streams = Arc::clone(&active_streams);
         let worker_blocked = Arc::clone(&blocked_domains);
         let worker_policy = Arc::new(policy);
         let worker_auth = Arc::new(expected_auth);
@@ -310,9 +340,30 @@ impl SandboxProxy {
                         if worker_shutdown.load(Ordering::Acquire) {
                             break;
                         }
+                        if active_count.fetch_add(1, Ordering::AcqRel)
+                            >= MAX_CONCURRENT_PROXY_CONNECTIONS
+                        {
+                            active_count.fetch_sub(1, Ordering::AcqRel);
+                            let mut rejected = stream;
+                            let _ = write_error_response(
+                                &mut rejected,
+                                "503 Service Unavailable",
+                                None,
+                                "Sandbox proxy connection limit reached\n",
+                            );
+                            continue;
+                        }
+                        let conn_id = next_conn_id.fetch_add(1, Ordering::Relaxed);
+                        if let Ok(cloned) = stream.try_clone() {
+                            if let Ok(mut map) = worker_streams.lock() {
+                                map.insert(conn_id, cloned);
+                            }
+                        }
                         let policy = Arc::clone(&worker_policy);
                         let auth = Arc::clone(&worker_auth);
                         let blocked = Arc::clone(&worker_blocked);
+                        let count = Arc::clone(&active_count);
+                        let streams = Arc::clone(&worker_streams);
                         thread::spawn(move || {
                             let _ = handle_client(
                                 stream,
@@ -321,11 +372,13 @@ impl SandboxProxy {
                                 &blocked,
                                 allow_loopback_upstream,
                             );
+                            if let Ok(mut map) = streams.lock() {
+                                map.remove(&conn_id);
+                            }
+                            count.fetch_sub(1, Ordering::AcqRel);
                         });
                     }
-                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(15));
-                    }
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
                     Err(_) => break,
                 }
             }
@@ -335,6 +388,7 @@ impl SandboxProxy {
             port,
             token,
             shutdown,
+            active_streams,
             blocked_domains,
             thread: Some(handle),
         })
@@ -366,6 +420,11 @@ impl SandboxProxy {
 impl Drop for SandboxProxy {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::Release);
+        if let Ok(mut map) = self.active_streams.lock() {
+            for (_, stream) in map.drain() {
+                let _ = stream.shutdown(std::net::Shutdown::Both);
+            }
+        }
         let _ = TcpStream::connect_timeout(
             &SocketAddr::from(([127, 0, 0, 1], self.port)),
             Duration::from_millis(50),
@@ -466,20 +525,33 @@ fn handle_client(
     let _ = client.set_write_timeout(Some(IO_TIMEOUT));
 
     let mut reader = BufReader::new(client.try_clone()?);
-    let mut request_line = String::new();
-    let n = reader.read_line(&mut request_line)?;
-    if n == 0 || request_line.len() > MAX_HEADER_BYTES {
+    let Some(request_line) = read_bounded_line(&mut reader, MAX_HEADER_BYTES)? else {
         return Ok(());
-    }
+    };
     let mut headers = Vec::new();
-    let mut total_bytes = n;
+    let mut total_bytes = request_line.len();
     let mut proxy_auth: Option<String> = None;
     loop {
-        let mut line = String::new();
-        let count = reader.read_line(&mut line)?;
-        total_bytes += count;
-        if count == 0 || total_bytes > MAX_HEADER_BYTES {
+        let remaining = MAX_HEADER_BYTES.saturating_sub(total_bytes);
+        if remaining == 0 {
+            return write_error_response(
+                &mut client,
+                "431 Request Header Fields Too Large",
+                None,
+                "Request headers exceeded sandbox proxy limit\n",
+            );
+        }
+        let Some(line) = read_bounded_line(&mut reader, remaining)? else {
             return Ok(());
+        };
+        total_bytes += line.len();
+        if total_bytes > MAX_HEADER_BYTES {
+            return write_error_response(
+                &mut client,
+                "431 Request Header Fields Too Large",
+                None,
+                "Request headers exceeded sandbox proxy limit\n",
+            );
         }
         let trimmed = line.trim_end_matches(['\r', '\n']);
         if trimmed.is_empty() {
@@ -645,36 +717,87 @@ fn handle_client(
     let _ = upstream.set_read_timeout(Some(IO_TIMEOUT));
     let _ = upstream.set_write_timeout(Some(IO_TIMEOUT));
 
-    write!(upstream, "{method} {path} {version}\r\n")?;
-    let mut has_host = false;
-    let mut content_length: usize = 0;
+    if !matches!(version, "HTTP/1.0" | "HTTP/1.1")
+        || method.is_empty()
+        || !method.bytes().all(|b| b.is_ascii_uppercase())
+    {
+        return write_error_response(
+            &mut client,
+            "400 Bad Request",
+            None,
+            "Unsupported HTTP method or version\n",
+        );
+    }
+    let mut content_length: Option<usize> = None;
     for (name, value) in &headers {
-        if name.eq_ignore_ascii_case("host") {
-            has_host = true;
+        if name.eq_ignore_ascii_case("transfer-encoding") {
+            return write_error_response(
+                &mut client,
+                "501 Not Implemented",
+                None,
+                "Transfer-Encoding is not supported for plain HTTP proxy forwarding\n",
+            );
         }
         if name.eq_ignore_ascii_case("content-length") {
-            content_length = value.parse::<usize>().unwrap_or(0);
+            let Ok(parsed) = value.parse::<usize>() else {
+                return write_error_response(
+                    &mut client,
+                    "400 Bad Request",
+                    None,
+                    "Invalid Content-Length header\n",
+                );
+            };
+            if content_length.is_some() {
+                return write_error_response(
+                    &mut client,
+                    "400 Bad Request",
+                    None,
+                    "Duplicate Content-Length header\n",
+                );
+            }
+            content_length = Some(parsed);
         }
-        if name.eq_ignore_ascii_case("connection") {
+    }
+
+    write!(upstream, "{method} {path} {version}\r\n")?;
+    if port == 80 {
+        write!(upstream, "Host: {host}\r\n")?;
+    } else {
+        write!(upstream, "Host: {host}:{port}\r\n")?;
+    }
+    for (name, value) in &headers {
+        if name.eq_ignore_ascii_case("host") || name.eq_ignore_ascii_case("connection") {
             continue;
         }
         write!(upstream, "{name}: {value}\r\n")?;
     }
-    if !has_host {
-        if port == 80 {
-            write!(upstream, "Host: {host}\r\n")?;
-        } else {
-            write!(upstream, "Host: {host}:{port}\r\n")?;
-        }
-    }
     upstream.write_all(b"Connection: close\r\n\r\n")?;
-    if content_length > 0 {
-        let mut body_reader = reader.take(content_length as u64);
+    if let Some(len) = content_length.filter(|len| *len > 0) {
+        let mut body_reader = reader.take(len as u64);
         io::copy(&mut body_reader, &mut upstream)?;
     }
     upstream.flush()?;
     io::copy(&mut upstream, &mut client)?;
     client.flush()
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn read_bounded_line<R: BufRead>(reader: &mut R, max_bytes: usize) -> io::Result<Option<String>> {
+    let mut buffer = Vec::new();
+    let mut limited = reader.take((max_bytes + 1) as u64);
+    let read = limited.read_until(b'\n', &mut buffer)?;
+    if read == 0 {
+        return Ok(None);
+    }
+    if buffer.len() > max_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "HTTP header line exceeded sandbox proxy limit",
+        ));
+    }
+    String::from_utf8(buffer)
+        .map(Some)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid UTF-8 in HTTP header"))
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -861,5 +984,27 @@ mod tests {
         let layered_dev = dev.with_extra_domains(&["api.internal.example".into()]);
         assert!(layered_dev.allows_host("registry.npmjs.org"));
         assert!(layered_dev.allows_host("api.internal.example"));
+    }
+
+    #[test]
+    fn blocks_extended_ipv4_and_ipv6_ssrf_ranges_and_bounds_header_line() {
+        for ip in [
+            "0.1.2.3",
+            "::1.2.3.4",
+            "64:ff9b::8.8.8.8",
+            "64:ff9b:1::1",
+            "2002:c000:0204::1",
+            "2001:0::1",
+            "2001:db8::1",
+            "fec0::1",
+        ] {
+            assert!(
+                is_blocked_destination_ip(ip.parse().unwrap()),
+                "expected {ip} to be blocked"
+            );
+        }
+        let oversized = vec![b'A'; MAX_HEADER_BYTES + 1024];
+        let mut reader = BufReader::new(oversized.as_slice());
+        assert!(read_bounded_line(&mut reader, MAX_HEADER_BYTES).is_err());
     }
 }

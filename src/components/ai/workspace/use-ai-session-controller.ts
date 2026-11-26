@@ -11,7 +11,7 @@ import { ApprovalDecisionGuard, approvalIdentityKey } from '@/lib/ai/approval-de
 
 import { sharedAgentSessionAdapter, submissionMemoryFor, type AiSubmissionContext } from '@/lib/ai/submission-memory';
 import { AiSubmissionQueue } from '@/lib/ai/submission-queue';
-import { acknowledgeDetachedImageDraft, holdDetachedImageDraft } from '@/lib/ai/image-drafts';
+import { acknowledgeDetachedImageDraft, holdDetachedImageDraft, restoreCancelledImageDraft } from '@/lib/ai/image-drafts';
 import { builtinSkillPreview } from '@/lib/ai/builtin-skills';
 import { listProjectDirectories as readProjectDirectories } from '@/lib/ai/project-directory-completion';
 import { questionKey } from '@/types/agent-question';
@@ -1123,9 +1123,9 @@ export function useAiSessionController({
               committed(next.status === 'failed' || pausedInInbox);
               settle({ type: 'submit.committed', clientOperationId: payload.clientOperationId, sessionId });
               if (submissionInputs.current.get(payload.clientOperationId)?.images?.length) {
-                void acknowledgeDetachedImageDraft(payload.clientOperationId).then(() => {
+                void acknowledgeDetachedImageDraft(payload.clientOperationId).catch(() => undefined).finally(() => {
                   submissionInputs.current.delete(payload.clientOperationId);
-                }).catch(() => undefined);
+                });
               }
               if (isCurrent()) {
                 setOpenedSessionId(sessionId);
@@ -1137,9 +1137,9 @@ export function useAiSessionController({
           sessionSubmissionQueues.current.set(receipt.sessionId, queue);
           settle({ type: 'submit.committed', clientOperationId: payload.clientOperationId, sessionId: receipt.sessionId });
           if (submissionInputs.current.get(payload.clientOperationId)?.images?.length) {
-            void acknowledgeDetachedImageDraft(payload.clientOperationId).then(() => {
+            void acknowledgeDetachedImageDraft(payload.clientOperationId).catch(() => undefined).finally(() => {
               submissionInputs.current.delete(payload.clientOperationId);
-            }).catch(() => undefined);
+            });
           }
           if (!isCurrent()) return;
           updateOptimistic(current => current.filter(item => item.clientOperationId !== payload.clientOperationId));
@@ -1190,6 +1190,7 @@ export function useAiSessionController({
         const normalized = normalizeAiSessionError(error);
         if (!normalized.retryable) {
           queue.discard(payload.clientOperationId);
+          submissionInputs.current.delete(payload.clientOperationId);
         }
         settle({ type: 'submit.failed', clientOperationId: payload.clientOperationId, error: normalized });
         if (!isCurrent()) return;
@@ -1291,6 +1292,8 @@ export function useAiSessionController({
     setView(retained);
     setQueueMutation(null);
     setRenameError(null);
+    setHistoricalContinuationError(null);
+    setHistoricalSources([]);
     queueOperationRef.current = null;
     viewRef.current = retained;
     setNavigation(visit?.navigation ?? createAiWorkspaceNavigationState());
@@ -1731,11 +1734,9 @@ export function useAiSessionController({
     view?.status,
     view?.summary.archived,
     view?.summary.id,
-    view?.summary.revision,
     view?.summary.status,
     view?.summary.targetId,
     view?.summary.title,
-    view?.summary.updatedAt,
     workspaceChanging,
   ]);
 
@@ -2171,29 +2172,35 @@ export function useAiSessionController({
     }
   }, [adapter, approvalGuard]);
 
+  const loadingOlderRef = useRef<string | null>(null);
   const loadOlder = useCallback((): void => {
     const initial = viewRef.current;
-    if (!initial?.canLoadOlder || loadingOlder) return;
+    if (!initial?.canLoadOlder || loadingOlderRef.current === initial.summary.id) return;
+    const sessionId = initial.summary.id;
+    loadingOlderRef.current = sessionId;
     setLoadingOlder(true);
     const firstSeq = initial.nodes[0]?.firstSeq ?? 0;
-    void adapter.loadOlder(initial.summary.id, String(firstSeq)).then(
+    void adapter.loadOlder(sessionId, String(firstSeq)).then(
       (older) => {
         const latest = viewRef.current;
-        if (!mountedRef.current || older.length === 0 || latest?.summary.id !== initial.summary.id) return;
+        if (!mountedRef.current || older.length === 0 || latest?.summary.id !== sessionId) return;
         const keys = new Set(latest.nodes.map((node) => node.key));
         const next = { ...latest, nodes: [...older.filter((node) => !keys.has(node.key)), ...latest.nodes] };
         viewRef.current = next;
         setView(next);
       },
       (error: unknown) => {
-        if (mountedRef.current && viewRef.current?.summary.id === initial.summary.id) {
+        if (mountedRef.current && viewRef.current?.summary.id === sessionId) {
           dispatch({ type: 'error.reported', error: normalizeAiSessionError(error) });
         }
       },
     ).finally(() => {
-      if (mountedRef.current) setLoadingOlder(false);
+      if (loadingOlderRef.current === sessionId) {
+        loadingOlderRef.current = null;
+        if (mountedRef.current) setLoadingOlder(false);
+      }
     });
-  }, [adapter, dispatch, loadingOlder]);
+  }, [adapter, dispatch]);
 
   const loadArtifact = useCallback<AiSessionAdapter['loadArtifact']>((sessionId, artifactId, maxBytes) => (
     adapter.loadArtifact(sessionId, artifactId, maxBytes)
@@ -2481,7 +2488,6 @@ export function useAiSessionController({
         return;
       }
       if (imageDraft.draft?.images.length) {
-        const executeImageEffect = effectExecutorRef.current;
         const decision = resolveAiSubmission({ sessionId: composer.sessionId, sessionStatus: composer.runtimeStatus,
           terminal: composer.terminal, waitingApproval: composer.waitingApproval, waitingQuestion: composer.waitingQuestion,
           hasProvider, canCreateSession: canStartAgent, draft: composer.draft, hasImages: true, gesture,
@@ -2514,10 +2520,11 @@ export function useAiSessionController({
         }).then(value => {
           if (!value?.operation) return;
           const op = value.operation;
+          const liveComposer = composerRef.current;
           submissionInputs.current.set(op.id, { clientOperationId: op.id, mode: op.mode, content: value.text,
             images: value.images, provider: imageProvider, terminalContext, create: op.create,
             targetTurnId: op.targetTurnId,
-            queued: composer.runtimeStatus === 'running' || composer.runtimeStatus === 'waiting' });
+            queued: liveComposer.runtimeStatus === 'running' || liveComposer.runtimeStatus === 'waiting' });
           if (!op.create) {
             const queue = submissionQueues.current.get(context)
               ?? new AiSubmissionQueue(op.sessionId, (sessionId, input) => adapter.submit(sessionId, input),
@@ -2530,14 +2537,17 @@ export function useAiSessionController({
           const event: AiComposerEvent = { type: 'submit.requested', content: value.text, hasImages: true, gesture,
             accelerated: effectiveAccelerated, clientOperationId: op.id, now: now(), hasProvider, canCreateSession: canStartAgent };
           if (!mountedRef.current || submissionContextRef.current !== context) {
-            const transition = reduceAiComposer(submissionLedger.current.get(context) ?? composer, event);
+            const transition = reduceAiComposer(submissionLedger.current.get(context) ?? liveComposer, event);
             submissionMemory.remember(context, transition.state);
+            const executeImageEffect = effectExecutorRef.current;
             for (const effect of transition.effects) if (effect.type === 'submit') executeImageEffect(effect, context);
             return;
           }
-          const willSubmit = reduceAiComposer(composerRef.current, event).effects.some(effect => effect.type === 'submit');
+          const willSubmit = reduceAiComposer(liveComposer, event).effects.some(effect => effect.type === 'submit');
           if (!willSubmit) {
             submissionInputs.current.delete(op.id);
+            void restoreCancelledImageDraft(value).catch(() => undefined);
+            imageDraft.reportError('sessionUnavailable');
             return;
           }
           if (composerRef.current.draft === capturedText) dispatch({ type: 'draft.changed', value: '' });

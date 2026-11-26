@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import {
   ArchiveIcon,
   ChevronDownIcon,
@@ -69,6 +69,17 @@ function sessionStatusLabel(status: AiSessionStatus, t: (key: LocaleKey) => stri
   return t(`agent.outcome.${status}`);
 }
 
+const relativeTimeFormatterCache = new Map<string, Intl.RelativeTimeFormat>();
+
+function getRelativeTimeFormatter(locale: string): Intl.RelativeTimeFormat {
+  let formatter = relativeTimeFormatterCache.get(locale);
+  if (!formatter) {
+    formatter = new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style: 'narrow' });
+    relativeTimeFormatterCache.set(locale, formatter);
+  }
+  return formatter;
+}
+
 function relativeTimeLabel(timestamp: string, locale: string): string {
   const then = Date.parse(timestamp);
   if (!Number.isFinite(then)) return timestamp;
@@ -81,7 +92,7 @@ function relativeTimeLabel(timestamp: string, locale: string): string {
       : absoluteSeconds < 86_400
         ? [Math.round(deltaSeconds / 3_600), 'hour']
         : [Math.round(deltaSeconds / 86_400), 'day'];
-  return new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style: 'narrow' }).format(value, unit);
+  return getRelativeTimeFormatter(locale).format(value, unit);
 }
 
 function SessionBrowserLoading({ label }: { readonly label: string }): React.ReactNode {
@@ -271,6 +282,7 @@ export function AiSessionBrowser({
   readonly onRename?: (summary: AiSessionSummary, title: string) => void;
 }): React.ReactNode {
   const { locale, t } = useI18n();
+  const renameInputId = useId();
   const [filter, setFilter] = useState<SessionFilter>('all');
   const [query, setQuery] = useState('');
   const [archiveTarget, setArchiveTarget] = useState<AiSessionSummary | null>(null);
@@ -502,11 +514,11 @@ export function AiSessionBrowser({
           </AlertDialogHeader>
           <FieldGroup>
             <Field data-invalid={!renameValue.trim() || renameError !== null}>
-              <FieldLabel htmlFor="ai-session-rename-input">
+              <FieldLabel htmlFor={renameInputId}>
                 {t('ai.workspace.sessions.renameLabel')}
               </FieldLabel>
               <Input
-                id="ai-session-rename-input"
+                id={renameInputId}
                 value={renameValue}
                 maxLength={120}
                 disabled={renamingId !== null}

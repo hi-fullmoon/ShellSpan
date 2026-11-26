@@ -36,20 +36,21 @@ pub(crate) fn is_sensitive_key(key: &str) -> bool {
 // These patterns locate values in prose and code examples, not entire messages.
 // Keep replacement markers stable: persisted events are sanitized again on load.
 static PRIVATE_KEYS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?is)-----BEGIN (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----.*?(?:-----END (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----|\z)").unwrap()
+    Regex::new(r"(?is)-----BEGIN (?:(?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY|PGP PRIVATE KEY BLOCK)-----.*?(?:-----END (?:(?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY|PGP PRIVATE KEY BLOCK)-----|\z)").unwrap()
 });
 static TERMINAL_PRIVATE_KEYS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(&PRIVATE_KEYS.as_str().replace(' ', "")).unwrap());
 static TERMINAL_PRIVATE_KEY_BOUNDARY: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)-----(BEGIN|END)(?:OPENSSH|RSA|EC|DSA|ENCRYPTED)?PRIVATEKEY-----$").unwrap()
+    Regex::new(r"(?i)-----(BEGIN|END)(?:(?:OPENSSH|RSA|EC|DSA|ENCRYPTED)?PRIVATEKEY|PGPPRIVATEKEYBLOCK)-----$").unwrap()
 });
-const PRIVATE_KEY_BEGIN_MARKERS: [&str; 6] = [
+const PRIVATE_KEY_BEGIN_MARKERS: [&str; 7] = [
     "-----BEGIN PRIVATE KEY-----",
     "-----BEGIN OPENSSH PRIVATE KEY-----",
     "-----BEGIN RSA PRIVATE KEY-----",
     "-----BEGIN EC PRIVATE KEY-----",
     "-----BEGIN DSA PRIVATE KEY-----",
     "-----BEGIN ENCRYPTED PRIVATE KEY-----",
+    "-----BEGIN PGP PRIVATE KEY BLOCK-----",
 ];
 
 pub(crate) enum PrivateKeyBoundary {
@@ -67,12 +68,12 @@ pub(crate) fn terminal_private_key_boundary(value: &str) -> Option<PrivateKeyBou
 }
 macro_rules! credential_prefix {
     () => {
-        r#"\b(?:[a-z0-9]+[_-])*(?:api[_-]?key|access[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|password|passwd|passphrase|private[_-]?key|secret|token|authorization)["']?[ \t]*"#
+        r#"\b(?:(?:[a-z0-9]+[_-])*(?:api[_-]?key|access[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|password|passwd|passphrase|private[_-]?key|secret|token|authorization|pwd|set-cookie|cookie)|[a-z0-9_-]*(?:pgpassword|dbpass|mysql_pwd|sshpass))["']?[ \t]*"#
     };
 }
 macro_rules! flag_prefix {
     () => {
-        r"--(?:api[_-]key|access[_-]token|auth[_-]token|client[_-]secret|password|passwd|passphrase|private[_-]key|secret|token)"
+        r"(?:--(?:api[_-]key|access[_-]token|auth[_-]token|client[_-]secret|password|passwd|passphrase|private[_-]key|secret|token)|\bsshpass[ \t]+-p)"
     };
 }
 macro_rules! credential_assignment {
@@ -116,6 +117,7 @@ static OPEN_CREDENTIAL: LazyLock<Regex> =
     LazyLock::new(|| {
         Regex::new(concat!(
         "(?i)(?:", credential_prefix!(), "|", flag_prefix!(), r"[ \t]*|",
+        r"\bcurl\b[^\r\n]*|",
         credential_assignment!(),
         r"(?:Bearer[ \t]*|Basic[ \t]*|\$\{\{[^}\r\n]*(?:\}[^}\r\n]+)*\}?|[|>][+-]?[ \t]*\r?|))\z"
     )).unwrap()
@@ -124,10 +126,17 @@ static SECRET_REFERENCES: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\$\{\{[ \t]*secrets\.[A-Za-z_][A-Za-z0-9_]*[ \t]*\}\}$").unwrap()
 });
 static URL_CREDENTIALS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?P<prefix>\b[a-zA-Z][a-zA-Z0-9+.-]*://[^\s:/@]+:)[^\s/@]+@"#).unwrap()
+    Regex::new(r#"(?P<prefix>\b[a-zA-Z][a-zA-Z0-9+.-]*://[^\s:/@]*:)[^\s/@]+@"#).unwrap()
 });
-static TOKEN_CANDIDATES: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[A-Za-z0-9_][A-Za-z0-9_.-]*").unwrap());
+static CURL_USER_FLAG: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?P<prefix>\bcurl\b[^\r\n]*?[ \t](?:-u|--user)(?:=|[ \t]+)['"]?[^\s:"'`,;<>]+:)[^\s"'`,;<>]+"#).unwrap()
+});
+static KNOWN_TOKENS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"\b(?:(?:A[KS]IA[A-Z0-9]{16}\b)|(?:gh[pousr]_[A-Za-z0-9_]{20,}\b)|(?:github_pat_[A-Za-z0-9_]{20,}\b)|(?:(?:sk-ant-|sk_live_|sk_test_|glpat-|xox[baprs]-|sk-|AIza|npm_)[A-Za-z0-9_-]{20,})|(?:eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}))",
+    )
+    .unwrap()
+});
 
 /// A preview can only publish text that no later delta can turn into a
 /// credential. Keep the unfinished word and any open multiline value.
@@ -233,6 +242,7 @@ pub(crate) fn redact_model_output_text(value: &str) -> String {
 fn redact_text(value: &str, sensitive_values: &Regex) -> String {
     let redacted = PRIVATE_KEYS.replace_all(value, REDACTED_PRIVATE_KEY);
     let redacted = URL_CREDENTIALS.replace_all(&redacted, "${prefix}[REDACTED]@");
+    let redacted = CURL_USER_FLAG.replace_all(&redacted, "${prefix}[REDACTED]");
     let redacted = sensitive_values.replace_all(&redacted, |captures: &Captures<'_>| {
         let value = &captures["value"];
         let unquoted = value.trim_matches(['\'', '"']);
@@ -244,7 +254,7 @@ fn redact_text(value: &str, sensitive_values: &Regex) -> String {
             format!("{}{}{}", &captures["prefix"], REDACTED_VALUE, newline)
         }
     });
-    TOKEN_CANDIDATES
+    KNOWN_TOKENS
         .replace_all(&redacted, |captures: &Captures<'_>| {
             let token = captures[0].trim_end_matches('.');
             if contains_well_known_token(token) || contains_jwt(token) {
@@ -260,12 +270,12 @@ fn contains_well_known_token(value: &str) -> bool {
     value
         .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
         .any(|token| {
-            (token.starts_with("AKIA")
+            ((token.starts_with("AKIA") || token.starts_with("ASIA"))
                 && token.len() == 20
                 && token
                     .chars()
                     .all(|character| character.is_ascii_uppercase() || character.is_ascii_digit()))
-                || (["ghp_", "gho_", "ghu_", "ghs_", "ghr_"]
+                || (["ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"]
                     .iter()
                     .any(|prefix| token.starts_with(prefix) && token.len() >= prefix.len() + 20))
         })
@@ -468,6 +478,7 @@ mod tests {
             "输出 -----BEGIN OPENSSH PRIVATE KEY-----\nlocal-only value\n-----END OPENSSH PRIVATE KEY-----\n结束。",
             "输出 -----BEGIN OPENſſH PRIVATE KEY-----\nlocal-only value\n-----END OPENſſH PRIVATE KEY-----\n结束。",
             "Start sk-ant-abcdefghijklmnopqrstuvwxyz1234567890. Done.",
+            "Start curl -u alice:s3cr3t-password https://example.test Done.",
             "Start token='${{ secrets.ACCESS_TOKEN }}'; Done.",
             "纯中文不需要等到下一行。",
         ] {
@@ -481,6 +492,54 @@ mod tests {
             }
             preview.push_str(&stream.drain(true));
             assert_eq!(preview, expected);
+        }
+    }
+
+    #[test]
+    fn redacts_extended_env_cli_cookie_url_and_token_formats_idempotently() {
+        for (input, expected) in [
+            ("PGPASSWORD=supersecret psql", "PGPASSWORD=[REDACTED] psql"),
+            ("MYSQL_PWD=dbsecret mysql", "MYSQL_PWD=[REDACTED] mysql"),
+            ("DBPASS=topsecret ./run", "DBPASS=[REDACTED] ./run"),
+            ("Cookie: session_id=abc123", "Cookie: [REDACTED]"),
+            (
+                "Set-Cookie: sid=xyz789; HttpOnly",
+                "Set-Cookie: [REDACTED]; HttpOnly",
+            ),
+            (
+                "curl -u alice:s3cr3t https://example.test",
+                "curl -u alice:[REDACTED] https://example.test",
+            ),
+            (
+                "sshpass -p hunter2 ssh host",
+                "sshpass -p [REDACTED] ssh host",
+            ),
+            (
+                "git clone https://:ghp_secret123@github.com/org/repo.git",
+                "git clone https://:[REDACTED]@github.com/org/repo.git",
+            ),
+            (
+                "aws key ASIA1234567890ABCDEF here",
+                "aws key [REDACTED] here",
+            ),
+            (
+                "pat github_pat_11ABCDEFGH012345678901234567890 ok",
+                "pat [REDACTED] ok",
+            ),
+            (
+                "-----BEGIN PGP PRIVATE KEY BLOCK-----\nbody\n-----END PGP PRIVATE KEY BLOCK-----",
+                "[REDACTED PRIVATE KEY]",
+            ),
+            // Trailing hyphen on tokens must not leak after redaction.
+            (
+                "key sk-abcdefghijklmnopqrstuvwxyz- done",
+                "key [REDACTED] done",
+            ),
+            // Non-sensitive words containing `pass` must not be over-redacted.
+            ("bypass=true compass=north", "bypass=true compass=north"),
+        ] {
+            assert_eq!(redact_sensitive_text(input), expected, "{input}");
+            assert_eq!(redact_sensitive_text(expected), expected, "{expected}");
         }
     }
 }

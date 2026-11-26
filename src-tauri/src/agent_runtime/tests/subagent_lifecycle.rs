@@ -1073,6 +1073,50 @@ async fn subagent_remote_target_explains_trash_file_is_local_only() {
         .is_empty());
 }
 
+#[tokio::test]
+async fn failed_continuable_children_release_handle_slots_beyond_concurrent_limit() {
+    let (_storage, manager, _) = setup();
+    let initial_handles = manager.handles.lock().unwrap().len();
+    let parent = manager.sessions.snapshot("lifecycle-parent").unwrap();
+    let target_id = parent.header.target.unwrap().target_id;
+    for index in 0..17 {
+        let child_id = manager
+            .create_child(
+                "lifecycle-parent",
+                format!("Continuable task {index}"),
+                AgentSubagentRole::Explorer,
+                "blank",
+                vec![target_id.clone()],
+                default_subagent_budget(),
+                true,
+            )
+            .unwrap();
+        let entry = manager.agents.get(&child_id).unwrap().unwrap();
+        entry.set_phase(AgentLifecyclePhase::Stopping).unwrap();
+        manager
+            .sessions
+            .terminate(
+                &child_id,
+                AgentSessionStatus::Failed,
+                "modelFailure: simulated".into(),
+            )
+            .unwrap();
+        manager
+            .release_or_dispose_child(&child_id, true)
+            .await
+            .unwrap();
+        assert!(
+            !manager.handles.lock().unwrap().contains_key(&child_id),
+            "failed continuable child {child_id} must release handle slot"
+        );
+        assert!(
+            manager.agents.get(&child_id).unwrap().is_none(),
+            "failed continuable child {child_id} must detach from agent registry"
+        );
+    }
+    assert_eq!(manager.handles.lock().unwrap().len(), initial_handles);
+}
+
 mod fleet_tool_budget_tests {
     use super::*;
     include!("fleet_tool_budget.rs");

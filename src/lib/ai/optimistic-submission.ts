@@ -119,6 +119,7 @@ export function withOptimisticConversationNodes(
   sessionId: string | null,
   committedInbox: readonly AiInboxItem[] = [],
 ): readonly AiConversationNode[] {
+  if (submissions.length === 0) return committedNodes;
   const deduplicated = [...new Map(committedNodes.map((node) => [node.key, node])).values()];
   const visible = submissions.filter((submission) => (
     submission.scopeKey === scopeKey
@@ -131,5 +132,6 @@ export function withOptimisticConversationNodes(
     ))
     && !deduplicated.some((node) => observedOperationId(node, submission))
   ));
+  if (visible.length === 0 && deduplicated.length === committedNodes.length) return committedNodes;
   return [...deduplicated, ...visible.map(optimisticNode)];
 }

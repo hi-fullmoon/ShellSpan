@@ -117,6 +117,14 @@ export function AiQuestionSeat({ question, onAnswer, ...props }: Omit<AiQuestion
   readonly question?: AgentQuestionView | null;
 }): React.ReactNode {
   const [submittingQuestion, setSubmittingQuestion] = useState<AgentQuestionView | null>(null);
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (feedbackTimerRef.current !== null) {
+      clearTimeout(feedbackTimerRef.current);
+      feedbackTimerRef.current = null;
+    }
+  }, []);
+
   const displayed = (onAnswer ? submittingQuestion : null) ?? question;
   if (!displayed) return null;
 
@@ -129,6 +137,7 @@ export function AiQuestionSeat({ question, onAnswer, ...props }: Omit<AiQuestion
       let timer: ReturnType<typeof setTimeout> | undefined;
       const release = () => {
         clearTimeout(timer);
+        if (feedbackTimerRef.current === timer) feedbackTimerRef.current = null;
         setSubmittingQuestion((current) => current === displayed ? null : current);
       };
       const feedback = new Promise<void>((resolve) => {
@@ -136,6 +145,7 @@ export function AiQuestionSeat({ question, onAnswer, ...props }: Omit<AiQuestion
           release();
           resolve();
         }, submissionFeedbackMs);
+        feedbackTimerRef.current = timer;
       });
       try {
         await Promise.all([onAnswer(input), feedback]);
@@ -200,9 +210,13 @@ export function AiQuestionPanel({
   const answers: readonly QuestionAnswer[] =
     (operation?.kind === 'submit' ? operation.answers : draft?.answers) ??
     question.questions.map((q) => ({ id: q.id, selected: [] }));
-  const currentQuestion = question.questions[currentIndex];
+  const safeIndex = question.questions.length > 0
+    ? Math.min(Math.max(0, currentIndex), question.questions.length - 1)
+    : 0;
+  const currentQuestion = question.questions[safeIndex];
+  if (!currentQuestion) return null;
   const currentAnswer = answers.find((answer) => answer.id === currentQuestion.id) ?? { id: currentQuestion.id, selected: [] };
-  const inputId = `${question.identity.questionRequestId}-${currentIndex}`;
+  const inputId = `${question.identity.questionRequestId}-${safeIndex}`;
   const tooLong =
     new TextEncoder().encode(currentAnswer.custom ?? '').length > 8192;
   const invalid = answers.some(isAnswerInvalid);

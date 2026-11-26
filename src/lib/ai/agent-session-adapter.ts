@@ -79,10 +79,12 @@ import type {
 } from './session-adapter';
 
 interface AgentCommittedClientLike {
+  readonly eventCount?: number;
   state(): AgentSessionStreamState;
   onChange(listener: (state: AgentSessionStreamState) => void): () => void;
   connect(): Promise<AgentSessionStreamState>;
   reconnect(): Promise<AgentSessionStreamState>;
+  refresh?(): Promise<AgentSessionStreamState>;
   retrySync?(): Promise<AgentSessionStreamState>;
   disconnect(): void;
 }
@@ -674,6 +676,20 @@ export function createAgentSessionAdapter(
   dependencies: AgentSessionAdapterDependencies = defaultDependencies,
 ): AiSessionAdapter<'agent'> {
   const entries = new Map<string, AgentAdapterEntry>();
+  const pendingSettingsBySession = new Map<string, PendingSessionSettings>();
+  let disposed = false;
+
+  const assertActive = (): void => {
+    if (disposed) throw new DOMException('Agent session adapter disposed', 'AbortError');
+  };
+
+  const clientEventCount = (client: AgentCommittedClientLike): number => (
+    typeof client.eventCount === 'number' ? client.eventCount : client.state().events.length
+  );
+
+  const clientRefresh = (client: AgentCommittedClientLike): Promise<AgentSessionStreamState> => (
+    typeof client.refresh === 'function' ? client.refresh() : client.reconnect()
+  );
 
   const evict = (sessionId: string): void => {
     const entry = entries.get(sessionId);
@@ -685,18 +701,18 @@ export function createAgentSessionAdapter(
   // Retain a small warm working set. Native runtimes own execution; evicting
   // a frontend subscription never stops a task or discards its durable journal.
   const trim = (): void => {
-    const idle = [...entries].filter(([, entry]) => !entry.listeners.size && !entry.leases && !entry.connecting
-      && !entry.pendingSettings);
-    let events = idle.reduce((count, [, entry]) => count + entry.client.state().events.length, 0);
+    const idle = [...entries].filter(([, entry]) => !entry.listeners.size && !entry.leases && !entry.connecting);
+    let events = idle.reduce((count, [, entry]) => count + clientEventCount(entry.client), 0);
     while (idle.length > 4 || events > 20_000) {
       const oldest = idle.shift();
       if (!oldest) break;
-      events -= oldest[1].client.state().events.length;
+      events -= clientEventCount(oldest[1].client);
       evict(oldest[0]);
     }
   };
 
   const ensureEntry = (sessionId: string): AgentAdapterEntry => {
+    assertActive();
     const existing = entries.get(sessionId);
     if (existing) {
       entries.delete(sessionId);
@@ -708,7 +724,7 @@ export function createAgentSessionAdapter(
     const projectCommitted = createAgentSessionViewProjector();
     const entry: AgentAdapterEntry = {
       projectCommitted,
-      project: (state) => withPendingSessionSettings(projectCommitted(state), entry.pendingSettings),
+      project: (state) => withPendingSessionSettings(projectCommitted(state), pendingSettingsBySession.get(sessionId)),
       client,
       listeners,
       leases: 0,
@@ -754,9 +770,11 @@ export function createAgentSessionAdapter(
       && !['cancelled', 'failed', 'completed'].includes(view.status)) return view;
     await (dependencies.resume ?? invokeResumeAgentRuntime)({ sessionId });
     signal?.throwIfAborted();
+    assertActive();
     const entry = ensureEntry(sessionId);
     const state = await entry.client.reconnect();
     signal?.throwIfAborted();
+    if (disposed || entries.get(sessionId) !== entry) return view;
     const resumed = entry.project(state);
     entry.view = resumed;
     for (const listener of entry.listeners) listener(resumed);
@@ -779,29 +797,43 @@ export function createAgentSessionAdapter(
     signal?: AbortSignal,
   ): Promise<AiSessionView> => {
     const entry = ensureEntry(sessionId);
-    if (!entry.pendingSettings) return view;
-    const without = (key: keyof PendingSessionSettings): void => {
-      const next: PendingSessionSettings = { ...entry.pendingSettings, [key]: undefined };
-      entry.pendingSettings = next.model || next.permissionMode || next.executionSurface ? next : undefined;
+    const currentPending = pendingSettingsBySession.get(sessionId);
+    if (!currentPending) return view;
+    const clearIfMatching = <K extends keyof PendingSessionSettings>(
+      key: K,
+      applied: PendingSessionSettings[K],
+    ): void => {
+      const latest = pendingSettingsBySession.get(sessionId);
+      if (!latest) return;
+      const matches = key === 'model'
+        ? JSON.stringify(latest.model) === JSON.stringify(applied)
+        : latest[key] === applied;
+      if (!matches) return;
+      const next: PendingSessionSettings = { ...latest, [key]: undefined };
+      if (next.model || next.permissionMode || next.executionSurface) {
+        pendingSettingsBySession.set(sessionId, next);
+      } else {
+        pendingSettingsBySession.delete(sessionId);
+      }
     };
-    const { permissionMode, executionSurface, model } = entry.pendingSettings;
+    const { permissionMode, executionSurface, model } = currentPending;
     if (permissionMode) {
       await (dependencies.setPermission ?? invokeSetAgentRuntimePermission)({ sessionId, mode: permissionMode });
-      without('permissionMode');
+      clearIfMatching('permissionMode', permissionMode);
       signal?.throwIfAborted();
     }
     if (executionSurface) {
       await (dependencies.setExecutionSurface ?? invokeSetAgentRuntimeExecutionSurface)({ sessionId, surface: executionSurface });
-      without('executionSurface');
+      clearIfMatching('executionSurface', executionSurface);
       signal?.throwIfAborted();
     }
     if (model) {
       await (dependencies.selectModel ?? invokeSelectAgentRuntimeModel)({ sessionId, selection: {
         routeId: model.routeId, modelId: model.modelId, reasoningEffort: model.reasoningEffort } });
-      without('model');
+      clearIfMatching('model', model);
       signal?.throwIfAborted();
     }
-    const state = await entry.client.reconnect();
+    const state = await clientRefresh(entry.client);
     signal?.throwIfAborted();
     return publish(entry, entry.project(state));
   };
@@ -820,8 +852,10 @@ export function createAgentSessionAdapter(
   const recordDeferredSetting = (sessionId: string, patch: PendingSessionSettings): void => {
     const entry = ensureEntry(sessionId);
     const committed = entry.projectCommitted(entry.client.state());
-    entry.pendingSettings = normalizePendingSettings(committed.snapshot.value.header,
-      { ...entry.pendingSettings, ...patch });
+    const normalized = normalizePendingSettings(committed.snapshot.value.header,
+      { ...pendingSettingsBySession.get(sessionId), ...patch });
+    if (normalized) pendingSettingsBySession.set(sessionId, normalized);
+    else pendingSettingsBySession.delete(sessionId);
     publish(entry, entry.project(entry.client.state()));
   };
 
@@ -931,7 +965,7 @@ export function createAgentSessionAdapter(
     try {
       return await awaitInboxAdmission(async () => isPaused(await command()), observed, async signal => {
         let refreshed: AgentSessionStreamState;
-        try { refreshed = await entry.client.reconnect(); }
+        try { refreshed = await clientRefresh(entry.client); }
         catch { return { kind: 'unavailable' }; }
         signal.throwIfAborted();
         entry.view = entry.project(refreshed);
@@ -978,23 +1012,33 @@ export function createAgentSessionAdapter(
       return openEntry(input.request.sessionId);
     },
     async reconnectTerminal(sessionId, previousSessionId, terminalSessionId) {
+      const priorEntry = entries.get(sessionId);
       await (dependencies.reconnectTerminal ?? invokeReconnectAgentTerminal)({ sessionId, previousSessionId, terminalSessionId });
+      assertActive();
+      if (priorEntry && entries.get(sessionId) !== priorEntry) {
+        throw new DOMException('Agent session evicted during reconnect', 'AbortError');
+      }
       // Reopening belongs to the explicit reconnect action, never to background
       // file/skill discovery that may finish after a terminal was closed.
       const entry = ensureEntry(sessionId);
       // Reconnecting a terminal resets permissionMode to requestApproval on the backend;
       // drop any deferred permission change so it cannot override that security reset.
-      if (entry.pendingSettings?.permissionMode) {
-        const next: PendingSessionSettings = { ...entry.pendingSettings, permissionMode: undefined };
-        entry.pendingSettings = next.model || next.executionSurface ? next : undefined;
+      const pending = pendingSettingsBySession.get(sessionId);
+      if (pending?.permissionMode) {
+        const next: PendingSessionSettings = { ...pending, permissionMode: undefined };
+        if (next.model || next.executionSurface) pendingSettingsBySession.set(sessionId, next);
+        else pendingSettingsBySession.delete(sessionId);
       }
       const rebound = entry.project(await entry.client.reconnect());
+      if (disposed || entries.get(sessionId) !== entry) return rebound;
       entry.view = await resumeEndedSession(sessionId, rebound);
+      if (disposed || entries.get(sessionId) !== entry) return entry.view;
       for (const listener of entry.listeners) listener(entry.view);
       return entry.view;
     },
     open: openEntry,
     peek(sessionId: string) {
+      if (disposed) return undefined;
       const entry = entries.get(sessionId);
       if (!entry?.view) return undefined;
       ensureEntry(sessionId);
@@ -1004,6 +1048,7 @@ export function createAgentSessionAdapter(
     async selectModel(sessionId, provider) {
       const selection = { routeId: provider.id, modelId: provider.model, reasoningEffort: provider.reasoningEffort };
       const view = await openEntry(sessionId);
+      const original = entries.get(sessionId);
       if (defersSettings(view)) {
         const value = view.snapshot.value;
         const liveEvents = entries.get(sessionId)?.client.state().events ?? [];
@@ -1016,24 +1061,32 @@ export function createAgentSessionAdapter(
       }
       await resumeEndedSession(sessionId, view);
       await (dependencies.selectModel ?? invokeSelectAgentRuntimeModel)({ sessionId, selection });
+      if (disposed || (original && entries.get(sessionId) !== original)) return;
       const entry = ensureEntry(sessionId);
-      entry.view = entry.project(await entry.client.reconnect());
+      const state = await entry.client.reconnect();
+      if (disposed || entries.get(sessionId) !== entry) return;
+      entry.view = entry.project(state);
       for (const listener of entry.listeners) listener(entry.view);
     },
     async setPermission(sessionId, mode) {
       const view = await openEntry(sessionId);
+      const original = entries.get(sessionId);
       if (defersSettings(view)) {
         recordDeferredSetting(sessionId, { permissionMode: mode });
         return;
       }
       await resumeEndedSession(sessionId, view);
       await (dependencies.setPermission ?? invokeSetAgentRuntimePermission)({ sessionId, mode });
+      if (disposed || (original && entries.get(sessionId) !== original)) return;
       const entry = ensureEntry(sessionId);
-      entry.view = entry.project(await entry.client.reconnect());
+      const state = await entry.client.reconnect();
+      if (disposed || entries.get(sessionId) !== entry) return;
+      entry.view = entry.project(state);
       for (const listener of entry.listeners) listener(entry.view);
     },
     async setExecutionSurface(sessionId, surface) {
       const view = await openEntry(sessionId);
+      const original = entries.get(sessionId);
       if (defersSettings(view)) {
         const target = view.snapshot.value.header.target;
         if ((target?.localSandboxRequired === 'windowsAppContainer' || target?.windowsSandboxRequired === true) && surface !== 'direct') {
@@ -1044,15 +1097,22 @@ export function createAgentSessionAdapter(
       }
       await resumeEndedSession(sessionId, view);
       await (dependencies.setExecutionSurface ?? invokeSetAgentRuntimeExecutionSurface)({ sessionId, surface });
+      if (disposed || (original && entries.get(sessionId) !== original)) return;
       const entry = ensureEntry(sessionId);
-      entry.view = entry.project(await entry.client.reconnect());
+      const state = await entry.client.reconnect();
+      if (disposed || entries.get(sessionId) !== entry) return;
+      entry.view = entry.project(state);
       for (const listener of entry.listeners) listener(entry.view);
     },
     async bindProjectRoot(sessionId, root) {
+      const original = entries.get(sessionId);
       await resumeEndedSession(sessionId);
       await invokeBindAgentProjectRoot({ sessionId, root });
+      if (disposed || (original && entries.get(sessionId) !== original)) return;
       const entry = ensureEntry(sessionId);
-      entry.view = entry.project(await entry.client.reconnect());
+      const state = await entry.client.reconnect();
+      if (disposed || entries.get(sessionId) !== entry) return;
+      entry.view = entry.project(state);
       for (const listener of entry.listeners) listener(entry.view);
     },
     subscribe(sessionId: string, listener: AiSessionListener): () => void {
@@ -1128,7 +1188,7 @@ export function createAgentSessionAdapter(
           mode: 'nextTurn',
         };
       }
-      const deferredModel = entries.get(resolvedSessionId)?.pendingSettings?.model;
+      const deferredModel = pendingSettingsBySession.get(resolvedSessionId)?.model;
       const paused = input.paused || (input.queued && view.status === 'failed');
       if (!paused || hasImages) view = await resumeEndedSession(resolvedSessionId, view);
       // An idle restored Session needs an owning runtime before its next input. start is idempotent.
@@ -1174,14 +1234,18 @@ export function createAgentSessionAdapter(
     },
     async stop(sessionId: string): Promise<void> {
       const current = await openEntry(sessionId);
+      const original = entries.get(sessionId);
       const parentSessionId = current.snapshot.value.header.parentSessionId;
       if (current.snapshot.value.header.subagent && parentSessionId) {
         await dependencies.cancelChild({ parentSessionId, childSessionId: sessionId });
       } else {
         await dependencies.stop({ sessionId });
       }
+      if (disposed || (original && entries.get(sessionId) !== original)) return;
       const entry = ensureEntry(sessionId);
-      entry.view = entry.project(await entry.client.reconnect());
+      const state = await entry.client.reconnect();
+      if (disposed || entries.get(sessionId) !== entry) return;
+      entry.view = entry.project(state);
       for (const listener of entry.listeners) listener(entry.view);
     },
     async approve(input: AiApprovalDecisionInput): Promise<void> {
@@ -1195,10 +1259,12 @@ export function createAgentSessionAdapter(
     },
     async archive(sessionId: string): Promise<void> {
       await dependencies.archive({ sessionId });
+      pendingSettingsBySession.delete(sessionId);
       evict(sessionId);
     },
     async delete(sessionId: string): Promise<void> {
       await dependencies.delete({ sessionId });
+      pendingSettingsBySession.delete(sessionId);
       evict(sessionId);
     },
     evict,
@@ -1246,7 +1312,7 @@ export function createAgentSessionAdapter(
       // Always dispatch the explicit action; native receipt handling is idempotent.
       let before = await openEntry(sessionId);
       // A model switched after the failure must govern the retry itself.
-      if (entries.get(sessionId)?.pendingSettings) before = await resumeEndedSession(sessionId, before);
+      if (pendingSettingsBySession.has(sessionId)) before = await resumeEndedSession(sessionId, before);
       const id = `${before.snapshot.value.header.subagent ? 'child' : 'model'}-retry-${turnId}`;
       await waitForCommittedOperation(sessionId, id, () => (dependencies.retryModel ?? invokeRetryAgentModel)({ sessionId, turnId }), {
         confirmed: modelRetryConfirmation(before, turnId),
@@ -1259,11 +1325,13 @@ export function createAgentSessionAdapter(
       return dependencies.loadArtifact({ sessionId, artifactId, maxBytes });
     },
     dispose(): void {
+      disposed = true;
       for (const entry of entries.values()) {
         entry.stopListening();
         entry.client.disconnect();
       }
       entries.clear();
+      pendingSettingsBySession.clear();
     },
   } satisfies AiSessionAdapter<'agent'>;
 
@@ -1282,6 +1350,7 @@ export function createAgentSessionAdapter(
   return {
     ...adapter,
     create: protect(adapter.create, input => input.request.sessionId),
+    continueOnTarget: protect(adapter.continueOnTarget, input => input.request.sessionId),
     open: protect(adapter.open, id => id),
     submit: protect(adapter.submit, (id, input) => id ?? input.create?.request.sessionId ?? null),
     approve: protect(adapter.approve, input => input.sessionId),

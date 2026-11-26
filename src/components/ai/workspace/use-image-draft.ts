@@ -39,14 +39,41 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
   const restoreRef = useRef(restoreText); restoreRef.current = restoreText;
   const managedRef = useRef(isManagedSubmission); managedRef.current = isManagedSubmission;
   const current = useRef<ImageDraft | null>(null);
+  const ownerBoxRef = useRef<{ owner: string; draft: ImageDraft | null }>({ owner, draft: null });
   const epoch = useRef(0);
   const running = useRef(false);
   const cancelling = useRef<number | null>(null);
   const ready = useRef(false);
   const saving = useRef<{ generation: number; promise: Promise<void> } | null>(null);
+  const textSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingTextSave = useRef<{ owner: string; text: string } | null>(null);
   const detaching = useRef<AbortController | null>(null);
+  const clearTextSaveTimer = () => {
+    if (textSaveTimer.current !== null) {
+      clearTimeout(textSaveTimer.current);
+      textSaveTimer.current = null;
+    }
+    pendingTextSave.current = null;
+  };
+  const flushPendingTextSave = () => {
+    const pending = pendingTextSave.current;
+    const box = ownerBoxRef.current;
+    const inFlight = saving.current?.promise;
+    clearTextSaveTimer();
+    if (!pending || pending.owner !== box.owner) return;
+    void (inFlight ?? Promise.resolve()).catch(() => undefined).then(() => {
+      const latest = box.draft;
+      if (!latest || !latest.images.length || latest.operation || latest.text === pending.text) return;
+      const next: ImageDraft = { ...latest, revision: latest.revision + 1, text: pending.text };
+      box.draft = next;
+      return writeImageDraft(next, latest.revision);
+    }).catch(() => undefined);
+  };
   useEffect(() => {
+    clearTextSaveTimer();
     const generation = ++epoch.current;
+    const box = { owner, draft: null as ImageDraft | null };
+    ownerBoxRef.current = box;
     setSubmittedOperationId(undefined);
     current.current = null; setDraft(null); setPendingFiles([]); setError(null); setBusy(false); running.current = false; ready.current = false;
     void readImageDraft(owner).then(async value => {
@@ -54,15 +81,20 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
       // Do not also put its old text/images over the user's newer editor draft.
       if (value?.operation && managedRef.current?.(value.operation.id)) value = await readImageDraft(owner, true);
       if (epoch.current !== generation) return;
-      ready.current = true; current.current = value; setDraft(value);
+      ready.current = true; box.draft = value; current.current = value; setDraft(value);
       if (value?.images.length) restoreRef.current(value.text);
     }).catch(e => { if (epoch.current === generation) { ready.current = true; reportError(String(e)); } });
-    return () => { epoch.current++; };
+    return () => {
+      flushPendingTextSave();
+      epoch.current++;
+    };
   }, [owner, reportError]);
 
   const isCurrent = (generation: number) => epoch.current === generation && ownerRef.current === owner;
   async function persist(value: ImageDraft, generation: number): Promise<void> {
+    const box = ownerBoxRef.current;
     await writeImageDraft(value, value.revision - 1);
+    if (box.owner === value.owner) box.draft = value;
     if (!isCurrent(generation)) return;
     current.current = value; setDraft(value);
   }
@@ -71,6 +103,7 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
   }
   async function add(files: File[]): Promise<void> {
     if (running.current || !ready.current || current.current?.operation) return;
+    clearTextSaveTimer();
     const generation = epoch.current;
     running.current = true; setBusy(true); setError(null);
     try {
@@ -91,6 +124,7 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
   }
   async function remove(index: number): Promise<void> {
     if (running.current || current.current?.operation) return;
+    clearTextSaveTimer();
     const generation = epoch.current;
     running.current = true; setBusy(true);
     try {
@@ -104,6 +138,7 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
   }
   async function replace(images: readonly AgentImageUpload[], nextText: string): Promise<void> {
     if (running.current || !ready.current || current.current?.operation) return;
+    clearTextSaveTimer();
     const generation = epoch.current;
     running.current = true; setBusy(true); setError(null);
     try {
@@ -134,7 +169,23 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
     saving.current = { generation, promise };
     return promise;
   }
-  useEffect(() => { void saveText(text); }, [text]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    clearTextSaveTimer();
+    if (!current.current?.images.length || current.current.operation || current.current.text === text) return;
+    const ownerForSave = current.current.owner;
+    pendingTextSave.current = { owner: ownerForSave, text };
+    textSaveTimer.current = setTimeout(() => {
+      textSaveTimer.current = null;
+      pendingTextSave.current = null;
+      void saveText(textRef.current);
+    }, 300);
+    return () => {
+      if (textSaveTimer.current !== null) {
+        clearTimeout(textSaveTimer.current);
+        textSaveTimer.current = null;
+      }
+    };
+  }, [text]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function send(
     bind: () => Promise<NonNullable<ImageDraft['operation']>>,
@@ -142,6 +193,7 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
     accepted: (value: ImageDraft) => void,
   ): Promise<void> {
     if (running.current || !ready.current || !current.current?.images.length) return;
+    clearTextSaveTimer();
     const generation = epoch.current;
     running.current = true; setBusy(true); setError(null);
     try {
@@ -165,6 +217,7 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
   }
   async function detach(bind: () => Promise<NonNullable<ImageDraft['operation']>>): Promise<ImageDraft | null> {
     if (running.current || !ready.current || !current.current?.images.length) return null;
+    clearTextSaveTimer();
     const generation = epoch.current;
     const capturedText = textRef.current;
     const cancellation = new AbortController();

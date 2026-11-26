@@ -1083,9 +1083,20 @@ pub(crate) fn select_complete_compaction_prefix(
 ) -> Result<Option<u64>, String> {
     let candidates = complete_compaction_boundaries(events, replaced_through_seq, active_turn_id)?;
     let mut last_candidate = None;
+    let mut event_idx = 0_usize;
+    while event_idx < events.len()
+        && replaced_through_seq.is_some_and(|replaced| events[event_idx].seq <= replaced)
+    {
+        event_idx += 1;
+    }
+    let mut removed_tokens = 0_u64;
     for boundary in candidates {
         last_candidate = Some(boundary);
-        let removed_tokens = surface_tokens_between(events, replaced_through_seq, boundary);
+        while event_idx < events.len() && events[event_idx].seq <= boundary {
+            removed_tokens =
+                removed_tokens.saturating_add(event_surface_tokens(&events[event_idx]));
+            event_idx += 1;
+        }
         let remaining = budget
             .estimated_input_tokens
             .saturating_sub(removed_tokens)
@@ -1346,33 +1357,21 @@ fn first_unresolved_recovery_seq(events: &[AgentSessionEvent]) -> Option<u64> {
     }
 }
 
-fn surface_tokens_between(
-    events: &[AgentSessionEvent],
-    replaced_through_seq: Option<u64>,
-    boundary: u64,
-) -> u64 {
-    events
-        .iter()
-        .filter(|event| {
-            replaced_through_seq.is_none_or(|replaced| event.seq > replaced)
-                && event.seq <= boundary
-        })
-        .filter_map(|event| match &event.payload {
-            AgentSessionEventPayload::UserMessage { message } => Some(message.content.len()),
+fn event_surface_tokens(event: &AgentSessionEvent) -> u64 {
+    let bytes =
+        match &event.payload {
+            AgentSessionEventPayload::UserMessage { message } => message.content.len(),
             AgentSessionEventPayload::AssistantMessage { content, .. } => {
-                Some(serde_json::to_vec(content).map_or(0, |value| value.len()))
+                serde_json::to_vec(content).map_or(0, |value| value.len())
             }
-            AgentSessionEventPayload::ToolResult { summary, data, .. } => Some(
-                summary
-                    .len()
-                    .saturating_add(data.as_ref().map_or(0, |value| {
-                        serde_json::to_vec(value).map_or(0, |encoded| encoded.len())
-                    })),
-            ),
-            _ => None,
-        })
-        .map(|bytes| (bytes as u64).saturating_add(3) / 4)
-        .sum()
+            AgentSessionEventPayload::ToolResult { summary, data, .. } => summary
+                .len()
+                .saturating_add(data.as_ref().map_or(0, |value| {
+                    serde_json::to_vec(value).map_or(0, |encoded| encoded.len())
+                })),
+            _ => return 0,
+        };
+    (bytes as u64).saturating_add(3) / 4
 }
 
 // Complete messages are chunked at UTF-8 boundaries; no head-only truncation.
@@ -2020,22 +2019,114 @@ fn render_checkpoint_with_preamble(
         (REQUIRED_SECTIONS[7], checkpoint.next_steps.clone()),
     ];
     // Validated semantic claims must not be silently clipped by equal per-section
-    // quotas. The caller either admits this complete representation or keeps the
-    // previous Surface when it cannot fit.
+    // quotas. Only inherited raw extractive evidence (tool_outcomes, merged
+    // references, and evidence_refs) is bounded when the combined summary would
+    // otherwise exceed `maximum`; if semantic claims themselves still exceed
+    // `maximum`, the caller rejects or triggers a concise semantic rewrite.
     if checkpoint.summary_mode.starts_with("semantic synthesis") {
+        let render_unbounded = |items: &[(&str, Vec<String>)]| {
+            let mut rendered = format!("{preamble}\nSummary mode: {}", checkpoint.summary_mode);
+            for (title, values) in items {
+                rendered.push_str(&format!("\n\n{title}\n"));
+                if values.is_empty() {
+                    rendered.push_str("- (none)");
+                } else {
+                    rendered.push_str(
+                        &values
+                            .iter()
+                            .map(|line| format!("- {line}"))
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    );
+                }
+            }
+            rendered
+        };
+        let full = render_unbounded(&sections);
+        if full.len() <= maximum {
+            return full;
+        }
+        // Keep validated semantic claims intact and budget only the inherited
+        // extractive sections: tool_evidence (index 5), related_files_symbols_commands
+        // (index 4), and appended evidence_refs inside blockers (index 6).
+        let semantic_blockers = checkpoint.todos_and_blockers.clone();
+        let evidence_ref_lines = checkpoint
+            .evidence_refs
+            .iter()
+            .map(|reference| format!("Evidence reference: {reference}"))
+            .collect::<Vec<_>>();
+        let mut protected_bytes =
+            format!("{preamble}\nSummary mode: {}", checkpoint.summary_mode).len();
+        for (index, (title, values)) in sections.iter().enumerate() {
+            protected_bytes += 2 + title.len() + 1;
+            match index {
+                4 | 5 => {
+                    // Extractive-heavy sections: budgeted from remaining space below.
+                }
+                6 => {
+                    if !semantic_blockers.is_empty() {
+                        protected_bytes += semantic_blockers
+                            .iter()
+                            .map(|line| line.len() + 2)
+                            .sum::<usize>()
+                            + semantic_blockers.len().saturating_sub(1);
+                    }
+                }
+                _ => {
+                    if values.is_empty() {
+                        protected_bytes += "- (none)".len();
+                    } else {
+                        protected_bytes += values.iter().map(|line| line.len() + 2).sum::<usize>()
+                            + values.len().saturating_sub(1);
+                    }
+                }
+            }
+        }
+        let extractive_remaining = maximum.saturating_sub(protected_bytes + 32);
+        let extractive_count = usize::from(!sections[4].1.is_empty())
+            + usize::from(!sections[5].1.is_empty())
+            + usize::from(!evidence_ref_lines.is_empty());
+        let per_extractive = extractive_remaining / extractive_count.max(1);
         let mut rendered = format!("{preamble}\nSummary mode: {}", checkpoint.summary_mode);
-        for (title, values) in &sections {
-            rendered.push_str(&format!("\n\n{title}\n"));
-            if values.is_empty() {
-                rendered.push_str("- (none)");
-            } else {
-                rendered.push_str(
-                    &values
-                        .iter()
-                        .map(|line| format!("- {line}"))
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                );
+        for (index, (title, values)) in sections.iter().enumerate() {
+            rendered.push_str("\n\n");
+            rendered.push_str(title);
+            rendered.push('\n');
+            match index {
+                4 | 5 => {
+                    if values.is_empty() {
+                        rendered.push_str("- (none)");
+                    } else {
+                        rendered.push_str(&render_bullets(values, per_extractive));
+                    }
+                }
+                6 => {
+                    if semantic_blockers.is_empty() && evidence_ref_lines.is_empty() {
+                        rendered.push_str("- (none)");
+                    } else {
+                        let mut parts = Vec::new();
+                        for line in &semantic_blockers {
+                            parts.push(format!("- {line}"));
+                        }
+                        if !evidence_ref_lines.is_empty() {
+                            parts.push(render_bullets(&evidence_ref_lines, per_extractive));
+                        }
+                        rendered.push_str(&parts.join("\n"));
+                    }
+                }
+                _ => {
+                    if values.is_empty() {
+                        rendered.push_str("- (none)");
+                    } else {
+                        rendered.push_str(
+                            &values
+                                .iter()
+                                .map(|line| format!("- {line}"))
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                        );
+                    }
+                }
             }
         }
         return rendered;

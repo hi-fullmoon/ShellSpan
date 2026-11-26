@@ -458,4 +458,40 @@ describe('AiTurnChangesSummary', () => {
     expect(turnFooterCss).toContain('.ai-turn-changes-header:has(.ai-turn-changes-trigger:hover)');
     expect(turnFooterCss).not.toMatch(/^\.ai-turn-changes-trigger:hover\b/m);
   });
+
+  it('preserves historical turn baseline map identity when a later turn updates', () => {
+    const readTool = makeTool({
+      key: 'tool:read-base',
+      callId: 'call-read-base',
+      name: 'read_file',
+      nativeName: 'read_file',
+      input: { path: 'src/base.ts' },
+      output: { path: 'src/base.ts', content: 'line-1\nline-2\n', truncated: false },
+    });
+    const turn1 = makeProcess({
+      key: 'turn-process:turn-1',
+      turnId: 'turn-1',
+      children: [readTool],
+      childKeys: [readTool.key],
+    });
+    const turn2a = makeProcess({
+      key: 'turn-process:turn-2',
+      turnId: 'turn-2',
+      children: [],
+      childKeys: [],
+    });
+    const turn2b = makeProcess({
+      key: 'turn-process:turn-2',
+      turnId: 'turn-2',
+      lastSeq: 99,
+      children: [],
+      childKeys: [],
+    });
+
+    const first = buildConversationTurnBaselines([turn1, turn2a]);
+    const second = buildConversationTurnBaselines([turn1, turn2b]);
+    expect(second.get(turn1.key)).toBe(first.get(turn1.key));
+    expect(second.get(turn2b.key)).toBe(first.get(turn2a.key));
+    expect(second.get(turn2b.key)?.get('src/base.ts')).toBe('line-1\nline-2\n');
+  });
 });

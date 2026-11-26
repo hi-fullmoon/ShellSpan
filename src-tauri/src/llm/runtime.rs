@@ -80,9 +80,7 @@ impl PreparedModel {
         if !request.tools.is_empty() && model.tool_calling == catalog::Support::Unsupported {
             return Err("UNSUPPORTED_OPTION: tool calling".into());
         }
-        let mut content = request.clone();
-        content.request_id.clear();
-        let images = content
+        let images = request
             .messages
             .iter()
             .flat_map(|m| match m {
@@ -90,6 +88,7 @@ impl PreparedModel {
                 _ => vec![],
             })
             .collect();
+        let content_hash = hash_request_without_id(&request)?;
         let snapshot = RequestSnapshot::Prepared {
             route_id: self.provider.id.clone(),
             route_revision: self.route.revision,
@@ -106,7 +105,7 @@ impl PreparedModel {
             purpose: purpose.into(),
             preparation_version: 1,
             projection_policy: "immutable-png-v1-strict".into(),
-            content_hash: digest(&serde_json::to_vec(&content).map_err(|e| e.to_string())?),
+            content_hash,
             images,
         };
         Ok(PreparedCall {
@@ -116,6 +115,45 @@ impl PreparedModel {
         })
     }
 }
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BorrowedRequestHashView<'a> {
+    request_id: &'a str,
+    surface_generation: u64,
+    system_prompt: &'a str,
+    messages: &'a [ModelMessage],
+    tools: &'a [ModelToolDefinition],
+    #[serde(skip_serializing_if = "ModelToolChoice::is_auto")]
+    tool_choice: ModelToolChoice,
+}
+
+struct Sha256Writer(Sha256);
+
+impl std::io::Write for Sha256Writer {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.update(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn hash_request_without_id(request: &ModelRequest) -> Result<String, String> {
+    let view = BorrowedRequestHashView {
+        request_id: "",
+        surface_generation: request.surface_generation,
+        system_prompt: &request.system_prompt,
+        messages: &request.messages,
+        tools: &request.tools,
+        tool_choice: request.tool_choice,
+    };
+    let mut writer = Sha256Writer(Sha256::new());
+    serde_json::to_writer(&mut writer, &view).map_err(|e| e.to_string())?;
+    Ok(hex::encode(writer.0.finalize()))
+}
+
 #[derive(Clone)]
 pub(crate) struct PreparedCall {
     model: PreparedModel,

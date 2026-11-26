@@ -434,9 +434,10 @@ const LARGE_MARKDOWN_CHUNK = 8_192;
 const MARKDOWN_UPDATE_INTERVAL_MS = 80;
 
 export const StreamingMarkdownContent = React.memo(function StreamingMarkdownContent({
-  children, streaming, animateText = true, ...props
+  children, streaming, animateText = true, initialSource, ...props
 }: React.ComponentProps<typeof MarkdownContent> & { streaming: boolean; animateText?: boolean }) {
   const [layoutRevision, publish] = useState(0);
+  const initialSourceRef = useRef(initialSource);
   const published = useRef(children);
   const latest = useRef(children);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -466,7 +467,7 @@ export const StreamingMarkdownContent = React.memo(function StreamingMarkdownCon
   useMessageLayoutCommit(layoutRevision);
   return (
     <StreamingTextContext.Provider value={streaming && animateText}>
-      <MarkdownContent {...props} streaming={streaming}>{shown}</MarkdownContent>
+      <MarkdownContent {...props} initialSource={initialSourceRef.current} streaming={streaming}>{shown}</MarkdownContent>
     </StreamingTextContext.Provider>
   );
 });

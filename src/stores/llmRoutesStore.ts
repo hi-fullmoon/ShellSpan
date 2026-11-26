@@ -27,25 +27,58 @@ interface LlmRoutesState {
   hydrate(): Promise<void>;
   save(routes: ProviderRoute[], defaultSelection: ModelSelection|undefined, secrets?: Record<string,string>): Promise<RouteSnapshot>;
 }
+const MAX_HYDRATE_REVISION_RETRIES = 3;
+let hydrateInFlight: Promise<void> | null = null;
+let hydrateGeneration = 0;
+
 export const useLlmRoutesStore=create<LlmRoutesState>((set,get)=>({
   status:'idle', modelsByRoute:{},
-  async hydrate(){ set({status:'loading',error:undefined}); try {
-    const snapshot=await invokeListAiRoutes();
-    const responses=await Promise.all(snapshot.routes.map(async route=>[route.id,await invokeListAiRouteModels(route.id)] as const));
-    if(responses.some(([,response])=>response.revision!==snapshot.revision)) { await get().hydrate(); return; }
-    const entries=responses.map(([id,response])=>[id,response.models] as const);
-    // Ignore a late response if a newer revision has already been published.
-    if(get().snapshot && get().snapshot!.revision>snapshot.revision) return;
-    set({snapshot,modelsByRoute:Object.fromEntries(entries),status:'ready'});
-  } catch(error){set({status:'error',error:String(error)});} },
+  async hydrate(){
+    if (hydrateInFlight) return hydrateInFlight;
+    const generation = ++hydrateGeneration;
+    const run = (async () => {
+      set({status:'loading',error:undefined});
+      try {
+        for (let attempt = 0; attempt <= MAX_HYDRATE_REVISION_RETRIES; attempt += 1) {
+          const snapshot=await invokeListAiRoutes();
+          const responses=await Promise.all(snapshot.routes.map(async route=>[route.id,await invokeListAiRouteModels(route.id)] as const));
+          if (responses.some(([,response])=>response.revision!==snapshot.revision)) {
+            if (attempt < MAX_HYDRATE_REVISION_RETRIES) continue;
+            throw new Error('ROUTE_REVISION_MISMATCH');
+          }
+          const entries=responses.map(([id,response])=>[id,response.models] as const);
+          // Ignore a late response if a newer revision or generation has already been published.
+          if (generation !== hydrateGeneration) return;
+          if(get().snapshot && get().snapshot!.revision>snapshot.revision) return;
+          set({snapshot,modelsByRoute:Object.fromEntries(entries),status:'ready'});
+          return;
+        }
+      } catch(error){
+        if (generation !== hydrateGeneration) return;
+        set({status:'error',error:String(error)});
+      }
+    })().finally(() => {
+      if (hydrateInFlight === run) hydrateInFlight = null;
+    });
+    hydrateInFlight = run;
+    return run;
+  },
   async save(routes,defaultSelection,secrets={}){
     const current=get().snapshot; if(!current) throw new Error('ROUTE_STATE_NOT_LOADED');
+    const generation = ++hydrateGeneration;
+    hydrateInFlight = null;
     set({status:'saving',error:undefined});
     try { const snapshot=await invokeSaveAiRoutes({routes,defaultSelection,expectedRevision:current.revision,secrets});
       const responses=await Promise.all(snapshot.routes.map(async route=>[route.id,await invokeListAiRouteModels(route.id)] as const));
-      if(responses.some(([,response])=>response.revision!==snapshot.revision)) { await get().hydrate(); return snapshot; }
+      if(responses.some(([,response])=>response.revision!==snapshot.revision)) { await get().hydrate(); return get().snapshot ?? snapshot; }
       const entries=responses.map(([id,response])=>[id,response.models] as const);
-      set({snapshot,modelsByRoute:Object.fromEntries(entries),status:'ready'}); return snapshot; }
-    catch(error){set({status:'error',error:String(error)}); throw error;}
+      if (!get().snapshot || get().snapshot!.revision <= snapshot.revision) {
+        set({snapshot,modelsByRoute:Object.fromEntries(entries),status:'ready'});
+      }
+      return get().snapshot ?? snapshot; }
+    catch(error){
+      if (generation === hydrateGeneration) set({status:'error',error:String(error)});
+      throw error;
+    }
   },
 }));

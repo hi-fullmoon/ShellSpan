@@ -975,8 +975,15 @@ export function aiConversationNodeRevision(node: AiConversationNode): string {
       return `${base}:${node.state}:${node.hasTurnTail ?? false}:${node.partialReason ?? ''}`;
     case 'reasoning':
       return `${base}:${node.state}:${node.durationMs ?? ''}`;
-    case 'tool':
-      return `${base}:${node.state}`;
+    case 'tool': {
+      const bg = node.backgroundJob
+        ? `${node.backgroundJob.state}:${node.backgroundJob.exitCode ?? ''}:${node.backgroundJob.observing ? 1 : 0}:${node.backgroundJob.stopRequested ? 1 : 0}:${node.backgroundJob.observationCount}:${node.backgroundJob.output.length}:${node.backgroundJob.latestObserverToolKey}`
+        : '';
+      const linked = node.linkedBackgroundJob
+        ? `${node.linkedBackgroundJob.observedState}:${node.linkedBackgroundJob.exitCode ?? ''}`
+        : '';
+      return `${base}:${node.state}:${node.recoveredByToolKey ?? ''}:${bg}:${linked}`;
+    }
     case 'question':
       return `${base}:${node.question.status}:${node.lastSeq}`;
     case 'approvalMarker':

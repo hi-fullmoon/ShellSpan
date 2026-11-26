@@ -138,6 +138,21 @@ pub(crate) struct LocalScopedReader {
     _ancestors: Vec<File>,
 }
 impl LocalScopedReader {
+    pub(crate) fn open_regular_file(&self, path: &str) -> Result<File, ScopeReadError> {
+        self.check_root()?;
+        let handle = self.open_relative(path, false)?;
+        #[cfg(unix)]
+        let file = handle;
+        #[cfg(windows)]
+        let file = handle.file;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() {
+            return Err(ScopeReadError::Denied);
+        }
+        self.check_root()?;
+        Ok(file)
+    }
+
     #[cfg(unix)]
     pub(super) fn open_command_directory(&self, path: &str) -> Result<File, ScopeReadError> {
         self.check_root()?;

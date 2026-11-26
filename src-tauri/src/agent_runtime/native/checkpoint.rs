@@ -316,10 +316,33 @@ fn load_records(directory: &Path) -> Result<Vec<PersistedCheckpointNative>, Stri
         if path.extension().and_then(|value| value.to_str()) != Some("json") {
             continue;
         }
-        let bytes = read_bounded(&path, 64 * 1024)?;
-        let record: PersistedCheckpointNative = serde_json::from_slice(&bytes)
-            .map_err(|error| format!("checkpoint metadata is invalid: {error}"))?;
-        validate_checkpoint_id(&record.snapshot.checkpoint_id)?;
+        let bytes = match read_bounded(&path, 64 * 1024) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                log::warn!(
+                    "Skipping unreadable checkpoint metadata {}: {error}",
+                    path.display()
+                );
+                continue;
+            }
+        };
+        let record: PersistedCheckpointNative = match serde_json::from_slice(&bytes) {
+            Ok(record) => record,
+            Err(error) => {
+                log::warn!(
+                    "Skipping corrupt checkpoint metadata {}: {error}",
+                    path.display()
+                );
+                continue;
+            }
+        };
+        if let Err(error) = validate_checkpoint_id(&record.snapshot.checkpoint_id) {
+            log::warn!(
+                "Skipping invalid checkpoint metadata {}: {error}",
+                path.display()
+            );
+            continue;
+        }
         records.push(record);
     }
     Ok(records)

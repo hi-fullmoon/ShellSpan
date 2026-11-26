@@ -843,7 +843,7 @@ export function AiWorkspaceRoot({
       anchor.href = url;
       anchor.download = fileName;
       anchor.click();
-      URL.revokeObjectURL(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
       toast.success(t('ai.workspace.export.success'));
     } catch {
       toast.error(t('ai.workspace.export.failed'));
@@ -904,6 +904,26 @@ export function AiWorkspaceRoot({
       )}
     </Badge>
   ) : undefined;
+
+  const failureRecovery = useMemo(
+    () => (view && (!readOnlySession || Boolean(subagent)) && !historicalTargetUnavailable
+      ? latestFailureRecovery(view)
+      : null),
+    [historicalTargetUnavailable, readOnlySession, subagent, view],
+  );
+  const failureRecoveryContextValue = useMemo(() => ({
+    recovery: failureRecovery,
+    busy: retryingModel || activeComposerState?.phase === 'submitting' || activeComposerState?.phase === 'stopping',
+    onRetry: onRetryModel,
+    onSettings: onOpenModel,
+  }), [activeComposerState?.phase, failureRecovery, onOpenModel, onRetryModel, retryingModel]);
+  const failedDraftRecoveryContextValue = useMemo(() => ({
+    composerState,
+    syncRecovery: view?.syncRecovery,
+    onRetrySync,
+    onRetryFailedDraft: readOnlySession ? undefined : onRetryFailedDraft,
+    failedDraftRetryBlockedReason,
+  }), [composerState, failedDraftRetryBlockedReason, onRetryFailedDraft, onRetrySync, readOnlySession, view?.syncRecovery]);
 
   return (
     <section
@@ -1001,18 +1021,8 @@ export function AiWorkspaceRoot({
               onSelectQuickAction={handleSelectHeroQuickAction}
             />
           ) : (
-            <AiFailureRecoveryContext.Provider value={{
-              recovery: view && (!readOnlySession || Boolean(subagent)) && !historicalTargetUnavailable
-                ? latestFailureRecovery(view) : null,
-              busy: retryingModel || activeComposerState?.phase === 'submitting' || activeComposerState?.phase === 'stopping',
-              onRetry: onRetryModel,
-              onSettings: onOpenModel,
-            }}>
-            <AiFailedDraftRecoveryContext.Provider value={{
-              composerState, syncRecovery: view?.syncRecovery,
-              onRetrySync, onRetryFailedDraft: readOnlySession ? undefined : onRetryFailedDraft,
-              failedDraftRetryBlockedReason,
-            }}>
+            <AiFailureRecoveryContext.Provider value={failureRecoveryContextValue}>
+            <AiFailedDraftRecoveryContext.Provider value={failedDraftRecoveryContextValue}>
             <AiMarkdownTargetContext.Provider value={sessionTarget}>
             <AiTerminalInsertContext.Provider value={terminalInsertContext}>
             <AiContinueGenerationContext.Provider value={continueGenerationContext}>

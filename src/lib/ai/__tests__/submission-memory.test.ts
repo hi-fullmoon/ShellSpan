@@ -110,3 +110,30 @@ it('settles stop against the latest visit and preserves its draft', () => {
   memory.settleSession(oldVisit, 'missing-session', { type: 'stop.succeeded' });
   expect(memory.sessionStates.has('missing-session')).toBe(false);
 });
+
+it('does not retain idle closed workspaces and clears inputs when forgetting a closed session', () => {
+  const memory = submissionMemoryFor({});
+  const idleContext = { key: 'terminal:idle-close' };
+  const idleState = createAiComposerState({ sessionId: 'idle-session', runtimeStatus: 'idle' });
+  memory.remember(idleContext, idleState);
+  memory.close(idleContext);
+  expect(memory.reopen(idleContext.key)).toBeUndefined();
+
+  const pendingContext = { key: 'terminal:pending-close' };
+  const pendingState = reduceAiComposer(
+    createAiComposerState({ sessionId: 'pending-session', runtimeStatus: 'running' }),
+    { type: 'submit.requested', content: 'img', gesture: 'primary', accelerated: false, clientOperationId: 'op-img', now: 1, hasProvider: true, canCreateSession: true },
+  ).state;
+  memory.inputs.set('op-img', {
+    clientOperationId: 'op-img',
+    mode: 'nextTurn',
+    content: 'img',
+    provider: { id: 'r', kind: 'openAiCompatible', baseUrl: 'https://x', model: 'm', requiresApiKey: false, profile: 'generic' },
+  });
+  memory.remember(pendingContext, pendingState);
+  memory.close(pendingContext);
+  expect(memory.reopen(pendingContext.key)?.context).toBe(pendingContext);
+  memory.forgetClosedSession('pending-session');
+  expect(memory.reopen(pendingContext.key)).toBeUndefined();
+  expect(memory.inputs.has('op-img')).toBe(false);
+});

@@ -649,6 +649,14 @@ impl NativeToolEngine {
         database: &Database,
     ) -> Result<PreparedMcpAuthorizationNative, String> {
         context.validate()?;
+        #[cfg(target_os = "macos")]
+        if context.mac_sandbox_required {
+            return Err("MCP tools are not available in local sandbox sessions".into());
+        }
+        #[cfg(windows)]
+        if context.windows_sandbox_required {
+            return Err("MCP tools are not available in local sandbox sessions".into());
+        }
         let target = context
             .request
             .targets
@@ -695,13 +703,42 @@ impl NativeToolEngine {
             paths: Vec::new(),
             network_destinations: Vec::new(),
         };
+        let raw_command_summary = if server.args.is_empty() {
+            server.command.clone()
+        } else {
+            format!("{} {}", server.command, server.args.join(" "))
+        };
+        let redacted_command = crate::redaction::redact_sensitive_text(&raw_command_summary);
+        let command_summary = if redacted_command.len() > 256 {
+            let mut end = 256;
+            while !redacted_command.is_char_boundary(end) {
+                end -= 1;
+            }
+            format!("{}...", &redacted_command[..end])
+        } else {
+            redacted_command
+        };
+        let cwd_summary = server.cwd.as_deref().unwrap_or(".");
+        let creds_summary = if server.credential_refs.is_empty() {
+            "none".to_string()
+        } else {
+            server
+                .credential_refs
+                .iter()
+                .map(|r| format!("{}={}", r.env, r.credential_id))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
         Ok(PreparedMcpAuthorizationNative {
             native_prompt: format!(
-                "Allow {} for Session task {} / turn {} / step {}?\n\nThe MCP server starts only after approval. Its output is untrusted.",
+                "Allow {} for Session task {} / turn {} / step {}?\n\nCommand: {}\nCwd: {}\nCredentials: {}\n\nThe MCP server starts only after approval. Its output is untrusted.",
                 canonical_name,
                 context.request.task_id,
                 context.turn_id,
                 context.step_id,
+                command_summary,
+                cwd_summary,
+                creds_summary,
             ),
             context,
             call,
@@ -1194,17 +1231,17 @@ impl NativeToolEngine {
         target: &crate::agent_runtime::AgentSessionTarget,
     ) -> Option<bool> {
         if handle.starts_with("proc-") {
-            let snapshot = self.processes.get(handle).ok()?.snapshot().ok()?;
-            if snapshot.owner_target_id != target.target_id
-                || snapshot.task_id != task
-                || snapshot.request_id
+            let meta = self.processes.get(handle).ok()?.metadata().ok()?;
+            if meta.owner_target_id != target.target_id
+                || meta.task_id != task
+                || meta.request_id
                     != crate::agent_runtime::native_adapter::stable_native_id("request", session)
-                || snapshot.state == ProcessLifecycleNative::Running
-                || !snapshot.termination_confirmed
+                || meta.state == ProcessLifecycleNative::Running
+                || !meta.termination_confirmed
             {
                 return None;
             }
-            Some(snapshot.state != ProcessLifecycleNative::Exited || snapshot.exit_code != Some(0))
+            Some(meta.state != ProcessLifecycleNative::Exited || meta.exit_code != Some(0))
         } else {
             let job = self
                 .terminal_broker
@@ -1539,11 +1576,11 @@ impl NativeToolEngine {
                     }
                     return Ok(());
                 }
-                let snapshot = self.processes.get(process_handle)?.snapshot()?;
-                if snapshot.target_id != *target_id
-                    || snapshot.owner_target_id != *owner_target_id
-                    || snapshot.request_id != context.request.request_id
-                    || snapshot.task_id != context.request.task_id
+                let meta = self.processes.get(process_handle)?.metadata()?;
+                if meta.target_id != *target_id
+                    || meta.owner_target_id != *owner_target_id
+                    || meta.request_id != context.request.request_id
+                    || meta.task_id != context.request.task_id
                 {
                     return Err("Process handle does not match its frozen Session owner".into());
                 }

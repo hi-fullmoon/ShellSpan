@@ -416,13 +416,14 @@ async fn prepare_step_attempt(
     state: &mut StepLoopState,
     request_id: String,
 ) -> Result<AttemptPreparation, String> {
+    let was_prepared = state.prepared_call.is_some();
     let mut request = if let Some(call) = &state.prepared_call {
         call.request(request_id.clone())
     } else {
         assemble_fresh_step_request(ctx, &request_id).await?
     };
     let request_surface_generation = request.surface_generation;
-    if state.prepared_call.is_none() {
+    let budget = if !was_prepared {
         let raw_budget =
             estimate_request_budget(ctx.sessions, &ctx.entry.session_id, ctx.model, &request)?;
         if raw_budget.requires_compaction() {
@@ -433,19 +434,23 @@ async fn prepare_step_attempt(
                 &request,
                 &raw_budget,
             )?;
+            request = ctx
+                .tools
+                .bound_request_results(
+                    &ctx.entry.session_id,
+                    ctx.turn_id,
+                    ctx.step_id,
+                    request,
+                    raw_budget,
+                )
+                .await?;
+            estimate_request_budget(ctx.sessions, &ctx.entry.session_id, ctx.model, &request)?
+        } else {
+            raw_budget
         }
-        request = ctx
-            .tools
-            .bound_request_results(
-                &ctx.entry.session_id,
-                ctx.turn_id,
-                ctx.step_id,
-                request,
-                raw_budget,
-            )
-            .await?;
-    }
-    let budget = estimate_request_budget(ctx.sessions, &ctx.entry.session_id, ctx.model, &request)?;
+    } else {
+        estimate_request_budget(ctx.sessions, &ctx.entry.session_id, ctx.model, &request)?
+    };
     // Retries retain the same prepared request. Its input was already
     // admitted; compaction is only appropriate when assembling a new call.
     if budget.requires_compaction() && state.prepared_call.is_none() {
@@ -513,19 +518,21 @@ async fn prepare_step_attempt(
             &ctx.entry.cancellation(),
         )));
     }
-    if state.prepared_call.is_none() {
+    let budget = if state.prepared_call.is_none() {
         state.prepared_call = Some(ctx.model.prepare_request(
             request,
             "step",
             &ctx.entry.cancellation(),
         )?);
-    }
-    request = state
-        .prepared_call
-        .as_ref()
-        .expect("prepared call")
-        .request(request_id.clone());
-    let budget = estimate_request_budget(ctx.sessions, &ctx.entry.session_id, ctx.model, &request)?;
+        request = state
+            .prepared_call
+            .as_ref()
+            .expect("prepared call")
+            .request(request_id.clone());
+        estimate_request_budget(ctx.sessions, &ctx.entry.session_id, ctx.model, &request)?
+    } else {
+        budget
+    };
     if !budget.fits_hard_limit() {
         ctx.compactions.record_budget(
             &ctx.entry.session_id,

@@ -84,25 +84,13 @@ export function AiWorkspaceController({
     return [...ids];
   }, [activeTerminal, focusMode, scope]);
   const activeTerminalStatus = activeTerminal?.status;
-  const nativeStartupTimedOut = useTerminalStore((state) => state.sessions.find(
-    (candidate) => candidate.sessionId === activeTerminalId,
-  )?.integrationReason === 'nativeStartupTimedOut');
-  const terminalReconnecting = useTerminalStore((state) => state.sessions.find(
-    candidate => candidate.sessionId === activeTerminalId,
-  )?.reconnecting ?? false);
-  const activeTerminalNativeRecoveryRequired = useTerminalStore((state) => state.sessions.find(
-    (candidate) => candidate.sessionId === activeTerminalId,
-  )?.nativeRecoveryRequired ?? false);
+  const nativeStartupTimedOut = activeTerminal?.integrationReason === 'nativeStartupTimedOut';
+  const terminalReconnecting = activeTerminal?.reconnecting ?? false;
+  const activeTerminalNativeRecoveryRequired = activeTerminal?.nativeRecoveryRequired ?? false;
   const terminalRecovery = !controller.readOnlySession && terminalExecutionRecovery(controller.view);
-  const terminalGeneration = useTerminalStore((state) => state.sessions.find(
-    (candidate) => candidate.sessionId === activeTerminalId,
-  )?.terminalGeneration);
-  const terminalSessionId = useTerminalStore((state) => state.sessions.find(
-    (candidate) => candidate.sessionId === activeTerminalId,
-  )?.terminalSessionId);
-  const activeSandboxAgentId = useTerminalStore((state) => state.sessions.find(
-    (candidate) => candidate.sessionId === activeTerminalId,
-  )?.ptyInfo?.sandboxBinding?.agentSessionId);
+  const terminalGeneration = activeTerminal?.terminalGeneration;
+  const terminalSessionId = activeTerminal?.terminalSessionId;
+  const activeSandboxAgentId = activeTerminal?.ptyInfo?.sandboxBinding?.agentSessionId;
   const session = controller.view?.snapshot.value;
   const boundSandbox = useTerminalStore((state) => {
     const id = session?.header.sessionId;

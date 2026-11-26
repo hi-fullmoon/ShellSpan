@@ -119,11 +119,14 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [deletingAll, setDeletingAll] = useState(false);
   const adapterRef = useRef<AiSessionAdapter<'agent'> | null>(null);
+  const viewAbortRef = useRef<AbortController | null>(null);
   const requestRef = useRef(0);
   const viewRequestRef = useRef(0);
 
   const closeView = useCallback(() => {
     viewRequestRef.current += 1;
+    viewAbortRef.current?.abort();
+    viewAbortRef.current = null;
     adapterRef.current?.dispose();
     adapterRef.current = null;
     setSelected(null);
@@ -152,6 +155,8 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
     return () => {
       requestRef.current += 1;
       viewRequestRef.current += 1;
+      viewAbortRef.current?.abort();
+      viewAbortRef.current = null;
       adapterRef.current?.dispose();
       adapterRef.current = null;
     };
@@ -160,18 +165,23 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
   const openView = useCallback(async (item: AgentSessionListItem) => {
     closeView();
     const request = ++viewRequestRef.current;
+    const controller = new AbortController();
+    viewAbortRef.current = controller;
     setSelected(item);
     setViewLoading(true);
     try {
       const { createAgentSessionAdapter } = await import('@/lib/ai/agent-session-adapter');
-      if (request !== viewRequestRef.current) return;
+      if (request !== viewRequestRef.current || controller.signal.aborted) return;
       const adapter = createAgentSessionAdapter();
       adapterRef.current = adapter;
       const next = await adapter.open(item.header.sessionId);
-      const sources = await loadHistoricalSources(adapter, next);
-      if (request === viewRequestRef.current) setView(withHistoricalConversation(next, sources));
+      if (request !== viewRequestRef.current || controller.signal.aborted) return;
+      const sources = await loadHistoricalSources(adapter, next, controller.signal);
+      if (request === viewRequestRef.current && !controller.signal.aborted) {
+        setView(withHistoricalConversation(next, sources));
+      }
     } catch {
-      if (request === viewRequestRef.current) setViewError(true);
+      if (request === viewRequestRef.current && !controller.signal.aborted) setViewError(true);
     } finally {
       if (request === viewRequestRef.current) setViewLoading(false);
     }

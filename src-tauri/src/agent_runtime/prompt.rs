@@ -703,7 +703,10 @@ pub(crate) fn apply_terminal_execution_context(
             "nativeJobControl": job_control,
             "boundCommandReady": command_ready,
         })),
-        source: AgentMessageSource::runtime("terminal-execution-state".into()),
+        source: AgentMessageSource {
+            producer_id: "shellspan.terminal-execution-state.v1".into(),
+            ..AgentMessageSource::runtime("terminal-execution-state".into())
+        },
     });
 }
 

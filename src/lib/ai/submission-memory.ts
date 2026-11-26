@@ -19,7 +19,26 @@ export class AiSubmissionMemory {
 
   remember(context: AiSubmissionContext, state: AiComposerState): void {
     this.ledger.set(context, state);
-    if (state.sessionId) this.sessionStates.set(state.sessionId, state);
+    if (state.sessionId) {
+      this.sessionStates.delete(state.sessionId);
+      this.sessionStates.set(state.sessionId, state);
+      if (this.sessionStates.size > 128) {
+        for (const [id, entry] of this.sessionStates) {
+          if (this.sessionStates.size <= 128) break;
+          if (!entry.pendingSubmissions.length && !entry.failedDrafts.length) {
+            this.sessionStates.delete(id);
+            this.sessionQueues.delete(id);
+          }
+        }
+      }
+    }
+    if (
+      this.closedWorkspaces.get(context.key) === context
+      && !state.pendingSubmissions.length
+      && !state.failedDrafts.length
+    ) {
+      this.closedWorkspaces.delete(context.key);
+    }
     for (const listener of [...this.listeners]) listener(context, state);
   }
 
@@ -30,13 +49,30 @@ export class AiSubmissionMemory {
     this.remember(context, reduceAiComposer(previous, event).state);
   }
 
-  close(context: AiSubmissionContext): void { this.closedWorkspaces.set(context.key, context); }
+  close(context: AiSubmissionContext): void {
+    const state = this.stateFor(context);
+    if (state && (state.pendingSubmissions.length > 0 || state.failedDrafts.length > 0)) {
+      this.closedWorkspaces.set(context.key, context);
+    } else {
+      this.closedWorkspaces.delete(context.key);
+    }
+  }
 
-  /** Remove automatic restoration links for archived/deleted conversations. */
+  /** Remove automatic restoration links and retained state for archived/deleted conversations. */
   forgetClosedSession(sessionId: string): void {
+    const remembered = this.sessionStates.get(sessionId);
+    if (remembered) {
+      for (const pending of remembered.pendingSubmissions) {
+        this.inputs.delete(pending.clientOperationId);
+      }
+      for (const failed of remembered.failedDrafts) {
+        this.inputs.delete(failed.id);
+      }
+    }
     for (const [workspace, context] of this.closedWorkspaces) {
       if (this.stateFor(context)?.sessionId === sessionId) this.closedWorkspaces.delete(workspace);
     }
+    this.sessionQueues.delete(sessionId);
   }
 
   stateFor(context: AiSubmissionContext): AiComposerState | undefined {

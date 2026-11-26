@@ -1,4 +1,3 @@
-use std::io::Read;
 use std::net::TcpStream;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -12,7 +11,6 @@ use hyper::client::conn::http1;
 use hyper::header::{CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, HOST};
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
-use reqwest::blocking::Client;
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 use url::Url;
@@ -120,6 +118,23 @@ pub(super) fn execute_http_probe_native(
     )
 }
 
+fn shared_loopback_http_client() -> Result<&'static reqwest::Client, String> {
+    static CLIENT: std::sync::OnceLock<Result<reqwest::Client, String>> =
+        std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            crate::ensure_rustls_provider();
+            reqwest::Client::builder()
+                .no_proxy()
+                .redirect(reqwest::redirect::Policy::none())
+                .user_agent(concat!("ShellSpan/", env!("CARGO_PKG_VERSION")))
+                .build()
+                .map_err(|error| format!("Failed to create loopback HTTP client: {error}"))
+        })
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
 fn send_http_probe(
     arguments: &ProbeHttpArgumentsNative,
     logical_url: &Url,
@@ -127,15 +142,7 @@ fn send_http_probe(
     max_bytes: u64,
     cancellation: &CancellationToken,
 ) -> Result<HttpProbeOutputNative, String> {
-    crate::ensure_rustls_provider();
-    let client = Client::builder()
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(timeout)
-        .timeout(timeout)
-        .user_agent(concat!("ShellSpan/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .map_err(|error| format!("Failed to create loopback HTTP client: {error}"))?;
+    let client = shared_loopback_http_client()?;
     let method = match arguments.method {
         HttpProbeMethodNative::Get => reqwest::Method::GET,
         HttpProbeMethodNative::Head => reqwest::Method::HEAD,
@@ -151,6 +158,7 @@ fn send_http_probe(
     };
     let mut request = client
         .request(method, logical_url.clone())
+        .timeout(timeout)
         .header(CONNECTION, "close")
         .header(HOST, target_authority);
     if let Some(content_type) = arguments.content_type.as_deref() {
@@ -159,45 +167,85 @@ fn send_http_probe(
     if let Some(body) = arguments.body.as_ref() {
         request = request.body(body.clone());
     }
-    let response = request
-        .send()
-        .map_err(|error| probe_transport_error(&error))?;
-    if cancellation.is_cancelled() {
-        return Err("probe_http was cancelled while awaiting the response".into());
-    }
-
-    let status = response.status().as_u16();
-    let content_type = response
-        .headers()
-        .get(CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| (value.len() <= 1_024).then(|| value.to_string()));
-    let content_length = response
-        .headers()
-        .get(CONTENT_LENGTH)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok());
-    let mut body = Vec::new();
-    if arguments.method != HttpProbeMethodNative::Head {
-        response
-            .take(max_bytes.saturating_add(1))
-            .read_to_end(&mut body)
-            .map_err(|error| format!("Failed to read loopback HTTP response: {error}"))?;
-    }
-    if cancellation.is_cancelled() {
-        return Err("probe_http was cancelled while reading the response".into());
-    }
-    complete_http_probe(
-        arguments,
-        logical_url,
-        HttpProbeResponseNative {
-            status,
-            content_type,
-            content_length,
-            body,
-        },
-        max_bytes,
-    )
+    let fut = async {
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => Err("probe_http was cancelled while awaiting the response".to_string()),
+            res = async {
+                let mut response = request
+                    .send()
+                    .await
+                    .map_err(|error| probe_transport_error(&error))?;
+                let status = response.status().as_u16();
+                let content_type = response
+                    .headers()
+                    .get(CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| (value.len() <= 1_024).then(|| value.to_string()));
+                let content_length = response
+                    .headers()
+                    .get(CONTENT_LENGTH)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.parse::<u64>().ok());
+                let mut body = Vec::new();
+                if arguments.method != HttpProbeMethodNative::Head {
+                    let limit = max_bytes.saturating_add(1) as usize;
+                    while let Some(chunk) = response
+                        .chunk()
+                        .await
+                        .map_err(|error| format!("Failed to read loopback HTTP response: {error}"))?
+                    {
+                        if cancellation.is_cancelled() {
+                            return Err("probe_http was cancelled while reading the response".into());
+                        }
+                        let remaining = limit.saturating_sub(body.len());
+                        if remaining == 0 {
+                            break;
+                        }
+                        body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+                        if body.len() >= limit {
+                            break;
+                        }
+                    }
+                }
+                Ok(HttpProbeResponseNative {
+                    status,
+                    content_type,
+                    content_length,
+                    body,
+                })
+            } => res,
+        }
+    };
+    let response = match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(|| handle.block_on(fut))?
+        }
+        Ok(_) => std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_io()
+                        .enable_time()
+                        .build()
+                        .map_err(|error| {
+                            format!("Failed to create loopback HTTP runtime: {error}")
+                        })?;
+                    runtime.block_on(fut)
+                })
+                .join()
+                .map_err(|_| "Loopback HTTP probe worker panicked".to_string())?
+        })?,
+        Err(_) => {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_io()
+                .enable_time()
+                .build()
+                .map_err(|error| format!("Failed to create loopback HTTP runtime: {error}"))?;
+            runtime.block_on(fut)?
+        }
+    };
+    complete_http_probe(arguments, logical_url, response, max_bytes)
 }
 
 fn send_http_probe_over_stream(

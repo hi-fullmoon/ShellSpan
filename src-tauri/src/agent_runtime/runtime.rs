@@ -8,14 +8,13 @@ use base64::Engine;
 use tauri::Emitter;
 
 use super::{
-    drive_agent, recover_open_scope, AgentArtifactStore, AgentCompactionManager, AgentDriverConfig,
-    AgentDriverSettlement, AgentHookBus, AgentInboxLane, AgentInboxMessage, AgentLifecyclePhase,
-    AgentMessageSource, AgentRegistry, AgentSessionEvent, AgentSessionEventPage,
-    AgentSessionEventsRequest, AgentSessionListPage, AgentSessionListRequest, AgentSessionSnapshot,
-    AgentSessionStore, AgentToolDecision, AgentToolDecisionInput, AgentToolPipeline,
-    CreateAgentSessionRequest, ModelRegistry, NativeToolAdapter, NativeToolEngine,
-    NativeToolRuntime, NativeToolRuntimeSlot, OrchestrationToolRuntime,
-    OrchestrationToolRuntimeSlot, SubAgentManager,
+    recover_open_scope, AgentArtifactStore, AgentCompactionManager, AgentDriverConfig,
+    AgentHookBus, AgentInboxLane, AgentInboxMessage, AgentLifecyclePhase, AgentMessageSource,
+    AgentRegistry, AgentSessionEvent, AgentSessionEventPage, AgentSessionEventsRequest,
+    AgentSessionListPage, AgentSessionListRequest, AgentSessionSnapshot, AgentSessionStore,
+    AgentToolDecision, AgentToolDecisionInput, AgentToolPipeline, CreateAgentSessionRequest,
+    ModelRegistry, NativeToolAdapter, NativeToolEngine, NativeToolRuntime, NativeToolRuntimeSlot,
+    OrchestrationToolRuntime, OrchestrationToolRuntimeSlot, SubAgentManager,
 };
 
 #[cfg(all(
@@ -263,6 +262,13 @@ pub(crate) struct AgentRuntime {
     subagents: Arc<SubAgentManager>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WakeOutcome {
+    Started,
+    AlreadyRunning,
+    NotStarted,
+}
+
 struct ActiveDriverLease(Arc<super::AgentEntry>);
 
 struct SessionRecoveryGuard {
@@ -507,9 +513,14 @@ impl AgentRuntime {
                 })?;
             let _ = store.boundary("afterInbox", &lease.token);
             // Inbox commit is the acknowledgement. A wake failure cannot undo acceptance.
-            if !paused && self.wake(&input.session_id).is_err() {
-                if let Some(guard) = reservation.as_mut() {
-                    guard.committed = false;
+            if !paused {
+                match self.wake_with_outcome(&input.session_id) {
+                    Ok(WakeOutcome::Started | WakeOutcome::AlreadyRunning) => {}
+                    Ok(WakeOutcome::NotStarted) | Err(_) => {
+                        if let Some(guard) = reservation.as_mut() {
+                            guard.committed = false;
+                        }
+                    }
                 }
             }
             drop(reservation);
@@ -2076,14 +2087,22 @@ impl AgentRuntime {
         // Admission is durable. Scheduling failure cannot turn this receipt into
         // a failed send; the input remains available for explicit continuation.
         if !paused && !snapshot.ended {
-            if let Err(error) = self.wake(session_id) {
-                if let Some(guard) = reservation.as_mut() {
-                    guard.committed = false;
+            match self.wake_with_outcome(session_id) {
+                Ok(WakeOutcome::Started | WakeOutcome::AlreadyRunning) => {}
+                Ok(WakeOutcome::NotStarted) => {
+                    if let Some(guard) = reservation.as_mut() {
+                        guard.committed = false;
+                    }
                 }
-                log::warn!(
-                    "Agent input accepted but scheduling failed: {}",
-                    crate::redaction::redact_sensitive_text(&error)
-                );
+                Err(error) => {
+                    if let Some(guard) = reservation.as_mut() {
+                        guard.committed = false;
+                    }
+                    log::warn!(
+                        "Agent input accepted but scheduling failed: {}",
+                        crate::redaction::redact_sensitive_text(&error)
+                    );
+                }
             }
         }
         drop(reservation);
@@ -2114,9 +2133,18 @@ impl AgentRuntime {
         }
         self.require_session_not_stopping(session_id)?;
         let snapshot = self.sessions.snapshot(session_id)?;
+        let entry = self
+            .handles
+            .lock()
+            .map_err(|_| "Agent handle registry is unavailable".to_string())?
+            .get(session_id)
+            .map(|handle| handle.entry());
+        let Some(entry) = entry else {
+            return Ok(None);
+        };
         if paused
             || snapshot.ended
-            || self.agents.get(session_id)?.is_none()
+            || entry.phase()? == AgentLifecyclePhase::Waiting
             || snapshot.header.execution_surface != super::AgentExecutionSurface::BoundTerminal
         {
             return Ok(None);
@@ -2338,11 +2366,19 @@ impl AgentRuntime {
             guard.committed = !snapshot.ended;
         }
         if resume {
-            if let Err(error) = self.wake(&session_id) {
-                if let Some(guard) = reservation.as_mut() {
-                    guard.committed = false;
+            match self.wake_with_outcome(&session_id) {
+                Ok(WakeOutcome::Started | WakeOutcome::AlreadyRunning) => {}
+                Ok(WakeOutcome::NotStarted) => {
+                    if let Some(guard) = reservation.as_mut() {
+                        guard.committed = false;
+                    }
                 }
-                return Err(error);
+                Err(error) => {
+                    if let Some(guard) = reservation.as_mut() {
+                        guard.committed = false;
+                    }
+                    return Err(error);
+                }
             }
         }
         drop(reservation);
@@ -2498,6 +2534,10 @@ impl AgentRuntime {
         let snapshot = if let Some(handle) = handle {
             let result = async {
                 handle.entry().stop_admission()?;
+                // Always cancel the entry's token before checking descendant
+                // cancellation so an in-flight root LLM stream never stays live
+                // if a child fails to cancel and the handle is retained for retry.
+                handle.entry().cancel();
                 self.tools.cancel_session_interactions(&handle.entry())?;
                 descendants?;
                 self.tools.await_pending_executions(&handle.entry()).await?;
@@ -3600,6 +3640,10 @@ impl AgentRuntime {
     }
 
     fn wake(&self, session_id: &str) -> Result<(), String> {
+        self.wake_with_outcome(session_id).map(|_| ())
+    }
+
+    fn wake_with_outcome(&self, session_id: &str) -> Result<WakeOutcome, String> {
         // An attached entry accepts question answers while it is being
         // restored. Only the registered handle may start its driver.
         let entry = self
@@ -3609,108 +3653,31 @@ impl AgentRuntime {
             .get(session_id)
             .map(|handle| handle.entry());
         let Some(entry) = entry else {
-            return Ok(());
+            return Ok(WakeOutcome::NotStarted);
         };
         if entry.scope()?.is_none() && !self.sessions.has_ready_input(session_id)? {
-            return Ok(());
+            return Ok(if entry.is_driver_active() {
+                WakeOutcome::AlreadyRunning
+            } else {
+                WakeOutcome::NotStarted
+            });
         }
         if !entry.try_acquire_driver()? {
-            return Ok(());
+            return Ok(if entry.is_driver_active() {
+                WakeOutcome::AlreadyRunning
+            } else {
+                WakeOutcome::NotStarted
+            });
         }
-        let sessions = self.sessions.clone();
-        let hooks = self.hooks.clone();
-        let tools = self.tools.clone();
-        let compactions = self.compactions.clone();
-        let config = self.driver_config;
-        tauri::async_runtime::spawn(async move {
-            let mut lease = Some(ActiveDriverLease(Arc::clone(&entry)));
-            loop {
-                let settlement = drive_agent(
-                    sessions.clone(),
-                    Arc::clone(&entry),
-                    hooks.clone(),
-                    tools.clone(),
-                    compactions.clone(),
-                    config,
-                )
-                .await;
-                #[cfg(test)]
-                if settlement == AgentDriverSettlement::Waiting {
-                    let pause = tools.question_lease_pause.lock().unwrap().take();
-                    if let Some((entered, release)) = pause {
-                        entered.notify_one();
-                        release.notified().await;
-                    }
-                }
-                if settlement == AgentDriverSettlement::Waiting {
-                    // Keep the current lease if an answer already committed. Otherwise
-                    // publish idle while holding the same gate used by answer/cancel,
-                    // so no accepted answer can fall into a release/reacquire gap.
-                    let resume = {
-                        let Ok(gate) = tools.question_gate(&entry.session_id) else {
-                            break;
-                        };
-                        let Ok(_gate) = gate.lock() else {
-                            break;
-                        };
-                        if entry.phase().ok() == Some(super::AgentLifecyclePhase::Running)
-                            && !entry.cancellation().is_cancelled()
-                        {
-                            true
-                        } else {
-                            drop(lease.take());
-                            false
-                        }
-                    };
-                    if resume {
-                        continue;
-                    }
-                    // Recheck after releasing the driver lease so concurrent approval/recovery
-                    // wakes or new inputs arriving after `pause_context_budget` are never lost.
-                    if !entry.cancellation().is_cancelled() {
-                        let phase = entry.phase().ok();
-                        let should_reacquire = phase == Some(super::AgentLifecyclePhase::Running)
-                            || (phase == Some(super::AgentLifecyclePhase::Idle)
-                                && sessions.has_ready_input(&entry.session_id).unwrap_or(false));
-                        if should_reacquire && entry.try_acquire_driver().unwrap_or(false) {
-                            lease = Some(ActiveDriverLease(Arc::clone(&entry)));
-                            continue;
-                        }
-                    }
-                    match tools.wait_for_expiry(&entry).await {
-                        Ok(true) if !entry.cancellation().is_cancelled() => {
-                            if entry.try_acquire_driver().unwrap_or(false) {
-                                lease = Some(ActiveDriverLease(Arc::clone(&entry)));
-                                continue;
-                            }
-                        }
-                        Ok(_) => {}
-                        Err(error) => {
-                            let reason = format!("approvalExpiryFailure: {error}");
-                            let _ = entry.set_phase(AgentLifecyclePhase::Stopping);
-                            let _ = super::driver::close_open_scope(&sessions, &entry, &reason);
-                            let _ = sessions.terminate(
-                                &entry.session_id,
-                                super::AgentSessionStatus::Failed,
-                                reason,
-                            );
-                        }
-                    }
-                    break;
-                }
-                drop(lease.take());
-                if settlement != AgentDriverSettlement::Idle || entry.cancellation().is_cancelled()
-                {
-                    break;
-                }
-                let has_work = sessions.has_ready_input(&entry.session_id).unwrap_or(false);
-                if !has_work || !entry.try_acquire_driver().unwrap_or(false) {
-                    break;
-                }
-                lease = Some(ActiveDriverLease(Arc::clone(&entry)));
-            }
-        });
-        Ok(())
+        super::driver::spawn_driver_loop(
+            self.sessions.clone(),
+            entry,
+            self.hooks.clone(),
+            self.tools.clone(),
+            self.compactions.clone(),
+            self.driver_config,
+        );
+        Ok(WakeOutcome::Started)
     }
 
     #[cfg(test)]
