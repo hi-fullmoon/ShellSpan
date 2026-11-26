@@ -62,7 +62,7 @@ struct PersistedCheckpointNative {
 pub(crate) struct LoadedCheckpointNative {
     pub(crate) snapshot: AgentFileCheckpointNative,
     pub(crate) original_bytes: Option<Vec<u8>>,
-    #[cfg_attr(not(unix), allow(dead_code))]
+    #[cfg(any(unix, test))]
     pub(crate) permissions: Option<u32>,
 }
 
@@ -206,6 +206,7 @@ impl CheckpointStoreNative {
         Ok(LoadedCheckpointNative {
             snapshot: record.snapshot,
             original_bytes,
+            #[cfg(any(unix, test))]
             permissions: record.permissions,
         })
     }
