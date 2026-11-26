@@ -8,7 +8,9 @@ const TERMINAL_WORKSPACE_VERSION: u64 = 1;
 const MAX_TERMINAL_WORKSPACE_BYTES: usize = 1024 * 1024;
 const MAX_TERMINAL_WORKSPACE_SESSIONS: usize = 100;
 const AGENT_SANDBOX_ENABLED_KEY: &str = "ai.agentSandboxEnabled";
+#[cfg(target_os = "macos")]
 const AGENT_SANDBOX_NETWORK_MODE_KEY: &str = "ai.agentSandboxNetworkMode";
+#[cfg(target_os = "macos")]
 const AGENT_SANDBOX_NETWORK_ALLOWLIST_KEY: &str = "ai.agentSandboxNetworkAllowlist";
 const VIM_BRIDGE_AUTO_ATTACH_KEY: &str = "ai.vimBridgeAutoAttach";
 const AGENT_SANDBOX_DISABLED: &str = "AGENT_SANDBOX_DISABLED: enable Agent sandbox in AI Settings";
@@ -1058,6 +1060,7 @@ impl Database {
         Self::read_agent_sandbox_enabled(&conn)
     }
 
+    #[cfg(target_os = "macos")]
     pub(crate) fn agent_sandbox_network_policy(
         &self,
     ) -> Result<crate::agent_runtime::SandboxNetworkPolicy, String> {

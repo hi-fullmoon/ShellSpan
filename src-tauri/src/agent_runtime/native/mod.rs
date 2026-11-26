@@ -47,7 +47,9 @@ pub(crate) use mcp::*;
 pub(crate) use process::*;
 pub(crate) use registry::*;
 pub(crate) use runtime::*;
-pub(crate) use sandbox_proxy::{SandboxNetworkMode, SandboxNetworkPolicy};
+pub(crate) use sandbox_proxy::SandboxNetworkMode;
+#[cfg(any(target_os = "macos", test))]
+pub(crate) use sandbox_proxy::SandboxNetworkPolicy;
 #[cfg(test)]
 pub(crate) use shell_guard::REMOTE_PRIVILEGE_DENIED;
 pub(crate) use shell_guard::{

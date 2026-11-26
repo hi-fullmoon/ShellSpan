@@ -267,6 +267,7 @@ impl NativeToolEngine {
         }
     }
 
+    #[cfg(target_os = "macos")]
     pub(crate) fn effective_sandbox_network_policy(
         &self,
         database: &Database,

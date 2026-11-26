@@ -861,10 +861,10 @@ pub(crate) async fn open_local_sandbox_terminal(
             rows,
             replaces_session_id,
         );
-        return Err(
+        Err(
             "LOCAL_SANDBOX_VISIBLE_PTY_UNSUPPORTED: managed sandbox visible terminal requires macOS"
                 .into(),
-        );
+        )
     }
     #[cfg(target_os = "macos")]
     {

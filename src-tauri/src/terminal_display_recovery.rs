@@ -342,6 +342,7 @@ enum TtyDecision {
 }
 
 pub(crate) struct TtyRecoveryWatcher {
+    #[cfg(unix)]
     root: std::path::PathBuf,
     recovery: DisplayRecovery,
 }
@@ -349,6 +350,7 @@ pub(crate) struct TtyRecoveryWatcher {
 impl TtyRecoveryWatcher {
     pub(crate) fn new(root: &Path) -> Self {
         Self {
+            #[cfg(unix)]
             root: root.into(),
             recovery: DisplayRecovery::new(crate::terminal_integration::recovery_token(root)),
         }
@@ -381,6 +383,7 @@ impl TtyRecoveryReply {
         format!("TTY-RECOVERY {} {}\n", self.ticket, self.decision as u8).into_bytes()
     }
 
+    #[cfg(unix)]
     pub(crate) fn path(&self, root: &Path) -> std::path::PathBuf {
         root.join(format!(
             "control.tty-reply-{}-{}",

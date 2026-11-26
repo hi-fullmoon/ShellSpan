@@ -9,7 +9,9 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::agent_runtime::{SandboxNetworkMode, SandboxNetworkPolicy};
+use crate::agent_runtime::SandboxNetworkMode;
+#[cfg(any(target_os = "macos", test))]
+use crate::agent_runtime::SandboxNetworkPolicy;
 use crate::remote_sandbox;
 
 pub(crate) const SANDBOX_POLICY_CONTRACT_VERSION: u32 = 1;
@@ -63,6 +65,7 @@ pub(crate) enum SandboxNetworkPosture {
 }
 
 impl SandboxNetworkPosture {
+    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn from_local_policy(policy: &SandboxNetworkPolicy) -> Self {
         if !policy.uses_proxy() {
             return Self::Blocked;
@@ -118,6 +121,7 @@ pub(crate) struct SandboxPolicy {
 }
 
 impl SandboxPolicy {
+    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn for_mac_nono(
         workspace_root: impl Into<String>,
         network_policy: &SandboxNetworkPolicy,

@@ -174,12 +174,12 @@ fn create_writable_directory(path: &Path, user: &str, sid: &ContainerSid) -> io:
             &mut descriptor,
             null_mut(),
         ))?;
-        let mut security = SECURITY_ATTRIBUTES {
+        let security = SECURITY_ATTRIBUTES {
             nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
             lpSecurityDescriptor: descriptor,
             bInheritHandle: 0,
         };
-        let result = win(CreateDirectoryW(path.as_ptr(), &mut security));
+        let result = win(CreateDirectoryW(path.as_ptr(), &security));
         LocalFree(descriptor);
         result
     }

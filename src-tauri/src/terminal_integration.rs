@@ -846,6 +846,7 @@ impl PreparedLocalShellIntegration {
     }
 }
 
+#[cfg(unix)]
 fn drain_failed_control_channel(reader: &mut impl Read, stopped: &AtomicBool) {
     let mut buffer = [0_u8; 1024];
     loop {
@@ -2356,6 +2357,7 @@ fn open_windows_pipe(pipe_path: &str, stopped: &AtomicBool) -> Result<File, Stri
     }
 }
 
+#[cfg(any(unix, test))]
 fn read_control_events(
     reader: &mut impl Read,
     on_event: &mut impl FnMut(TerminalIntegrationControlEvent) -> Result<(), String>,
@@ -2461,11 +2463,13 @@ fn read_control_events(
     }
 }
 
+#[cfg(any(unix, test))]
 fn required_field(reader: &mut impl io::BufRead, label: &str) -> Result<String, String> {
     read_field(reader)?
         .ok_or_else(|| format!("TERMINAL_INTEGRATION_TRUNCATED_EVENT: missing {label}"))
 }
 
+#[cfg(any(unix, test))]
 fn read_field(reader: &mut impl io::BufRead) -> Result<Option<String>, String> {
     let mut bytes = Vec::new();
     let max_read = (MAX_CONTROL_FIELD_BYTES + 1) as u64;

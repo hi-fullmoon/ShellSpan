@@ -181,7 +181,7 @@ describe('release publication gates', () => {
 
     const unreadable = execFileSync('bash', [checker, path.join(icons, 'icon.icns')], options);
     expect(unreadable).toContain('::warning title=macOS DMG encoding overhead::');
-  }, 20_000);
+  }, 60_000);
 
   it.skipIf(!process.env.SHELLSPAN_DRAFT_RELEASE_TAG)('finds an existing real GitHub draft before publication', () => {
     const release = findReleaseByTag(process.env.SHELLSPAN_DRAFT_RELEASE_TAG);

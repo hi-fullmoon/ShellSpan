@@ -62,6 +62,7 @@ struct PersistedCheckpointNative {
 pub(crate) struct LoadedCheckpointNative {
     pub(crate) snapshot: AgentFileCheckpointNative,
     pub(crate) original_bytes: Option<Vec<u8>>,
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub(crate) permissions: Option<u32>,
 }
 

@@ -5,24 +5,37 @@
 //! can only connect to `127.0.0.1:<ephemeral_port>`. All DNS resolution and
 //! outbound domain/IP validation happens here on the host.
 
+#[cfg(any(target_os = "macos", test))]
 use std::collections::BTreeSet;
+#[cfg(any(target_os = "macos", test))]
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::net::IpAddr;
+#[cfg(any(target_os = "macos", test))]
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+#[cfg(any(target_os = "macos", test))]
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
+#[cfg(any(target_os = "macos", test))]
 use std::thread::{self, JoinHandle};
+#[cfg(any(target_os = "macos", test))]
 use std::time::Duration;
 
+#[cfg(any(target_os = "macos", test))]
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(target_os = "macos", test))]
 const MAX_HEADER_BYTES: usize = 16 * 1024;
+#[cfg(any(target_os = "macos", test))]
 const MAX_BLOCKED_RECORDED: usize = 32;
+#[cfg(any(target_os = "macos", test))]
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+#[cfg(any(target_os = "macos", test))]
 const IO_TIMEOUT: Duration = Duration::from_secs(60);
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) const DEV_REGISTRY_DOMAINS: &[&str] = &[
     "registry.npmjs.org",
     "pypi.org",
@@ -50,6 +63,7 @@ pub(crate) enum SandboxNetworkMode {
     CustomAllowlist,
 }
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SandboxNetworkPolicy {
@@ -58,6 +72,7 @@ pub(crate) struct SandboxNetworkPolicy {
     pub(crate) custom_domains: Vec<String>,
 }
 
+#[cfg(any(target_os = "macos", test))]
 impl SandboxNetworkPolicy {
     #[cfg(test)]
     pub(crate) fn blocked() -> Self {
@@ -125,6 +140,7 @@ impl SandboxNetworkPolicy {
         }
     }
 
+    #[cfg(target_os = "macos")]
     pub(crate) fn prompt_summary(&self) -> String {
         match self.mode {
             SandboxNetworkMode::Blocked => "Outbound network is blocked.".into(),
@@ -185,6 +201,7 @@ pub(crate) fn normalize_domain_rule(raw: &str) -> Option<String> {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn normalize_request_host(raw: &str) -> Option<String> {
     let trimmed = raw.trim().to_ascii_lowercase();
     let trimmed = trimmed.trim_end_matches('.');
@@ -199,6 +216,7 @@ fn normalize_request_host(raw: &str) -> Option<String> {
     Some(trimmed.to_string())
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn domain_rule_matches(rule: &str, host: &str) -> bool {
     if let Some(suffix) = rule.strip_prefix("*.") {
         host.len() > suffix.len() + 1
@@ -209,6 +227,7 @@ fn domain_rule_matches(rule: &str, host: &str) -> bool {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn is_blocked_destination_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => is_blocked_ipv4(v4),
@@ -216,6 +235,7 @@ pub(crate) fn is_blocked_destination_ip(ip: IpAddr) -> bool {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn is_blocked_ipv4(ip: Ipv4Addr) -> bool {
     let octets = ip.octets();
     ip.is_private()
@@ -233,6 +253,7 @@ fn is_blocked_ipv4(ip: Ipv4Addr) -> bool {
         || octets[0] >= 240
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn is_blocked_ipv6(ip: Ipv6Addr) -> bool {
     if let Some(mapped) = ip.to_ipv4_mapped() {
         return is_blocked_ipv4(mapped);
@@ -247,6 +268,7 @@ fn is_blocked_ipv6(ip: Ipv6Addr) -> bool {
         || (seg0 & 0xffc0) == 0xfe80
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) struct SandboxProxy {
     port: u16,
     token: String,
@@ -255,6 +277,7 @@ pub(crate) struct SandboxProxy {
     thread: Option<JoinHandle<()>>,
 }
 
+#[cfg(any(target_os = "macos", test))]
 impl SandboxProxy {
     pub(crate) fn start(policy: SandboxNetworkPolicy) -> io::Result<Self> {
         Self::start_with_options(policy, false)
@@ -321,6 +344,7 @@ impl SandboxProxy {
         self.port
     }
 
+    #[cfg(target_os = "macos")]
     pub(crate) fn proxy_url(&self) -> String {
         format!("http://ss:{}@127.0.0.1:{}", self.token, self.port)
     }
@@ -332,11 +356,13 @@ impl SandboxProxy {
             .unwrap_or_default()
     }
 
+    #[cfg(target_os = "macos")]
     pub(crate) fn blocked_domains_handle(&self) -> Arc<Mutex<Vec<String>>> {
         Arc::clone(&self.blocked_domains)
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 impl Drop for SandboxProxy {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::Release);
@@ -350,6 +376,7 @@ impl Drop for SandboxProxy {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn record_blocked(blocked: &Mutex<Vec<String>>, host: &str) {
     if let Ok(mut list) = blocked.lock() {
         if list.len() < MAX_BLOCKED_RECORDED && !list.iter().any(|item| item == host) {
@@ -358,6 +385,7 @@ fn record_blocked(blocked: &Mutex<Vec<String>>, host: &str) {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn write_error_response(
     stream: &mut TcpStream,
     status: &str,
@@ -373,6 +401,7 @@ fn write_error_response(
     stream.flush()
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn parse_host_port(authority: &str, default_port: u16) -> Option<(String, u16)> {
     let authority = authority.trim();
     if authority.is_empty() || authority.starts_with('[') {
@@ -387,6 +416,7 @@ fn parse_host_port(authority: &str, default_port: u16) -> Option<(String, u16)> 
     Some((host, port))
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn resolve_allowed_addr(
     host: &str,
     port: u16,
@@ -422,6 +452,7 @@ fn resolve_allowed_addr(
     Ok(addrs[0])
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn handle_client(
     mut client: TcpStream,
     policy: &SandboxNetworkPolicy,
@@ -646,6 +677,7 @@ fn handle_client(
     client.flush()
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn relay_bidirectional(mut client: TcpStream, mut upstream: TcpStream) -> io::Result<()> {
     let mut client_read = client.try_clone()?;
     let mut upstream_write = upstream.try_clone()?;

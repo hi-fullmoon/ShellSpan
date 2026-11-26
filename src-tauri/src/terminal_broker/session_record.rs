@@ -239,6 +239,7 @@ pub(super) struct SessionRecord {
     #[cfg(unix)]
     pub(super) echo_probe: Option<crate::local_terminal_input::PtyEchoProbe>,
     pub(super) sandbox_binding: Option<crate::models::LocalSandboxPtyBinding>,
+    #[cfg(target_os = "macos")]
     pub(super) sandbox_blocked_domains: Option<Arc<Mutex<Vec<String>>>>,
 }
 
@@ -391,6 +392,7 @@ impl SessionRecord {
             #[cfg(unix)]
             echo_probe: None,
             sandbox_binding: None,
+            #[cfg(target_os = "macos")]
             sandbox_blocked_domains: None,
         }
     }

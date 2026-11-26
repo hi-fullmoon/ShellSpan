@@ -141,7 +141,7 @@ fn serve(
             write_all_nonblocking(
                 &mut file,
                 &response(index, widths),
-                &stop,
+                stop,
                 Instant::now() + Duration::from_secs(2),
             )?;
         }
