@@ -400,6 +400,7 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<EditorArti
     }
     Ok(catalogue.profiles)
 }
+#[cfg(unix)]
 pub(crate) fn verify(
     artifact: &EditorArtifact,
     shell: &Path,

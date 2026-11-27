@@ -188,7 +188,12 @@ async fn primary_session_can_finish_after_more_than_sixty_four_productive_steps(
     runtime
         .followup(id, "initial".into(), "inspect many distinct entries".into())
         .unwrap();
-    runtime.start(id, provider(), None).unwrap();
+    let mut long_provider = provider();
+    long_provider.model_definition = Some(crate::llm::catalog::fixture_definition(
+        AiProviderKind::Ollama,
+        128_000,
+    ));
+    runtime.start(id, long_provider, None).unwrap();
     runtime.await_idle(id).await.unwrap();
 
     assert_eq!(model.request_count(), 66);

@@ -8,10 +8,13 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+use tauri::Emitter;
+use tauri::{AppHandle, Manager, State};
 use url::Url;
 use uuid::Uuid;
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) const DEEP_LINK_EVENT: &str = "shellspan-deep-link";
 const MAX_URL_BYTES: usize = 4096;
 const MAX_PATH_BYTES: usize = 1024;
@@ -259,6 +262,7 @@ pub(crate) fn parse_deep_link_url(raw: &str) -> Result<DeepLinkAction, String> {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) fn handle_incoming_deep_link(app: &AppHandle, raw: &str) {
     match parse_deep_link_url(raw) {
         Ok(action) => {

@@ -394,10 +394,11 @@ pub(crate) fn select_powershell7(
                 }
             }
             Err(error) => match error.integration_reason.as_deref() {
-                Some(reason) if reason.starts_with("windowsPowerShell7TooOld:") => {
-                    if too_old_reason.is_none() {
-                        too_old_reason = Some(reason.to_owned());
-                    }
+                Some(reason)
+                    if reason.starts_with("windowsPowerShell7TooOld:")
+                        && too_old_reason.is_none() =>
+                {
+                    too_old_reason = Some(reason.to_owned());
                 }
                 Some(WINDOWS_POWERSHELL7_UNTRUSTED_REASON) => {
                     untrusted = true;
@@ -427,6 +428,7 @@ pub(crate) fn select_powershell7(
     ))
 }
 
+#[cfg(test)]
 pub(crate) fn matching_powershell7(resources: &Path) -> Result<PathBuf, String> {
     select_powershell7(resources)
         .map(|inspected| inspected.path)
@@ -559,6 +561,7 @@ pub(crate) struct PreparedNativePowerShell {
     conpty: PathBuf,
 }
 impl PreparedNativePowerShell {
+    #[cfg(test)]
     pub fn prepare(shell: &Path, resources: &Path, data: &Path) -> Result<Self, String> {
         Self::prepare_detailed(shell, resources, data).map_err(|error| error.code)
     }
