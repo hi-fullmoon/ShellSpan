@@ -158,6 +158,12 @@ pub(crate) fn configure_runtime(app: &AppHandle, runtime: &AgentRuntime) -> Resu
             .clone(),
     )?;
     runtime.configure_native(app.clone())?;
+    runtime.configure_app_inspector(Arc::new(
+        super::app_actions::TauriAppWorkspaceInspector::new(app.clone()),
+    ))?;
+    runtime.configure_app_session_coordinator(Arc::new(
+        super::app_actions::TauriAppSessionCoordinator::new(app.clone()),
+    ))?;
     let emitter = app.clone();
     runtime.set_event_publisher(Arc::new(move |event| {
         if let Err(error) = emitter.emit(AGENT_RUNTIME_SESSION_EVENT, event) {

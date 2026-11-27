@@ -517,6 +517,10 @@ function createActivityNodesProjection() {
         upsert(`activity:skill-proposal:${identity.proposalId}`, 'question', event, status, event.type, null, event.data, identity.requestId);
         break;
       }
+      case 'app_action/dispatched':
+      case 'app_action/card':
+      case 'app_action/proposal_requested':
+        break;
       case 'tool/approval': {
         const key = `activity:tool:${agentToolEventKey(event, event.data.callId)}`;
         const existingLabel = nodesByKey.get(key)?.current.label ?? event.data.callId;

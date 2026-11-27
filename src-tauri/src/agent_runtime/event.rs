@@ -991,6 +991,31 @@ pub(crate) enum AgentSessionEventPayload {
     SkillProposalCancelled {
         identity: super::skill_proposals::SkillProposalIdentity,
     },
+    #[serde(rename = "app_action/dispatched")]
+    AppActionDispatched {
+        action_id: String,
+        call_id: String,
+        action: super::app_actions::AppUiAction,
+        requires_focus: bool,
+    },
+    #[serde(rename = "app_action/card")]
+    AppActionCard {
+        card_id: String,
+        call_id: String,
+        kind: super::app_actions::AppActionCardKind,
+        title: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subtitle: Option<String>,
+        action: super::app_actions::AppUiAction,
+    },
+    #[serde(rename = "app_action/proposal_requested")]
+    AppActionProposalRequested {
+        proposal_id: String,
+        call_id: String,
+        kind: super::app_actions::AppProposalKind,
+        summary: String,
+        draft: Value,
+    },
     #[serde(rename = "tool/approval")]
     ToolApproval {
         request_id: String,

@@ -57,6 +57,10 @@ interface JumpHostFormState extends JumpHostConfig {
   privateKeyPath: string;
 }
 
+export type ConnectionFormInitialValues = Partial<
+  Pick<FormState, 'name' | 'host' | 'port' | 'username' | 'group' | 'tags' | 'notes'>
+>;
+
 export interface ConnectionFormDrawerProps {
   open: boolean;
   onClose: () => void;
@@ -66,8 +70,8 @@ export interface ConnectionFormDrawerProps {
     connectionAttemptId?: string,
   ) => void | Promise<void>;
   initial?: ConnectionProfile;
-  /** Partial pre-fill values (e.g. host + port from a known-host entry). */
-  initialValues?: Pick<FormState, 'host' | 'port'>;
+  /** Partial secret-free pre-fill values (e.g. from known-hosts or Agent proposals). */
+  initialValues?: ConnectionFormInitialValues;
 }
 
 interface FormState {

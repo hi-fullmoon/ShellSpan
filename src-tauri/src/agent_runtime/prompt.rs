@@ -410,6 +410,12 @@ fn tool_available_on_target(name: &str, header: &AgentSessionHeader) -> bool {
         super::skill_proposals::TOOL_NAME => {
             header.parent_session_id.is_none() && header.subagent.is_none()
         }
+        super::app_actions::APP_NAVIGATE_TOOL
+        | super::app_actions::APP_PROPOSE_ACTION_TOOL
+        | super::app_actions::APP_TERMINAL_TOOL
+        | super::app_actions::APP_SESSION_TOOL => {
+            header.parent_session_id.is_none() && header.subagent.is_none()
+        }
         "run_terminal_command" => {
             target.is_some_and(|target| matches!(target.kind.as_str(), "local" | "remote"))
         }

@@ -1299,6 +1299,8 @@ fn model_tools_for(
         // historical native capability scopes retained by a resumed root.
         .filter(|tool| {
             (super::user_questions::is_question_tool(&tool.name)
+                || (super::app_actions::is_app_control_tool(&tool.name)
+                    && entry.subagent.is_none())
                 || (super::skill_proposals::is_proposal_tool(&tool.name)
                     && entry.subagent.is_none()
                     && scope
@@ -1306,6 +1308,8 @@ fn model_tools_for(
                         .iter()
                         .any(|name| name == super::skills::SKILL_TOOL))
                 || scope.tool_names.iter().any(|name| name == &tool.name))
+                && (!super::app_actions::is_root_only_app_tool(&tool.name)
+                    || entry.subagent.is_none())
                 && (tool.name != super::tool_output::READ_TOOL_RESULT
                     || scope.effects.contains(&super::AgentSessionEffect::ReadOnly))
         })

@@ -1854,7 +1854,39 @@ impl Drop for DeleteProgressTracker {
     }
 }
 
+pub(crate) struct TerminalSessionSnapshot {
+    pub(crate) session_id: String,
+    pub(crate) title: String,
+    pub(crate) host: String,
+    pub(crate) port: u16,
+    pub(crate) username: String,
+    pub(crate) terminal_kind: SessionTerminalKind,
+    pub(crate) status: SessionStatus,
+}
+
 impl SessionManager {
+    pub(crate) fn list_terminal_snapshots(&self) -> Result<Vec<TerminalSessionSnapshot>, String> {
+        let registry = self
+            .registry
+            .lock()
+            .map_err(|_| "session registry poisoned".to_string())?;
+        let mut items: Vec<TerminalSessionSnapshot> = registry
+            .sessions
+            .iter()
+            .map(|(session_id, managed)| TerminalSessionSnapshot {
+                session_id: session_id.clone(),
+                title: managed.identity.title.clone(),
+                host: managed.identity.host.clone(),
+                port: managed.identity.port,
+                username: managed.identity.username.clone(),
+                terminal_kind: managed.terminal_kind,
+                status: managed.status.status,
+            })
+            .collect();
+        items.sort_by(|left, right| left.session_id.cmp(&right.session_id));
+        Ok(items)
+    }
+
     pub(crate) fn register_vim_bridge(
         &self,
         session_id: &str,

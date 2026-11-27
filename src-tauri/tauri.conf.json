@@ -41,13 +41,23 @@
     "targets": "all",
     "createUpdaterArtifacts": "v1Compatible",
     "macOS": {
-      "signingIdentity": "ShellSpan Dev"
+      "signingIdentity": "ShellSpan Dev",
+      "infoPlist": "Info.plist"
+    },
+    "linux": {
+      "deb": {
+        "desktopTemplate": "linux/shellspan.desktop.hbs"
+      },
+      "rpm": {
+        "desktopTemplate": "linux/shellspan.desktop.hbs"
+      }
     },
     "windows": {
       "minimumWebview2Version": "133.0.0.0",
       "nsis": {
         "installMode": "currentUser",
-        "displayLanguageSelector": false
+        "displayLanguageSelector": false,
+        "installerHooks": "windows/nsis-hooks.nsh"
       }
     },
     "icon": [

@@ -126,6 +126,41 @@
       "interceptedBy": "sessionRuntime",
       "neverDispatchedToNative": true,
       "description": "Records explicit reconciliation evidence for an uncertain Fleet target."
+    },
+    {
+      "name": "app_inspect",
+      "category": "appControl",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Reads redacted ShellSpan workspace state (saved connection profiles, open terminals, port forwards, or AI sessions) without exposing credentials."
+    },
+    {
+      "name": "app_navigate",
+      "category": "appControl",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Dispatches a declarative, root-only ShellSpan UI navigation intent (section, workbench tab, settings section, terminal focus, SFTP path, or host tool) and records a clickable card."
+    },
+    {
+      "name": "app_propose_action",
+      "category": "appControl",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Prepares a secret-free draft for a ShellSpan connection profile or port-forward rule and opens the matching confirmation form for explicit human save."
+    },
+    {
+      "name": "app_terminal",
+      "category": "appControl",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Opens a saved SSH profile terminal through the standard credential/host-key flow, opens a new local terminal tab, or focuses an existing terminal session. Root session only."
+    },
+    {
+      "name": "app_session",
+      "category": "appControl",
+      "interceptedBy": "sessionRuntime",
+      "neverDispatchedToNative": true,
+      "description": "Creates an independent top-level root AI session (optionally bound to a profile or terminal with an initial prompt), opens an existing root session, or sends a prompt to another root session. Root session only."
     }
   ],
   "modelFacades": [

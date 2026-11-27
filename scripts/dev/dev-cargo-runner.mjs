@@ -99,6 +99,7 @@ async function main() {
       CFBundleName: 'ShellSpan Dev', CFBundleDisplayName: 'ShellSpan Dev',
       CFBundlePackageType: 'APPL', CFBundleShortVersionString: version, CFBundleVersion: version,
       NSHighResolutionCapable: true, LSMinimumSystemVersion: '10.15',
+      CFBundleURLTypes: [{ CFBundleURLName: `${config.identifier}.deeplink`, CFBundleURLSchemes: ['shellspan'] }],
     }));
     const plistCode = await plist.done;
     if (plistCode !== 0) return plistCode;

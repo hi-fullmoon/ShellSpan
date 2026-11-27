@@ -1892,3 +1892,13 @@ export async function invokeListAgentFileReferences(sessionId: string, query: st
     return result;
   } finally { signal.removeEventListener('abort', cancel); }
 }
+
+export function invokeDrainPendingDeepLinks(): Promise<import('@/types/agent-app-action').DeepLinkDispatch[]> {
+  return invokeLogged<import('@/types/agent-app-action').DeepLinkDispatch[]>('drain_pending_deep_links');
+}
+
+export function listenToDeepLink(
+  callback: EventCallback<import('@/types/agent-app-action').DeepLinkDispatch>,
+): Promise<UnlistenFn> {
+  return listen<import('@/types/agent-app-action').DeepLinkDispatch>('shellspan-deep-link', callback);
+}

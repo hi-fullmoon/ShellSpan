@@ -1,3 +1,4 @@
+pub(crate) mod app_actions;
 mod artifact;
 mod budget;
 mod builtin_skills;

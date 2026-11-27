@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircleIcon,
   ArrowDownIcon,
@@ -30,8 +30,18 @@ import { useProfileStore } from '@/stores/profileStore';
 import { useToastStore } from '@/stores/toastStore';
 import type { ConnectionProfile, PortForwardKind, PortForwardRule } from '@/types';
 
+export interface PortForwardInitialDraft {
+  readonly name: string;
+  readonly kind: PortForwardKind;
+  readonly localPort: number;
+  readonly remoteHost?: string;
+  readonly remotePort?: number;
+  readonly autoStart?: boolean;
+}
+
 interface PortForwardDialogProps {
   profile?: ConnectionProfile;
+  initialDraft?: PortForwardInitialDraft;
   onClose: () => void;
 }
 
@@ -78,7 +88,7 @@ function statusVariant(status: ManagedPortForwardRuntime['status'] | undefined):
   return 'outline';
 }
 
-export function PortForwardDialog({ profile: requestedProfile, onClose }: PortForwardDialogProps): React.JSX.Element {
+export function PortForwardDialog({ profile: requestedProfile, initialDraft, onClose }: PortForwardDialogProps): React.JSX.Element {
   const { t } = useI18n();
   const profile = useProfileStore((state) =>
     requestedProfile ? (state.profiles.find((item) => item.id === requestedProfile.id) ?? requestedProfile) : undefined,
@@ -87,6 +97,23 @@ export function PortForwardDialog({ profile: requestedProfile, onClose }: PortFo
   const runtimes = useMemo(() => (profile ? allRuntimes.filter((runtime) => runtime.profileId === profile.id) : []), [allRuntimes, profile]);
   const [draft, setDraft] = useState<RuleDraft>();
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!profile) {
+      setDraft(undefined);
+      return;
+    }
+    if (initialDraft) {
+      setDraft({
+        name: initialDraft.name,
+        kind: initialDraft.kind,
+        localPort: String(initialDraft.localPort),
+        remoteHost: initialDraft.kind === 'dynamic' ? '' : (initialDraft.remoteHost ?? '127.0.0.1'),
+        remotePort: initialDraft.kind === 'dynamic' ? '' : String(initialDraft.remotePort ?? ''),
+        autoStart: Boolean(initialDraft.autoStart),
+      });
+    }
+  }, [initialDraft, profile]);
   const rules = profile?.portForwards ?? [];
   const activeCount = runtimes.filter(isPortForwardActive).length;
 

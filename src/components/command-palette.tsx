@@ -43,6 +43,7 @@ import { invokeListSftpBookmarks } from '@/lib/ipc/tauri';
 import type { LocaleKey } from '@/locales';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
+import { dispatchAppAction, switchSftpConnection } from '@/lib/app-actions/registry';
 import { useFocusStore } from '@/stores/focusStore';
 import { isPortForwardActive, usePortForwardStore } from '@/stores/portForwardStore';
 import { useProfileStore } from '@/stores/profileStore';
@@ -457,12 +458,16 @@ export const CommandPalette: React.FC<{ defaultOpen?: boolean }> = ({ defaultOpe
       portForwardRuntimes,
       label: t,
       navigate: (section, tab) => {
-        const app = useAppStore.getState();
-        app.setActiveSection(section);
-        if (tab) app.setActiveWorkbenchTab(tab);
+        dispatchAppAction(
+          { type: 'navigateSection', section, workbenchTab: tab },
+          { source: 'palette' },
+        );
       },
       openSettings: (section) => {
-        useAppStore.getState().openSettings(section);
+        dispatchAppAction(
+          { type: 'navigateSettings', settingsSection: section },
+          { source: 'palette' },
+        );
       },
       connect: (profileId, target) => {
         document.dispatchEvent(new CustomEvent('shellspan:connect-profile', {
@@ -470,20 +475,23 @@ export const CommandPalette: React.FC<{ defaultOpen?: boolean }> = ({ defaultOpe
         }));
       },
       openHostTool: (profileId, tool) => {
-        const app = useAppStore.getState();
-        app.setActiveSection('workbench');
-        app.setActiveWorkbenchTab('connections');
-        document.dispatchEvent(new CustomEvent('shellspan:open-host-tool', {
-          detail: { profileId, tool },
-        }));
+        dispatchAppAction(
+          { type: 'openHostTool', profileId, tool },
+          { source: 'palette' },
+        );
       },
       switchTerminal: (sessionId) => {
-        useTerminalStore.getState().setActiveSession(sessionId);
-        useAppStore.getState().setActiveSection('terminal');
+        const result = dispatchAppAction(
+          { type: 'focusTerminal', terminalSessionId: sessionId },
+          { source: 'palette' },
+        );
+        if (result.status !== 'applied') {
+          useTerminalStore.getState().setActiveSession(sessionId);
+          useAppStore.getState().setActiveSection('terminal');
+        }
       },
       switchSftp: (connectionId) => {
-        useSftpStore.getState().setActiveConnection(connectionId);
-        useAppStore.getState().setActiveSection('sftp');
+        switchSftpConnection(connectionId);
       },
       openBookmark: (profile, bookmark) => {
         openHostPath(profile, bookmark.path, 'sftp', bookmark.side);

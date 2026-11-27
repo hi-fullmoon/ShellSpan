@@ -54,6 +54,7 @@ import {
   usePortForwardStore,
 } from '@/stores/portForwardStore';
 import { usePortForwardEvents } from '@/hooks/usePortForwardEvents';
+import { useAppActionBridge } from '@/hooks/useAppActionBridge';
 const logger = createLogger('app');
 
 interface AppSectionsProps {
@@ -173,6 +174,7 @@ export const App: React.FC = () => {
   usePortForwardEvents();
   useMonitorEvents();
   useAppShortcuts();
+  useAppActionBridge();
 
   const [aboutDialogOpen, setAboutDialogOpen] = React.useState(false);
   const [exitDialogOpen, setExitDialogOpen] = React.useState(false);

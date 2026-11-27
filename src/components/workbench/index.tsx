@@ -3,7 +3,11 @@ import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import { useProfileStore } from '@/stores/profileStore';
 import { useAppStore } from '@/stores/appStore';
-import { ConnectionFormDrawer } from './connection-form-drawer';
+import { ConnectionFormDrawer, type ConnectionFormInitialValues } from './connection-form-drawer';
+import {
+  OPEN_CONNECTION_DRAFT_EVENT,
+  type ConnectionDraftEventDetail,
+} from '@/lib/app-actions/types';
 import { ConnectionList } from './connection-list';
 import { KnownHostsPanel } from './known-hosts-panel';
 import { KeychainPanel } from './keychain-panel';
@@ -57,7 +61,7 @@ const Workbench: React.FC<WorkbenchProps> = ({
   const [deleting, setDeleting] = useState<ConnectionProfile | undefined>();
   const editRequestRef = useRef(0);
   const [initialValues, setInitialValues] = useState<
-    { host: string; port: string } | undefined
+    ConnectionFormInitialValues | undefined
   >();
   const [importCandidates, setImportCandidates] = useState<ConnectionImportPreview[]>([]);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -193,6 +197,29 @@ const Workbench: React.FC<WorkbenchProps> = ({
     document.addEventListener('shellspan:connect-profile', handleConnectProfile);
     return () => document.removeEventListener('shellspan:connect-profile', handleConnectProfile);
   }, [connect, openSftpConnection]);
+
+  useEffect(() => {
+    const handleOpenConnectionDraft = (event: Event): void => {
+      const detail = (event as CustomEvent<ConnectionDraftEventDetail>).detail;
+      const draft = detail?.draft;
+      if (!draft?.host) return;
+      editRequestRef.current += 1;
+      setEditing(undefined);
+      setInitialValues({
+        name: draft.name ?? '',
+        host: draft.host,
+        port: draft.port ? String(draft.port) : '22',
+        username: draft.username ?? '',
+        group: draft.group ?? '',
+        tags: draft.tags ? draft.tags.join(', ') : '',
+        notes: draft.notes ?? '',
+      });
+      setActiveTab('connections');
+      setFormOpen(true);
+    };
+    document.addEventListener(OPEN_CONNECTION_DRAFT_EVENT, handleOpenConnectionDraft);
+    return () => document.removeEventListener(OPEN_CONNECTION_DRAFT_EVENT, handleOpenConnectionDraft);
+  }, [setActiveTab]);
 
   const handleOpenImport = useCallback(async (): Promise<void> => {
     try {

@@ -63,6 +63,12 @@ import type {
 } from '@/lib/ai/session-adapter';
 import { generateId } from '@/lib/utils';
 import { t } from '@/locales';
+import {
+  OPEN_AGENT_SESSION_EVENT,
+  PREFILL_AGENT_PROMPT_EVENT,
+  type OpenAgentSessionEventDetail,
+  type PrefillAgentPromptEventDetail,
+} from '@/lib/app-actions/types';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useTerminalAgentExecution } from '@/hooks/useTerminalAgentExecution';
@@ -1937,6 +1943,42 @@ export function useAiSessionController({
     window.addEventListener('shellspan:ai-session-deleted', onSessionDeleted);
     return () => window.removeEventListener('shellspan:ai-session-deleted', onSessionDeleted);
   }, [adapter, forgetSessionVisits, newSession, openedSessionId]);
+
+  useEffect(() => {
+    let active = true;
+    const onOpenAgentSession = (event: Event): void => {
+      const sessionId = (event as CustomEvent<OpenAgentSessionEventDetail>).detail?.sessionId;
+      if (!sessionId) return;
+      const cached = sessionsRef.current.find((session) => session.id === sessionId);
+      if (cached && belongsToAiWorkspace(cached, scope, focusMode, sessionsRef.current)) {
+        openSession(cached);
+        return;
+      }
+      void adapter.open(sessionId).then((loaded) => {
+        if (!active) return;
+        const summary = loaded.summary;
+        const nextSessions = sessionsRef.current.some((item) => item.id === summary.id)
+          ? sessionsRef.current
+          : [summary, ...sessionsRef.current];
+        if (!belongsToAiWorkspace(summary, scope, focusMode, nextSessions)) return;
+        setSessions(nextSessions);
+        openSession(summary);
+      }).catch(() => undefined);
+    };
+    window.addEventListener(OPEN_AGENT_SESSION_EVENT, onOpenAgentSession);
+    const onPrefillPrompt = (event: Event): void => {
+      const prompt = (event as CustomEvent<PrefillAgentPromptEventDetail>).detail?.prompt?.trim();
+      if (!prompt) return;
+      claimWorkspace();
+      dispatch({ type: 'draft.changed', value: prompt });
+    };
+    window.addEventListener(PREFILL_AGENT_PROMPT_EVENT, onPrefillPrompt);
+    return () => {
+      active = false;
+      window.removeEventListener(OPEN_AGENT_SESSION_EVENT, onOpenAgentSession);
+      window.removeEventListener(PREFILL_AGENT_PROMPT_EVENT, onPrefillPrompt);
+    };
+  }, [adapter, claimWorkspace, dispatch, focusMode, openSession, scope]);
 
   const archiveSession = useCallback((summary: AiSessionSummary): void => {
     if (archivePendingRef.current || summary.archived) return;

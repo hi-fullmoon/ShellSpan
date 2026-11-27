@@ -73,6 +73,31 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
             input_schema: super::skill_proposals::schema(),
         },
         ModelToolDefinition {
+            name: super::app_actions::APP_INSPECT_TOOL.into(),
+            description: "Read-only, secret-free inspection of ShellSpan workspace objects: saved connection profiles, open terminals, active port forwards, or AI sessions. Never exposes passwords, private keys, or keychain secrets.".into(),
+            input_schema: super::app_actions::inspect_schema(),
+        },
+        ModelToolDefinition {
+            name: super::app_actions::APP_NAVIGATE_TOOL.into(),
+            description: "Navigate ShellSpan UI to a section, workbench tab (connections/knownHosts/keychain/monitor/logs), settings section, open terminal tab, SFTP path for a saved profile, host tool dialog, or AI session. Root session only. Automatically exits Focus Mode when navigating outside Focus Mode.".into(),
+            input_schema: super::app_actions::navigate_schema(),
+        },
+        ModelToolDefinition {
+            name: super::app_actions::APP_PROPOSE_ACTION_TOOL.into(),
+            description: "Prepare a secret-free draft for a ShellSpan connection profile (connectionProfile) or port-forward rule (portForward) and open the matching UI form for explicit user review and save. Root session only. Never include passwords, private keys, passphrases, or tokens.".into(),
+            input_schema: super::app_actions::propose_action_schema(),
+        },
+        ModelToolDefinition {
+            name: super::app_actions::APP_TERMINAL_TOOL.into(),
+            description: "Open a saved SSH connection profile in a terminal tab (routing through ShellSpan's standard credential and host-key prompts), open a new local terminal tab, or focus an existing terminal session. Root session only.".into(),
+            input_schema: super::app_actions::terminal_schema(),
+        },
+        ModelToolDefinition {
+            name: super::app_actions::APP_SESSION_TOOL.into(),
+            description: "Create an independent peer root AI session (distinct from spawn_*_agent subagents; use when the user asks to start a separate session/thread for another task), open an existing root session, or queue a prompt on another root session. Leaves the current session view intact by default and renders a clickable 'Open session' card unless focusNewSession=true is explicitly requested. Root session only; max 3 created sessions per turn.".into(),
+            input_schema: super::app_actions::session_schema(),
+        },
+        ModelToolDefinition {
             name: super::user_questions::TOOL_NAME.into(),
             description: format!("{} Ask 1 to 3 concise questions. Options are optional (2 to 7); free text is always available. Put a recommended choice first with (Recommended). Text limits are UTF-8 bytes: id 64, question 2048, header 128, label 256, description 1024; total JSON 32768.", super::user_questions::TOOL_INSTRUCTIONS),
             input_schema: super::user_questions::schema(),

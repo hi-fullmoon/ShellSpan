@@ -30,6 +30,7 @@
 - [内容脱敏](../protocol/agent/runtime/content-redaction.md)
 - [诊断工具](../protocol/agent/runtime/diagnostic-tools.md)
 - [切换工作区焦点](../protocol/agent/runtime/focus-workspace.md)与[会话标题](../protocol/agent/runtime/session-titles.md)
+- [应用控制面与 Deep Link 协议](../protocol/agent/runtime/app-control-plane.md)
 - [图片附件](../protocol/agent/runtime/image-attachments.md)与[文档附件](../protocol/agent/runtime/document-attachments.md)
 - [LLM 协议](../protocol/llm/README.md)
 - [Petdex 动作联动](../protocol/petdex/integration.md)与[消息气泡](../protocol/petdex/bubble.md)
@@ -51,6 +52,7 @@
 ## 后续设计与历史记录
 
 - [终端能力增强实施计划](design/terminal-capabilities-plan.md)：按三阶段规划终端交互、Shell Integration 体验释放、运维核心能力与 SSH 协议扩展。
+- [应用控制面实施计划](design/agent-app-control-plane-plan.md)：按三阶段规划 ShellSpan 应用控制面、人机统一 Action 总线、独立会话调度与 `shellspan://` Deep Link。
 - [终端兼容与分阶段上线记录](../protocol/agent/runtime/terminal-execution-compatibility.md)
 - [in-band 完成帧阶段 0 攻击记录](design/agent-direct-shell-execution-stage-0-gate.md)及[独立实验夹具](../tests/agent-direct-shell-gate/README.md)：保留被否决方案的反例，避免将终端输出当成可信完成信号。
 

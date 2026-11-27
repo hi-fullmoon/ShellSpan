@@ -7,6 +7,7 @@ mod ai_file_actions;
 mod commands;
 mod connection;
 mod db;
+mod deep_link;
 mod directory_request_registry;
 mod execution;
 mod file_actions;
@@ -513,6 +514,7 @@ pub fn run() {
             }
             #[cfg(not(target_os = "macos"))]
             menu::initialize_tray(app)?;
+            deep_link::enqueue_startup_deep_links(app.handle());
             Ok(())
         })
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -522,6 +524,7 @@ pub fn run() {
         .manage(terminal_recorder::TerminalRecorder::default())
         .manage(terminal_display_origin::DisplayOriginRegistry::default())
         .manage(agent_runtime::AgentRuntime::default())
+        .manage(deep_link::PendingDeepLinkQueue::default())
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())
         .manage(PreflightCancellationRegistry::default())
@@ -549,6 +552,7 @@ pub fn run() {
             ai::ai_resolve_model,
             ai::ai_model_declaration_template,
             agent_runtime::agent_runtime_create_session,
+            deep_link::drain_pending_deep_links,
             agent_runtime::agent_runtime_local_sandbox_status,
             agent_runtime::agent_runtime_sandbox_diff,
             agent_runtime::agent_runtime_sandbox_file_diff,
@@ -857,6 +861,12 @@ pub fn run() {
         .build(context)
         .expect("error while building tauri application");
     app.run(|app, event| {
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        if let tauri::RunEvent::Opened { urls } = &event {
+            for url in urls {
+                deep_link::handle_incoming_deep_link(app, url.as_str());
+            }
+        }
         if matches!(
             event,
             tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }

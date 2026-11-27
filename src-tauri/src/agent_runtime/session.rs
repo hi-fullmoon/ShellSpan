@@ -5268,6 +5268,9 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
         Payload::SkillProposalRequested { .. }
         | Payload::SkillProposalResolved { .. }
         | Payload::SkillProposalCancelled { .. } => super::skill_proposals::validate_payload(event),
+        Payload::AppActionDispatched { .. }
+        | Payload::AppActionCard { .. }
+        | Payload::AppActionProposalRequested { .. } => super::app_actions::validate_payload(event),
         Payload::SessionCreated { .. }
         | Payload::AgentCreated { .. }
         | Payload::SessionResumed {}

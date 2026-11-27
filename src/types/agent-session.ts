@@ -598,6 +598,9 @@ export type AgentSessionEvent =
   | AgentSessionEventWithData<'skill/proposal_cancelled', {
     identity: import('./agent-skill').SkillProposalIdentity;
   }>
+  | AgentSessionEventWithData<'app_action/dispatched', import('./agent-app-action').AppActionDispatchedData>
+  | AgentSessionEventWithData<'app_action/card', import('./agent-app-action').AppActionCardData>
+  | AgentSessionEventWithData<'app_action/proposal_requested', import('./agent-app-action').AppActionProposalRequestedData>
   | AgentSessionEventWithData<'tool/approval', {
       requestId: string;
       callId: string;

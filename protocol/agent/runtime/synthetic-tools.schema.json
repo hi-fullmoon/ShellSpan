@@ -33,7 +33,8 @@
         "skillLoad",
         "userInteraction",
         "subagentOrchestration",
-        "fleetOrchestration"
+        "fleetOrchestration",
+        "appControl"
       ]
     },
     "syntheticToolDescriptor": {

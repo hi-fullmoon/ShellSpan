@@ -680,6 +680,8 @@ pub(crate) struct AgentToolPipeline {
     native: Arc<dyn NativeToolRuntime>,
     artifacts: AgentArtifactStore,
     orchestration: OrchestrationToolRuntimeSlot,
+    app_inspector: super::app_actions::AppWorkspaceInspectorSlot,
+    app_session_coordinator: super::app_actions::AppSessionCoordinatorSlot,
     pending: Arc<Mutex<HashMap<String, PendingTool>>>,
     changed: Arc<Notify>,
     parallel_limit: Arc<std::sync::atomic::AtomicUsize>,
@@ -710,6 +712,8 @@ impl AgentToolPipeline {
             native,
             artifacts,
             orchestration,
+            app_inspector: super::app_actions::AppWorkspaceInspectorSlot::default(),
+            app_session_coordinator: super::app_actions::AppSessionCoordinatorSlot::default(),
             pending: Arc::new(Mutex::new(HashMap::new())),
             changed: Arc::new(Notify::new()),
             parallel_limit: Arc::new(std::sync::atomic::AtomicUsize::new(
@@ -721,6 +725,20 @@ impl AgentToolPipeline {
             #[cfg(test)]
             failure_observed: Arc::new(Notify::new()),
         }
+    }
+
+    pub(crate) fn configure_app_inspector(
+        &self,
+        inspector: Arc<dyn super::app_actions::AppWorkspaceInspector>,
+    ) -> Result<(), String> {
+        self.app_inspector.install(inspector)
+    }
+
+    pub(crate) fn configure_app_session_coordinator(
+        &self,
+        coordinator: Arc<dyn super::app_actions::AppSessionCoordinator>,
+    ) -> Result<(), String> {
+        self.app_session_coordinator.install(coordinator)
     }
 
     pub(super) fn question_gate(&self, session_id: &str) -> Result<Arc<Mutex<()>>, String> {
@@ -1141,6 +1159,24 @@ impl AgentToolPipeline {
                                 continue;
                             }
                         }
+                    }
+                    if super::app_actions::is_app_control_tool(&call.name) {
+                        if !running.is_empty() {
+                            draining_barrier = true;
+                            continue;
+                        }
+                        self.process_app_control_call(
+                            entry,
+                            turn_id,
+                            step_id,
+                            request_id,
+                            permission_mode,
+                            target.clone(),
+                            call.clone(),
+                        )?;
+                        next += 1;
+                        committed += 1;
+                        continue;
                     }
                     if is_session_tool(&call.name) || is_orchestration_tool(&call.name) {
                         if !running.is_empty() {
@@ -1969,6 +2005,172 @@ impl AgentToolPipeline {
                     evidence_refs: Vec::new(),
                 },
             }),
+        }
+        self.sessions.append_batch(&entry.session_id, payloads)?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn process_app_control_call(
+        &self,
+        entry: &Arc<AgentEntry>,
+        turn_id: &str,
+        step_id: &str,
+        request_id: &str,
+        permission_mode: super::AgentSessionPermissionMode,
+        target: AgentSessionTarget,
+        call: ModelToolCall,
+    ) -> Result<(), String> {
+        let effect = match call.name.as_str() {
+            super::app_actions::APP_INSPECT_TOOL => AgentSessionEffect::SensitiveRead,
+            super::app_actions::APP_TERMINAL_TOOL | super::app_actions::APP_SESSION_TOOL => {
+                AgentSessionEffect::StateChange
+            }
+            _ => AgentSessionEffect::None,
+        };
+        if entry.subagent.is_some() {
+            self.ensure_capability(entry, &call.name, effect, &target.target_id)?;
+        }
+        let title = match call.name.as_str() {
+            super::app_actions::APP_INSPECT_TOOL => "Inspect ShellSpan workspace",
+            super::app_actions::APP_NAVIGATE_TOOL => "Navigate ShellSpan UI",
+            super::app_actions::APP_PROPOSE_ACTION_TOOL => "Propose ShellSpan form draft",
+            super::app_actions::APP_TERMINAL_TOOL => "Manage ShellSpan terminal",
+            super::app_actions::APP_SESSION_TOOL => "Manage ShellSpan AI session",
+            _ => "ShellSpan app control",
+        };
+        let recorded = RecordedToolCall {
+            call_id: call.call_id.clone(),
+            provider_call_id: call.provider_call_id.clone(),
+            name: call.name.clone(),
+            native_name: None,
+            arguments: call.arguments.clone(),
+            title: Some(title.into()),
+            effect: Some(effect),
+            target: Some(target),
+        };
+        let mut payloads = vec![
+            AgentScopedPayload {
+                turn_id: Some(turn_id.into()),
+                step_id: Some(step_id.into()),
+                payload: AgentSessionEventPayload::ToolCall { call: recorded },
+            },
+            AgentScopedPayload {
+                turn_id: Some(turn_id.into()),
+                step_id: Some(step_id.into()),
+                payload: AgentSessionEventPayload::ToolApproval {
+                    request_id: request_id.into(),
+                    call_id: call.call_id.clone(),
+                    approval_id: None,
+                    status: AgentToolApprovalStatus::Approved,
+                    risk: Some(effect),
+                    reason: Some("sessionRuntimeAuthorized".into()),
+                    expires_at_unix_ms: None,
+                    prompt: None,
+                },
+            },
+            AgentScopedPayload {
+                turn_id: Some(turn_id.into()),
+                step_id: Some(step_id.into()),
+                payload: AgentSessionEventPayload::ToolExecution {
+                    call_id: call.call_id.clone(),
+                    status: AgentToolExecutionStatus::Dispatched,
+                    idempotency: if call.name == super::app_actions::APP_INSPECT_TOOL {
+                        "yes".into()
+                    } else {
+                        "conditional".into()
+                    },
+                },
+            },
+        ];
+        let inspector = self.app_inspector.get();
+        let coordinator = self.app_session_coordinator.get();
+        let sessions_created_in_turn = if call.name == super::app_actions::APP_SESSION_TOOL {
+            self.sessions
+                .read_events(&entry.session_id, |events| {
+                    events
+                        .iter()
+                        .filter(|event| {
+                            event.turn_id.as_deref() == Some(turn_id)
+                                && matches!(
+                                    &event.payload,
+                                    AgentSessionEventPayload::ToolResult {
+                                        name,
+                                        status: AgentToolResultStatus::Completed,
+                                        data: Some(data),
+                                        ..
+                                    } if name == super::app_actions::APP_SESSION_TOOL
+                                        && data.get("sessionAction").and_then(Value::as_str)
+                                            == Some("create")
+                                )
+                        })
+                        .count()
+                })
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        match super::app_actions::execute_app_control_tool(
+            super::app_actions::AppControlCallContext {
+                session_id: &entry.session_id,
+                is_subagent: entry.subagent.is_some(),
+                permission_mode,
+                call_id: &call.call_id,
+                sessions_created_in_turn,
+                sessions: &self.sessions,
+                inspector: inspector.as_deref(),
+                coordinator: coordinator.as_deref(),
+            },
+            &call.name,
+            call.arguments,
+        ) {
+            Ok(outcome) => {
+                for extra in outcome.extra_payloads {
+                    payloads.push(AgentScopedPayload {
+                        turn_id: Some(turn_id.into()),
+                        step_id: Some(step_id.into()),
+                        payload: extra,
+                    });
+                }
+                payloads.push(AgentScopedPayload {
+                    turn_id: Some(turn_id.into()),
+                    step_id: Some(step_id.into()),
+                    payload: AgentSessionEventPayload::ToolResult {
+                        call_id: call.call_id,
+                        name: call.name,
+                        status: AgentToolResultStatus::Completed,
+                        summary: outcome.summary,
+                        data: Some(outcome.data),
+                        duration_ms: None,
+                        evidence_refs: Vec::new(),
+                    },
+                });
+            }
+            Err(error) => {
+                let status = if error.starts_with("APP_ACTION_ROOT_ONLY:")
+                    || error.starts_with("APP_ACTION_REDACTION_REQUIRED:")
+                    || error.starts_with("APP_ACTION_RATE_LIMITED:")
+                    || error.starts_with("APP_ACTION_INVALID_TARGET:")
+                    || error.starts_with("APP_ACTION_APPROVAL_REQUIRED:")
+                {
+                    AgentToolResultStatus::Rejected
+                } else {
+                    AgentToolResultStatus::Failed
+                };
+                payloads.push(AgentScopedPayload {
+                    turn_id: Some(turn_id.into()),
+                    step_id: Some(step_id.into()),
+                    payload: AgentSessionEventPayload::ToolResult {
+                        call_id: call.call_id,
+                        name: call.name,
+                        status,
+                        summary: error,
+                        data: None,
+                        duration_ms: None,
+                        evidence_refs: Vec::new(),
+                    },
+                });
+            }
         }
         self.sessions.append_batch(&entry.session_id, payloads)?;
         Ok(())

@@ -3,6 +3,7 @@ import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { applyPatch, diffLines, parsePatch } from 'diff';
 import hljs from 'highlight.js/lib/common';
 import {
+  ArrowUpRightIcon,
   BotIcon,
   BracesIcon,
   CheckCircle2Icon,
@@ -52,6 +53,10 @@ import { renderTerminalTranscript } from '@/lib/terminal/terminal-output-buffer'
 import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
+import { useLinkedAgentSessionStatus } from '@/hooks/useLinkedAgentSessionStatus';
+import { dispatchAppAction } from '@/lib/app-actions/registry';
+import type { AppUiAction } from '@/types/agent-app-action';
+import type { AgentSessionRuntimeStatus } from '@/types/agent-session';
 import {
   extractSubagentToolSummary,
   isSubagentDelegationTool,
@@ -416,6 +421,11 @@ function toolTitle(
   t: ReturnType<typeof useI18n>['t'],
 ): string {
   if (node.name === 'skill' || node.nativeName === 'skill') return t('ai.workspace.tool.title.skill');
+  if (node.name === 'app_inspect' || node.nativeName === 'app_inspect') return t('ai.workspace.tool.title.appInspect');
+  if (node.name === 'app_navigate' || node.nativeName === 'app_navigate') return t('ai.workspace.tool.title.appNavigate');
+  if (node.name === 'app_propose_action' || node.nativeName === 'app_propose_action') return t('ai.workspace.tool.title.appPropose');
+  if (node.name === 'app_terminal' || node.nativeName === 'app_terminal') return t('ai.workspace.tool.title.appTerminal');
+  if (node.name === 'app_session' || node.nativeName === 'app_session') return t('ai.workspace.tool.title.appSession');
   if (node.name === 'trash_file') return t('ai.workspace.approval.action.trashFile');
   if (node.name === 'probe_http' || node.nativeName === 'probe_http') return t('ai.workspace.tool.title.httpProbe');
   const subagentAction = subagentToolAction(node.name, node.nativeName);
@@ -2131,6 +2141,94 @@ export function AiToolGroupRow({
   );
 }
 
+function extractAppActionFromToolOutput(node: ToolNode): {
+  readonly action: AppUiAction;
+  readonly labelKey: LocaleKey;
+  readonly linkedSessionId: string | null;
+  readonly initialSessionStatus: AgentSessionRuntimeStatus | null;
+} | null {
+  if (node.state !== 'succeeded') return null;
+  if (
+    node.name !== 'app_navigate'
+    && node.name !== 'app_propose_action'
+    && node.name !== 'app_terminal'
+    && node.name !== 'app_session'
+  ) {
+    return null;
+  }
+  const record = asRecord(node.output);
+  const action = asRecord(record?.action);
+  if (!action || typeof action.type !== 'string') return null;
+  const labelKey: LocaleKey = node.name === 'app_propose_action' || action.type === 'openProposalDraft'
+    ? 'ai.workspace.appAction.openDraft'
+    : node.name === 'app_session' || action.type === 'openAgentSession'
+      ? 'ai.workspace.appAction.openSession'
+      : node.name === 'app_terminal'
+        ? 'ai.workspace.appAction.openTerminal'
+        : 'ai.workspace.appAction.open';
+  const linkedSessionId = action.type === 'openAgentSession' && typeof action.agentSessionId === 'string'
+    ? action.agentSessionId
+    : null;
+  const initialSessionStatus: AgentSessionRuntimeStatus | null = linkedSessionId
+    ? (record?.started === true ? 'running' : record?.requiresManualStart === true ? 'idle' : null)
+    : null;
+  return {
+    action: action as unknown as AppUiAction,
+    labelKey,
+    linkedSessionId,
+    initialSessionStatus,
+  };
+}
+
+function sessionStatusBadgeVariant(
+  status: AgentSessionRuntimeStatus,
+): React.ComponentProps<typeof Badge>['variant'] {
+  if (status === 'failed') return 'destructive';
+  if (status === 'running' || status === 'waiting') return 'secondary';
+  return 'outline';
+}
+
+function AppActionCardBar({
+  action,
+  labelKey,
+  linkedSessionId,
+  initialSessionStatus,
+}: {
+  readonly action: AppUiAction;
+  readonly labelKey: LocaleKey;
+  readonly linkedSessionId: string | null;
+  readonly initialSessionStatus: AgentSessionRuntimeStatus | null;
+}) {
+  const { t } = useI18n();
+  const liveStatus = useLinkedAgentSessionStatus(linkedSessionId, initialSessionStatus);
+  return (
+    <div className="ml-[22px] mt-1 flex flex-wrap items-center gap-1.5" data-app-action-card="">
+      <Button
+        type="button"
+        variant="outline"
+        size="xs"
+        className="gap-1"
+        onClick={() => dispatchAppAction(action, { source: 'user' })}
+      >
+        <ArrowUpRightIcon className="size-3.5" aria-hidden="true" />
+        <span>{t(labelKey)}</span>
+      </Button>
+      {liveStatus && (
+        <Badge
+          variant={sessionStatusBadgeVariant(liveStatus)}
+          className="h-5 gap-1 px-1.5 text-[11px]"
+          data-app-session-status={liveStatus}
+        >
+          {liveStatus === 'running' && (
+            <LoaderCircleIcon className="size-3 animate-spin" aria-hidden="true" />
+          )}
+          <span>{t(`ai.workspace.appAction.sessionStatus.${liveStatus}` as LocaleKey)}</span>
+        </Badge>
+      )}
+    </div>
+  );
+}
+
 function StandardAiToolRow({
   node,
 }: {
@@ -2200,6 +2298,7 @@ function StandardAiToolRow({
     : toolTitle(node, variant, t);
   const model = useMemo(() => variant === 'write' || variant === 'edit' ? diffModel(node) : null, [node, variant]);
   const changeStat = model ? diffStat(model) : null;
+  const appActionCard = useMemo(() => extractAppActionFromToolOutput(node), [node]);
   if (linkedJob && !hasError && node.state !== 'uncertain') {
     return (
       <div
@@ -2273,6 +2372,14 @@ function StandardAiToolRow({
             </span>
           )}
         </CollapsibleTrigger>
+        {appActionCard && (
+          <AppActionCardBar
+            action={appActionCard.action}
+            labelKey={appActionCard.labelKey}
+            linkedSessionId={appActionCard.linkedSessionId}
+            initialSessionStatus={appActionCard.initialSessionStatus}
+          />
+        )}
         <CollapsibleContent>
           <div className="ai-tool-body flex min-w-0 max-w-full flex-col">
             <AiToolExpandedContent

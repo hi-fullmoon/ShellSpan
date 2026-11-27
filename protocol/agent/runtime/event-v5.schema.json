@@ -96,7 +96,10 @@
         "session/resumed",
         "subagent/recovery_started",
         "agent/inbox/paused",
-        "agent/inbox/item_resumed"
+        "agent/inbox/item_resumed",
+        "app_action/dispatched",
+        "app_action/card",
+        "app_action/proposal_requested"
       ]
     },
     "data": {
@@ -1996,6 +1999,151 @@
               },
               "provider": {
                 "$ref": "#/$defs/selection"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "app_action/dispatched"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "actionId",
+              "callId",
+              "action",
+              "requiresFocus"
+            ],
+            "properties": {
+              "actionId": {
+                "$ref": "#/$defs/identifier"
+              },
+              "callId": {
+                "$ref": "#/$defs/identifier"
+              },
+              "action": {
+                "$ref": "#/$defs/appUiAction"
+              },
+              "requiresFocus": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "app_action/card"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "cardId",
+              "callId",
+              "kind",
+              "title",
+              "action"
+            ],
+            "properties": {
+              "cardId": {
+                "$ref": "#/$defs/identifier"
+              },
+              "callId": {
+                "$ref": "#/$defs/identifier"
+              },
+              "kind": {
+                "$ref": "#/$defs/appActionCardKind"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "subtitle": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "action": {
+                "$ref": "#/$defs/appUiAction"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "app_action/proposal_requested"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "proposalId",
+              "callId",
+              "kind",
+              "summary",
+              "draft"
+            ],
+            "properties": {
+              "proposalId": {
+                "$ref": "#/$defs/identifier"
+              },
+              "callId": {
+                "$ref": "#/$defs/identifier"
+              },
+              "kind": {
+                "$ref": "#/$defs/appProposalKind"
+              },
+              "summary": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "draft": {
+                "type": "object"
               }
             }
           }
@@ -5662,6 +5810,121 @@
           }
         }
       }
+    },
+    "appActionCardKind": {
+      "type": "string",
+      "enum": [
+        "navigation",
+        "terminal",
+        "sftpPath",
+        "hostTool",
+        "agentSession",
+        "proposalDraft"
+      ]
+    },
+    "appProposalKind": {
+      "type": "string",
+      "enum": [
+        "connectionProfile",
+        "portForward"
+      ]
+    },
+    "appUiAction": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "navigateSection",
+            "navigateSettings",
+            "focusTerminal",
+            "connectTerminalProfile",
+            "openLocalTerminal",
+            "openSftpPath",
+            "openHostTool",
+            "openAgentSession",
+            "openProposalDraft"
+          ]
+        },
+        "section": {
+          "type": "string",
+          "enum": [
+            "workbench",
+            "terminal",
+            "sftp"
+          ]
+        },
+        "workbenchTab": {
+          "type": "string",
+          "enum": [
+            "connections",
+            "knownHosts",
+            "keychain",
+            "monitor",
+            "logs"
+          ]
+        },
+        "settingsSection": {
+          "type": "string",
+          "enum": [
+            "appearance",
+            "general",
+            "terminal",
+            "sftp",
+            "ai",
+            "shortcuts",
+            "experimental",
+            "feedback"
+          ]
+        },
+        "terminalSessionId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "profileId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "initialDirectory": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "side": {
+          "type": "string",
+          "enum": [
+            "remote",
+            "local"
+          ]
+        },
+        "tool": {
+          "type": "string",
+          "enum": [
+            "overview",
+            "quickActions",
+            "portForward"
+          ]
+        },
+        "agentSessionId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "proposalId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "kind": {
+          "$ref": "#/$defs/appProposalKind"
+        },
+        "draft": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

@@ -833,6 +833,20 @@ impl AgentRuntime {
             .store(true, std::sync::atomic::Ordering::Release);
     }
 
+    pub(crate) fn configure_app_inspector(
+        &self,
+        inspector: Arc<dyn super::app_actions::AppWorkspaceInspector>,
+    ) -> Result<(), String> {
+        self.tools.configure_app_inspector(inspector)
+    }
+
+    pub(crate) fn configure_app_session_coordinator(
+        &self,
+        coordinator: Arc<dyn super::app_actions::AppSessionCoordinator>,
+    ) -> Result<(), String> {
+        self.tools.configure_app_session_coordinator(coordinator)
+    }
+
     pub(crate) fn configure_native(&self, app: tauri::AppHandle) -> Result<(), String> {
         self.native_engine.reconcile_remote_visible_rollout()?;
         let sudo_emitter = app.clone();

@@ -22,7 +22,11 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectValue } from '@/c
 import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
 import { HostOverviewDialog } from './host-overview-dialog';
-import { PortForwardDialog } from './port-forward-dialog';
+import { PortForwardDialog, type PortForwardInitialDraft } from './port-forward-dialog';
+import {
+  OPEN_PORT_FORWARD_DRAFT_EVENT,
+  type PortForwardDraftEventDetail,
+} from '@/lib/app-actions/types';
 import { HostQuickActionsDialog } from './host-quick-actions-dialog';
 import type { ConnectionProfile } from '@/types';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
@@ -105,6 +109,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [overviewProfile, setOverviewProfile] = useState<ConnectionProfile>();
   const [forwardProfile, setForwardProfile] = useState<ConnectionProfile>();
+  const [forwardInitialDraft, setForwardInitialDraft] = useState<PortForwardInitialDraft>();
   const [quickActionProfile, setQuickActionProfile] = useState<ConnectionProfile>();
   const recentIds = useRecentProfilesStore((state) => state.recentIds);
 
@@ -159,12 +164,35 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
       ).detail;
       const target = profiles.find((profile) => profile.id === detail?.profileId);
       if (!target) return;
-      if (detail.tool === 'portForward') setForwardProfile(target);
+      if (detail.tool === 'portForward') {
+        setForwardInitialDraft(undefined);
+        setForwardProfile(target);
+      }
       else if (detail.tool === 'overview') setOverviewProfile(target);
       else if (detail.tool === 'quickActions') setQuickActionProfile(target);
     };
+    const handleOpenPortForwardDraft = (event: Event): void => {
+      const detail = (event as CustomEvent<PortForwardDraftEventDetail>).detail;
+      const draft = detail?.draft;
+      if (!draft?.profileId) return;
+      const target = profiles.find((profile) => profile.id === draft.profileId);
+      if (!target) return;
+      setForwardInitialDraft({
+        name: draft.name,
+        kind: draft.kind,
+        localPort: draft.localPort,
+        remoteHost: draft.remoteHost,
+        remotePort: draft.remotePort,
+        autoStart: draft.autoStart,
+      });
+      setForwardProfile(target);
+    };
     document.addEventListener('shellspan:open-host-tool', handleOpenHostTool);
-    return () => document.removeEventListener('shellspan:open-host-tool', handleOpenHostTool);
+    document.addEventListener(OPEN_PORT_FORWARD_DRAFT_EVENT, handleOpenPortForwardDraft);
+    return () => {
+      document.removeEventListener('shellspan:open-host-tool', handleOpenHostTool);
+      document.removeEventListener(OPEN_PORT_FORWARD_DRAFT_EVENT, handleOpenPortForwardDraft);
+    };
   }, [profiles]);
 
   return (
@@ -335,7 +363,14 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
         </ScrollArea>
       </WorkbenchPage>
       <HostOverviewDialog profile={overviewProfile} onClose={() => setOverviewProfile(undefined)} />
-      <PortForwardDialog profile={forwardProfile} onClose={() => setForwardProfile(undefined)} />
+      <PortForwardDialog
+        profile={forwardProfile}
+        initialDraft={forwardInitialDraft}
+        onClose={() => {
+          setForwardProfile(undefined);
+          setForwardInitialDraft(undefined);
+        }}
+      />
       <HostQuickActionsDialog profile={quickActionProfile} onClose={() => setQuickActionProfile(undefined)} />
     </TooltipProvider>
   );
