@@ -16,10 +16,12 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { SettingsSection, WorkbenchTab } from '@/types';
+import { isPortForwardActive, usePortForwardStore } from '@/stores/portForwardStore';
 import { useUpdateStore } from '@/stores/updateStore';
 import { useAppStore } from '@/stores/appStore';
 import {
   ActivityIcon,
+  CableIcon,
   ChevronUpIcon,
   FileTextIcon,
   InfoIcon,
@@ -32,6 +34,7 @@ import {
   ServerIcon,
   SettingsIcon,
   ShieldCheckIcon,
+  ZapIcon,
 } from 'lucide-react';
 import { UserAvatar } from '@/components/workbench/user-avatar';
 import { UserProfileDialog } from '@/components/workbench/user-profile-dialog';
@@ -50,6 +53,7 @@ interface MenuItem {
   label: string;
   icon: React.ElementType;
   badge?: number;
+  badgeTone?: 'destructive' | 'secondary';
 }
 
 interface WorkbenchSidebarItemProps {
@@ -81,7 +85,12 @@ const WorkbenchSidebarItem: React.FC<WorkbenchSidebarItemProps> = ({
       <span className="min-w-0 flex-1 truncate text-left">{item.label}</span>
       {item.badge != null && item.badge > 0 && (
         <span
-          className="min-w-5 rounded-full bg-destructive px-1.5 text-center text-[11px] leading-5 text-destructive-foreground"
+          className={cn(
+            'min-w-5 rounded-full px-1.5 text-center text-[11px] leading-5 font-medium tabular-nums',
+            item.badgeTone === 'secondary'
+              ? 'bg-primary/10 text-primary'
+              : 'bg-destructive text-destructive-foreground',
+          )}
           aria-label={item.badge.toString()}
         >
           {item.badge > 99 ? '99+' : item.badge}
@@ -112,11 +121,26 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
   const checkingForUpdates = updatePhase === 'checking';
   const downloadingUpdate = updatePhase === 'update_available' || updatePhase === 'downloading';
   const updateBusy = checkingForUpdates || downloadingUpdate;
+  const activePortForwardCount = usePortForwardStore(
+    (state) => state.runtimes.filter(isPortForwardActive).length,
+  );
   const items: MenuItem[] = [
     {
       key: 'connections',
       label: t('workbench.connections.title'),
       icon: ServerIcon,
+    },
+    {
+      key: 'portForwards',
+      label: t('workbench.portForwards.title'),
+      icon: CableIcon,
+      badge: activePortForwardCount > 0 ? activePortForwardCount : undefined,
+      badgeTone: 'secondary',
+    },
+    {
+      key: 'quickActions',
+      label: t('workbench.quickActions.title'),
+      icon: ZapIcon,
     },
     {
       key: 'keychain',

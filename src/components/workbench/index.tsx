@@ -9,10 +9,13 @@ import {
   type ConnectionDraftEventDetail,
 } from '@/lib/app-actions/types';
 import { ConnectionList } from './connection-list';
+import { HostOverviewDialog } from './host-overview-dialog';
+import { HostQuickActionsPanel } from './host-quick-actions-panel';
 import { KnownHostsPanel } from './known-hosts-panel';
 import { KeychainPanel } from './keychain-panel';
 import { LogPanel } from './log-panel';
 import { MonitorPanel } from './monitor-panel';
+import { PortForwardPanel } from './port-forward-panel';
 import { WorkbenchSidebar } from './workbench-sidebar';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import { HostKeyDialog } from '@/components/terminal/host-key-dialog';
@@ -35,6 +38,7 @@ import {
 import { useKeychainStore } from '@/stores/keychainStore';
 import { createLogger } from '@/lib/logger';
 import { useRemoteHealthStore } from '@/stores/remoteHealthStore';
+import { useWorkbenchToolsStore } from '@/stores/workbenchToolsStore';
 
 const logger = createLogger('connection-import');
 
@@ -170,6 +174,26 @@ const Workbench: React.FC<WorkbenchProps> = ({
     setActiveTab('monitor');
   }, [setActiveTab]);
 
+  const openPortForward = useCallback((profile: ConnectionProfile): void => {
+    useWorkbenchToolsStore.getState().selectPortForwardProfile(profile.id);
+    setActiveTab('portForwards');
+  }, [setActiveTab]);
+
+  const openQuickActions = useCallback((profile: ConnectionProfile): void => {
+    useWorkbenchToolsStore.getState().selectQuickActionsProfile(profile.id);
+    setActiveTab('quickActions');
+  }, [setActiveTab]);
+
+  const openHostOverview = useCallback((profile: ConnectionProfile): void => {
+    useWorkbenchToolsStore.getState().openHostOverview(profile.id);
+  }, []);
+
+  const overviewProfileId = useWorkbenchToolsStore((state) => state.overviewProfileId);
+  const closeHostOverview = useWorkbenchToolsStore((state) => state.closeHostOverview);
+  const overviewProfile = overviewProfileId
+    ? profiles.find((profile) => profile.id === overviewProfileId)
+    : undefined;
+
   useEffect(() => {
     const handleConnectProfile = (event: Event): void => {
       const detail = (event as CustomEvent<{
@@ -296,12 +320,17 @@ const Workbench: React.FC<WorkbenchProps> = ({
               onConnectTerminal={connect}
               onConnectSftp={connectSftp}
               onOpenHealth={openRemoteHealth}
+              onOpenPortForward={openPortForward}
+              onOpenQuickActions={openQuickActions}
+              onOpenOverview={openHostOverview}
               onDuplicate={handleDuplicate}
               onToggleFavorite={(profile) => void handleToggleFavorite(profile)}
               onImport={() => void handleOpenImport()}
               onExport={() => void handleExport()}
             />
           )}
+          {activeTab === 'portForwards' && <PortForwardPanel />}
+          {activeTab === 'quickActions' && <HostQuickActionsPanel />}
           {activeTab === 'knownHosts' && (
             <KnownHostsPanel onCreateConnection={handleCreateFromKnownHost} />
           )}
@@ -310,6 +339,8 @@ const Workbench: React.FC<WorkbenchProps> = ({
           {activeTab === 'logs' && <LogPanel />}
         </div>
       </div>
+
+      <HostOverviewDialog profile={overviewProfile} onClose={closeHostOverview} />
 
       <ConnectionFormDrawer
         open={formOpen}

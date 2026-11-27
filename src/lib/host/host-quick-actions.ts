@@ -3,6 +3,7 @@ import { useAppStore } from '@/stores/appStore';
 import { getSftpPaneConnectionKey, getSftpPaneSource, useSftpStore, type SftpConnection, type SftpLocationRequest, type SftpSide } from '@/stores/sftpStore';
 import { sshRouteKey } from '@/lib/connections/ssh-route';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { useWorkbenchToolsStore } from '@/stores/workbenchToolsStore';
 import type { ConnectionProfile, HostConnectionAction } from '@/types';
 import { validateHostQuickAction } from '@/lib/host/host-quick-action-model';
 export {
@@ -127,8 +128,16 @@ export function runHostConnectionAction(
     }));
     return;
   }
-  useAppStore.getState().setActiveSection('workbench');
-  useAppStore.getState().setActiveWorkbenchTab('connections');
+  const app = useAppStore.getState();
+  const tools = useWorkbenchToolsStore.getState();
+  app.setActiveSection('workbench');
+  if (action === 'portForward') {
+    tools.selectPortForwardProfile(profileId);
+    app.setActiveWorkbenchTab('portForwards');
+  } else {
+    tools.openHostOverview(profileId);
+    app.setActiveWorkbenchTab('connections');
+  }
   document.dispatchEvent(new CustomEvent('shellspan:open-host-tool', {
     detail: { profileId, tool: action },
   }));

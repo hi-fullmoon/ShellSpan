@@ -89,7 +89,7 @@ pub(crate) fn navigate_schema() -> Value {
             },
             "workbenchTab": {
                 "type": "string",
-                "enum": ["connections", "knownHosts", "keychain", "monitor", "logs"]
+                "enum": ["connections", "portForwards", "quickActions", "knownHosts", "keychain", "monitor", "logs"]
             },
             "settingsSection": {
                 "type": "string",
@@ -1189,7 +1189,15 @@ fn execute_navigate(
             if let Some(tab) = args.workbench_tab.as_deref() {
                 validate_allowed(
                     tab,
-                    &["connections", "knownHosts", "keychain", "monitor", "logs"],
+                    &[
+                        "connections",
+                        "portForwards",
+                        "quickActions",
+                        "knownHosts",
+                        "keychain",
+                        "monitor",
+                        "logs",
+                    ],
                     "workbenchTab",
                 )?;
             }
@@ -1211,7 +1219,15 @@ fn execute_navigate(
                 .ok_or("app_navigate target 'workbenchTab' requires 'workbenchTab'")?;
             validate_allowed(
                 &tab,
-                &["connections", "knownHosts", "keychain", "monitor", "logs"],
+                &[
+                    "connections",
+                    "portForwards",
+                    "quickActions",
+                    "knownHosts",
+                    "keychain",
+                    "monitor",
+                    "logs",
+                ],
                 "workbenchTab",
             )?;
             let title = format!("Open workbench/{tab}");

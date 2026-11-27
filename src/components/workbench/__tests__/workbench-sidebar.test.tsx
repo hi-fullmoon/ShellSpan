@@ -2,12 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { WorkbenchSidebar } from '../workbench-sidebar';
 import { useAppStore } from '@/stores/appStore';
+import { usePortForwardStore } from '@/stores/portForwardStore';
 import { useUpdateStore } from '@/stores/updateStore';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
     t: (key: string) => ({
       'workbench.connections.title': 'Connections',
+      'workbench.portForwards.title': 'Port forwarding',
+      'workbench.quickActions.title': 'Quick actions',
       'workbench.keychain.title': 'Keychain',
       'deployment.title': 'Deployments',
       'workbench.knownHosts.title': 'Known Hosts',
@@ -35,6 +38,31 @@ describe('WorkbenchSidebar', () => {
   beforeEach(() => {
     useUpdateStore.setState({ phase: 'idle' });
     useAppStore.setState({ profileName: '', profileAvatar: '' });
+    usePortForwardStore.setState({ runtimes: [] });
+  });
+
+  it('shows a secondary badge on port forwarding when rules are active', () => {
+    usePortForwardStore.setState({
+      runtimes: [
+        {
+          operationId: 'op-1',
+          profileId: 'p-1',
+          configId: 'r-1',
+          name: 'DB',
+          kind: 'local',
+          mode: 'manual',
+          status: 'running',
+          bytesSent: 0,
+          bytesReceived: 0,
+          ownerIds: [],
+        },
+      ],
+    });
+    render(<WorkbenchSidebar activeTab="connections" onTabChange={vi.fn()} onOpenSettings={vi.fn()} onCheckForUpdates={vi.fn()} onOpenAbout={vi.fn()} onRequestExit={vi.fn()} />);
+
+    const badge = screen.getByLabelText('1');
+    expect(badge).toHaveClass('bg-primary/10', 'text-primary');
+    expect(badge).not.toHaveClass('bg-destructive');
   });
 
   it('hides the deployment center and preserves the other navigation entries', () => {
@@ -43,9 +71,9 @@ describe('WorkbenchSidebar', () => {
 
     expect(screen.queryByRole('button', { name: 'Deployments' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', {
-      name: /^(Connections|Deployments|Keychain|Known Hosts|Monitor|Log explorer)$/,
+      name: /^(Connections|Port forwarding|Quick actions|Deployments|Keychain|Known Hosts|Monitor|Log explorer)$/,
     }).map((button) => button.textContent)).toEqual([
-      'Connections', 'Keychain', 'Known Hosts', 'Monitor', 'Log explorer',
+      'Connections', 'Port forwarding', 'Quick actions', 'Keychain', 'Known Hosts', 'Monitor', 'Log explorer',
     ]);
 
     fireEvent.click(screen.getByRole('button', { name: 'Connections' }), { detail: 0 });

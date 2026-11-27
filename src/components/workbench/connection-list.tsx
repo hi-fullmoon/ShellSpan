@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Select as SelectPrimitive } from '@base-ui/react/select';
 import { useI18n } from '@/hooks/useI18n';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
@@ -22,12 +22,6 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectValue } from '@/c
 import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
 import { HostOverviewDialog } from './host-overview-dialog';
-import { PortForwardDialog, type PortForwardInitialDraft } from './port-forward-dialog';
-import {
-  OPEN_PORT_FORWARD_DRAFT_EVENT,
-  type PortForwardDraftEventDetail,
-} from '@/lib/app-actions/types';
-import { HostQuickActionsDialog } from './host-quick-actions-dialog';
 import type { ConnectionProfile } from '@/types';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import { cn } from '@/lib/utils';
@@ -80,6 +74,9 @@ export interface ConnectionListProps {
   onConnectTerminal: (profile: ConnectionProfile) => void;
   onConnectSftp: (profile: ConnectionProfile) => void;
   onOpenHealth?: (profile: ConnectionProfile) => void;
+  onOpenPortForward?: (profile: ConnectionProfile) => void;
+  onOpenQuickActions?: (profile: ConnectionProfile) => void;
+  onOpenOverview?: (profile: ConnectionProfile) => void;
   onDuplicate: (profile: ConnectionProfile) => void;
   onToggleFavorite: (profile: ConnectionProfile) => void;
   onImport: () => void;
@@ -95,6 +92,9 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   onConnectTerminal,
   onConnectSftp,
   onOpenHealth = () => {},
+  onOpenPortForward = () => {},
+  onOpenQuickActions = () => {},
+  onOpenOverview,
   onDuplicate,
   onToggleFavorite,
   onImport,
@@ -106,9 +106,6 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   const [groupFilter, setGroupFilter] = useState('all');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [overviewProfile, setOverviewProfile] = useState<ConnectionProfile>();
-  const [forwardProfile, setForwardProfile] = useState<ConnectionProfile>();
-  const [forwardInitialDraft, setForwardInitialDraft] = useState<PortForwardInitialDraft>();
-  const [quickActionProfile, setQuickActionProfile] = useState<ConnectionProfile>();
   const recentIds = useRecentProfilesStore((state) => state.recentIds);
 
   const groups = useMemo(
@@ -152,46 +149,13 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
     });
   }, [profiles, normalizedQuery, activityFilter, groupFilter, recentIds, activeTags]);
 
-  useEffect(() => {
-    const handleOpenHostTool = (event: Event): void => {
-      const detail = (
-        event as CustomEvent<{
-          profileId?: string;
-          tool?: 'portForward' | 'overview' | 'quickActions';
-        }>
-      ).detail;
-      const target = profiles.find((profile) => profile.id === detail?.profileId);
-      if (!target) return;
-      if (detail.tool === 'portForward') {
-        setForwardInitialDraft(undefined);
-        setForwardProfile(target);
-      }
-      else if (detail.tool === 'overview') setOverviewProfile(target);
-      else if (detail.tool === 'quickActions') setQuickActionProfile(target);
-    };
-    const handleOpenPortForwardDraft = (event: Event): void => {
-      const detail = (event as CustomEvent<PortForwardDraftEventDetail>).detail;
-      const draft = detail?.draft;
-      if (!draft?.profileId) return;
-      const target = profiles.find((profile) => profile.id === draft.profileId);
-      if (!target) return;
-      setForwardInitialDraft({
-        name: draft.name,
-        kind: draft.kind,
-        localPort: draft.localPort,
-        remoteHost: draft.remoteHost,
-        remotePort: draft.remotePort,
-        autoStart: draft.autoStart,
-      });
-      setForwardProfile(target);
-    };
-    document.addEventListener('shellspan:open-host-tool', handleOpenHostTool);
-    document.addEventListener(OPEN_PORT_FORWARD_DRAFT_EVENT, handleOpenPortForwardDraft);
-    return () => {
-      document.removeEventListener('shellspan:open-host-tool', handleOpenHostTool);
-      document.removeEventListener(OPEN_PORT_FORWARD_DRAFT_EVENT, handleOpenPortForwardDraft);
-    };
-  }, [profiles]);
+  const handleOverview = useCallback((profile: ConnectionProfile): void => {
+    if (onOpenOverview) {
+      onOpenOverview(profile);
+    } else {
+      setOverviewProfile(profile);
+    }
+  }, [onOpenOverview]);
 
   return (
     <TooltipProvider>
@@ -350,9 +314,9 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                     onOpenHealth={onOpenHealth}
                     onDuplicate={onDuplicate}
                     onToggleFavorite={onToggleFavorite}
-                    onOverview={setOverviewProfile}
-                    onPortForward={setForwardProfile}
-                    onQuickActions={setQuickActionProfile}
+                    onOverview={handleOverview}
+                    onPortForward={onOpenPortForward}
+                    onQuickActions={onOpenQuickActions}
                   />
                 ))}
               </ConnectionCardGrid>
@@ -360,16 +324,9 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
           </WorkbenchPageContent>
         </ScrollArea>
       </WorkbenchPage>
-      <HostOverviewDialog profile={overviewProfile} onClose={() => setOverviewProfile(undefined)} />
-      <PortForwardDialog
-        profile={forwardProfile}
-        initialDraft={forwardInitialDraft}
-        onClose={() => {
-          setForwardProfile(undefined);
-          setForwardInitialDraft(undefined);
-        }}
-      />
-      <HostQuickActionsDialog profile={quickActionProfile} onClose={() => setQuickActionProfile(undefined)} />
+      {!onOpenOverview && (
+        <HostOverviewDialog profile={overviewProfile} onClose={() => setOverviewProfile(undefined)} />
+      )}
     </TooltipProvider>
   );
 };

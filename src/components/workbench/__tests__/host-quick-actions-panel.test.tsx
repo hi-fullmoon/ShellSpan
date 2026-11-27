@@ -1,13 +1,14 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { HostQuickActionsDialog } from '@/components/workbench/host-quick-actions-dialog';
+import { HostQuickActionsPanel } from '../host-quick-actions-panel';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { useWorkbenchToolsStore } from '@/stores/workbenchToolsStore';
 import type { ConnectionProfile } from '@/types';
 
-const profile: ConnectionProfile = {
+const prodProfile: ConnectionProfile = {
   id: 'profile-1',
   name: 'Production',
   host: 'prod.example.test',
@@ -18,7 +19,27 @@ const profile: ConnectionProfile = {
   updatedAt: 1,
 };
 
-describe('HostQuickActionsDialog', () => {
+const stagingProfile: ConnectionProfile = {
+  id: 'profile-2',
+  name: 'Staging',
+  host: 'staging.example.test',
+  port: 22,
+  username: 'ops',
+  authMethod: 'key',
+  quickActions: [
+    {
+      id: 'dir-1',
+      kind: 'directory',
+      label: 'Nginx Config',
+      path: '/etc/nginx',
+      target: 'sftp',
+    },
+  ],
+  createdAt: 2,
+  updatedAt: 2,
+};
+
+describe('HostQuickActionsPanel', () => {
   const updateProfile = vi.fn().mockResolvedValue(undefined);
 
   beforeEach(async () => {
@@ -26,14 +47,26 @@ describe('HostQuickActionsDialog', () => {
     updateProfile.mockResolvedValue(undefined);
     await initI18n('en-US');
     useAppStore.setState({ locale: 'en-US' });
-    useProfileStore.setState({ profiles: [profile], updateProfile });
+    useProfileStore.setState({ profiles: [prodProfile], updateProfile });
     useTerminalStore.setState({ sessions: [], activeSessionId: null });
+    useWorkbenchToolsStore.setState({
+      portForwardProfileId: 'all',
+      quickActionsProfileId: 'all',
+      overviewProfileId: null,
+      pendingPortForwardDraft: null,
+    });
   });
 
-  it('creates a host-bound directory action through the managed form', async () => {
-    render(<HostQuickActionsDialog profile={profile} onClose={vi.fn()} />);
+  it('creates a host-bound directory action through the right-side Drawer', async () => {
+    render(<HostQuickActionsPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Add quick action' }));
+    const drawer = screen.getByRole('dialog');
+    expect(drawer).toHaveAttribute('data-slot', 'drawer-content');
+    expect(drawer.querySelector('[data-slot="drawer-footer"]')).not.toHaveClass('border-t');
+    expect(drawer.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
+    expect(screen.getByText(/never sends Enter/i)).toBeInTheDocument();
+
     fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'Releases' } });
     fireEvent.change(screen.getByLabelText('Remote path'), { target: { value: '/srv/releases' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -50,31 +83,8 @@ describe('HostQuickActionsDialog', () => {
     });
   });
 
-  it('uses the shared scroll area while keeping the managed form at its intrinsic height', async () => {
-    render(<HostQuickActionsDialog profile={profile} onClose={vi.fn()} />);
-
-    expect(screen.getByRole('dialog')).toHaveClass('h-[min(720px,calc(100vh-2rem))]');
-    fireEvent.click(screen.getByRole('button', { name: 'Add quick action' }));
-
-    const formTitle = await screen.findByText('Add quick action', {
-      selector: '[data-slot="card-title"]',
-    });
-    expect(screen.getByLabelText('Label')).toHaveClass('bg-input-surface');
-    expect(screen.getByLabelText('Remote path')).toHaveClass('bg-input-surface');
-    expect(formTitle.closest('[data-slot="card"]')).toHaveClass('shrink-0');
-    expect(document.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
-    const viewport = document.querySelector('[data-slot="scroll-area-viewport"]');
-    expect(viewport).toBeInTheDocument();
-    expect(viewport?.firstElementChild).toHaveAttribute('data-slot', 'scroll-area-content');
-    expect(viewport?.firstElementChild).toHaveClass('flex', 'flex-col', 'gap-3', 'px-4', 'py-3');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Command snippet' }));
-    expect(screen.getByLabelText('Label')).toHaveClass('bg-input-surface');
-    expect(screen.getByLabelText('Command text')).toHaveClass('bg-input-surface');
-  });
-
   it('blocks secret-bearing snippets before persistence', async () => {
-    render(<HostQuickActionsDialog profile={profile} onClose={vi.fn()} />);
+    render(<HostQuickActionsPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Add quick action' }));
     fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'Unsafe' } });
@@ -88,9 +98,9 @@ describe('HostQuickActionsDialog', () => {
     expect(updateProfile).not.toHaveBeenCalled();
   });
 
-  it('disables command insertion when this host has no connected terminal', () => {
+  it('filters across hosts and kinds with readable Select labels', () => {
     const withCommand: ConnectionProfile = {
-      ...profile,
+      ...prodProfile,
       quickActions: [{
         id: 'command-1',
         kind: 'command',
@@ -98,18 +108,29 @@ describe('HostQuickActionsDialog', () => {
         command: 'systemctl status api',
       }],
     };
-    useProfileStore.setState({ profiles: [withCommand], updateProfile });
-    render(<HostQuickActionsDialog profile={withCommand} onClose={vi.fn()} />);
+    useProfileStore.setState({ profiles: [withCommand, stagingProfile], updateProfile });
+    render(<HostQuickActionsPanel />);
 
-    expect(screen.getByRole('button', { name: 'Insert only' })).toBeDisabled();
-    expect(screen.getByText(/never sends Enter/i)).toBeInTheDocument();
-    const actionCard = screen.getByText('Check status').closest('[data-slot="card"]');
-    expect(actionCard?.parentElement).toHaveClass('flex-col', 'gap-3');
+    expect(screen.getByRole('combobox', { name: 'Filter by host' })).toHaveTextContent('All hosts');
+    expect(screen.getByText('Check status')).toBeInTheDocument();
+    expect(screen.getByText('Nginx Config')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Directory' }));
+    expect(screen.queryByText('Check status')).not.toBeInTheDocument();
+    expect(screen.getByText('Nginx Config')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'All' }));
+    act(() => {
+      useWorkbenchToolsStore.getState().selectQuickActionsProfile(prodProfile.id);
+    });
+    expect(screen.getByRole('combobox', { name: 'Filter by host' })).toHaveTextContent('Production');
+    expect(screen.getByText('Check status')).toBeInTheDocument();
+    expect(screen.queryByText('Nginx Config')).not.toBeInTheDocument();
   });
 
-  it('disables command insertion when connected terminals for this host are read-only', () => {
+  it('disables command insertion when the host has no connected writable terminal', () => {
     const withCommand: ConnectionProfile = {
-      ...profile,
+      ...prodProfile,
       quickActions: [{
         id: 'command-1',
         kind: 'command',
@@ -131,8 +152,12 @@ describe('HostQuickActionsDialog', () => {
       }],
       activeSessionId: 's-ro',
     });
-    render(<HostQuickActionsDialog profile={withCommand} onClose={vi.fn()} />);
+
+    render(<HostQuickActionsPanel />);
 
     expect(screen.getByRole('button', { name: 'Insert only' })).toBeDisabled();
+    const card = screen.getByText('Check status').closest('[data-slot="card"]');
+    expect(card).toHaveAttribute('data-size', 'sm');
+    expect(card).toHaveAttribute('data-radius', 'compact');
   });
 });

@@ -168,6 +168,8 @@ export function buildCommandPaletteItems({
     ['workbench', 'workbench', undefined, WrenchIcon],
     ['terminal', 'terminal', undefined, SquareTerminalIcon],
     ['sftp', 'sftp', undefined, FolderSyncIcon],
+    ['portForwards', 'workbench', 'portForwards', CableIcon],
+    ['quickActions', 'workbench', 'quickActions', ZapIcon],
     ['logs', 'workbench', 'logs', LogsIcon],
     ['monitor', 'workbench', 'monitor', MonitorIcon],
   ].map(([id, section, tab, icon]) => ({

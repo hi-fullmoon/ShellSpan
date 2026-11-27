@@ -5861,6 +5861,8 @@
           "type": "string",
           "enum": [
             "connections",
+            "portForwards",
+            "quickActions",
             "knownHosts",
             "keychain",
             "monitor",

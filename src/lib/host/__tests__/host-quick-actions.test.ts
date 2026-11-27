@@ -269,7 +269,7 @@ describe('host quick actions', () => {
 
     expect(useAppStore.getState()).toMatchObject({
       activeSection: 'workbench',
-      activeWorkbenchTab: 'connections',
+      activeWorkbenchTab: 'portForwards',
     });
     expect((listener.mock.calls[0][0] as CustomEvent).detail).toEqual({
       profileId: profile.id,

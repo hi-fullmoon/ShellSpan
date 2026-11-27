@@ -14,6 +14,7 @@ import { useFocusStore } from '@/stores/focusStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useToastStore } from '@/stores/toastStore';
+import { useWorkbenchToolsStore } from '@/stores/workbenchToolsStore';
 import type { ConnectionProfile } from '@/types';
 
 const SAMPLE_PROFILE: ConnectionProfile = {
@@ -135,6 +136,21 @@ describe('app-actions registry', () => {
       );
       expect(pfResult.status).toBe('applied');
       expect(forwardListener).toHaveBeenCalledTimes(1);
+      expect(useAppStore.getState().activeWorkbenchTab).toBe('portForwards');
+      expect(useWorkbenchToolsStore.getState().portForwardProfileId).toBe(SAMPLE_PROFILE.id);
+      expect(useWorkbenchToolsStore.getState().pendingPortForwardDraft).toMatchObject({
+        profileId: SAMPLE_PROFILE.id,
+        draft: expect.objectContaining({ name: 'Web UI', localPort: 8080 }),
+      });
+
+      const quickToolResult = dispatchAppAction(
+        { type: 'openHostTool', profileId: SAMPLE_PROFILE.id, tool: 'quickActions' },
+        { source: 'user' },
+        dedupe,
+      );
+      expect(quickToolResult.status).toBe('applied');
+      expect(useAppStore.getState().activeWorkbenchTab).toBe('quickActions');
+      expect(useWorkbenchToolsStore.getState().quickActionsProfileId).toBe(SAMPLE_PROFILE.id);
     } finally {
       window.requestAnimationFrame = originalRaf;
       document.removeEventListener(OPEN_CONNECTION_DRAFT_EVENT, connectionListener);

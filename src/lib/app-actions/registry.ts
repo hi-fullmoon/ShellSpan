@@ -7,6 +7,7 @@ import { useProfileStore } from '@/stores/profileStore';
 import { useSftpStore } from '@/stores/sftpStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useToastStore } from '@/stores/toastStore';
+import { useWorkbenchToolsStore } from '@/stores/workbenchToolsStore';
 import type { PortForwardKind } from '@/types';
 import { liveAppActionDedupe, type AppActionDedupeSet } from './dedupe';
 import {
@@ -203,8 +204,18 @@ export function dispatchAppAction(
         };
       }
       const app = useAppStore.getState();
+      const tools = useWorkbenchToolsStore.getState();
       app.setActiveSection('workbench');
-      app.setActiveWorkbenchTab('connections');
+      if (action.tool === 'portForward') {
+        tools.selectPortForwardProfile(action.profileId);
+        app.setActiveWorkbenchTab('portForwards');
+      } else if (action.tool === 'quickActions') {
+        tools.selectQuickActionsProfile(action.profileId);
+        app.setActiveWorkbenchTab('quickActions');
+      } else {
+        tools.openHostOverview(action.profileId);
+        app.setActiveWorkbenchTab('connections');
+      }
       document.dispatchEvent(new CustomEvent('shellspan:open-host-tool', {
         detail: { profileId: action.profileId, tool: action.tool },
       }));
@@ -285,8 +296,16 @@ export function dispatchAppAction(
           };
         }
         const app = useAppStore.getState();
+        useWorkbenchToolsStore.getState().requestPortForwardDraft(draft.profileId, {
+          name: draft.name,
+          kind: draft.kind,
+          localPort: draft.localPort,
+          remoteHost: draft.remoteHost,
+          remotePort: draft.remotePort,
+          autoStart: draft.autoStart,
+        });
         app.setActiveSection('workbench');
-        app.setActiveWorkbenchTab('connections');
+        app.setActiveWorkbenchTab('portForwards');
         requestAnimationFrame(() => {
           document.dispatchEvent(new CustomEvent(OPEN_PORT_FORWARD_DRAFT_EVENT, {
             detail: { proposalId: action.proposalId, draft },

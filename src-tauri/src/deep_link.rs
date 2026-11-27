@@ -155,7 +155,15 @@ pub(crate) fn parse_deep_link_url(raw: &str) -> Result<DeepLinkAction, String> {
             let workbench_tab = match query_param(&pairs, "tab") {
                 Some(tab) => Some(validate_allowed(
                     tab,
-                    &["connections", "knownHosts", "keychain", "monitor", "logs"],
+                    &[
+                        "connections",
+                        "portForwards",
+                        "quickActions",
+                        "knownHosts",
+                        "keychain",
+                        "monitor",
+                        "logs",
+                    ],
                     "tab",
                 )?),
                 None => None,
@@ -326,6 +334,20 @@ mod tests {
             DeepLinkAction::NavigateSection {
                 section: "workbench".into(),
                 workbench_tab: Some("logs".into()),
+            }
+        );
+        assert_eq!(
+            parse_deep_link_url("shellspan://open?section=workbench&tab=portForwards").unwrap(),
+            DeepLinkAction::NavigateSection {
+                section: "workbench".into(),
+                workbench_tab: Some("portForwards".into()),
+            }
+        );
+        assert_eq!(
+            parse_deep_link_url("shellspan://open?section=workbench&tab=quickActions").unwrap(),
+            DeepLinkAction::NavigateSection {
+                section: "workbench".into(),
+                workbench_tab: Some("quickActions".into()),
             }
         );
         assert_eq!(
