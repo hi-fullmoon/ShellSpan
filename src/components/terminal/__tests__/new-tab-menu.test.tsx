@@ -28,6 +28,7 @@ function makeProfile(
   name: string,
   host: string,
   username: string,
+  overrides: Partial<ConnectionProfile> = {},
 ): ConnectionProfile {
   return {
     id,
@@ -38,6 +39,7 @@ function makeProfile(
     authMethod: 'password',
     createdAt: 0,
     updatedAt: 0,
+    ...overrides,
   };
 }
 
@@ -334,5 +336,66 @@ describe('NewSessionDialog', () => {
     const scrollArea = dialog.querySelector('[data-slot="scroll-area"]');
     expect(scrollArea).toHaveClass('min-h-0', 'flex-1');
     expect(scrollArea).not.toHaveClass('min-h-32');
+  });
+
+  it('renders group and tag badges on profile rows and connects when clicking a badge', () => {
+    const withMetadata = makeProfile('p1', 'Alpha', 'host1.io', 'user1', {
+      group: '  Production  ',
+      tags: ['web', ' cn-shanghai ', 'web', ''],
+    });
+    const withoutMetadata = makeProfile('p2', 'Beta', 'host2.io', 'user2', {
+      group: '   ',
+      tags: [' '],
+    });
+    useProfileStore.setState({ profiles: [withMetadata, withoutMetadata] });
+
+    const onClose = vi.fn();
+    render(<NewSessionDialog open onClose={onClose} onConnect={mockConnect} />);
+
+    const alphaRow = screen.getByRole('button', { name: 'Alpha' });
+    const betaRow = screen.getByRole('button', { name: 'Beta' });
+
+    expect(alphaRow.querySelector('[data-slot="profile-metadata"]')).not.toBeNull();
+    expect(betaRow.querySelector('[data-slot="profile-metadata"]')).toBeNull();
+
+    const groupBadge = screen.getByText('Production').closest('[data-slot="badge"]');
+    expect(groupBadge).toHaveAttribute('data-variant', 'secondary');
+    expect(groupBadge).toHaveClass('bg-background');
+
+    const firstTagBadge = screen.getByText('web').closest('[data-slot="badge"]');
+    const secondTagBadge = screen.getByText('cn-shanghai').closest('[data-slot="badge"]');
+    expect(firstTagBadge).toHaveAttribute('data-variant', 'outline');
+    expect(secondTagBadge).toHaveAttribute('data-variant', 'outline');
+    expect(secondTagBadge).toHaveClass('hidden', 'sm:inline-flex');
+    expect(screen.getByText('+1').closest('[data-slot="badge"]')).toHaveClass('sm:hidden');
+
+    fireEvent.click(screen.getByText('Production'));
+    expect(mockConnect).toHaveBeenCalledTimes(1);
+    expect(mockConnect).toHaveBeenCalledWith(withMetadata);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('caps visible tags with overflow counts and surfaces matching overflow tags during search', () => {
+    const profile = makeProfile('p1', 'Alpha', 'host1.io', 'user1', {
+      group: 'Infra',
+      tags: ['web', 'api', 'docker', 'gpu'],
+    });
+    useProfileStore.setState({ profiles: [profile] });
+
+    render(<NewSessionDialog open onClose={vi.fn()} onConnect={mockConnect} />);
+
+    expect(screen.getByText('Infra')).toBeInTheDocument();
+    expect(screen.getByText('web')).toBeInTheDocument();
+    expect(screen.getByText('api')).toBeInTheDocument();
+    expect(screen.queryByText('docker')).not.toBeInTheDocument();
+    expect(screen.getByText('+2')).toHaveClass('hidden', 'sm:inline');
+    expect(screen.getByText('+3')).toHaveClass('sm:hidden');
+
+    const searchInput = screen.getByRole('searchbox');
+    fireEvent.change(searchInput, { target: { value: 'docker' } });
+
+    expect(screen.getByText('docker')).toBeInTheDocument();
+    expect(screen.getByText('web')).toBeInTheDocument();
+    expect(screen.queryByText('api')).not.toBeInTheDocument();
   });
 });

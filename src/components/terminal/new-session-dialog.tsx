@@ -11,6 +11,7 @@ import { usePlatform } from '@/hooks/usePlatform';
 import { useAppStore } from '@/stores/appStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -28,6 +29,7 @@ import {
 import { Kbd } from '@/components/ui/kbd';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/utils';
 import type { ConnectionProfile, LocalTerminalOptions, LocalTerminalProfile } from '@/types';
 
 interface NewSessionDialogProps {
@@ -212,6 +214,16 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
   const renderProfileCommand = ({ command, index }: IndexedSessionCommand): React.ReactNode => {
     if (command.kind !== 'profile') return null;
     const isSelected = index === selectedIndex;
+    const group = command.profile.group?.trim();
+    const rawTags = [...new Set((command.profile.tags ?? []).map((tag) => tag.trim()).filter(Boolean))];
+    const tags = normalizedQuery
+      ? [...rawTags].sort((left, right) => {
+          const leftMatches = left.toLocaleLowerCase().includes(normalizedQuery) ? 0 : 1;
+          const rightMatches = right.toLocaleLowerCase().includes(normalizedQuery) ? 0 : 1;
+          return leftMatches - rightMatches;
+        })
+      : rawTags;
+    const hasMetadata = Boolean(group) || tags.length > 0;
     return (
       <li key={command.profile.id}>
         <Button
@@ -233,7 +245,57 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
               {command.profile.username}@{command.profile.host}:{command.profile.port}
             </span>
           </span>
-          {isSelected && <Kbd aria-hidden="true">↵</Kbd>}
+          {hasMetadata && (
+            <span
+              data-slot="profile-metadata"
+              className="flex min-w-0 max-w-[45%] shrink-0 items-center justify-end gap-1 pl-2"
+            >
+              {group && (
+                <Badge
+                  variant="secondary"
+                  className={cn(
+                    'min-w-0 max-w-24 shrink',
+                    isSelected && 'bg-background',
+                  )}
+                  title={group}
+                >
+                  <span className="truncate">{group}</span>
+                </Badge>
+              )}
+              {tags[0] && (
+                <Badge variant="outline" className="min-w-0 max-w-24 shrink" title={tags[0]}>
+                  <span className="truncate">{tags[0]}</span>
+                </Badge>
+              )}
+              {tags[1] && (
+                <Badge
+                  variant="outline"
+                  className="hidden min-w-0 max-w-24 shrink sm:inline-flex"
+                  title={tags[1]}
+                >
+                  <span className="truncate">{tags[1]}</span>
+                </Badge>
+              )}
+              {tags.length === 2 && (
+                <Badge variant="outline" className="shrink-0 sm:hidden" title={tags[1]}>
+                  +1
+                </Badge>
+              )}
+              {tags.length > 2 && (
+                <Badge variant="outline" className="shrink-0">
+                  <span className="sm:hidden" title={tags.slice(1).join(', ')}>
+                    +{tags.length - 1}
+                  </span>
+                  <span className="hidden sm:inline" title={tags.slice(2).join(', ')}>
+                    +{tags.length - 2}
+                  </span>
+                </Badge>
+              )}
+            </span>
+          )}
+          <span className="flex w-5 shrink-0 items-center justify-end">
+            {isSelected && <Kbd aria-hidden="true">↵</Kbd>}
+          </span>
         </Button>
       </li>
     );
