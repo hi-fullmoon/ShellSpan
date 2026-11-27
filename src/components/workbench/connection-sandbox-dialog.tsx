@@ -28,6 +28,15 @@ import { PreflightStepRow } from './connection-preflight-dialog';
 
 type Mode = SandboxMode | 'off';
 
+const DEFAULT_BUBBLEWRAP_WORKSPACE = '/srv/shellspan-workspaces/default';
+const DEFAULT_CLIENT_READ_ONLY_WORKSPACE = '/var/log';
+
+function defaultWorkspaceForMode(mode: SandboxMode): string {
+  return mode === 'clientReadOnly'
+    ? DEFAULT_CLIENT_READ_ONLY_WORKSPACE
+    : DEFAULT_BUBBLEWRAP_WORKSPACE;
+}
+
 export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
   const { t } = useI18n();
   const { connect } = useConnectSession();
@@ -49,6 +58,7 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
   const activeTest = useRef<string | null>(null);
   const activeDeploy = useRef<string | null>(null);
   const activeTrust = useRef<symbol | null>(null);
+  const workspaceAutoFilled = useRef(false);
   const id = useId();
   const selectedPath = workspace.trim();
   const isClientReadOnly = mode === 'clientReadOnly';
@@ -78,6 +88,7 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
     setTesting(false);
     setDeploying(false);
     setTrusting(false);
+    workspaceAutoFilled.current = false;
     void invokeGetProfileSandbox(profileId).then((value) => {
       if (!live) return;
       setSaved(value);
@@ -100,6 +111,16 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
     setReport(undefined);
     setDeployResult(undefined);
     setTestError(false);
+  };
+
+  const handleModeChange = (nextMode: Mode) => {
+    setMode(nextMode);
+    clearReport();
+    if (nextMode === 'off') return;
+    if (workspace.trim() === '' || workspaceAutoFilled.current) {
+      setWorkspace(defaultWorkspaceForMode(nextMode));
+      workspaceAutoFilled.current = true;
+    }
   };
 
   async function test() {
@@ -215,7 +236,7 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
             {saved && <FieldGroup>
               <Field>
                 <FieldLabel htmlFor={`${id}-mode`}>{t('connection.sandbox.mode')}</FieldLabel>
-                <Select items={modes} value={mode} disabled={!ready} onValueChange={(value) => { if (value) { setMode(value); clearReport(); } }}>
+                <Select items={modes} value={mode} disabled={!ready} onValueChange={(value) => { if (value) handleModeChange(value); }}>
                   <SelectTrigger id={`${id}-mode`}><SelectValue /></SelectTrigger>
                   <SelectContent><SelectGroup>{modes.map(({ value, label }) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectGroup></SelectContent>
                 </Select>
@@ -226,10 +247,15 @@ export function ConnectionSandboxDialog({ profileId }: { profileId: string }) {
                   id={`${id}-workspace`}
                   aria-describedby={showWorkspaceError ? `${id}-workspace-hint ${id}-workspace-error` : `${id}-workspace-hint`}
                   aria-invalid={showWorkspaceError || undefined}
+                  placeholder={isClientReadOnly ? DEFAULT_CLIENT_READ_ONLY_WORKSPACE : DEFAULT_BUBBLEWRAP_WORKSPACE}
                   value={workspace}
                   disabled={!ready}
                   autoComplete="off"
-                  onChange={(event) => { setWorkspace(event.target.value); clearReport(); }}
+                  onChange={(event) => {
+                    workspaceAutoFilled.current = false;
+                    setWorkspace(event.target.value);
+                    clearReport();
+                  }}
                 />
                 <FieldDescription id={`${id}-workspace-hint`}>
                   {t(isClientReadOnly ? 'connection.sandbox.workspaceHintClientReadOnly' : 'connection.sandbox.workspaceHint')}

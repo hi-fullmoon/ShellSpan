@@ -149,17 +149,20 @@ export function ConnectionSudoPolicyDialog({ profileId }: { profileId: string })
                     <Field>
                       <FieldLabel htmlFor={`${id}-runner-port`}>{t('connection.sudo.runnerPort')}</FieldLabel>
                       <Input id={`${id}-runner-port`} type="number" min={1} max={65535} required disabled={saving}
+                        placeholder={t('connection.sudo.runnerPortPlaceholder')}
                         value={runner.port} onChange={(event) => setRunner({ ...runner, port: event.target.value })} />
                     </Field>
                     <Field>
                       <FieldLabel htmlFor={`${id}-runner-user`}>{t('connection.sudo.runnerUser')}</FieldLabel>
                       <Input id={`${id}-runner-user`} autoComplete="off" required disabled={saving} maxLength={32}
+                        placeholder={t('connection.sudo.runnerUserPlaceholder')}
                         value={runner.username} onChange={(event) => setRunner({ ...runner, username: event.target.value })} />
                     </Field>
                   </div>
                   <Field>
                     <FieldLabel htmlFor={`${id}-runner-key`}>{t('connection.sudo.runnerKey')}</FieldLabel>
                     <Input id={`${id}-runner-key`} autoComplete="off" required disabled={saving} maxLength={50}
+                      placeholder={t('connection.sudo.runnerKeyPlaceholder')}
                       value={runner.hostKeySha256} onChange={(event) => setRunner({ ...runner, hostKeySha256: event.target.value })} />
                   </Field>
                 </FieldGroup>
@@ -185,6 +188,7 @@ export function ConnectionSudoPolicyDialog({ profileId }: { profileId: string })
                           <Field key={field}>
                             <FieldLabel htmlFor={controlId}>{t(`connection.sudo.field.${field}`)}</FieldLabel>
                             <Input id={controlId} value={operation[field]} onChange={(event) => update(operation.key, field, event.target.value)}
+                              placeholder={t(`connection.sudo.field.${field}Placeholder`)}
                               required disabled={saving} autoComplete="off" spellCheck={false}
                               maxLength={field === 'id' ? 64 : field === 'label' ? 120 : 2048}
                               pattern={field === 'id' ? '[a-z][a-z0-9_\\-]*' : undefined} />

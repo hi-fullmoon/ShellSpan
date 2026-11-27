@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { toast } from 'sonner';
 import { ConnectionSandboxDialog } from '../connection-sandbox-dialog';
@@ -141,5 +142,40 @@ describe('sandbox installation copy', () => {
       'connection.sandbox.deploySuccess',
     );
     expect(screen.getByText(/installed shellspan-bwrap-v1/)).toBeInTheDocument();
+  });
+
+  it('prefills a valid default workspace directory when enabling sandbox from off and updates it across modes until customized', async () => {
+    const user = userEvent.setup();
+    const tauri = await import('@/lib/ipc/tauri');
+    vi.mocked(tauri.invokeGetProfileSandbox).mockResolvedValueOnce({
+      binding: 'binding',
+      policy: null,
+    });
+
+    render(<ConnectionSandboxDialog profileId="profile" />);
+    await user.click(screen.getByRole('button', { name: 'connection.sandbox.manage' }));
+    const modeSelect = await screen.findByRole('combobox', { name: 'connection.sandbox.mode' });
+    await waitFor(() => expect(modeSelect).toBeEnabled());
+
+    await user.click(modeSelect);
+    await user.click(await screen.findByRole('option', { name: 'connection.sandbox.mode.workspaceWrite' }));
+
+    const input = await screen.findByLabelText('connection.sandbox.workspace');
+    expect(input).toHaveValue('/srv/shellspan-workspaces/default');
+    expect(screen.getByRole('button', { name: 'connection.sandbox.test' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'common.save' })).toBeEnabled();
+
+    await user.click(modeSelect);
+    await user.click(await screen.findByRole('option', { name: 'connection.sandbox.mode.clientReadOnly' }));
+    expect(input).toHaveValue('/var/log');
+
+    await user.click(modeSelect);
+    await user.click(await screen.findByRole('option', { name: 'connection.sandbox.mode.readOnly' }));
+    expect(input).toHaveValue('/srv/shellspan-workspaces/default');
+
+    fireEvent.change(input, { target: { value: '/srv/shellspan-workspaces/custom-app' } });
+    await user.click(modeSelect);
+    await user.click(await screen.findByRole('option', { name: 'connection.sandbox.mode.workspaceWrite' }));
+    expect(input).toHaveValue('/srv/shellspan-workspaces/custom-app');
   });
 });

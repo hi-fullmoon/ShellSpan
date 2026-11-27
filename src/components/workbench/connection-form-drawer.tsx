@@ -851,12 +851,6 @@ const AuthMethodToggle: React.FC<AuthMethodToggleProps> = ({ value, onChange }) 
       <ToggleGroupItem value="key" className="w-full">
         {t('connection.form.auth.key')}
       </ToggleGroupItem>
-      <ToggleGroupItem value="agent" className="w-full">
-        {t('connection.form.auth.agent')}
-      </ToggleGroupItem>
-      <ToggleGroupItem value="keyboardInteractive" className="w-full">
-        {t('connection.form.auth.keyboardInteractive')}
-      </ToggleGroupItem>
     </ToggleGroup>
   );
 };
