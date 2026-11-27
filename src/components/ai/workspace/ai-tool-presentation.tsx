@@ -2184,11 +2184,10 @@ function sessionStatusBadgeVariant(
   status: AgentSessionRuntimeStatus,
 ): React.ComponentProps<typeof Badge>['variant'] {
   if (status === 'failed') return 'destructive';
-  if (status === 'running' || status === 'waiting') return 'secondary';
   return 'outline';
 }
 
-function AppActionCardBar({
+function AppActionInlineBar({
   action,
   labelKey,
   linkedSessionId,
@@ -2202,29 +2201,29 @@ function AppActionCardBar({
   const { t } = useI18n();
   const liveStatus = useLinkedAgentSessionStatus(linkedSessionId, initialSessionStatus);
   return (
-    <div className="ml-[22px] mt-1 flex flex-wrap items-center gap-1.5" data-app-action-card="">
-      <Button
-        type="button"
-        variant="outline"
-        size="xs"
-        className="gap-1"
-        onClick={() => dispatchAppAction(action, { source: 'user' })}
-      >
-        <ArrowUpRightIcon className="size-3.5" aria-hidden="true" />
-        <span>{t(labelKey)}</span>
-      </Button>
+    <div className="flex shrink-0 items-center gap-1.5" data-app-action-card="">
       {liveStatus && (
         <Badge
           variant={sessionStatusBadgeVariant(liveStatus)}
-          className="h-5 gap-1 px-1.5 text-[11px]"
+          className={cn('h-5 px-1.5 text-[11px] font-normal', liveStatus !== 'failed' && 'text-muted-foreground')}
           data-app-session-status={liveStatus}
         >
           {liveStatus === 'running' && (
-            <LoaderCircleIcon className="size-3 animate-spin" aria-hidden="true" />
+            <LoaderCircleIcon className="animate-spin" aria-hidden="true" />
           )}
           <span>{t(`ai.workspace.appAction.sessionStatus.${liveStatus}` as LocaleKey)}</span>
         </Badge>
       )}
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        className="ai-tool-app-action shrink-0"
+        onClick={() => dispatchAppAction(action, { source: 'user' })}
+      >
+        <span>{t(labelKey)}</span>
+        <ArrowUpRightIcon aria-hidden="true" />
+      </Button>
     </div>
   );
 }
@@ -2324,6 +2323,46 @@ function StandardAiToolRow({
       </div>
     );
   }
+  const trigger = (
+    <CollapsibleTrigger
+      render={(
+        <button
+          type="button"
+          className={cn(AI_TOOL_ROW_CLASS, appActionCard && 'w-auto min-w-44 flex-1')}
+          data-ai-node-action=""
+          aria-label={`${title}: ${summary}${changeStat ? ` ${changeStat}` : ''}`}
+        />
+      )}
+    >
+      <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
+        {node.state === 'uncertain' ? <CircleHelpIcon /> : hasError
+          ? <span className={AI_STATE_DOT_CLASS} data-state="failed" />
+          : node.state === 'approval'
+            ? <ShieldAlertIcon />
+            : <Icon />}
+        <ChevronDownIcon className="ai-disclosure-chevron" />
+      </span>
+      <span className={AI_DISCLOSURE_TITLE_CLASS}>{title}</span>
+      <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
+      <span
+        className={AI_DISCLOSURE_SUMMARY_CLASS}
+        data-error={hasError || undefined}
+      >
+        {summary}
+      </span>
+      {(changeStat || showStatusLabel || node.durationMs !== null) && (
+        <span className="ai-tool-meta ml-2 inline-flex shrink-0 items-baseline gap-2 whitespace-nowrap">
+          {changeStat && <span className="ai-tool-diff-stat">{changeStat}</span>}
+          {showStatusLabel && (
+            <span className="ai-subagent-row-meta" data-state="failed">{statusLabel}</span>
+          )}
+          {node.durationMs !== null && (
+            <span className="ai-tool-duration">{formatToolDuration(node.durationMs, t)}</span>
+          )}
+        </span>
+      )}
+    </CollapsibleTrigger>
+  );
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div
@@ -2334,52 +2373,17 @@ function StandardAiToolRow({
         data-tool-fallback={variant === 'generic' || undefined}
       >
         <span className="sr-only" role="status">{t(node.recoveredByToolKey ? 'ai.workspace.tool.recovered' : stateKey)}</span>
-        <CollapsibleTrigger
-          render={(
-            <button
-              type="button"
-              className={AI_TOOL_ROW_CLASS}
-              data-ai-node-action=""
-              aria-label={`${title}: ${summary}${changeStat ? ` ${changeStat}` : ''}`}
+        {appActionCard ? (
+          <div className="flex min-h-6 w-full min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-1">
+            {trigger}
+            <AppActionInlineBar
+              action={appActionCard.action}
+              labelKey={appActionCard.labelKey}
+              linkedSessionId={appActionCard.linkedSessionId}
+              initialSessionStatus={appActionCard.initialSessionStatus}
             />
-          )}
-        >
-          <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
-            {node.state === 'uncertain' ? <CircleHelpIcon /> : hasError
-              ? <span className={AI_STATE_DOT_CLASS} data-state="failed" />
-              : node.state === 'approval'
-                ? <ShieldAlertIcon />
-                : <Icon />}
-            <ChevronDownIcon className="ai-disclosure-chevron" />
-          </span>
-          <span className={AI_DISCLOSURE_TITLE_CLASS}>{title}</span>
-          <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
-          <span
-            className={AI_DISCLOSURE_SUMMARY_CLASS}
-            data-error={hasError || undefined}
-          >
-            {summary}
-          </span>
-          {(changeStat || showStatusLabel || node.durationMs !== null) && (
-            <span className="ai-tool-meta ml-2 inline-flex shrink-0 items-baseline gap-2 whitespace-nowrap">
-              {changeStat && <span className="ai-tool-diff-stat">{changeStat}</span>}
-              {showStatusLabel && (
-                <span className="ai-subagent-row-meta" data-state="failed">{statusLabel}</span>
-              )}
-              {node.durationMs !== null && (
-                <span className="ai-tool-duration">{formatToolDuration(node.durationMs, t)}</span>
-              )}
-            </span>
-          )}
-        </CollapsibleTrigger>
-        {appActionCard && (
-          <AppActionCardBar
-            action={appActionCard.action}
-            labelKey={appActionCard.labelKey}
-            linkedSessionId={appActionCard.linkedSessionId}
-            initialSessionStatus={appActionCard.initialSessionStatus}
-          />
-        )}
+          </div>
+        ) : trigger}
         <CollapsibleContent>
           <div className="ai-tool-body flex min-w-0 max-w-full flex-col">
             <AiToolExpandedContent

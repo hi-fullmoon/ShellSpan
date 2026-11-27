@@ -60,13 +60,23 @@ describe('App control tool presentation', () => {
     });
   });
 
-  it('renders a clickable Open button for app_navigate results and navigates on click', () => {
-    render(<AiToolRow node={createToolNode({})} />);
+  it('renders a clickable Open button inline on the tool header row without toggling disclosure', () => {
+    const { container } = render(<AiToolRow node={createToolNode({})} />);
+    const disclosureTrigger = container.querySelector('button.ai-tool-row');
+    const actionBar = container.querySelector('[data-app-action-card]');
+    expect(disclosureTrigger).not.toBeNull();
+    expect(actionBar).not.toBeNull();
+    expect(actionBar?.parentElement).toBe(disclosureTrigger?.parentElement);
+    expect(disclosureTrigger).toHaveClass('flex-1', 'w-auto');
+    expect(disclosureTrigger).toHaveAttribute('aria-expanded', 'false');
+
     const openButton = screen.getByRole('button', { name: /^Open$/ });
+    expect(openButton).toHaveClass('ai-tool-app-action', 'gap-1');
     fireEvent.click(openButton);
 
     expect(useAppStore.getState().activeSection).toBe('workbench');
     expect(useAppStore.getState().activeWorkbenchTab).toBe('logs');
+    expect(disclosureTrigger).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('renders an Open draft form button for app_propose_action results', () => {

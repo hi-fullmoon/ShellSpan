@@ -237,6 +237,17 @@
   line-height: 16px;
 }
 
+.ai-tool-app-action {
+  background: var(--ai-action-hover);
+  color: var(--ai-text-secondary);
+  font-weight: 400;
+}
+
+.ai-tool-app-action:is(:hover, :focus-visible) {
+  background: var(--ai-action-hover-solid);
+  color: var(--ai-text);
+}
+
 .ai-state-dot {
   border: 1.5px solid var(--ai-text-muted);
   border-radius: 50%;
