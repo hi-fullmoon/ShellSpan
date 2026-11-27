@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ActivityIcon, ChevronDownIcon } from 'lucide-react';
+import { ChevronDownIcon } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Separator } from '@/components/ui/separator';
@@ -50,8 +50,7 @@ export function PetdexDiagnostics({ snapshot, status, health }: {
           type="button"
           className="flex w-full items-center justify-between gap-3 rounded-lg px-4 py-2.5 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50 [&[aria-expanded=true]_.petdex-chevron]:rotate-180"
         >
-          <span className="flex min-w-0 items-center gap-1 text-sm font-medium text-foreground">
-            <ActivityIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span className="flex min-w-0 items-center text-sm font-medium text-foreground">
             <span className="truncate">{t('settings.experimental.petdex.details')}</span>
           </span>
           <span aria-hidden="true" className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">

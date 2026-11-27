@@ -28,13 +28,27 @@ export function CopyButton({ text, label, errorLabel, copiedLabel, iconOnly = fa
   const { t } = useI18n();
   const { copied, copy } = useCopyFeedback(errorLabel);
   const feedback = copiedLabel ?? t('common.copied');
+  const activeLabel = copied ? feedback : label;
+  const mirrorLabel = copied ? label : feedback;
   const button = <Button type="button" variant="ghost" {...props}
-    aria-label={copied ? feedback : label} onClick={() => { void copy(text); }}>
-    {copied ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />}
-    {!iconOnly && <CopyFeedbackLabel copied={copied} label={label} copiedLabel={feedback} />}
+    aria-label={activeLabel} onClick={() => { void copy(text); }}>
+    {iconOnly ? (
+      copied ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />
+    ) : (
+      <span className="grid place-items-center">
+        <span className="col-start-1 row-start-1 inline-flex items-center gap-1">
+          {copied ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />}
+          <span>{activeLabel}</span>
+        </span>
+        <span className="invisible pointer-events-none col-start-1 row-start-1 inline-flex items-center gap-1 select-none" aria-hidden="true">
+          <svg aria-hidden="true" />
+          <span>{mirrorLabel}</span>
+        </span>
+      </span>
+    )}
   </Button>;
   return iconOnly ? <Tooltip>
     <TooltipTrigger render={button} />
-    <TooltipContent>{copied ? feedback : label}</TooltipContent>
+    <TooltipContent>{activeLabel}</TooltipContent>
   </Tooltip> : button;
 }

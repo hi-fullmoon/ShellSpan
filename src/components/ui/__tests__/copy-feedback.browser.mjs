@@ -198,8 +198,31 @@ try {
         }
         if (scene === 'preview') { item = page.getByRole('button', { name: labels['sftp.preview.copyContent'], exact: true }); expected = 'Complete preview\n第二行'; }
         if (item) {
+          const measureTextButton = locator => locator.evaluate(element => {
+            const box = element.getBoundingClientRect();
+            const icon = element.querySelector('svg');
+            const spans = [...element.querySelectorAll('span')];
+            const label = spans.find(span => span.childElementCount === 0 && span.textContent?.trim() === element.getAttribute('aria-label') && getComputedStyle(span).visibility !== 'hidden')
+              ?? element.lastElementChild;
+            if (!icon || !label || icon === label) return null;
+            const text = document.createRange();
+            text.selectNodeContents(label);
+            const iconRect = icon.getBoundingClientRect();
+            const textRect = text.getBoundingClientRect();
+            return {
+              gap: textRect.left - iconRect.right,
+              leftInset: iconRect.left - box.left,
+              rightInset: box.right - textRect.right,
+            };
+          });
           await item.focus();
           const before = await item.boundingBox();
+          if (!(scene === 'known' || scene === 'preview')) {
+            const beforeLayout = await measureTextButton(item);
+            assert.ok(beforeLayout && Math.abs(beforeLayout.gap - 4) <= 0.5, `${scene}: idle icon/text gap must be 4px, got ${beforeLayout?.gap}.`);
+            assert.ok(Math.abs(beforeLayout.leftInset - beforeLayout.rightInset) <= 1,
+              `${scene}: idle content must be horizontally centered, got left=${beforeLayout.leftInset} right=${beforeLayout.rightInset}.`);
+          }
           await page.keyboard.press('Enter');
           await copied.waitFor();
           assert.equal(await copied.locator('.lucide-check').count(), 1);
@@ -207,16 +230,12 @@ try {
           const after = await copied.boundingBox();
           assert.ok(Math.abs(before.width - after.width) <= 0.5 && Math.abs(before.height - after.height) <= 0.5,
             `${scene}: copy feedback must preserve the action dimensions.`);
-          const gap = await copied.evaluate(element => {
-            const icon = element.querySelector('svg');
-            const spans = [...element.querySelectorAll('span')];
-            const label = spans.find(span => span.childElementCount === 0 && span.textContent?.trim() === element.getAttribute('aria-label') && getComputedStyle(span).visibility !== 'hidden')
-              ?? element.lastElementChild;
-            const text = document.createRange();
-            text.selectNodeContents(label);
-            return icon && label && icon !== label ? text.getBoundingClientRect().left - icon.getBoundingClientRect().right : null;
-          });
-          if (gap !== null && !(scene === 'known' || scene === 'preview')) assert.ok(Math.abs(gap - 4) <= 0.5, `${scene}: icon/text gap must be 4px, got ${gap}.`);
+          if (!(scene === 'known' || scene === 'preview')) {
+            const afterLayout = await measureTextButton(copied);
+            assert.ok(afterLayout && Math.abs(afterLayout.gap - 4) <= 0.5, `${scene}: copied icon/text gap must be 4px, got ${afterLayout?.gap}.`);
+            assert.ok(Math.abs(afterLayout.leftInset - afterLayout.rightInset) <= 1,
+              `${scene}: copied content must be horizontally centered, got left=${afterLayout.leftInset} right=${afterLayout.rightInset}.`);
+          }
         }
         assert.equal((await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n'), expected, scene);
         assert.equal(await page.locator('[data-sonner-toast]').count(), 0, `${scene}: success must stay on the action.`);

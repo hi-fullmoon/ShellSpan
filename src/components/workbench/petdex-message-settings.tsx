@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { FlaskConicalIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { SettingRow, SettingsGroup } from './settings-layout';
 import { Button } from '@/components/ui/button';
@@ -68,7 +67,6 @@ export function PetdexMessageSettings() {
           disabled={!enabled || !messagesEnabled || configuring || testing}
           onClick={() => void test()}
         >
-          <FlaskConicalIcon data-icon="inline-start" />
           {t(testing ? 'settings.experimental.petdex.testing' : 'settings.experimental.petdex.messages.test')}
         </Button>
       )}

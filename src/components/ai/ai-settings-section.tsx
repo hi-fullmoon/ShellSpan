@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArchiveIcon,
-  PlusIcon,
   ServerIcon,
   Trash2Icon,
 } from 'lucide-react';
@@ -306,7 +305,6 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         titleId="ai-model-providers-heading"
         action={(
           <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
-            <PlusIcon data-icon="inline-start" />
             {t('settings.ai.addProvider')}
           </Button>
         )}
@@ -325,7 +323,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
             <Field
               key={provider.id}
               data-slot="ai-provider-row"
-              className="min-h-14 gap-2 px-3.5 py-2.5 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-5"
+              className="min-h-14 gap-2 px-4 py-2.5 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-5"
             >
               <div className="flex min-w-0 flex-1 items-center gap-2.5">
                 <div className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-muted/50">
