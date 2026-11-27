@@ -375,8 +375,7 @@ mod tests {
         let secret_err = parse_deep_link_url(
             "shellspan://agent/draft?prompt=Authorization%3A%20Bearer%20sk-1234567890abcdef1234567890",
         )
-        .err()
-        .expect("secret token in deep link must be rejected");
+        .expect_err("secret token in deep link must be rejected");
         assert!(secret_err.contains("DEEP_LINK_REDACTION_REQUIRED"));
 
         assert!(parse_deep_link_url("https://example.com/open").is_err());

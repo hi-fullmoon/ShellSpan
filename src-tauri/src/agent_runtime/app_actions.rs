@@ -692,7 +692,7 @@ impl AppSessionCoordinator for TauriAppSessionCoordinator {
             None,
         )?;
         let started = self.try_start_with_selection(&runtime, target_session_id, selection);
-        let title = target.header.title.unwrap_or_else(|| target.header.goal);
+        let title = target.header.title.unwrap_or(target.header.goal);
         Ok(AppSentPromptOutcome {
             session_id: target_session_id.into(),
             title,
