@@ -8,11 +8,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useTransferStore, isTransferComplete, formatTransferProgress, type TransferOperation } from '@/stores/transferStore';
 
 const COMPLETED_TRANSFER_DISMISS_DELAY_MS = 2000;
+const SPEED_DISPLAY_INTERVAL_MS = 400;
 
 interface SpeedSample {
   bytes: number;
   time: number;
   speed: number;
+  displayedSpeed: number;
+  lastDisplayedAt: number;
 }
 
 function normalizeTransferPath(path: string): string {
@@ -60,6 +63,8 @@ function useTransferSpeeds(operations: TransferOperation[]): Map<string, number>
           bytes: op.processedBytes,
           time: now,
           speed: 0,
+          displayedSpeed: 0,
+          lastDisplayedAt: 0,
         });
         continue;
       }
@@ -70,26 +75,39 @@ function useTransferSpeeds(operations: TransferOperation[]): Map<string, number>
           bytes: op.processedBytes,
           time: now,
           speed: 0,
+          displayedSpeed: 0,
+          lastDisplayedAt: 0,
         });
         continue;
       }
       if (deltaBytes === 0) {
         // This update was for another operation; keep the last known rate.
-        if (previous.speed > 0) next.set(op.operationId, previous.speed);
+        if (previous.displayedSpeed > 0) next.set(op.operationId, previous.displayedSpeed);
         continue;
       }
       const elapsedSeconds = (now - previous.time) / 1000;
       const instant = elapsedSeconds > 0 ? deltaBytes / elapsedSeconds : 0;
       // EMA smoothing so bursty progress events don't make the readout jump.
       const speed = previous.speed > 0 ? previous.speed * 0.6 + instant * 0.4 : instant;
+      const shouldUpdateDisplay = previous.displayedSpeed === 0
+        || now - previous.lastDisplayedAt >= SPEED_DISPLAY_INTERVAL_MS;
+      const displayedSpeed = shouldUpdateDisplay ? speed : previous.displayedSpeed;
+      const lastDisplayedAt = shouldUpdateDisplay ? now : previous.lastDisplayedAt;
       samplesRef.current.set(op.operationId, {
         bytes: op.processedBytes,
         time: now,
         speed,
+        displayedSpeed,
+        lastDisplayedAt,
       });
-      if (speed > 0) next.set(op.operationId, speed);
+      if (displayedSpeed > 0) next.set(op.operationId, displayedSpeed);
     }
-    setSpeeds(next);
+    setSpeeds((prev) => {
+      if (prev.size === next.size && [...next].every(([id, value]) => prev.get(id) === value)) {
+        return prev;
+      }
+      return next;
+    });
   }, [operations]);
 
   return speeds;
@@ -239,18 +257,37 @@ export const TransferProgress: React.FC = () => {
                 </Button>
               </div>
             ) : (
-              <div className={cn('flex max-w-full flex-wrap items-center gap-x-3 gap-y-1 tabular-nums', op.status !== 'pending' && '@max-[600px]/transfer:order-last @max-[600px]/transfer:w-full')}>
+              <div className={cn('flex max-w-full flex-wrap items-center gap-x-3 gap-y-1 tabular-nums', op.status !== 'pending' && '@max-[740px]/transfer:order-last @max-[740px]/transfer:w-full')}>
                 {showProgress && (
                   <div className="flex w-48 shrink-0 items-center gap-1">
                     <Progress value={progress} aria-label={displayTransferPath(op)} className="min-w-0 flex-1" />
                     <span className="w-8 text-right">{Math.round(progress)}%</span>
                   </div>
                 )}
-                {op.status !== 'pending' && op.totalBytes > 0 && <span className="whitespace-nowrap text-muted-foreground">
+                {op.status !== 'pending' && op.totalBytes > 0 && <span
+                  data-slot="transfer-bytes"
+                  className="whitespace-nowrap text-right text-muted-foreground @min-[560px]/transfer:min-w-34"
+                >
                   {`${formatBytes(op.processedBytes)} / ${formatBytes(op.totalBytes)}`}
                 </span>}
-                {showSpeed && <span className="whitespace-nowrap text-muted-foreground/60">{formatBytes(speed)}/s</span>}
-                {(!showProgress || op.totalSteps > 0) && <span className={cn('whitespace-nowrap text-right', isTransferComplete(op) ? 'text-app-success' : 'text-muted-foreground')}>
+                {(showProgress || showSpeed) && <span
+                  data-slot="transfer-speed"
+                  aria-hidden={!showSpeed || undefined}
+                  className={cn(
+                    'whitespace-nowrap text-right text-muted-foreground/60 @min-[560px]/transfer:min-w-22',
+                    !showSpeed && '@max-[560px]/transfer:hidden',
+                  )}
+                >
+                  {showSpeed ? `${formatBytes(speed)}/s` : null}
+                </span>}
+                {(!showProgress || op.totalSteps > 0) && <span
+                  data-slot="transfer-status"
+                  className={cn(
+                    'whitespace-nowrap text-right',
+                    op.totalSteps > 0 && '@min-[560px]/transfer:min-w-22',
+                    isTransferComplete(op) ? 'text-app-success' : 'text-muted-foreground',
+                  )}
+                >
                   {op.status === 'cancelling'
                     ? t(op.kind === 'delete' ? 'sftp.transfer.cancellingDelete' : 'sftp.transfer.cancelling')
                     : op.status === 'cancelled'

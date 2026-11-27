@@ -354,4 +354,78 @@ describe('TransferProgress', () => {
     expect(filenameGroup).toHaveClass('items-center', 'gap-1');
     expect(filenameGroup.querySelector('svg')).toHaveClass('size-4', 'shrink-0', '-translate-y-px');
   });
+
+  it('reserves stable metric slots during active transfers so the progress bar does not shift', () => {
+    useTransferStore.setState({
+      operations: [{
+        ...failedUpload,
+        status: 'running',
+        error: undefined,
+        retry: undefined,
+        processedBytes: 0,
+        totalBytes: 58 * 1024 * 1024,
+        completedSteps: 1,
+        totalSteps: 152,
+      }],
+    });
+    const { container } = render(<TransferProgress />);
+
+    const bytesSlot = container.querySelector('[data-slot="transfer-bytes"]');
+    const speedSlot = container.querySelector('[data-slot="transfer-speed"]');
+    const statusSlot = container.querySelector('[data-slot="transfer-status"]');
+
+    expect(bytesSlot).toHaveClass('text-right', '@min-[560px]/transfer:min-w-34');
+    expect(speedSlot).toBeInTheDocument();
+    expect(speedSlot).toHaveAttribute('aria-hidden', 'true');
+    expect(speedSlot).toHaveClass('text-right', '@min-[560px]/transfer:min-w-22', '@max-[560px]/transfer:hidden');
+    expect(speedSlot).toBeEmptyDOMElement();
+    expect(statusSlot).toHaveClass('text-right', '@min-[560px]/transfer:min-w-22');
+  });
+
+  it('throttles transfer speed display updates within the display interval', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      useTransferStore.setState({
+        operations: [{
+          ...failedUpload,
+          status: 'running',
+          error: undefined,
+          retry: undefined,
+          processedBytes: 0,
+          totalBytes: 100 * 1024,
+        }],
+      });
+      render(<TransferProgress />);
+
+      vi.setSystemTime(2_000);
+      act(() => {
+        useTransferStore.setState((state) => ({
+          operations: state.operations.map((op) => ({ ...op, processedBytes: 1024 })),
+        }));
+      });
+      expect(screen.getByText('1.0 KB/s')).toBeInTheDocument();
+
+      // Within 400ms interval: displayed rate stays steady even as bytes jump.
+      vi.setSystemTime(2_100);
+      act(() => {
+        useTransferStore.setState((state) => ({
+          operations: state.operations.map((op) => ({ ...op, processedBytes: 5120 })),
+        }));
+      });
+      expect(screen.getByText('1.0 KB/s')).toBeInTheDocument();
+
+      // Once 400ms elapses, displayed rate refreshes to the smoothed value.
+      vi.setSystemTime(2_500);
+      act(() => {
+        useTransferStore.setState((state) => ({
+          operations: state.operations.map((op) => ({ ...op, processedBytes: 25600 })),
+        }));
+      });
+      expect(screen.queryByText('1.0 KB/s')).not.toBeInTheDocument();
+      expect(screen.getByText(/\/s$/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
