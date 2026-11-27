@@ -94,7 +94,6 @@ describe('ProviderSetupDialog', () => {
     const provider = useAiSettingsStore.getState().providers[0];
     render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={vi.fn()} />);
     expect(screen.getByLabelText('settings.ai.providerName')).toHaveValue(provider.name);
-    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     const capabilityButton = await screen.findByRole('button', { name: /settings.ai.profileLimits/ });
     expect(screen.queryByText(/settings.ai.profileLimits/)).not.toBeInTheDocument();
     await user.hover(capabilityButton);
@@ -108,7 +107,6 @@ describe('ProviderSetupDialog', () => {
     const provider = useAiSettingsStore.getState().providers[0];
     render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={vi.fn()} />);
 
-    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await user.click(screen.getByRole('combobox', { name: 'settings.ai.profile' }));
     const options = await screen.findAllByRole('option');
 
@@ -158,8 +156,9 @@ describe('ProviderSetupDialog', () => {
     const inputs = dialog.querySelectorAll('[data-slot="input"]');
     const inputGroups = dialog.querySelectorAll('[data-slot="input-group"]');
     const fieldGroups = scrollArea?.querySelectorAll('[data-slot="field-group"]');
-    expect(dialog).toHaveClass('max-w-xl', 'gap-0', 'p-0');
+    expect(dialog).toHaveClass('h-[min(680px,calc(100vh-2rem))]', 'max-w-xl', 'gap-0', 'p-0');
     expect(scrollArea).toHaveClass(
+      'flex-1',
       'overflow-y-auto',
       'px-4',
       'py-3',
@@ -167,7 +166,12 @@ describe('ProviderSetupDialog', () => {
       'native-scrollbar-default',
     );
     expect(scrollArea).not.toHaveClass('pr-1');
-    expect(fieldGroups).toHaveLength(1);
+    expect(fieldGroups).toHaveLength(2);
+    expect(dialog.querySelector('[data-slot="collapsible"]')).toBeNull();
+    expect(screen.getByLabelText('settings.ai.baseUrl')).toBeDisabled();
+    expect(screen.queryByText('settings.ai.modelsRequired')).not.toBeInTheDocument();
+    expect(screen.queryByText('settings.ai.modelsCustomized')).not.toBeInTheDocument();
+    expect(screen.queryByText('settings.ai.modelsInherited')).not.toBeInTheDocument();
     expect(screen.queryByText('settings.ai.provider', { exact: true })).not.toBeInTheDocument();
     expect(screen.queryByText('settings.ai.connectionDetails', { exact: true })).not.toBeInTheDocument();
     expect(screen.queryByText('settings.ai.credentials', { exact: true })).not.toBeInTheDocument();
@@ -178,8 +182,9 @@ describe('ProviderSetupDialog', () => {
     expect(screen.getByRole('button', { name: 'common.cancel' })).toHaveClass('h-8');
     expect(screen.getByRole('button', { name: 'common.save' })).toHaveClass('h-8');
     expect(fieldGroups?.[0]).toHaveClass('gap-4');
+    expect(fieldGroups?.[1]).toHaveClass('gap-3', '@min-[30rem]:grid', '@min-[30rem]:grid-cols-2');
     expect(providerControl).toHaveAttribute('data-slot', 'input-group-control');
-    expect(inputGroups).toHaveLength(1);
+    expect(inputGroups).toHaveLength(2);
     inputGroups.forEach((inputGroup) => {
       expect(inputGroup).toHaveClass(
         'h-9',
@@ -222,9 +227,6 @@ describe('ProviderSetupDialog', () => {
     expect(providerInput).toHaveValue('DeepSeek');
     const apiKeyInput = screen.getByLabelText(/settings\.ai\.apiKey/);
     const providerNameInput = screen.getByLabelText('settings.ai.providerName');
-    expect(providerNameInput).toHaveValue('DeepSeek');
-    expect(screen.queryByLabelText('settings.ai.baseUrl')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     expect(providerNameInput).toHaveValue('DeepSeek');
     const modelInput = screen.getByLabelText('settings.ai.modelIdNumber:1');
     expect(apiKeyInput.compareDocumentPosition(modelInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -300,9 +302,9 @@ describe('ProviderSetupDialog', () => {
     await user.type(providerInput, 'OpenRouter');
     await user.click(await screen.findByRole('option', { name: /OpenRouter/ }));
     await user.type(screen.getByLabelText(/settings\.ai\.apiKey/), 'router-key');
-    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
 
     expect(screen.getByLabelText('settings.ai.baseUrl')).toHaveValue('https://openrouter.ai/api/v1');
+    expect(screen.getByText('settings.ai.modelsRequired')).toBeInTheDocument();
     expect(screen.queryByLabelText('settings.ai.modelIdNumber:1')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'settings.ai.loadModels' }));
     await waitFor(() => expect(mocks.invokeListAiModels).toHaveBeenCalledWith(expect.objectContaining({
@@ -423,7 +425,6 @@ describe('ProviderSetupDialog', () => {
     await user.click(providerInput);
     await user.type(providerInput, 'Ollama');
     await user.click(await screen.findByRole('option', { name: /Ollama/ }));
-    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await user.click(screen.getByRole('button', { name: 'settings.ai.loadModels' }));
 
     await waitFor(() => expect(mocks.invokeListAiModels).toHaveBeenCalledWith({
@@ -471,7 +472,6 @@ describe('ProviderSetupDialog', () => {
     await user.click(providerInput);
     await user.type(providerInput, 'Ollama');
     await user.click(await screen.findByRole('option', { name: /Ollama/ }));
-    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await user.click(screen.getByRole('button', { name: 'settings.ai.loadModels' }));
 
     const feedback = (await screen.findByText('settings.ai.connectionFailed')).closest('[role="alert"]');
@@ -500,7 +500,6 @@ describe('ProviderSetupDialog', () => {
     await user.click(providerInput);
     await user.type(providerInput, 'Ollama');
     await user.click(await screen.findByRole('option', { name: /Ollama/ }));
-    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await user.click(screen.getByRole('button', { name: 'settings.ai.loadModels' }));
     await waitFor(() => expect(mocks.invokeListAiModels).toHaveBeenCalledTimes(1));
 
@@ -513,7 +512,6 @@ describe('ProviderSetupDialog', () => {
       await pendingModels.promise;
     });
 
-    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     expect(screen.getByLabelText('settings.ai.modelIdNumber:1')).toHaveValue('deepseek-flash');
     expect(screen.queryByText('settings.ai.connectionSuccess:1')).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'stale-ollama-model' })).not.toBeInTheDocument();
@@ -535,7 +533,6 @@ describe('ProviderSetupDialog', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await user.click(screen.getByRole('button', { name: 'settings.ai.loadModels' }));
     await waitFor(() => expect(mocks.invokeListAiModels).toHaveBeenCalledTimes(1));
     rerender(
@@ -559,7 +556,6 @@ describe('ProviderSetupDialog', () => {
       await pendingModels.promise;
     });
 
-    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     expect(screen.queryByLabelText('settings.ai.modelIdNumber:1')).not.toBeInTheDocument();
     expect(screen.queryByText('settings.ai.connectionSuccess:1')).not.toBeInTheDocument();
   });
@@ -582,7 +578,6 @@ describe('ProviderSetupDialog', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await user.click(screen.getByRole('button', { name: 'settings.ai.loadModels' }));
     await waitFor(() => expect(mocks.invokeListAiModels).toHaveBeenCalledTimes(1));
     rerender(
@@ -598,7 +593,6 @@ describe('ProviderSetupDialog', () => {
       await pendingModels.promise;
     });
 
-    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     expect(screen.getByLabelText('settings.ai.providerName')).toHaveValue(providerB.name);
     expect(screen.getByLabelText('settings.ai.baseUrl')).toHaveValue(providerB.baseUrl);
     expect(screen.queryByLabelText('settings.ai.modelIdNumber:1')).not.toBeInTheDocument();
@@ -636,7 +630,6 @@ describe('ProviderSetupDialog', () => {
 
     expect(screen.getByText('settings.ai.editProviderTitle')).toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'settings.ai.chooseProvider' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await user.clear(screen.getByLabelText('settings.ai.providerName'));
     await user.type(screen.getByLabelText('settings.ai.providerName'), 'Renamed provider');
     await user.clear(screen.getByLabelText('settings.ai.modelIdNumber:1'));
@@ -665,7 +658,6 @@ describe('ProviderSetupDialog', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await user.type(screen.getByLabelText('settings.ai.modelNameNumber:1'), 'Local Qwen');
     await user.click(screen.getByRole('button', { name: 'settings.ai.modelAdvancedNumber:1' }));
     await user.type(screen.getByLabelText('settings.ai.contextWindow'), '64000');
@@ -747,7 +739,6 @@ describe('ProviderSetupDialog', () => {
     }, true);
 
     render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={vi.fn()} />);
-    await userEvent.setup().click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     expect(await screen.findByText('settings.ai.unknownModelDescription')).toBeVisible();
     await userEvent.setup().click(screen.getByRole('button', { name: 'common.save' }));
 
@@ -822,7 +813,6 @@ describe('ProviderSetupDialog', () => {
 
     const user = userEvent.setup();
     render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={vi.fn()} />);
-    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await user.click(screen.getByRole('button', { name: 'settings.ai.removeModelNumber:2' }));
     await user.click(screen.getByRole('button', { name: 'common.save' }));
 
@@ -928,9 +918,11 @@ describe('ProviderSetupDialog', () => {
 
     const user = userEvent.setup();
     render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={vi.fn()} />);
-    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
+    await user.click(screen.getByRole('button', { name: 'settings.ai.modelAdvancedNumber:1' }));
+    expect(screen.getByLabelText('settings.ai.contextWindow')).toBeVisible();
     await user.click(screen.getByRole('combobox', { name: 'settings.ai.profile' }));
     await user.click(await screen.findByRole('option', { name: 'settings.ai.profileName.qwen' }));
+    expect(screen.queryByLabelText('settings.ai.contextWindow')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'common.save' }));
 
     await waitFor(() => expect(routeSave).toHaveBeenCalledTimes(1));
@@ -958,7 +950,6 @@ describe('ProviderSetupDialog', () => {
       />,
     );
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await user.click(screen.getByRole('button', { name: 'settings.ai.modelAdvancedNumber:1' }));
     await user.click(screen.getByRole('button', { name: 'settings.ai.declareModel' }));
     expect(screen.getByRole('button', { name: 'settings.ai.removeModelNumber:1' })).toBeDisabled();
@@ -988,7 +979,6 @@ describe('ProviderSetupDialog', () => {
     });
     await pendingDeclaration.promise;
 
-    await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await user.click(screen.getByRole('button', { name: 'settings.ai.modelAdvancedNumber:1' }));
     expect(screen.getByLabelText('settings.ai.modelNameNumber:1')).toHaveValue('');
     expect(screen.getByLabelText('settings.ai.contextWindow')).toHaveValue(null);

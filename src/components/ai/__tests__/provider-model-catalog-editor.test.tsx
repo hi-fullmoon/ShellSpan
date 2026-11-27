@@ -78,9 +78,20 @@ describe('ProviderModelCatalogEditor', () => {
 
     await user.click(screen.getByRole('button', { name: 'settings.ai.addModel' }));
     const second = screen.getByLabelText('settings.ai.modelIdNumber:2');
+    expect(second).toHaveFocus();
+    expect(screen.queryByLabelText('settings.ai.contextWindow')).not.toBeInTheDocument();
     await user.type(second, 'model-b');
     expect(second).toHaveValue('model-b');
     expect(screen.queryByText('settings.ai.modelIdRequired:2')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'settings.ai.modelAdvancedNumber:2' }));
+    const advancedGroup = screen.getByLabelText('settings.ai.contextWindow').closest('[data-slot="field-group"]');
+    const rowCard = advancedGroup?.closest('[data-slot="collapsible"]');
+    expect(rowCard).toHaveClass('@container/model-row');
+    expect(advancedGroup).not.toHaveClass('@container/model-row');
+    expect(advancedGroup).toHaveClass('gap-3', '@min-[28rem]/model-row:grid', '@min-[28rem]/model-row:grid-cols-2');
+    expect(screen.getByLabelText('settings.ai.requestOutput').closest('[data-slot="field"]'))
+      .toHaveClass('@min-[28rem]/model-row:col-span-2');
 
     await user.clear(second);
     await user.type(second, 'model-a');

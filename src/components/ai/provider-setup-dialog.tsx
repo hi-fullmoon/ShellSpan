@@ -2,22 +2,15 @@ import { invoke } from '@tauri-apps/api/core';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2Icon,
-  ChevronDownIcon,
   CircleAlertIcon,
   EyeIcon,
   EyeOffIcon,
   InfoIcon,
   ServerIcon,
-  Settings2Icon,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { DEFAULT_RETRY_POLICY } from '@/lib/ai/retry-policy';
 import { Button } from '@/components/ui/button';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
 import {
   Combobox,
   ComboboxContent,
@@ -287,7 +280,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   const [showApiKey, setShowApiKey] = useState(false);
   const [revealedApiKey, setRevealedApiKey] = useState<string>();
   const [apiKeyBusy, setApiKeyBusy] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [catalogResetVersion, setCatalogResetVersion] = useState(0);
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const connectionTest = useRef<AbortController | undefined>(undefined);
@@ -359,7 +352,6 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
     setShowApiKey(false);
     setRevealedApiKey(undefined);
     setApiKeyBusy(false);
-    setAdvancedOpen(false);
     setBusy(false);
     setModelBusy(false);
     setModelDiscoveryError(undefined);
@@ -465,16 +457,15 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
     setShowApiKey(false);
     if (!preset) {
       setDraft(undefined);
-      setAdvancedOpen(false);
       setProviderModels([]);
       setModelCatalogMode('explicit');
       setFeedback(undefined);
       return;
     }
     setDraft({ ...preset });
-    setAdvancedOpen(preset.preset === 'custom');
     setProviderModels(preset.model ? [{ id: preset.model }] : []);
     setModelCatalogMode(preset.preset === 'custom' ? 'explicit' : 'inherited');
+    setCatalogResetVersion((version) => version + 1);
     setModelDiscoveryError(undefined);
     setFeedback(undefined);
   };
@@ -564,6 +555,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
         reasoningEffort: undefined,
       } : current);
     }
+    setCatalogResetVersion((version) => version + 1);
     setModelDiscoveryError(undefined);
     setFeedback(undefined);
   };
@@ -605,6 +597,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
     if (!definition) return;
     const defaultModel = definition?.model ?? '';
     declarationRequestGeneration.current += 1;
+    setCatalogResetVersion((version) => version + 1);
     setModelCatalogMode('inherited');
     setProviderModels(defaultModel ? [{ id: defaultModel }] : []);
     setDraft((current) => current ? { ...current, model: defaultModel, modelDefinition: undefined } : current);
@@ -760,7 +753,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <CompactDialogContent className="max-w-xl [&_[data-slot=dialog-close]]:size-6">
+      <CompactDialogContent className="h-[min(680px,calc(100vh-2rem))] max-w-xl [&_[data-slot=dialog-close]]:size-6">
         <CompactDialogHeader
           title={t(provider ? 'settings.ai.editProviderTitle' : 'settings.ai.addProviderTitle')}
           description={provider
@@ -777,7 +770,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
         >
           <CompactDialogBody
             data-slot="provider-dialog-scroll-area"
-            className="native-scrollbar-default @container gap-4"
+            className="native-scrollbar-default @container flex-1 gap-4"
           >
             <FieldGroup className="gap-4">
               {!provider && <Field>
@@ -879,184 +872,153 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
 
             </FieldGroup>
 
-            <Collapsible
-              open={advancedOpen}
-              onOpenChange={setAdvancedOpen}
-              className="rounded-lg border"
-            >
-              <CollapsibleTrigger
-                render={(
-                  <Button
-                    type="button"
-                    variant="plain"
-                    className="h-auto w-full justify-between rounded-lg px-3 py-2.5"
-                    disabled={!draft}
-                  />
-                )}
-              >
-                <span className="flex min-w-0 items-center gap-1">
-                  <Settings2Icon data-icon="inline-start" />
-                  <span className="flex min-w-0 flex-col items-start gap-0.5">
-                    <span>{t('settings.ai.advancedSettings')}</span>
-                    <span className="text-xs font-normal text-muted-foreground">
-                      {t('settings.ai.advancedSettingsDescription')}
-                    </span>
-                  </span>
-                </span>
-                <ChevronDownIcon
-                  data-icon="inline-end"
-                  className={cn('transition-transform', advancedOpen && 'rotate-180')}
-                />
-              </CollapsibleTrigger>
+            <Separator />
 
-              <CollapsibleContent>
-                <Separator />
-                <FieldGroup className="gap-3 p-3 @min-[30rem]:grid @min-[30rem]:grid-cols-2">
-                  <Field data-disabled={!draft || undefined}>
-                    <div className="flex items-center gap-1">
-                      <FieldLabel htmlFor="ai-provider-profile">{t('settings.ai.profile')}</FieldLabel>
-                      {profileCapabilityLabel && (
-                        <TooltipProvider delay={100}>
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={(
-                                <Button
-                                  type="button"
-                                  variant="plain"
-                                  size="xs"
-                                  className="relative size-4 p-0 after:absolute after:-inset-1"
-                                  aria-label={profileCapabilityLabel}
-                                />
-                              )}
-                            >
-                              <InfoIcon />
-                            </TooltipTrigger>
-                            <TooltipContent align="start" className="max-w-sm break-words">
-                              {profileCapabilityLabel}
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      )}
-                    </div>
-                    <Combobox
-                      items={PROVIDER_PROFILE_IDS}
-                      itemToStringLabel={(profile) => t(`settings.ai.profileName.${profile}`)}
-                      value={draft ? resolveProviderProfile(draft) : null}
-                      onValueChange={(profile) => {
-                        if (!profile || !draft) return;
-                        handleProfileChange(profile);
+            <FieldGroup className="gap-3 @min-[30rem]:grid @min-[30rem]:grid-cols-2">
+              <Field data-disabled={!draft || undefined}>
+                <div className="flex items-center gap-1">
+                  <FieldLabel htmlFor="ai-provider-profile">{t('settings.ai.profile')}</FieldLabel>
+                  {profileCapabilityLabel && (
+                    <TooltipProvider delay={100}>
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={(
+                            <Button
+                              type="button"
+                              variant="plain"
+                              size="xs"
+                              className="relative size-4 p-0 after:absolute after:-inset-1"
+                              aria-label={profileCapabilityLabel}
+                            />
+                          )}
+                        >
+                          <InfoIcon />
+                        </TooltipTrigger>
+                        <TooltipContent align="start" className="max-w-sm break-words">
+                          {profileCapabilityLabel}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  )}
+                </div>
+                <Combobox
+                  items={PROVIDER_PROFILE_IDS}
+                  itemToStringLabel={(profile) => t(`settings.ai.profileName.${profile}`)}
+                  value={draft ? resolveProviderProfile(draft) : null}
+                  onValueChange={(profile) => {
+                    if (!profile || !draft) return;
+                    handleProfileChange(profile);
+                  }}
+                >
+                  <ComboboxInput id="ai-provider-profile" className={SYSTEM_INPUT_GROUP_CLASS} disabled={!draft} />
+                  <ComboboxContent>
+                    <ComboboxEmpty>{t('settings.ai.providerNoResults')}</ComboboxEmpty>
+                    <ComboboxList>
+                      {(profile: (typeof PROVIDER_PROFILE_IDS)[number]) => {
+                        const ProfileIcon = PROFILE_ICONS[profile];
+                        return (
+                          <ComboboxItem
+                            key={profile}
+                            value={profile}
+                            className="[&>svg]:size-4!"
+                          >
+                            <ProfileIcon aria-hidden />
+                            <span>{t(`settings.ai.profileName.${profile}`)}</span>
+                          </ComboboxItem>
+                        );
                       }}
-                    >
-                      <ComboboxInput id="ai-provider-profile" className={SYSTEM_INPUT_GROUP_CLASS} disabled={!draft} />
-                      <ComboboxContent>
-                        <ComboboxEmpty>{t('settings.ai.providerNoResults')}</ComboboxEmpty>
-                        <ComboboxList>
-                          {(profile: (typeof PROVIDER_PROFILE_IDS)[number]) => {
-                            const ProfileIcon = PROFILE_ICONS[profile];
-                            return (
-                              <ComboboxItem
-                                key={profile}
-                                value={profile}
-                                className="[&>svg]:size-4!"
-                              >
-                                <ProfileIcon aria-hidden />
-                                <span>{t(`settings.ai.profileName.${profile}`)}</span>
-                              </ComboboxItem>
-                            );
-                          }}
-                        </ComboboxList>
-                      </ComboboxContent>
-                    </Combobox>
-                    {draft && resolution.status !== 'ready' && (
-                      <FieldDescription aria-live="polite">
-                        {resolution.status === 'error'
-                          ? isUnknownModelFailure(resolution.error)
-                            ? t('settings.ai.unknownModelDescription')
-                            : resolution.error
-                          : t('settings.ai.capabilitiesLoading')}
-                      </FieldDescription>
-                    )}
-                  </Field>
+                    </ComboboxList>
+                  </ComboboxContent>
+                </Combobox>
+                {draft && resolution.status !== 'ready' && (
+                  <FieldDescription aria-live="polite">
+                    {resolution.status === 'error'
+                      ? isUnknownModelFailure(resolution.error)
+                        ? t('settings.ai.unknownModelDescription')
+                        : resolution.error
+                      : t('settings.ai.capabilitiesLoading')}
+                  </FieldDescription>
+                )}
+              </Field>
 
-                  <Field data-disabled={!draft || undefined}>
-                    <FieldLabel htmlFor="ai-new-provider-protocol">{t('settings.ai.protocol')}</FieldLabel>
-                    <Input
-                      id="ai-new-provider-protocol"
-                      className={SYSTEM_INPUT_CLASS}
-                      value={draft ? t(PROTOCOL_LABEL_KEYS[draft.kind]) : ''}
-                      placeholder={t('settings.ai.chooseProviderFirst')}
-                      disabled
-                      readOnly
-                    />
-                  </Field>
+              <Field data-disabled={!draft || undefined}>
+                <FieldLabel htmlFor="ai-new-provider-protocol">{t('settings.ai.protocol')}</FieldLabel>
+                <Input
+                  id="ai-new-provider-protocol"
+                  className={SYSTEM_INPUT_CLASS}
+                  value={draft ? t(PROTOCOL_LABEL_KEYS[draft.kind]) : ''}
+                  placeholder={t('settings.ai.chooseProviderFirst')}
+                  disabled
+                  readOnly
+                />
+              </Field>
 
-                  <Field
-                    className="@min-[30rem]:col-span-2"
-                    data-disabled={!draft || undefined}
-                    data-invalid={Boolean(draft && !requestEndpoint) || undefined}
-                  >
-                    <div className="flex items-center gap-1">
-                      <FieldLabel htmlFor="ai-new-provider-url">{t('settings.ai.baseUrl')}</FieldLabel>
-                      {requestEndpointLabel && (
-                        <TooltipProvider delay={100}>
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={(
-                                <Button
-                                  type="button"
-                                  variant="plain"
-                                  size="xs"
-                                  className="relative size-4 p-0 after:absolute after:-inset-1"
-                                  aria-label={requestEndpointLabel}
-                                />
-                              )}
-                            >
-                              <InfoIcon />
-                            </TooltipTrigger>
-                            <TooltipContent align="start">{requestEndpointLabel}</TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      )}
-                    </div>
-                    <Input
-                      id="ai-new-provider-url"
-                      className={SYSTEM_INPUT_CLASS}
-                      value={draft?.baseUrl ?? ''}
-                      placeholder="https://..."
-                      disabled={!draft}
-                      aria-invalid={Boolean(draft && !requestEndpoint) || undefined}
-                      onChange={(event) => updateDraft({ baseUrl: event.target.value })}
-                      autoCapitalize="none"
-                      autoCorrect="off"
-                    />
-                  </Field>
+              <Field
+                className="@min-[30rem]:col-span-2"
+                data-disabled={!draft || undefined}
+                data-invalid={Boolean(draft && !requestEndpoint) || undefined}
+              >
+                <div className="flex items-center gap-1">
+                  <FieldLabel htmlFor="ai-new-provider-url">{t('settings.ai.baseUrl')}</FieldLabel>
+                  {requestEndpointLabel && (
+                    <TooltipProvider delay={100}>
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={(
+                            <Button
+                              type="button"
+                              variant="plain"
+                              size="xs"
+                              className="relative size-4 p-0 after:absolute after:-inset-1"
+                              aria-label={requestEndpointLabel}
+                            />
+                          )}
+                        >
+                          <InfoIcon />
+                        </TooltipTrigger>
+                        <TooltipContent align="start">{requestEndpointLabel}</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  )}
+                </div>
+                <Input
+                  id="ai-new-provider-url"
+                  className={SYSTEM_INPUT_CLASS}
+                  value={draft?.baseUrl ?? ''}
+                  placeholder="https://..."
+                  disabled={!draft}
+                  aria-invalid={Boolean(draft && !requestEndpoint) || undefined}
+                  onChange={(event) => updateDraft({ baseUrl: event.target.value })}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                />
+              </Field>
+            </FieldGroup>
 
-                  <Separator className="@min-[30rem]:col-span-2" />
-                  <div className="@min-[30rem]:col-span-2">
-                    <ProviderModelCatalogEditor
-                      models={providerModels}
-                      defaultModelId={draft?.model ?? ''}
-                      inherited={modelCatalogMode === 'inherited'}
-                      canReset={Boolean(
-                        draft
-                        && PRESET_OPTIONS.some((item) => (
-                          resolveProviderProfile(item) === resolveProviderProfile(draft)
-                        ))
-                        && modelCatalogMode !== 'inherited'
-                      )}
-                      disabled={!draft || busy || modelBusy}
-                      discovering={modelBusy}
-                      discoveryError={modelDiscoveryError}
-                      onChange={handleModelsChange}
-                      onDefaultChange={(model) => updateDraft({ model, reasoningEffort: undefined })}
-                      onDiscover={handleLoadModels}
-                      onDeclare={handleDeclareModel}
-                      onReset={handleResetModels}
-                    />
-                  </div>
-                </FieldGroup>
-              </CollapsibleContent>
-            </Collapsible>
+            <Separator />
+
+            <ProviderModelCatalogEditor
+              key={`${provider?.id ?? draft?.preset ?? 'empty'}:${catalogResetVersion}`}
+              models={providerModels}
+              defaultModelId={draft?.model ?? ''}
+              inherited={modelCatalogMode === 'inherited'}
+              canReset={Boolean(
+                draft
+                && PRESET_OPTIONS.some((item) => (
+                  resolveProviderProfile(item) === resolveProviderProfile(draft)
+                ))
+                && modelCatalogMode !== 'inherited'
+              )}
+              disabled={!draft || busy || modelBusy}
+              hasProvider={Boolean(draft)}
+              discovering={modelBusy}
+              discoveryError={modelDiscoveryError}
+              onChange={handleModelsChange}
+              onDefaultChange={(model) => updateDraft({ model, reasoningEffort: undefined })}
+              onDiscover={handleLoadModels}
+              onDeclare={handleDeclareModel}
+              onReset={handleResetModels}
+            />
           </CompactDialogBody>
 
           <CompactDialogFooter className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1 sm:gap-2">

@@ -2079,8 +2079,6 @@ export default {
   'settings.ai.editProvider': '编辑',
   'settings.ai.editProviderTitle': '编辑 AI 服务',
   'settings.ai.editProviderDescription': '更新 {name} 的凭据或模型。',
-  'settings.ai.advancedSettings': '高级设置',
-  'settings.ai.advancedSettingsDescription': '模型目录、能力配置、协议与服务地址',
   'settings.ai.chooseProvider': '选择供应商',
   'settings.ai.chooseProviderPlaceholder': '搜索并选择供应商…',
   'settings.ai.chooseProviderFirst': '请先选择供应商',

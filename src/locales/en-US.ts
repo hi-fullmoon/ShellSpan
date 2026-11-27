@@ -2081,8 +2081,6 @@ export default {
   'settings.ai.editProvider': 'Edit',
   'settings.ai.editProviderTitle': 'Edit AI provider',
   'settings.ai.editProviderDescription': 'Update credentials or the model used by {name}.',
-  'settings.ai.advancedSettings': 'Advanced settings',
-  'settings.ai.advancedSettingsDescription': 'Model catalog, profile, protocol, and service URL',
   'settings.ai.chooseProvider': 'Choose provider',
   'settings.ai.chooseProviderPlaceholder': 'Search and choose a provider…',
   'settings.ai.chooseProviderFirst': 'Choose a provider first',

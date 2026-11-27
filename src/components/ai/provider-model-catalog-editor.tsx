@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDownIcon,
   PlusIcon,
@@ -120,6 +120,7 @@ interface ProviderModelCatalogEditorProps {
   inherited: boolean;
   canReset: boolean;
   disabled: boolean;
+  hasProvider?: boolean;
   discovering: boolean;
   discoveryError?: string;
   onChange: (models: ProviderModelDraft[]) => void;
@@ -148,6 +149,7 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
   inherited,
   canReset,
   disabled,
+  hasProvider = true,
   discovering,
   discoveryError,
   onChange,
@@ -162,7 +164,18 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [query, setQuery] = useState('');
   const [pickerError, setPickerError] = useState<string>();
+  const pendingFocusIndex = useRef<number | null>(null);
+  const modelIdInputs = useRef<Map<number, HTMLInputElement>>(new Map());
   useEffect(() => { setPickerError(undefined); }, [models, discoveryError]);
+  useEffect(() => {
+    const targetIndex = pendingFocusIndex.current;
+    if (targetIndex === null) return;
+    const input = modelIdInputs.current.get(targetIndex);
+    if (!input) return;
+    pendingFocusIndex.current = null;
+    input.focus();
+    input.scrollIntoView?.({ block: 'nearest' });
+  }, [models.length]);
   const failure = validateProviderModels(models);
   const visibleCandidates = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -252,9 +265,11 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
         <div className="flex min-w-0 flex-col gap-0.5">
           <div className="flex items-center gap-2">
             <span className="text-xs font-medium text-foreground">{t('settings.ai.modelCatalog')}</span>
-            <span className="text-xs text-muted-foreground">
-              {t(inherited ? 'settings.ai.modelsInherited' : 'settings.ai.modelsCustomized')}
-            </span>
+            {hasProvider && (
+              <span className="text-xs text-muted-foreground">
+                {t(inherited ? 'settings.ai.modelsInherited' : 'settings.ai.modelsCustomized')}
+              </span>
+            )}
           </div>
           <span className="text-xs text-muted-foreground">{t('settings.ai.modelCatalogDescription')}</span>
         </div>
@@ -323,7 +338,7 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
                 else next.delete(index);
                 return next;
               })}
-              className="rounded-lg border bg-background"
+              className="@container/model-row rounded-lg border bg-background"
             >
               <FieldGroup className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto] items-end gap-1 p-2">
                 <Field data-invalid={idInvalid || undefined}>
@@ -331,6 +346,10 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
                     {t('settings.ai.modelIdNumber', { number: index + 1 })}
                   </FieldLabel>
                   <Input
+                    ref={(node) => {
+                      if (node) modelIdInputs.current.set(index, node);
+                      else modelIdInputs.current.delete(index);
+                    }}
                     id={`ai-model-id-${index}`}
                     value={model.id}
                     aria-invalid={idInvalid || undefined}
@@ -383,7 +402,7 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
                 </div>
               </FieldGroup>
               <CollapsibleContent>
-                <FieldGroup className="border-t p-3 @container/model-row @min-[28rem]/model-row:grid @min-[28rem]/model-row:grid-cols-2">
+                <FieldGroup className="gap-3 border-t p-3 @min-[28rem]/model-row:grid @min-[28rem]/model-row:grid-cols-2">
                   <Field data-invalid={definitionInvalid || undefined}>
                     <FieldLabel htmlFor={`ai-model-context-${index}`}>{t('settings.ai.contextWindow')}</FieldLabel>
                     <Input
@@ -414,7 +433,10 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
                       })}
                     />
                   </Field>
-                  <Field data-invalid={definitionInvalid || undefined}>
+                  <Field
+                    className="@min-[28rem]/model-row:col-span-2"
+                    data-invalid={definitionInvalid || undefined}
+                  >
                     <FieldLabel htmlFor={`ai-model-request-output-${index}`}>{t('settings.ai.requestOutput')}</FieldLabel>
                     <Input
                       id={`ai-model-request-output-${index}`}
@@ -459,14 +481,14 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
         className="w-full border-dashed"
         disabled={disabled}
         onClick={() => {
+          pendingFocusIndex.current = models.length;
           onChange([...models, { id: '' }]);
-          setExpanded((current) => new Set(current).add(models.length));
         }}
       >
         <PlusIcon data-icon="inline-start" />
         {t('settings.ai.addModel')}
       </Button>
-      <FieldError>{failureMessage(failure, t)}</FieldError>
+      {hasProvider && <FieldError>{failureMessage(failure, t)}</FieldError>}
       {(pickerError ?? discoveryError) && <FieldError>{pickerError ?? discoveryError}</FieldError>}
 
       <Dialog open={candidates !== undefined} onOpenChange={(open) => { if (!open) closePicker(); }}>
