@@ -756,4 +756,169 @@ describe('sftpStore', () => {
     expect(invokeDisconnectSftp).toHaveBeenCalledTimes(1);
     expect(invokeDisconnectSftp).toHaveBeenCalledWith(oldRemote);
   });
+
+  it('resets the saved path and bookmarks when switching a restored pane to a different server', () => {
+    useSftpStore.getState().addRestoredConnections([
+      {
+        id: 'restored-tab',
+        title: 'Server A',
+        pinned: false,
+        leftSource: 'remote',
+        rightSource: 'remote',
+        leftProfileId: 'profile-left',
+        rightProfileId: 'profile-a',
+        localPath: '/home/admin',
+        remotePath: '/xh22sc/H113',
+        splitRatio: 0.5,
+        remoteBookmarks: { local: ['/home/admin'], remote: ['/xh22sc/H113'] },
+      },
+    ], 'restored-tab', [
+      {
+        id: 'profile-left',
+        name: 'Left Server',
+        host: '175.178.66.45',
+        port: 22,
+        username: 'admin',
+        authMethod: 'password',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'profile-a',
+        name: 'Server A',
+        host: '172.16.0.101',
+        port: 22,
+        username: 'xhlis',
+        authMethod: 'password',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ]);
+
+    const serverBRequest = {
+      host: '172.16.0.102',
+      port: 22,
+      username: 'xhlis',
+      authMethod: 'password' as const,
+    };
+    const attemptId = useSftpStore.getState().beginConnectionAttempt({
+      title: 'Server B',
+      host: serverBRequest.host,
+      port: serverBRequest.port,
+      username: serverBRequest.username,
+      profileId: 'profile-b',
+      connection: serverBRequest,
+    }, 'restored-tab', 'remote', 'switch-restored');
+
+    useSftpStore.getState().resolveConnectionAttempt(
+      attemptId,
+      {
+        sessionId: 'server-b-session',
+        title: 'Server B',
+        host: serverBRequest.host,
+        port: serverBRequest.port,
+        username: serverBRequest.username,
+      },
+      serverBRequest,
+      'profile-b',
+    );
+
+    expect(useSftpStore.getState().connections[0]).toMatchObject({
+      title: 'Server B',
+      profileId: 'profile-b',
+      remotePath: '',
+      restorePending: { local: true, remote: false },
+      remoteBookmarks: { local: ['/home/admin'], remote: [] },
+    });
+
+    const serverCRequest = {
+      host: '172.16.0.103',
+      port: 22,
+      username: 'deploy',
+      authMethod: 'password' as const,
+    };
+    useSftpStore.getState().attachRemoteConnection(
+      'restored-tab',
+      'local',
+      {
+        sessionId: 'server-c-session',
+        title: 'Server C',
+        host: serverCRequest.host,
+        port: serverCRequest.port,
+        username: serverCRequest.username,
+      },
+      serverCRequest,
+      'profile-c',
+    );
+
+    expect(useSftpStore.getState().connections[0]).toMatchObject({
+      leftTitle: 'Server C',
+      leftProfileId: 'profile-c',
+      localPath: '',
+      restorePending: { local: false, remote: false },
+      remoteBookmarks: { local: [], remote: [] },
+    });
+  });
+
+  it('preserves the saved path and bookmarks when reconnecting the same restored server via connection attempt', () => {
+    useSftpStore.getState().addRestoredConnections([
+      {
+        id: 'restored-same',
+        title: 'Server A',
+        pinned: false,
+        leftSource: 'local',
+        rightSource: 'remote',
+        rightProfileId: 'profile-a',
+        localPath: '',
+        remotePath: '/xh22sc/H113',
+        splitRatio: 0.5,
+        remoteBookmarks: { local: [], remote: ['/xh22sc/H113'] },
+      },
+    ], 'restored-same', [
+      {
+        id: 'profile-a',
+        name: 'Server A',
+        host: '172.16.0.102',
+        port: 22,
+        username: 'xhlis',
+        authMethod: 'password',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ]);
+
+    const serverARequest = {
+      host: '172.16.0.102',
+      port: 22,
+      username: 'xhlis',
+      authMethod: 'password' as const,
+    };
+    const attemptId = useSftpStore.getState().beginConnectionAttempt({
+      title: 'Server A',
+      host: serverARequest.host,
+      port: serverARequest.port,
+      username: serverARequest.username,
+      profileId: 'profile-a',
+      connection: serverARequest,
+    }, 'restored-same', 'remote', 'reconnect-restored');
+
+    useSftpStore.getState().resolveConnectionAttempt(
+      attemptId,
+      {
+        sessionId: 'server-a-session',
+        title: 'Server A',
+        host: serverARequest.host,
+        port: serverARequest.port,
+        username: serverARequest.username,
+      },
+      serverARequest,
+      'profile-a',
+    );
+
+    expect(useSftpStore.getState().connections[0]).toMatchObject({
+      remotePath: '/xh22sc/H113',
+      restorePending: { local: false, remote: false },
+      remoteBookmarks: { local: [], remote: ['/xh22sc/H113'] },
+    });
+  });
 });

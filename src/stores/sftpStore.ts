@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { generateId } from '@/lib/utils';
 import { sshRouteKey } from '@/lib/connections/ssh-route';
+import { nextDirectoryListRequestId } from '@/hooks/utils';
 import type {
   ConnectionProfile,
   LocalFileEntry,
@@ -271,6 +272,25 @@ export function getSftpPaneConnectionKey(
   return sshRouteKey(getSftpPaneConnection(connection, side));
 }
 
+function isReconnectingRestoredRemotePane(
+  current: SftpConnection,
+  side: SftpSide,
+  connectionRequest: RemoteConnectionRequest,
+  profileId?: string,
+): boolean {
+  if (
+    current.restorePending?.[side] !== true
+    || getSftpPaneSource(current, side) !== 'remote'
+  ) {
+    return false;
+  }
+  const currentProfileId = side === 'local' ? current.leftProfileId : current.profileId;
+  if (currentProfileId && profileId) {
+    return currentProfileId === profileId;
+  }
+  return getSftpPaneConnectionKey(current, side) === sshRouteKey(connectionRequest);
+}
+
 // True while any tracked transfer still holds paths on this connection. The
 // connection's own paths are fed back into hasActivePathOperation so its
 // overlap check reduces to "any active transfer on this connection".
@@ -375,6 +395,7 @@ export const useSftpStore = create<SftpState>()((set) => ({
       if (targetConnectionId) {
         const target = state.connections.find((connection) => connection.id === targetConnectionId);
         if (!target) return state;
+        nextDirectoryListRequestId(`${targetConnectionId}:${targetSide}`);
         return {
           connections: updateConnection(state, targetConnectionId, (connection) => ({
             ...connection,
@@ -431,10 +452,16 @@ export const useSftpStore = create<SftpState>()((set) => ({
       const side: SftpSide = target.connectionAttemptIds?.local === attemptId
         ? 'local'
         : 'remote';
-      const wasRestored = target.restorePending?.[side] === true;
+      const reconnectingRestored = isReconnectingRestoredRemotePane(
+        target,
+        side,
+        connectionRequest,
+        profileId,
+      );
       const locationRequest = typeof initialDirectory === 'object' ? initialDirectory : undefined;
       const directory = typeof initialDirectory === 'string' ? initialDirectory : locationRequest?.path;
       resolvedConnectionId = target.id;
+      nextDirectoryListRequestId(`${target.id}:${side}`);
       return {
         connections: updateConnection(state, target.id, (current) => ({
           ...current,
@@ -455,7 +482,7 @@ export const useSftpStore = create<SftpState>()((set) => ({
           localOnly: false,
           rightLocal: side === 'remote' ? false : current.rightLocal,
           [getPathKey(side)]: directory
-            ?? (wasRestored ? current[getPathKey(side)] : ''),
+            ?? (reconnectingRestored ? current[getPathKey(side)] : ''),
           [getEntriesKey(side)]: [],
           [getLoadingKey(side)]: false,
           [getErrorKey(side)]: undefined,
@@ -466,7 +493,7 @@ export const useSftpStore = create<SftpState>()((set) => ({
             [side]: undefined,
           },
           restorePending: { ...current.restorePending, [side]: false },
-          remoteBookmarks: wasRestored
+          remoteBookmarks: reconnectingRestored
             ? current.remoteBookmarks
             : { ...current.remoteBookmarks, [side]: [] },
           remoteClipboard:
@@ -603,6 +630,7 @@ export const useSftpStore = create<SftpState>()((set) => ({
 
   setPaneLocal: (id, side) => {
     void usePortForwardStore.getState().stopOwnersByPrefix(`sftp:${id}:${side}:`);
+    nextDirectoryListRequestId(`${id}:${side}`);
     set((state) => {
       const previous = state.connections.find((conn) => conn.id === id);
       const detachedCandidate = previous && getSftpPaneSource(previous, side) === 'remote'
@@ -660,6 +688,7 @@ export const useSftpStore = create<SftpState>()((set) => ({
 
   attachRemoteConnection: (id, side, summary, connection, profileId) =>
     set((state) => {
+      nextDirectoryListRequestId(`${id}:${side}`);
       const previous = state.connections.find((conn) => conn.id === id);
       const detachedCandidate = previous && getSftpPaneSource(previous, side) === 'remote'
         ? {
@@ -668,7 +697,12 @@ export const useSftpStore = create<SftpState>()((set) => ({
           }
         : undefined;
       const connections = updateConnection(state, id, (current) => {
-        const wasRestored = current.restorePending?.[side] === true;
+        const reconnectingRestored = isReconnectingRestoredRemotePane(
+          current,
+          side,
+          connection,
+          profileId,
+        );
         return {
           ...current,
           ...(side === 'local'
@@ -687,12 +721,12 @@ export const useSftpStore = create<SftpState>()((set) => ({
               }),
           localOnly: false,
           rightLocal: side === 'remote' ? false : current.rightLocal,
-          [getPathKey(side)]: wasRestored ? current[getPathKey(side)] : '',
+          [getPathKey(side)]: reconnectingRestored ? current[getPathKey(side)] : '',
           [getEntriesKey(side)]: [],
           [getErrorKey(side)]: undefined,
           [getPaneKey(side)]: createDefaultPaneState(),
           restorePending: { ...current.restorePending, [side]: false },
-          remoteBookmarks: wasRestored
+          remoteBookmarks: reconnectingRestored
             ? current.remoteBookmarks
             : { ...current.remoteBookmarks, [side]: [] },
           remoteClipboard:

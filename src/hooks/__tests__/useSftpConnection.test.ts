@@ -312,6 +312,74 @@ describe('useSftpConnection directory listing race', () => {
       remoteError: 'new host unavailable',
     });
   });
+
+  it('ignores an in-flight listing from the previous server after switching servers', async () => {
+    let resolveOldServer!: (listing: { path: string; entries: unknown[] }) => void;
+    tauri.invokeListRemoteDirectory.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveOldServer = resolve; }),
+    );
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpConnection(connection));
+
+    let oldServerLoad!: Promise<void>;
+    act(() => {
+      oldServerLoad = result.current.loadRemoteDirectory('/xh22sc/H113');
+    });
+
+    const newRequest = {
+      host: '172.16.0.102',
+      port: 22,
+      username: 'xhlis',
+      authMethod: 'password' as const,
+    };
+    const attemptId = useSftpStore.getState().beginConnectionAttempt({
+      title: 'Server B',
+      host: newRequest.host,
+      port: newRequest.port,
+      username: newRequest.username,
+      profileId: 'profile-b',
+      connection: newRequest,
+    }, connection.id, 'remote', 'switch-attempt');
+    useSftpStore.getState().resolveConnectionAttempt(
+      attemptId,
+      {
+        sessionId: 'session-b',
+        title: 'Server B',
+        host: newRequest.host,
+        port: newRequest.port,
+        username: newRequest.username,
+      },
+      newRequest,
+      'profile-b',
+    );
+
+    await act(async () => {
+      resolveOldServer({ path: '/xh22sc/H113', entries: [file] });
+      await oldServerLoad;
+    });
+
+    expect(useSftpStore.getState().connections[0]).toMatchObject({
+      title: 'Server B',
+      remotePath: '',
+      remoteEntries: [],
+    });
+  });
+
+  it('normalizes an empty directory path to undefined so the backend resolves the home directory', async () => {
+    tauri.invokeListRemoteDirectory.mockResolvedValueOnce({
+      path: '/home/tester',
+      entries: [],
+    });
+    const connection = useSftpStore.getState().connections[0]!;
+    const { result } = renderHook(() => useSftpConnection(connection));
+
+    await act(() => result.current.loadRemoteDirectory(''));
+
+    expect(tauri.invokeListRemoteDirectory).toHaveBeenCalledWith(
+      expect.objectContaining({ path: undefined }),
+    );
+    expect(useSftpStore.getState().connections[0]?.remotePath).toBe('/home/tester');
+  });
 });
 
 describe('useSftpConnection uploads', () => {

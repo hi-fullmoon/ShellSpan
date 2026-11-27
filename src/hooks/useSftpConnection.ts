@@ -27,6 +27,7 @@ import {
 import {
   getSftpPaneConnection,
   getSftpPaneConnectionKey,
+  getSftpPaneSource,
   useSftpStore,
   type SftpConnection,
   type SftpLocationRequest,
@@ -295,10 +296,19 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
 
   const loadRemoteDirectory = useCallback(
     async (path?: string, canApply: () => boolean = () => true, location?: SftpLocationRequest) => {
-      if (!canApply()) return;
+      const isCurrentRemotePane = (): boolean => {
+        const current = useSftpStore.getState().connections.find(({ id }) => id === connection.id);
+        return current !== undefined
+          && getSftpPaneSource(current, side) === 'remote'
+          && current.connectionAttemptIds?.[side] === undefined
+          && getSftpPaneConnectionKey(current, side) === remoteConnectionKey;
+      };
+      if (!canApply() || !isCurrentRemotePane()) return;
       const requestKey = `${connection.id}:${side}`;
       const requestId = nextDirectoryListRequestId(requestKey);
-      const isLatest = () => isLatestDirectoryListRequest(requestKey, requestId) && canApply();
+      const isLatest = () => isLatestDirectoryListRequest(requestKey, requestId)
+        && isCurrentRemotePane()
+        && canApply();
       const isCurrentLocation = () => {
         if (!location) return true;
         const current = useSftpStore.getState().connections.find(({ id }) => id === connection.id);
@@ -306,6 +316,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       };
       const backendRequestKey = getBackendDirectoryListRequestKey(requestKey);
       const requestedPath = path ?? '';
+      const normalizedPath = requestedPath || undefined;
       const cached = getCachedDirectoryListing(directoryCacheScope, requestedPath);
       if (cached) {
         // Render the cached listing instantly and revalidate below; only a
@@ -340,7 +351,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       try {
         const listing = await invokeListRemoteDirectory({
           ...remoteConnection,
-          path,
+          path: normalizedPath,
           requestKey: backendRequestKey,
           requestId,
         });
@@ -368,7 +379,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
               try {
                 const retryListing = await invokeListRemoteDirectory({
                   ...newRequest,
-                  path,
+                  path: normalizedPath,
                   requestKey: backendRequestKey,
                   requestId,
                 });
@@ -404,7 +415,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         }
       }
     },
-    [connection.id, connection.leftProfileId, connection.profileId, directoryCacheScope, remoteConnection, setPath, setEntries, setLoading, setError, setPaneState, updateConnectionRequest, resolveEntryOwners, side],
+    [connection.id, connection.leftProfileId, connection.profileId, directoryCacheScope, remoteConnection, remoteConnectionKey, setPath, setEntries, setLoading, setError, setPaneState, updateConnectionRequest, resolveEntryOwners, side],
   );
 
   // Mutating operations invalidate this pane's cached listings up front so
