@@ -35,8 +35,9 @@ fn drain_tick(
         Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
         Err(e) => panic!("Actual SSH PTY read failed: {e}"),
     }
-    match native.control.read(&mut bytes) {
-        Ok(0) if native.control.eof() => panic!("Actual private SSH channel closed"),
+    let control = native.control_mut().expect("native relay started");
+    match control.read(&mut bytes) {
+        Ok(0) if control.eof() => panic!("Actual private SSH channel closed"),
         Ok(n) => native.decode_control_bytes(&bytes[..n]).unwrap(),
         Err(e) if e.kind() == io::ErrorKind::WouldBlock => Vec::new(),
         Err(e) => panic!("Actual private SSH read failed: {e}"),
@@ -102,6 +103,7 @@ fn remote_early_core_preserved(session: &Session, owner: &Path, evidence: &Path)
     let mut pty = session.channel_session().unwrap();
     pty.request_pty("xterm-256color", None, Some((100, 30, 0, 0)))
         .unwrap();
+    native.start_relay(session).unwrap();
     native.start_shell(&mut pty, None).unwrap();
     session.set_blocking(false);
     let mut raw = Vec::new();
@@ -115,7 +117,11 @@ fn remote_early_core_preserved(session: &Session, owner: &Path, evidence: &Path)
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
                 Err(e) => panic!("Early user Core PTY read failed: {e}"),
             }
-            match native.control.read(&mut bytes) {
+            match native
+                .control_mut()
+                .expect("native relay started")
+                .read(&mut bytes)
+            {
                 Ok(n) => records.extend(native.decode_control_bytes(&bytes[..n]).unwrap()),
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
                 Err(e) => panic!("Early user Core control read failed: {e}"),
@@ -271,6 +277,7 @@ fn production_remote_zle_parent_parser_and_background() {
     let mut pty = session.channel_session().unwrap();
     pty.request_pty("xterm-256color", None, Some((columns, 30, 0, 0)))
         .unwrap();
+    native.start_relay(&session).unwrap();
     native.start_shell(&mut pty, None).unwrap();
     session.set_blocking(false);
     let connection = nip::ConnectionIdentity {
@@ -549,8 +556,9 @@ fn production_remote_zle_parent_parser_and_background() {
         );
         assert!(!records.iter().any(|m|matches!(m,nip::Message::Operation(e)if e.request_id=="prepare-eof"&&matches!(e.payload,nip::Payload::SubmissionAccepted|nip::Payload::Started))));
         session.set_blocking(true);
-        native.control.send_eof().unwrap();
-        native.control.close().unwrap();
+        let control = native.control_mut().expect("native relay started");
+        control.send_eof().unwrap();
+        control.close().unwrap();
         session.set_blocking(false);
         let enter = format!("\x1b]1337;{}\x07", nip::DISPLAY_ENTER).into_bytes();
         let leave = format!("\x1b]1337;{}\x07", nip::DISPLAY_EXIT).into_bytes();

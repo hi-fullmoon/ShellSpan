@@ -624,6 +624,11 @@ fn queue_initial_ssh_directory(
     Ok(())
 }
 
+enum NativeSshStartupOutcome {
+    Ready(Vec<native_protocol::Message>),
+    Unavailable(String),
+}
+
 fn wait_for_native_ssh_startup(
     session: &Session,
     channel: &mut Channel,
@@ -631,7 +636,7 @@ fn wait_for_native_ssh_startup(
     pending: &mut PendingSshTerminal,
     _session_id: &str,
     output: &mut Vec<u8>,
-) -> Result<Option<Vec<native_protocol::Message>>, String> {
+) -> Result<NativeSshStartupOutcome, String> {
     let probe = pending.register_native_channel(native.profile.clone())?;
     let bytes = probe
         .encode()
@@ -640,18 +645,15 @@ fn wait_for_native_ssh_startup(
     let mut probe_sent = false;
     loop {
         let pty_progress = read_startup_pty(channel, output)?;
-        if !probe_sent && native.relay_started() {
-            if native.send(session, &bytes).is_err() {
-                return Ok(None);
-            }
-            probe_sent = true;
-        }
+        let mut control_progress = false;
         match native.read_control() {
             Ok(Some(messages)) if !messages.is_empty() => {
                 let mut messages = messages.into_iter();
                 let message = messages.next().expect("nonempty control batch");
                 let native_protocol::Message::Connection(capabilities) = &message else {
-                    return Ok(None);
+                    return Ok(NativeSshStartupOutcome::Unavailable(
+                        "unexpected_control_message".into(),
+                    ));
                 };
                 #[cfg(all(
                     feature = "native-input-acceptance",
@@ -663,25 +665,52 @@ fn wait_for_native_ssh_startup(
                     &message,
                     _session_id,
                 )?;
-                if pending.accept_native_capabilities(capabilities).is_err() {
-                    return Ok(None);
+                if let Err(error) = pending.accept_native_capabilities(capabilities) {
+                    return Ok(NativeSshStartupOutcome::Unavailable(format!(
+                        "capabilities_rejected:{error}"
+                    )));
                 }
                 // Reading the relay can also consume a PTY EOF from this socket.
                 read_startup_pty(channel, output)?;
-                if channel.eof() || native.control.eof() {
+                if channel.eof() || native.control_eof() {
                     return Err(
                         "remote shell or native control closed during initialization".into(),
                     );
                 }
-                return Ok(Some(messages.collect()));
+                return Ok(NativeSshStartupOutcome::Ready(messages.collect()));
             }
-            Err(_) => return Ok(None),
-            Ok(_) => {}
+            Ok(Some(_)) => {
+                control_progress = true;
+            }
+            Err(error) => {
+                return Ok(NativeSshStartupOutcome::Unavailable(format!(
+                    "control_read:{error}"
+                )));
+            }
+            Ok(None) => {}
         }
-        if Instant::now() >= deadline || output.len() >= SSH_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES {
-            return Ok(None);
+        if !probe_sent && native.relay_started() {
+            if let Err(error) = native.send(session, &bytes) {
+                return Ok(NativeSshStartupOutcome::Unavailable(format!(
+                    "probe_send:{error}"
+                )));
+            }
+            probe_sent = true;
+            control_progress = true;
         }
-        if !pty_progress {
+        if Instant::now() >= deadline {
+            return Ok(NativeSshStartupOutcome::Unavailable(if probe_sent {
+                "capabilities_timeout".into()
+            } else {
+                "relay_preamble_timeout".into()
+            }));
+        }
+        if output.len() >= SSH_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES {
+            return Ok(NativeSshStartupOutcome::Unavailable(
+                "startup_output_limit".into(),
+            ));
+        }
+        if !pty_progress && !control_progress {
             wait_for_session_socket(session, Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS))?;
         }
     }
@@ -713,6 +742,32 @@ fn start_ssh_native_or_fallback(
         )
         .map_err(|message| ConnectionError::Other { message })?;
     let started = Instant::now();
+    if let Err(reason) = prepared.start_relay(session) {
+        info!(
+            "Native SSH shell startup session_id={session_id} outcome=unavailable reason={reason:?} elapsed_ms={}",
+            started.elapsed().as_millis()
+        );
+        if let Some(message) = crate::connection::terminal_deadline::failure_reason() {
+            return Err(ConnectionError::Other { message });
+        }
+        warn!(
+            "Native SSH relay startup failed; using ordinary SSH shell session_id={session_id} reason={reason}"
+        );
+        if let Some(native) = native.take() {
+            native.close(session);
+        }
+        channel.shell().map_err(|error| ConnectionError::Other {
+            message: format!(
+                "failed to start ordinary remote shell after native relay startup failed: {error}"
+            ),
+        })?;
+        initial_output.clear();
+        session.set_blocking(false);
+        confirm_plain_ssh_startup(session, channel, initial_output)
+            .and_then(|()| queue_initial_ssh_directory(session, channel, initial_input))
+            .map_err(|message| ConnectionError::Other { message })?;
+        return Ok(None);
+    }
     let startup = prepared
         .start_shell(channel, vim_bridge_config)
         .and_then(|()| {
@@ -727,23 +782,23 @@ fn start_ssh_native_or_fallback(
                 initial_output,
             )
         });
-    let outcome = match &startup {
-        Ok(Some(_)) => "ready",
-        Ok(None) => "unavailable",
-        Err(_) => "failed",
+    let (outcome, reason) = match &startup {
+        Ok(NativeSshStartupOutcome::Ready(_)) => ("ready", None),
+        Ok(NativeSshStartupOutcome::Unavailable(reason)) => ("unavailable", Some(reason.as_str())),
+        Err(error) => ("failed", Some(error.as_str())),
     };
     info!(
-        "Native SSH shell startup session_id={session_id} outcome={outcome} elapsed_ms={}",
+        "Native SSH shell startup session_id={session_id} outcome={outcome} reason={reason:?} elapsed_ms={}",
         started.elapsed().as_millis()
     );
     match startup {
-        Ok(Some(messages)) => {
+        Ok(NativeSshStartupOutcome::Ready(messages)) => {
             return Ok(Some(SshNativeStartup {
                 pending,
                 messages: Some(messages),
             }))
         }
-        Ok(None) if !private_bash => {
+        Ok(NativeSshStartupOutcome::Unavailable(_)) if !private_bash => {
             confirm_plain_ssh_startup(session, channel, initial_output)
                 .map_err(|message| ConnectionError::Other { message })?;
             return Ok(Some(SshNativeStartup {
@@ -1856,7 +1911,7 @@ fn session_loop_inner(
                 native_integration
                     .as_deref_mut()
                     .filter(|native| native.active)
-                    .map(|native| &mut native.control),
+                    .and_then(RemoteNativeBash::control_mut),
                 remote_integration
                     .as_deref_mut()
                     .filter(|integration| integration.active)
@@ -1911,7 +1966,7 @@ fn session_loop_inner(
                             ..
                         }) => native_integration
                             .as_deref()
-                            .is_some_and(|native| native.control.eof()),
+                            .is_some_and(RemoteNativeBash::control_eof),
                         Some(SshWrite::Data {
                             payload: SshPayload::TtyReply { native: false, .. },
                             ..
@@ -2130,9 +2185,9 @@ fn session_loop_inner(
             session,
             channel,
             native_integration
-                .as_ref()
+                .as_deref()
                 .filter(|native| native.active)
-                .map(|native| &native.control)
+                .and_then(RemoteNativeBash::control)
                 .or_else(|| {
                     remote_integration
                         .as_ref()

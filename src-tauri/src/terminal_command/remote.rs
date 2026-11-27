@@ -155,7 +155,7 @@ impl SftpStartupTimings {
 
 pub(super) struct RemoteNativeBash {
     pub profile: VerifiedNativeProfile,
-    pub control: Channel,
+    control: Option<Channel>,
     pub active: bool,
     decoder: nip::Decoder,
     relay_boundary: Option<RelayBoundary>,
@@ -373,13 +373,15 @@ impl RemoteNativeBash {
                 )
                 .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
             }
-            let (control, boundary) = start_native_relay(session, &root)?;
+            // Defer launching the remote relay until right before start_shell so
+            // slow post-prepare steps (such as Vim bridge upload and PTY setup)
+            // cannot exhaust the relay's 5-second accept() window.
             Ok(Self {
                 profile,
-                control,
-                active: true,
+                control: None,
+                active: false,
                 decoder: nip::Decoder::default(),
-                relay_boundary: Some(boundary),
+                relay_boundary: None,
                 root: root.clone(),
                 executable,
                 startup,
@@ -567,13 +569,12 @@ impl RemoteNativeBash {
             let initializer=format!("__shellspan_nip_initialize() {{\n precmd_functions=(\"${{(@)precmd_functions:#__shellspan_nip_initialize}}\"); unfunction __shellspan_nip_initialize\n source {}\n}}\nprecmd_functions=(__shellspan_nip_initialize \"${{precmd_functions[@]}}\")\n",quote_remote_posix(&format!("{root}/native-init")));
             let wrapper=format!("{original_env}if {core_loader}; then\n{initializer}else\n builtin printf '%s\\n' TERMINAL_NATIVE_SCOPED_CORE_CONFLICT >&2\nfi\n");
             timings.upload(&sftp, &format!("{root}/.zshenv"), wrapper.as_bytes(), 0o600)?;
-            let (control, boundary) = start_native_relay(session, &root)?;
             Ok(Self {
                 profile,
-                control,
-                active: true,
+                control: None,
+                active: false,
                 decoder: nip::Decoder::default(),
-                relay_boundary: Some(boundary),
+                relay_boundary: None,
                 root: root.clone(),
                 executable: identity.executable.clone(),
                 startup: RemoteShellStartup::Zle,
@@ -584,15 +585,37 @@ impl RemoteNativeBash {
         }
         result
     }
+    pub fn start_relay(&mut self, session: &Session) -> Result<(), String> {
+        if self.control.is_some() {
+            return Ok(());
+        }
+        let (control, boundary) = start_native_relay(session, &self.root)?;
+        self.control = Some(control);
+        self.relay_boundary = Some(boundary);
+        self.active = true;
+        Ok(())
+    }
+    pub fn control(&self) -> Option<&Channel> {
+        self.control.as_ref()
+    }
+    pub fn control_mut(&mut self) -> Option<&mut Channel> {
+        self.control.as_mut()
+    }
+    pub fn control_eof(&self) -> bool {
+        self.control.as_ref().is_none_or(Channel::eof)
+    }
     pub fn send(&mut self, session: &Session, bytes: &[u8]) -> Result<(), String> {
+        let Some(control) = self.control.as_mut() else {
+            return Err("TERMINAL_NATIVE_CONTROL_UNAVAILABLE".into());
+        };
         if !self.active || bytes.len() > nip::MAX_MESSAGE_BYTES {
             return Err("TERMINAL_NATIVE_CONTROL_UNAVAILABLE".into());
         }
-        write_all_nonblocking(session, &mut self.control, bytes)
+        write_all_nonblocking(session, control, bytes)
     }
 
     pub fn relay_started(&self) -> bool {
-        self.relay_boundary.is_none()
+        self.control.is_some() && self.relay_boundary.is_none()
     }
 
     fn decode_control_bytes(&mut self, bytes: &[u8]) -> Result<Vec<nip::Message>, String> {
@@ -613,9 +636,12 @@ impl RemoteNativeBash {
     }
 
     pub fn read_control(&mut self) -> Result<Option<Vec<nip::Message>>, String> {
+        let Some(control) = self.control.as_mut() else {
+            return Err("TERMINAL_NATIVE_CONTROL_UNAVAILABLE".into());
+        };
         let mut bytes = [0; 8192];
-        match self.control.read(&mut bytes) {
-            Ok(0) if self.control.eof() => {
+        match control.read(&mut bytes) {
+            Ok(0) if control.eof() => {
                 self.decoder
                     .finish()
                     .map_err(|_| "TERMINAL_NATIVE_PARTIAL_FRAME_EOF")?;
@@ -665,8 +691,10 @@ impl RemoteNativeBash {
     }
     pub fn fail(&mut self, app: &AppHandle, transport: &str) {
         self.active = false;
-        let _ = self.control.send_eof();
-        let _ = self.control.close();
+        if let Some(control) = self.control.as_mut() {
+            let _ = control.send_eof();
+            let _ = control.close();
+        }
         if let Some(runtime) = app.try_state::<crate::agent_runtime::AgentRuntime>() {
             let _ = runtime.native_terminal_control_closed(transport);
         }
@@ -674,8 +702,10 @@ impl RemoteNativeBash {
     }
     pub fn close(mut self, session: &Session) {
         self.active = false;
-        let _ = self.control.send_eof();
-        let _ = self.control.close();
+        if let Some(mut control) = self.control.take() {
+            let _ = control.send_eof();
+            let _ = control.close();
+        }
         let previous_timeout = session.timeout();
         session.set_timeout(if previous_timeout == 0 {
             1500
@@ -979,5 +1009,45 @@ mod staging_tests {
         );
         assert_eq!(managed_run_ancestors("/tmp/.ss-nip-0123"), None);
         assert_eq!(managed_run_ancestors("/run/user/1000/.ss-nip-0123"), None);
+    }
+
+    #[test]
+    fn prepared_remote_native_bash_defers_relay_until_start_relay() {
+        let dir = std::env::temp_dir().join(format!("ss-remote-relay-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let module = dir.join("adapter.so");
+        std::fs::write(&module, b"fixture-module").unwrap();
+        let module_sha = file_sha(&module).unwrap();
+        let shell_sha = hex::encode(Sha256::digest(b"fixture-shell"));
+        let profile = VerifiedNativeProfile::verify_remote(
+            "gnu-bash-5.3-readline-8.3.6-linux-x86_64-glibc-2.28-native",
+            &shell_sha,
+            &shell_sha,
+            &module,
+            &module_sha,
+            &module_sha,
+        )
+        .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let mut native = RemoteNativeBash {
+            profile,
+            control: None,
+            active: false,
+            decoder: nip::Decoder::default(),
+            relay_boundary: None,
+            root: "/tmp/.ss-nip-0123456789abcdef0123456789abcdef".into(),
+            executable: "/tmp/.ss-nip-0123456789abcdef0123456789abcdef/bash".into(),
+            startup: RemoteShellStartup::PrivateBash,
+        };
+        assert!(!native.active);
+        assert!(native.control().is_none());
+        assert!(native.control_mut().is_none());
+        assert!(!native.relay_started());
+        assert!(native.control_eof());
+        assert_eq!(
+            native.read_control().err().as_deref(),
+            Some("TERMINAL_NATIVE_CONTROL_UNAVAILABLE")
+        );
     }
 }
