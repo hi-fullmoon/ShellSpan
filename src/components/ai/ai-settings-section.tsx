@@ -118,6 +118,13 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   useEffect(() => {
     setAllowlistDraft(agentSandboxNetworkAllowlist.join(', '));
   }, [agentSandboxNetworkAllowlist]);
+  const contextLineItems = useMemo(
+    () => [50, 100, 200, 500].map((count) => ({
+      value: String(count),
+      label: t('settings.ai.contextLinesValue', { count }),
+    })),
+    [t],
+  );
   const sandboxNetworkModeItems: { value: AgentSandboxNetworkMode; label: string }[] = [
     { value: 'blocked', label: t('settings.ai.agent.sandboxNetwork.blocked') },
     { value: 'devRegistries', label: t('settings.ai.agent.sandboxNetwork.devRegistries') },
@@ -293,7 +300,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   };
 
   return (
-    <div className={cn('@container flex flex-col', embedded ? 'gap-3' : 'gap-5 px-4 py-4')}>
+    <div className={cn('@container flex flex-col', embedded ? 'gap-7' : 'gap-6 px-4 py-4')}>
       {!embedded && (
         <div className="flex min-w-0 flex-col gap-1">
           <h2 className="text-base font-semibold text-foreground">{t('settings.ai.title')}</h2>
@@ -305,7 +312,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         title={t('settings.ai.providers')}
         titleId="ai-model-providers-heading"
         action={(
-          <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
+          <Button variant="soft" size="sm" onClick={() => setAddOpen(true)}>
             <PlusIcon data-icon="inline-start" />
             {t('settings.ai.addProvider')}
           </Button>
@@ -325,10 +332,10 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
             <Field
               key={provider.id}
               data-slot="ai-provider-row"
-              className="min-h-14 gap-2 px-3.5 py-2.5 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-5"
+              className="min-h-14 gap-2 py-3.5 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-6"
             >
               <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                <div className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-muted/50">
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted/40">
                   <ProviderIcon aria-hidden />
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -372,7 +379,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
               <div className="flex min-h-8 w-full shrink-0 items-center gap-2 @min-[32rem]:w-auto @min-[32rem]:justify-end">
                 {!isDefault && (
                   <Button
-                    variant="outline"
+                    variant="soft"
                     size="sm"
                     onClick={() => {
                       const route=routeSnapshot?.routes.find(item=>item.id===provider.id);
@@ -384,7 +391,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
                   </Button>
                 )}
                 <Button
-                  variant="outline"
+                  variant="soft"
                   size="sm"
                   onClick={() => {
                     setSelectedProviderId(provider.id);
@@ -401,22 +408,22 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
           <EmptyState
             title={t('settings.ai.providersEmpty')}
             description={t('settings.ai.providersEmptyDescription')}
-            className="py-4"
+            className="py-6"
           />
         )}
         <SettingRow
           label={t('settings.ai.contextLines')}
           description={t('settings.ai.contextHint')}
         >
-          <Select value={String(contextLines)} onValueChange={(value) => setContextLines(Number(value))}>
-            <SelectTrigger size="sm" aria-label={t('settings.ai.contextLines')}>
-              <SelectValue>{t('settings.ai.contextLinesValue', { count: contextLines })}</SelectValue>
+          <Select items={contextLineItems} value={String(contextLines)} onValueChange={(value) => { if (value) setContextLines(Number(value)); }}>
+            <SelectTrigger variant="ghost" size="sm" aria-label={t('settings.ai.contextLines')}>
+              <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent align="end" alignItemWithTrigger={false}>
               <SelectGroup>
-                {[50, 100, 200, 500].map((count) => (
-                  <SelectItem key={count} value={String(count)}>
-                    {t('settings.ai.contextLinesValue', { count })}
+                {contextLineItems.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
                   </SelectItem>
                 ))}
               </SelectGroup>
@@ -466,14 +473,15 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
               >
                 <SelectTrigger
                   id={sandboxNetworkControlId}
+                  variant="ghost"
                   size="sm"
-                  className="w-full @min-[32rem]:w-64"
+                  className="max-w-full"
                   aria-label={t('settings.ai.agent.sandboxNetwork')}
                   aria-describedby={`${sandboxNetworkControlId}-description`}
                 >
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent align="end" alignItemWithTrigger={false}>
                   <SelectGroup>
                     {sandboxNetworkModeItems.map((item) => (
                       <SelectItem key={item.value} value={item.value}>
@@ -501,7 +509,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
                       ? `${sandboxAllowlistControlId}-description ${sandboxAllowlistControlId}-error`
                       : `${sandboxAllowlistControlId}-description`}
                     aria-invalid={allowlistValidation.invalid.length > 0 || undefined}
-                    className="h-8 min-w-0 flex-1 text-xs @min-[32rem]:w-56"
+                    className="h-8 min-w-0 flex-1 rounded-lg text-xs @min-[32rem]:w-56"
                     value={allowlistDraft}
                     placeholder={t('settings.ai.agent.sandboxAllowlistPlaceholder')}
                     disabled={!preferencesReady || agentSandboxNetworkSaving}
@@ -514,7 +522,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
                     }}
                   />
                   <Button
-                    variant="outline"
+                    variant="soft"
                     size="sm"
                     disabled={!preferencesReady || agentSandboxNetworkSaving || allowlistValidation.invalid.length > 0}
                     onClick={handleSaveCustomAllowlist}
@@ -554,7 +562,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
             >
               <Button
                 className="w-full @min-[32rem]:w-auto"
-                variant="outline"
+                variant="soft"
                 size="sm"
                 disabled={sandboxStorageLoading || sandboxCleanupBusy || !sandboxStorage || sandboxStorage.reclaimableCount === 0}
                 onClick={() => setCleanupSandboxOpen(true)}
@@ -586,7 +594,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
           >
             <Button
               className="w-full @min-[32rem]:w-auto"
-              variant="outline"
+              variant="soft"
               size="sm"
               onClick={() => setSkillsOpen(true)}
             >
@@ -606,7 +614,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         >
           <Button
             className="w-full @min-[32rem]:w-auto"
-            variant="outline"
+            variant="soft"
             size="sm"
             onClick={() => setRecordsOpen(true)}
           >
@@ -619,7 +627,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         >
           <Button
             className="w-full @min-[32rem]:w-auto"
-            variant="destructiveOutline"
+            variant="destructiveSoft"
             size="sm"
             disabled={agentActionBusy}
             onClick={() => setClearAgentOpen(true)}

@@ -37,6 +37,33 @@ describe('SelectTrigger', () => {
     expect(screen.getByTestId('trigger')).toHaveClass('data-[size=sm]:h-8');
   });
 
+  it('supports a borderless ghost trigger with soft hover and open states', () => {
+    render(
+      <Select defaultValue="a" items={[{ value: 'a', label: 'System' }]}>
+        <SelectTrigger data-testid="trigger" size="sm" variant="ghost">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent align="end" alignItemWithTrigger={false}>
+          <SelectGroup>
+            <SelectItem value="a">System</SelectItem>
+          </SelectGroup>
+        </SelectContent>
+      </Select>,
+    );
+
+    const trigger = screen.getByTestId('trigger');
+    expect(trigger).toHaveAttribute('data-variant', 'ghost');
+    expect(trigger).toHaveClass(
+      'w-auto',
+      'border-transparent',
+      'bg-transparent',
+      'hover:bg-accent',
+      'data-popup-open:bg-secondary',
+      'data-[size=sm]:h-8',
+    );
+    expect(trigger).not.toHaveClass('border-input', 'w-full');
+  });
+
   it('uses a one-pixel invalid-state ring', () => {
     render(
       <Select defaultValue="a">

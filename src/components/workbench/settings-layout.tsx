@@ -1,5 +1,4 @@
 import React from 'react';
-import { Card, CardContent } from '@/components/ui/card';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
@@ -25,7 +24,7 @@ export const SettingRow: React.FC<SettingRowProps> = ({
 }) => (
   <Field
     className={cn(
-      'min-h-14 gap-2 px-4 py-2.5 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-5',
+      'min-h-14 gap-2 py-3.5 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-6',
       className,
     )}
   >
@@ -33,9 +32,11 @@ export const SettingRow: React.FC<SettingRowProps> = ({
       <FieldLabel id={labelId} htmlFor={controlId} className="text-sm font-medium text-foreground">
         {label}
       </FieldLabel>
-      <FieldDescription id={descriptionId}>
-        {description}
-      </FieldDescription>
+      {description && (
+        <FieldDescription id={descriptionId}>
+          {description}
+        </FieldDescription>
+      )}
     </div>
     {children && (
       <div
@@ -51,6 +52,8 @@ export const SettingRow: React.FC<SettingRowProps> = ({
 interface SettingsGroupProps {
   action?: React.ReactNode;
   children: React.ReactNode;
+  description?: React.ReactNode;
+  descriptionId?: string;
   title?: React.ReactNode;
   titleId?: string;
 }
@@ -58,6 +61,8 @@ interface SettingsGroupProps {
 export const SettingsGroup: React.FC<SettingsGroupProps> = ({
   action,
   children,
+  description,
+  descriptionId,
   title,
   titleId,
 }) => {
@@ -69,30 +74,35 @@ export const SettingsGroup: React.FC<SettingsGroupProps> = ({
     <section
       aria-labelledby={titleId}
       data-slot="settings-group"
-      className="flex min-w-0 flex-col gap-2"
+      className="flex min-w-0 flex-col gap-1.5"
     >
-      {(title || action) && (
-        <div data-slot="settings-group-header" className="flex min-h-8 min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 px-1">
-          {title && (
-            <h3 id={titleId} className="min-w-0 flex-1 text-sm font-medium break-words text-foreground">
-              {title}
-            </h3>
+      {(title || action || description) && (
+        <div className="flex min-w-0 flex-col gap-1">
+          {(title || action) && (
+            <div data-slot="settings-group-header" className="flex min-h-8 min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2">
+              {title && (
+                <h3 id={titleId} className="min-w-0 flex-1 text-sm font-semibold break-words text-foreground">
+                  {title}
+                </h3>
+              )}
+              {action && <div className="ml-auto shrink-0">{action}</div>}
+            </div>
           )}
-          {action && <div className="ml-auto shrink-0">{action}</div>}
+          {description && (
+            <p id={descriptionId} className="text-xs leading-relaxed text-muted-foreground">
+              {description}
+            </p>
+          )}
         </div>
       )}
-      <Card size="sm" radius="compact" variant="outline" className="gap-0 py-0">
-        <CardContent className="px-0">
-          <FieldGroup className="gap-0">
-            {rows.map((row, index) => (
-              <React.Fragment key={index}>
-                {index > 0 && <Separator className="mx-4 data-horizontal:w-auto" />}
-                {row}
-              </React.Fragment>
-            ))}
-          </FieldGroup>
-        </CardContent>
-      </Card>
+      <FieldGroup className="gap-0">
+        {rows.map((row, index) => (
+          <React.Fragment key={index}>
+            {index > 0 && <Separator className="border-t-[0.5px] border-border/50" />}
+            {row}
+          </React.Fragment>
+        ))}
+      </FieldGroup>
     </section>
   );
 };

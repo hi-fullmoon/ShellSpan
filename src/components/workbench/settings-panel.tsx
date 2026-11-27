@@ -9,11 +9,14 @@ import {
   Globe2Icon,
   KeyboardIcon,
   MessageSquareIcon,
+  MonitorIcon,
+  MoonIcon,
   PaletteIcon,
   PawPrintIcon,
   RotateCcwIcon,
   Settings2Icon,
   SquareTerminalIcon,
+  SunIcon,
   Trash2Icon,
   XIcon,
 } from 'lucide-react';
@@ -24,7 +27,6 @@ import { findShortcutConflict, getShortcutKeys, isLeaderShortcutAction, shortcut
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import { Input } from '@/components/ui/input';
@@ -33,6 +35,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { UpdateSection } from './update-section';
 import type {
@@ -155,6 +158,8 @@ const SETTINGS_SECTIONS: {
   { id: 'feedback', icon: MessageSquareIcon, titleKey: 'settings.feedback.title', descriptionKey: 'settings.feedback.description' },
 ];
 
+const SETTINGS_SECTION_DIVIDERS = new Set<SettingsSection>(['shortcuts', 'experimental']);
+
 interface SettingGroupLabelProps {
   children: React.ReactNode;
 }
@@ -164,16 +169,16 @@ const SettingGroupLabel: React.FC<SettingGroupLabelProps> = () => null;
 const IntegrationGroup: React.FC<{ title: string; description?: string; descriptionId?: string; children: React.ReactNode }> = ({ title, description, descriptionId, children }) => {
   const titleId = React.useId();
   return (
-    <section aria-labelledby={titleId} data-slot="integration-group" className="flex min-w-0 flex-col gap-2">
-      <div className="flex min-w-0 flex-col gap-1 px-1">
+    <section aria-labelledby={titleId} data-slot="integration-group" className="flex min-w-0 flex-col gap-1.5">
+      <div className="flex min-w-0 flex-col gap-1">
         <div data-slot="settings-group-header" className="flex min-h-8 min-w-0 items-center">
-          <h3 id={titleId} className="min-w-0 text-sm font-medium break-words text-foreground">{title}</h3>
+          <h3 id={titleId} className="min-w-0 text-sm font-semibold break-words text-foreground">{title}</h3>
         </div>
         {description && <p id={descriptionId} className="text-xs leading-relaxed text-muted-foreground">{description}</p>}
       </div>
-      <Card size="sm" radius="compact" variant="outline" className="gap-0 py-0">
+      <div className="flex flex-col">
         {children}
-      </Card>
+      </div>
     </section>
   );
 };
@@ -198,7 +203,7 @@ const SettingsGrid: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   if (currentGroup.rows.length > 0) groups.push(currentGroup);
 
   return (
-    <div data-slot="settings-groups" className="flex flex-col gap-3">
+    <div data-slot="settings-groups" className="flex flex-col gap-7">
       {groups.map((group, groupIndex) => (
         <SettingsGroup key={groupIndex} title={group.title}>
           {group.rows}
@@ -261,6 +266,69 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const setTerminalOsc52Policy = useAppStore((state) => state.setTerminalOsc52Policy);
   const commandNotificationThreshold = useAppStore((state) => state.terminalCommandNotificationThresholdSec);
   const setCommandNotificationThreshold = useAppStore((state) => state.setTerminalCommandNotificationThresholdSec);
+  const localeItems = useMemo(
+    () => [
+      { value: 'zh-CN', label: t('locale.zh-CN') },
+      { value: 'en-US', label: t('locale.en-US') },
+    ],
+    [t],
+  );
+  const startupSectionItems = useMemo(
+    () => (['workbench', 'terminal', 'sftp'] as const).map((section) => ({
+      value: section,
+      label: t(`settings.general.startupSection.${section}`),
+    })),
+    [t],
+  );
+  const lineHeightItems = useMemo(
+    () => [1, 1.1, 1.2, 1.4].map((value) => ({
+      value: String(value),
+      label: t('settings.terminal.lineHeightValue', { value }),
+    })),
+    [t],
+  );
+  const letterSpacingItems = useMemo(
+    () => [0, 1, 2].map((value) => ({
+      value: String(value),
+      label: t('settings.terminal.letterSpacingValue', { value }),
+    })),
+    [t],
+  );
+  const cursorStyleItems = useMemo(
+    () => (['block', 'underline', 'bar'] as const).map((style) => ({
+      value: style,
+      label: t(`settings.terminal.cursorStyle.${style}`),
+    })),
+    [t],
+  );
+  const bellStyleItems = useMemo(
+    () => (['none', 'sound'] as const).map((style) => ({
+      value: style,
+      label: t(`settings.terminal.bellStyle.${style}`),
+    })),
+    [t],
+  );
+  const scrollbackItems = useMemo(
+    () => [1000, 5000, 10000, 50000].map((lines) => ({
+      value: String(lines),
+      label: t('settings.terminal.scrollbackValue', { count: lines.toLocaleString() }),
+    })),
+    [t],
+  );
+  const sftpConflictPolicyItems = useMemo(
+    () => (['ask', 'overwrite', 'skip'] as const).map((policy) => ({
+      value: policy,
+      label: t(`settings.sftp.conflictPolicy.${policy}`),
+    })),
+    [t],
+  );
+  const sftpRetryCountItems = useMemo(
+    () => [0, 1, 3].map((count) => ({
+      value: String(count),
+      label: t('settings.sftp.retryCountValue', { count }),
+    })),
+    [t],
+  );
   const commandNotificationItems = useMemo(() => [0, 5, 10, 30, 60].map((seconds) => ({
     value: String(seconds),
     label: seconds ? t('terminal.commandBlock.thresholdSeconds', { seconds }) : t('terminal.commandBlock.notificationsOff'),
@@ -609,55 +677,59 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => onOpenChange(nextOpen)}>
       <DialogContent
-        className="flex h-[min(52rem,calc(100vh-2rem))] w-[min(76rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden bg-background p-0 [&_[data-slot=card]]:border-[0.5px] [&_[data-slot=card]]:border-border/60 [&_[data-slot=separator]]:border-t-[0.5px] [&_[data-slot=separator]]:border-border/50 [&_[data-slot=dialog-close]]:size-8 [&_[data-slot=input]]:h-8 [&_[data-slot=input-group]]:h-8 [&_[data-slot=select-trigger]]:h-8 [&_[data-slot=select-trigger]]:min-w-36 sm:rounded-xl"
+        className="flex h-[min(52rem,calc(100vh-2rem))] w-[min(76rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden bg-card p-0 [&_[data-slot=separator]]:border-t-[0.5px] [&_[data-slot=separator]]:border-border/50 [&_[data-slot=dialog-close]]:size-8 [&_[data-slot=input]]:h-8 [&_[data-slot=input-group]]:h-8 [&_[data-slot=select-trigger]]:h-8 sm:rounded-2xl"
       >
         <TooltipProvider>
+          <DialogHeader className="flex h-12 shrink-0 flex-row items-center justify-between border-b-[0.5px] border-border/50 px-5 py-0 pr-12 text-left">
+            <DialogTitle className="text-sm font-semibold text-foreground">{t('workbench.settings.title')}</DialogTitle>
+            <DialogDescription className="sr-only">{t('settings.description')}</DialogDescription>
+          </DialogHeader>
           <Tabs
             value={activeSection}
             onValueChange={handleSectionChange}
             orientation="vertical"
             className="@container min-h-0 flex-1 flex-row gap-0 overflow-hidden"
           >
-            <aside className="flex min-h-0 w-36 shrink-0 flex-col border-r-[0.5px] border-border/50 bg-muted/30 @min-[48rem]:w-52">
-            <DialogHeader className="shrink-0 px-4 pb-4 pt-5 text-left">
-              <DialogTitle>{t('workbench.settings.title')}</DialogTitle>
-              <DialogDescription className="sr-only">{t('settings.description')}</DialogDescription>
-            </DialogHeader>
-            <ScrollArea className="min-h-0 flex-1">
-            <div className="px-2 pb-4">
-            <TabsList
-              variant="sidebar"
-              aria-label={t('settings.sectionNavigation')}
-              aria-orientation="vertical"
-              className="h-auto w-full flex-col items-stretch justify-start rounded-none p-0"
-            >
-              {SETTINGS_SECTIONS.map((section) => {
-                const Icon = section.icon;
-                return (
-                  <TabsTrigger key={section.id} value={section.id} title={t(section.titleKey)} className="h-8 min-w-0 flex-none justify-start px-2.5">
-                    <Icon data-icon="inline-start" />
-                    <span className="min-w-0 truncate">{t(section.titleKey)}</span>
-                  </TabsTrigger>
-                );
-              })}
-            </TabsList>
-            </div>
-            </ScrollArea>
+            <aside className="flex min-h-0 w-36 shrink-0 flex-col border-r-[0.5px] border-border/50 bg-card @min-[48rem]:w-52">
+              <ScrollArea className="min-h-0 flex-1">
+                <div className="px-2.5 py-3">
+                  <TabsList
+                    variant="sidebar"
+                    aria-label={t('settings.sectionNavigation')}
+                    aria-orientation="vertical"
+                    className="h-auto w-full flex-col items-stretch justify-start rounded-none p-0"
+                  >
+                    {SETTINGS_SECTIONS.map((section) => {
+                      const Icon = section.icon;
+                      return (
+                        <React.Fragment key={section.id}>
+                          {SETTINGS_SECTION_DIVIDERS.has(section.id) && (
+                            <Separator className="mx-2 my-1.5 data-horizontal:w-auto" />
+                          )}
+                          <TabsTrigger value={section.id} title={t(section.titleKey)} className="h-8 min-w-0 flex-none justify-start px-2.5">
+                            <Icon data-icon="inline-start" />
+                            <span className="min-w-0 truncate">{t(section.titleKey)}</span>
+                          </TabsTrigger>
+                        </React.Fragment>
+                      );
+                    })}
+                  </TabsList>
+                </div>
+              </ScrollArea>
             </aside>
 
-            <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-              <div aria-hidden="true" className="h-10 shrink-0" />
+            <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-card">
               <ScrollArea viewportRef={settingsViewportRef} className="min-h-0 flex-1">
-                <div data-slot="settings-content" className="@container mx-auto w-full max-w-4xl px-4 pb-6 @min-[48rem]:px-6">
-              <div data-slot="settings-section-header" className="mb-5 flex items-start justify-between gap-3">
+                <div data-slot="settings-content" className="@container mx-auto w-full max-w-4xl px-2 py-6 @min-[48rem]:px-5">
+              <div data-slot="settings-section-header" className="mb-6 flex items-start justify-between gap-3 px-3">
                 <div className="min-w-0 flex-1">
-                  <h2 className="text-xl font-semibold tracking-tight text-foreground">{t(activeSectionMeta.titleKey)}</h2>
-                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{t(activeSectionMeta.descriptionKey)}</p>
+                  <h2 className="text-base font-semibold tracking-tight text-foreground">{t(activeSectionMeta.titleKey)}</h2>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t(activeSectionMeta.descriptionKey)}</p>
                 </div>
                 {activeSection === 'shortcuts' && (
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="soft"
                     size="sm"
                     className="shrink-0"
                     disabled={customizedShortcutCount === 0}
@@ -669,32 +741,53 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 )}
               </div>
 
-            <TabsContent value="appearance" className="w-full">
+            <TabsContent value="appearance" className="w-full px-3">
               <SettingsGrid>
                 <SettingRow label={t('settings.appearance.theme')} description={t('settings.appearance.themeDescription')}>
-                  <Select value={theme} onValueChange={(value) => setTheme(value as ThemeMode)}>
-                    <SelectTrigger size="sm" aria-label={t('settings.appearance.theme')}>
-                      <SelectValue>{theme === 'light' ? t('theme.light') : theme === 'dark' ? t('theme.dark') : t('theme.system')}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value="light">{t('theme.light')}</SelectItem>
-                        <SelectItem value="dark">{t('theme.dark')}</SelectItem>
-                        <SelectItem value="system">{t('theme.system')}</SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
+                  <ToggleGroup
+                    aria-label={t('settings.appearance.theme')}
+                    variant="surface"
+                    spacing={0.5}
+                    value={[theme]}
+                    onValueChange={(values) => {
+                      const nextTheme = values[0] as ThemeMode | undefined;
+                      if (nextTheme) setTheme(nextTheme);
+                    }}
+                    className="h-8 rounded-lg border border-border/60 bg-background p-0.5"
+                  >
+                    {([
+                      { value: 'system', icon: MonitorIcon, label: t('theme.system') },
+                      { value: 'light', icon: SunIcon, label: t('theme.light') },
+                      { value: 'dark', icon: MoonIcon, label: t('theme.dark') },
+                    ] as const).map(({ value, icon: Icon, label }) => (
+                      <Tooltip key={value}>
+                        <TooltipTrigger
+                          render={
+                            <ToggleGroupItem
+                              value={value}
+                              aria-label={label}
+                              className="size-7 min-w-7 rounded-md px-0 [&_svg:not([class*='size-'])]:size-3.5"
+                            />
+                          }
+                        >
+                          <Icon />
+                        </TooltipTrigger>
+                        <TooltipContent>{label}</TooltipContent>
+                      </Tooltip>
+                    ))}
+                  </ToggleGroup>
                 </SettingRow>
                 <SettingRow label={t('settings.appearance.language')} description={t('settings.appearance.languageDescription')}>
-                  <Select value={locale} onValueChange={(value) => setLocale(value as Locale)}>
-                    <SelectTrigger size="sm" aria-label={t('settings.appearance.language')}>
+                  <Select items={localeItems} value={locale} onValueChange={(value) => { if (value) setLocale(value as Locale); }}>
+                    <SelectTrigger variant="ghost" size="sm" aria-label={t('settings.appearance.language')}>
                       <Globe2Icon />
-                      <SelectValue>{locale === 'zh-CN' ? t('locale.zh-CN') : t('locale.en-US')}</SelectValue>
+                      <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent align="end" alignItemWithTrigger={false}>
                       <SelectGroup>
-                        <SelectItem value="zh-CN">{t('locale.zh-CN')}</SelectItem>
-                        <SelectItem value="en-US">{t('locale.en-US')}</SelectItem>
+                        {localeItems.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+                        ))}
                       </SelectGroup>
                     </SelectContent>
                   </Select>
@@ -702,8 +795,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </SettingsGrid>
             </TabsContent>
 
-            <TabsContent value="experimental" className="w-full">
-              <div className="flex min-w-0 flex-col gap-3">
+            <TabsContent value="experimental" className="w-full px-3">
+              <div className="flex min-w-0 flex-col gap-7">
                 <SettingsGroup
                   title={t('settings.experimental.group.integration')}
                   titleId="petdex-integration-group-title"
@@ -745,35 +838,37 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       onCheckedChange={(enabled) => handlePetdexEnabledChange(enabled)}
                     />
                   </SettingRow>
-                  <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 bg-muted/25 px-4 py-2.5">
-                    <p id="petdex-privacy-description" className="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground">
-                      {t('settings.experimental.petdex.privacy')}
-                      {petdexView.subscriptionFailed && ` ${t('settings.experimental.petdex.subscriptionError')}`}
-                    </p>
-                    <div className="flex shrink-0 flex-wrap items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        type="button"
-                        disabled={!petdexEnabled || testingPetdex || checkingPetdex || petdexConfiguring}
-                        onClick={() => void handleTestPetdex(true)}
-                      >
-                        <RotateCcwIcon data-icon="inline-start" />
-                        {t(checkingPetdex ? 'settings.experimental.petdex.status.checking' : 'settings.experimental.petdex.recheck')}
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        aria-describedby="petdex-privacy-description"
-                        disabled={!petdexEnabled || testingPetdex || checkingPetdex || petdexConfiguring}
-                        onClick={() => void handleTestPetdex()}
-                      >
-                        <FlaskConicalIcon data-icon="inline-start" />
-                        {testingPetdex
-                          ? t('settings.experimental.petdex.testing')
-                          : t('settings.experimental.petdex.testAction')}
-                      </Button>
+                  <div className="pt-2">
+                    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg bg-muted/40 px-3.5 py-2.5">
+                      <p id="petdex-privacy-description" className="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground">
+                        {t('settings.experimental.petdex.privacy')}
+                        {petdexView.subscriptionFailed && ` ${t('settings.experimental.petdex.subscriptionError')}`}
+                      </p>
+                      <div className="flex shrink-0 flex-wrap items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="soft"
+                          type="button"
+                          disabled={!petdexEnabled || testingPetdex || checkingPetdex || petdexConfiguring}
+                          onClick={() => void handleTestPetdex(true)}
+                        >
+                          <RotateCcwIcon data-icon="inline-start" />
+                          {t(checkingPetdex ? 'settings.experimental.petdex.status.checking' : 'settings.experimental.petdex.recheck')}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="soft"
+                          aria-describedby="petdex-privacy-description"
+                          disabled={!petdexEnabled || testingPetdex || checkingPetdex || petdexConfiguring}
+                          onClick={() => void handleTestPetdex()}
+                        >
+                          <FlaskConicalIcon data-icon="inline-start" />
+                          {testingPetdex
+                            ? t('settings.experimental.petdex.testing')
+                            : t('settings.experimental.petdex.testAction')}
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </SettingsGroup>
@@ -782,7 +877,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   data-slot="petdex-preferences"
                   data-inactive={!displayedPetdexEnabled ? 'true' : undefined}
                   className={cn(
-                    'flex min-w-0 flex-col gap-3 transition-opacity duration-200',
+                    'flex min-w-0 flex-col gap-7 transition-opacity duration-200',
                     !displayedPetdexEnabled && 'opacity-65 hover:opacity-100 focus-within:opacity-100',
                   )}
                 >
@@ -794,7 +889,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <div className="flex flex-col">
                       {(['ssh', 'sftp', 'ai'] as const).map((category, index) => (
                         <React.Fragment key={category}>
-                          {index > 0 && <Separator className="mx-4 data-horizontal:w-auto" />}
+                          {index > 0 && <Separator className="border-t-[0.5px] border-border/50" />}
                           <SettingRow
                             className="min-h-10 flex-row items-center gap-3 py-1 [&>[data-slot=setting-control]]:w-auto"
                             controlId={`petdex-category-${category}`}
@@ -821,13 +916,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </div>
             </TabsContent>
 
-            <TabsContent value="feedback" className="w-full">
+            <TabsContent value="feedback" className="w-full px-3">
               <SettingsGroup>
                 <SettingRow label={t('settings.feedback.reportTitle')} descriptionId="feedback-description" description={t('settings.feedback.privacy')}>
                     <Button
                       type="button"
                       size="sm"
-                      variant="outline"
+                      variant="soft"
                       aria-describedby="feedback-description"
                       onClick={() => void openFeedback().catch(() => toast.error(t('settings.feedback.openError')))}
                     >
@@ -840,19 +935,19 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </SettingsGroup>
             </TabsContent>
 
-            <TabsContent value="general" className="w-full">
+            <TabsContent value="general" className="w-full px-3">
               <SettingsGrid>
                 <SettingGroupLabel>{t('settings.general.appBehavior')}</SettingGroupLabel>
                 <SettingRow label={t('settings.general.startupSection')} description={t('settings.general.startupSectionDescription')}>
-                  <Select value={startupSection} onValueChange={(value) => setStartupSection(value as AppSection)}>
-                    <SelectTrigger size="sm" aria-label={t('settings.general.startupSection')}>
-                      <SelectValue>{t(`settings.general.startupSection.${startupSection}`)}</SelectValue>
+                  <Select items={startupSectionItems} value={startupSection} onValueChange={(value) => { if (value) setStartupSection(value as AppSection); }}>
+                    <SelectTrigger variant="ghost" size="sm" aria-label={t('settings.general.startupSection')}>
+                      <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent align="end" alignItemWithTrigger={false}>
                       <SelectGroup>
-                        {(['workbench', 'terminal', 'sftp'] as const).map((section) => (
-                          <SelectItem key={section} value={section}>
-                            {t(`settings.general.startupSection.${section}`)}
+                        {startupSectionItems.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
                           </SelectItem>
                         ))}
                       </SelectGroup>
@@ -871,7 +966,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </SettingRow>
                 <SettingRow label={t('settings.general.restoreWorkspace')} description={t('settings.general.restoreWorkspaceDescription')}>
                   <div className="flex items-center justify-end gap-2">
-                    <Button variant="outline" size="sm" onClick={handleClearWorkspace}>
+                    <Button variant="soft" size="sm" onClick={handleClearWorkspace}>
                       <Trash2Icon data-icon="inline-start" />
                       {t('settings.general.clearWorkspace')}
                     </Button>
@@ -892,15 +987,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </SettingsGrid>
             </TabsContent>
 
-            <TabsContent value="terminal" className="w-full">
+            <TabsContent value="terminal" className="w-full px-3">
               <SettingsGrid>
                 <SettingGroupLabel>{t('settings.terminal.groupAppearance')}</SettingGroupLabel>
                 <SettingRow label={t('settings.terminal.fontFamily')} description={t('settings.terminal.fontFamilyDescription')}>
                   <Select items={terminalFontFamilies} value={terminalFontFamily} onValueChange={(value) => { if (value) setTerminalFontFamily(value); }}>
-                    <SelectTrigger size="sm" aria-label={t('settings.terminal.fontFamily')}>
+                    <SelectTrigger variant="ghost" size="sm" aria-label={t('settings.terminal.fontFamily')}>
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent align="end" alignItemWithTrigger={false}>
                       <SelectGroup>
                         {terminalFontFamilies.map((font) => (
                           <SelectItem key={font.value} value={font.value}>
@@ -913,7 +1008,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </SettingRow>
                 <SettingRow label={t('settings.terminal.customFont')} description={t('settings.terminal.customFontDescription')}>
                   <Input aria-label={t('settings.terminal.customFont')} placeholder="JetBrains Mono"
-                    className="h-8 text-xs @min-[32rem]:w-52" maxLength={128} value={terminalCustomFontFamily}
+                    className="h-8 rounded-lg text-xs @min-[32rem]:w-52" maxLength={128} value={terminalCustomFontFamily}
                     onChange={(event) => setTerminalCustomFontFamily(event.target.value)} />
                 </SettingRow>
                 <SettingRow label={t('settings.terminal.colorScheme')} description={t('settings.terminal.colorSchemeDescription')}>
@@ -927,10 +1022,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       if (value) setTerminalMinimumContrastRatio(normalizeTerminalMinimumContrastRatio(Number(value)));
                     }}
                   >
-                    <SelectTrigger size="sm" aria-label={t('settings.terminal.minimumContrastRatio')}>
+                    <SelectTrigger variant="ghost" size="sm" aria-label={t('settings.terminal.minimumContrastRatio')}>
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent align="end" alignItemWithTrigger={false}>
                       <SelectGroup>
                         {terminalMinimumContrastItems.map((item) => (
                           <SelectItem key={item.value} value={item.value}>
@@ -943,10 +1038,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </SettingRow>
                 <SettingRow label={t('settings.terminal.fontSize')} description={t('settings.terminal.fontSizeDescription')}>
                   <Select items={terminalFontSizeItems} value={String(terminalFontSize)} onValueChange={(value) => { if (value) setTerminalFontSize(Number(value)); }}>
-                    <SelectTrigger size="sm" aria-label={t('settings.terminal.fontSize')}>
+                    <SelectTrigger variant="ghost" size="sm" aria-label={t('settings.terminal.fontSize')}>
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent align="end" alignItemWithTrigger={false}>
                       <SelectGroup>
                         {terminalFontSizeItems.map((size) => (
                           <SelectItem key={size.value} value={size.value}>
@@ -958,15 +1053,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </Select>
                 </SettingRow>
                 <SettingRow label={t('settings.terminal.lineHeight')} description={t('settings.terminal.lineHeightDescription')}>
-                  <Select value={String(terminalLineHeight)} onValueChange={(value) => setTerminalLineHeight(Number(value))}>
-                    <SelectTrigger size="sm" aria-label={t('settings.terminal.lineHeight')}>
-                      <SelectValue>{t('settings.terminal.lineHeightValue', { value: terminalLineHeight })}</SelectValue>
+                  <Select items={lineHeightItems} value={String(terminalLineHeight)} onValueChange={(value) => { if (value) setTerminalLineHeight(Number(value)); }}>
+                    <SelectTrigger variant="ghost" size="sm" aria-label={t('settings.terminal.lineHeight')}>
+                      <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent align="end" alignItemWithTrigger={false}>
                       <SelectGroup>
-                        {[1, 1.1, 1.2, 1.4].map((value) => (
-                          <SelectItem key={value} value={String(value)}>
-                            {t('settings.terminal.lineHeightValue', { value })}
+                        {lineHeightItems.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
                           </SelectItem>
                         ))}
                       </SelectGroup>
@@ -974,15 +1069,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </Select>
                 </SettingRow>
                 <SettingRow label={t('settings.terminal.letterSpacing')} description={t('settings.terminal.letterSpacingDescription')}>
-                  <Select value={String(terminalLetterSpacing)} onValueChange={(value) => setTerminalLetterSpacing(Number(value))}>
-                    <SelectTrigger size="sm" aria-label={t('settings.terminal.letterSpacing')}>
-                      <SelectValue>{t('settings.terminal.letterSpacingValue', { value: terminalLetterSpacing })}</SelectValue>
+                  <Select items={letterSpacingItems} value={String(terminalLetterSpacing)} onValueChange={(value) => { if (value) setTerminalLetterSpacing(Number(value)); }}>
+                    <SelectTrigger variant="ghost" size="sm" aria-label={t('settings.terminal.letterSpacing')}>
+                      <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent align="end" alignItemWithTrigger={false}>
                       <SelectGroup>
-                        {[0, 1, 2].map((value) => (
-                          <SelectItem key={value} value={String(value)}>
-                            {t('settings.terminal.letterSpacingValue', { value })}
+                        {letterSpacingItems.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
                           </SelectItem>
                         ))}
                       </SelectGroup>
@@ -990,15 +1085,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </Select>
                 </SettingRow>
                 <SettingRow label={t('settings.terminal.cursorStyle')} description={t('settings.terminal.cursorStyleDescription')}>
-                  <Select value={terminalCursorStyle} onValueChange={(value) => setTerminalCursorStyle(value as TerminalCursorStyle)}>
-                    <SelectTrigger size="sm" aria-label={t('settings.terminal.cursorStyle')}>
-                      <SelectValue>{t(`settings.terminal.cursorStyle.${terminalCursorStyle}`)}</SelectValue>
+                  <Select items={cursorStyleItems} value={terminalCursorStyle} onValueChange={(value) => { if (value) setTerminalCursorStyle(value as TerminalCursorStyle); }}>
+                    <SelectTrigger variant="ghost" size="sm" aria-label={t('settings.terminal.cursorStyle')}>
+                      <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent align="end" alignItemWithTrigger={false}>
                       <SelectGroup>
-                        {(['block', 'underline', 'bar'] as const).map((style) => (
-                          <SelectItem key={style} value={style}>
-                            {t(`settings.terminal.cursorStyle.${style}`)}
+                        {cursorStyleItems.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
                           </SelectItem>
                         ))}
                       </SelectGroup>
@@ -1044,8 +1139,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <SettingRow label={t('terminal.commandBlock.notifications')} description={t('terminal.commandBlock.notificationsDescription')}>
                   <Select items={commandNotificationItems} value={String(commandNotificationThreshold)}
                     onValueChange={(value) => { if (value) setCommandNotificationThreshold(Number(value)); }}>
-                    <SelectTrigger size="sm" aria-label={t('terminal.commandBlock.notifications')}><SelectValue /></SelectTrigger>
-                    <SelectContent><SelectGroup>{commandNotificationItems.map((item) =>
+                    <SelectTrigger variant="ghost" size="sm" aria-label={t('terminal.commandBlock.notifications')}><SelectValue /></SelectTrigger>
+                    <SelectContent align="end" alignItemWithTrigger={false}><SelectGroup>{commandNotificationItems.map((item) =>
                       <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectGroup></SelectContent>
                   </Select>
                 </SettingRow>
@@ -1071,15 +1166,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </div>
                 </SettingRow>
                 <SettingRow label={t('settings.terminal.bellStyle')} description={t('settings.terminal.bellStyleDescription')}>
-                  <Select value={terminalBellStyle} onValueChange={(value) => setTerminalBellStyle(value as TerminalBellStyle)}>
-                    <SelectTrigger size="sm" aria-label={t('settings.terminal.bellStyle')}>
-                      <SelectValue>{t(`settings.terminal.bellStyle.${terminalBellStyle}`)}</SelectValue>
+                  <Select items={bellStyleItems} value={terminalBellStyle} onValueChange={(value) => { if (value) setTerminalBellStyle(value as TerminalBellStyle); }}>
+                    <SelectTrigger variant="ghost" size="sm" aria-label={t('settings.terminal.bellStyle')}>
+                      <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent align="end" alignItemWithTrigger={false}>
                       <SelectGroup>
-                        {(['none', 'sound'] as const).map((style) => (
-                          <SelectItem key={style} value={style}>
-                            {t(`settings.terminal.bellStyle.${style}`)}
+                        {bellStyleItems.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
                           </SelectItem>
                         ))}
                       </SelectGroup>
@@ -1090,19 +1185,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   label={t('settings.terminal.scrollback')}
                   description={t('settings.terminal.scrollbackDescription')}
                 >
-                  <Select value={String(terminalScrollback)} onValueChange={(value) => setTerminalScrollback(Number(value))}>
-                    <SelectTrigger size="sm" aria-label={t('settings.terminal.scrollback')}>
-                      <SelectValue>
-                        {t('settings.terminal.scrollbackValue', {
-                          count: terminalScrollback.toLocaleString(),
-                        })}
-                      </SelectValue>
+                  <Select items={scrollbackItems} value={String(terminalScrollback)} onValueChange={(value) => { if (value) setTerminalScrollback(Number(value)); }}>
+                    <SelectTrigger variant="ghost" size="sm" aria-label={t('settings.terminal.scrollback')}>
+                      <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent align="end" alignItemWithTrigger={false}>
                       <SelectGroup>
-                        {[1000, 5000, 10000, 50000].map((lines) => (
-                          <SelectItem key={lines} value={String(lines)}>
-                            {t('settings.terminal.scrollbackValue', { count: lines.toLocaleString() })}
+                        {scrollbackItems.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
                           </SelectItem>
                         ))}
                       </SelectGroup>
@@ -1132,7 +1223,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </div>
                 </SettingRow>
                 <SettingGroupLabel>{t('settings.terminal.groupSessions')}</SettingGroupLabel>
-                <Field className="min-w-0 gap-3 px-3.5 py-3" data-terminal-title-settings data-settings-target="terminal-title-template">
+                <Field className="min-w-0 gap-3 py-3.5" data-terminal-title-settings data-settings-target="terminal-title-template">
                   <div className="flex min-w-0 flex-col gap-0.5">
                     <FieldLabel className="text-sm font-medium text-foreground">{t('terminal.title.template')}</FieldLabel>
                     <FieldDescription>{t('terminal.title.description')}</FieldDescription>
@@ -1160,7 +1251,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </SettingsGrid>
             </TabsContent>
 
-            <TabsContent value="sftp" className="w-full">
+            <TabsContent value="sftp" className="w-full px-3">
               <SettingsGrid>
                 <SettingRow label={t('settings.sftp.showHiddenFiles')} description={t('settings.sftp.showHiddenFilesDescription')}>
                   <div className="flex justify-end">
@@ -1168,15 +1259,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </div>
                 </SettingRow>
                 <SettingRow label={t('settings.sftp.conflictPolicy')} description={t('settings.sftp.conflictPolicyDescription')}>
-                  <Select value={sftpConflictPolicy} onValueChange={(value) => setSftpConflictPolicy(value as SftpConflictPolicy)}>
-                    <SelectTrigger size="sm" aria-label={t('settings.sftp.conflictPolicy')}>
-                      <SelectValue>{t(`settings.sftp.conflictPolicy.${sftpConflictPolicy}`)}</SelectValue>
+                  <Select items={sftpConflictPolicyItems} value={sftpConflictPolicy} onValueChange={(value) => { if (value) setSftpConflictPolicy(value as SftpConflictPolicy); }}>
+                    <SelectTrigger variant="ghost" size="sm" aria-label={t('settings.sftp.conflictPolicy')}>
+                      <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent align="end" alignItemWithTrigger={false}>
                       <SelectGroup>
-                        {(['ask', 'overwrite', 'skip'] as const).map((policy) => (
-                          <SelectItem key={policy} value={policy}>
-                            {t(`settings.sftp.conflictPolicy.${policy}`)}
+                        {sftpConflictPolicyItems.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
                           </SelectItem>
                         ))}
                       </SelectGroup>
@@ -1184,15 +1275,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </Select>
                 </SettingRow>
                 <SettingRow label={t('settings.sftp.retryCount')} description={t('settings.sftp.retryCountDescription')}>
-                  <Select value={String(sftpRetryCount)} onValueChange={(value) => setSftpRetryCount(Number(value))}>
-                    <SelectTrigger size="sm" aria-label={t('settings.sftp.retryCount')}>
-                      <SelectValue>{t('settings.sftp.retryCountValue', { count: sftpRetryCount })}</SelectValue>
+                  <Select items={sftpRetryCountItems} value={String(sftpRetryCount)} onValueChange={(value) => { if (value) setSftpRetryCount(Number(value)); }}>
+                    <SelectTrigger variant="ghost" size="sm" aria-label={t('settings.sftp.retryCount')}>
+                      <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent align="end" alignItemWithTrigger={false}>
                       <SelectGroup>
-                        {[0, 1, 3].map((count) => (
-                          <SelectItem key={count} value={String(count)}>
-                            {t('settings.sftp.retryCountValue', { count })}
+                        {sftpRetryCountItems.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
                           </SelectItem>
                         ))}
                       </SelectGroup>
@@ -1205,7 +1296,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       <TooltipTrigger
                         render={
                           <Button
-                            variant="outline"
+                            variant="soft"
                             size="sm"
                             className="min-w-0 flex-1 justify-start"
                             onClick={() => {
@@ -1255,19 +1346,19 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </SettingsGrid>
             </TabsContent>
 
-            <TabsContent value="ai" className="w-full">
+            <TabsContent value="ai" className="w-full px-3">
               <AiSettingsSection embedded />
             </TabsContent>
 
-            <TabsContent value="shortcuts" className="w-full">
-              <div className="flex flex-col gap-3">
+            <TabsContent value="shortcuts" className="w-full px-3">
+              <div className="flex flex-col gap-7">
                 {SHORTCUT_GROUPS.map((group) => (
                   <SettingsGroup key={group.id} title={t(SHORTCUT_GROUP_LABEL_KEYS[group.id])}>
                     {group.actions.map((action) => {
                       const binding = shortcuts[action] ?? DEFAULT_SHORTCUTS[action];
                       const leaderBinding = shortcuts.terminalLeader ?? DEFAULT_SHORTCUTS.terminalLeader;
                       return (
-                        <div key={action} className="flex min-h-11 items-center justify-between gap-3 px-3.5 py-1.5">
+                        <div key={action} className="flex min-h-11 items-center justify-between gap-3 py-1.5">
                           <span className="text-sm font-medium">{shortcutLabels[action]}</span>
                           <div className="flex items-center gap-1">
                             <Button

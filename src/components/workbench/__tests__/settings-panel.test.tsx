@@ -143,12 +143,16 @@ describe('SettingsPanel', () => {
     openSection('settings.appearance.title');
     expect(screen.getByText('settings.appearance.theme')).toBeInTheDocument();
     expect(screen.getByText('settings.appearance.language')).toBeInTheDocument();
-    expect(
-      screen.getByRole('combobox', { name: 'settings.appearance.theme' }),
-    ).toHaveTextContent('theme.system');
+    const themeGroup = screen.getByRole('group', { name: 'settings.appearance.theme' });
+    expect(within(themeGroup).getByRole('button', { name: 'theme.system' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(themeGroup).getByRole('button', { name: 'theme.light' })).toHaveAttribute('aria-pressed', 'false');
+    expect(within(themeGroup).getByRole('button', { name: 'theme.dark' })).toHaveAttribute('aria-pressed', 'false');
     expect(
       screen.getByRole('combobox', { name: 'settings.appearance.language' }),
     ).toHaveTextContent('locale.zh-CN');
+    expect(
+      screen.getByRole('combobox', { name: 'settings.appearance.language' }),
+    ).toHaveAttribute('data-variant', 'ghost');
     expect(screen.queryByText('settings.experimental.petdex.title')).not.toBeInTheDocument();
 
     openSection('settings.experimental.title');
@@ -385,21 +389,19 @@ describe('SettingsPanel', () => {
     expect(generalTab).not.toHaveAttribute('data-active');
   });
 
-  it('keeps settings inputs and selects at 32px', async () => {
+  it('keeps settings inputs and selects at 32px with inline ghost selects', async () => {
     render(<SettingsPanel />);
     await waitFor(() => {});
 
     const settingsDialog = screen.getByRole('dialog', { name: 'workbench.settings.title' });
 
     expect(settingsDialog).toHaveClass(
-      '[&_[data-slot=card]]:border-[0.5px]',
-      '[&_[data-slot=card]]:border-border/60',
+      'bg-card',
       '[&_[data-slot=separator]]:border-t-[0.5px]',
       '[&_[data-slot=separator]]:border-border/50',
       '[&_[data-slot=input]]:h-8',
       '[&_[data-slot=input-group]]:h-8',
       '[&_[data-slot=select-trigger]]:h-8',
-      '[&_[data-slot=select-trigger]]:min-w-36',
     );
     expect(settingsDialog).toHaveClass(
       'h-[min(52rem,calc(100vh-2rem))]',
@@ -407,6 +409,7 @@ describe('SettingsPanel', () => {
       'max-w-none',
     );
     expect(settingsDialog.className).not.toMatch(/(?:^|\s)max-h-\[min\(48rem/);
+    expect(screen.getByRole('combobox', { name: 'settings.general.startupSection' })).toHaveAttribute('data-variant', 'ghost');
   });
 
   it('uses the same 32px scale for action buttons and selects throughout settings', async () => {
@@ -474,7 +477,7 @@ describe('SettingsPanel', () => {
     expect(notice).toHaveTextContent('update.failedFriendly');
   });
 
-  it('groups related settings into a responsive row card', async () => {
+  it('groups related settings into flat hairline-divided sections', async () => {
     render(<SettingsPanel />);
     await waitFor(() => {});
 
@@ -484,22 +487,21 @@ describe('SettingsPanel', () => {
     const updateRow = screen
       .getByText('settings.general.update')
       .closest('[data-slot="field"]');
-    const settingsCard = startupRow?.closest('[data-slot="card"]');
-    const settingsGroups = settingsCard?.closest('[data-slot="settings-groups"]');
+    const behaviorGroup = startupRow?.closest('[data-slot="settings-group"]');
+    const settingsGroups = behaviorGroup?.closest('[data-slot="settings-groups"]');
 
-    expect(startupRow).toHaveClass('min-h-14', 'px-4', 'py-2.5', '@min-[32rem]:flex-row');
-    expect(settingsCard).toHaveAttribute('data-variant', 'outline');
-    expect(settingsCard).toHaveAttribute('data-radius', 'compact');
-    const updateCard = updateRow?.closest('[data-slot="card"]');
-    expect(updateCard).not.toBe(settingsCard);
-    expect(screen.getByText('settings.general.startupUpdateCheck').closest('[data-slot="card"]')).toBe(updateCard);
+    expect(startupRow).toHaveClass('min-h-14', 'py-3.5', '@min-[32rem]:flex-row');
+    expect(startupRow?.closest('[data-slot="card"]')).toBeNull();
+    const updateGroup = updateRow?.closest('[data-slot="settings-group"]');
+    expect(updateGroup).not.toBe(behaviorGroup);
+    expect(screen.getByText('settings.general.startupUpdateCheck').closest('[data-slot="settings-group"]')).toBe(updateGroup);
     expect(screen.getByRole('heading', { name: 'settings.general.softwareUpdate' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'settings.general.appBehavior' })).toHaveAttribute('class', screen.getByRole('heading', { name: 'settings.general.softwareUpdate' }).className);
-    expect(screen.getByRole('button', { name: 'settings.general.checkUpdate' })).toHaveClass('border-input', 'bg-transparent');
-    expect(settingsCard?.querySelectorAll('[data-slot="separator"]')).toHaveLength(3);
-    expect(updateCard?.querySelectorAll('[data-slot="separator"]')).toHaveLength(1);
-    expect(settingsGroups).toHaveClass('flex-col', 'gap-3');
-    expect(settingsGroups?.firstElementChild).toHaveClass('gap-2');
+    expect(screen.getByRole('button', { name: 'settings.general.checkUpdate' })).toHaveAttribute('data-variant', 'soft');
+    expect(behaviorGroup?.querySelectorAll('[data-slot="separator"]')).toHaveLength(3);
+    expect(updateGroup?.querySelectorAll('[data-slot="separator"]')).toHaveLength(1);
+    expect(settingsGroups).toHaveClass('flex-col', 'gap-7');
+    expect(settingsGroups?.firstElementChild).toHaveClass('gap-1.5');
 
     openSection('settings.terminal.title');
     const terminalGroups = screen
@@ -522,17 +524,17 @@ describe('SettingsPanel', () => {
     const sectionHeader = screen
       .getByRole('heading', { name: 'settings.general.title', level: 2 })
       .parentElement?.parentElement;
-    expect(sectionHeader).toHaveClass('mb-5');
+    expect(sectionHeader).toHaveClass('mb-6');
     expect(sectionHeader?.closest('[data-slot="scroll-area"]')).toBeTruthy();
     expect(sectionHeader?.closest('section')).toHaveClass('min-h-0', 'flex-1');
 
     const contentScroller = screen.getByRole('tabpanel').closest('[data-slot="scroll-area"]');
     const viewport = contentScroller?.querySelector('[data-slot="scroll-area-viewport"]');
-    expect(viewport?.firstElementChild).toHaveClass('px-4', 'max-w-4xl', 'pb-6');
+    expect(viewport?.firstElementChild).toHaveClass('px-2', 'max-w-4xl', 'py-6');
 
     openSection('settings.shortcuts.title');
     const shortcutRow = screen.getByText('settings.shortcuts.newTerminalTab').parentElement;
-    expect(shortcutRow).toHaveClass('min-h-11', 'px-3.5', 'py-1.5');
+    expect(shortcutRow).toHaveClass('min-h-11', 'py-1.5');
   });
 
   it('reports close requests without changing the active app section', async () => {
@@ -546,19 +548,18 @@ describe('SettingsPanel', () => {
     expect(useAppStore.getState().activeSection).toBe('terminal');
   });
 
-  it('groups model providers and terminal context in one compact settings card', async () => {
+  it('groups model providers and terminal context in one flat settings section', async () => {
     render(<SettingsPanel />);
     await waitFor(() => {});
     openSection('settings.ai.title');
 
-    const providerSection = screen.getByText('settings.ai.providers').closest('section');
-    const providerCard = providerSection?.querySelector('[data-slot="card"]');
-    const providerRows = providerCard?.querySelectorAll('[data-slot="ai-provider-row"]');
+    const providerSection = screen.getByText('settings.ai.providers').closest('[data-slot="settings-group"]');
+    const providerRows = providerSection?.querySelectorAll('[data-slot="ai-provider-row"]');
     const contextField = screen.getByText('settings.ai.contextLines').closest('[data-slot="field"]');
 
-    expect(providerCard).toHaveAttribute('data-variant', 'outline');
+    expect(providerSection).not.toBeNull();
     expect(providerRows).toHaveLength(useAiSettingsStore.getState().providers.length);
-    expect(contextField?.closest('[data-slot="card"]')).toBe(providerCard);
+    expect(contextField?.closest('[data-slot="settings-group"]')).toBe(providerSection);
     expect(screen.getAllByRole('button', { name: 'settings.ai.editProvider' })).not.toHaveLength(0);
   });
 
@@ -572,11 +573,11 @@ describe('SettingsPanel', () => {
       openSection('settings.ai.title');
 
       const emptyState = screen.getByText('settings.ai.providersEmpty').closest('[data-slot="empty-state"]');
-      const providerCard = emptyState?.closest('[data-slot="card"]');
+      const providerGroup = emptyState?.closest('[data-slot="settings-group"]');
 
       expect(emptyState).toHaveTextContent('settings.ai.providersEmptyDescription');
-      expect(providerCard).toBeInTheDocument();
-      expect(providerCard?.querySelectorAll('[data-slot="ai-provider-row"]')).toHaveLength(0);
+      expect(providerGroup).toBeInTheDocument();
+      expect(providerGroup?.querySelectorAll('[data-slot="ai-provider-row"]')).toHaveLength(0);
       expect(
         screen.getByRole('button', { name: 'settings.ai.addProvider' }),
       ).toBeInTheDocument();

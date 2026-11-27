@@ -331,7 +331,7 @@ export function TerminalColorSettings() {
   const [open, setOpen] = useState(false);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>{t('settings.terminal.colors.customize')}</Button>
+      <Button variant="soft" size="sm" onClick={() => setOpen(true)}>{t('settings.terminal.colors.customize')}</Button>
       <DialogContent className="@container flex h-[min(48rem,calc(100dvh-2rem))] max-w-2xl flex-col gap-3 overflow-hidden px-0">
         {open && <TerminalColorEditor onClose={() => setOpen(false)} />}
       </DialogContent>
@@ -347,10 +347,10 @@ export function TerminalColorSchemeControl() {
   return (
     <div className="flex min-w-0 items-center gap-2">
       <Select items={items} value={scheme} onValueChange={value => { if (value) setScheme(value as TerminalColorScheme); }}>
-        <SelectTrigger size="sm" aria-label={t('settings.terminal.colorScheme')}>
+        <SelectTrigger variant="ghost" size="sm" aria-label={t('settings.terminal.colorScheme')}>
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent align="end" alignItemWithTrigger={false}>
           <SelectGroup>
             {items.map(item => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
           </SelectGroup>

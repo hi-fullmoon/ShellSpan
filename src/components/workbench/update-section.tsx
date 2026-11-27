@@ -55,7 +55,7 @@ export const UpdateSection: React.FC = () => {
   const displayProgress = Math.max(0, Math.min(100, downloadProgress ?? 0));
 
   return (
-    <Field className="min-h-14 min-w-0 gap-2 px-4 py-2.5 @min-[32rem]:grid @min-[32rem]:grid-cols-[minmax(0,1fr)_auto] @min-[32rem]:items-center @min-[32rem]:gap-x-5">
+    <Field className="min-h-14 min-w-0 gap-2 py-3.5 @min-[32rem]:grid @min-[32rem]:grid-cols-[minmax(0,1fr)_auto] @min-[32rem]:items-center @min-[32rem]:gap-x-6">
       <div data-slot="update-summary" className="flex min-w-0 flex-1 flex-col gap-0.5">
         <FieldLabel className="text-sm font-medium text-foreground">
           {t('settings.general.update')}
@@ -75,7 +75,7 @@ export const UpdateSection: React.FC = () => {
 
       <div data-slot="update-actions" className="flex min-h-8 w-full flex-col items-stretch justify-center gap-2 @min-[32rem]:w-auto @min-[32rem]:min-w-44 @min-[32rem]:items-end">
         {!downloading && !downloaded && (
-          <Button variant="outline" size="sm" disabled={checking} onClick={() => void runCheck('manual')}>
+          <Button variant="soft" size="sm" disabled={checking} onClick={() => void runCheck('manual')}>
             <CheckIcon data-icon="inline-start" className={cn(checking && 'animate-spin')} />
             {t(checkLabel)}
           </Button>

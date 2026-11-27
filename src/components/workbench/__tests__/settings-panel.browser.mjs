@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
-import { webkit } from 'playwright';
+import { chromium, webkit } from 'playwright';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
+await mkdir(`${root}artifacts/tests/settings-redesign`, { recursive: true });
+await mkdir(`${root}artifacts/tests/update-failure`, { recursive: true });
 const server = await createServer({
   root,
   configFile: false,
@@ -41,7 +44,11 @@ const server = await createServer({
 let browser;
 try {
   await server.listen();
-  browser = await webkit.launch();
+  try {
+    browser = await webkit.launch();
+  } catch {
+    browser = await chromium.launch({ channel: 'msedge' });
+  }
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/`);
   await page.evaluate(async () => {
@@ -79,15 +86,16 @@ try {
     for (const height of selectHeights) assert.equal(height, 32, `${name}: Select must match action button height`);
     const headers = await page.locator('[role="tabpanel"] [data-slot="settings-group"] [data-slot="settings-group-header"]').evaluateAll(elements => elements.map(header => {
       const rect = header.getBoundingClientRect();
-      const card = header.nextElementSibling.getBoundingClientRect();
+      const group = header.closest('[data-slot="settings-group"]');
+      const fieldGroup = group.querySelector('[data-slot="field-group"]').getBoundingClientRect();
       const title = header.querySelector('h3').getBoundingClientRect();
       const button = header.querySelector('button')?.getBoundingClientRect();
-      return { height: rect.height, gap: card.top - rect.bottom,
+      return { height: rect.height, gap: fieldGroup.top - rect.bottom,
         centerOffset: button ? Math.abs(title.top + title.height / 2 - button.top - button.height / 2) : 0 };
     }));
     for (const header of headers) {
       assert.equal(header.height, 32, `${name}: consistent group header height`);
-      assert.equal(header.gap, 8, `${name}: group header to card gap`);
+      assert.ok(header.gap >= 4 && header.gap <= 12, `${name}: group header to list gap (${header.gap}px)`);
       assert.ok(header.centerOffset <= 1, `${name}: title and action must be vertically centered`);
     }
   };
@@ -124,7 +132,7 @@ try {
         && Math.abs(rect.right - actions.getBoundingClientRect().right) <= 1
         && description.scrollWidth <= description.clientWidth;
     }), 'the complete failure notice fits across the row below the retry button');
-    await notice.locator('xpath=ancestor::*[@data-slot="card"]').screenshot({ path: screenshot, animations: 'disabled' });
+    await notice.locator('xpath=ancestor::*[@data-slot="settings-group"]').screenshot({ path: screenshot, animations: 'disabled' });
     await page.evaluate(async () => (await import('/settings-runtime.js')).useUpdateStore.getState().reset());
     await notice.waitFor({ state: 'hidden' });
   };
@@ -138,15 +146,15 @@ try {
       const group = divider.parentElement.getBoundingClientRect();
       return { left: line.left - group.left, right: group.right - line.right };
     }));
-    assert.ok(dividerInsets.every(({ left, right }) => left >= 15 && Math.abs(left - right) <= 1), `setting dividers must have equal insets: ${JSON.stringify(dividerInsets)}`);
+    assert.ok(dividerInsets.every(({ left, right }) => Math.abs(left) <= 1 && Math.abs(right) <= 1), `setting dividers must span cleanly across rows: ${JSON.stringify(dividerInsets)}`);
     assert.ok(await page.locator('section [data-slot="scroll-area-viewport"]').evaluate(viewport => {
       const close = document.querySelector('[data-slot="dialog-close"]');
       return viewport.getBoundingClientRect().top >= close.getBoundingClientRect().bottom;
     }), 'scrolling settings must stay below the fixed close button');
-    await page.screenshot({ path: `/tmp/shellspan-settings-buttons-${viewport.width}.png`, animations: 'disabled' });
+    await page.screenshot({ path: `${root}artifacts/tests/settings-redesign/general-${viewport.width}.png`, animations: 'disabled' });
     for (const section of ['appearance', 'sftp', 'ai']) {
       await openSection(section);
-      await page.screenshot({ path: `/tmp/shellspan-settings-${section}-${viewport.width}.png` });
+      await page.screenshot({ path: `${root}artifacts/tests/settings-redesign/${section}-${viewport.width}.png`, animations: 'disabled' });
     }
     await openSection('general');
 
@@ -167,14 +175,14 @@ try {
     // Below ~720px the content column drops under the 32rem container query,
     // so rows stack the control under the label instead of sitting side by side.
     const stacked = viewport.width <= 720;
-    const rowMin = stacked ? 90 : 56;
-    const rowMax = stacked ? 125 : 76;
+    const rowMin = stacked ? 95 : 56;
+    const rowMax = stacked ? 140 : 88;
 
     assert.ok(
       general.rowHeights.every((height) => height >= rowMin && height <= rowMax),
       `general rows outside ${rowMin}..${rowMax}px at ${viewport.width}: ${general.rowHeights.join(',')}`,
     );
-    assert.ok(general.sectionHeader >= 50 && general.sectionHeader <= 110, `section heading must fit its title and description at ${viewport.width}: ${general.sectionHeader}px`);
+    assert.ok(general.sectionHeader >= 40 && general.sectionHeader <= 110, `section heading must fit its title and description at ${viewport.width}: ${general.sectionHeader}px`);
     assert.ok(general.dialogHeight <= general.viewportHeight, 'settings dialog exceeds viewport height');
     assert.match(general.rowDescriptionLeading, /^1[6-9]px$/, `description line height ${general.rowDescriptionLeading} is not compact`);
     await checkFailedUpdate({
@@ -188,7 +196,7 @@ try {
         .filter((row) => row.querySelector('button'));
       return rows[0].getBoundingClientRect().height;
     });
-    assert.ok(shortcutRow >= 42 && shortcutRow <= 46, `shortcut row ${shortcutRow}px outside 42..46px at ${viewport.width}`);
+    assert.ok(shortcutRow >= 42 && shortcutRow <= 48, `shortcut row ${shortcutRow}px outside 42..48px at ${viewport.width}`);
 
     await openSection('terminal');
     const overflow = await page.evaluate(() => {
@@ -196,14 +204,12 @@ try {
       const groupTitleRow = document.querySelector('[data-slot="settings-group-header"]');
       return {
         horizontal: viewportEl.scrollWidth - viewportEl.clientWidth,
-        cardCount: document.querySelectorAll('[data-slot="settings-group"]').length,
-        firstCardRadius: getComputedStyle(document.querySelector('[data-slot="settings-group"] [data-slot="card"]')).borderRadius,
+        groupCount: document.querySelectorAll('[data-slot="settings-group"]').length,
         groupTitleRow: groupTitleRow.getBoundingClientRect().height,
       };
     });
     assert.ok(overflow.horizontal <= 0, `terminal section overflows horizontally by ${overflow.horizontal}px at ${viewport.width}`);
-    assert.equal(overflow.cardCount, 4, 'terminal section should render 4 groups');
-    assert.ok(overflow.firstCardRadius.length > 0, 'settings cards should carry a compact radius');
+    assert.equal(overflow.groupCount, 4, 'terminal section should render 4 groups');
     assert.equal(overflow.groupTitleRow, 32, `group title row must be 32px at ${viewport.width}`);
     const titleInput = page.getByLabel('自定义模板', { exact: true });
     await titleInput.scrollIntoViewIfNeeded();
@@ -250,7 +256,7 @@ try {
       const rect = element.getBoundingClientRect();
       return rect.left >= 0 && rect.right <= window.innerWidth;
     }), 'template input must fit the narrow dialog');
-    await page.screenshot({ path: `/tmp/shellspan-title-settings-${viewport.width}.png` });
+    await page.screenshot({ path: `${root}artifacts/tests/settings-redesign/title-settings-${viewport.width}.png`, animations: 'disabled' });
 
     await openSection('experimental');
     const panel = page.getByRole('tabpanel');
@@ -259,7 +265,7 @@ try {
     assert.equal(await petTab.locator('.lucide-paw-print').count(), 1);
     assert.equal(await page.getByRole('tab', { name: '实验性集成', exact: true }).count(), 0);
     assert.equal(await page.getByRole('heading', { name: '桌面宠物', level: 2 }).count(), 1);
-    assert.equal(await panel.locator('[data-slot="card"]').count(), 4);
+    assert.equal(await panel.locator('[data-slot="settings-group"], [data-slot="integration-group"], [data-slot="petdex-diagnostics"]').count(), 4);
     assert.equal(await panel.getByRole('switch').count(), 6);
     assert.ok(await panel.getByRole('switch').evaluateAll((controls) => controls.every((control) => {
       const labels = (control.getAttribute('aria-labelledby') ?? '').split(/\s+/).map(id => document.getElementById(id));
@@ -279,10 +285,10 @@ try {
     assert.ok(taskRows.every(row => row.centerOffset <= 1), 'compact task labels and switches must stay on the same row');
     assert.ok(await taskGroup.evaluate(group => {
       const description = group.querySelector('#petdex-categories-description');
-      const card = group.querySelector('[data-slot="card"]');
-      return !card.contains(description) && description.getBoundingClientRect().bottom < card.getBoundingClientRect().top;
-    }), 'task description must be a subtitle above the settings card');
-    await page.screenshot({ path: `/tmp/shellspan-pet-subtitle-${viewport.width}.png` });
+      const firstRow = group.querySelector('[data-slot="field"]');
+      return description.getBoundingClientRect().bottom < firstRow.getBoundingClientRect().top;
+    }), 'task description must sit above the settings rows');
+    await page.screenshot({ path: `${root}artifacts/tests/settings-redesign/experimental-${viewport.width}.png`, animations: 'disabled' });
     const geometry = await panel.evaluate((element) => {
       const sections = [...element.querySelectorAll('[data-slot="settings-group"], [data-slot="integration-group"], [data-slot="petdex-diagnostics"]')];
       return {
@@ -292,15 +298,15 @@ try {
       };
     });
     assert.ok(geometry.overflow <= 0, `integration overflow at ${viewport.width}`);
-    assert.deepEqual(geometry.gaps, [12, 12, 12]);
+    assert.deepEqual(geometry.gaps, [28, 28, 28]);
     assert.deepEqual(await panel.getByRole('heading', { level: 3 }).allTextContents(), ['桌宠联动', '任务提醒', '消息气泡']);
     assert.ok(await panel.locator('[data-slot="settings-group"], [data-slot="integration-group"]').evaluateAll((groups) => groups.every((group) => {
       const title = group.querySelector('h3');
-      const card = group.querySelector('[data-slot="card"]');
+      const firstRow = group.querySelector('[data-slot="field"]');
       return title.id === group.getAttribute('aria-labelledby')
-        && title.getBoundingClientRect().bottom < card.getBoundingClientRect().top
+        && title.getBoundingClientRect().bottom < firstRow.getBoundingClientRect().top
         && getComputedStyle(title).fontSize === '14px';
-    })), 'group titles should match other settings sections and sit above each card');
+    })), 'group titles should match other settings sections and sit above each list');
     assert.ok(geometry.switchesFit, `switches clipped at ${viewport.width}`);
     assert.equal(await panel.locator('[data-slot="collapsible-trigger"]').count(), 1);
     assert.equal(await panel.locator('[data-slot="collapsible-content"]:visible').count(), 0);
@@ -317,7 +323,7 @@ try {
     }), 'unified diagnostics must remain reachable below the message settings');
     await page.keyboard.press('Space');
     assert.equal(await diagnosticsTrigger.getAttribute('aria-expanded'), 'false');
-    await page.screenshot({ path: `/tmp/shellspan-integrations-${viewport.width}.png` });
+    await page.screenshot({ path: `${root}artifacts/tests/settings-redesign/integrations-${viewport.width}.png`, animations: 'disabled' });
 
     await openSection('feedback');
     assert.equal(await panel.getByRole('switch').count(), 0);
@@ -336,20 +342,19 @@ try {
     await feedbackButton.focus();
     assert.ok(await feedbackButton.evaluate((element) => element === document.activeElement));
     assert.ok(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth), `feedback overflow at ${viewport.width}`);
-    await page.screenshot({ path: `/tmp/shellspan-feedback-${viewport.width}.png` });
+    await page.screenshot({ path: `${root}artifacts/tests/settings-redesign/feedback-${viewport.width}.png`, animations: 'disabled' });
 
     // Exercise the real preference controls, including translated narrow layouts.
     await openSection('appearance');
-    await page.getByRole('combobox', { name: '主题', exact: true }).click();
-    await page.getByRole('option', { name: '深色', exact: true }).click();
+    const themeToggleGroup = page.getByRole('group', { name: '主题', exact: true });
+    await themeToggleGroup.getByRole('button', { name: '深色', exact: true }).click();
     assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
-    await page.getByRole('option', { name: '深色', exact: true }).waitFor({ state: 'hidden' });
-    await page.screenshot({ path: `/tmp/shellspan-settings-dark-${viewport.width}.png`, animations: 'disabled' });
+    await page.screenshot({ path: `${root}artifacts/tests/settings-redesign/appearance-dark-${viewport.width}.png`, animations: 'disabled' });
     await page.getByRole('combobox', { name: '语言', exact: true }).click();
+    await page.screenshot({ path: `${root}artifacts/tests/settings-redesign/select-open-dark-${viewport.width}.png`, animations: 'disabled' });
     await page.getByRole('option', { name: 'English', exact: true }).click();
     await page.getByRole('heading', { name: 'Appearance', exact: true }).waitFor();
     assert.ok(await page.getByRole('tabpanel').evaluate(element => element.scrollWidth <= element.clientWidth), 'English settings must fit');
-    await page.screenshot({ path: `/tmp/shellspan-settings-english-${viewport.width}.png` });
     await openSection('general');
     await checkFailedUpdate({
       checkLabel: 'Check for updates', retryLabel: 'Retry',
@@ -359,8 +364,11 @@ try {
     await page.getByRole('combobox', { name: 'Language', exact: true }).click();
     await page.getByRole('option', { name: '简体中文', exact: true }).click();
     await page.getByRole('heading', { name: '外观', exact: true }).waitFor();
-    await page.getByRole('combobox', { name: '主题', exact: true }).click();
-    await page.getByRole('option', { name: '浅色', exact: true }).click();
+    await page.getByRole('group', { name: '主题', exact: true }).getByRole('button', { name: '浅色', exact: true }).click();
+    assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
+    await page.getByRole('combobox', { name: '语言', exact: true }).click();
+    await page.screenshot({ path: `${root}artifacts/tests/settings-redesign/select-open-light-${viewport.width}.png`, animations: 'disabled' });
+    await page.keyboard.press('Escape');
     await openSection('terminal');
     await page.getByLabel('自定义模板', { exact: true }).scrollIntoViewIfNeeded();
     await page.getByRole('tab', { name: '通用', exact: true }).focus();

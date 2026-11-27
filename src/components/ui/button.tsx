@@ -12,7 +12,9 @@ const buttonVariants = cva(
         warning: 'bg-app-warning text-app-primary-text hover:bg-app-warning/90',
         destructive: 'bg-destructive text-white hover:bg-destructive/90',
         destructiveOutline: 'border border-destructive bg-transparent text-destructive hover:bg-transparent hover:text-destructive',
+        destructiveSoft: 'bg-destructive/10 text-destructive hover:bg-destructive/15 active:bg-destructive/20',
         outline: 'border border-input bg-transparent hover:bg-accent hover:text-accent-foreground',
+        soft: 'bg-foreground/[0.06] text-foreground hover:bg-foreground/[0.11] active:bg-foreground/[0.14]',
         secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
         ghost: 'hover:bg-accent hover:text-accent-foreground',
         plain: 'bg-transparent',
@@ -30,6 +32,8 @@ const buttonVariants = cva(
     },
     compoundVariants: [
       { variant: 'secondary', size: 'icon-sm', class: 'hover:bg-accent' },
+      { variant: 'soft', size: 'sm', class: 'rounded-lg px-3' },
+      { variant: 'destructiveSoft', size: 'sm', class: 'rounded-lg px-3' },
     ],
     defaultVariants: {
       variant: 'default',

@@ -82,6 +82,23 @@ describe('Button', () => {
     expect(button).not.toHaveClass('bg-background');
   });
 
+  it('renders soft and destructiveSoft actions with borderless tinted fills', () => {
+    render(
+      <>
+        <Button variant="soft" size="sm">Check</Button>
+        <Button variant="destructiveSoft" size="sm">Clear</Button>
+      </>,
+    );
+
+    const soft = screen.getByRole('button', { name: 'Check' });
+    const destructiveSoft = screen.getByRole('button', { name: 'Clear' });
+    expect(soft).toHaveAttribute('data-variant', 'soft');
+    expect(soft).toHaveClass('h-8', 'rounded-lg', 'bg-foreground/[0.06]', 'hover:bg-foreground/[0.11]');
+    expect(soft).not.toHaveClass('border', 'border-input');
+    expect(destructiveSoft).toHaveAttribute('data-variant', 'destructiveSoft');
+    expect(destructiveSoft).toHaveClass('h-8', 'rounded-lg', 'bg-destructive/10', 'text-destructive');
+  });
+
   it('renders destructive outline actions without a filled background', () => {
     render(<Button variant="destructiveOutline">Delete</Button>);
 
