@@ -28,6 +28,36 @@ describe('terminal busy feedback', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
+  it.each(['en-US', 'zh-CN'] as const)('shows Windows PowerShell 7 missing, tooOld, and untrusted notices in %s', async locale => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+    const { rerender } = render(
+      <AgentTerminalBusyNotice
+        disabled={false}
+        state="unavailable"
+        windowsPowerShell7Fallback={{ kind: 'missing', minimum: '7.4.0' }}
+      />,
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('7.4.0');
+    rerender(
+      <AgentTerminalBusyNotice
+        disabled={false}
+        state="unavailable"
+        windowsPowerShell7Fallback={{ kind: 'tooOld', actual: '7.3.11', minimum: '7.4.0' }}
+      />,
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('7.3.11');
+    expect(screen.getByRole('status')).toHaveTextContent('7.4.0');
+    rerender(
+      <AgentTerminalBusyNotice
+        disabled={false}
+        state="unavailable"
+        windowsPowerShell7Fallback={{ kind: 'untrusted' }}
+      />,
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('Microsoft');
+  });
+
   it('keeps short commands silent before and after returning to the prompt', async () => {
     const { rerender } = render(<StrictMode><AgentTerminalBusyNotice disabled={false} /></StrictMode>);
     expect(screen.queryByRole('status')).not.toBeInTheDocument();

@@ -5,7 +5,149 @@ use std::io::Read;
 use std::path::Path;
 
 pub(crate) const POWERSHELL7_NATIVE_PROFILE: &str =
-    "powershell-7.6.9-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native";
+    "powershell-7-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native";
+pub(crate) const POWERSHELL7_MIN_VERSION: &str = "7.4.0";
+pub(crate) const POWERSHELL7_MIN_MINOR: u32 = 4;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PowerShell7VersionCheck {
+    Supported {
+        numeric: (u32, u32, u32),
+        canonical: String,
+    },
+    Unsupported {
+        reported: String,
+    },
+}
+
+fn parse_strict_u32_component(part: &str) -> Option<u32> {
+    if part.is_empty()
+        || !part.bytes().all(|byte| byte.is_ascii_digit())
+        || (part.len() > 1 && part.starts_with('0'))
+    {
+        return None;
+    }
+    part.parse::<u32>().ok()
+}
+
+pub(crate) fn parse_powershell7_stable_version(version: &str) -> Option<(u32, u32, u32)> {
+    let mut parts = version.split('.');
+    let major = parse_strict_u32_component(parts.next()?)?;
+    let minor = parse_strict_u32_component(parts.next()?)?;
+    let patch = parse_strict_u32_component(parts.next()?)?;
+    if parts.next().is_some() || major != 7 {
+        return None;
+    }
+    Some((major, minor, patch))
+}
+
+pub(crate) fn is_supported_powershell7_version(version: &str) -> bool {
+    matches!(
+        parse_powershell7_stable_version(version),
+        Some((7, minor, _)) if minor >= POWERSHELL7_MIN_MINOR
+    )
+}
+
+fn sanitize_version_reason_token(raw: &str) -> String {
+    let token: String = raw
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_'))
+        .take(48)
+        .collect();
+    if token.is_empty() {
+        "unknown".into()
+    } else {
+        token
+    }
+}
+
+pub(crate) fn classify_pe_powershell7_version(
+    product_version: Option<&str>,
+    fixed: Option<(u16, u16, u16)>,
+) -> Option<PowerShell7VersionCheck> {
+    if let Some(raw) = product_version {
+        let token = raw
+            .trim()
+            .split(|ch: char| ch.is_whitespace() || ch == '+')
+            .next()
+            .unwrap_or("");
+        if !token.is_empty() {
+            if token.contains('-') {
+                return Some(PowerShell7VersionCheck::Unsupported {
+                    reported: sanitize_version_reason_token(token),
+                });
+            }
+            if let Some((major, minor, patch)) = parse_powershell7_stable_version(token) {
+                let canonical = format!("{major}.{minor}.{patch}");
+                return Some(if minor >= POWERSHELL7_MIN_MINOR {
+                    PowerShell7VersionCheck::Supported {
+                        numeric: (major, minor, patch),
+                        canonical,
+                    }
+                } else {
+                    PowerShell7VersionCheck::Unsupported {
+                        reported: canonical,
+                    }
+                });
+            }
+            let parts: Vec<&str> = token.split('.').collect();
+            if parts.len() == 3 || parts.len() == 4 {
+                if let (Some(major), Some(minor), Some(patch)) = (
+                    parse_strict_u32_component(parts[0]),
+                    parse_strict_u32_component(parts[1]),
+                    parse_strict_u32_component(parts[2]),
+                ) {
+                    let fourth_ok =
+                        parts.len() == 3 || parse_strict_u32_component(parts[3]).is_some();
+                    if fourth_ok {
+                        let canonical = format!("{major}.{minor}.{patch}");
+                        return Some(if major == 7 && minor >= POWERSHELL7_MIN_MINOR {
+                            PowerShell7VersionCheck::Supported {
+                                numeric: (major, minor, patch),
+                                canonical,
+                            }
+                        } else {
+                            PowerShell7VersionCheck::Unsupported {
+                                reported: canonical,
+                            }
+                        });
+                    }
+                }
+            }
+            return Some(PowerShell7VersionCheck::Unsupported {
+                reported: sanitize_version_reason_token(token),
+            });
+        }
+    }
+    let (major, minor, patch) = fixed?;
+    let major = u32::from(major);
+    let minor = u32::from(minor);
+    let patch = u32::from(patch);
+    let canonical = format!("{major}.{minor}.{patch}");
+    Some(if major == 7 && minor >= POWERSHELL7_MIN_MINOR {
+        PowerShell7VersionCheck::Supported {
+            numeric: (major, minor, patch),
+            canonical,
+        }
+    } else {
+        PowerShell7VersionCheck::Unsupported {
+            reported: canonical,
+        }
+    })
+}
+
+pub(crate) fn windows_powershell7_missing_reason() -> String {
+    format!("windowsPowerShell7Missing:{POWERSHELL7_MIN_VERSION}")
+}
+
+pub(crate) fn windows_powershell7_too_old_reason(actual: &str) -> String {
+    format!(
+        "windowsPowerShell7TooOld:{}:{POWERSHELL7_MIN_VERSION}",
+        sanitize_version_reason_token(actual)
+    )
+}
+
+pub(crate) const WINDOWS_POWERSHELL7_UNTRUSTED_REASON: &str = "windowsPowerShell7Untrusted";
 
 pub(crate) fn mac_zle_pin(field: &str) -> Result<String, String> {
     static PIN: std::sync::OnceLock<Result<serde_json::Value, &'static str>> =
@@ -178,7 +320,10 @@ impl VerifiedNativeProfile {
                     .contains(&id)
             }
             (ShellFamily::PowerShell7, EditorFamily::PsReadLine) => {
-                profile.shell_version.as_deref() == Some("7.6.9")
+                profile
+                    .shell_version
+                    .as_deref()
+                    .is_some_and(is_supported_powershell7_version)
                     && profile.editor_version.as_deref() == Some("2.4.5")
                     && profile.editor_numeric_version == 20405
                     && id == POWERSHELL7_NATIVE_PROFILE

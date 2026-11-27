@@ -121,7 +121,8 @@ impl PreparedNativeBash {
         let artifact = super::editors::read_catalogue(resources, target)?
             .into_iter()
             .find(|artifact| {
-                artifact.shell_sha256 == digest || stock_macos_zsh && artifact.shell.is_some()
+                artifact.shell_sha256.as_deref() == Some(digest.as_str())
+                    || stock_macos_zsh && artifact.shell.is_some()
             })
             .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
         if artifact.shell.is_some()

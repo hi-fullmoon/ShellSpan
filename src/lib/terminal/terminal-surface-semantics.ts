@@ -27,6 +27,29 @@ export function remoteGlibcMismatch(reason: string | undefined): RemoteGlibcMism
   return match ? { actual: match[1], minimum: match[2] } : null;
 }
 
+export type WindowsPowerShell7Unavailable =
+  | { readonly kind: 'missing'; readonly minimum: string }
+  | { readonly kind: 'tooOld'; readonly actual: string; readonly minimum: string }
+  | { readonly kind: 'untrusted' };
+
+export function windowsPowerShell7Unavailable(
+  reason: string | undefined,
+): WindowsPowerShell7Unavailable | null {
+  if (!reason) return null;
+  if (reason === 'windowsPowerShell7Untrusted') {
+    return { kind: 'untrusted' };
+  }
+  const missing = /^windowsPowerShell7Missing:(\d+\.\d+\.\d+)$/.exec(reason);
+  if (missing) {
+    return { kind: 'missing', minimum: missing[1] };
+  }
+  const tooOld = /^windowsPowerShell7TooOld:([A-Za-z0-9._-]+):(\d+\.\d+\.\d+)$/.exec(reason);
+  if (tooOld) {
+    return { kind: 'tooOld', actual: tooOld[1], minimum: tooOld[2] };
+  }
+  return null;
+}
+
 export interface TerminalSurfacePresentation {
   /** Overall state shown for the currently selected execution surface. */
   readonly state: TerminalSurfacePresentationState;

@@ -13,7 +13,9 @@ $__shellspanNipModule = New-Module -Name ShellSpanTerminalIntegration -ArgumentL
   $Expected=Microsoft.PowerShell.Utility\ConvertFrom-Json $ProfileJson
   $Loaded=Microsoft.PowerShell.Core\Get-Module PSReadLine
   $Assembly=[Microsoft.PowerShell.PSConsoleReadLine].Assembly
-  if($ExpectedEditorHash.Length -ne 64 -or (Microsoft.PowerShell.Utility\Get-FileHash $Assembly.Location -Algorithm SHA256).Hash.ToLowerInvariant() -cne $ExpectedEditorHash -or $Loaded.Version.ToString() -cne $Expected.editorVersion -or $PSVersionTable.PSVersion.ToString() -cne $Expected.shellVersion -or $Host.Name -cne 'ConsoleHost'){
+  $RuntimeVersion=$PSVersionTable.PSVersion
+  $RuntimeVersionString=('{0}.{1}.{2}' -f $RuntimeVersion.Major,$RuntimeVersion.Minor,$RuntimeVersion.Patch)
+  if($ExpectedEditorHash.Length -ne 64 -or (Microsoft.PowerShell.Utility\Get-FileHash $Assembly.Location -Algorithm SHA256).Hash.ToLowerInvariant() -cne $ExpectedEditorHash -or $Loaded.Version.ToString() -cne $Expected.editorVersion -or $PSVersionTable.PSEdition -cne 'Core' -or $RuntimeVersion.Major -ne 7 -or $RuntimeVersion.Minor -lt 4 -or -not [string]::IsNullOrEmpty($RuntimeVersion.PreReleaseLabel) -or $RuntimeVersionString -cne $Expected.shellVersion -or $Host.Name -cne 'ConsoleHost'){
     throw 'TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH'
   }
   # This independent module scope still sees an existing global user override.

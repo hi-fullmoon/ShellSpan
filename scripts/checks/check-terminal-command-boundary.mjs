@@ -168,7 +168,7 @@ export async function checkTerminalCommandBoundary() {
   const supportedProfiles = new Set([
     'zsh-5.9-zle-5.9-macos-arm64-native',
     'zsh-5.9-zle-5.9-linux-aarch64-glibc-2.36-native',
-    'powershell-7.6.9-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native',
+    'powershell-7-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native',
   ]);
   for (const profile of admission.productionProfiles) {
     assert(supportedProfiles.has(profile), `Unsupported production editor profile: ${profile}`);

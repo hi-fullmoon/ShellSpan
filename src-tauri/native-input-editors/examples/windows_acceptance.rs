@@ -57,7 +57,7 @@ fn main() {
     let mut profile=nip::PeerProfile { shell: nip::ShellFamily::PowerShell7,
         shell_version: Some("7.6.9".into()),
         editor: nip::EditorFamily::PsReadLine, editor_version: Some("2.4.5".into()), editor_numeric_version: 20405,
-        adapter_version:"1".into(), verified_profile_id:Some("powershell-7.6.9-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native".into()) };
+        adapter_version:"1".into(), verified_profile_id:Some("powershell-7-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native".into()) };
     let quote=|s: &str| format!("'{}'",s.replace('\'',"''"));
     let bootstrap=evidence.join("bootstrap.ps1");
     let transport_source=evidence.join("transport.cs");

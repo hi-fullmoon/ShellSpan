@@ -125,7 +125,7 @@ export function AiWorkspaceController({
     ));
   const realTerminalState = controller.realTerminalState;
   const terminalNeedsRecovery = activeTerminalStatus === 'connected' && activeTerminalNativeRecoveryRequired;
-  const noticeState = terminalNeedsRecovery && !controller.glibcMismatch
+  const noticeState = terminalNeedsRecovery && !controller.glibcMismatch && !controller.windowsPowerShell7Fallback
     ? 'recoveryRequired'
     : realTerminalState !== 'ready'
       ? realTerminalState
@@ -303,6 +303,7 @@ export function AiWorkspaceController({
               realTerminalState={realTerminalState}
               nativeStartupTimedOut={activeTerminalStatus === 'connected' && nativeStartupTimedOut}
               glibcMismatch={controller.glibcMismatch}
+              windowsPowerShell7Fallback={controller.windowsPowerShell7Fallback}
               sandboxDirectOnly={controller.sandboxDirectOnly}
               sandboxVisiblePty={controller.sandboxVisiblePty}
               disabled={executionSurfaceLocked}
@@ -341,7 +342,7 @@ export function AiWorkspaceController({
         {focusMode && activeTerminalStatus !== 'connected' ? <FocusNoTarget /> : scope === 'terminal' && activeTerminalStatus === 'connected' && noticeState !== null
         && !(controller.sandboxVisiblePty && !activeSandboxAgentId)
         && !(terminalNeedsRecovery && terminalRecovery)
-        && (controller.selectedExecutionSurface === 'boundTerminal' || controller.glibcMismatch)
+        && (controller.selectedExecutionSurface === 'boundTerminal' || controller.glibcMismatch || controller.windowsPowerShell7Fallback)
         && (!controller.readOnlySession || (focusMode && controller.historicalContinuationAvailable))
         ? <AgentTerminalBusyNotice
             key={JSON.stringify([activeTerminalId, terminalSessionId, terminalGeneration])}
@@ -349,6 +350,7 @@ export function AiWorkspaceController({
             disabled={executionSurfaceLocked}
             state={noticeState}
             glibcMismatch={controller.glibcMismatch}
+            windowsPowerShell7Fallback={controller.windowsPowerShell7Fallback}
             focusMode={focusMode}
             blockedAttempt={blockedAttempt}
             switchDirectLockedByUncertain={!configuringContinuation && uncertainNativeEffects}

@@ -1036,7 +1036,7 @@ fn native_zle_stock_shell_is_admitted_without_validation() {
         .shell_override()
         .expect("expected packaged private Zsh");
     assert_eq!(
-        super::registration::file_sha(executable).unwrap(),
+        Some(super::registration::file_sha(executable).unwrap()),
         catalogue[0].shell_sha256
     );
     publish(

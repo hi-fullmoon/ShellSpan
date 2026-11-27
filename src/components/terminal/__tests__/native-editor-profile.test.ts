@@ -3,12 +3,12 @@ import { isCurrentNativeEditorProfile } from './native-editor-profile';
 
 const current = {
   shell: 'powerShell7', shellVersion: '7.6.9', editor: 'psReadLine', editorVersion: '2.4.5',
-  adapterVersion: '1', verifiedProfileId: 'powershell-7.6.9-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native',
+  adapterVersion: '1', verifiedProfileId: 'powershell-7-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native',
 };
 
 describe('native editor acceptance identity', () => {
-  it('accepts the complete current PowerShell profile', () => {
-    expect(isCurrentNativeEditorProfile(current, 'powerShell7')).toBe(true);
+  it.each(['7.4.0', '7.4.6', '7.5.1', '7.6.9'])('accepts supported stable PowerShell %s', shellVersion => {
+    expect(isCurrentNativeEditorProfile({ ...current, shellVersion }, 'powerShell7')).toBe(true);
   });
 
   it.each([
@@ -19,8 +19,11 @@ describe('native editor acceptance identity', () => {
     { verifiedProfileId: current.verifiedProfileId.replace('shellspan6', 'shellspan1') },
     { verifiedProfileId: `${current.verifiedProfileId}-capture1` },
     { verifiedProfileId: 'unverified-windows-x64-native' },
-    { verifiedProfileId: 'powershell-7.6.9-psreadline-2.4.5-windows-x64-native' },
-    { shellVersion: '7.6.8' },
+    { verifiedProfileId: 'powershell-7.6.9-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native' },
+    { verifiedProfileId: 'powershell-7-psreadline-2.4.5-windows-x64-native' },
+    { shellVersion: '7.3.11' },
+    { shellVersion: '7.5.0-preview.3' },
+    { shellVersion: '8.0.0' },
     { editorVersion: '2.4.4' },
     { adapterVersion: '2' },
     { editor: 'custom' },

@@ -267,7 +267,10 @@ impl WindowsLocalShell {
         &self,
         app: &AppHandle,
         native_requested: bool,
-    ) -> Result<Option<(std::path::PathBuf, std::path::PathBuf)>, String> {
+    ) -> Result<
+        Option<(std::path::PathBuf, std::path::PathBuf)>,
+        crate::terminal_command::windows::WindowsNativePreparationError,
+    > {
         use crate::terminal_command::{artifacts, windows};
         use std::path::{Path, PathBuf};
 
@@ -282,11 +285,9 @@ impl WindowsLocalShell {
 
         let resources = artifacts::resource_root(app)?;
         let shell = match self.configured.as_deref() {
-            None => windows::matching_powershell7(&resources)?,
+            None => windows::select_powershell7(&resources)?.path,
             Some(shell) if Path::new(shell).file_name() == Some(std::ffi::OsStr::new(shell)) => {
-                windows::powershell7_candidates()
-                    .next()
-                    .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?
+                windows::select_powershell7(&resources)?.path
             }
             Some(shell) => PathBuf::from(shell),
         };
@@ -314,6 +315,7 @@ fn prepare_windows_local_shell(
 ) -> (
     String,
     Option<crate::terminal_command::windows::PreparedNativePowerShell>,
+    Option<String>,
 ) {
     use crate::terminal_command::windows;
 
@@ -332,7 +334,7 @@ fn prepare_windows_local_shell(
                 .path()
                 .home_dir()
                 .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
-            let native = windows::PreparedNativePowerShell::prepare(
+            let native = windows::PreparedNativePowerShell::prepare_detailed(
                 &shell,
                 &resources,
                 &crate::shellspan_data_dir(&home),
@@ -340,9 +342,10 @@ fn prepare_windows_local_shell(
             Ok(Some((executable, native)))
         });
     match prepared {
-        Ok(Some((executable, native))) => (executable, Some(native)),
-        Ok(None) => (selection.fallback().to_owned(), None),
-        Err(reason) => {
+        Ok(Some((executable, native))) => (executable, Some(native), None),
+        Ok(None) => (selection.fallback().to_owned(), None, None),
+        Err(error) => {
+            let reason = error.code;
             let code = if reason.starts_with("TERMINAL_NATIVE_")
                 && reason.len() <= 128
                 && reason
@@ -354,7 +357,11 @@ fn prepare_windows_local_shell(
                 "TERMINAL_NATIVE_PREPARATION_FAILED"
             };
             warn!("Native Windows input preparation rejected session_id={session_id} code={code}");
-            (selection.fallback().to_owned(), None)
+            (
+                selection.fallback().to_owned(),
+                None,
+                error.integration_reason,
+            )
         }
     }
 }
@@ -945,11 +952,13 @@ fn create_local_session_blocking(
     let native_client =
         native_input_protocol.as_deref() == Some(crate::terminal_command::protocol::PROTOCOL);
     #[cfg(windows)]
-    let (shell, mut prepared_native) = prepare_windows_local_shell(
+    let (shell, mut prepared_native, windows_fallback_reason) = prepare_windows_local_shell(
         &app,
         native_client && shell_integration_enabled,
         &session_id,
     );
+    #[cfg(not(windows))]
+    let windows_fallback_reason: Option<String> = None;
     #[cfg(not(windows))]
     let shell = if sandbox_agent_session_id.is_some() {
         "/bin/zsh".to_string()
@@ -1564,7 +1573,9 @@ fn create_local_session_blocking(
             let reason = if !shell_integration_enabled {
                 "shellIntegrationDisabled"
             } else if native_mode.is_some() {
-                "nativeProfileMismatch"
+                windows_fallback_reason
+                    .as_deref()
+                    .unwrap_or("nativeProfileMismatch")
             } else if !shell_kind.supported() {
                 "unsupportedShell"
             } else {

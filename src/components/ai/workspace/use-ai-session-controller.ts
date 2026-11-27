@@ -75,7 +75,12 @@ import { invokeAgentImagePreview, isTauriRuntime, listenToAgentRuntimeSession } 
 import { imageErrorKey } from '@/lib/ai/image-error';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { readTerminalCurrentDirectory } from '@/lib/terminal/terminal-current-directory';
-import { terminalConnectionPresentationState, type RealTerminalPresentationState, type RemoteGlibcMismatch } from '@/lib/terminal/terminal-surface-semantics';
+import {
+  terminalConnectionPresentationState,
+  type RealTerminalPresentationState,
+  type RemoteGlibcMismatch,
+  type WindowsPowerShell7Unavailable,
+} from '@/lib/terminal/terminal-surface-semantics';
 import { terminalLoginLabel, terminalLoginScopeKey } from '@/lib/ai/terminal-login-scope';
 import {
   canContinueHistoricalConversation,
@@ -133,6 +138,7 @@ export interface AiSessionController {
   readonly localSandboxOptOut: boolean;
   readonly setLocalSandboxOptOut: (optOut: boolean) => void;
   readonly glibcMismatch: RemoteGlibcMismatch | null;
+  readonly windowsPowerShell7Fallback: WindowsPowerShell7Unavailable | null;
   readonly settingsBusy: boolean;
   readonly selectModel: (provider: AiProviderConfig) => Promise<void>;
   readonly selectPermission: (mode: AgentPermissionMode) => Promise<void>;
@@ -647,8 +653,11 @@ export function useAiSessionController({
       ? 'initializing'
       : terminalConnectionPresentationState(activeTerminal?.status);
   const glibcMismatch = activeTerminal?.status === 'connected' ? terminalExecution.glibcMismatch : null;
+  const windowsPowerShell7Fallback = activeTerminal?.status === 'connected'
+    ? terminalExecution.windowsPowerShell7Fallback
+    : null;
   const terminalCreationSurface = focusMode ? 'boundTerminal' : terminalExecution.creationSurface;
-  const needsDirectFallback = !focusMode && glibcMismatch !== null
+  const needsDirectFallback = !focusMode && (glibcMismatch !== null || windowsPowerShell7Fallback !== null)
     && view?.snapshot.value.header.executionSurface === 'boundTerminal'
     && view.snapshot.value.header.target?.sessionId === activeTerminal?.sessionId
     && !view.snapshot.value.header.subagent;
@@ -2366,6 +2375,7 @@ export function useAiSessionController({
       setLocalSandboxOptOutByTerminal((prev) => ({ ...prev, [terminalId]: optOut }));
     },
     glibcMismatch,
+    windowsPowerShell7Fallback,
     settingsBusy,
     selectModel: (provider) => changeSettings(async (sessionId) => {
       if (!adapter.selectModel) throw new Error('Model selection is unavailable');

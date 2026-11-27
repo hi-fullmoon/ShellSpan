@@ -19,6 +19,7 @@ import {
   type RealTerminalPresentationState,
   type RemoteGlibcMismatch,
   type TerminalSurfaceRuntimeFallbackSignal,
+  type WindowsPowerShell7Unavailable,
 } from '@/lib/terminal/terminal-surface-semantics';
 import type { AgentExecutionSurface } from '@/types/agent-session';
 
@@ -70,6 +71,7 @@ export interface AgentExecutionSurfaceSelectorProps {
   readonly realTerminalState?: RealTerminalPresentationState;
   readonly nativeStartupTimedOut?: boolean;
   readonly glibcMismatch?: RemoteGlibcMismatch | null;
+  readonly windowsPowerShell7Fallback?: WindowsPowerShell7Unavailable | null;
   readonly sandboxDirectOnly?: 'local' | 'remote';
   readonly sandboxVisiblePty?: boolean;
   /** Reserved for a future authoritative runtime routing result. */
@@ -84,6 +86,7 @@ export function AgentExecutionSurfaceSelector({
   realTerminalState = 'unavailable',
   nativeStartupTimedOut = false,
   glibcMismatch,
+  windowsPowerShell7Fallback,
   sandboxDirectOnly,
   sandboxVisiblePty = false,
   runtimeFallback,
@@ -111,7 +114,16 @@ export function AgentExecutionSurfaceSelector({
     ? t(realTerminalCopy.description)
     : glibcMismatch
       ? t('agent.executionSurface.v1.remoteGlibcTooOld', { ...glibcMismatch })
-      : t(nativeStartupTimedOut ? 'agent.executionSurface.v1.nativeSshStartupTimedOut' : realTerminalCopy.description);
+      : windowsPowerShell7Fallback
+        ? windowsPowerShell7Fallback.kind === 'missing'
+          ? t('agent.executionSurface.v1.windowsPowerShell7Missing', { minimum: windowsPowerShell7Fallback.minimum })
+          : windowsPowerShell7Fallback.kind === 'tooOld'
+            ? t('agent.executionSurface.v1.windowsPowerShell7TooOld', {
+              actual: windowsPowerShell7Fallback.actual,
+              minimum: windowsPowerShell7Fallback.minimum,
+            })
+            : t('agent.executionSurface.v1.windowsPowerShell7Untrusted')
+        : t(nativeStartupTimedOut ? 'agent.executionSurface.v1.nativeSshStartupTimedOut' : realTerminalCopy.description);
   const currentStateDescription = presentation.state === 'directFallback'
     ? t(DIRECT_FALLBACK_COPY.description)
     : surface === 'boundTerminal'

@@ -99,11 +99,30 @@ fn windows_editor_binding_requires_the_updated_exact_host_and_artifacts() {
             .is_err());
     }
     assert!(verify(&profile, &"2".repeat(64)).is_err());
-    profile.shell_version = Some("7.6.8".into());
+    for supported in ["7.4.0", "7.4.6", "7.5.1", "7.6.8", "7.6.9", "7.10.0"] {
+        profile.shell_version = Some(supported.into());
+        assert!(verify(&profile, &shell_sha).is_ok(), "{supported}");
+    }
+    for unsupported in [
+        "7.3.9",
+        "7.0.0",
+        "7.4.0-preview.1",
+        "7.6.9-rc.1",
+        "8.0.0",
+        "7.4",
+        "07.4.0",
+        "",
+    ] {
+        profile.shell_version = Some(unsupported.into());
+        assert!(verify(&profile, &shell_sha).is_err(), "{unsupported}");
+    }
+    profile.shell_version = None;
     assert!(verify(&profile, &shell_sha).is_err());
     profile.shell_version = Some("7.6.9".into());
     profile.verified_profile_id =
-        Some("powershell-7.6.9-psreadline-2.4.5-windows-x64-native".into());
+        Some("powershell-7.6.9-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native".into());
+    assert!(verify(&profile, &shell_sha).is_err());
+    profile.verified_profile_id = Some("powershell-7-psreadline-2.4.5-windows-x64-native".into());
     assert!(verify(&profile, &shell_sha).is_err());
     let mut retired = profile.clone();
     retired.shell = ShellFamily::WindowsPowerShell;
@@ -119,6 +138,74 @@ fn windows_editor_binding_requires_the_updated_exact_host_and_artifacts() {
     profile.verified_profile_id = Some(super::registration::POWERSHELL7_NATIVE_PROFILE.into());
     std::fs::write(&module, b"modified binding fixture").unwrap();
     assert!(verify(&profile, &shell_sha).is_err());
+}
+
+#[test]
+fn windows_powershell7_pe_version_classification_and_fallback_reasons() {
+    use super::registration::{
+        classify_pe_powershell7_version, windows_powershell7_missing_reason,
+        windows_powershell7_too_old_reason, PowerShell7VersionCheck,
+        WINDOWS_POWERSHELL7_UNTRUSTED_REASON,
+    };
+
+    assert_eq!(
+        classify_pe_powershell7_version(Some("7.4.6"), None),
+        Some(PowerShell7VersionCheck::Supported {
+            numeric: (7, 4, 6),
+            canonical: "7.4.6".into(),
+        })
+    );
+    assert_eq!(
+        classify_pe_powershell7_version(Some("7.6.9+abcdef1234"), None),
+        Some(PowerShell7VersionCheck::Supported {
+            numeric: (7, 6, 9),
+            canonical: "7.6.9".into(),
+        })
+    );
+    assert_eq!(
+        classify_pe_powershell7_version(Some("7.5.1.0 SHA: deadbeef"), None),
+        Some(PowerShell7VersionCheck::Supported {
+            numeric: (7, 5, 1),
+            canonical: "7.5.1".into(),
+        })
+    );
+    assert_eq!(
+        classify_pe_powershell7_version(None, Some((7, 4, 0))),
+        Some(PowerShell7VersionCheck::Supported {
+            numeric: (7, 4, 0),
+            canonical: "7.4.0".into(),
+        })
+    );
+    assert_eq!(
+        classify_pe_powershell7_version(Some("7.5.0-preview.3+abc"), Some((7, 5, 0))),
+        Some(PowerShell7VersionCheck::Unsupported {
+            reported: "7.5.0-preview.3".into(),
+        })
+    );
+    assert_eq!(
+        classify_pe_powershell7_version(Some("7.3.11"), Some((7, 3, 11))),
+        Some(PowerShell7VersionCheck::Unsupported {
+            reported: "7.3.11".into(),
+        })
+    );
+    assert_eq!(
+        classify_pe_powershell7_version(Some("8.0.0"), Some((8, 0, 0))),
+        Some(PowerShell7VersionCheck::Unsupported {
+            reported: "8.0.0".into(),
+        })
+    );
+    assert_eq!(
+        windows_powershell7_missing_reason(),
+        "windowsPowerShell7Missing:7.4.0"
+    );
+    assert_eq!(
+        windows_powershell7_too_old_reason("7.3.11"),
+        "windowsPowerShell7TooOld:7.3.11:7.4.0"
+    );
+    assert_eq!(
+        WINDOWS_POWERSHELL7_UNTRUSTED_REASON,
+        "windowsPowerShell7Untrusted"
+    );
 }
 
 fn identity() -> Identity {

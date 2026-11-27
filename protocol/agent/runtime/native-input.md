@@ -65,7 +65,7 @@ Windows 后台标记的名称冲突检查不得自动导入模块或执行模块
 能力不足的新 Agent 命令在 lease/PTY 写入前返回 `TERMINAL_NATIVE_INPUT_REQUIRED`；
 既有会话不会切换 Shell。普通用户输入与 TUI 保留；当前后台作业的输入和管理均走已验证的原生通道。
 生产编辑器清单准入 macOS arm64 本地及 Linux aarch64/glibc 2.36 SSH 的 Zsh 5.9/ZLE 5.9，
-以及 Windows x64 的 PowerShell 7 固定版本配置。Windows 本地原生终端在没有明确指定 Shell 时优先选择与随包摘要匹配的 `pwsh.exe`；准备失败时启动普通 Windows PowerShell 5.1 会话。明确指定的 Shell 仍按配置启动，缺少原生能力时使用普通终端模式。
+以及 Windows x64 的 PowerShell 7（`7.4.0 <= version < 8.0.0` 稳定版，须通过 Microsoft Authenticode 数字签名校验）配置。Windows 本地原生终端在没有明确指定 Shell 时扫描本机 `pwsh.exe` 并优先选择版本号最高的已验签稳定版；未安装、版本低于 7.4.0 或验签/准备失败时启动普通 Windows PowerShell 5.1 会话并向终端集成状态报告结构化降级原因。明确指定的 Shell 仍按配置启动，缺少原生能力时使用普通终端模式。
 macOS 仅在所选 Zsh 匹配受信系统摘要时，启动应用随包提供的已校验私有 Zsh 和 Core。
 GNU Bash 正式包只提供 Bash 5.3 / Readline 8.3.6，沿用独立的来源匹配 catalogue、实际 Shell SHA 和模块校验。Bash 4.1 和 4.4 可显式构建用于兼容性验证。缺少匹配构建的 Bash 会话保留普通终端输入和 TUI。
 各平台实际结果分别留证，统一实机待验项见[验收清单](../../../docs/design/agent-terminal-input-acceptance-checklist.md)。
@@ -279,9 +279,10 @@ macOS组合使用内容绑定的私有Main/Core历史接口，将本次源码与
 负责。系统Shell不替换，用户历史选项和显式历史写入不覆盖。旧Main/错Core拒绝该能力；
 该元数据接口本身不授予输入或执行权限，详见[ZLE接口](native-zle-append.md)。
 
-Windows 两个主机独立验证：Windows PowerShell `5.1.26100.9818` 与 PowerShell `7.6.9`，
-均绑定 PSReadLine `2.4.5-shellspan1` 已复核构建（模块 API 版本仍为 `2.4.5`）的实际
-程序集摘要和独立 profile ID。原生路径只在当前进程的 PSModulePath 中前置应用私有
+Windows 原生输入支持经 Microsoft Authenticode 验签的 PowerShell 7 稳定版（`>= 7.4.0` 且 `< 8.0.0`，拒绝 preview/rc），
+统一绑定 PSReadLine `2.4.5-shellspan6` 已复核构建（模块 API 版本仍为 `2.4.5`）的实际
+程序集摘要、私有 ConPTY `1.25.260930003` 摘要和 profile ID
+`powershell-7-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native`（握手报文仍上报真实运行时 `shellVersion`）。原生路径只在当前进程的 PSModulePath 中前置应用私有
 模块目录及该主机的系统模块目录，使用户 profile 在正确构建下正常配置；不修改全局
 安装或用户 profile。该构建只为普通进程退出补充原生 SaveAtExit 钩子，继续使用模块
 自己的历史队列、敏感项过滤和互斥写入，不在集成层重放或强制写历史。显式隔离数据根目录启用时，

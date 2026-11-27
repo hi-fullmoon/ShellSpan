@@ -2,12 +2,17 @@
 //! Preparation and the bounded pipe worker run off the Tauri main thread.
 use super::{
     editors, protocol as nip,
-    registration::{file_sha, VerifiedNativeProfile, POWERSHELL7_NATIVE_PROFILE},
+    registration::{
+        classify_pe_powershell7_version, file_sha, windows_powershell7_missing_reason,
+        windows_powershell7_too_old_reason, PowerShell7VersionCheck, VerifiedNativeProfile,
+        POWERSHELL7_NATIVE_PROFILE, WINDOWS_POWERSHELL7_UNTRUSTED_REASON,
+    },
 };
 use std::{
+    collections::HashSet,
     fs::{self, File},
     io::{Read, Write},
-    os::windows::io::AsRawHandle,
+    os::windows::{ffi::OsStrExt, io::AsRawHandle},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -16,41 +21,416 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use windows_sys::Win32::System::Pipes::{
-    GetNamedPipeServerProcessId, PeekNamedPipe, SetNamedPipeHandleState, PIPE_NOWAIT,
-    PIPE_READMODE_BYTE,
+use windows_sys::Win32::{
+    Foundation::INVALID_HANDLE_VALUE,
+    Security::{
+        Cryptography::{
+            szOID_COMMON_NAME, szOID_ORGANIZATION_NAME, CertGetNameStringW, CERT_CONTEXT,
+            CERT_NAME_ATTR_TYPE,
+        },
+        WinTrust::{
+            WTHelperGetProvCertFromChain, WTHelperGetProvSignerFromChain,
+            WTHelperProvDataFromStateData, WinVerifyTrust, WINTRUST_ACTION_GENERIC_VERIFY_V2,
+            WINTRUST_DATA, WINTRUST_DATA_0, WINTRUST_FILE_INFO, WTD_CACHE_ONLY_URL_RETRIEVAL,
+            WTD_CHOICE_FILE, WTD_REVOCATION_CHECK_NONE, WTD_REVOKE_NONE, WTD_STATEACTION_CLOSE,
+            WTD_STATEACTION_VERIFY, WTD_UI_NONE,
+        },
+    },
+    Storage::FileSystem::{
+        GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW, VS_FIXEDFILEINFO,
+    },
+    System::Pipes::{
+        GetNamedPipeServerProcessId, PeekNamedPipe, SetNamedPipeHandleState, PIPE_NOWAIT,
+        PIPE_READMODE_BYTE,
+    },
 };
 fn module_search_path(path: &Path) -> PathBuf {
     PathBuf::from(crate::path_utils::portable_local_path(path).replace('/', "\\"))
 }
 
-pub(crate) fn powershell7_candidates() -> impl Iterator<Item = PathBuf> {
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    std::env::split_paths(&path)
-        .map(|directory| directory.join("pwsh.exe"))
-        .collect::<Vec<_>>()
-        .into_iter()
-        .chain(
-            ["ProgramW6432", "ProgramFiles"]
-                .into_iter()
-                .filter_map(std::env::var_os)
-                .map(|directory| PathBuf::from(directory).join("PowerShell/7/pwsh.exe")),
-        )
-        .filter(|path| path.is_absolute() && path.is_file())
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct InspectedPowerShell7 {
+    pub path: PathBuf,
+    pub numeric: (u32, u32, u32),
+    pub version: String,
 }
 
-pub(crate) fn matching_powershell7(resources: &Path) -> Result<PathBuf, String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WindowsNativePreparationError {
+    pub code: String,
+    pub integration_reason: Option<String>,
+}
+
+impl WindowsNativePreparationError {
+    pub(crate) fn code_only(code: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            integration_reason: None,
+        }
+    }
+
+    pub(crate) fn with_reason(code: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            integration_reason: Some(reason.into()),
+        }
+    }
+}
+
+impl From<String> for WindowsNativePreparationError {
+    fn from(code: String) -> Self {
+        Self::code_only(code)
+    }
+}
+
+impl From<&str> for WindowsNativePreparationError {
+    fn from(code: &str) -> Self {
+        Self::code_only(code)
+    }
+}
+
+fn wide_os_str(value: &std::ffi::OsStr) -> Vec<u16> {
+    value.encode_wide().chain(std::iter::once(0)).collect()
+}
+
+fn wide_str(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+fn read_pe_powershell7_version(path: &Path) -> Option<PowerShell7VersionCheck> {
+    let wide = wide_os_str(path.as_os_str());
+    let mut handle = 0u32;
+    let size = unsafe { GetFileVersionInfoSizeW(wide.as_ptr(), &mut handle) };
+    if size == 0 {
+        return None;
+    }
+    let mut buffer = vec![0u8; size as usize];
+    if unsafe { GetFileVersionInfoW(wide.as_ptr(), 0, size, buffer.as_mut_ptr().cast()) } == 0 {
+        return None;
+    }
+    let fixed = {
+        let root = wide_str("\\");
+        let mut ptr = std::ptr::null_mut();
+        let mut len = 0u32;
+        if unsafe { VerQueryValueW(buffer.as_ptr().cast(), root.as_ptr(), &mut ptr, &mut len) } != 0
+            && !ptr.is_null()
+            && (len as usize) >= std::mem::size_of::<VS_FIXEDFILEINFO>()
+        {
+            let info = unsafe { std::ptr::read_unaligned(ptr.cast::<VS_FIXEDFILEINFO>()) };
+            if info.dwSignature == 0xFEEF_04BD {
+                Some((
+                    ((info.dwFileVersionMS >> 16) & 0xffff) as u16,
+                    (info.dwFileVersionMS & 0xffff) as u16,
+                    ((info.dwFileVersionLS >> 16) & 0xffff) as u16,
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+    let query_product_version = |lang: u16, codepage: u16| -> Option<String> {
+        let subblock = wide_str(&format!(
+            "\\StringFileInfo\\{lang:04X}{codepage:04X}\\ProductVersion"
+        ));
+        let mut ptr = std::ptr::null_mut();
+        let mut len = 0u32;
+        if unsafe {
+            VerQueryValueW(
+                buffer.as_ptr().cast(),
+                subblock.as_ptr(),
+                &mut ptr,
+                &mut len,
+            )
+        } == 0
+            || ptr.is_null()
+            || len == 0
+        {
+            return None;
+        }
+        let slice = unsafe { std::slice::from_raw_parts(ptr.cast::<u16>(), len as usize) };
+        let end = slice.iter().position(|&c| c == 0).unwrap_or(slice.len());
+        let text = String::from_utf16_lossy(&slice[..end]);
+        (!text.trim().is_empty()).then_some(text)
+    };
+    let mut product_version = None;
+    let translation = wide_str("\\VarFileInfo\\Translation");
+    let mut ptr = std::ptr::null_mut();
+    let mut len = 0u32;
+    if unsafe {
+        VerQueryValueW(
+            buffer.as_ptr().cast(),
+            translation.as_ptr(),
+            &mut ptr,
+            &mut len,
+        )
+    } != 0
+        && !ptr.is_null()
+        && len >= 4
+    {
+        let pairs = (len as usize) / 4;
+        for index in 0..pairs {
+            let entry = unsafe { std::ptr::read_unaligned(ptr.cast::<[u16; 2]>().add(index)) };
+            if let Some(value) = query_product_version(entry[0], entry[1]) {
+                product_version = Some(value);
+                break;
+            }
+        }
+    }
+    if product_version.is_none() {
+        product_version =
+            query_product_version(0x0409, 0x04B0).or_else(|| query_product_version(0x0000, 0x04B0));
+    }
+    classify_pe_powershell7_version(product_version.as_deref(), fixed)
+}
+
+unsafe fn cert_attr_string(
+    cert: *const CERT_CONTEXT,
+    oid: windows_sys::core::PCSTR,
+) -> Option<String> {
+    let required = CertGetNameStringW(
+        cert,
+        CERT_NAME_ATTR_TYPE,
+        0,
+        oid.cast(),
+        std::ptr::null_mut(),
+        0,
+    );
+    if required <= 1 {
+        return None;
+    }
+    let mut buffer = vec![0u16; required as usize];
+    let written = CertGetNameStringW(
+        cert,
+        CERT_NAME_ATTR_TYPE,
+        0,
+        oid.cast(),
+        buffer.as_mut_ptr(),
+        required,
+    );
+    if written <= 1 {
+        return None;
+    }
+    let end = (written as usize).min(buffer.len()).saturating_sub(1);
+    Some(String::from_utf16_lossy(&buffer[..end]))
+}
+
+fn verify_microsoft_authenticode(path: &Path) -> bool {
+    let wide = wide_os_str(path.as_os_str());
+    let mut file_info = WINTRUST_FILE_INFO {
+        cbStruct: std::mem::size_of::<WINTRUST_FILE_INFO>() as u32,
+        pcwszFilePath: wide.as_ptr(),
+        hFile: std::ptr::null_mut(),
+        pgKnownSubject: std::ptr::null_mut(),
+    };
+    let mut data = WINTRUST_DATA {
+        cbStruct: std::mem::size_of::<WINTRUST_DATA>() as u32,
+        dwUIChoice: WTD_UI_NONE,
+        fdwRevocationChecks: WTD_REVOKE_NONE,
+        dwUnionChoice: WTD_CHOICE_FILE,
+        Anonymous: WINTRUST_DATA_0 {
+            pFile: &mut file_info,
+        },
+        dwStateAction: WTD_STATEACTION_VERIFY,
+        dwProvFlags: WTD_REVOCATION_CHECK_NONE | WTD_CACHE_ONLY_URL_RETRIEVAL,
+        ..Default::default()
+    };
+    let mut action = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+    let status = unsafe {
+        WinVerifyTrust(
+            INVALID_HANDLE_VALUE,
+            &mut action,
+            (&mut data as *mut WINTRUST_DATA).cast(),
+        )
+    };
+    let trusted = if status == 0 {
+        unsafe {
+            let prov_data = WTHelperProvDataFromStateData(data.hWVTStateData);
+            let signer = if prov_data.is_null() {
+                std::ptr::null_mut()
+            } else {
+                WTHelperGetProvSignerFromChain(prov_data, 0, 0, 0)
+            };
+            let cert = if signer.is_null() {
+                std::ptr::null_mut()
+            } else {
+                WTHelperGetProvCertFromChain(signer, 0)
+            };
+            if cert.is_null()
+                || (*cert).pCert.is_null()
+                || (*cert).fTestCert != 0
+                || (*cert).fSelfSigned != 0
+            {
+                false
+            } else {
+                let org = cert_attr_string((*cert).pCert, szOID_ORGANIZATION_NAME);
+                let cn = cert_attr_string((*cert).pCert, szOID_COMMON_NAME);
+                org.as_deref() == Some("Microsoft Corporation")
+                    && cn
+                        .as_deref()
+                        .is_some_and(|name| name.starts_with("Microsoft"))
+            }
+        }
+    } else {
+        false
+    };
+    data.dwStateAction = WTD_STATEACTION_CLOSE;
+    unsafe {
+        let _ = WinVerifyTrust(
+            INVALID_HANDLE_VALUE,
+            &mut action,
+            (&mut data as *mut WINTRUST_DATA).cast(),
+        );
+    }
+    trusted
+}
+
+pub(crate) fn inspect_powershell7(
+    path: &Path,
+) -> Result<InspectedPowerShell7, WindowsNativePreparationError> {
+    if !path.is_file() {
+        return Err(WindowsNativePreparationError::with_reason(
+            "TERMINAL_NATIVE_PROFILE_UNSUPPORTED",
+            windows_powershell7_missing_reason(),
+        ));
+    }
+    let version = read_pe_powershell7_version(path).ok_or_else(|| {
+        WindowsNativePreparationError::code_only("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")
+    })?;
+    let (numeric, canonical) = match version {
+        PowerShell7VersionCheck::Supported { numeric, canonical } => (numeric, canonical),
+        PowerShell7VersionCheck::Unsupported { reported } => {
+            return Err(WindowsNativePreparationError::with_reason(
+                "TERMINAL_NATIVE_PROFILE_UNSUPPORTED",
+                windows_powershell7_too_old_reason(&reported),
+            ));
+        }
+    };
+    if !verify_microsoft_authenticode(path) {
+        return Err(WindowsNativePreparationError::with_reason(
+            "TERMINAL_NATIVE_PROFILE_UNSUPPORTED",
+            WINDOWS_POWERSHELL7_UNTRUSTED_REASON,
+        ));
+    }
+    Ok(InspectedPowerShell7 {
+        path: path.to_path_buf(),
+        numeric,
+        version: canonical,
+    })
+}
+
+pub(crate) fn powershell7_candidates() -> impl Iterator<Item = PathBuf> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let mut raw = std::env::split_paths(&path)
+        .map(|directory| directory.join("pwsh.exe"))
+        .collect::<Vec<_>>();
+    for env_key in ["ProgramW6432", "ProgramFiles"] {
+        if let Some(directory) = std::env::var_os(env_key) {
+            raw.push(PathBuf::from(directory).join("PowerShell/7/pwsh.exe"));
+        }
+    }
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+        let base = PathBuf::from(local_app_data);
+        raw.push(base.join("Microsoft/PowerShell/7/pwsh.exe"));
+        raw.push(base.join("Microsoft/WindowsApps/pwsh.exe"));
+    }
+    if let Some(user_profile) = std::env::var_os("USERPROFILE") {
+        let base = PathBuf::from(user_profile);
+        raw.push(base.join("scoop/apps/pwsh/current/pwsh.exe"));
+    }
+    let mut seen = HashSet::new();
+    raw.into_iter().filter(move |candidate| {
+        if !candidate.is_absolute() || !candidate.is_file() {
+            return false;
+        }
+        let key = fs::canonicalize(candidate)
+            .unwrap_or_else(|_| candidate.clone())
+            .to_string_lossy()
+            .to_ascii_lowercase();
+        seen.insert(key)
+    })
+}
+
+pub(crate) fn select_powershell7(
+    resources: &Path,
+) -> Result<InspectedPowerShell7, WindowsNativePreparationError> {
     let artifact = editors::read_catalogue(resources, "windows-x64")?
         .into_iter()
         .find(|artifact| {
             artifact.profile.verified_profile_id.as_deref() == Some(POWERSHELL7_NATIVE_PROFILE)
         })
-        .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
-    let shell = powershell7_candidates()
-        .find(|candidate| file_sha(candidate).is_ok_and(|digest| digest == artifact.shell_sha256))
-        .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
-    editors::verify(&artifact, &shell, &resources.join(&artifact.module))?;
-    Ok(shell)
+        .ok_or_else(|| {
+            WindowsNativePreparationError::code_only("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")
+        })?;
+    let mut best: Option<InspectedPowerShell7> = None;
+    let mut too_old_reason: Option<String> = None;
+    let mut untrusted = false;
+    for candidate in powershell7_candidates() {
+        if let Some(expected_sha) = artifact.shell_sha256.as_deref() {
+            if !file_sha(&candidate).is_ok_and(|digest| digest == expected_sha) {
+                continue;
+            }
+        }
+        match inspect_powershell7(&candidate) {
+            Ok(inspected) => {
+                let mut runtime_profile = artifact.profile.clone();
+                runtime_profile.shell_version = Some(inspected.version.clone());
+                if editors::verify_windows_host(
+                    &artifact,
+                    &runtime_profile,
+                    &candidate,
+                    &resources.join(&artifact.module),
+                )
+                .is_err()
+                {
+                    continue;
+                }
+                let replace = best
+                    .as_ref()
+                    .is_none_or(|current| inspected.numeric > current.numeric);
+                if replace {
+                    best = Some(inspected);
+                }
+            }
+            Err(error) => match error.integration_reason.as_deref() {
+                Some(reason) if reason.starts_with("windowsPowerShell7TooOld:") => {
+                    if too_old_reason.is_none() {
+                        too_old_reason = Some(reason.to_owned());
+                    }
+                }
+                Some(WINDOWS_POWERSHELL7_UNTRUSTED_REASON) => {
+                    untrusted = true;
+                }
+                _ => {}
+            },
+        }
+    }
+    if let Some(selected) = best {
+        return Ok(selected);
+    }
+    if let Some(reason) = too_old_reason {
+        return Err(WindowsNativePreparationError::with_reason(
+            "TERMINAL_NATIVE_PROFILE_UNSUPPORTED",
+            reason,
+        ));
+    }
+    if untrusted {
+        return Err(WindowsNativePreparationError::with_reason(
+            "TERMINAL_NATIVE_PROFILE_UNSUPPORTED",
+            WINDOWS_POWERSHELL7_UNTRUSTED_REASON,
+        ));
+    }
+    Err(WindowsNativePreparationError::with_reason(
+        "TERMINAL_NATIVE_PROFILE_UNSUPPORTED",
+        windows_powershell7_missing_reason(),
+    ))
+}
+
+pub(crate) fn matching_powershell7(resources: &Path) -> Result<PathBuf, String> {
+    select_powershell7(resources)
+        .map(|inspected| inspected.path)
+        .map_err(|error| error.code)
 }
 
 #[cfg(test)]
@@ -180,15 +560,26 @@ pub(crate) struct PreparedNativePowerShell {
 }
 impl PreparedNativePowerShell {
     pub fn prepare(shell: &Path, resources: &Path, data: &Path) -> Result<Self, String> {
+        Self::prepare_detailed(shell, resources, data).map_err(|error| error.code)
+    }
+
+    pub fn prepare_detailed(
+        shell: &Path,
+        resources: &Path,
+        data: &Path,
+    ) -> Result<Self, WindowsNativePreparationError> {
         if !cfg!(target_arch = "x86_64") {
             return Err("TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into());
         }
+        let inspected = inspect_powershell7(shell)?;
         let digest = file_sha(shell)?;
         let artifact = editors::read_catalogue(resources, "windows-x64")?
             .into_iter()
             .find(|p| {
-                p.shell_sha256 == digest
-                    && p.profile.verified_profile_id.as_deref() == Some(POWERSHELL7_NATIVE_PROFILE)
+                p.profile.verified_profile_id.as_deref() == Some(POWERSHELL7_NATIVE_PROFILE)
+                    && p.shell_sha256
+                        .as_deref()
+                        .is_none_or(|expected| expected == digest)
             })
             .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
         let editor_sha = artifact
@@ -199,6 +590,8 @@ impl PreparedNativePowerShell {
         if artifact.profile.shell != nip::ShellFamily::PowerShell7 {
             return Err("TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH".into());
         }
+        let mut runtime_profile = artifact.profile.clone();
+        runtime_profile.shell_version = Some(inspected.version);
         let modules =
             crate::terminal_integration::prepare_bundled_powershell_module_for_host(data, false)?;
         let conpty = super::windows_conpty::prepare(data)?;
@@ -217,7 +610,8 @@ impl PreparedNativePowerShell {
         let library = root.path().join("shellspan_native_input_editors.dll");
         fs::copy(resources.join(&artifact.module), &library)
             .map_err(|_| "TERMINAL_NATIVE_ARTIFACTS_UNAVAILABLE")?;
-        let profile = editors::verify(&artifact, shell, &library)?.bind_private_conpty(&conpty)?;
+        let profile = editors::verify_windows_host(&artifact, &runtime_profile, shell, &library)?
+            .bind_private_conpty(&conpty)?;
         let transport = root.path().join("transport.cs");
         fs::write(
             &transport,
@@ -256,7 +650,7 @@ impl PreparedNativePowerShell {
         // classifier does not treat that prefix as an ordinary local drive.
         // The files, hashes, ACLs and execution policy remain unchanged.
         let quote_path = |path: &Path| quote(&crate::path_utils::portable_local_path(path));
-        let json = serde_json::to_string(&artifact.profile)
+        let json = serde_json::to_string(&runtime_profile)
             .map_err(|_| "TERMINAL_NATIVE_MANIFEST_INVALID")?;
         let mut startup = "Import-Module PSReadLine -ErrorAction Stop\n".to_string();
         if let Some(isolated) = crate::path_utils::configured_data_directory() {

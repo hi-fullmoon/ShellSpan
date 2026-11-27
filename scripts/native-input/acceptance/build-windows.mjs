@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {statSync,mkdirSync,readFileSync,writeFileSync,copyFileSync,openSync,closeSync} from 'node:fs';
 import {resolve,join,dirname,win32} from 'node:path';
 import {parseArgs} from 'node:util';
-import {selectWindowsProfiles} from './windows-profiles.mjs';
+import {isSupportedPowerShell7Version,selectWindowsProfiles} from './windows-profiles.mjs';
 import {nativeInputBuildDirectory,nativeInputBuildPath} from '../integration/resource-paths.mjs';
 const {values}=parseArgs({options:{shell:{type:'string',multiple:true},'list-shells':{type:'boolean'}}});
 const selected=selectWindowsProfiles(values.shell);
@@ -37,15 +37,17 @@ const buildRevision=JSON.parse(readFileSync(resolve(root,'scripts/dependency-bui
 assert(/^shellspan[1-9][0-9]*$/.test(buildRevision),'Reviewed provider build revision required');
 const expectedEditor=sha(resolve(root,'src-tauri/resources/powershell/PSReadLine/2.4.5/Microsoft.PowerShell.PSReadLine.dll'));
 const profiles=[];
-for(const{shell,expectedVersion}of selected){
+for(const{shell,minimumVersion}of selected){
   const environment={...process.env};
   environment.PSModulePath=[win32.normalize(resolve(root,'src-tauri/resources/powershell')),win32.normalize(join(dirname(pwsh),'Modules')),environment.PSModulePath??''].filter(Boolean).join(';');
-  const actual=JSON.parse(execFileSync(pwsh,['-NoLogo','-NoProfile','-Command',"Import-Module PSReadLine -ErrorAction Stop; $m=Get-Module PSReadLine; $a=[Microsoft.PowerShell.PSConsoleReadLine].Assembly; @{engine=$PSVersionTable.PSVersion.ToString();editor=$m.Version.ToString();assembly=$a.Location}|ConvertTo-Json -Compress"],{env:environment,encoding:'utf8',windowsHide:true}).trim());
-  assert.equal(actual.engine,expectedVersion);assert.equal(actual.editor,'2.4.5');assert.equal(sha(actual.assembly),expectedEditor,'Loaded provider differs from the reviewed private assembly');
-  const id=`powershell-${expectedVersion}-psreadline-2.4.5-${buildRevision}-conpty1.25.260930003-graphemes-windows-x64-native`;
-  const profile={shell,shellVersion:actual.engine,editor:'psReadLine',editorVersion:actual.editor,editorNumericVersion:20405,adapterVersion:'1',verifiedProfileId:id};
+  const actual=JSON.parse(execFileSync(pwsh,['-NoLogo','-NoProfile','-Command',"Import-Module PSReadLine -ErrorAction Stop; $m=Get-Module PSReadLine; $a=[Microsoft.PowerShell.PSConsoleReadLine].Assembly; @{engine=$PSVersionTable.PSVersion.ToString();edition=$PSVersionTable.PSEdition;editor=$m.Version.ToString();assembly=$a.Location}|ConvertTo-Json -Compress"],{env:environment,encoding:'utf8',windowsHide:true}).trim());
+  assert.equal(actual.edition,'Core','Windows native provider requires PowerShell 7 (Core edition)');
+  assert(isSupportedPowerShell7Version(actual.engine),`PowerShell ${actual.engine} does not satisfy minimum ${minimumVersion} (< 8.0.0 stable)`);
+  assert.equal(actual.editor,'2.4.5');assert.equal(sha(actual.assembly),expectedEditor,'Loaded provider differs from the reviewed private assembly');
+  const id=`powershell-7-psreadline-2.4.5-${buildRevision}-conpty1.25.260930003-graphemes-windows-x64-native`;
+  const profile={shell,shellVersion:null,editor:'psReadLine',editorVersion:actual.editor,editorNumericVersion:20405,adapterVersion:'1',verifiedProfileId:id};
   mkdirSync(resolve(resources,id),{recursive:true});copyFileSync(library,resolve(resources,id,'shellspan_native_input_editors.dll'));
-  profiles.push({profile,shellSha256:sha(pwsh),moduleSha256:sha(library),module:`${id}/shellspan_native_input_editors.dll`,editorSha256:expectedEditor});
+  profiles.push({profile,moduleSha256:sha(library),module:`${id}/shellspan_native_input_editors.dll`,editorSha256:expectedEditor});
 }
 writeFileSync(resolve(resources,'editors-windows-x64.json'),JSON.stringify({version:1,profiles,sources},null,2)+'\n');
 console.log(JSON.stringify({target:'windows-x64',fullMatrix:values.shell===undefined,profiles:profiles.map(p=>p.profile.verifiedProfileId)}));

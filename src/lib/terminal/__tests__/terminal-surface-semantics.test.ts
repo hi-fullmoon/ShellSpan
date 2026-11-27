@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   resolveTerminalSurfacePresentation,
   terminalConnectionPresentationState,
+  windowsPowerShell7Unavailable,
 } from '../terminal-surface-semantics';
 
 describe('terminal surface semantics', () => {
@@ -44,5 +45,28 @@ describe('terminal surface semantics', () => {
       state: 'directFallback',
       realTerminalState: 'unavailable',
     });
+  });
+
+  it('parses structured Windows PowerShell 7 unavailable reasons and ignores unrelated ones', () => {
+    expect(windowsPowerShell7Unavailable('windowsPowerShell7Missing:7.4.0')).toEqual({
+      kind: 'missing',
+      minimum: '7.4.0',
+    });
+    expect(windowsPowerShell7Unavailable('windowsPowerShell7TooOld:7.3.11:7.4.0')).toEqual({
+      kind: 'tooOld',
+      actual: '7.3.11',
+      minimum: '7.4.0',
+    });
+    expect(windowsPowerShell7Unavailable('windowsPowerShell7TooOld:7.5.0-preview.3:7.4.0')).toEqual({
+      kind: 'tooOld',
+      actual: '7.5.0-preview.3',
+      minimum: '7.4.0',
+    });
+    expect(windowsPowerShell7Unavailable('windowsPowerShell7Untrusted')).toEqual({
+      kind: 'untrusted',
+    });
+    expect(windowsPowerShell7Unavailable('nativeProfileMismatch')).toBeNull();
+    expect(windowsPowerShell7Unavailable('remoteGlibcTooOld:2.27:2.28')).toBeNull();
+    expect(windowsPowerShell7Unavailable(undefined)).toBeNull();
   });
 });

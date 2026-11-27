@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
-import { remoteGlibcMismatch } from '@/lib/terminal/terminal-surface-semantics';
+import { remoteGlibcMismatch, windowsPowerShell7Unavailable } from '@/lib/terminal/terminal-surface-semantics';
 import type { AgentExecutionSurface } from '@/types/agent-session';
 import {
   AGENT_PERMISSION_MODES,
@@ -174,7 +174,8 @@ const unsubscribeTerminalStore = useTerminalStore.subscribe((terminalState, prev
     // validated conversation binding and capability state once connected.
     const reconnectingSurface = session.reconnecting && predecessor
       ? permissionState.conversationSurfaces[predecessor.sessionId]?.surface
-        ?? (remoteGlibcMismatch(predecessor.integrationReason) ? 'direct' : previousPreference?.reconnectingSurface)
+        ?? (remoteGlibcMismatch(predecessor.integrationReason) || windowsPowerShell7Unavailable(predecessor.integrationReason)
+          ? 'direct' : previousPreference?.reconnectingSurface)
       : undefined;
     nextPreferences[session.sessionId] = {
       mode: defaults.agentPermissionMode,

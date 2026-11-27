@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { TriangleAlertIcon } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useI18n } from '@/hooks/useI18n';
-import type { RemoteGlibcMismatch } from '@/lib/terminal/terminal-surface-semantics';
+import type { RemoteGlibcMismatch, WindowsPowerShell7Unavailable } from '@/lib/terminal/terminal-surface-semantics';
 import { cn } from '@/lib/utils';
 import { AI_NOTICE_ACTION_ROW_CLASS, AI_NOTICE_COPY_CLASS, AI_NOTICE_COPY_WITH_ACTION_CLASS } from './workspace/ai-style-classes';
 import { AiNoticeAction } from './workspace/ai-notice-action';
@@ -12,6 +12,7 @@ interface AgentTerminalBusyNoticeProps {
   readonly state?: 'busy' | 'initializing' | 'unavailable' | 'recoveryRequired';
   readonly focusMode?: boolean;
   readonly glibcMismatch?: RemoteGlibcMismatch | null;
+  readonly windowsPowerShell7Fallback?: WindowsPowerShell7Unavailable | null;
   /** A new runtime rejection during this busy period, rather than a historical failure. */
   readonly blockedAttempt?: string | null;
   /** Changes on navigation, but stays stable when submitting creates a session. */
@@ -59,6 +60,7 @@ function TerminalBusyFeedback({
   focusMode = false,
   blockedAttempt = null,
   glibcMismatch,
+  windowsPowerShell7Fallback,
 }: AgentTerminalBusyNoticeProps): React.ReactNode {
   const { t } = useI18n();
   const [initialBlockedAttempt] = useState(blockedAttempt);
@@ -72,7 +74,7 @@ function TerminalBusyFeedback({
   if (state === 'initializing' && !initializationTimedOut) return null;
   if (state === 'busy' && !blocked) return null;
 
-  const unavailableLocked = state === 'unavailable' && !glibcMismatch && !focusMode && switchDirectLockedByUncertain;
+  const unavailableLocked = state === 'unavailable' && !glibcMismatch && !windowsPowerShell7Fallback && !focusMode && switchDirectLockedByUncertain;
   const action = state === 'recoveryRequired' || unavailableLocked
     ? (onReconnectTerminal
       ? { label: t('ai.workspace.status.reconnect'), disabled: reconnectDisabled ?? disabled, onClick: onReconnectTerminal }
@@ -80,11 +82,23 @@ function TerminalBusyFeedback({
     : (onSwitchDirect
       ? { label: t('agent.executionSurface.v1.switchDirect'), disabled, onClick: onSwitchDirect }
       : null);
+  const windowsPowerShell7Message = windowsPowerShell7Fallback
+    ? windowsPowerShell7Fallback.kind === 'missing'
+      ? t('agent.executionSurface.v1.windowsPowerShell7Missing', { minimum: windowsPowerShell7Fallback.minimum })
+      : windowsPowerShell7Fallback.kind === 'tooOld'
+        ? t('agent.executionSurface.v1.windowsPowerShell7TooOld', {
+          actual: windowsPowerShell7Fallback.actual,
+          minimum: windowsPowerShell7Fallback.minimum,
+        })
+        : t('agent.executionSurface.v1.windowsPowerShell7Untrusted')
+    : null;
   const message = glibcMismatch
     ? t('agent.executionSurface.v1.remoteGlibcTooOld', { ...glibcMismatch })
-    : unavailableLocked
-      ? t('agent.executionSurface.v1.unavailableLockedDescription')
-      : t(descriptions[state][focusMode ? 'focus' : 'terminal']);
+    : windowsPowerShell7Message
+      ? windowsPowerShell7Message
+      : unavailableLocked
+        ? t('agent.executionSurface.v1.unavailableLockedDescription')
+        : t(descriptions[state][focusMode ? 'focus' : 'terminal']);
 
   return (
     <Alert variant="warning" size="sm" role="status" data-slot="terminal-busy-notice"

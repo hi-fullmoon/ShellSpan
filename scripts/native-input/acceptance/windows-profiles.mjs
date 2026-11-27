@@ -2,8 +2,16 @@ import assert from 'node:assert/strict';
 import {isAbsolute,resolve} from 'node:path';
 
 const profiles=Object.freeze([
-  Object.freeze({shell:'powerShell7',expectedVersion:'7.6.9'}),
+  Object.freeze({shell:'powerShell7',minimumVersion:'7.4.0'}),
 ]);
+
+export function isSupportedPowerShell7Version(version){
+  if(typeof version!=='string')return false;
+  const match=/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(version);
+  if(!match)return false;
+  const major=Number(match[1]),minor=Number(match[2]);
+  return major===7&&minor>=4;
+}
 
 export function selectWindowsProfiles(selection){
   if(selection===undefined)return [...profiles];

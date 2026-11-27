@@ -435,7 +435,7 @@ impl RemoteNativeBash {
         let (shell_sha, _) = timings.readback(&sftp, &identity.executable)?;
         let artifact = editors::read_catalogue(resources, "linux-aarch64-glibc-2.36")?
             .into_iter()
-            .find(|p| p.shell_sha256 == shell_sha)
+            .find(|p| p.shell_sha256.as_deref() == Some(shell_sha.as_str()))
             .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
         let module = resources.join(&artifact.module);
         let core = resources.join(
@@ -474,9 +474,13 @@ impl RemoteNativeBash {
         {
             return Err("TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH".into());
         }
+        let expected_shell_sha = artifact
+            .shell_sha256
+            .as_deref()
+            .ok_or("TERMINAL_NATIVE_MANIFEST_INVALID")?;
         let profile = VerifiedNativeProfile::verify_editor(
             &artifact.profile,
-            &artifact.shell_sha256,
+            expected_shell_sha,
             &shell_sha,
             &module,
             &artifact.module_sha256,

@@ -14,7 +14,8 @@ pub(crate) const BASH_ACCEPT_KEY: &[u8] = b"\x18a";
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct EditorArtifact {
     pub profile: nip::PeerProfile,
-    pub shell_sha256: String,
+    #[serde(default)]
+    pub shell_sha256: Option<String>,
     #[serde(default)]
     pub shell: Option<String>,
     pub module_sha256: String,
@@ -258,10 +259,24 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<EditorArti
         }
     }
     for artifact in &catalogue.profiles {
-        if target == "windows-x64"
-            && artifact.editor_sha256.as_ref().is_none_or(|value| {
-                value.len() != 64 || !value.bytes().all(|b| b.is_ascii_hexdigit())
-            })
+        let valid_sha =
+            |value: &str| value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit());
+        if target == "windows-x64" {
+            if artifact
+                .editor_sha256
+                .as_deref()
+                .is_none_or(|value| !valid_sha(value))
+                || artifact
+                    .shell_sha256
+                    .as_deref()
+                    .is_some_and(|value| !valid_sha(value))
+            {
+                return Err("TERMINAL_NATIVE_MANIFEST_INVALID".into());
+            }
+        } else if artifact
+            .shell_sha256
+            .as_deref()
+            .is_none_or(|value| !valid_sha(value))
         {
             return Err("TERMINAL_NATIVE_MANIFEST_INVALID".into());
         }
@@ -319,8 +334,8 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<EditorArti
             }
             if target == "macos-arm64"
                 && (artifact.shell.as_deref() != Some(format!("{id}/zsh").as_str())
-                    || artifact.shell_sha256
-                        != super::registration::mac_zle_pin("privateMainSha256")?
+                    || artifact.shell_sha256.as_deref()
+                        != Some(super::registration::mac_zle_pin("privateMainSha256")?.as_str())
                     || catalogue
                         .sources
                         .get("scripts/dependency-builds/zsh/native-history.patch")
@@ -352,7 +367,7 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<EditorArti
                 .map_err(|_| "TERMINAL_NATIVE_ARTIFACTS_UNAVAILABLE")?
                 .file_type()
                 .is_symlink()
-                || file_sha(&path)? != artifact.shell_sha256
+                || artifact.shell_sha256.as_deref() != Some(file_sha(&path)?.as_str())
             {
                 return Err("TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH".into());
             }
@@ -390,10 +405,34 @@ pub(crate) fn verify(
     shell: &Path,
     module: &Path,
 ) -> Result<VerifiedNativeProfile, String> {
+    let expected_shell_sha = artifact
+        .shell_sha256
+        .as_deref()
+        .ok_or("TERMINAL_NATIVE_MANIFEST_INVALID")?;
     VerifiedNativeProfile::verify_editor(
         &artifact.profile,
-        &artifact.shell_sha256,
+        expected_shell_sha,
         &file_sha(shell)?,
+        module,
+        &artifact.module_sha256,
+    )
+}
+#[cfg(windows)]
+pub(crate) fn verify_windows_host(
+    artifact: &EditorArtifact,
+    runtime_profile: &nip::PeerProfile,
+    shell: &Path,
+    module: &Path,
+) -> Result<VerifiedNativeProfile, String> {
+    let actual_shell_sha = file_sha(shell)?;
+    let expected_shell_sha = artifact
+        .shell_sha256
+        .as_deref()
+        .unwrap_or(actual_shell_sha.as_str());
+    VerifiedNativeProfile::verify_editor(
+        runtime_profile,
+        expected_shell_sha,
+        &actual_shell_sha,
         module,
         &artifact.module_sha256,
     )

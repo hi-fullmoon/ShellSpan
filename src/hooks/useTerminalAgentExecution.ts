@@ -8,7 +8,7 @@ import {
   isTauriRuntime,
   type LocalSandboxStatus,
 } from '@/lib/ipc/tauri';
-import { remoteGlibcMismatch } from '@/lib/terminal/terminal-surface-semantics';
+import { remoteGlibcMismatch, windowsPowerShell7Unavailable } from '@/lib/terminal/terminal-surface-semantics';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
@@ -150,8 +150,9 @@ export function useTerminalAgentExecution(
     || macStatusChecking
     || (Boolean(profileId) && (!profileCheck || profileCheck.checking));
   const glibcMismatch = remoteGlibcMismatch(terminal?.integrationReason);
+  const windowsPowerShell7Fallback = windowsPowerShell7Unavailable(terminal?.integrationReason);
   const localDirectOnly = localSandbox && !localSandboxSupportsVisiblePty;
-  const creationSurface: AgentExecutionSurface = localDirectOnly || profileSandbox || glibcMismatch
+  const creationSurface: AgentExecutionSurface = localDirectOnly || profileSandbox || glibcMismatch || windowsPowerShell7Fallback
     ? 'direct'
     : localSandboxSupportsVisiblePty && !preference?.surfaceExplicit
       ? 'boundTerminal'
@@ -172,5 +173,6 @@ export function useTerminalAgentExecution(
     sandboxChecking,
     sandboxEnabled,
     glibcMismatch,
+    windowsPowerShell7Fallback,
   };
 }
