@@ -1,6 +1,10 @@
 import type { Terminal } from '@xterm/xterm';
 import type { TerminalColorScheme } from '@/types';
-import { applyTerminalColorOverrides, type TerminalColorOverrides } from '@/lib/terminal/terminal-colors';
+import {
+  applyTerminalColorOverrides,
+  LIGHT_TERMINAL_ANSI_COLORS,
+  type TerminalColorOverrides,
+} from '@/lib/terminal/terminal-colors';
 
 export type TerminalTheme = NonNullable<ConstructorParameters<typeof Terminal>[0]>['theme'];
 
@@ -178,28 +182,27 @@ const TERMINAL_COLOR_THEMES: Record<Exclude<TerminalColorScheme, 'app'>, Termina
     cursor: '#0969da',
     selectionBackground: LIGHT_SELECTION_BACKGROUND,
     selectionInactiveBackground: LIGHT_SELECTION_INACTIVE_BACKGROUND,
-    black: '#24292f',
-    red: '#cf222e',
-    green: '#116329',
-    yellow: '#4d2d00',
-    blue: '#0969da',
-    magenta: '#8250df',
-    cyan: '#1b7c83',
-    white: '#f6f8fa',
+    ...LIGHT_TERMINAL_ANSI_COLORS,
   },
 };
+
+function isDarkAppTheme(): boolean {
+  return document.documentElement.dataset.theme === 'dark';
+}
 
 function readAppColor(variable: string, lightFallback: string, darkFallback: string): string {
   const resolved = getComputedStyle(document.documentElement).getPropertyValue(variable).trim();
   if (resolved) return resolved;
-  return document.documentElement.dataset.theme === 'dark' ? darkFallback : lightFallback;
+  return isDarkAppTheme() ? darkFallback : lightFallback;
 }
 
 function resolveBaseTerminalTheme(colorScheme: TerminalColorScheme): TerminalTheme {
   if (colorScheme !== 'app') return { ...TERMINAL_COLOR_THEMES[colorScheme], overviewRulerBorder: '#00000000' };
+  const ansiPalette = isDarkAppTheme() ? undefined : LIGHT_TERMINAL_ANSI_COLORS;
   return {
     // Keep search markers without xterm's default full-height ruler border.
     overviewRulerBorder: '#00000000',
+    ...ansiPalette,
     background: readAppColor('--app-surface', '#ffffff', '#202122'),
     foreground: readAppColor('--app-text', '#181818', '#d4d4d8'),
     cursor: readAppColor('--app-primary', '#282828', '#b3b3b8'),

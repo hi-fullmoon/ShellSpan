@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsPanel } from '../settings-panel';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
@@ -753,5 +754,28 @@ describe('SettingsPanel', () => {
     } finally {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
     }
+  });
+
+  it('displays readable labels for terminal minimum contrast ratio and updates the store', async () => {
+    const user = userEvent.setup();
+    useAppStore.setState({ activeSettingsSection: 'terminal', terminalMinimumContrastRatio: 4.5 });
+    render(<SettingsPanel />);
+    await waitFor(() => {});
+
+    const trigger = screen.getByRole('combobox', { name: 'settings.terminal.minimumContrastRatio' });
+    expect(trigger).toHaveTextContent('settings.terminal.minimumContrastRatio.standard');
+    expect(trigger).not.toHaveTextContent('4.5');
+
+    await user.click(trigger);
+    await user.click(await screen.findByRole('option', { name: 'settings.terminal.minimumContrastRatio.off' }));
+
+    expect(useAppStore.getState().terminalMinimumContrastRatio).toBe(1);
+    expect(trigger).toHaveTextContent('settings.terminal.minimumContrastRatio.off');
+
+    await user.click(trigger);
+    await user.click(await screen.findByRole('option', { name: 'settings.terminal.minimumContrastRatio.high' }));
+
+    expect(useAppStore.getState().terminalMinimumContrastRatio).toBe(7);
+    expect(trigger).toHaveTextContent('settings.terminal.minimumContrastRatio.high');
   });
 });

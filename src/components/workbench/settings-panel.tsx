@@ -60,6 +60,10 @@ import { INITIAL_PETDEX_DIAGNOSTIC_VIEW, petdexDiagnosticStatus, reducePetdexDia
 import { SettingRow, SettingsGroup } from './settings-layout';
 import { TerminalTitleSettings } from '@/components/terminal/terminal-title-settings';
 import { TerminalColorSchemeControl } from '@/components/terminal/terminal-color-settings';
+import {
+  normalizeTerminalMinimumContrastRatio,
+  TERMINAL_MINIMUM_CONTRAST_RATIOS,
+} from '@/lib/terminal/terminal-colors';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
 import { cn } from '@/lib/utils';
 
@@ -269,6 +273,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     return sizes.sort((a, b) => a - b)
       .map((size) => ({ value: String(size), label: t('settings.terminal.fontSizeValue', { size }) }));
   }, [t, terminalFontSize]);
+  const terminalMinimumContrastRatio = useAppStore((state) => state.terminalMinimumContrastRatio);
+  const setTerminalMinimumContrastRatio = useAppStore((state) => state.setTerminalMinimumContrastRatio);
+  const terminalMinimumContrastItems = useMemo(() => TERMINAL_MINIMUM_CONTRAST_RATIOS.map((ratio) => ({
+    value: String(ratio),
+    label: ratio === 1
+      ? t('settings.terminal.minimumContrastRatio.off')
+      : ratio === 7
+        ? t('settings.terminal.minimumContrastRatio.high')
+        : t('settings.terminal.minimumContrastRatio.standard'),
+  })), [t]);
   const terminalCursorBlink = useAppStore((state) => state.terminalCursorBlink);
   const setTerminalCursorBlink = useAppStore((state) => state.setTerminalCursorBlink);
   const terminalCursorStyle = useAppStore((state) => state.terminalCursorStyle);
@@ -904,6 +918,28 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </SettingRow>
                 <SettingRow label={t('settings.terminal.colorScheme')} description={t('settings.terminal.colorSchemeDescription')}>
                   <TerminalColorSchemeControl />
+                </SettingRow>
+                <SettingRow label={t('settings.terminal.minimumContrastRatio')} description={t('settings.terminal.minimumContrastRatioDescription')}>
+                  <Select
+                    items={terminalMinimumContrastItems}
+                    value={String(terminalMinimumContrastRatio)}
+                    onValueChange={(value) => {
+                      if (value) setTerminalMinimumContrastRatio(normalizeTerminalMinimumContrastRatio(Number(value)));
+                    }}
+                  >
+                    <SelectTrigger size="sm" aria-label={t('settings.terminal.minimumContrastRatio')}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {terminalMinimumContrastItems.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
                 </SettingRow>
                 <SettingRow label={t('settings.terminal.fontSize')} description={t('settings.terminal.fontSizeDescription')}>
                   <Select items={terminalFontSizeItems} value={String(terminalFontSize)} onValueChange={(value) => { if (value) setTerminalFontSize(Number(value)); }}>

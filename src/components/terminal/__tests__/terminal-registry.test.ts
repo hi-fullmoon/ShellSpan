@@ -440,6 +440,10 @@ describe('terminalRegistry', () => {
       cursor: '#1e293b',
       selectionBackground: 'rgba(15, 23, 42, 0.22)',
       selectionInactiveBackground: 'rgba(15, 23, 42, 0.12)',
+      blue: '#0969da',
+      brightYellow: '#9a6700',
+      brightGreen: '#1a7f37',
+      brightCyan: '#0e7490',
     });
 
     document.documentElement.dataset.theme = 'dark';
@@ -457,7 +461,58 @@ describe('terminalRegistry', () => {
       selectionBackground: 'rgba(34, 211, 238, 0.3)',
       selectionInactiveBackground: 'rgba(34, 211, 238, 0.18)',
     });
+    expect(controller.terminal.options.theme?.brightYellow).toBeUndefined();
     expect(controller.terminal.element?.style.backgroundColor).toBe('rgb(15, 23, 42)');
+  });
+
+  it('provides a complete 16-color light preset and applies minimumContrastRatio updates', () => {
+    expect(resolveTerminalTheme('light')).toMatchObject({
+      background: '#ffffff',
+      foreground: '#1f2328',
+      blue: '#0969da',
+      brightBlack: '#57606a',
+      brightGreen: '#1a7f37',
+      brightYellow: '#9a6700',
+      brightBlue: '#1f6feb',
+      brightCyan: '#0e7490',
+      brightWhite: '#ffffff',
+    });
+
+    const controller = createController('s-contrast');
+    controller.attach(document.createElement('div'));
+    expect(controller.terminal.options.minimumContrastRatio).toBe(4.5);
+
+    terminalRegistry.updateOptions({
+      fontSize: 14,
+      fontFamily: 'system',
+      cursorBlink: true,
+      cursorStyle: 'block',
+      scrollback: 10000,
+      colorScheme: 'light',
+      minimumContrastRatio: 7,
+      autoReconnect: false,
+      lineHeight: 1,
+      letterSpacing: 0,
+      urlDetection: true,
+      bellStyle: 'none',
+    });
+    expect(controller.terminal.options.minimumContrastRatio).toBe(7);
+
+    terminalRegistry.updateOptions({
+      fontSize: 14,
+      fontFamily: 'system',
+      cursorBlink: true,
+      cursorStyle: 'block',
+      scrollback: 10000,
+      colorScheme: 'light',
+      minimumContrastRatio: 1,
+      autoReconnect: false,
+      lineHeight: 1,
+      letterSpacing: 0,
+      urlDetection: true,
+      bellStyle: 'none',
+    });
+    expect(controller.terminal.options.minimumContrastRatio).toBe(1);
   });
 
   it('keeps app-scheme light fallbacks in sync with the light palette in base.css', () => {

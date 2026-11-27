@@ -46,6 +46,7 @@ export const TerminalControllerLayer: React.FC = () => {
   const terminalScrollback = useAppStore((s) => s.terminalScrollback);
   const terminalColorScheme = useAppStore((s) => s.terminalColorScheme);
   const terminalColorOverrides = useAppStore((s) => s.terminalColorOverrides);
+  const terminalMinimumContrastRatio = useAppStore((s) => s.terminalMinimumContrastRatio);
   const terminalAutoReconnect = useAppStore((s) => s.terminalAutoReconnect);
   const terminalLineHeight = useAppStore((s) => s.terminalLineHeight);
   const terminalLetterSpacing = useAppStore((s) => s.terminalLetterSpacing);
@@ -67,13 +68,14 @@ export const TerminalControllerLayer: React.FC = () => {
       scrollback: terminalScrollback,
       colorScheme: terminalColorScheme,
       colorOverrides: terminalColorOverrides,
+      minimumContrastRatio: terminalMinimumContrastRatio,
       autoReconnect: terminalAutoReconnect,
       lineHeight: terminalLineHeight,
       letterSpacing: terminalLetterSpacing,
       urlDetection: terminalUrlDetection,
       bellStyle: terminalBellStyle,
     });
-  }, [terminalAltClickMovesCursor, terminalAutoReconnect, terminalBellStyle, terminalColorScheme, terminalColorOverrides, terminalCursorBlink, terminalCursorStyle, terminalCustomFontFamily, terminalFontFamily, terminalFontSize, terminalLetterSpacing, terminalLineHeight, terminalMacOptionIsMeta, terminalScrollback, terminalUrlDetection, terminalWebglRenderer]);
+  }, [terminalAltClickMovesCursor, terminalAutoReconnect, terminalBellStyle, terminalColorScheme, terminalColorOverrides, terminalCursorBlink, terminalCursorStyle, terminalCustomFontFamily, terminalFontFamily, terminalFontSize, terminalLetterSpacing, terminalLineHeight, terminalMacOptionIsMeta, terminalMinimumContrastRatio, terminalScrollback, terminalUrlDetection, terminalWebglRenderer]);
 
   useEffect(() => {
     const root = document.documentElement;

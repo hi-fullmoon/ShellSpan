@@ -1,6 +1,14 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { enableRealCanvas } from '@/tests/real-canvas';
-import { applyTerminalColorOverrides, normalizeTerminalColorOverrides, terminalSearchDecorations } from '../terminal-colors';
+import {
+  applyTerminalColorOverrides,
+  DEFAULT_TERMINAL_MINIMUM_CONTRAST_RATIO,
+  LIGHT_TERMINAL_ANSI_COLORS,
+  normalizeTerminalColorOverrides,
+  normalizeTerminalMinimumContrastRatio,
+  TERMINAL_ANSI_COLOR_KEYS,
+  terminalSearchDecorations,
+} from '../terminal-colors';
 import { useAppStore } from '@/stores/appStore';
 
 describe('terminal custom colors', () => {
@@ -55,5 +63,21 @@ describe('terminal custom colors', () => {
     expect(terminalSearchDecorations({ background: '#000000' }, overrides)).toMatchObject({ matchBackground: '#800000', activeMatchBackground: '#000000' });
     expect(terminalSearchDecorations({ background: '#ffffff' }, overrides)).toMatchObject({ matchBackground: '#ff7f7f', activeMatchBackground: '#ffffff' });
     expect(terminalSearchDecorations({ background: '#123456' }, { searchMatchBackground: '#aabbccff' }).matchBackground).toBe('#aabbcc');
+  });
+
+  it('normalizes supported minimum contrast ratios and provides a complete 16-color light ANSI palette', () => {
+    expect(DEFAULT_TERMINAL_MINIMUM_CONTRAST_RATIO).toBe(4.5);
+    expect(normalizeTerminalMinimumContrastRatio(1)).toBe(1);
+    expect(normalizeTerminalMinimumContrastRatio(4.5)).toBe(4.5);
+    expect(normalizeTerminalMinimumContrastRatio(7)).toBe(7);
+    expect(normalizeTerminalMinimumContrastRatio(0)).toBe(4.5);
+    expect(normalizeTerminalMinimumContrastRatio(99)).toBe(4.5);
+    expect(normalizeTerminalMinimumContrastRatio('4.5')).toBe(4.5);
+    expect(normalizeTerminalMinimumContrastRatio(undefined)).toBe(4.5);
+
+    for (const key of TERMINAL_ANSI_COLOR_KEYS) {
+      expect(LIGHT_TERMINAL_ANSI_COLORS[key]).toMatch(/^#[\da-f]{6}$/);
+    }
+    expect(LIGHT_TERMINAL_ANSI_COLORS.brightYellow).toBe('#9a6700');
   });
 });

@@ -1,5 +1,11 @@
 import { create } from 'zustand';
-import { normalizeTerminalColorOverrides, type TerminalColorOverrides } from '@/lib/terminal/terminal-colors';
+import {
+  DEFAULT_TERMINAL_MINIMUM_CONTRAST_RATIO,
+  normalizeTerminalColorOverrides,
+  normalizeTerminalMinimumContrastRatio,
+  type TerminalColorOverrides,
+  type TerminalMinimumContrastRatio,
+} from '@/lib/terminal/terminal-colors';
 import { DEFAULT_TAB_TITLE_TEMPLATE, normalizeTabTitleOverrides, validTabTitleTemplate } from '@/lib/terminal/tab-title';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { shallow } from 'zustand/shallow';
@@ -107,6 +113,7 @@ interface AppPreferences extends PetdexMessagePreferences {
   terminalScrollback: number;
   terminalColorScheme: TerminalColorScheme;
   terminalColorOverrides: TerminalColorOverrides;
+  terminalMinimumContrastRatio: TerminalMinimumContrastRatio;
   terminalMultiLinePasteWarning: boolean;
   terminalLargePasteWarning: boolean;
   terminalAutoReconnect: boolean;
@@ -180,6 +187,7 @@ interface AppState extends AppPreferences {
   setTerminalScrollback: (lines: number) => void;
   setTerminalColorScheme: (scheme: TerminalColorScheme) => void;
   setTerminalColorOverrides: (colors: TerminalColorOverrides) => void;
+  setTerminalMinimumContrastRatio: (ratio: TerminalMinimumContrastRatio) => void;
   setTerminalMultiLinePasteWarning: (enabled: boolean) => void;
   setTerminalLargePasteWarning: (enabled: boolean) => void;
   setTerminalAutoReconnect: (enabled: boolean) => void;
@@ -210,7 +218,7 @@ const PREFERENCE_KEYS: readonly (keyof AppPreferences)[] = [
   'terminalCustomFontFamily', 'terminalMacOptionIsMeta', 'terminalAltClickMovesCursor', 'terminalWebglRenderer', 'terminalOsc52Policy',
   'terminalCommandNotificationThresholdSec',
   'terminalCursorStyle', 'terminalCopyOnSelect', 'terminalScrollback',
-  'terminalColorScheme', 'terminalColorOverrides', 'terminalMultiLinePasteWarning',
+  'terminalColorScheme', 'terminalColorOverrides', 'terminalMinimumContrastRatio', 'terminalMultiLinePasteWarning',
   'terminalLargePasteWarning', 'terminalAutoReconnect',
   'terminalLineHeight', 'terminalLetterSpacing', 'terminalUrlDetection',
   'terminalTrimTrailingWhitespace',
@@ -250,6 +258,7 @@ function getDefaultPreferences(): AppPreferences {
     terminalScrollback: 10000,
     terminalColorScheme: 'app',
     terminalColorOverrides: {},
+    terminalMinimumContrastRatio: DEFAULT_TERMINAL_MINIMUM_CONTRAST_RATIO,
     terminalMultiLinePasteWarning: true,
     terminalLargePasteWarning: true,
     terminalAutoReconnect: false,
@@ -366,6 +375,7 @@ function entriesToPreferences(entries: [string, string][]): Partial<AppPreferenc
     terminalScrollback: (prefs.terminalScrollback as number) ?? defaults.terminalScrollback,
     terminalColorScheme: (prefs.terminalColorScheme as TerminalColorScheme) ?? defaults.terminalColorScheme,
     terminalColorOverrides: normalizeTerminalColorOverrides(prefs.terminalColorOverrides),
+    terminalMinimumContrastRatio: normalizeTerminalMinimumContrastRatio(prefs.terminalMinimumContrastRatio),
     terminalMultiLinePasteWarning: (prefs.terminalMultiLinePasteWarning as boolean) ?? defaults.terminalMultiLinePasteWarning,
     terminalLargePasteWarning: (prefs.terminalLargePasteWarning as boolean) ?? defaults.terminalLargePasteWarning,
     terminalAutoReconnect: (prefs.terminalAutoReconnect as boolean) ?? defaults.terminalAutoReconnect,
@@ -595,6 +605,7 @@ export const useAppStore = create<AppState>()(
     setTerminalScrollback: (terminalScrollback) => set({ terminalScrollback }),
     setTerminalColorScheme: (terminalColorScheme) => set({ terminalColorScheme }),
     setTerminalColorOverrides: (colors) => set({ terminalColorOverrides: normalizeTerminalColorOverrides(colors) }),
+    setTerminalMinimumContrastRatio: (ratio) => set({ terminalMinimumContrastRatio: normalizeTerminalMinimumContrastRatio(ratio) }),
     setTerminalMultiLinePasteWarning: (terminalMultiLinePasteWarning) => set({ terminalMultiLinePasteWarning }),
     setTerminalLargePasteWarning: (terminalLargePasteWarning) => set({ terminalLargePasteWarning }),
     setTerminalAutoReconnect: (terminalAutoReconnect) => set({ terminalAutoReconnect }),
@@ -667,6 +678,7 @@ useAppStore.subscribe(
     terminalScrollback: state.terminalScrollback,
     terminalColorScheme: state.terminalColorScheme,
     terminalColorOverrides: state.terminalColorOverrides,
+    terminalMinimumContrastRatio: state.terminalMinimumContrastRatio,
     terminalMultiLinePasteWarning: state.terminalMultiLinePasteWarning,
     terminalLargePasteWarning: state.terminalLargePasteWarning,
     terminalAutoReconnect: state.terminalAutoReconnect,

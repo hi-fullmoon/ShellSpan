@@ -57,7 +57,12 @@ import type { IDisposable, ILink } from '@xterm/xterm';
 import { useTerminalStore } from '@/stores/terminalStore';
 import type { TerminalDisplayBinding } from '@/types/agent-session';
 import { restoreTerminalDisplay } from '@/lib/terminal/terminal-display-restore';
-import type { TerminalColorOverrides } from '@/lib/terminal/terminal-colors';
+import {
+  DEFAULT_TERMINAL_MINIMUM_CONTRAST_RATIO,
+  normalizeTerminalMinimumContrastRatio,
+  type TerminalColorOverrides,
+  type TerminalMinimumContrastRatio,
+} from '@/lib/terminal/terminal-colors';
 import { playBellSound, resolveTerminalTheme } from './terminal-themes';
 import { applyTrackedUserInput, hasKnownCredentialPrompt as detectKnownCredentialPrompt } from './terminal-input-heuristics';
 
@@ -122,6 +127,7 @@ export interface TerminalDisplayPreferences {
   scrollback: number;
   colorScheme: TerminalColorScheme;
   colorOverrides?: TerminalColorOverrides;
+  minimumContrastRatio?: TerminalMinimumContrastRatio;
   autoReconnect: boolean;
   lineHeight: number;
   letterSpacing: number;
@@ -136,6 +142,7 @@ const DEFAULT_TERMINAL_PREFERENCES: TerminalDisplayPreferences = {
   cursorStyle: 'block',
   scrollback: 10000,
   colorScheme: 'app',
+  minimumContrastRatio: DEFAULT_TERMINAL_MINIMUM_CONTRAST_RATIO,
   autoReconnect: false,
   lineHeight: 1,
   letterSpacing: 0,
@@ -303,6 +310,7 @@ class TerminalControllerImpl implements TerminalController {
       },
       fontSize: preferences.fontSize,
       theme: resolveTerminalTheme(preferences.colorScheme, preferences.colorOverrides),
+      minimumContrastRatio: normalizeTerminalMinimumContrastRatio(preferences.minimumContrastRatio),
       cursorBlink: preferences.cursorBlink,
       rightClickSelectsWord: false,
       cursorStyle: preferences.cursorStyle,
@@ -1594,6 +1602,10 @@ class TerminalControllerImpl implements TerminalController {
       const theme = resolveTerminalTheme(preferences.colorScheme, preferences.colorOverrides);
       this.terminal.options.theme = theme;
       this.updateElementStyles(theme);
+    }
+    const nextMinimumContrastRatio = normalizeTerminalMinimumContrastRatio(preferences.minimumContrastRatio);
+    if (normalizeTerminalMinimumContrastRatio(previous.minimumContrastRatio) !== nextMinimumContrastRatio) {
+      this.terminal.options.minimumContrastRatio = nextMinimumContrastRatio;
     }
     if (previous.lineHeight !== preferences.lineHeight) {
       this.terminal.options.lineHeight = preferences.lineHeight;

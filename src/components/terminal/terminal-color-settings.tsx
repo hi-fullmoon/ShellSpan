@@ -127,6 +127,7 @@ function TerminalColorPreview({ colors }: { colors: Record<TerminalColorKey, str
       cols: 36, rows: 4, fontSize: 13, lineHeight: 1.3,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
       disableStdin: true, scrollback: 0, cursorBlink: false, cursorInactiveStyle: 'block', allowProposedApi: true,
+      minimumContrastRatio: useAppStore.getState().terminalMinimumContrastRatio,
     });
     const fit = new FitAddon();
     const search = new SearchAddon();
@@ -134,9 +135,10 @@ function TerminalColorPreview({ colors }: { colors: Record<TerminalColorKey, str
     terminal.loadAddon(search);
     const updateTheme = () => {
       if (disposed) return;
-      const { terminalColorScheme, terminalColorOverrides } = useAppStore.getState();
+      const { terminalColorScheme, terminalColorOverrides, terminalMinimumContrastRatio } = useAppStore.getState();
       const theme = resolveTerminalTheme(terminalColorScheme, terminalColorOverrides);
       terminal.options.theme = theme;
+      terminal.options.minimumContrastRatio = terminalMinimumContrastRatio;
       host.style.backgroundColor = theme?.background ?? '';
       if (terminal.element) {
         terminal.element.style.backgroundColor = theme?.background ?? '';
@@ -156,7 +158,11 @@ function TerminalColorPreview({ colors }: { colors: Record<TerminalColorKey, str
     terminal.write(`\x1b[32m$\x1b[0m echo "${greeting}"\r\n${greeting}\r\n${match}  ${match}\r\n$ ${t('settings.terminal.colors.previewCursor')} A\x1b[D`, updateTheme);
     updateTheme();
     const unsubscribe = useAppStore.subscribe((state, previous) => {
-      if (state.terminalColorScheme !== previous.terminalColorScheme || state.terminalColorOverrides !== previous.terminalColorOverrides) updateTheme();
+      if (
+        state.terminalColorScheme !== previous.terminalColorScheme
+        || state.terminalColorOverrides !== previous.terminalColorOverrides
+        || state.terminalMinimumContrastRatio !== previous.terminalMinimumContrastRatio
+      ) updateTheme();
     });
     const resize = new ResizeObserver(() => { fit.fit(); updateTheme(); });
     resize.observe(host);

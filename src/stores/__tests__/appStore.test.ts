@@ -301,6 +301,7 @@ describe('appStore', () => {
   it('updates terminal safety and continuity preferences', () => {
     const state = useAppStore.getState();
     state.setTerminalColorScheme('solarizedDark');
+    state.setTerminalMinimumContrastRatio(7);
     state.setTerminalMultiLinePasteWarning(false);
     state.setTerminalLargePasteWarning(false);
     state.setTerminalAutoReconnect(true);
@@ -314,6 +315,7 @@ describe('appStore', () => {
 
     expect(useAppStore.getState()).toMatchObject({
       terminalColorScheme: 'solarizedDark',
+      terminalMinimumContrastRatio: 7,
       terminalMultiLinePasteWarning: false,
       terminalLargePasteWarning: false,
       terminalAutoReconnect: true,
