@@ -285,7 +285,7 @@ describe('ConnectionList', () => {
     expect(search).not.toHaveAttribute('title');
   });
 
-  it('renders the profile list in a grid capped at three columns', () => {
+  it('renders the profile list in an auto-fill grid that scales columns on wide viewports', () => {
     const { container } = render(
       <ConnectionList
         profiles={[makeProfile()]}
@@ -314,8 +314,7 @@ describe('ConnectionList', () => {
     ).not.toBeInTheDocument();
 
     const grid = container.querySelector('.grid');
-    expect(grid).toHaveClass('grid-cols-1', 'gap-2', '@min-[640px]/connections:grid-cols-2', '@min-[900px]/connections:grid-cols-3');
-    expect(grid?.parentElement).toHaveClass('@container/connections');
+    expect(grid).toHaveClass('w-full', 'grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))]', 'gap-2');
     expect(grid).not.toHaveAttribute('style');
     expect(grid).not.toHaveClass('items-start');
   });
@@ -703,6 +702,42 @@ describe('ConnectionList', () => {
     }
     expect(screen.getByRole('menuitem', { name: 'common.delete' })).toHaveAttribute('data-variant', 'destructive');
     expect(screen.queryByRole('menuitem', { name: 'deployment.openForHost' })).not.toBeInTheDocument();
+  });
+
+  it('renders the sandbox badge in the card footer row without crowding header labels', () => {
+    const { container } = render(
+      <ConnectionList
+        profiles={[
+          makeProfile({
+            name: 'Production API',
+            group: 'Production',
+            tags: ['api', 'critical'],
+            sandboxMode: 'workspaceWrite',
+            jumpHost: { host: 'bastion.example.com', username: 'jump', port: 22, authMethod: 'agent' },
+          }),
+        ]}
+        initialized
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onConnectTerminal={() => {}}
+        onConnectSftp={() => {}}
+        onDuplicate={() => {}}
+        onToggleFavorite={() => {}}
+        onImport={() => {}}
+        onExport={() => {}}
+      />,
+    );
+
+    const sandboxBadge = container.querySelector('[data-connection-sandbox-mode="workspaceWrite"]');
+    expect(sandboxBadge).not.toBeNull();
+    expect(sandboxBadge?.closest('[data-slot="connection-labels"]')).toBeNull();
+    expect(sandboxBadge?.closest('.mt-auto')).not.toBeNull();
+    expect(sandboxBadge).toHaveClass('min-w-0', 'shrink');
+    expect(screen.getByText('connection.form.jumpHost', { selector: 'span' }).closest('[data-slot="badge"]')).toHaveClass(
+      'hidden',
+      '@min-[25rem]/connection-card:inline-flex',
+    );
   });
 
   it('renders distinct translated labels and SVG icons for agent and keyboardInteractive auth methods', () => {

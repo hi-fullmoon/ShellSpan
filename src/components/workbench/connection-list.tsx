@@ -61,12 +61,10 @@ import { WorkbenchPage, WorkbenchPageContent, WorkbenchPageHeader, WorkbenchSear
 const CARD_ACTION_DEBOUNCE_MS = 500;
 const CONNECTION_TRANSFER_MENU_ITEM_CLASS =
   "[&_svg:not([class*='size-'])]:size-3.5 [&>svg]:translate-y-px [&>svg]:text-muted-foreground";
-// Keep column changes in the same layout pass as AI-panel resizing.
+// Keep column changes in the same layout pass as AI-panel resizing while scaling columns on wide screens.
 export const ConnectionCardGrid = ({ children }: { children: React.ReactNode }) => (
-  <div className="@container/connections w-full">
-    <div className="grid grid-cols-1 gap-2 @min-[640px]/connections:grid-cols-2 @min-[900px]/connections:grid-cols-3">
-      {children}
-    </div>
+  <div className="grid w-full grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))] gap-2">
+    {children}
   </div>
 );
 const CONNECTION_MENU_ITEM_CLASS =
@@ -485,18 +483,8 @@ const ConnectionCard = React.memo<ConnectionCardProps>(
               </TooltipTrigger>
               <TooltipContent>{authLabel}</TooltipContent>
             </Tooltip>
-            {profile.sandboxMode && (
-              <Badge
-                variant="secondary"
-                className="shrink-0 gap-1"
-                data-connection-sandbox-mode={profile.sandboxMode}
-              >
-                <ShieldCheckIcon aria-hidden="true" className="size-3 shrink-0" />
-                <span>{t(`connection.sandbox.badge.${profile.sandboxMode}`)}</span>
-              </Badge>
-            )}
             {profile.jumpHost && <Badge variant="outline" className={cn('min-w-0 max-w-24 shrink',
-              profile.group && tags.length > 1 && 'hidden @min-[25rem]/connection-card:inline-flex',
+              (profile.group || tags.length > 0) && 'hidden @min-[25rem]/connection-card:inline-flex',
             )}><span className="truncate">{t('connection.form.jumpHost')}</span></Badge>}
             {profile.group && <Badge variant="secondary" className="min-w-0 max-w-[min(6rem,40%)] shrink-0"><ConnectionText text={profile.group} /></Badge>}
             {tags[0] && (
@@ -538,8 +526,20 @@ const ConnectionCard = React.memo<ConnectionCardProps>(
             </div>
           </div>
         )}
-        <div className="mt-auto flex flex-wrap items-center gap-1">
-          <div className="flex w-full items-center justify-end gap-1">
+        <div className="mt-auto flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1">
+            {profile.sandboxMode && (
+              <Badge
+                variant="secondary"
+                className="min-w-0 max-w-full shrink gap-1"
+                data-connection-sandbox-mode={profile.sandboxMode}
+              >
+                <ShieldCheckIcon aria-hidden="true" className="size-3 shrink-0" />
+                <ConnectionText text={t(`connection.sandbox.badge.${profile.sandboxMode}`)} kind="sandbox" />
+              </Badge>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center justify-end gap-1">
             <div className="flex flex-wrap items-center gap-1">
               <IconActionButton
                 className="size-8"
