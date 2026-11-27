@@ -824,6 +824,8 @@ export type RemoteFsError =
   | RemoteFsErrorHostKeyMismatch
   | RemoteFsErrorOther;
 
+export type TransferProgressPhase = 'transferring' | 'finalizing';
+
 export interface UploadProgressEvent {
   operationId: string;
   currentPath?: string;
@@ -831,6 +833,7 @@ export interface UploadProgressEvent {
   uploadedBytes: number;
   totalSteps: number;
   completedSteps: number;
+  phase?: TransferProgressPhase;
 }
 
 export interface DownloadProgressEvent {
@@ -840,6 +843,7 @@ export interface DownloadProgressEvent {
   downloadedBytes: number;
   totalSteps: number;
   completedSteps: number;
+  phase?: TransferProgressPhase;
 }
 
 export interface DeleteProgressEvent {
@@ -969,6 +973,7 @@ export interface RemoteCopyProgressEvent {
   copiedBytes: number;
   totalSteps: number;
   completedSteps: number;
+  phase?: TransferProgressPhase;
 }
 
 export interface CopyRemoteToRemoteRequest {

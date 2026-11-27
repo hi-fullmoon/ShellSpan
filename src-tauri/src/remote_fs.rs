@@ -11,8 +11,8 @@ use crate::models::{
     RemoteCopyProgressTracker, RemoteCopyScanStats, RemoteDirectoryListing, RemoteDirectoryRequest,
     RemoteEntryOwners, RemoteEntryOwnersRequest, RemoteFileEntry, RemoteFileKind, RemoteFsError,
     RenameRemotePathRequest, TransferBatchResult, TransferEventEmitter, TransferItemResult,
-    TransferItemStatus, UpdateRemotePermissionsRequest, UploadConflictPolicy,
-    UploadLocalPathsRequest, UploadProgressTracker, UploadScanStats,
+    TransferItemStatus, TransferProgressPhase, UpdateRemotePermissionsRequest,
+    UploadConflictPolicy, UploadLocalPathsRequest, UploadProgressTracker, UploadScanStats,
     REMOTE_FILE_READ_CANCELLED_MESSAGE,
 };
 use crate::portable_local_path;
@@ -1145,6 +1145,9 @@ fn upload_local_paths_inner<E: TransferEventEmitter>(
             cancel_message = Some(message);
             break;
         }
+        progress
+            .set_phase(TransferProgressPhase::Transferring)
+            .map_err(|message| RemoteFsError::Other { message })?;
         let local_path = Path::new(local_path);
         let conflict_policy = request
             .conflict_policies
@@ -1190,15 +1193,17 @@ fn upload_local_paths_inner<E: TransferEventEmitter>(
     }
 
     metrics.start_phase(TransferPhase::Finalize);
-    progress
-        .set_current_path(None)
-        .map_err(|message| RemoteFsError::Other { message })?;
-
     if let Some(message) = cancel_message {
+        progress
+            .set_current_path(None)
+            .map_err(|error| RemoteFsError::Other { message: error })?;
         return Err(RemoteFsError::Other { message });
     }
     progress
-        .ensure_not_cancelled()
+        .set_phase(TransferProgressPhase::Finalizing)
+        .map_err(|message| RemoteFsError::Other { message })?;
+    progress
+        .set_current_path(None)
         .map_err(|message| RemoteFsError::Other { message })?;
 
     let batch = TransferBatchResult { items };
@@ -1250,6 +1255,9 @@ fn upload_single_local_path<E: TransferEventEmitter>(
             )?;
             progress
                 .ensure_not_cancelled()
+                .map_err(|message| RemoteFsError::Other { message })?;
+            progress
+                .set_phase(TransferProgressPhase::Finalizing)
                 .map_err(|message| RemoteFsError::Other { message })?;
             finalize_remote_copy_staging(sftp, payload, &destination_path, true, true)
         })?;
@@ -1410,6 +1418,9 @@ fn download_remote_paths_inner<E: TransferEventEmitter>(
             cancel_message = Some(message);
             break;
         }
+        progress
+            .set_phase(TransferProgressPhase::Transferring)
+            .map_err(|message| RemoteFsError::Other { message })?;
         let remote_path = manifest.source_path.as_path();
         let source_path = path_to_string(remote_path);
         let download_result = (|| {
@@ -1462,15 +1473,17 @@ fn download_remote_paths_inner<E: TransferEventEmitter>(
     }
 
     metrics.start_phase(TransferPhase::Finalize);
-    progress
-        .set_current_path(None)
-        .map_err(|message| RemoteFsError::Other { message })?;
-
     if let Some(message) = cancel_message {
+        progress
+            .set_current_path(None)
+            .map_err(|error| RemoteFsError::Other { message: error })?;
         return Err(RemoteFsError::Other { message });
     }
     progress
-        .ensure_not_cancelled()
+        .set_phase(TransferProgressPhase::Finalizing)
+        .map_err(|message| RemoteFsError::Other { message })?;
+    progress
+        .set_current_path(None)
         .map_err(|message| RemoteFsError::Other { message })?;
 
     let batch = TransferBatchResult { items };
@@ -1729,6 +1742,12 @@ fn download_remote_entry<E: TransferEventEmitter>(
     let staging = private_local_download_directory(destination_directory, ".shellspan-download-")?;
     let payload = staging.path().join("payload");
     download_remote_entry_to_path(sftp, manifest, &payload, progress, transfer_buffer)?;
+    progress
+        .ensure_not_cancelled()
+        .map_err(|message| RemoteFsError::Other { message })?;
+    progress
+        .set_phase(TransferProgressPhase::Finalizing)
+        .map_err(|message| RemoteFsError::Other { message })?;
     loop {
         progress
             .ensure_not_cancelled()
@@ -2247,6 +2266,9 @@ fn copy_remote_to_remote_with_sftp<E: TransferEventEmitter>(
         progress
             .ensure_not_cancelled()
             .map_err(|message| RemoteFsError::Other { message })?;
+        progress
+            .set_phase(TransferProgressPhase::Transferring)
+            .map_err(|message| RemoteFsError::Other { message })?;
         let result = execute_remote_copy(
             source,
             destination,
@@ -2268,10 +2290,10 @@ fn copy_remote_to_remote_with_sftp<E: TransferEventEmitter>(
 
     metrics.start_phase(TransferPhase::Finalize);
     progress
-        .set_current_path(None)
+        .set_phase(TransferProgressPhase::Finalizing)
         .map_err(|message| RemoteFsError::Other { message })?;
     progress
-        .ensure_not_cancelled()
+        .set_current_path(None)
         .map_err(|message| RemoteFsError::Other { message })?;
     items.sort_by_key(|(index, _)| *index);
     Ok(TransferBatchResult {
@@ -2393,6 +2415,9 @@ fn execute_remote_copy<E: TransferEventEmitter>(
             copy(payload, false, false, progress, transfer_buffer)?;
             progress
                 .ensure_not_cancelled()
+                .map_err(|message| RemoteFsError::Other { message })?;
+            progress
+                .set_phase(TransferProgressPhase::Finalizing)
                 .map_err(|message| RemoteFsError::Other { message })?;
             finalize_remote_copy_staging(
                 destination,
@@ -2976,15 +3001,32 @@ fn stage_remote_tree<T>(
 }
 
 fn remove_remote_entry_simple(sftp: &Sftp, path: &Path) -> Result<(), RemoteFsError> {
-    let stat = sftp.lstat(path).map_err(|error| RemoteFsError::Other {
-        message: format!("failed to inspect remote destination: {error}"),
-    })?;
-    if kind_from_permissions(stat.perm) == RemoteFileKind::Directory {
-        for (child_path, _) in sftp.readdir(path).map_err(|error| RemoteFsError::Other {
-            message: format!("failed to list remote destination: {error}"),
-        })? {
+    remove_remote_entry_simple_with_perm(sftp, path, None)
+}
+
+fn remove_remote_entry_simple_with_perm(
+    sftp: &Sftp,
+    path: &Path,
+    perm: Option<u32>,
+) -> Result<(), RemoteFsError> {
+    let perm = match perm {
+        Some(perm) => Some(perm),
+        None => {
+            sftp.lstat(path)
+                .map_err(|error| RemoteFsError::Other {
+                    message: format!("failed to inspect remote destination: {error}"),
+                })?
+                .perm
+        }
+    };
+    if kind_from_permissions(perm) == RemoteFileKind::Directory {
+        for (child_path, child_stat) in
+            sftp.readdir(path).map_err(|error| RemoteFsError::Other {
+                message: format!("failed to list remote destination: {error}"),
+            })?
+        {
             if !should_skip_remote_child(&child_path) {
-                remove_remote_entry_simple(sftp, &child_path)?;
+                remove_remote_entry_simple_with_perm(sftp, &child_path, child_stat.perm)?;
             }
         }
         sftp.rmdir(path).map_err(|error| RemoteFsError::Other {

@@ -1203,6 +1203,7 @@ export default {
   'sftp.transfer.cancellingDelete': '正在撤销',
   'sftp.transfer.cancelling': '正在取消',
   'sftp.transfer.cancelled': '已撤销',
+  'sftp.transfer.finalizing': '正在完成',
   'sftp.transfer.queued': '已加入队列，等待当前操作完成',
   'sftp.transfer.pending': '排队中',
   'sftp.transfer.items': '项',

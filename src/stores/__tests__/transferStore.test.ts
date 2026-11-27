@@ -720,4 +720,40 @@ describe('transferStore', () => {
       currentPath: operation.currentPath,
     });
   });
+
+  it('tracks finalizing phase while keeping paths occupied, blocks late cancel, and resets on retry', async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    useTransferStore.getState().addOperation({
+      ...operation,
+      operationId: 'replace-dir',
+      connectionId: 'conn-1',
+      paths: ['/remote/web'],
+      status: 'running',
+      cancel,
+    });
+
+    useTransferStore.getState().updateUpload({
+      operationId: 'replace-dir',
+      currentPath: '/local/web/app.js',
+      totalBytes: 100,
+      uploadedBytes: 100,
+      totalSteps: 1,
+      completedSteps: 1,
+      phase: 'finalizing',
+    });
+
+    expect(useTransferStore.getState().operations[0]?.phase).toBe('finalizing');
+    expect(isTransferComplete(useTransferStore.getState().operations[0]!)).toBe(false);
+    expect(hasActivePathOperation('conn-1', ['/remote/web'])).toBe(true);
+
+    await useTransferStore.getState().cancelOperation('replace-dir');
+    expect(cancel).not.toHaveBeenCalled();
+    expect(useTransferStore.getState().operations[0]?.status).toBe('running');
+
+    useTransferStore.getState().markOperationFailed('replace-dir', 'rename failed');
+    expect(useTransferStore.getState().operations[0]?.phase).toBeUndefined();
+
+    useTransferStore.getState().markOperationRunning('replace-dir');
+    expect(useTransferStore.getState().operations[0]?.phase).toBeUndefined();
+  });
 });

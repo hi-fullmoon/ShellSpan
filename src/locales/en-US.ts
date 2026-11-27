@@ -1203,6 +1203,7 @@ export default {
   'sftp.transfer.cancellingDelete': 'Cancelling',
   'sftp.transfer.cancelling': 'Cancelling',
   'sftp.transfer.cancelled': 'Cancelled',
+  'sftp.transfer.finalizing': 'Finalizing',
   'sftp.transfer.queued': 'Queued until the current operation finishes',
   'sftp.transfer.pending': 'Pending',
   'sftp.transfer.items': 'items',

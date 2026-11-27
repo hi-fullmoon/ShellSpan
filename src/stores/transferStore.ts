@@ -5,6 +5,7 @@ import type {
   DeleteProgressEvent,
   DownloadProgressEvent,
   RemoteCopyProgressEvent,
+  TransferProgressPhase,
   UploadProgressEvent,
 } from '@/types';
 
@@ -29,6 +30,7 @@ export interface TransferOperation {
   processedBytes: number;
   totalSteps: number;
   completedSteps: number;
+  phase?: TransferProgressPhase;
   status?:
     | 'pending'
     | 'running'
@@ -67,6 +69,7 @@ interface TransferProgressUpdate {
   processedBytes?: number;
   totalSteps: number;
   completedSteps: number;
+  phase?: TransferProgressPhase;
 }
 
 interface TransferProgressResult {
@@ -90,12 +93,14 @@ function updateOperationProgress(
   const currentPath = progress.currentPath || operation.currentPath;
   const totalBytes = progress.totalBytes ?? operation.totalBytes;
   const processedBytes = progress.processedBytes ?? operation.processedBytes;
+  const phase = progress.phase ?? operation.phase;
   if (
     currentPath === operation.currentPath &&
     totalBytes === operation.totalBytes &&
     processedBytes === operation.processedBytes &&
     progress.totalSteps === operation.totalSteps &&
-    progress.completedSteps === operation.completedSteps
+    progress.completedSteps === operation.completedSteps &&
+    phase === operation.phase
   ) {
     return { operations, pathOccupancyChanged: false };
   }
@@ -108,6 +113,7 @@ function updateOperationProgress(
     processedBytes,
     totalSteps: progress.totalSteps,
     completedSteps: progress.completedSteps,
+    phase,
   };
   next[index] = updatedOperation;
   return {
@@ -150,6 +156,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
           processedBytes: event.uploadedBytes,
           totalSteps: event.totalSteps,
           completedSteps: event.completedSteps,
+          phase: event.phase,
         },
       );
       if (result.operations === state.operations) return state;
@@ -171,6 +178,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
           processedBytes: event.downloadedBytes,
           totalSteps: event.totalSteps,
           completedSteps: event.completedSteps,
+          phase: event.phase,
         },
       );
       if (result.operations === state.operations) return state;
@@ -217,7 +225,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
     set((state) => ({
       operations: state.operations.map((operation) =>
         operation.operationId === operationId
-          ? { ...operation, status: 'running', error: undefined, errorCategory: undefined }
+          ? { ...operation, status: 'running', phase: undefined, error: undefined, errorCategory: undefined }
           : operation,
       ),
       pathOccupancyRevision: state.pathOccupancyRevision + 1,
@@ -227,7 +235,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
     set((state) => ({
       operations: state.operations.map((operation) =>
         operation.operationId === operationId
-          ? { ...operation, status: 'failed', error, errorCategory: classifyError(error).category }
+          ? { ...operation, status: 'failed', phase: undefined, error, errorCategory: classifyError(error).category }
           : operation,
       ),
       pathOccupancyRevision: state.pathOccupancyRevision + 1,
@@ -244,6 +252,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
           processedBytes: event.copiedBytes,
           totalSteps: event.totalSteps,
           completedSteps: event.completedSteps,
+          phase: event.phase,
         },
       );
       if (result.operations === state.operations) return state;
@@ -262,6 +271,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
           ? {
               ...operation,
               status: 'completed',
+              phase: undefined,
               completedSteps: operation.totalSteps,
               processedBytes: operation.totalBytes,
               error: undefined,
@@ -277,7 +287,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
     set((state) => ({
       operations: state.operations.map((operation) =>
         operation.operationId === operationId
-          ? { ...operation, status: 'cancelled', error: undefined, errorCategory: undefined }
+          ? { ...operation, status: 'cancelled', phase: undefined, error: undefined, errorCategory: undefined }
           : operation,
       ),
       pathOccupancyRevision: state.pathOccupancyRevision + 1,
@@ -321,7 +331,7 @@ export const useTransferStore = create<TransferState>()((set) => ({
     const operation = useTransferStore
       .getState()
       .operations.find((item) => item.operationId === operationId);
-    if (!operation?.cancel) return;
+    if (!operation?.cancel || operation.phase === 'finalizing') return;
 
     set((state) => ({
       operations: state.operations.map((item) =>

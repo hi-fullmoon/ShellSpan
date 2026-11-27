@@ -809,6 +809,14 @@ pub(crate) enum ClosedReasonKind {
     Error,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum TransferProgressPhase {
+    #[default]
+    Transferring,
+    Finalizing,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct UploadProgressEvent {
@@ -818,6 +826,7 @@ pub(crate) struct UploadProgressEvent {
     pub(crate) uploaded_bytes: u64,
     pub(crate) total_steps: u64,
     pub(crate) completed_steps: u64,
+    pub(crate) phase: TransferProgressPhase,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -838,6 +847,7 @@ pub(crate) struct DownloadProgressEvent {
     pub(crate) downloaded_bytes: u64,
     pub(crate) total_steps: u64,
     pub(crate) completed_steps: u64,
+    pub(crate) phase: TransferProgressPhase,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -849,6 +859,7 @@ pub(crate) struct RemoteCopyProgressEvent {
     pub(crate) copied_bytes: u64,
     pub(crate) total_steps: u64,
     pub(crate) completed_steps: u64,
+    pub(crate) phase: TransferProgressPhase,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1371,6 +1382,7 @@ pub(crate) struct DownloadProgressTracker<E: TransferEventEmitter> {
     downloaded_bytes: u64,
     total_steps: u64,
     completed_steps: u64,
+    phase: TransferProgressPhase,
     emit_state: ProgressEmitState,
 }
 
@@ -1438,8 +1450,18 @@ impl<E: TransferEventEmitter> DownloadProgressTracker<E> {
             downloaded_bytes: 0,
             total_steps: stats.total_steps,
             completed_steps: 0,
+            phase: TransferProgressPhase::Transferring,
             emit_state: ProgressEmitState::default(),
         }
+    }
+
+    pub(crate) fn set_phase(&mut self, phase: TransferProgressPhase) -> Result<(), String> {
+        if self.phase == phase {
+            return Ok(());
+        }
+        self.phase = phase;
+        self.emit_state.mark_dirty();
+        self.emit_if_due(true)
     }
 
     pub(crate) fn set_current_path(&mut self, path: Option<String>) -> Result<(), String> {
@@ -1504,6 +1526,7 @@ impl<E: TransferEventEmitter> DownloadProgressTracker<E> {
                 downloaded_bytes: self.downloaded_bytes,
                 total_steps: self.total_steps,
                 completed_steps: self.completed_steps,
+                phase: self.phase,
             },
         ) {
             warn!("failed to emit download progress event: {error}");
@@ -1547,6 +1570,7 @@ pub(crate) struct RemoteCopyProgressTracker<E: TransferEventEmitter> {
     copied_bytes: u64,
     total_steps: u64,
     completed_steps: u64,
+    phase: TransferProgressPhase,
     emit_state: ProgressEmitState,
 }
 
@@ -1566,8 +1590,18 @@ impl<E: TransferEventEmitter> RemoteCopyProgressTracker<E> {
             copied_bytes: 0,
             total_steps: stats.total_steps,
             completed_steps: 0,
+            phase: TransferProgressPhase::Transferring,
             emit_state: ProgressEmitState::default(),
         }
+    }
+
+    pub(crate) fn set_phase(&mut self, phase: TransferProgressPhase) -> Result<(), String> {
+        if self.phase == phase {
+            return Ok(());
+        }
+        self.phase = phase;
+        self.emit_state.mark_dirty();
+        self.emit_if_due(true)
     }
 
     pub(crate) fn set_current_path(&mut self, path: Option<String>) -> Result<(), String> {
@@ -1624,6 +1658,7 @@ impl<E: TransferEventEmitter> RemoteCopyProgressTracker<E> {
                 copied_bytes: self.copied_bytes,
                 total_steps: self.total_steps,
                 completed_steps: self.completed_steps,
+                phase: self.phase,
             },
         ) {
             warn!("failed to emit remote copy progress event: {error}");
@@ -1664,6 +1699,7 @@ pub(crate) struct UploadProgressTracker<E: TransferEventEmitter> {
     uploaded_bytes: u64,
     total_steps: u64,
     completed_steps: u64,
+    phase: TransferProgressPhase,
     emit_state: ProgressEmitState,
 }
 
@@ -1693,8 +1729,18 @@ impl<E: TransferEventEmitter> UploadProgressTracker<E> {
             uploaded_bytes: 0,
             total_steps: stats.total_steps,
             completed_steps: 0,
+            phase: TransferProgressPhase::Transferring,
             emit_state: ProgressEmitState::default(),
         }
+    }
+
+    pub(crate) fn set_phase(&mut self, phase: TransferProgressPhase) -> Result<(), String> {
+        if self.phase == phase {
+            return Ok(());
+        }
+        self.phase = phase;
+        self.emit_state.mark_dirty();
+        self.emit_if_due(true)
     }
 
     pub(crate) fn set_current_path(&mut self, path: Option<String>) -> Result<(), String> {
@@ -1751,6 +1797,7 @@ impl<E: TransferEventEmitter> UploadProgressTracker<E> {
                 uploaded_bytes: self.uploaded_bytes,
                 total_steps: self.total_steps,
                 completed_steps: self.completed_steps,
+                phase: self.phase,
             },
         ) {
             warn!("failed to emit upload progress event: {error}");
@@ -2854,6 +2901,55 @@ mod tests {
 
         state.mark_emitted_at(inside_interval);
         assert!(!state.needs_flush());
+    }
+
+    #[test]
+    fn transfer_progress_phase_forces_immediate_emit_and_serializes_camel_case() {
+        #[derive(Clone, Default)]
+        struct RecordingEmitter(std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>);
+
+        impl super::TransferEventEmitter for RecordingEmitter {
+            fn emit_transfer_event<S: serde::Serialize + Clone>(
+                &self,
+                _event: &str,
+                payload: S,
+            ) -> Result<(), String> {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(serde_json::to_value(payload).unwrap());
+                Ok(())
+            }
+        }
+
+        let emitter = RecordingEmitter::default();
+        let mut tracker = super::UploadProgressTracker::new(
+            emitter.clone(),
+            "op-phase".to_string(),
+            std::sync::Arc::default(),
+            super::UploadScanStats {
+                total_bytes: 10,
+                total_steps: 1,
+                total_files: 1,
+            },
+        );
+        tracker.emit().unwrap();
+        tracker
+            .set_phase(super::TransferProgressPhase::Finalizing)
+            .unwrap();
+        tracker
+            .set_phase(super::TransferProgressPhase::Finalizing)
+            .unwrap();
+        tracker
+            .set_phase(super::TransferProgressPhase::Transferring)
+            .unwrap();
+
+        let events = emitter.0.lock().unwrap();
+        let phases: Vec<&str> = events
+            .iter()
+            .map(|event| event["phase"].as_str().unwrap())
+            .collect();
+        assert_eq!(phases, vec!["transferring", "finalizing", "transferring"]);
     }
 }
 

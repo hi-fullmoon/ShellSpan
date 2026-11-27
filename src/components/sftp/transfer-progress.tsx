@@ -181,10 +181,13 @@ export const TransferProgress: React.FC = () => {
 
   const renderOperation = (op: TransferOperation, primary: boolean) => {
         const progress = op.totalBytes > 0 ? Math.max(0, Math.min(100, (op.processedBytes / op.totalBytes) * 100)) : 0;
+        const isFinalizing = (op.status === 'running' || op.status === undefined)
+          && op.phase === 'finalizing' && !isTransferComplete(op);
         const showProgress = op.totalBytes > 0 && op.kind !== 'delete'
-          && (op.status === 'running' || op.status === undefined) && !isTransferComplete(op);
+          && (op.status === 'running' || op.status === undefined) && !isFinalizing && !isTransferComplete(op);
         const speed = speeds.get(op.operationId);
-        const showSpeed = speed !== undefined && speed > 0 && (op.status === 'running' || op.status === undefined) && !isTransferComplete(op);
+        const showSpeed = speed !== undefined && speed > 0
+          && (op.status === 'running' || op.status === undefined) && !isFinalizing && !isTransferComplete(op);
         // A delete that finished (or was cancelled) leaves the remote entry
         // gone, so its row dims instead of staying red/struck through.
         const isDeleteFinished = op.kind === 'delete' && (isTransferComplete(op) || op.status === 'cancelled');
@@ -280,7 +283,7 @@ export const TransferProgress: React.FC = () => {
                 >
                   {showSpeed ? `${formatBytes(speed)}/s` : null}
                 </span>}
-                {(!showProgress || op.totalSteps > 0) && <span
+                {(!showProgress || op.totalSteps > 0) && (op.totalSteps > 0 || !isFinalizing) && <span
                   data-slot="transfer-status"
                   className={cn(
                     'whitespace-nowrap text-right',
@@ -296,11 +299,19 @@ export const TransferProgress: React.FC = () => {
                         ? t('sftp.transfer.pending')
                         : <><span className={cn(isTransferComplete(op) && 'text-app-success')}>{formatTransferProgress(op)}</span>{op.totalSteps > 0 && ` ${t('sftp.transfer.items')}`}</>}
                 </span>}
+                {isFinalizing && (
+                  <span
+                    data-slot="transfer-phase"
+                    className="whitespace-nowrap text-right text-muted-foreground"
+                  >
+                    {t('sftp.transfer.finalizing')}
+                  </span>
+                )}
               </div>
             )}
             {op.status !== 'failed' && (
               <div key={`transfer-actions-${op.operationId}`} className="flex shrink-0 items-center gap-1">
-                {(op.cancel || op.status === 'pending') && op.status !== 'cancelling' && op.status !== 'cancelled' && !isTransferComplete(op) && (
+                {(op.cancel || op.status === 'pending') && op.status !== 'cancelling' && op.status !== 'cancelled' && !isFinalizing && !isTransferComplete(op) && (
                   <Button variant="ghost" size="xs" onClick={() => op.cancel ? void cancelOperation(op.operationId) : removeOperation(op.operationId)}>
                     {t(op.status === 'pending' ? 'sftp.transfer.removeQueued' : 'common.cancel')}
                   </Button>

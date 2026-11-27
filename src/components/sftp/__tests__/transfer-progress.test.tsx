@@ -428,4 +428,68 @@ describe('TransferProgress', () => {
       vi.useRealTimers();
     }
   });
+
+  it('shows finalizing state without progress bar, speed, or cancel action', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      const cancel = vi.fn().mockResolvedValue(undefined);
+      useTransferStore.setState({
+        operations: [{
+          ...failedUpload,
+          status: 'running',
+          error: undefined,
+          retry: undefined,
+          cancel,
+          processedBytes: 0,
+          totalBytes: 2048,
+          completedSteps: 0,
+          totalSteps: 2,
+        }],
+      });
+      render(<TransferProgress />);
+
+      vi.setSystemTime(3_000);
+      act(() => {
+        useTransferStore.getState().updateUpload({
+          operationId: 'upload-1',
+          currentPath: '/tmp/apple-touch-icon.png',
+          totalBytes: 2048,
+          uploadedBytes: 2048,
+          totalSteps: 2,
+          completedSteps: 2,
+          phase: 'transferring',
+        });
+      });
+      expect(screen.getByRole('progressbar', { name: 'apple-touch-icon.png' })).toBeInTheDocument();
+      expect(screen.getByText('1.0 KB/s')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'common.cancel' })).toBeInTheDocument();
+
+      act(() => {
+        useTransferStore.getState().updateUpload({
+          operationId: 'upload-1',
+          currentPath: '/tmp/apple-touch-icon.png',
+          totalBytes: 2048,
+          uploadedBytes: 2048,
+          totalSteps: 2,
+          completedSteps: 2,
+          phase: 'finalizing',
+        });
+      });
+      expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      expect(screen.queryByText('1.0 KB/s')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'common.cancel' })).not.toBeInTheDocument();
+      expect(screen.getByText('2/2')).not.toHaveClass('text-app-success');
+      expect(screen.getByText('sftp.transfer.finalizing')).toBeInTheDocument();
+
+      act(() => {
+        useTransferStore.getState().markOperationCompleted('upload-1');
+      });
+      expect(screen.queryByText('sftp.transfer.finalizing')).not.toBeInTheDocument();
+      expect(screen.getByText('2/2')).toHaveClass('text-app-success');
+      expect(screen.getByRole('button', { name: 'common.close' })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
