@@ -209,28 +209,25 @@ describe('release publication gates', () => {
       push: { tags: ['v*'] },
       workflow_dispatch: expect.any(Object),
     });
-    expect(quality.on).toEqual({ workflow_dispatch: null, workflow_call: expect.any(Object) });
+    expect(quality.on).toEqual({ workflow_dispatch: null });
     expect(cacheWarm.on).toEqual({ workflow_dispatch: null });
   });
 
-  it('requires the full quality gate at the same SHA and serializes publication', async () => {
+  it('enforces preflight quality verification without duplicating quality gate in release and serializes publication', async () => {
     const release = parse(await readFile(path.join(root, '.github/workflows/release.yml'), 'utf8'));
     const quality = parse(await readFile(path.join(root, '.github/workflows/quality-gate.yml'), 'utf8'));
-    expect(release.jobs.quality.uses).toBe('./.github/workflows/quality-gate.yml');
-    expect(release.jobs.quality.with.ref).toBe('${{ needs.preflight.outputs.sha }}');
+    expect(release.jobs.quality).toBeUndefined();
+    expect(release.jobs.preflight.steps.map(step => step.run)).toContain('node scripts/release/release-preflight.mjs');
     expect(release.jobs.build.needs).toEqual(['preflight', 'build-frontend', 'build-native-bash', 'build-native-macos-editor']);
     expect(release.jobs['build-native-bash'].needs).toBe('preflight');
     expect(release.jobs['build-native-macos-editor'].needs).toBe('preflight');
-    expect(release.jobs.quality.needs).toEqual(['preflight', 'build-frontend', 'build-native-macos-editor']);
-    expect(release.jobs.release.needs).toContain('build');
-    expect(release.jobs.release.needs).toContain('quality');
+    expect(release.jobs.release.needs).toEqual(['preflight', 'build']);
     expect(release.jobs.release.if).toBeUndefined();
-    expect(release.jobs.quality['continue-on-error']).toBeUndefined();
     expect(release.jobs.build['continue-on-error']).toBeUndefined();
     expect(release.jobs.release.concurrency.group).toBe('publish-release');
     expect(release.concurrency.group).toContain('inputs.tag || github.ref_name');
     for (const job of Object.values(quality.jobs)) {
-      expect(job.steps.find(step => step.uses?.startsWith('actions/checkout@')).with.ref).toBe('${{ inputs.ref || github.sha }}');
+      expect(job.steps.find(step => step.uses?.startsWith('actions/checkout@')).with.ref).toBe('${{ github.sha }}');
     }
     for (const name of ['build', 'build-frontend', 'build-native-bash', 'build-native-macos-editor', 'release']) {
       expect(release.jobs[name].steps.find(step => step.uses?.startsWith('actions/checkout@')).with.ref).toBe('${{ needs.preflight.outputs.sha }}');
@@ -243,7 +240,7 @@ describe('release publication gates', () => {
   it('builds the frontend once in either entry point and runs platform tests with the current run artifact', async () => {
     const release = parse(await readFile(path.join(root, '.github/workflows/release.yml'), 'utf8'));
     const quality = parse(await readFile(path.join(root, '.github/workflows/quality-gate.yml'), 'utf8'));
-    const artifact = release.jobs.quality.with['frontend-artifact'];
+    const artifact = 'frontend-dist';
     for (const producer of [quality.jobs.frontend, release.jobs['build-frontend']]) {
       expect(producer['runs-on']).toBe('ubuntu-24.04');
       const uploadIndex = producer.steps.findIndex(step => step.uses?.startsWith('actions/upload-artifact@'));
@@ -252,18 +249,15 @@ describe('release publication gates', () => {
       );
       expect(producer.steps[uploadIndex].with).toMatchObject({ name: artifact, path: 'dist', 'if-no-files-found': 'error' });
     }
-    expect(quality.on.workflow_call.inputs['frontend-artifact'].default).toBe('');
-    expect(quality.jobs.frontend.if).toBe('${{ !inputs.frontend-artifact }}');
+    expect(quality.jobs.frontend.if).toBeUndefined();
     const rust = quality.jobs.rust;
     expect(rust.needs).toBe('frontend');
-    expect(rust.if.replace(/\s+/g, ' ')).toBe(
-      "${{ !cancelled() && (needs.frontend.result == 'success' || (inputs.frontend-artifact != '' && needs.frontend.result == 'skipped')) }}",
-    );
+    expect(rust.if).toBeUndefined();
     expect(rust.steps.find(step => step.run === 'pnpm test').if).toBeUndefined();
     expect(rust.steps.map(step => step.run)).not.toContain('pnpm build');
     const download = rust.steps.find(step => step.uses?.startsWith('actions/download-artifact@'));
     expect(download.if).toBeUndefined();
-    expect(download.with).toEqual({ name: `\${{ inputs.frontend-artifact || '${artifact}' }}`, path: 'dist' });
+    expect(download.with).toEqual({ name: artifact, path: 'dist' });
     expect(download['continue-on-error']).toBeUndefined();
     const packageDownload = release.jobs.build.steps.find(step => step.uses?.startsWith('actions/download-artifact@'));
     expect(packageDownload.with).toEqual({ name: artifact, path: 'dist' });
@@ -272,34 +266,23 @@ describe('release publication gates', () => {
     expect(JSON.stringify(release.jobs)).not.toContain('artifacts/');
   });
 
-  it('prepares the macOS shell fixtures before Rust tests and reuses the release ZLE build', async () => {
+  it('prepares the macOS shell fixtures before Rust tests and keeps release ZLE packaging isolated', async () => {
     const release = parse(await readFile(path.join(root, '.github/workflows/release.yml'), 'utf8'));
     const quality = parse(await readFile(path.join(root, '.github/workflows/quality-gate.yml'), 'utf8'));
     const { strategy, steps } = quality.jobs.rust;
     expect(strategy.matrix.include).toContainEqual({ platform: 'macos', runner: 'xcode-27' });
-    expect(quality.on.workflow_call.inputs['macos-editor-artifact'].default).toBe('');
     const preparation = steps.slice(0, steps.findIndex(step => step.name === 'Run Agent terminal contract tests'));
     const buildBash = preparation.find(step => step.name === 'Build pinned Bash and Readline test resources');
     expect(buildBash.if).toBe("runner.os == 'macOS'");
     expect(buildBash.env.SHELLSPAN_NATIVE_BUILD_ROOT).toBe('artifacts/tests');
     const build = preparation.find(step => step.name === 'Build pinned Zsh and ZLE test resources');
-    const download = preparation.find(step => step.name === 'Download pinned Zsh and ZLE test resources');
-    const restore = preparation.find(step => step.name === 'Install downloaded Zsh test resources');
-    expect(build.if).toBe("runner.os == 'macOS' && !inputs.macos-editor-artifact");
+    expect(build.if).toBe("runner.os == 'macOS'");
     expect(build.env.SHELLSPAN_NATIVE_BUILD_ROOT).toBe('artifacts/tests');
-    expect(download.if).toBe("runner.os == 'macOS' && inputs.macos-editor-artifact");
-    expect(download.with).toEqual({ name: '${{ inputs.macos-editor-artifact }}', path: '${{ runner.temp }}/native-macos-editor' });
-    expect(preparation.indexOf(restore)).toBeGreaterThan(preparation.indexOf(download));
-    expect(restore.if).toBe(download.if);
-    expect(restore.run).toContain('test_native_root=artifacts/tests/native-input');
-    expect(restore.run).toContain('$release_native_root/integration/resources/.');
-    expect(restore.run).toContain('$release_native_root/acceptance/dependencies/.');
-    expect(restore.run).toContain('$test_native_root/integration/resources/');
-    expect(restore.run).toContain('$test_native_root/acceptance/dependencies/');
+    expect(preparation.find(step => step.name === 'Download pinned Zsh and ZLE test resources')).toBeUndefined();
+    expect(preparation.find(step => step.name === 'Install downloaded Zsh test resources')).toBeUndefined();
     const producer = release.jobs['build-native-macos-editor'];
     expect(producer.steps.map(step => step.run)).toContain(build.run);
     const upload = producer.steps.find(step => step.uses?.startsWith('actions/upload-artifact@'));
-    expect(release.jobs.quality.with['macos-editor-artifact']).toBe(upload.with.name);
     const buildRoot = 'src-tauri/target/native-input';
     expect(producer.steps.find(step => step.run === build.run).env.SHELLSPAN_NATIVE_BUILD_ROOT).toBe(buildRoot);
     expect(upload.with.path.trim().split('\n').every(path => path.startsWith(buildRoot + '/'))).toBe(true);

@@ -2,22 +2,6 @@ name: Quality Gate
 
 on:
   workflow_dispatch:
-  workflow_call:
-    inputs:
-      ref:
-        description: Exact commit to validate
-        required: true
-        type: string
-      frontend-artifact:
-        description: Frontend dist built at ref after frontend tests and static checks in this workflow run
-        required: false
-        default: ''
-        type: string
-      macos-editor-artifact:
-        description: macOS Zsh and ZLE resources built at ref in this workflow run
-        required: false
-        default: ''
-        type: string
 
 permissions:
   contents: read
@@ -27,19 +11,18 @@ env:
   npm_config_registry: https://registry.npmjs.org
 
 concurrency:
-  group: quality-${{ github.workflow }}-${{ inputs.ref || github.ref }}
+  group: quality-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   frontend:
     name: Frontend and Audit
-    if: ${{ !inputs.frontend-artifact }}
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ inputs.ref || github.sha }}
+          ref: ${{ github.sha }}
       - name: Setup pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
       - name: Setup Node.js
@@ -74,10 +57,6 @@ jobs:
   rust:
     name: Rust (${{ matrix.platform }})
     needs: frontend
-    # Release supplies a tested dist and intentionally skips the local producer.
-    if: >-
-      ${{ !cancelled() && (needs.frontend.result == 'success' ||
-        (inputs.frontend-artifact != '' && needs.frontend.result == 'skipped')) }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -92,7 +71,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ inputs.ref || github.sha }}
+          ref: ${{ github.sha }}
       - name: Setup pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
       - name: Setup Node.js
@@ -118,7 +97,7 @@ jobs:
       - name: Download tested frontend dist
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          name: ${{ inputs.frontend-artifact || 'frontend-dist' }}
+          name: frontend-dist
           path: dist
       - name: Cache Rust
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
@@ -131,25 +110,10 @@ jobs:
           SHELLSPAN_NATIVE_BUILD_ROOT: artifacts/tests
         run: python3 -B scripts/native-input/integration/build.py --versions 5.3
       - name: Build pinned Zsh and ZLE test resources
-        if: runner.os == 'macOS' && !inputs.macos-editor-artifact
+        if: runner.os == 'macOS'
         env:
           SHELLSPAN_NATIVE_BUILD_ROOT: artifacts/tests
         run: bash scripts/native-input/acceptance/build-macos-editor.sh
-      - name: Download pinned Zsh and ZLE test resources
-        if: runner.os == 'macOS' && inputs.macos-editor-artifact
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: ${{ inputs.macos-editor-artifact }}
-          path: ${{ runner.temp }}/native-macos-editor
-      - name: Install downloaded Zsh test resources
-        if: runner.os == 'macOS' && inputs.macos-editor-artifact
-        run: |
-          test_native_root=artifacts/tests/native-input
-          release_native_root="$RUNNER_TEMP/native-macos-editor"
-          mkdir -p "$test_native_root/integration/resources" "$test_native_root/acceptance/dependencies"
-          cp -R "$release_native_root/integration/resources/." "$test_native_root/integration/resources/"
-          cp -R "$release_native_root/acceptance/dependencies/." "$test_native_root/acceptance/dependencies/"
-          chmod 500 "$test_native_root/integration/resources/native-input/zsh-5.9-zle-5.9-macos-arm64-native/zsh"
       - name: Run Agent terminal contract tests
         run: node scripts/verification/agent/verify-agent-terminal-contracts.mjs
       - name: Run Clippy
@@ -168,7 +132,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ inputs.ref || github.sha }}
+          ref: ${{ github.sha }}
       - name: Setup pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
       - name: Setup Node.js

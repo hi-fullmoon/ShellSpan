@@ -66,16 +66,16 @@ CI 发布顺序：
 
 1. 校验版本、已审核说明、基线和 tag SHA，并重新核验元数据绑定的准备前 Quality Gate；拒绝缺失证据、代码夹带和重建已公开版本。
 2. 对固定 SHA 运行前端测试和构建，将 dist 保存为本次运行的 artifact。
-3. 并行运行 macOS ARM64、Windows x64 打包与 Quality Gate（双平台 Rust 测试、Clippy、格式检查及 SSH/SFTP E2E）。打包和 Rust 检查共用本次已通过测试的前端 dist，避免重复前端测试和构建；所有产物来自同一 SHA。打包和全部检查均成功后才能发布。
+3. 并行构建原生资源并运行 macOS ARM64、Windows x64 打包。打包复用本次已通过测试的前端 dist 与原生资源，所有产物来自同一 SHA；双平台 Rust 测试、Clippy 及 SSH/SFTP E2E 已由准备前的独立 Quality Gate 完成验证，发布阶段不再重复运行。打包全部成功后才能发布。
 4. 在共享发布锁内检查双平台资产完整性，用配置中的更新公钥执行真实 minisign 签名验证，生成 `SHA256SUMS`。
 5. 上传到 GitHub 草稿，重新下载并校验每个资产的 SHA-256。
 6. 公开版本但暂不切换 Latest；验证公开更新清单和下载地址后，才将稳定版设为 Latest。预发布始终不设为 Latest。
 
 正式发布不接受临时覆盖说明参数。要调整说明，应在发布前修改版本 Markdown。
 
-准备前和推送发布标签后，分别验证最终代码提交和发布提交。发布流程仅复用同一次运行内的前端产物，不跨提交或跨运行复用构建产物。并行打包可缩短等待时间，但后端检查失败时已经执行的打包会消耗额外 runner 时间，产物不会公开。
+准备前由独立 Quality Gate 完整验证最终代码提交；推送发布标签后，preflight 核验该门禁记录及零代码夹带，发布流程仅复用同一次运行内的前端与原生资源产物，不跨提交或跨运行复用构建产物。
 
-发布流程在 `src-tauri/target/native-input/` 构建并准备原生资源，在 `src-tauri/target/releases/` 写入临时打包配置、暂存和下载安装包，并组装发布附件。Quality Gate 复用已构建的 macOS 原生资源时，将其下载到 `artifacts/tests/` 作为测试输入。
+发布流程在 `src-tauri/target/native-input/` 构建并准备原生资源，在 `src-tauri/target/releases/` 写入临时打包配置、暂存和下载安装包，并组装发布附件。
 
 ## 失败和恢复
 
