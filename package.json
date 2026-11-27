@@ -1,7 +1,7 @@
 {
   "name": "shellspan",
   "private": true,
-  "version": "3.0.0-beta.2",
+  "version": "3.0.0-beta.3",
   "license": "MIT",
   "type": "module",
   "scripts": {
