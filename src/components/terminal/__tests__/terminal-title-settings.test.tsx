@@ -82,3 +82,21 @@ it('saves valid global edits immediately and preserves the last valid value duri
   expect(useAppStore.getState().terminalTabTitleCustom).toBe(true);
   expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument();
 });
+
+it('inserts clicked variable chips cleanly and uses ghost selects', () => {
+  render(<TerminalTitleSettings />);
+  expect(screen.getByRole('combobox', { name: '应用范围' })).toHaveAttribute('data-variant', 'ghost');
+  expect(screen.getByRole('combobox', { name: '页签标题模板' })).toHaveAttribute('data-variant', 'ghost');
+
+  const input = screen.getByRole('textbox') as HTMLInputElement;
+  fireEvent.click(screen.getByRole('button', { name: /\$\{cwd\}/ }));
+
+  expect(input).toHaveValue('${name} ${cwd}');
+  expect(useAppStore.getState().terminalTabTitleTemplate).toBe('${name} ${cwd}');
+  expect(useAppStore.getState().terminalTabTitleCustom).toBe(true);
+
+  input.setSelectionRange(7, 7);
+  fireEvent.select(input);
+  fireEvent.click(screen.getByRole('button', { name: /\$\{host\}/ }));
+  expect(input).toHaveValue('${name}${host} ${cwd}');
+});

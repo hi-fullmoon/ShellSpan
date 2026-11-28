@@ -310,7 +310,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   };
 
   return (
-    <div className={cn('@container flex flex-col', embedded ? 'gap-7' : 'gap-6 px-4 py-4')}>
+    <div className={cn('@container flex flex-col', embedded ? 'gap-3' : 'gap-6 px-4 py-4')}>
       {!embedded && (
         <div className="flex min-w-0 flex-col gap-1">
           <h2 className="text-base font-semibold text-foreground">{t('settings.ai.title')}</h2>
@@ -341,7 +341,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
             <Field
               key={provider.id}
               data-slot="ai-provider-row"
-              className="min-h-14 gap-2 py-3.5 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-6"
+              className="min-h-14 gap-2 px-4 py-3 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-5"
             >
               <div className="flex min-w-0 flex-1 items-center gap-2.5">
                 <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted/40">

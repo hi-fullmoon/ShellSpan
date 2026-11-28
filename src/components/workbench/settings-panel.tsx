@@ -15,6 +15,7 @@ import { findShortcutConflict, getShortcutKeys, isLeaderShortcutAction, shortcut
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import { Input } from '@/components/ui/input';
@@ -55,7 +56,6 @@ import {
   normalizeTerminalMinimumContrastRatio,
   TERMINAL_MINIMUM_CONTRAST_RATIOS,
 } from '@/lib/terminal/terminal-colors';
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
 import { cn } from '@/lib/utils';
 
 interface ShortcutGroup {
@@ -156,16 +156,16 @@ const SettingGroupLabel: React.FC<SettingGroupLabelProps> = () => null;
 const IntegrationGroup: React.FC<{ title: string; description?: string; descriptionId?: string; children: React.ReactNode }> = ({ title, description, descriptionId, children }) => {
   const titleId = React.useId();
   return (
-    <section aria-labelledby={titleId} data-slot="integration-group" className="flex min-w-0 flex-col gap-1.5">
-      <div className="flex min-w-0 flex-col gap-1">
+    <section aria-labelledby={titleId} data-slot="integration-group" className="flex min-w-0 flex-col gap-2">
+      <div className="flex min-w-0 flex-col gap-1 px-1">
         <div data-slot="settings-group-header" className="flex min-h-8 min-w-0 items-center">
-          <h3 id={titleId} className="min-w-0 text-sm font-semibold break-words text-foreground">{title}</h3>
+          <h3 id={titleId} className="min-w-0 text-sm font-medium break-words text-foreground">{title}</h3>
         </div>
         {description && <p id={descriptionId} className="text-xs leading-relaxed text-muted-foreground">{description}</p>}
       </div>
-      <div className="flex flex-col">
+      <Card size="sm" radius="compact" variant="outline" className="gap-0 py-0">
         {children}
-      </div>
+      </Card>
     </section>
   );
 };
@@ -190,7 +190,7 @@ const SettingsGrid: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   if (currentGroup.rows.length > 0) groups.push(currentGroup);
 
   return (
-    <div data-slot="settings-groups" className="flex flex-col gap-7">
+    <div data-slot="settings-groups" className="flex flex-col gap-3">
       {groups.map((group, groupIndex) => (
         <SettingsGroup key={groupIndex} title={group.title}>
           {group.rows}
@@ -664,10 +664,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => onOpenChange(nextOpen)}>
       <DialogContent
-        className="flex h-[min(52rem,calc(100vh-2rem))] w-[min(76rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden bg-card p-0 [&_[data-slot=separator]]:border-t-[0.5px] [&_[data-slot=separator]]:border-border/50 [&_[data-slot=dialog-close]]:size-8 [&_[data-slot=input]]:h-8 [&_[data-slot=input-group]]:h-8 [&_[data-slot=select-trigger]]:h-8 sm:rounded-2xl"
+        className="flex h-[min(52rem,calc(100vh-2rem))] w-[min(76rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden bg-background p-0 [&_[data-slot=card]]:border-[0.5px] [&_[data-slot=card]]:border-border/50 [&_[data-slot=separator]]:border-t-[0.5px] [&_[data-slot=separator]]:border-border/40 [&_[data-slot=dialog-close]]:size-8 [&_[data-slot=input]]:h-8 [&_[data-slot=input-group]]:h-8 [&_[data-slot=select-trigger]]:h-8 sm:rounded-2xl"
       >
         <TooltipProvider>
-          <DialogHeader className="flex h-12 shrink-0 flex-row items-center justify-between border-b-[0.5px] border-border/50 px-5 py-0 pr-12 text-left">
+          <DialogHeader className="flex h-12 shrink-0 flex-row items-center justify-between border-b-[0.5px] border-border/50 bg-card px-5 py-0 pr-12 text-left">
             <DialogTitle className="text-sm font-semibold text-foreground">{t('workbench.settings.title')}</DialogTitle>
             <DialogDescription className="sr-only">{t('settings.description')}</DialogDescription>
           </DialogHeader>
@@ -677,7 +677,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             orientation="vertical"
             className="@container min-h-0 flex-1 flex-row gap-0 overflow-hidden"
           >
-            <aside className="flex min-h-0 w-36 shrink-0 flex-col border-r-[0.5px] border-border/50 bg-card @min-[48rem]:w-52">
+            <aside className="flex min-h-0 w-36 shrink-0 flex-col border-r-[0.5px] border-border/50 bg-muted/35 @min-[48rem]:w-52">
               <ScrollArea className="min-h-0 flex-1">
                 <div className="px-2.5 py-3">
                   <TabsList
@@ -701,7 +701,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </ScrollArea>
             </aside>
 
-            <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-card">
+            <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
               <ScrollArea viewportRef={settingsViewportRef} className="min-h-0 flex-1">
                 <div data-slot="settings-content" className="@container mx-auto w-full max-w-4xl px-2 py-6 @min-[48rem]:px-5">
               <div data-slot="settings-section-header" className="mb-6 flex items-start justify-between gap-3 px-3">
@@ -777,7 +777,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </TabsContent>
 
             <TabsContent value="experimental" className="w-full px-3">
-              <div className="flex min-w-0 flex-col gap-7">
+              <div className="flex min-w-0 flex-col gap-3">
                 <SettingsGroup
                   title={t('settings.experimental.group.integration')}
                   titleId="petdex-integration-group-title"
@@ -819,35 +819,33 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       onCheckedChange={(enabled) => handlePetdexEnabledChange(enabled)}
                     />
                   </SettingRow>
-                  <div className="pt-2">
-                    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg bg-muted/40 px-3.5 py-2.5">
-                      <p id="petdex-privacy-description" className="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground">
-                        {t('settings.experimental.petdex.privacy')}
-                        {petdexView.subscriptionFailed && ` ${t('settings.experimental.petdex.subscriptionError')}`}
-                      </p>
-                      <div className="flex shrink-0 flex-wrap items-center gap-2">
-                        <Button
-                          size="sm"
-                          variant="soft"
-                          type="button"
-                          disabled={!petdexEnabled || testingPetdex || checkingPetdex || petdexConfiguring}
-                          onClick={() => void handleTestPetdex(true)}
-                        >
-                          {t(checkingPetdex ? 'settings.experimental.petdex.status.checking' : 'settings.experimental.petdex.recheck')}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="soft"
-                          aria-describedby="petdex-privacy-description"
-                          disabled={!petdexEnabled || testingPetdex || checkingPetdex || petdexConfiguring}
-                          onClick={() => void handleTestPetdex()}
-                        >
-                          {testingPetdex
-                            ? t('settings.experimental.petdex.testing')
-                            : t('settings.experimental.petdex.testAction')}
-                        </Button>
-                      </div>
+                  <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 bg-muted/25 px-4 py-2.5">
+                    <p id="petdex-privacy-description" className="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground">
+                      {t('settings.experimental.petdex.privacy')}
+                      {petdexView.subscriptionFailed && ` ${t('settings.experimental.petdex.subscriptionError')}`}
+                    </p>
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="soft"
+                        type="button"
+                        disabled={!petdexEnabled || testingPetdex || checkingPetdex || petdexConfiguring}
+                        onClick={() => void handleTestPetdex(true)}
+                      >
+                        {t(checkingPetdex ? 'settings.experimental.petdex.status.checking' : 'settings.experimental.petdex.recheck')}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="soft"
+                        aria-describedby="petdex-privacy-description"
+                        disabled={!petdexEnabled || testingPetdex || checkingPetdex || petdexConfiguring}
+                        onClick={() => void handleTestPetdex()}
+                      >
+                        {testingPetdex
+                          ? t('settings.experimental.petdex.testing')
+                          : t('settings.experimental.petdex.testAction')}
+                      </Button>
                     </div>
                   </div>
                 </SettingsGroup>
@@ -856,7 +854,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   data-slot="petdex-preferences"
                   data-inactive={!displayedPetdexEnabled ? 'true' : undefined}
                   className={cn(
-                    'flex min-w-0 flex-col gap-7 transition-opacity duration-200',
+                    'flex min-w-0 flex-col gap-3 transition-opacity duration-200',
                     !displayedPetdexEnabled && 'opacity-65 hover:opacity-100 focus-within:opacity-100',
                   )}
                 >
@@ -868,7 +866,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <div className="flex flex-col">
                       {(['ssh', 'sftp', 'ai'] as const).map((category, index) => (
                         <React.Fragment key={category}>
-                          {index > 0 && <Separator className="border-t-[0.5px] border-border/50" />}
+                          {index > 0 && <Separator className="mx-4 data-horizontal:w-auto" />}
                           <SettingRow
                             className="min-h-10 flex-row items-center gap-3 py-1 [&>[data-slot=setting-control]]:w-auto"
                             controlId={`petdex-category-${category}`}
@@ -1199,13 +1197,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </div>
                 </SettingRow>
                 <SettingGroupLabel>{t('settings.terminal.groupSessions')}</SettingGroupLabel>
-                <Field className="min-w-0 gap-3 py-3.5" data-terminal-title-settings data-settings-target="terminal-title-template">
-                  <div className="flex min-w-0 flex-col gap-0.5">
-                    <FieldLabel className="text-sm font-medium text-foreground">{t('terminal.title.template')}</FieldLabel>
-                    <FieldDescription>{t('terminal.title.description')}</FieldDescription>
-                  </div>
+                <div className="min-w-0 px-4 py-3" data-terminal-title-settings data-settings-target="terminal-title-template">
                   <TerminalTitleSettings />
-                </Field>
+                </div>
                 <SettingRow label={t('settings.terminal.autoReconnect')} description={t('settings.terminal.autoReconnectDescription')}>
                   <div className="flex justify-end">
                     <Switch
@@ -1326,14 +1320,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </TabsContent>
 
             <TabsContent value="shortcuts" className="w-full px-3">
-              <div className="flex flex-col gap-7">
+              <div className="flex flex-col gap-3">
                 {SHORTCUT_GROUPS.map((group) => (
                   <SettingsGroup key={group.id} title={t(SHORTCUT_GROUP_LABEL_KEYS[group.id])}>
                     {group.actions.map((action) => {
                       const binding = shortcuts[action] ?? DEFAULT_SHORTCUTS[action];
                       const leaderBinding = shortcuts.terminalLeader ?? DEFAULT_SHORTCUTS.terminalLeader;
                       return (
-                        <div key={action} className="flex min-h-11 items-center justify-between gap-3 py-1.5">
+                        <div key={action} className="flex min-h-11 items-center justify-between gap-3 px-4 py-1.5">
                           <span className="text-sm font-medium">{shortcutLabels[action]}</span>
                           <div className="flex items-center gap-1">
                             <Button

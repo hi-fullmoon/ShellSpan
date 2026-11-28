@@ -92,15 +92,15 @@ try {
     const headers = await page.locator('[role="tabpanel"] [data-slot="settings-group"] [data-slot="settings-group-header"]').evaluateAll(elements => elements.map(header => {
       const rect = header.getBoundingClientRect();
       const group = header.closest('[data-slot="settings-group"]');
-      const fieldGroup = group.querySelector('[data-slot="field-group"]').getBoundingClientRect();
+      const card = group.querySelector('[data-slot="card"]').getBoundingClientRect();
       const title = header.querySelector('h3').getBoundingClientRect();
       const button = header.querySelector('button')?.getBoundingClientRect();
-      return { height: rect.height, gap: fieldGroup.top - rect.bottom,
+      return { height: rect.height, gap: card.top - rect.bottom,
         centerOffset: button ? Math.abs(title.top + title.height / 2 - button.top - button.height / 2) : 0 };
     }));
     for (const header of headers) {
       assert.equal(header.height, 32, `${name}: consistent group header height`);
-      assert.ok(header.gap >= 4 && header.gap <= 12, `${name}: group header to list gap (${header.gap}px)`);
+      assert.equal(header.gap, 8, `${name}: group header to card gap (${header.gap}px)`);
       assert.ok(header.centerOffset <= 1, `${name}: title and action must be vertically centered`);
     }
   };
@@ -137,7 +137,7 @@ try {
         && Math.abs(rect.right - actions.getBoundingClientRect().right) <= 1
         && description.scrollWidth <= description.clientWidth;
     }), 'the complete failure notice fits across the row below the retry button');
-    await notice.locator('xpath=ancestor::*[@data-slot="settings-group"]').screenshot({ path: screenshot, animations: 'disabled' });
+    await notice.locator('xpath=ancestor::*[@data-slot="card"]').screenshot({ path: screenshot, animations: 'disabled' });
     await page.evaluate(async () => (await import('/settings-runtime.js')).useUpdateStore.getState().reset());
     await notice.waitFor({ state: 'hidden' });
   };
@@ -151,7 +151,19 @@ try {
       const group = divider.parentElement.getBoundingClientRect();
       return { left: line.left - group.left, right: group.right - line.right };
     }));
-    assert.ok(dividerInsets.every(({ left, right }) => Math.abs(left) <= 1 && Math.abs(right) <= 1), `setting dividers must span cleanly across rows: ${JSON.stringify(dividerInsets)}`);
+    assert.ok(dividerInsets.every(({ left, right }) => left >= 15 && Math.abs(left - right) <= 1), `setting dividers must have equal insets: ${JSON.stringify(dividerInsets)}`);
+    const surfaces = await page.evaluate(() => {
+      const aside = document.querySelector('aside');
+      const section = document.querySelector('[data-slot="dialog-content"] section');
+      const card = document.querySelector('[data-slot="settings-group"] [data-slot="card"]');
+      return {
+        asideBg: getComputedStyle(aside).backgroundColor,
+        sectionBg: getComputedStyle(section).backgroundColor,
+        cardBg: getComputedStyle(card).backgroundColor,
+      };
+    });
+    assert.notEqual(surfaces.asideBg, surfaces.sectionBg, 'sidebar and content canvas must have distinct surfaces');
+    assert.notEqual(surfaces.cardBg, surfaces.sectionBg, 'settings group cards must stand out from content canvas');
     assert.ok(await page.locator('section [data-slot="scroll-area-viewport"]').evaluate(viewport => {
       const close = document.querySelector('[data-slot="dialog-close"]');
       return viewport.getBoundingClientRect().top >= close.getBoundingClientRect().bottom;
@@ -219,8 +231,8 @@ try {
     assert.equal(overflow.groupTitleRow, 32, `group title row must be 32px at ${viewport.width}`);
     const titleInput = page.getByLabel('自定义模板', { exact: true });
     await titleInput.scrollIntoViewIfNeeded();
-    assert.equal(await titleInput.evaluate((input) => getComputedStyle(input).backgroundColor), 'rgba(0, 0, 0, 0)',
-      'The custom template input must show the card surface');
+    assert.notEqual(await titleInput.evaluate((input) => getComputedStyle(input).backgroundColor), 'rgba(0, 0, 0, 0)',
+      'The custom template input must render on an elevated card surface inside the template tray');
     await page.getByLabel('页签标题模板', { exact: true }).click();
     await page.getByRole('option', { name: '连接名称', exact: true }).click();
     assert.ok(await page.getByText('全局默认', { exact: true }).isVisible(), 'scope must display a readable label');
@@ -250,7 +262,7 @@ try {
         selectTops: selects.map((select) => select.getBoundingClientRect().top),
         fits: element.scrollWidth <= element.clientWidth };
     });
-    assert.ok(titleLayout.inputWidth > titleLayout.width - 40, 'template editor must use the full row width');
+    assert.ok(titleLayout.inputWidth > titleLayout.width - 72, 'template editor must use the full tray width');
     assert.ok(titleLayout.fits, 'title settings must not overflow');
     if (viewport.width === 1280) {
       assert.equal(titleLayout.selectTops[0], titleLayout.selectTops[1], 'wide title controls must share one row');
@@ -304,15 +316,15 @@ try {
       };
     });
     assert.ok(geometry.overflow <= 0, `integration overflow at ${viewport.width}`);
-    assert.deepEqual(geometry.gaps, [28, 28, 28]);
+    assert.deepEqual(geometry.gaps, [12, 12, 12]);
     assert.deepEqual(await panel.getByRole('heading', { level: 3 }).allTextContents(), ['桌宠联动', '任务提醒', '消息气泡']);
     assert.ok(await panel.locator('[data-slot="settings-group"], [data-slot="integration-group"]').evaluateAll((groups) => groups.every((group) => {
       const title = group.querySelector('h3');
-      const firstRow = group.querySelector('[data-slot="field"]');
+      const card = group.querySelector('[data-slot="card"]');
       return title.id === group.getAttribute('aria-labelledby')
-        && title.getBoundingClientRect().bottom < firstRow.getBoundingClientRect().top
+        && title.getBoundingClientRect().bottom < card.getBoundingClientRect().top
         && getComputedStyle(title).fontSize === '14px';
-    })), 'group titles should match other settings sections and sit above each list');
+    })), 'group titles should match other settings sections and sit above each card');
     assert.ok(geometry.switchesFit, `switches clipped at ${viewport.width}`);
     assert.equal(await panel.locator('[data-slot="collapsible-trigger"]').count(), 1);
     assert.equal(await panel.locator('[data-slot="collapsible-content"]:visible').count(), 0);

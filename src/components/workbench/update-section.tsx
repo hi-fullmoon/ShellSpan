@@ -54,7 +54,7 @@ export const UpdateSection: React.FC = () => {
   const displayProgress = Math.max(0, Math.min(100, downloadProgress ?? 0));
 
   return (
-    <Field className="min-h-14 min-w-0 gap-2 py-3.5 @min-[32rem]:grid @min-[32rem]:grid-cols-[minmax(0,1fr)_auto] @min-[32rem]:items-center @min-[32rem]:gap-x-6">
+    <Field className="min-h-14 min-w-0 gap-2 px-4 py-3 @min-[32rem]:grid @min-[32rem]:grid-cols-[minmax(0,1fr)_auto] @min-[32rem]:items-center @min-[32rem]:gap-x-5">
       <div data-slot="update-summary" className="flex min-w-0 flex-1 flex-col gap-0.5">
         <FieldLabel className="text-sm font-medium text-foreground">
           {t('settings.general.update')}

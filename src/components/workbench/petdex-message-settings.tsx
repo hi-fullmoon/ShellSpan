@@ -101,11 +101,9 @@ export function PetdexMessageSettings() {
           onCheckedChange={(value) => void update('petdexMessageDetailsEnabled', value)}
         />
       </SettingRow>
-      <div className="pt-2">
-        <p id="petdex-message-visibility" className="rounded-lg bg-muted/40 px-3.5 py-2.5 text-xs leading-relaxed text-muted-foreground">
-          {t('settings.experimental.petdex.messages.visibility')}
-        </p>
-      </div>
+      <p id="petdex-message-visibility" className="bg-muted/25 px-4 py-2.5 text-xs leading-relaxed text-muted-foreground">
+        {t('settings.experimental.petdex.messages.visibility')}
+      </p>
     </SettingsGroup>
   );
 }

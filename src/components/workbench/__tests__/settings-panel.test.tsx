@@ -389,20 +389,26 @@ describe('SettingsPanel', () => {
     expect(generalTab).not.toHaveAttribute('data-active');
   });
 
-  it('keeps settings inputs and selects at 32px with inline ghost selects', async () => {
+  it('keeps settings inputs and selects at 32px with inline ghost selects and distinct section surfaces', async () => {
     render(<SettingsPanel />);
     await waitFor(() => {});
 
     const settingsDialog = screen.getByRole('dialog', { name: 'workbench.settings.title' });
+    const sidebar = screen.getByRole('tablist', { name: 'settings.sectionNavigation' }).closest('aside');
+    const contentSection = screen.getByRole('tabpanel').closest('section');
 
     expect(settingsDialog).toHaveClass(
-      'bg-card',
+      'bg-background',
+      '[&_[data-slot=card]]:border-[0.5px]',
+      '[&_[data-slot=card]]:border-border/50',
       '[&_[data-slot=separator]]:border-t-[0.5px]',
-      '[&_[data-slot=separator]]:border-border/50',
+      '[&_[data-slot=separator]]:border-border/40',
       '[&_[data-slot=input]]:h-8',
       '[&_[data-slot=input-group]]:h-8',
       '[&_[data-slot=select-trigger]]:h-8',
     );
+    expect(sidebar).toHaveClass('bg-muted/35', 'border-r-[0.5px]', 'border-border/50');
+    expect(contentSection).toHaveClass('bg-background');
     expect(settingsDialog).toHaveClass(
       'h-[min(52rem,calc(100vh-2rem))]',
       'w-[min(76rem,calc(100vw-2rem))]',
@@ -488,7 +494,7 @@ describe('SettingsPanel', () => {
     expect(notice).toHaveTextContent('update.failedFriendly');
   });
 
-  it('groups related settings into flat hairline-divided sections', async () => {
+  it('groups related settings into compact outline cards with inset hairline dividers', async () => {
     render(<SettingsPanel />);
     await waitFor(() => {});
 
@@ -498,21 +504,24 @@ describe('SettingsPanel', () => {
     const updateRow = screen
       .getByText('settings.general.update')
       .closest('[data-slot="field"]');
+    const behaviorCard = startupRow?.closest('[data-slot="card"]');
+    const updateCard = updateRow?.closest('[data-slot="card"]');
     const behaviorGroup = startupRow?.closest('[data-slot="settings-group"]');
     const settingsGroups = behaviorGroup?.closest('[data-slot="settings-groups"]');
 
-    expect(startupRow).toHaveClass('min-h-14', 'py-3.5', '@min-[32rem]:flex-row');
-    expect(startupRow?.closest('[data-slot="card"]')).toBeNull();
-    const updateGroup = updateRow?.closest('[data-slot="settings-group"]');
-    expect(updateGroup).not.toBe(behaviorGroup);
-    expect(screen.getByText('settings.general.startupUpdateCheck').closest('[data-slot="settings-group"]')).toBe(updateGroup);
+    expect(startupRow).toHaveClass('min-h-14', 'px-4', 'py-3', '@min-[32rem]:flex-row');
+    expect(behaviorCard).toHaveAttribute('data-size', 'sm');
+    expect(behaviorCard).toHaveAttribute('data-radius', 'compact');
+    expect(behaviorCard).toHaveAttribute('data-variant', 'outline');
+    expect(updateCard).not.toBe(behaviorCard);
+    expect(screen.getByText('settings.general.startupUpdateCheck').closest('[data-slot="card"]')).toBe(updateCard);
     expect(screen.getByRole('heading', { name: 'settings.general.softwareUpdate' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'settings.general.appBehavior' })).toHaveAttribute('class', screen.getByRole('heading', { name: 'settings.general.softwareUpdate' }).className);
     expect(screen.getByRole('button', { name: 'settings.general.checkUpdate' })).toHaveAttribute('data-variant', 'soft');
-    expect(behaviorGroup?.querySelectorAll('[data-slot="separator"]')).toHaveLength(3);
-    expect(updateGroup?.querySelectorAll('[data-slot="separator"]')).toHaveLength(1);
-    expect(settingsGroups).toHaveClass('flex-col', 'gap-7');
-    expect(settingsGroups?.firstElementChild).toHaveClass('gap-1.5');
+    expect(behaviorCard?.querySelectorAll('[data-slot="separator"]')).toHaveLength(3);
+    expect(updateCard?.querySelectorAll('[data-slot="separator"]')).toHaveLength(1);
+    expect(settingsGroups).toHaveClass('flex-col', 'gap-3');
+    expect(settingsGroups?.firstElementChild).toHaveClass('gap-2');
 
     openSection('settings.terminal.title');
     const terminalGroups = screen
@@ -545,7 +554,7 @@ describe('SettingsPanel', () => {
 
     openSection('settings.shortcuts.title');
     const shortcutRow = screen.getByText('settings.shortcuts.newTerminalTab').parentElement;
-    expect(shortcutRow).toHaveClass('min-h-11', 'py-1.5');
+    expect(shortcutRow).toHaveClass('min-h-11', 'px-4', 'py-1.5');
   });
 
   it('reports close requests without changing the active app section', async () => {
@@ -559,18 +568,19 @@ describe('SettingsPanel', () => {
     expect(useAppStore.getState().activeSection).toBe('terminal');
   });
 
-  it('groups model providers and terminal context in one flat settings section', async () => {
+  it('groups model providers and terminal context in one settings card', async () => {
     render(<SettingsPanel />);
     await waitFor(() => {});
     openSection('settings.ai.title');
 
     const providerSection = screen.getByText('settings.ai.providers').closest('[data-slot="settings-group"]');
-    const providerRows = providerSection?.querySelectorAll('[data-slot="ai-provider-row"]');
+    const providerCard = providerSection?.querySelector('[data-slot="card"]');
+    const providerRows = providerCard?.querySelectorAll('[data-slot="ai-provider-row"]');
     const contextField = screen.getByText('settings.ai.contextLines').closest('[data-slot="field"]');
 
-    expect(providerSection).not.toBeNull();
+    expect(providerCard).not.toBeNull();
     expect(providerRows).toHaveLength(useAiSettingsStore.getState().providers.length);
-    expect(contextField?.closest('[data-slot="settings-group"]')).toBe(providerSection);
+    expect(contextField?.closest('[data-slot="card"]')).toBe(providerCard);
     expect(screen.getAllByRole('button', { name: 'settings.ai.editProvider' })).not.toHaveLength(0);
   });
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ChevronDownIcon } from 'lucide-react';
+import { Card } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
@@ -43,11 +44,11 @@ export function PetdexDiagnostics({ snapshot, status, health }: {
 
   return (
     <section data-slot="petdex-diagnostics" className="flex min-w-0 flex-col">
-      <div className="overflow-hidden rounded-xl border-[0.5px] border-border/60 bg-muted/25">
+      <Card size="sm" radius="compact" variant="outline" className="gap-0 py-0">
       <Collapsible className="flex min-w-0 flex-col">
         <CollapsibleTrigger
           type="button"
-          className="flex w-full items-center justify-between gap-3 rounded-xl px-4 py-2.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50 [&[aria-expanded=true]_.petdex-chevron]:rotate-180"
+          className="flex w-full items-center justify-between gap-3 rounded-lg px-4 py-2.5 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50 [&[aria-expanded=true]_.petdex-chevron]:rotate-180"
         >
           <span className="flex min-w-0 items-center text-sm font-medium text-foreground">
             <span className="truncate">{t('settings.experimental.petdex.details')}</span>
@@ -133,7 +134,7 @@ export function PetdexDiagnostics({ snapshot, status, health }: {
           </p>
         </CollapsibleContent>
       </Collapsible>
-      </div>
+      </Card>
     </section>
   );
 }
