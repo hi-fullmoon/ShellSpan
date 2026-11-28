@@ -118,7 +118,8 @@ describe('Queue Dock', () => {
     expect(screen.getByRole('button', { name: 'Request approval' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Direct execution' })).toBeVisible();
     expect(screen.getByRole('button', { name: /MiniMax-M3\.1-Flash/ })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Running input behavior' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Running input behavior' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Queue for next turn' })).toBeVisible();
   });
 
   it('keeps the existing draft when recalling a queued item fails', async () => {
