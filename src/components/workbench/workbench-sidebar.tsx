@@ -74,10 +74,10 @@ const WorkbenchSidebarItem: React.FC<WorkbenchSidebarItemProps> = ({
       {...activation}
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'flex h-8 w-full items-center justify-start gap-1 rounded-lg px-3 text-[13px] font-medium transition-colors [&_svg]:size-4',
+        'flex h-8 w-full items-center justify-start gap-1 rounded-lg px-2.5 text-[13px] transition-colors [&_svg]:size-4 [&_svg]:shrink-0',
         active
-          ? 'bg-app-surface text-app-text shadow-sm ring-1 ring-app-border'
-          : 'text-app-text-soft hover:bg-accent hover:text-app-text',
+          ? 'bg-app-tab-active font-semibold text-app-tab-accent'
+          : 'font-medium text-muted-foreground hover:bg-accent hover:text-foreground',
       )}
     >
       <Icon aria-hidden="true" />
@@ -164,8 +164,8 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
   ];
 
   return (
-    <Sidebar className="border-r border-app-border/50 p-2">
-      <nav className="flex flex-1 flex-col gap-1">
+    <Sidebar className="border-r border-border/50 p-2">
+      <nav className="flex flex-1 flex-col gap-0.5">
         {items.map((item) => {
           return (
             <WorkbenchSidebarItem
@@ -183,7 +183,7 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
             <Button
               type="button"
               variant="ghost"
-              className="h-auto w-full justify-start px-2 py-1.5 data-popup-open:bg-app-surface"
+              className="h-auto w-full justify-start rounded-lg px-2 py-1.5 data-popup-open:bg-app-tab-active"
               aria-label={t('workbench.userMenu.open')}
             />
           }

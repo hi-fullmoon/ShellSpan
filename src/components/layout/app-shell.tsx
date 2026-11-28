@@ -23,8 +23,9 @@ export interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ children, className }) => {
   return (
     <div
+      data-slot="sidebar"
       className={cn(
-        'flex h-full w-56 shrink-0 flex-col bg-app-surface-muted',
+        'flex h-full w-50 shrink-0 flex-col bg-muted/35',
         className,
       )}
     >

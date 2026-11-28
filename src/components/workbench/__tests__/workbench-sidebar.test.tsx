@@ -41,6 +41,36 @@ describe('WorkbenchSidebar', () => {
     usePortForwardStore.setState({ runtimes: [] });
   });
 
+  it('aligns sidebar surface, compact width, and borderless active pill with settings navigation', () => {
+    const { container } = render(
+      <WorkbenchSidebar
+        activeTab="connections"
+        onTabChange={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onCheckForUpdates={vi.fn()}
+        onOpenAbout={vi.fn()}
+        onRequestExit={vi.fn()}
+      />,
+    );
+
+    const sidebar = container.querySelector('[data-slot="sidebar"]');
+    expect(sidebar).toHaveClass('w-50', 'bg-muted/35', 'border-r', 'border-border/50');
+    expect(sidebar).not.toHaveClass('w-56', 'bg-app-surface-muted');
+
+    const activeItem = screen.getByRole('button', { name: 'Connections' });
+    expect(activeItem).toHaveAttribute('aria-current', 'page');
+    expect(activeItem).toHaveClass('h-8', 'gap-1', 'rounded-lg', 'px-2.5', 'bg-app-tab-active', 'font-semibold', 'text-app-tab-accent');
+    expect(activeItem).not.toHaveClass('bg-app-surface', 'shadow-sm', 'ring-1', 'ring-app-border');
+
+    const inactiveItem = screen.getByRole('button', { name: 'Keychain' });
+    expect(inactiveItem).not.toHaveAttribute('aria-current');
+    expect(inactiveItem).toHaveClass('h-8', 'gap-1', 'rounded-lg', 'px-2.5', 'font-medium', 'text-muted-foreground', 'hover:bg-accent', 'hover:text-foreground');
+
+    const userTrigger = screen.getByRole('button', { name: 'Open user menu' });
+    expect(userTrigger).toHaveClass('rounded-lg', 'data-popup-open:bg-app-tab-active');
+    expect(userTrigger).not.toHaveClass('data-popup-open:bg-app-surface');
+  });
+
   it('shows a secondary badge on port forwarding when rules are active', () => {
     usePortForwardStore.setState({
       runtimes: [
