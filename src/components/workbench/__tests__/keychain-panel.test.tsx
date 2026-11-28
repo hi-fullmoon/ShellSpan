@@ -115,6 +115,12 @@ describe('KeychainPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'common.create' }));
 
+    expect(screen.getByRole('dialog').querySelector('[data-slot="drawer-footer"]')).toHaveClass(
+      'shrink-0',
+      'px-4',
+      'pb-4',
+      'pt-3',
+    );
     expect(
       screen.getByPlaceholderText('keychain.form.privateKeyPlaceholder'),
     ).toBeInTheDocument();

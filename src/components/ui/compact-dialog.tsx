@@ -62,7 +62,7 @@ export const CompactDialogFooter: React.FC<React.ComponentProps<typeof DialogFoo
 ) => (
   <DialogFooter
     className={cn(
-      'mx-0 mb-0 min-w-0 shrink-0 flex-wrap rounded-none px-4 pb-4 pt-1',
+      'mx-0 mb-0 min-w-0 shrink-0 flex-wrap rounded-none px-4 pb-4 pt-3',
       className,
     )}
     {...props}

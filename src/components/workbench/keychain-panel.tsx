@@ -604,7 +604,7 @@ export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionPr
             />}
           </FieldGroup>
           </ScrollArea>
-          <DrawerFooter className="shrink-0 px-4 pb-4 pt-1">
+          <DrawerFooter className="shrink-0 px-4 pb-4 pt-3">
             <Button size="sm" onClick={() => void handleSave()} disabled={isSubmitting} className="w-full">
               {t('common.save')}
             </Button>

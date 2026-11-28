@@ -199,6 +199,7 @@ try {
                 previewPinned: previewRect.bottom <= viewport.getBoundingClientRect().top,
                 footerInside: footer.getBoundingClientRect().bottom <= bounds.bottom,
                 footerBorder: getComputedStyle(footer).borderTopWidth,
+                footerPaddingTop: getComputedStyle(footer).paddingTop,
                 scrollbarEdge: Math.abs(scrollbar.right - (bounds.right - border)) < 0.5,
                 scrollbarInside: scrollbar.left >= bounds.left && scrollbar.right <= bounds.right,
                 rows: [...element.querySelectorAll('[data-slot="field"]')].map(field => {
@@ -220,6 +221,7 @@ try {
             });
             assert.ok(layout.inside && !layout.overflow && layout.scrolls && layout.previewPinned && layout.footerInside, `${context}: ${JSON.stringify(layout)}`);
             assert.equal(layout.footerBorder, '0px', `${context}: no footer separator`);
+            assert.equal(layout.footerPaddingTop, '12px', `${context}: footer top padding keeps 12px clearance`);
             assert.ok(layout.scrollbarEdge && layout.scrollbarInside, `${context}: scrollbar must touch the dialog edge and remain unclipped: ${JSON.stringify(layout)}`);
             assert.ok(layout.rows.every(row => row.height === 36 && row.pickerInside && row.sharedBorder && row.noOverlap), `${context}: swatch and text share one control without overlapping: ${JSON.stringify(layout.rows)}`);
             assert.ok(layout.rows.every(row => row.centerOffsets.every(offset => Math.abs(offset) <= 0.5)), `${context}: swatch and value must be vertically centered: ${JSON.stringify(layout.rows.map(row => row.centerOffsets))}`);

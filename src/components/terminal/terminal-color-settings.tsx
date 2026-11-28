@@ -316,7 +316,7 @@ function TerminalColorEditor({ onClose }: { onClose: () => void }) {
           </ScrollAreaContent>
         </ScrollArea>
       </Tabs>
-      <DialogFooter className="shrink-0 flex-row justify-end gap-2 px-5 pb-4 pt-2">
+      <DialogFooter className="shrink-0 flex-row justify-end gap-2 px-5 pb-4 pt-3">
         <Button variant="soft" size="sm" onClick={() => { setOverrides({}); setResetVersion(version => version + 1); }}>
           {t('settings.terminal.colors.reset')}
         </Button>

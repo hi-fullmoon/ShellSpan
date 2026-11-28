@@ -69,7 +69,9 @@ describe('HostQuickActionsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add quick action' }));
     const drawer = screen.getByRole('dialog');
     expect(drawer).toHaveAttribute('data-slot', 'drawer-content');
-    expect(drawer.querySelector('[data-slot="drawer-footer"]')).not.toHaveClass('border-t');
+    const drawerFooter = drawer.querySelector('[data-slot="drawer-footer"]');
+    expect(drawerFooter).not.toHaveClass('border-t');
+    expect(drawerFooter).toHaveClass('shrink-0', 'px-4', 'pb-4', 'pt-3');
     expect(drawer.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
     expect(screen.getByText(/never sends Enter/i)).toBeInTheDocument();
 

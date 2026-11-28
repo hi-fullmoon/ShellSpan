@@ -560,7 +560,7 @@ export function AiSkillsDialog({
                     </div>
                   </div>
 
-                  <DialogFooter className="shrink-0 flex-row items-center justify-between gap-2 px-5 pb-4 pt-2 sm:justify-between">
+                  <DialogFooter className="shrink-0 flex-row items-center justify-between gap-2 px-5 pb-4 pt-3 sm:justify-between">
                     <div className="flex items-center">
                       {editor.kind === 'edit' && (
                         <Button

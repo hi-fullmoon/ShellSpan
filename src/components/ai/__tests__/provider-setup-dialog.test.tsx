@@ -157,6 +157,7 @@ describe('ProviderSetupDialog', () => {
     const inputGroups = dialog.querySelectorAll('[data-slot="input-group"]');
     const fieldGroups = scrollArea?.querySelectorAll('[data-slot="field-group"]');
     expect(dialog).toHaveClass('h-[min(680px,calc(100vh-2rem))]', 'max-w-xl', 'gap-0', 'p-0');
+    expect(dialog.querySelector('[data-slot="dialog-footer"]')).toHaveClass('px-4', 'pb-4', 'pt-3');
     expect(scrollArea).toHaveClass(
       'flex-1',
       'overflow-y-auto',

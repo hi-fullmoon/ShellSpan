@@ -43,6 +43,7 @@ describe('ConfirmationDialog', () => {
       'text-left',
     );
     expect(scrollArea).toHaveClass('[&_[data-slot=scroll-area-viewport]]:max-h-[inherit]');
+    expect(dialog.querySelector('[data-slot="alert-dialog-footer"]')).toHaveClass('px-4', 'pb-4', 'pt-3');
     expect(screen.getByRole('heading', { name: 'Confirm action' })).toHaveClass(
       'self-center',
       'flex-1',

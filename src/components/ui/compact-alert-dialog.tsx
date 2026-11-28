@@ -77,7 +77,7 @@ export const CompactAlertDialogFooter: React.FC<React.ComponentProps<typeof Aler
 }) => (
   <AlertDialogFooter
     className={cn(
-      'mx-0 mb-0 shrink-0 rounded-none px-4 pb-4 pt-1',
+      'mx-0 mb-0 shrink-0 rounded-none px-4 pb-4 pt-3',
       className,
     )}
     {...props}

@@ -955,7 +955,7 @@ export const HostQuickActionsPanel: React.FC = () => {
                 </FieldGroup>
               </ScrollArea>
 
-              <DrawerFooter className="shrink-0 flex-row justify-end gap-2 px-4 pb-4 pt-2">
+              <DrawerFooter className="shrink-0 flex-row justify-end gap-2 px-4 pb-4 pt-3">
                 <Button variant="outline" size="sm" onClick={closeDrawer} disabled={saving}>
                   {t('common.cancel')}
                 </Button>

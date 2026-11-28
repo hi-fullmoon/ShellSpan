@@ -112,7 +112,7 @@ describe('AiSkillsDialog', () => {
       expect(screen.getByRole('switch', { name: /Show in \/ completion menu/i })).toBeChecked();
       const footer = dialog.querySelector('[data-slot="dialog-footer"]');
       expect(footer).not.toBeNull();
-      expect(footer).toHaveClass('shrink-0');
+      expect(footer).toHaveClass('shrink-0', 'pb-4', 'pt-3');
       expect(footer?.className).not.toContain('border-t');
 
       await user.type(screen.getByLabelText('Skill name'), 'restart-nginx');
