@@ -1,7 +1,9 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { AiComposerSeat } from '@/components/ai/workspace/ai-composer-seat';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { projectAgentInbox } from '@/lib/ai/agent-session-adapter';
 import { createAiComposerState, reduceAiComposer } from '@/lib/ai/composer-machine';
 import { initI18n, t } from '@/locales';
@@ -21,16 +23,38 @@ describe('Composer queue visibility during submission', () => {
       phase, waitingApproval: phase === 'waitingApproval', waitingQuestion: phase === 'waitingQuestion',
       preferredBusyMode: 'steer', draft: 'Follow up after the decision' });
     render(<AiComposerSeat phase="active" status="waiting" composerState={composer}
-      onBusyPreferenceChange={() => { throw new Error('Pending decisions must not change the preference'); }}
       onSubmitGesture={(gesture, accelerated) => {
         composer = reduceAiComposer(composer, { type: 'submit.requested', gesture, accelerated,
           clientOperationId: 'queued-followup', now: 100, hasProvider: true, canCreateSession: true }).state;
       }} />);
-    expect(screen.getByRole('button', { name: t('ai.workspace.busyPreference') })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: t('ai.workspace.busyPreference') })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: t('ai.workspace.queue.action') })).toBeEnabled();
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', ctrlKey: true });
     expect(composer.pendingSubmissions[0].mode).toBe('nextTurn');
     expect(composer.preferredBusyMode).toBe('steer');
+  });
+
+  it.each([
+    { mode: 'queue' as const, labelKey: 'ai.workspace.queue.action' as const, tooltipKey: 'ai.workspace.queue.tooltip' as const },
+    { mode: 'steer' as const, labelKey: 'ai.workspace.steer.action' as const, tooltipKey: 'ai.workspace.steer.tooltip' as const },
+  ])('reflects the configured $mode busy preference on the running submit control without a toolbar dropdown', async ({ mode, labelKey, tooltipKey }) => {
+    const user = userEvent.setup();
+    const composer = createAiComposerState({
+      sessionId: 'session-fixture',
+      runtimeStatus: 'running',
+      preferredBusyMode: mode,
+      draft: 'Check the active job',
+    });
+    render(
+      <TooltipProvider delay={0}>
+        <AiComposerSeat phase="active" status="running" composerState={composer} onSubmitGesture={() => {}} />
+      </TooltipProvider>,
+    );
+    expect(screen.queryByRole('button', { name: t('ai.workspace.busyPreference') })).not.toBeInTheDocument();
+    const primary = screen.getByRole('button', { name: t(labelKey) });
+    expect(primary).toBeEnabled();
+    await user.hover(primary);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(t(tooltipKey));
   });
 
   it.each([

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiSettingsSection } from '../ai-settings-section';
@@ -73,6 +74,20 @@ describe('Agent Session settings', () => {
     expect(toggle).toHaveAttribute('aria-checked', 'false');
     fireEvent.click(toggle);
     expect(save).toHaveBeenCalledWith(true);
+  });
+
+  it('configures the running input behavior with readable labels in Agent settings', async () => {
+    const user = userEvent.setup();
+    render(<AiSettingsSection />);
+    const select = screen.getByRole('combobox', { name: 'settings.ai.agent.busyPreference' });
+    expect(select).toHaveTextContent('ai.workspace.queue.action');
+    expect(select).toHaveAccessibleDescription('settings.ai.agent.busyPreferenceDescription');
+
+    await user.click(select);
+    await user.click(await screen.findByRole('option', { name: 'ai.workspace.steer.action' }));
+
+    await waitFor(() => expect(useAiSettingsStore.getState().agentBusyPreference).toBe('steer'));
+    expect(select).toHaveTextContent('ai.workspace.steer.action');
   });
 
   it('omits the Agent enable switch and permission notice while retaining session cleanup', () => {

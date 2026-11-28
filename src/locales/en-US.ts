@@ -1875,6 +1875,8 @@ export default {
   'settings.ai.description': 'Configure multiple local or cloud model providers and choose the default used by the AI assistant.',
   'settings.ai.agent.title': 'Terminal Agent',
   'settings.ai.agent.description': 'Control Agent Session access and review structured operations.',
+  'settings.ai.agent.busyPreference': 'Running input behavior',
+  'settings.ai.agent.busyPreferenceDescription': 'Choose what Enter does while the Agent is running. Press Cmd/Ctrl+Enter anytime to use the other behavior.',
   'settings.ai.agent.sandbox': 'Agent sandbox (experimental)',
   'settings.ai.agent.sandboxDescription': 'On supported systems, new local Agent sessions use Direct execution in a managed sandbox. This also enables configured SSH sandboxes. Turning this off blocks operations that require a sandbox.',
   'settings.ai.agent.sandboxDescriptionMac': 'macOS local sandbox is ready: new local Agent sessions default to a managed nono sandbox terminal (with Direct execution also available), and configured SSH sandboxes are enabled. Turning this off blocks operations that require a sandbox.',

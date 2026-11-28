@@ -371,7 +371,6 @@ export function AiWorkspaceController({
       historicalContinuationAvailable={controller.historicalContinuationAvailable}
       historicalContinuationBusy={controller.historicalContinuationBusy}
       historicalContinuationError={controller.historicalContinuationError}
-      onBusyPreferenceChange={controller.setBusyPreference}
       onDismissError={controller.dismissError}
       onRetryFailedDraft={controller.retryFailedDraft}
       failedDraftRetryBlockedReason={controller.failedDraftRetryBlockedReason}

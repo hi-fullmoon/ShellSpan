@@ -274,7 +274,6 @@ export interface AiWorkspaceRootProps {
   readonly historicalContinuationAvailable?: boolean;
   readonly historicalContinuationBusy?: boolean;
   readonly historicalContinuationError?: string | null;
-  readonly onBusyPreferenceChange?: (value: 'queue' | 'steer') => void;
   readonly onDismissError?: () => void;
   readonly onRetryFailedDraft?: (id: string) => void;
   readonly failedDraftRetryBlockedReason?: string | null;
@@ -383,7 +382,6 @@ export function AiWorkspaceRoot({
   historicalContinuationAvailable = false,
   historicalContinuationBusy = false,
   historicalContinuationError = null,
-  onBusyPreferenceChange,
   onDismissError,
   onRetryFailedDraft,
   failedDraftRetryBlockedReason,
@@ -1217,8 +1215,6 @@ export function AiWorkspaceRoot({
             onSubmitGesture(gesture, accelerated);
           } : undefined}
           onStop={readOnlySession ? undefined : onStop}
-          onBusyPreferenceChange={surfaceMode === 'agent' && !readOnlySession
-            && !view?.snapshot.value.header.subagent ? onBusyPreferenceChange : undefined}
           onEditQueueItem={surfaceMode === 'agent' && !readOnlySession ? onEditQueueItem : undefined}
           onUpdateQueueItem={surfaceMode === 'agent' && !readOnlySession ? onUpdateQueueItem : undefined}
           onDiscardQueueEdit={onDiscardQueueEdit}

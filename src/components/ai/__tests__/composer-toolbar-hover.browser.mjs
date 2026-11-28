@@ -85,9 +85,9 @@ try {
             await page.setViewportSize({ width, height: 400 });
             const controls = toolbar.locator([
               '.ai-composer-add', '.ai-execution-surface-trigger', '.ai-model-trigger',
-              '.ai-busy-preference-trigger', '.ai-context-meter-trigger',
+              '.ai-context-meter-trigger',
             ].join(', '));
-            assert.equal(await controls.count(), 5);
+            assert.equal(await controls.count(), 4);
             const expected = await tokenBackground(toolbar, '--accent');
             for (const control of await controls.all()) {
               assert.ok(await control.getAttribute('aria-label'), 'Toolbar actions retain readable labels');

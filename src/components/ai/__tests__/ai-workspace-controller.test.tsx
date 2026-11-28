@@ -426,6 +426,7 @@ beforeEach(async () => {
     contextLines: 200,
     agentPermissionMode: 'autoApproveReadOnly',
     agentExecutionSurface: 'direct',
+    agentBusyPreference: 'queue',
     agentSandboxEnabled: false,
   });
   useTerminalStore.setState({ sessions: [], activeSessionId: null });
@@ -1984,7 +1985,6 @@ describe('AiWorkspaceController', () => {
           onDraftChange={controller.setDraft}
           onSubmitGesture={controller.submit}
           onStop={controller.stop}
-          onBusyPreferenceChange={controller.setBusyPreference}
         />
       );
     }
@@ -2005,6 +2005,23 @@ describe('AiWorkspaceController', () => {
     await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(
       view.summary.id,
       expect.objectContaining({ mode: 'nextStep', content: 'steer input' }),
+    ));
+
+    act(() => {
+      useAiSettingsStore.getState().setAgentBusyPreference('steer');
+    });
+    await user.type(textbox, 'default steer input');
+    fireEvent.keyDown(textbox, { key: 'Enter' });
+    await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(
+      view.summary.id,
+      expect.objectContaining({ mode: 'nextStep', content: 'default steer input' }),
+    ));
+
+    await user.type(textbox, 'ctrl queue input');
+    fireEvent.keyDown(textbox, { key: 'Enter', ctrlKey: true });
+    await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(
+      view.summary.id,
+      expect.objectContaining({ mode: 'nextTurn', content: 'ctrl queue input' }),
     ));
 
     await user.click(screen.getByRole('button', { name: 'Stop this turn' }));

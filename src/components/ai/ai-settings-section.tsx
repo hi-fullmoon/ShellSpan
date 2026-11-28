@@ -28,6 +28,7 @@ import {
 } from '@/lib/ipc/tauri';
 import { listAllAgentSessionRecords } from '@/lib/ai/session-records';
 import { modelDefinitionOf } from '@/lib/ai/provider-contract';
+import type { AiBusyPreference } from '@/lib/ai/submission-policy';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { type AgentSandboxNetworkMode, useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { validateSandboxAllowlistInput } from '@/lib/terminal/sandbox-terminal';
@@ -101,6 +102,9 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const setDefaultProvider = useAiSettingsStore((state) => state.setDefaultProvider);
   const contextLines = useAiSettingsStore((state) => state.contextLines);
   const setContextLines = useAiSettingsStore((state) => state.setContextLines);
+  const agentBusyPreference = useAiSettingsStore((state) => state.agentBusyPreference);
+  const setAgentBusyPreference = useAiSettingsStore((state) => state.setAgentBusyPreference);
+  const busyPreferenceControlId = React.useId();
   const sandboxControlId = React.useId();
   const sandboxNetworkControlId = React.useId();
   const sandboxAllowlistControlId = React.useId();
@@ -122,6 +126,13 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
       value: String(count),
       label: t('settings.ai.contextLinesValue', { count }),
     })),
+    [t],
+  );
+  const busyPreferenceItems = useMemo<{ value: AiBusyPreference; label: string }[]>(
+    () => [
+      { value: 'queue', label: t('ai.workspace.queue.action') },
+      { value: 'steer', label: t('ai.workspace.steer.action') },
+    ],
     [t],
   );
   const sandboxNetworkModeItems: { value: AgentSandboxNetworkMode; label: string }[] = [
@@ -432,6 +443,40 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
 
       {nativeRouteMode && (
         <SettingsGroup title={t('settings.ai.agent.title')}>
+          <SettingRow
+            controlId={busyPreferenceControlId}
+            label={t('settings.ai.agent.busyPreference')}
+            description={t('settings.ai.agent.busyPreferenceDescription')}
+            descriptionId={`${busyPreferenceControlId}-description`}
+          >
+            <Select
+              items={busyPreferenceItems}
+              value={agentBusyPreference}
+              onValueChange={(value) => {
+                if (value === 'queue' || value === 'steer') setAgentBusyPreference(value);
+              }}
+            >
+              <SelectTrigger
+                id={busyPreferenceControlId}
+                variant="ghost"
+                size="sm"
+                className="max-w-full"
+                aria-label={t('settings.ai.agent.busyPreference')}
+                aria-describedby={`${busyPreferenceControlId}-description`}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end" alignItemWithTrigger={false}>
+                <SelectGroup>
+                  {busyPreferenceItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </SettingRow>
           <SettingRow
             controlId={sandboxControlId}
             label={t('settings.ai.agent.sandbox')}

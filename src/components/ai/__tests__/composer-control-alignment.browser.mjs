@@ -192,20 +192,8 @@ try {
       assert.deepEqual(pageErrors, [], 'Rendering the real composer must not raise browser errors');
       await page.locator('main').evaluate(element => { element.style.width = ''; });
       await page.evaluate(() => window.setComposerStatus('running'));
-      await composer.locator('.ai-busy-preference-trigger').waitFor();
-      let preservedSurface = false;
-      for (const width of [1100, 900, 800, 760, 720, 700, 680, 664, 640, 600, 540, 480, 360]) {
-        await page.setViewportSize({ width, height: 300 });
-        await page.waitForTimeout(80);
-        const visible = selector => composer.locator(selector).evaluate(element => getComputedStyle(element).display !== 'none');
-        const busy = await visible('.ai-busy-preference-label');
-        const surface = await visible('.ai-execution-surface-label');
-        if (!busy && surface) preservedSurface = true;
-        assert.ok(surface || !busy, `Queue text must collapse before execution text at ${width}px`);
-        if (!busy) assert.equal(await composer.locator('.ai-busy-preference-trigger').evaluate(element => element.getBoundingClientRect().width), 28);
-        if (width === 664) await page.screenshot({ path: `/tmp/shellspan-composer-priority-${engine.name()}-${locale}.png` });
-      }
-      assert.ok(preservedSurface, 'Execution text must remain visible after queue text collapses');
+      assert.equal(await composer.locator('.ai-busy-preference-trigger').count(), 0,
+        'Running input policy lives in settings instead of the composer toolbar');
 
       const visibleCommandLabel = locale === 'zh-CN' ? '可视命令' : 'Visible command';
       const disabledSurface = composer.locator('[data-execution-surface="boundTerminal"]');

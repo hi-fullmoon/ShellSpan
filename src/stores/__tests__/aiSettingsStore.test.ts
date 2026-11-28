@@ -52,11 +52,13 @@ describe('aiSettingsStore', () => {
       preference('contextLines', 500),
       preference('agentPermissionMode', 'requestApproval'),
       preference('agentExecutionSurface', 'boundTerminal'),
+      preference('agentBusyPreference', 'steer'),
       preference('providers', [{ id: 'ignored-old-provider' }]),
     ]);
     expect(preferences.contextLines).toBe(500);
     expect(preferences.agentPermissionMode).toBe('requestApproval');
     expect(preferences.agentExecutionSurface).toBe('boundTerminal');
+    expect(preferences.agentBusyPreference).toBe('steer');
     expect(preferences.providers).toEqual(initialState.providers);
     expect(preferences.defaultProviderId).toBe(initialState.defaultProviderId);
   });
@@ -65,9 +67,11 @@ describe('aiSettingsStore', () => {
     const preferences = parseAiPreferences([
       preference('agentPermissionMode', 'fullAccess'),
       preference('agentExecutionSurface', 'unknown'),
+      preference('agentBusyPreference', 'invalid'),
     ]);
     expect(preferences.agentPermissionMode).toBe('fullAccess');
     expect(preferences.agentExecutionSurface).toBe('direct');
+    expect(preferences.agentBusyPreference).toBe('queue');
   });
 
   it('saves Agent defaults for future sessions', async () => {
@@ -75,10 +79,12 @@ describe('aiSettingsStore', () => {
     useAiSettingsStore.setState({ ...initialState, initialized: true }, true);
     useAiSettingsStore.getState().setAgentPermissionMode('requestApproval');
     useAiSettingsStore.getState().setAgentExecutionSurface('boundTerminal');
+    useAiSettingsStore.getState().setAgentBusyPreference('steer');
     await flushAiSettingsPreferences();
     expect(tauri.invokeSavePreferences).toHaveBeenCalledWith(expect.arrayContaining([
       ['ai.agentPermissionMode', '"requestApproval"'],
       ['ai.agentExecutionSurface', '"boundTerminal"'],
+      ['ai.agentBusyPreference', '"steer"'],
     ]));
   });
 

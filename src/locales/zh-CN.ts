@@ -1873,6 +1873,8 @@ export default {
   'settings.ai.description': '同时配置多个本地或云端模型服务，并指定 AI 助手默认使用的厂商。',
   'settings.ai.agent.title': '终端 Agent',
   'settings.ai.agent.description': '管理 Agent Session 访问并审阅结构化操作。',
+  'settings.ai.agent.busyPreference': '运行中输入策略',
+  'settings.ai.agent.busyPreferenceDescription': '决定 Agent 运行中按 Enter 发送消息时的默认行为；随时可按 Cmd/Ctrl+Enter 临时切换为另一种方式。',
   'settings.ai.agent.sandbox': 'Agent 沙箱（实验性）',
   'settings.ai.agent.sandboxDescription': '在支持的系统上，新建本地 Agent 会话会在受管沙箱中直接执行。此开关也启用已配置的 SSH 沙箱。关闭后，要求沙箱的操作会被拦截。',
   'settings.ai.agent.sandboxDescriptionMac': '当前 macOS 本地沙箱已就绪：开启后，新建本地 Agent 会话会优先在受管 nono 沙箱终端中运行（也可切换为直接执行），同时启用已配置的 SSH 沙箱。关闭后，要求沙箱的操作会被拦截。',

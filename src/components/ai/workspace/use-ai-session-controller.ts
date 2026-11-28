@@ -193,7 +193,6 @@ export interface AiSessionController {
   readonly renamingSessionId: string | null;
   readonly renameError: string | null;
   readonly setDraft: (value: string) => void;
-  readonly setBusyPreference: (value: 'queue' | 'steer') => void;
   readonly submit: (gesture: 'keyboard' | 'primary', accelerated?: boolean) => void;
   readonly stop: () => void;
   readonly continueOnReconnectedTerminal: (() => void) | null;
@@ -406,6 +405,7 @@ export function useAiSessionController({
   useEffect(()=>{if(isTauriRuntime()&&!routeSnapshot)void hydrateRoutes();},[routeSnapshot,hydrateRoutes]);
   const providers = useMemo(()=>routeSnapshot ? routeProviderConfigs(routeSnapshot,routeModels) : isTauriRuntime() ? [] : browserProviders,[routeSnapshot,routeModels,browserProviders]);
   const defaultProviderId = useAiSettingsStore((state) => state.defaultProviderId);
+  const agentBusyPreference = useAiSettingsStore((state) => state.agentBusyPreference);
   const preferredAgentPermission = useAgentPermissionStore((state) =>
     state.preferences[activeTerminalId ?? '']?.mode ?? 'autoApproveReadOnly');
   const provider = useMemo(() => {
@@ -449,6 +449,7 @@ export function useAiSessionController({
     ...(initialFocusSessionId ? submissionMemory.sessionStates.get(initialFocusSessionId) : undefined),
     sessionId: initialFocusSessionId,
     draft: useAiDraftStore.getState().drafts[initialFocusSessionId ? sessionRouteKey('agent', initialFocusSessionId) : focusMode ? 'new:agent:focus' : `new:agent:${scope}:${activeTerminal?.sessionId ?? 'workspace'}`] ?? '',
+    preferredBusyMode: useAiSettingsStore.getState().agentBusyPreference,
   }));
   const [navigation, setNavigation] = useState(() => createAiWorkspaceNavigationState());
   const navigationRef = useRef(navigation);
@@ -697,7 +698,7 @@ export function useAiSessionController({
       && previous.pendingSubmissions.length === 0) {
       const saved = sessionSubmissionStates.current.get(event.sessionId);
       if (saved && (saved.pendingSubmissions.length || saved.failedDrafts.length)) {
-        previous = { ...saved, draft: previous.draft };
+        previous = { ...saved, draft: previous.draft, preferredBusyMode: previous.preferredBusyMode };
         updateOptimistic(() => saved.pendingSubmissions.map(item => ({ ...item,
           scopeKey: submissionContextRef.current.key, expectedNextSeq: null,
           delivery: item.state === 'confirming' ? 'confirming' : 'pending' })));
@@ -766,7 +767,7 @@ export function useAiSessionController({
       ),
       waitingApproval: summary?.status === 'waiting',
       draft: useAiDraftStore.getState().drafts[key] ?? '',
-      preferredBusyMode: summary?.subagent ? 'queue' : composerRef.current.preferredBusyMode,
+      preferredBusyMode: summary?.subagent ? 'queue' : useAiSettingsStore.getState().agentBusyPreference,
     });
     composerRef.current = next;
     submissionMemory.remember(submissionContextRef.current, next);
@@ -775,6 +776,14 @@ export function useAiSessionController({
     setComposer(next);
     setAnnouncement(null);
   }, [approvalGuard, navigationDraftKey, saveCurrentDraft, submissionMemory, updateOptimistic, workspaceScopeKey]);
+
+  const isSubagentSession = Boolean(view?.snapshot.value.header.subagent);
+  useEffect(() => {
+    const targetBusyMode = isSubagentSession ? 'queue' : agentBusyPreference;
+    if (composerRef.current.preferredBusyMode !== targetBusyMode) {
+      dispatch({ type: 'preference.changed', value: targetBusyMode });
+    }
+  }, [agentBusyPreference, dispatch, isSubagentSession]);
 
   const coldSkillSession = useRef<Promise<AiSessionView> | null>(null);
   const terminalDirectory = useRef<{
@@ -2503,7 +2512,6 @@ export function useAiSessionController({
     renamingSessionId,
     renameError,
     setDraft: (value) => { claimWorkspace(); dispatch({ type: 'draft.changed', value }); },
-    setBusyPreference: (value) => dispatch({ type: 'preference.changed', value }),
     submit: (gesture, accelerated = false) => {
       if (terminalSessionRestoring || sandboxChecking || sandboxUnavailableReason || focusCommandsUnavailable || needsDirectFallback
         || viewRef.current?.storageFaultAtSeq !== undefined) return;

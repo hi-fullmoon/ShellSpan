@@ -17,6 +17,7 @@ import {
 } from '@/lib/ai/ai-reasoning';
 
 import { isProviderProfile, resolveProviderProfile } from '@/lib/ai/provider-contract';
+import type { AiBusyPreference } from '@/lib/ai/submission-policy';
 import type { AgentPermissionMode } from '@/types/agent-approval';
 import type { AgentExecutionSurface } from '@/types/agent-session';
 import llmCatalog from '../../protocol/llm/catalog.json';
@@ -149,6 +150,7 @@ interface AiPreferences {
   contextLines: number;
   agentPermissionMode: AgentPermissionMode;
   agentExecutionSurface: AgentExecutionSurface;
+  agentBusyPreference: AiBusyPreference;
 }
 
 interface AiSettingsState extends AiPreferences {
@@ -172,6 +174,7 @@ interface AiSettingsState extends AiPreferences {
   setContextLines: (lines: number) => void;
   setAgentPermissionMode: (mode: AgentPermissionMode) => void;
   setAgentExecutionSurface: (surface: AgentExecutionSurface) => void;
+  setAgentBusyPreference: (preference: AiBusyPreference) => void;
   setAgentSandboxEnabled: (enabled: boolean) => Promise<void>;
   setAgentSandboxNetworkPolicy: (mode: AgentSandboxNetworkMode, allowlist: string[]) => Promise<void>;
   allowSandboxDomain: (domain: string) => Promise<void>;
@@ -208,11 +211,17 @@ const defaults: AiPreferences = {
   contextLines: 200,
   agentPermissionMode: 'autoApproveReadOnly',
   agentExecutionSurface: 'direct',
+  agentBusyPreference: 'queue',
 };
 
 // RouteStore owns provider connections and model selection. This store persists
 // only independent composer and terminal-context preferences.
-const PREFERENCE_KEYS = ['contextLines', 'agentPermissionMode', 'agentExecutionSurface'] as const;
+const PREFERENCE_KEYS = [
+  'contextLines',
+  'agentPermissionMode',
+  'agentExecutionSurface',
+  'agentBusyPreference',
+] as const;
 
 function storageKey(key: keyof AiPreferences): string {
   return `ai.${key}`;
@@ -229,12 +238,14 @@ export function parseAiPreferences(entries: [string, string][]): AiPreferences {
   if (typeof contextValue === 'number') contextLines = contextValue;
   const permissionValue = read('agentPermissionMode');
   const surfaceValue = read('agentExecutionSurface');
+  const busyPreferenceValue = read('agentBusyPreference');
   return {
     ...defaults,
     contextLines,
     agentPermissionMode: permissionValue === 'requestApproval' || permissionValue === 'fullAccess'
       ? permissionValue : defaults.agentPermissionMode,
     agentExecutionSurface: surfaceValue === 'boundTerminal' ? surfaceValue : defaults.agentExecutionSurface,
+    agentBusyPreference: busyPreferenceValue === 'steer' ? 'steer' : defaults.agentBusyPreference,
   };
 }
 
@@ -393,6 +404,7 @@ export const useAiSettingsStore = create<AiSettingsState>()(
     setContextLines: (contextLines) => set({ contextLines }),
     setAgentPermissionMode: (agentPermissionMode) => set({ agentPermissionMode }),
     setAgentExecutionSurface: (agentExecutionSurface) => set({ agentExecutionSurface }),
+    setAgentBusyPreference: (agentBusyPreference) => set({ agentBusyPreference }),
     setAgentSandboxEnabled: async (agentSandboxEnabled) => {
       const next = sandboxEnabledQueue.then(async () => {
         set({ agentSandboxSaving: true });
@@ -493,7 +505,7 @@ export const useAiSettingsStore = create<AiSettingsState>()(
 );
 
 useAiSettingsStore.subscribe(
-  (state) => `${state.contextLines}:${state.agentPermissionMode}:${state.agentExecutionSurface}`,
+  (state) => `${state.contextLines}:${state.agentPermissionMode}:${state.agentExecutionSurface}:${state.agentBusyPreference}`,
   () => {
     const state = useAiSettingsStore.getState();
     if (state.initialized) schedulePreferencesSave({
@@ -502,6 +514,7 @@ useAiSettingsStore.subscribe(
       contextLines: state.contextLines,
       agentPermissionMode: state.agentPermissionMode,
       agentExecutionSurface: state.agentExecutionSurface,
+      agentBusyPreference: state.agentBusyPreference,
     });
   },
 );

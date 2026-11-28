@@ -9,9 +9,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   ArrowUpIcon,
   ChevronDownIcon,
-  CornerUpLeftIcon,
   InfoIcon,
-  ListPlusIcon,
   ShieldCheckIcon,
   SquareIcon,
   TriangleAlertIcon,
@@ -20,15 +18,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Spinner } from '@/components/ui/spinner';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import {
   InputGroup,
   InputGroupAddon,
@@ -126,7 +115,6 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly onSubmit?: (value: string) => void | Promise<void>;
   readonly onSubmitGesture?: (gesture: 'keyboard' | 'primary', accelerated: boolean) => void;
   readonly onStop?: () => void;
-  readonly onBusyPreferenceChange?: (value: 'queue' | 'steer') => void;
   readonly onEditQueueItem?: (item: AiInboxItem) => Promise<boolean> | boolean | void;
   readonly onUpdateQueueItem?: AiSessionController['updateQueueItem'];
   readonly onDiscardQueueEdit?: AiSessionController['discardQueueEdit'];
@@ -199,7 +187,6 @@ export function AiComposerSeat({
   onSubmit,
   onSubmitGesture,
   onStop,
-  onBusyPreferenceChange,
   onEditQueueItem,
   onRemoveQueueItem,
   onSteerQueueItem,
@@ -836,62 +823,6 @@ export function AiComposerSeat({
                 ) : permissionControl}
                 {mode === 'agent' && executionSurfaceControl}
                 {mode === 'agent' && sandboxToggleControl}
-                {mode === 'agent' && running && (
-                  <DropdownMenu>
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={(
-                          <DropdownMenuTrigger
-                            render={(
-                              <Button
-                                variant="ghost"
-                                size="xs"
-                                className="ai-busy-preference-trigger h-7 min-w-0 @max-[640px]/ai-workspace:size-7 @max-[640px]/ai-workspace:shrink-0 @max-[640px]/ai-workspace:p-0 @max-[640px]/ai-workspace:[&_[data-icon=inline-end]]:hidden"
-                                aria-label={t('ai.workspace.busyPreference')}
-                                disabled={waitingApproval || waitingQuestion}
-                              />
-                            )}
-                          />
-                        )}
-                      >
-                        {busyPreference === 'queue'
-                          ? <ListPlusIcon data-icon="inline-start" />
-                          : <CornerUpLeftIcon data-icon="inline-start" />}
-                        <span className="ai-busy-preference-label min-w-0 truncate @max-[640px]/ai-workspace:hidden">
-                          {busyPreference === 'queue'
-                            ? t('ai.workspace.queue.action')
-                            : t('ai.workspace.steer.action')}
-                        </span>
-                        <ChevronDownIcon data-icon="inline-end" />
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        {busyPreference === 'queue'
-                          ? t('ai.workspace.queue.tooltip')
-                          : t('ai.workspace.steer.tooltip')}
-                      </TooltipContent>
-                    </Tooltip>
-                    <DropdownMenuContent className="ai-busy-preference-menu w-max min-w-[200px] max-w-[calc(100vw-16px)] p-[3px]" side="top" sideOffset={8} align="start">
-                      <DropdownMenuGroup>
-                        <DropdownMenuLabel className="px-2 py-[5px]">{t('ai.workspace.busyPreference')}</DropdownMenuLabel>
-                        <DropdownMenuRadioGroup
-                          value={busyPreference}
-                          onValueChange={(value) => {
-                            if (value === 'queue' || value === 'steer') onBusyPreferenceChange?.(value);
-                          }}
-                        >
-                          <DropdownMenuRadioItem className="min-h-[34px] gap-1 py-[5px] pl-2 whitespace-nowrap" value="queue">
-                            <ListPlusIcon />
-                            {t('ai.workspace.queue.action')}
-                          </DropdownMenuRadioItem>
-                          <DropdownMenuRadioItem className="min-h-[34px] gap-1 py-[5px] pl-2 whitespace-nowrap" value="steer">
-                            <CornerUpLeftIcon />
-                            {t('ai.workspace.steer.action')}
-                          </DropdownMenuRadioItem>
-                        </DropdownMenuRadioGroup>
-                      </DropdownMenuGroup>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
               </div>
 
               <div className="ai-composer-trailing flex min-w-0 flex-[1_1_auto] items-center justify-end gap-1.5 @max-[400px]/ai-workspace:gap-[3px]">
@@ -933,7 +864,7 @@ export function AiComposerSeat({
                       ? <SquareIcon className="ai-composer-stop-icon" fill="currentColor" />
                       : <ArrowUpIcon />}
                   </TooltipTrigger>
-                  <TooltipContent>
+                  <TooltipContent role="tooltip">
                     {stopPrimary
                       ? t('ai.workspace.stopTooltip')
                       : waitingApproval
@@ -942,6 +873,10 @@ export function AiComposerSeat({
                         ? unavailableReason
                       : terminal
                         ? t('ai.workspace.sessionEnded')
+                      : running && mode === 'agent' && !waitingQuestion
+                        ? (busyPreference === 'queue'
+                          ? t('ai.workspace.queue.tooltip')
+                          : t('ai.workspace.steer.tooltip'))
                         : primaryLabel}
                   </TooltipContent>
                 </Tooltip>
