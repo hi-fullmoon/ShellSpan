@@ -1,11 +1,17 @@
 import { create } from 'zustand';
 
 export type AiPanelSection = 'workbench' | 'terminal';
+export type AiActiveSessionScope = 'workbench' | 'terminal' | 'focus';
 
 interface AiPanelState {
   panelOpenBySection: Record<AiPanelSection, boolean>;
+  activeSessionByScope: Record<AiActiveSessionScope, string | null>;
+  pendingOpenSessionId: string | null;
   setOpen: (open: boolean, section?: AiPanelSection) => void;
   toggleOpen: (section?: AiPanelSection) => void;
+  setActiveSession: (scope: AiActiveSessionScope, sessionId: string | null) => void;
+  requestOpenSession: (sessionId: string) => void;
+  consumePendingOpenSession: (sessionId: string) => void;
 }
 
 export const useAiPanelStore = create<AiPanelState>()((set) => ({
@@ -13,6 +19,12 @@ export const useAiPanelStore = create<AiPanelState>()((set) => ({
     workbench: false,
     terminal: false,
   },
+  activeSessionByScope: {
+    workbench: null,
+    terminal: null,
+    focus: null,
+  },
+  pendingOpenSessionId: null,
   setOpen: (open, section) => set((state) => ({
     panelOpenBySection: section
       ? { ...state.panelOpenBySection, [section]: open }
@@ -30,4 +42,18 @@ export const useAiPanelStore = create<AiPanelState>()((set) => ({
       },
     };
   }),
+  setActiveSession: (scope, sessionId) => set((state) => (
+    state.activeSessionByScope[scope] === sessionId
+      ? state
+      : {
+          activeSessionByScope: {
+            ...state.activeSessionByScope,
+            [scope]: sessionId,
+          },
+        }
+  )),
+  requestOpenSession: (sessionId) => set({ pendingOpenSessionId: sessionId }),
+  consumePendingOpenSession: (sessionId) => set((state) => (
+    state.pendingOpenSessionId === sessionId ? { pendingOpenSessionId: null } : state
+  )),
 }));

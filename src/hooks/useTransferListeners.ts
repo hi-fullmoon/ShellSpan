@@ -8,18 +8,30 @@ import type {
   UploadProgressEvent,
 } from '@/types';
 import { useAppStore } from '@/stores/appStore';
-import { useToastStore } from '@/stores/toastStore';
+import { invokeSendDesktopNotification, isTauriRuntime } from '@/lib/ipc/tauri';
 import { createLogger } from '@/lib/logger';
+import {
+  isAppWindowFocused,
+  sanitizeNotificationText,
+  shouldDeliverDesktopNotification,
+} from '@/lib/notifications/policy';
 import { t } from '@/locales';
 
 const logger = createLogger('transfer');
+
+function transferNotificationBody(paths?: readonly string[], currentPath?: string): string {
+  const raw = currentPath ?? paths?.[0];
+  if (!raw) return '';
+  const segments = raw.split(/[\\/]/).filter(Boolean);
+  const name = segments[segments.length - 1] ?? raw;
+  return sanitizeNotificationText(name, 140);
+}
 
 export function useTransferListeners(): void {
   const updateUpload = useTransferStore((state) => state.updateUpload);
   const updateDownload = useTransferStore((state) => state.updateDownload);
   const updateDelete = useTransferStore((state) => state.updateDelete);
   const updateRemoteCopy = useTransferStore((state) => state.updateRemoteCopy);
-  const addToast = useToastStore((state) => state.addToast);
 
   useEffect(() => {
     let disposed = false;
@@ -40,16 +52,31 @@ export function useTransferListeners(): void {
     };
 
     const unsubscribe = useTransferStore.subscribe((state, previous) => {
-      if (state.pathOccupancyRevision === previous.pathOccupancyRevision
-        || !useAppStore.getState().sftpCompletionNotification
-        || (document.visibilityState === 'visible' && document.hasFocus())) return;
+      if (state.pathOccupancyRevision === previous.pathOccupancyRevision) return;
+      const app = useAppStore.getState();
+      const windowFocused = isAppWindowFocused();
+      if (!shouldDeliverDesktopNotification({
+        enabled: app.notificationsEnabled,
+        categoryEnabled: app.sftpCompletionNotification,
+        policy: app.notificationTriggerPolicy,
+        windowFocused,
+        targetVisible: windowFocused && app.activeSection === 'sftp',
+      })) return;
       const previouslyCompleted = new Set(previous.operations
         .filter((operation) => operation.status === 'completed')
         .map((operation) => operation.operationId));
       for (const operation of state.operations) {
         if (operation.status === 'completed' && operation.kind !== 'delete'
           && operation.totalSteps > 0 && !previouslyCompleted.has(operation.operationId)) {
-          addToast(t('sftp.transfer.completedNotification'), 'success');
+          if (!isTauriRuntime()) continue;
+          void invokeSendDesktopNotification({
+            title: sanitizeNotificationText(t('sftp.transfer.completedNotification'), 160),
+            body: transferNotificationBody(operation.paths, operation.currentPath),
+            target: { type: 'section', section: 'sftp' },
+            urgency: 'normal',
+          }).catch((error) => {
+            logger.debug('Desktop notification unavailable for transfer completion', error);
+          });
         }
       }
     });
@@ -87,5 +114,5 @@ export function useTransferListeners(): void {
       unlisteners.forEach((unlisten) => unlisten());
       unlisteners.length = 0;
     };
-  }, [addToast, updateUpload, updateDownload, updateDelete, updateRemoteCopy]);
+  }, [updateUpload, updateDownload, updateDelete, updateRemoteCopy]);
 }

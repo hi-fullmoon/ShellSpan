@@ -10,7 +10,7 @@ import { DEFAULT_TAB_TITLE_TEMPLATE, normalizeTabTitleOverrides, validTabTitleTe
 import { subscribeWithSelector } from 'zustand/middleware';
 import { shallow } from 'zustand/shallow';
 import { changeLocale } from '@/locales';
-import type { AppSection, Locale, PetdexDiagnostic, SettingsSection, SettingsTarget, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, TerminalOsc52Policy, ThemeMode, WorkbenchTab } from '@/types';
+import type { AppSection, Locale, NotificationTriggerPolicy, PetdexDiagnostic, SettingsSection, SettingsTarget, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, TerminalOsc52Policy, ThemeMode, WorkbenchTab } from '@/types';
 import {
   invokeLoadPreferences,
   invokeSavePreferences,
@@ -129,6 +129,13 @@ interface AppPreferences extends PetdexMessagePreferences {
   sftpRetryCount: number;
   sftpDownloadDirectory: string;
   sftpCompletionNotification: boolean;
+  notificationsEnabled: boolean;
+  notificationTriggerPolicy: NotificationTriggerPolicy;
+  aiNotifyApproval: boolean;
+  aiNotifyQuestion: boolean;
+  aiNotifySudo: boolean;
+  aiNotifyCompleted: boolean;
+  aiNotifyFailed: boolean;
   terminalHideSingleTabBar: boolean;
   sftpHideSingleTabBar: boolean;
   shortcuts: ShortcutBindings;
@@ -203,6 +210,13 @@ interface AppState extends AppPreferences {
   setSftpRetryCount: (count: number) => void;
   setSftpDownloadDirectory: (path: string) => void;
   setSftpCompletionNotification: (enabled: boolean) => void;
+  setNotificationsEnabled: (enabled: boolean) => void;
+  setNotificationTriggerPolicy: (policy: NotificationTriggerPolicy) => void;
+  setAiNotifyApproval: (enabled: boolean) => void;
+  setAiNotifyQuestion: (enabled: boolean) => void;
+  setAiNotifySudo: (enabled: boolean) => void;
+  setAiNotifyCompleted: (enabled: boolean) => void;
+  setAiNotifyFailed: (enabled: boolean) => void;
   setTerminalHideSingleTabBar: (enabled: boolean) => void;
   setSftpHideSingleTabBar: (enabled: boolean) => void;
   setShortcut: (action: ShortcutAction, shortcut: string) => void;
@@ -230,6 +244,8 @@ const PREFERENCE_KEYS: readonly (keyof PersistedAppPreferences)[] = [
   'terminalBellStyle', 'confirmBeforeExit', 'restoreWorkspace',
   'sftpShowHiddenFiles', 'sftpConflictPolicy', 'sftpRetryCount',
   'sftpDownloadDirectory', 'sftpCompletionNotification',
+  'notificationsEnabled', 'notificationTriggerPolicy',
+  'aiNotifyApproval', 'aiNotifyQuestion', 'aiNotifySudo', 'aiNotifyCompleted', 'aiNotifyFailed',
   'terminalHideSingleTabBar', 'sftpHideSingleTabBar', 'shortcuts',
 ];
 
@@ -279,6 +295,13 @@ function getDefaultPreferences(): AppPreferences {
     sftpRetryCount: 1,
     sftpDownloadDirectory: '',
     sftpCompletionNotification: true,
+    notificationsEnabled: true,
+    notificationTriggerPolicy: 'whenUnfocusedOrHidden',
+    aiNotifyApproval: true,
+    aiNotifyQuestion: true,
+    aiNotifySudo: true,
+    aiNotifyCompleted: true,
+    aiNotifyFailed: true,
     terminalHideSingleTabBar: false,
     sftpHideSingleTabBar: false,
     shortcuts: DEFAULT_SHORTCUTS,
@@ -396,6 +419,29 @@ function entriesToPreferences(entries: [string, string][]): Partial<AppPreferenc
     sftpRetryCount: (prefs.sftpRetryCount as number) ?? defaults.sftpRetryCount,
     sftpDownloadDirectory: (prefs.sftpDownloadDirectory as string) ?? defaults.sftpDownloadDirectory,
     sftpCompletionNotification: (prefs.sftpCompletionNotification as boolean) ?? defaults.sftpCompletionNotification,
+    notificationsEnabled: typeof prefs.notificationsEnabled === 'boolean'
+      ? prefs.notificationsEnabled
+      : defaults.notificationsEnabled,
+    notificationTriggerPolicy: prefs.notificationTriggerPolicy === 'whenWindowUnfocused'
+      || prefs.notificationTriggerPolicy === 'always'
+      || prefs.notificationTriggerPolicy === 'whenUnfocusedOrHidden'
+      ? prefs.notificationTriggerPolicy
+      : defaults.notificationTriggerPolicy,
+    aiNotifyApproval: typeof prefs.aiNotifyApproval === 'boolean'
+      ? prefs.aiNotifyApproval
+      : defaults.aiNotifyApproval,
+    aiNotifyQuestion: typeof prefs.aiNotifyQuestion === 'boolean'
+      ? prefs.aiNotifyQuestion
+      : defaults.aiNotifyQuestion,
+    aiNotifySudo: typeof prefs.aiNotifySudo === 'boolean'
+      ? prefs.aiNotifySudo
+      : defaults.aiNotifySudo,
+    aiNotifyCompleted: typeof prefs.aiNotifyCompleted === 'boolean'
+      ? prefs.aiNotifyCompleted
+      : defaults.aiNotifyCompleted,
+    aiNotifyFailed: typeof prefs.aiNotifyFailed === 'boolean'
+      ? prefs.aiNotifyFailed
+      : defaults.aiNotifyFailed,
     terminalHideSingleTabBar: (prefs.terminalHideSingleTabBar as boolean) ?? defaults.terminalHideSingleTabBar,
     sftpHideSingleTabBar: (prefs.sftpHideSingleTabBar as boolean) ?? defaults.sftpHideSingleTabBar,
     shortcuts: mergeShortcutBindings(prefs.shortcuts),
@@ -642,6 +688,13 @@ export const useAppStore = create<AppState>()(
     setSftpRetryCount: (sftpRetryCount) => set({ sftpRetryCount }),
     setSftpDownloadDirectory: (sftpDownloadDirectory) => set({ sftpDownloadDirectory }),
     setSftpCompletionNotification: (sftpCompletionNotification) => set({ sftpCompletionNotification }),
+    setNotificationsEnabled: (notificationsEnabled) => set({ notificationsEnabled }),
+    setNotificationTriggerPolicy: (notificationTriggerPolicy) => set({ notificationTriggerPolicy }),
+    setAiNotifyApproval: (aiNotifyApproval) => set({ aiNotifyApproval }),
+    setAiNotifyQuestion: (aiNotifyQuestion) => set({ aiNotifyQuestion }),
+    setAiNotifySudo: (aiNotifySudo) => set({ aiNotifySudo }),
+    setAiNotifyCompleted: (aiNotifyCompleted) => set({ aiNotifyCompleted }),
+    setAiNotifyFailed: (aiNotifyFailed) => set({ aiNotifyFailed }),
     setTerminalHideSingleTabBar: (terminalHideSingleTabBar) => set({ terminalHideSingleTabBar }),
     setSftpHideSingleTabBar: (sftpHideSingleTabBar) => set({ sftpHideSingleTabBar }),
     setShortcut: (action, shortcut) =>
@@ -702,6 +755,13 @@ useAppStore.subscribe(
     sftpRetryCount: state.sftpRetryCount,
     sftpDownloadDirectory: state.sftpDownloadDirectory,
     sftpCompletionNotification: state.sftpCompletionNotification,
+    notificationsEnabled: state.notificationsEnabled,
+    notificationTriggerPolicy: state.notificationTriggerPolicy,
+    aiNotifyApproval: state.aiNotifyApproval,
+    aiNotifyQuestion: state.aiNotifyQuestion,
+    aiNotifySudo: state.aiNotifySudo,
+    aiNotifyCompleted: state.aiNotifyCompleted,
+    aiNotifyFailed: state.aiNotifyFailed,
     terminalHideSingleTabBar: state.terminalHideSingleTabBar,
     sftpHideSingleTabBar: state.sftpHideSingleTabBar,
     shortcuts: state.shortcuts,

@@ -8,6 +8,7 @@ import { latestTerminalBusyAttempt } from '@/lib/ai/terminal-busy-feedback';
 import { terminalExecutionRecovery } from '@/lib/ai/terminal-execution-recovery';
 import { useResolvedModel } from '@/lib/ai/provider-contract';
 import { useFocusStore } from '@/stores/focusStore';
+import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { FocusNoTarget } from '@/components/focus/focus-no-target';
 import { FocusControls } from '@/components/focus/focus-controls';
@@ -52,11 +53,19 @@ export function AiWorkspaceController({
   const sandboxEnabled = useAiSettingsStore((state) => state.agentSandboxEnabled);
   const displayedSessionId = controller.view?.summary.id ?? null;
   useLayoutEffect(() => {
-    if (scope !== 'terminal') return;
-    const workspace = focusMode ? 'focus' : 'terminal';
-    const { setDisplayedSession } = useTerminalTaskNavigation.getState();
-    setDisplayedSession(workspace, displayedSessionId);
-    return () => setDisplayedSession(workspace, null);
+    const activeScope = focusMode ? 'focus' : scope;
+    useAiPanelStore.getState().setActiveSession(activeScope, displayedSessionId);
+    if (scope === 'terminal') {
+      const workspace = focusMode ? 'focus' : 'terminal';
+      useTerminalTaskNavigation.getState().setDisplayedSession(workspace, displayedSessionId);
+    }
+    return () => {
+      useAiPanelStore.getState().setActiveSession(activeScope, null);
+      if (scope === 'terminal') {
+        const workspace = focusMode ? 'focus' : 'terminal';
+        useTerminalTaskNavigation.getState().setDisplayedSession(workspace, null);
+      }
+    };
   }, [scope, focusMode, displayedSessionId]);
   const modelResolution = useResolvedModel(controller.selectedProvider);
   const sessionModel = controller.view?.snapshot.value.header.modelSelection;

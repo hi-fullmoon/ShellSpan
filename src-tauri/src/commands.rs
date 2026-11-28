@@ -2284,24 +2284,22 @@ pub(crate) fn get_terminal_broker_snapshot(
 }
 
 #[tauri::command]
-pub(crate) fn notify_terminal_command(
+pub(crate) async fn notify_terminal_command(
     app: AppHandle,
     title: String,
     body: String,
 ) -> Result<(), String> {
-    use tauri_plugin_notification::NotificationExt;
-    if title.len() > 512
-        || body.len() > 4096
-        || title.chars().chain(body.chars()).any(char::is_control)
-    {
-        return Err("terminal notification text is invalid".into());
-    }
-    app.notification()
-        .builder()
-        .title(title)
-        .body(body)
-        .show()
-        .map_err(|error| error.to_string())
+    crate::notifications::dispatch_desktop_notification(
+        app,
+        crate::notifications::DesktopNotificationRequest {
+            title,
+            body,
+            target: Some(crate::notifications::DesktopNotificationTarget::None),
+            urgency: None,
+        },
+    )
+    .await
+    .map_err(|_| "terminal notification text is invalid".into())
 }
 
 #[tauri::command]

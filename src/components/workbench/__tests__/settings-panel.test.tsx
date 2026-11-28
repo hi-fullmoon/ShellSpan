@@ -114,6 +114,7 @@ describe('SettingsPanel', () => {
     const sectionTitleKeys = [
       'settings.general.title',
       'settings.appearance.title',
+      'settings.notifications.title',
       'settings.terminal.title',
       'settings.sftp.title',
       'settings.ai.title',
@@ -204,6 +205,12 @@ describe('SettingsPanel', () => {
     expect(screen.queryByText('settings.appearance.theme')).not.toBeInTheDocument();
     expect(screen.getAllByRole('switch')).toHaveLength(4);
 
+    openSection('settings.notifications.title');
+    expect(screen.getByRole('switch', { name: 'settings.notifications.enabled' })).toBeChecked();
+    expect(screen.getByRole('combobox', { name: 'settings.notifications.triggerPolicy' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'terminal.commandBlock.notifications' })).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'settings.sftp.completionNotification' })).toBeChecked();
+
     openSection('settings.terminal.title');
     expect(screen.getByText('settings.terminal.fontSize')).toBeInTheDocument();
     expect(screen.getByText('settings.terminal.fontFamily')).toBeInTheDocument();
@@ -217,11 +224,10 @@ describe('SettingsPanel', () => {
     expect(customFontInput).toHaveAttribute('placeholder', 'JetBrains Mono');
     expect(screen.getByRole('switch', { name: 'settings.terminal.altClickMovesCursor' })).toBeChecked();
     expect(screen.getByRole('switch', { name: 'settings.terminal.osc52' })).toBeChecked();
-    expect(screen.getByRole('combobox', { name: 'terminal.commandBlock.notifications' })).toBeInTheDocument();
 
     openSection('settings.sftp.title');
     expect(screen.getByText('settings.sftp.showHiddenFiles')).toBeInTheDocument();
-    expect(screen.getAllByRole('switch')).toHaveLength(3);
+    expect(screen.getAllByRole('switch')).toHaveLength(2);
 
     openSection('settings.shortcuts.title');
     expect(screen.getByText('settings.shortcuts.resetAll')).toBeInTheDocument();

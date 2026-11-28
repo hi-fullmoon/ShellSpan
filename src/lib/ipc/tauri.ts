@@ -1435,6 +1435,33 @@ export function invokeNotifyTerminalCommand(title: string, body: string): Promis
   return invoke('notify_terminal_command', { title, body });
 }
 
+export function invokeSendDesktopNotification(
+  request: import('@/types').DesktopNotificationRequest,
+): Promise<void> {
+  return invoke('send_desktop_notification', { request });
+}
+
+export function invokeGetDesktopNotificationStatus(): Promise<import('@/types').DesktopNotificationStatus> {
+  return invoke('get_desktop_notification_status');
+}
+
+export function invokeRequestDesktopNotificationPermission(): Promise<import('@/types').DesktopNotificationStatus> {
+  return invoke('request_desktop_notification_permission');
+}
+
+export function invokeOpenSystemNotificationSettings(): Promise<void> {
+  return invoke('open_system_notification_settings');
+}
+
+export function listenToDesktopNotificationClicked(
+  callback: EventCallback<import('@/types').DesktopNotificationClickedEvent>,
+): Promise<UnlistenFn> {
+  return listen<import('@/types').DesktopNotificationClickedEvent>(
+    'shellspan-notification-clicked',
+    callback,
+  );
+}
+
 export function isTauriRuntime(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }

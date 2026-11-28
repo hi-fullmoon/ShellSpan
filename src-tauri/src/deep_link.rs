@@ -179,6 +179,7 @@ pub(crate) fn parse_deep_link_url(raw: &str) -> Result<DeepLinkAction, String> {
                 &[
                     "appearance",
                     "general",
+                    "notifications",
                     "terminal",
                     "sftp",
                     "ai",
@@ -354,6 +355,12 @@ mod tests {
             parse_deep_link_url("shellspan://settings?section=ai").unwrap(),
             DeepLinkAction::NavigateSettings {
                 settings_section: "ai".into(),
+            }
+        );
+        assert_eq!(
+            parse_deep_link_url("shellspan://settings?section=notifications").unwrap(),
+            DeepLinkAction::NavigateSettings {
+                settings_section: "notifications".into(),
             }
         );
         assert_eq!(

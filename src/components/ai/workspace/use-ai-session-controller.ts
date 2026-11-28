@@ -70,6 +70,7 @@ import {
   type PrefillAgentPromptEventDetail,
 } from '@/lib/app-actions/types';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
+import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useTerminalAgentExecution } from '@/hooks/useTerminalAgentExecution';
 import { useAiDraftStore } from '@/stores/aiDraftStore';
@@ -1953,13 +1954,15 @@ export function useAiSessionController({
     return () => window.removeEventListener('shellspan:ai-session-deleted', onSessionDeleted);
   }, [adapter, forgetSessionVisits, newSession, openedSessionId]);
 
+  const pendingOpenSessionId = useAiPanelStore((state) => state.pendingOpenSessionId);
+
   useEffect(() => {
     let active = true;
-    const onOpenAgentSession = (event: Event): void => {
-      const sessionId = (event as CustomEvent<OpenAgentSessionEventDetail>).detail?.sessionId;
+    const openById = (sessionId: string): void => {
       if (!sessionId) return;
       const cached = sessionsRef.current.find((session) => session.id === sessionId);
       if (cached && belongsToAiWorkspace(cached, scope, focusMode, sessionsRef.current)) {
+        useAiPanelStore.getState().consumePendingOpenSession(sessionId);
         openSession(cached);
         return;
       }
@@ -1970,9 +1973,17 @@ export function useAiSessionController({
           ? sessionsRef.current
           : [summary, ...sessionsRef.current];
         if (!belongsToAiWorkspace(summary, scope, focusMode, nextSessions)) return;
+        useAiPanelStore.getState().consumePendingOpenSession(sessionId);
         setSessions(nextSessions);
         openSession(summary);
       }).catch(() => undefined);
+    };
+    if (pendingOpenSessionId) {
+      openById(pendingOpenSessionId);
+    }
+    const onOpenAgentSession = (event: Event): void => {
+      const sessionId = (event as CustomEvent<OpenAgentSessionEventDetail>).detail?.sessionId;
+      if (sessionId) openById(sessionId);
     };
     window.addEventListener(OPEN_AGENT_SESSION_EVENT, onOpenAgentSession);
     const onPrefillPrompt = (event: Event): void => {
@@ -1987,7 +1998,7 @@ export function useAiSessionController({
       window.removeEventListener(OPEN_AGENT_SESSION_EVENT, onOpenAgentSession);
       window.removeEventListener(PREFILL_AGENT_PROMPT_EVENT, onPrefillPrompt);
     };
-  }, [adapter, claimWorkspace, dispatch, focusMode, openSession, scope]);
+  }, [adapter, claimWorkspace, dispatch, focusMode, openSession, pendingOpenSessionId, scope]);
 
   const archiveSession = useCallback((summary: AiSessionSummary): void => {
     if (archivePendingRef.current || summary.archived) return;

@@ -55,6 +55,7 @@ import {
 } from '@/stores/portForwardStore';
 import { usePortForwardEvents } from '@/hooks/usePortForwardEvents';
 import { useAppActionBridge } from '@/hooks/useAppActionBridge';
+import { useDesktopNotifications } from '@/hooks/useDesktopNotifications';
 const logger = createLogger('app');
 
 interface AppSectionsProps {
@@ -175,6 +176,7 @@ export const App: React.FC = () => {
   useMonitorEvents();
   useAppShortcuts();
   useAppActionBridge();
+  useDesktopNotifications();
 
   const [aboutDialogOpen, setAboutDialogOpen] = React.useState(false);
   const [exitDialogOpen, setExitDialogOpen] = React.useState(false);

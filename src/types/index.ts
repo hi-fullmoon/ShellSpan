@@ -19,8 +19,33 @@ export type TerminalBellStyle = 'none' | 'sound';
 export type TerminalOsc52Policy = 'writeOnly' | 'disabled';
 export type SftpConflictPolicy = 'ask' | 'overwrite' | 'skip';
 export type WorkbenchTab = 'connections' | 'portForwards' | 'quickActions' | 'knownHosts' | 'keychain' | 'monitor' | 'logs';
-export type SettingsSection = 'appearance' | 'general' | 'terminal' | 'sftp' | 'ai' | 'shortcuts' | 'experimental' | 'feedback';
+export type SettingsSection = 'appearance' | 'general' | 'notifications' | 'terminal' | 'sftp' | 'ai' | 'shortcuts' | 'experimental' | 'feedback';
 export type SettingsTarget = 'terminal-title-template';
+export type NotificationTriggerPolicy = 'whenUnfocusedOrHidden' | 'whenWindowUnfocused' | 'always';
+export type DesktopNotificationPermission = 'granted' | 'denied' | 'prompt' | 'unknown';
+export type DesktopNotificationUrgency = 'normal' | 'critical';
+export type DesktopNotificationTarget =
+  | { readonly type: 'agentSession'; readonly agentSessionId: string; readonly terminalSessionId?: string }
+  | { readonly type: 'terminalSession'; readonly terminalSessionId: string }
+  | { readonly type: 'section'; readonly section: AppSection }
+  | { readonly type: 'settings'; readonly settingsSection: SettingsSection }
+  | { readonly type: 'none' };
+export interface DesktopNotificationRequest {
+  readonly title: string;
+  readonly body: string;
+  readonly target?: DesktopNotificationTarget;
+  readonly urgency?: DesktopNotificationUrgency;
+}
+export interface DesktopNotificationStatus {
+  readonly supported: boolean;
+  readonly permission: DesktopNotificationPermission;
+  readonly canRequestPermission: boolean;
+  readonly canOpenSystemSettings: boolean;
+  readonly platform: 'macos' | 'windows' | 'linux';
+}
+export interface DesktopNotificationClickedEvent {
+  readonly target: DesktopNotificationTarget;
+}
 export type PetdexConnectionStatus =
   | 'disabled'
   | 'checking'

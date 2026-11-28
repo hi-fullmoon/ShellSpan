@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import type { Terminal } from '@xterm/xterm';
-import { invokeNotifyTerminalCommand, isTauriRuntime, listenToTerminalCommandLifecycle } from '@/lib/ipc/tauri';
+import { invokeSendDesktopNotification, isTauriRuntime, listenToTerminalCommandLifecycle } from '@/lib/ipc/tauri';
 import { createLogger } from '@/lib/logger';
+import { isAppWindowFocused, shouldDeliverDesktopNotification } from '@/lib/notifications/policy';
 import { createTerminalCommandBlocks, jumpToTerminalCommand, shouldNotifyTerminalCommand,
   type TerminalCommandBlocks } from '@/lib/terminal/terminal-command-blocks';
 import { cleanTerminalTitle } from '@/lib/terminal/tab-title';
@@ -98,15 +99,32 @@ export function TerminalCommandActivity() {
       entry?.tracker.update(payload);
       if (payload.phase !== 'completed' || !entry || entry.lastCompleted >= payload.commandId) return;
       entry.lastCompleted = payload.commandId;
-      if (!shouldNotifyTerminalCommand(payload, useAppStore.getState().terminalCommandNotificationThresholdSec,
-        isActiveAndVisible(payload.sessionId))) return;
+      const app = useAppStore.getState();
+      const targetVisible = isActiveAndVisible(payload.sessionId);
+      const meetsCommandCriteria = shouldNotifyTerminalCommand(
+        payload,
+        app.terminalCommandNotificationThresholdSec,
+        false,
+      );
+      if (!meetsCommandCriteria) return;
       const failed = (payload.exitCode ?? 0) !== 0;
-      state.setUnreadCommand(payload.sessionId, failed ? 'failed' : 'completed');
+      if (!targetVisible) {
+        state.setUnreadCommand(payload.sessionId, failed ? 'failed' : 'completed');
+      }
+      if (!shouldDeliverDesktopNotification({
+        enabled: app.notificationsEnabled,
+        categoryEnabled: app.terminalCommandNotificationThresholdSec > 0,
+        policy: app.notificationTriggerPolicy,
+        windowFocused: isAppWindowFocused(),
+        targetVisible,
+      })) return;
       const target = cleanTerminalTitle(session.manualTitle ?? session.baseTitle ?? session.host, 128);
-      void invokeNotifyTerminalCommand(
-        t(failed ? 'terminal.commandBlock.failed' : 'terminal.commandBlock.completed'),
-        t('terminal.commandBlock.notification', { target, seconds: ((payload.durationMs ?? 0) / 1000).toFixed(1) }),
-      ).catch((error) => logger.debug('Desktop notification unavailable', error));
+      void invokeSendDesktopNotification({
+        title: t(failed ? 'terminal.commandBlock.failed' : 'terminal.commandBlock.completed'),
+        body: t('terminal.commandBlock.notification', { target, seconds: ((payload.durationMs ?? 0) / 1000).toFixed(1) }),
+        target: { type: 'terminalSession', terminalSessionId: payload.sessionId },
+        urgency: failed ? 'critical' : 'normal',
+      }).catch((error) => logger.debug('Desktop notification unavailable', error));
     }).catch((error) => logger.warn('Failed to subscribe to command lifecycle', error)) : undefined;
     return () => {
       disposed = true;

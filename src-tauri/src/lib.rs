@@ -24,6 +24,7 @@ mod local_terminal_input;
 mod log_reader;
 mod menu;
 mod models;
+mod notifications;
 mod path_utils;
 mod petdex;
 mod port_forward;
@@ -514,6 +515,7 @@ pub fn run() {
             }
             #[cfg(not(target_os = "macos"))]
             menu::initialize_tray(app)?;
+            notifications::initialize_desktop_notifications(app.handle());
             deep_link::enqueue_startup_deep_links(app.handle());
             Ok(())
         })
@@ -651,6 +653,10 @@ pub fn run() {
             commands::write_session_bytes,
             commands::get_terminal_broker_snapshot,
             commands::notify_terminal_command,
+            notifications::send_desktop_notification,
+            notifications::get_desktop_notification_status,
+            notifications::request_desktop_notification_permission,
+            notifications::open_system_notification_settings,
             commands::get_terminal_acceptance_raw_output,
             commands::prepare_terminal_acceptance_raw_command,
             commands::run_terminal_acceptance_command,

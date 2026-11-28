@@ -8,6 +8,7 @@ in the matching directory instead of the library root.
 - `host/`: host actions, host health, monitoring, and overview projections.
 - `ipc/`: typed Tauri command and event adapters.
 - `logs/`: incremental log parsing and log viewer domain logic.
+- `notifications/`: desktop notification trigger policy, AI session monitor, and click-to-navigate routing.
 - `preferences/`: native UI preference hydration and queued persistence under the application data root.
 - `petdex/`: Petdex integration and feedback helpers.
 - `sftp/`: remote file browsing, previews, workspace persistence, and transfers.

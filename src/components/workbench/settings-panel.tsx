@@ -50,6 +50,7 @@ import { openFeedback } from '@/lib/feedback';
 import type { PetdexCategories, PetdexDiagnostic, PetdexHealth } from '@/types';
 import { INITIAL_PETDEX_DIAGNOSTIC_VIEW, petdexDiagnosticStatus, reducePetdexDiagnosticView, PETDEX_STATUS_LABEL_KEYS, PETDEX_PREVIEW_LABEL_KEYS } from '@/lib/petdex/diagnostic';
 import { SettingRow, SettingsGroup } from './settings-layout';
+import { NotificationSettingsSection } from './notification-settings-section';
 import { TerminalTitleSettings } from '@/components/terminal/terminal-title-settings';
 import { TerminalColorSchemeControl } from '@/components/terminal/terminal-color-settings';
 import {
@@ -137,6 +138,7 @@ const SETTINGS_SECTIONS: {
 }[] = [
   { id: 'general', titleKey: 'settings.general.title', descriptionKey: 'settings.general.description' },
   { id: 'appearance', titleKey: 'settings.appearance.title', descriptionKey: 'settings.appearance.description' },
+  { id: 'notifications', titleKey: 'settings.notifications.title', descriptionKey: 'settings.notifications.description' },
   { id: 'terminal', titleKey: 'settings.terminal.title', descriptionKey: 'settings.terminal.description' },
   { id: 'sftp', titleKey: 'settings.sftp.title', descriptionKey: 'settings.sftp.description' },
   { id: 'ai', titleKey: 'settings.ai.title', descriptionKey: 'settings.ai.description' },
@@ -251,8 +253,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const setTerminalWebglRenderer = useAppStore((state) => state.setTerminalWebglRenderer);
   const terminalOsc52Policy = useAppStore((state) => state.terminalOsc52Policy);
   const setTerminalOsc52Policy = useAppStore((state) => state.setTerminalOsc52Policy);
-  const commandNotificationThreshold = useAppStore((state) => state.terminalCommandNotificationThresholdSec);
-  const setCommandNotificationThreshold = useAppStore((state) => state.setTerminalCommandNotificationThresholdSec);
   const localeItems = useMemo(
     () => [
       { value: 'zh-CN', label: t('locale.zh-CN') },
@@ -316,10 +316,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     })),
     [t],
   );
-  const commandNotificationItems = useMemo(() => [0, 5, 10, 30, 60].map((seconds) => ({
-    value: String(seconds),
-    label: seconds ? t('terminal.commandBlock.thresholdSeconds', { seconds }) : t('terminal.commandBlock.notificationsOff'),
-  })), [t]);
   const terminalFontFamilies = useMemo(() => (['system', 'menlo', 'monaco', 'consolas', 'courierNew'] as const)
     .map((value) => ({ value, label: t(`settings.terminal.fontFamily.${value}`) })), [t]);
   const terminalFontSizeItems = useMemo(() => {
@@ -374,8 +370,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const setSftpRetryCount = useAppStore((state) => state.setSftpRetryCount);
   const sftpDownloadDirectory = useAppStore((state) => state.sftpDownloadDirectory);
   const setSftpDownloadDirectory = useAppStore((state) => state.setSftpDownloadDirectory);
-  const sftpCompletionNotification = useAppStore((state) => state.sftpCompletionNotification);
-  const setSftpCompletionNotification = useAppStore((state) => state.setSftpCompletionNotification);
   const terminalHideSingleTabBar = useAppStore((state) => state.terminalHideSingleTabBar);
   const setTerminalHideSingleTabBar = useAppStore((state) => state.setTerminalHideSingleTabBar);
   const sftpHideSingleTabBar = useAppStore((state) => state.sftpHideSingleTabBar);
@@ -776,6 +770,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </SettingsGrid>
             </TabsContent>
 
+            <TabsContent value="notifications" className="w-full px-3">
+              <NotificationSettingsSection />
+            </TabsContent>
+
             <TabsContent value="experimental" className="w-full px-3">
               <div className="flex min-w-0 flex-col gap-3">
                 <SettingsGroup
@@ -1113,14 +1111,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       onCheckedChange={(enabled) => setTerminalOsc52Policy(enabled ? 'writeOnly' : 'disabled')} />
                   </div>
                 </SettingRow>
-                <SettingRow label={t('terminal.commandBlock.notifications')} description={t('terminal.commandBlock.notificationsDescription')}>
-                  <Select items={commandNotificationItems} value={String(commandNotificationThreshold)}
-                    onValueChange={(value) => { if (value) setCommandNotificationThreshold(Number(value)); }}>
-                    <SelectTrigger variant="ghost" size="sm" aria-label={t('terminal.commandBlock.notifications')}><SelectValue /></SelectTrigger>
-                    <SelectContent align="end" alignItemWithTrigger={false}><SelectGroup>{commandNotificationItems.map((item) =>
-                      <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectGroup></SelectContent>
-                  </Select>
-                </SettingRow>
                 <SettingRow
                   label={t('settings.terminal.trimTrailingWhitespace')}
                   description={t('settings.terminal.trimTrailingWhitespaceDescription')}
@@ -1295,15 +1285,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         <XIcon />
                       </Button>
                     )}
-                  </div>
-                </SettingRow>
-                <SettingRow label={t('settings.sftp.completionNotification')} description={t('settings.sftp.completionNotificationDescription')}>
-                  <div className="flex justify-end">
-                    <Switch
-                      aria-label={t('settings.sftp.completionNotification')}
-                      checked={sftpCompletionNotification}
-                      onCheckedChange={setSftpCompletionNotification}
-                    />
                   </div>
                 </SettingRow>
                 <SettingRow label={t('settings.sftp.hideSingleTabBar')} description={t('settings.sftp.hideSingleTabBarDescription')}>

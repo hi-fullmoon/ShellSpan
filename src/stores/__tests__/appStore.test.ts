@@ -312,6 +312,13 @@ describe('appStore', () => {
     useAppStore.getState().setSftpRetryCount(3);
     useAppStore.getState().setSftpDownloadDirectory('/downloads');
     useAppStore.getState().setSftpCompletionNotification(false);
+    useAppStore.getState().setNotificationsEnabled(false);
+    useAppStore.getState().setNotificationTriggerPolicy('whenWindowUnfocused');
+    useAppStore.getState().setAiNotifyApproval(false);
+    useAppStore.getState().setAiNotifyQuestion(false);
+    useAppStore.getState().setAiNotifySudo(false);
+    useAppStore.getState().setAiNotifyCompleted(false);
+    useAppStore.getState().setAiNotifyFailed(false);
 
     expect(useAppStore.getState()).toMatchObject({
       startupSection: 'sftp',
@@ -320,6 +327,13 @@ describe('appStore', () => {
       sftpRetryCount: 3,
       sftpDownloadDirectory: '/downloads',
       sftpCompletionNotification: false,
+      notificationsEnabled: false,
+      notificationTriggerPolicy: 'whenWindowUnfocused',
+      aiNotifyApproval: false,
+      aiNotifyQuestion: false,
+      aiNotifySudo: false,
+      aiNotifyCompleted: false,
+      aiNotifyFailed: false,
     });
   });
 

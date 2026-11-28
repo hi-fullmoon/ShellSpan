@@ -60,7 +60,7 @@ try {
   await settingsDialog.waitFor();
   await page.locator('[role="tabpanel"]').waitFor();
 
-  const SECTION_TAB_ORDER = { general: 0, appearance: 1, terminal: 2, sftp: 3, ai: 4, shortcuts: 5, experimental: 6, feedback: 7 };
+  const SECTION_TAB_ORDER = { general: 0, appearance: 1, notifications: 2, terminal: 3, sftp: 4, ai: 5, shortcuts: 6, experimental: 7, feedback: 8 };
   const openSection = async (name) => {
     await page.evaluate((index) => {
       document.querySelectorAll('[role="tab"]')[index].click();
@@ -170,7 +170,7 @@ try {
     }), 'scrolling settings must stay below the fixed close button');
     assert.equal(await page.locator('aside [role="tab"] svg').count(), 0, 'sidebar navigation items must not render icons');
     await page.screenshot({ path: `${root}artifacts/tests/settings-redesign/general-${viewport.width}.png`, animations: 'disabled' });
-    for (const section of ['appearance', 'sftp', 'ai']) {
+    for (const section of ['appearance', 'notifications', 'sftp', 'ai']) {
       await openSection(section);
       await page.screenshot({ path: `${root}artifacts/tests/settings-redesign/${section}-${viewport.width}.png`, animations: 'disabled' });
     }

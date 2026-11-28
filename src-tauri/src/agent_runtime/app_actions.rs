@@ -93,7 +93,7 @@ pub(crate) fn navigate_schema() -> Value {
             },
             "settingsSection": {
                 "type": "string",
-                "enum": ["appearance", "general", "terminal", "sftp", "ai", "shortcuts", "experimental", "feedback"]
+                "enum": ["appearance", "general", "notifications", "terminal", "sftp", "ai", "shortcuts", "experimental", "feedback"]
             },
             "terminalSessionId": {
                 "type": "string",
@@ -1248,6 +1248,7 @@ fn execute_navigate(
                 &[
                     "appearance",
                     "general",
+                    "notifications",
                     "terminal",
                     "sftp",
                     "ai",
