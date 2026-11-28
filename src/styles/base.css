@@ -714,6 +714,12 @@ textarea,
   outline-offset: 0;
 }
 
+/* Overlap the preceding pane's rightmost pixel so the translucent divider
+   composites over each band's own surface instead of the workspace backdrop. */
+.sftp-split-pane > [data-slot='split-pane-divider'] {
+  margin-left: -1px;
+}
+
 @media (forced-colors: none) {
   /* Shared menu rows already show keyboard focus through their background. */
   :where([data-slot='dropdown-menu-item']):focus-visible {
@@ -723,6 +729,43 @@ textarea,
   .sftp-split-pane > [data-slot='split-pane-divider']:focus-visible {
     outline: none;
     background-color: var(--ring);
+  }
+}
+
+/* Keep the SFTP split divider a crisp single physical pixel on scaled/HiDPI displays. */
+@media (forced-colors: none) and (min-resolution: 1.25dppx) {
+  .sftp-split-pane > [data-slot='split-pane-divider']:not(:focus-visible) {
+    --sftp-divider-stop: calc(100% / 1.25);
+    background-color: transparent;
+    background-image: linear-gradient(
+      to right,
+      var(--app-resize-divider) 0 var(--sftp-divider-stop),
+      transparent var(--sftp-divider-stop)
+    );
+  }
+}
+
+@media (forced-colors: none) and (min-resolution: 1.5dppx) {
+  .sftp-split-pane > [data-slot='split-pane-divider']:not(:focus-visible) {
+    --sftp-divider-stop: calc(100% / 1.5);
+  }
+}
+
+@media (forced-colors: none) and (min-resolution: 1.75dppx) {
+  .sftp-split-pane > [data-slot='split-pane-divider']:not(:focus-visible) {
+    --sftp-divider-stop: calc(100% / 1.75);
+  }
+}
+
+@media (forced-colors: none) and (min-resolution: 2dppx) {
+  .sftp-split-pane > [data-slot='split-pane-divider']:not(:focus-visible) {
+    --sftp-divider-stop: 50%;
+  }
+}
+
+@media (forced-colors: none) and (min-resolution: 3dppx) {
+  .sftp-split-pane > [data-slot='split-pane-divider']:not(:focus-visible) {
+    --sftp-divider-stop: calc(100% / 3);
   }
 }
 

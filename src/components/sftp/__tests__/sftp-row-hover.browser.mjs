@@ -208,6 +208,8 @@ async function assertSplitDividerFocus(page, engineName, locale, width) {
   const tab = tabKey(engineName);
   const initial = await divider.boundingBox();
   assert.equal(initial.width, 1, 'The SFTP separator occupies a single pixel');
+  assert.equal(await divider.evaluate(element => getComputedStyle(element).marginLeft), '-1px',
+    'The SFTP separator overlaps the preceding pane surface');
   await divider.focus();
   await page.keyboard.press(`Shift+${tab}`);
   await page.keyboard.press(tab);
@@ -217,11 +219,11 @@ async function assertSplitDividerFocus(page, engineName, locale, width) {
   for (const [theme, color] of [['light', 'rgb(40, 40, 40)'], ['dark', 'rgb(179, 179, 184)']]) {
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
     const appearance = await divider.evaluate(element => {
-      const { outlineStyle, backgroundColor } = getComputedStyle(element);
-      return { outlineStyle, backgroundColor, indicatorColor: getComputedStyle(element, '::after').backgroundColor };
+      const { outlineStyle, backgroundColor, backgroundImage } = getComputedStyle(element);
+      return { outlineStyle, backgroundColor, backgroundImage, indicatorColor: getComputedStyle(element, '::after').backgroundColor };
     });
     assert.deepEqual(appearance, {
-      outlineStyle: 'none', backgroundColor: color, indicatorColor: 'rgba(0, 0, 0, 0)',
+      outlineStyle: 'none', backgroundColor: color, backgroundImage: 'none', indicatorColor: 'rgba(0, 0, 0, 0)',
     }, `${engineName}/${theme}/${width}: focus highlights only the divider line`);
     await page.screenshot({ path: join(artifacts, `${engineName}-${locale}-${theme}-${width}-split-focus.png`) });
   }
