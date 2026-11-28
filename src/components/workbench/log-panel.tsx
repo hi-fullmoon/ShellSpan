@@ -385,7 +385,6 @@ const LogInspector: React.FC<{
               errorLabel={t('workbench.logs.copyFailed')}
               variant="ghost"
               size="xs"
-              className="mr-1"
               aria-live="polite"
             />
           </div>

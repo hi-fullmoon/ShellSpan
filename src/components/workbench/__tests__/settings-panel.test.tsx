@@ -412,7 +412,7 @@ describe('SettingsPanel', () => {
     expect(screen.getByRole('combobox', { name: 'settings.general.startupSection' })).toHaveAttribute('data-variant', 'ghost');
   });
 
-  it('uses the same 32px scale for action buttons and selects throughout settings', async () => {
+  it('uses the same 32px scale and text-only action buttons and navigation throughout settings', async () => {
     render(<SettingsPanel />);
     await waitFor(() => {});
 
@@ -428,14 +428,25 @@ describe('SettingsPanel', () => {
       'settings.feedback.title',
     ];
 
+    for (const tab of within(settingsDialog).getAllByRole('tab')) {
+      expect(tab.querySelector('svg')).toBeNull();
+    }
+
     for (const title of sectionTitles) {
       openSection(title);
       within(settingsDialog).getAllByRole('button')
         .filter((button) => button.getAttribute('data-slot') === 'button')
         .forEach((button) => {
           expect(button.className).toMatch(/(?:^|\s)(?:h-8|size-8)(?:\s|$)/);
+          if ((button.textContent ?? '').trim().length > 0 && button.getAttribute('data-slot') === 'button') {
+            expect(button.querySelector('svg')).toBeNull();
+          }
         });
     }
+
+    openSection('settings.appearance.title');
+    const languageSelect = screen.getByRole('combobox', { name: 'settings.appearance.language' });
+    expect(languageSelect.querySelector('.lucide-globe-2')).toBeNull();
   });
 
   it('shows the up-to-date status beside the current version', async () => {

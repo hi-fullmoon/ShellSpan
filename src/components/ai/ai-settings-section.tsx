@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArchiveIcon,
-  PlusIcon,
   ServerIcon,
   Trash2Icon,
 } from 'lucide-react';
@@ -313,7 +312,6 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         titleId="ai-model-providers-heading"
         action={(
           <Button variant="soft" size="sm" onClick={() => setAddOpen(true)}>
-            <PlusIcon data-icon="inline-start" />
             {t('settings.ai.addProvider')}
           </Button>
         )}

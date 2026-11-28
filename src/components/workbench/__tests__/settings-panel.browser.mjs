@@ -73,13 +73,18 @@ try {
     await page.waitForFunction(() => [...document.querySelectorAll('[role="tabpanel"] [data-slot="button"]')].every(button => button.getBoundingClientRect().height > 0));
     const actions = await page.locator('[role="tabpanel"] [data-slot="button"]').evaluateAll(buttons => buttons.map(button => ({
       label: button.textContent || button.getAttribute('aria-label'),
+      hasText: (button.textContent || '').trim().length > 0,
       height: button.getBoundingClientRect().height,
       iconSize: button.querySelector('svg')?.getBoundingClientRect().height,
       gap: getComputedStyle(button).columnGap,
     })));
     for (const action of actions) {
       assert.equal(action.height, 32, `${name}/${action.label}: action height`);
-      if (action.iconSize !== undefined) assert.equal(action.iconSize, 14, `${name}/${action.label}: icon size`);
+      if (action.hasText) {
+        assert.equal(action.iconSize, undefined, `${name}/${action.label}: text action button should not render an icon`);
+      } else if (action.iconSize !== undefined) {
+        assert.equal(action.iconSize, 14, `${name}/${action.label}: icon size`);
+      }
       assert.equal(action.gap, '4px', `${name}/${action.label}: icon and text gap`);
     }
     const selectHeights = await page.locator('[role="tabpanel"] [data-slot="select-trigger"]').evaluateAll(selects => selects.map(select => select.getBoundingClientRect().height));
@@ -151,6 +156,7 @@ try {
       const close = document.querySelector('[data-slot="dialog-close"]');
       return viewport.getBoundingClientRect().top >= close.getBoundingClientRect().bottom;
     }), 'scrolling settings must stay below the fixed close button');
+    assert.equal(await page.locator('aside [role="tab"] svg').count(), 0, 'sidebar navigation items must not render icons');
     await page.screenshot({ path: `${root}artifacts/tests/settings-redesign/general-${viewport.width}.png`, animations: 'disabled' });
     for (const section of ['appearance', 'sftp', 'ai']) {
       await openSection(section);
@@ -262,7 +268,7 @@ try {
     const panel = page.getByRole('tabpanel');
     const petTab = page.getByRole('tab', { name: '桌面宠物', exact: true });
     assert.equal(await petTab.getAttribute('aria-selected'), 'true');
-    assert.equal(await petTab.locator('.lucide-paw-print').count(), 1);
+    assert.equal(await petTab.locator('svg').count(), 0);
     assert.equal(await page.getByRole('tab', { name: '实验性集成', exact: true }).count(), 0);
     assert.equal(await page.getByRole('heading', { name: '桌面宠物', level: 2 }).count(), 1);
     assert.equal(await panel.locator('[data-slot="settings-group"], [data-slot="integration-group"], [data-slot="petdex-diagnostics"]').count(), 4);
@@ -349,6 +355,7 @@ try {
     const themeToggleGroup = page.getByRole('group', { name: '主题', exact: true });
     await themeToggleGroup.getByRole('button', { name: '深色', exact: true }).click();
     assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
+    assert.equal(await page.locator('aside [role="tab"][data-active]').evaluate((tab) => getComputedStyle(tab).borderTopColor), 'rgba(0, 0, 0, 0)', 'dark active sidebar tab must not show a border');
     await page.screenshot({ path: `${root}artifacts/tests/settings-redesign/appearance-dark-${viewport.width}.png`, animations: 'disabled' });
     await page.getByRole('combobox', { name: '语言', exact: true }).click();
     await page.screenshot({ path: `${root}artifacts/tests/settings-redesign/select-open-dark-${viewport.width}.png`, animations: 'disabled' });

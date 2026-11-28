@@ -19,7 +19,7 @@ it.each([
   await initI18n(locale);
   render(<SettingsPanel />);
   const tab = await screen.findByRole('tab', { name: title });
-  expect(tab.querySelector('.lucide-paw-print')).not.toBeNull();
+  expect(tab.querySelector('svg')).toBeNull();
   expect(screen.queryByRole('tab', { name: previousTitle })).not.toBeInTheDocument();
   await userEvent.click(tab);
   expect(tab).toHaveAttribute('aria-selected', 'true');

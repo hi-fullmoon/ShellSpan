@@ -1,23 +1,11 @@
 import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  BotIcon,
-  ExternalLinkIcon,
-  FlaskConicalIcon,
-  FolderCogIcon,
-  FolderOpenIcon,
-  Globe2Icon,
   KeyboardIcon,
-  MessageSquareIcon,
   MonitorIcon,
   MoonIcon,
-  PaletteIcon,
-  PawPrintIcon,
   RotateCcwIcon,
-  Settings2Icon,
-  SquareTerminalIcon,
   SunIcon,
-  Trash2Icon,
   XIcon,
 } from 'lucide-react';
 import { useTheme } from '@/hooks/useTheme';
@@ -144,18 +132,17 @@ const SHORTCUT_GROUP_LABEL_KEYS: Record<ShortcutGroup['id'], LocaleKey> = {
 
 const SETTINGS_SECTIONS: {
   id: SettingsSection;
-  icon: React.ElementType;
   titleKey: LocaleKey;
   descriptionKey: LocaleKey;
 }[] = [
-  { id: 'general', icon: Settings2Icon, titleKey: 'settings.general.title', descriptionKey: 'settings.general.description' },
-  { id: 'appearance', icon: PaletteIcon, titleKey: 'settings.appearance.title', descriptionKey: 'settings.appearance.description' },
-  { id: 'terminal', icon: SquareTerminalIcon, titleKey: 'settings.terminal.title', descriptionKey: 'settings.terminal.description' },
-  { id: 'sftp', icon: FolderCogIcon, titleKey: 'settings.sftp.title', descriptionKey: 'settings.sftp.description' },
-  { id: 'ai', icon: BotIcon, titleKey: 'settings.ai.title', descriptionKey: 'settings.ai.description' },
-  { id: 'shortcuts', icon: KeyboardIcon, titleKey: 'settings.shortcuts.title', descriptionKey: 'settings.shortcuts.description' },
-  { id: 'experimental', icon: PawPrintIcon, titleKey: 'settings.experimental.title', descriptionKey: 'settings.experimental.description' },
-  { id: 'feedback', icon: MessageSquareIcon, titleKey: 'settings.feedback.title', descriptionKey: 'settings.feedback.description' },
+  { id: 'general', titleKey: 'settings.general.title', descriptionKey: 'settings.general.description' },
+  { id: 'appearance', titleKey: 'settings.appearance.title', descriptionKey: 'settings.appearance.description' },
+  { id: 'terminal', titleKey: 'settings.terminal.title', descriptionKey: 'settings.terminal.description' },
+  { id: 'sftp', titleKey: 'settings.sftp.title', descriptionKey: 'settings.sftp.description' },
+  { id: 'ai', titleKey: 'settings.ai.title', descriptionKey: 'settings.ai.description' },
+  { id: 'shortcuts', titleKey: 'settings.shortcuts.title', descriptionKey: 'settings.shortcuts.description' },
+  { id: 'experimental', titleKey: 'settings.experimental.title', descriptionKey: 'settings.experimental.description' },
+  { id: 'feedback', titleKey: 'settings.feedback.title', descriptionKey: 'settings.feedback.description' },
 ];
 
 const SETTINGS_SECTION_DIVIDERS = new Set<SettingsSection>(['shortcuts', 'experimental']);
@@ -699,20 +686,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     aria-orientation="vertical"
                     className="h-auto w-full flex-col items-stretch justify-start rounded-none p-0"
                   >
-                    {SETTINGS_SECTIONS.map((section) => {
-                      const Icon = section.icon;
-                      return (
-                        <React.Fragment key={section.id}>
-                          {SETTINGS_SECTION_DIVIDERS.has(section.id) && (
-                            <Separator className="mx-2 my-1.5 data-horizontal:w-auto" />
-                          )}
-                          <TabsTrigger value={section.id} title={t(section.titleKey)} className="h-8 min-w-0 flex-none justify-start px-2.5">
-                            <Icon data-icon="inline-start" />
-                            <span className="min-w-0 truncate">{t(section.titleKey)}</span>
-                          </TabsTrigger>
-                        </React.Fragment>
-                      );
-                    })}
+                    {SETTINGS_SECTIONS.map((section) => (
+                      <React.Fragment key={section.id}>
+                        {SETTINGS_SECTION_DIVIDERS.has(section.id) && (
+                          <Separator className="mx-2 my-1.5 data-horizontal:w-auto" />
+                        )}
+                        <TabsTrigger value={section.id} title={t(section.titleKey)} className="h-8 min-w-0 flex-none justify-start px-2.5">
+                          <span className="min-w-0 truncate">{t(section.titleKey)}</span>
+                        </TabsTrigger>
+                      </React.Fragment>
+                    ))}
                   </TabsList>
                 </div>
               </ScrollArea>
@@ -735,7 +718,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     disabled={customizedShortcutCount === 0}
                     onClick={resetShortcuts}
                   >
-                    <RotateCcwIcon data-icon="inline-start" />
                     {t('settings.shortcuts.resetAll')}
                   </Button>
                 )}
@@ -780,7 +762,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <SettingRow label={t('settings.appearance.language')} description={t('settings.appearance.languageDescription')}>
                   <Select items={localeItems} value={locale} onValueChange={(value) => { if (value) setLocale(value as Locale); }}>
                     <SelectTrigger variant="ghost" size="sm" aria-label={t('settings.appearance.language')}>
-                      <Globe2Icon />
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent align="end" alignItemWithTrigger={false}>
@@ -852,7 +833,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                           disabled={!petdexEnabled || testingPetdex || checkingPetdex || petdexConfiguring}
                           onClick={() => void handleTestPetdex(true)}
                         >
-                          <RotateCcwIcon data-icon="inline-start" />
                           {t(checkingPetdex ? 'settings.experimental.petdex.status.checking' : 'settings.experimental.petdex.recheck')}
                         </Button>
                         <Button
@@ -863,7 +843,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                           disabled={!petdexEnabled || testingPetdex || checkingPetdex || petdexConfiguring}
                           onClick={() => void handleTestPetdex()}
                         >
-                          <FlaskConicalIcon data-icon="inline-start" />
                           {testingPetdex
                             ? t('settings.experimental.petdex.testing')
                             : t('settings.experimental.petdex.testAction')}
@@ -926,9 +905,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       aria-describedby="feedback-description"
                       onClick={() => void openFeedback().catch(() => toast.error(t('settings.feedback.openError')))}
                     >
-                      <MessageSquareIcon data-icon="inline-start" />
                       {t('settings.feedback.title')}
-                      <ExternalLinkIcon data-icon="inline-end" />
                     </Button>
                 </SettingRow>
                 <SettingRow label={t('settings.feedback.includeTitle')} description={t('settings.feedback.includeDescription')} />
@@ -967,7 +944,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <SettingRow label={t('settings.general.restoreWorkspace')} description={t('settings.general.restoreWorkspaceDescription')}>
                   <div className="flex items-center justify-end gap-2">
                     <Button variant="soft" size="sm" onClick={handleClearWorkspace}>
-                      <Trash2Icon data-icon="inline-start" />
                       {t('settings.general.clearWorkspace')}
                     </Button>
                     <Switch aria-label={t('settings.general.restoreWorkspace')} checked={restoreWorkspace} onCheckedChange={setRestoreWorkspace} />
@@ -1307,7 +1283,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                           />
                         }
                       >
-                        <FolderOpenIcon data-icon="inline-start" />
                         <span className="truncate">{sftpDownloadDirectory || t('settings.sftp.downloadDirectoryAsk')}</span>
                       </TooltipTrigger>
                       <TooltipContent className="break-all">{sftpDownloadDirectory || t('settings.sftp.downloadDirectoryAsk')}</TooltipContent>

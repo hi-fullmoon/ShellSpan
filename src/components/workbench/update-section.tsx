@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2Icon, CircleAlertIcon, DownloadIcon, RefreshCwIcon, RotateCcwIcon } from 'lucide-react';
+import { CheckCircle2Icon, CircleAlertIcon } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
 import { useUpdateStore } from '@/stores/updateStore';
 import { isTauriRuntime } from '@/lib/ipc/tauri';
@@ -49,7 +49,6 @@ export const UpdateSection: React.FC = () => {
   const downloading = phase === 'downloading';
   const downloaded = phase === 'downloaded';
   const failed = phase === 'error';
-  const CheckIcon = failed ? RotateCcwIcon : RefreshCwIcon;
   const checkLabel = failed ? 'settings.general.retry' : checking ? 'settings.general.checkingUpdate' : 'settings.general.checkUpdate';
   const targetVersion = version.downloadedVersion ?? version.latestVersion;
   const displayProgress = Math.max(0, Math.min(100, downloadProgress ?? 0));
@@ -76,7 +75,6 @@ export const UpdateSection: React.FC = () => {
       <div data-slot="update-actions" className="flex min-h-8 w-full flex-col items-stretch justify-center gap-2 @min-[32rem]:w-auto @min-[32rem]:min-w-44 @min-[32rem]:items-end">
         {!downloading && !downloaded && (
           <Button variant="soft" size="sm" disabled={checking} onClick={() => void runCheck('manual')}>
-            <CheckIcon data-icon="inline-start" className={cn(checking && 'animate-spin')} />
             {t(checkLabel)}
           </Button>
         )}
@@ -102,7 +100,6 @@ export const UpdateSection: React.FC = () => {
               {targetVersion ? t('update.restartDialog.description', { version: targetVersion }) : t('update.downloaded')}
             </p>
             <Button size="sm" onClick={() => void installNow()}>
-              <DownloadIcon data-icon="inline-start" />
               {t('update.restartDialog.installNow')}
             </Button>
           </div>
