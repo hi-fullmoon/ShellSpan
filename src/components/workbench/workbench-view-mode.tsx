@@ -146,23 +146,26 @@ interface WorkbenchSortableHeadProps<TColumn extends string> {
   className?: string;
 }
 
+export const WORKBENCH_TABLE_HEADER_CLASS =
+  'sticky top-0 z-10 bg-background transition-shadow in-data-[overflow-y-start]:shadow-[0_1px_4px_rgba(0,0,0,0.06)] dark:in-data-[overflow-y-start]:shadow-[0_1px_6px_rgba(0,0,0,0.28)]';
+
 export const WORKBENCH_TABLE_HEADER_ROW_CLASS =
   'border-0 bg-muted/75 hover:bg-muted/75 dark:bg-muted/80 dark:hover:bg-muted/80';
 
 export const WORKBENCH_TABLE_HEAD_CLASS =
-  'h-8 border-b border-app-border px-3 text-[11px] font-semibold tracking-[0.02em] text-muted-foreground first:pl-3.5 last:pr-3.5';
+  'h-8 border-b border-app-border px-3 text-[11px] font-semibold tracking-[0.02em] text-muted-foreground first:pl-3.5 last:pr-3.5 in-data-[has-overflow-y]:last:pr-4';
 
 export const WORKBENCH_TABLE_ROW_CLASS =
   'group border-0 bg-card transition-colors hover:bg-accent/65 dark:bg-background dark:hover:bg-accent/55';
 
 export const WORKBENCH_TABLE_CELL_CLASS =
-  'min-w-0 border-b border-app-border/45 px-3 py-2 align-middle first:pl-3.5 last:pr-3.5';
+  'min-w-0 border-b border-app-border/45 px-3 py-2 align-middle first:pl-3.5 last:pr-3.5 in-data-[has-overflow-y]:last:pr-4';
 
 export const WORKBENCH_TABLE_ACTION_CELL_CLASS =
-  'w-[7.25rem] border-b border-app-border/45 px-3 py-1.5 text-right align-middle last:pr-3';
+  'w-[7.25rem] border-b border-app-border/45 px-3 py-1.5 text-right align-middle last:pr-3 in-data-[has-overflow-y]:last:pr-4';
 
 export const WORKBENCH_TABLE_COMPACT_ACTION_CELL_CLASS =
-  'w-[5.25rem] border-b border-app-border/45 px-3 py-1.5 text-right align-middle last:pr-3';
+  'w-[5.25rem] border-b border-app-border/45 px-3 py-1.5 text-right align-middle last:pr-3 in-data-[has-overflow-y]:last:pr-4';
 
 export const WORKBENCH_TABLE_ACTION_GROUP_CLASS =
   'flex shrink-0 flex-nowrap items-center justify-end gap-0.5 text-muted-foreground opacity-80 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100';

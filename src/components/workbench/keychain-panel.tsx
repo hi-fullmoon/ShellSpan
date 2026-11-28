@@ -23,13 +23,14 @@ import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon, ManagementCardText } from './management-card';
 import { FormRow, MANAGEMENT_CARD_MIN_WIDTH } from './shared';
 import type { ConnectionProfile, KeychainKeyKind } from '@/types';
-import { WorkbenchPage, WorkbenchPageContent, WorkbenchPageHeader, WorkbenchPageToolbar, WorkbenchSearchInput } from './workbench-page';
+import { WorkbenchPage, WorkbenchPageContent, WorkbenchPageHeader, WorkbenchPageScrollArea, WorkbenchPageToolbar, WorkbenchSearchInput } from './workbench-page';
 import {
   WORKBENCH_TABLE_ACTION_GROUP_CLASS,
   WORKBENCH_TABLE_CELL_CLASS,
   WORKBENCH_TABLE_COMPACT_ACTION_CELL_CLASS,
   WORKBENCH_TABLE_DESTRUCTIVE_ICON_BUTTON_CLASS,
   WORKBENCH_TABLE_HEAD_CLASS,
+  WORKBENCH_TABLE_HEADER_CLASS,
   WORKBENCH_TABLE_HEADER_ROW_CLASS,
   WORKBENCH_TABLE_ICON_BUTTON_CLASS,
   WORKBENCH_TABLE_ROW_CLASS,
@@ -319,7 +320,9 @@ export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionPr
           </WorkbenchPageToolbar>
         )}
 
-        <ScrollArea className="min-h-0 flex-1">
+        <WorkbenchPageScrollArea
+          viewportClassName={viewMode === 'table' && filteredKeys.length > 0 ? 'scroll-pt-8' : undefined}
+        >
           <WorkbenchPageContent
             className={cn(
               viewMode === 'table' && filteredKeys.length > 0 && 'p-0',
@@ -342,8 +345,12 @@ export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionPr
             )}
             {filteredKeys.length > 0 && viewMode === 'table' && (
               <WorkbenchTableFrame slot="keychain-table">
-                <Table aria-label={t('workbench.keychain.title')} className="table-fixed text-xs">
-                  <TableHeader className="sticky top-0 z-10 bg-background">
+                <Table
+                  aria-label={t('workbench.keychain.title')}
+                  containerClassName="overflow-visible"
+                  className="table-fixed text-xs"
+                >
+                  <TableHeader className={WORKBENCH_TABLE_HEADER_CLASS}>
                     <TableRow className={WORKBENCH_TABLE_HEADER_ROW_CLASS}>
                       <WorkbenchSortableHead
                         column="name"
@@ -523,7 +530,7 @@ export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionPr
               </ResponsiveCardGrid>
             )}
           </WorkbenchPageContent>
-        </ScrollArea>
+        </WorkbenchPageScrollArea>
       </WorkbenchPage>
 
       <Drawer

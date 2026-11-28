@@ -73,6 +73,7 @@ import {
   WorkbenchPage,
   WorkbenchPageContent,
   WorkbenchPageHeader,
+  WorkbenchPageScrollArea,
   WorkbenchPageToolbar,
   WorkbenchSearchInput,
 } from './workbench-page';
@@ -82,6 +83,7 @@ import {
   WORKBENCH_TABLE_CELL_CLASS,
   WORKBENCH_TABLE_DESTRUCTIVE_ICON_BUTTON_CLASS,
   WORKBENCH_TABLE_HEAD_CLASS,
+  WORKBENCH_TABLE_HEADER_CLASS,
   WORKBENCH_TABLE_HEADER_ROW_CLASS,
   WORKBENCH_TABLE_ICON_BUTTON_CLASS,
   WORKBENCH_TABLE_ROW_CLASS,
@@ -508,7 +510,9 @@ export const HostQuickActionsPanel: React.FC = () => {
           </WorkbenchPageToolbar>
         )}
 
-        <ScrollArea className="min-h-0 flex-1">
+        <WorkbenchPageScrollArea
+          viewportClassName={viewMode === 'table' && filteredEntries.length > 0 ? 'scroll-pt-8' : undefined}
+        >
           <WorkbenchPageContent
             className={cn(
               viewMode === 'table' && filteredEntries.length > 0 && 'p-0',
@@ -536,8 +540,12 @@ export const HostQuickActionsPanel: React.FC = () => {
               />
             ) : viewMode === 'table' ? (
               <WorkbenchTableFrame slot="quick-actions-table">
-                <Table aria-label={t('workbench.quickActions.title')} className="table-fixed text-xs">
-                  <TableHeader className="sticky top-0 z-10 bg-background">
+                <Table
+                  aria-label={t('workbench.quickActions.title')}
+                  containerClassName="overflow-visible"
+                  className="table-fixed text-xs"
+                >
+                  <TableHeader className={WORKBENCH_TABLE_HEADER_CLASS}>
                     <TableRow className={WORKBENCH_TABLE_HEADER_ROW_CLASS}>
                       <WorkbenchSortableHead
                         column="name"
@@ -758,7 +766,7 @@ export const HostQuickActionsPanel: React.FC = () => {
               </div>
             )}
           </WorkbenchPageContent>
-        </ScrollArea>
+        </WorkbenchPageScrollArea>
       </WorkbenchPage>
 
       <Drawer open={drawerOpen} onOpenChange={(open) => { if (!open) closeDrawer(); }}>

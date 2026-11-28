@@ -829,6 +829,17 @@ describe('ConnectionList', () => {
     expect(tableToggle).toHaveAttribute('aria-pressed', 'true');
     const table = screen.getByRole('table', { name: 'workbench.connections.title' });
     expect(table).toBeInTheDocument();
+    expect(table.closest('[data-slot="table-container"]')).toHaveClass('overflow-visible');
+    expect(table.closest('[data-slot="table-container"]')).not.toHaveClass('overflow-x-auto');
+    expect(table.closest('[data-slot="scroll-area-content"]')).toHaveClass('flex', 'min-h-full', 'w-full', 'flex-col');
+    expect(table.closest('[data-slot="scroll-area-viewport"]')).toHaveClass('scroll-pt-8');
+    expect(table.querySelector('thead')).toHaveClass(
+      'sticky',
+      'top-0',
+      'z-10',
+      'bg-background',
+      'in-data-[overflow-y-start]:shadow-[0_1px_4px_rgba(0,0,0,0.06)]',
+    );
     expect(table.closest('[data-slot="connection-table"]')).toHaveClass(
       '[&_table]:border-separate',
       '[&_table]:border-spacing-0',
@@ -839,10 +850,20 @@ describe('ConnectionList', () => {
     expect(tableRows[0]).not.toHaveClass('bg-background');
     expect(tableRows[1]).toHaveClass('bg-card', 'dark:bg-background');
     const columnHeaders = within(tableRows[0]).getAllByRole('columnheader');
-    expect(columnHeaders[0]).toHaveClass('border-b', 'border-app-border', 'font-semibold', 'text-muted-foreground');
+    expect(columnHeaders[0]).toHaveClass(
+      'border-b',
+      'border-app-border',
+      'font-semibold',
+      'text-muted-foreground',
+      'in-data-[has-overflow-y]:last:pr-4',
+    );
     const firstRowCells = within(tableRows[1]).getAllByRole('cell');
     expect(firstRowCells[0]).toHaveClass('border-b', 'border-app-border/45');
-    expect(firstRowCells[firstRowCells.length - 1]).toHaveClass('border-b', 'border-app-border/45');
+    expect(firstRowCells[firstRowCells.length - 1]).toHaveClass(
+      'border-b',
+      'border-app-border/45',
+      'in-data-[has-overflow-y]:last:pr-4',
+    );
     expect(table.querySelector('[data-connection-text="address"]')).toHaveTextContent('deploy@10.0.0.10:2222');
     const narrowAddressFallback = within(table).getAllByText('deploy@10.0.0.10:2222').find(
       (element) => element.getAttribute('data-connection-text') !== 'address',

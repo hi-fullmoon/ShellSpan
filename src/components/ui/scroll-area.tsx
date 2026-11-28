@@ -8,6 +8,7 @@ type ScrollbarSize = 'default' | 'thin';
 interface ScrollAreaProps extends ScrollAreaPrimitive.Root.Props {
   viewportRef?: React.Ref<HTMLDivElement>;
   viewportRender?: ScrollAreaPrimitive.Viewport.Props['render'];
+  viewportClassName?: string;
   horizontal?: boolean;
   vertical?: boolean;
   size?: ScrollbarSize;
@@ -19,6 +20,7 @@ function ScrollArea({
   children,
   viewportRef,
   viewportRender,
+  viewportClassName,
   horizontal = false,
   vertical = true,
   size = 'default',
@@ -26,13 +28,13 @@ function ScrollArea({
   ...props
 }: ScrollAreaProps) {
   return (
-    <ScrollAreaPrimitive.Root data-slot="scroll-area" className={cn('group/scroll-area relative min-h-0', className)} {...props}>
+    <ScrollAreaPrimitive.Root data-slot="scroll-area" className={cn('group/scroll-area relative isolate min-h-0', className)} {...props}>
       <ScrollAreaPrimitive.Viewport
         ref={viewportRef}
         render={viewportRender}
         data-slot="scroll-area-viewport"
         onWheel={onWheel}
-        className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none"
+        className={cn('size-full rounded-[inherit] transition-[color,box-shadow] outline-none', viewportClassName)}
       >
         {children}
       </ScrollAreaPrimitive.Viewport>
@@ -61,7 +63,7 @@ function ScrollBar({ className, orientation = 'vertical', size = 'default', ...p
       data-orientation={orientation}
       orientation={orientation}
       className={cn(
-        'flex touch-none select-none',
+        'z-20 flex touch-none select-none',
         isHorizontal ? cn('w-full flex-row', isThin ? 'h-1' : 'h-2.5') : cn('h-full flex-col', isThin ? 'w-1' : 'w-2.5'),
         isThin ? 'bg-transparent' : 'p-0.5',
         className,
@@ -72,7 +74,9 @@ function ScrollBar({ className, orientation = 'vertical', size = 'default', ...p
         data-slot="scroll-area-thumb"
         className={cn(
           'relative rounded-full transition-colors',
-          isThin ? 'bg-transparent group-hover/scroll-area:bg-app-text-soft/35 hover:bg-app-text-soft/50' : 'bg-app-text-soft/30 hover:bg-app-text-soft/50',
+          isThin
+            ? 'bg-transparent group-hover/scroll-area:bg-app-text-soft/35 hover:bg-app-text-soft/50 active:bg-app-text-soft/65'
+            : 'bg-app-text-soft/30 hover:bg-app-text-soft/50 active:bg-app-text-soft/65',
         )}
       />
     </ScrollAreaPrimitive.Scrollbar>

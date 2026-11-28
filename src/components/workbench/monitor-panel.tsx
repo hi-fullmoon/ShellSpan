@@ -45,6 +45,7 @@ import {
   WorkbenchPage,
   WorkbenchPageContent,
   WorkbenchPageHeader,
+  WorkbenchPageScrollArea,
 } from './workbench-page';
 
 const DISCONNECT_REASON_KEY: Record<ClosedReasonKind, LocaleKey> = {
@@ -431,7 +432,7 @@ export const MonitorPanel: React.FC = () => {
           )}
         />
 
-        <ScrollArea className="min-h-0 flex-1">
+        <WorkbenchPageScrollArea>
           <WorkbenchPageContent>
             <section aria-labelledby="local-monitor-heading" className="flex flex-col gap-3">
               <h2 id="local-monitor-heading" className="sr-only">
@@ -688,7 +689,7 @@ export const MonitorPanel: React.FC = () => {
 
             <RemoteHealthSection />
           </WorkbenchPageContent>
-        </ScrollArea>
+        </WorkbenchPageScrollArea>
       </WorkbenchPage>
     </TooltipProvider>
   );

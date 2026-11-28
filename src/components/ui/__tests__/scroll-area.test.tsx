@@ -24,15 +24,19 @@ vi.mock('@base-ui/react/scroll-area', () => {
 describe('ScrollArea', () => {
   it('uses the shared inset rounded scrollbar style', () => {
     const { container } = render(
-      <ScrollArea>
+      <ScrollArea viewportClassName="scroll-pt-8">
         <div>Content</div>
       </ScrollArea>,
     );
 
+    const root = container.querySelector('[data-slot="scroll-area"]');
+    const viewport = container.querySelector('[data-slot="scroll-area-viewport"]');
     const scrollbar = container.querySelector('[data-slot="scroll-area-scrollbar"]');
     const thumb = container.querySelector('[data-slot="scroll-area-thumb"]');
-    expect(scrollbar).toHaveClass('w-2.5', 'p-0.5');
-    expect(thumb).toHaveClass('rounded-full', 'bg-app-text-soft/30', 'hover:bg-app-text-soft/50');
+    expect(root).toHaveClass('isolate');
+    expect(viewport).toHaveClass('scroll-pt-8');
+    expect(scrollbar).toHaveClass('z-20', 'w-2.5', 'p-0.5');
+    expect(thumb).toHaveClass('rounded-full', 'bg-app-text-soft/30', 'hover:bg-app-text-soft/50', 'active:bg-app-text-soft/65');
     expect(thumb).not.toHaveClass('flex-1');
   });
 

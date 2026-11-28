@@ -4,6 +4,7 @@ import { ServerIcon } from 'lucide-react';
 import {
   WorkbenchPageContent,
   WorkbenchPageHeader,
+  WorkbenchPageScrollArea,
   WorkbenchPageToolbar,
 } from '../workbench-page';
 
@@ -80,5 +81,21 @@ describe('WorkbenchPageToolbar', () => {
 
     const toolbar = container.querySelector('[data-slot="workbench-page-toolbar"]');
     expect(toolbar).toHaveClass('px-2.5', 'py-1');
+  });
+});
+
+describe('WorkbenchPageScrollArea', () => {
+  it('wraps page content in an observed ScrollAreaContent that stretches full height without forcing min-content width', () => {
+    const { container } = render(
+      <WorkbenchPageScrollArea viewportClassName="scroll-pt-8">
+        <WorkbenchPageContent>Content</WorkbenchPageContent>
+      </WorkbenchPageScrollArea>,
+    );
+
+    const viewport = container.querySelector('[data-slot="scroll-area-viewport"]');
+    const scrollContent = container.querySelector('[data-slot="scroll-area-content"]');
+    expect(viewport).toHaveClass('scroll-pt-8');
+    expect(scrollContent).toHaveClass('flex', 'min-h-full', 'w-full', 'flex-col');
+    expect(scrollContent).toHaveStyle({ minWidth: '0px' });
   });
 });

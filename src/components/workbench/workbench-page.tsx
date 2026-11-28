@@ -7,6 +7,7 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from '@/components/ui/input-group';
+import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 
 type WorkbenchSearchClearProps =
   | { onClear?: never; clearLabel?: never }
@@ -140,6 +141,27 @@ export const WorkbenchPageToolbar: React.FC<WorkbenchPageToolbarProps> = ({
   />
 );
 
+interface WorkbenchPageScrollAreaProps
+  extends React.ComponentProps<typeof ScrollArea> {
+  contentClassName?: string;
+}
+
+export const WorkbenchPageScrollArea: React.FC<WorkbenchPageScrollAreaProps> = ({
+  className,
+  contentClassName,
+  children,
+  ...props
+}) => (
+  <ScrollArea className={cn('min-h-0 flex-1', className)} {...props}>
+    <ScrollAreaContent
+      className={cn('flex min-h-full w-full flex-col', contentClassName)}
+      style={{ minWidth: 0 }}
+    >
+      {children}
+    </ScrollAreaContent>
+  </ScrollArea>
+);
+
 type WorkbenchPageContentProps = React.ComponentProps<'main'>;
 
 export const WorkbenchPageContent: React.FC<WorkbenchPageContentProps> = ({
@@ -149,7 +171,7 @@ export const WorkbenchPageContent: React.FC<WorkbenchPageContentProps> = ({
   <main
     data-slot="workbench-page-content"
     className={cn(
-      'mx-auto flex min-h-full w-full flex-col gap-3 p-2.5',
+      'mx-auto flex min-h-full w-full flex-1 flex-col gap-3 p-2.5',
       className,
     )}
     {...props}

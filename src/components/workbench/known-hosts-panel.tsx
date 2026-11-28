@@ -9,7 +9,6 @@ import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/compone
 import { CopyButton } from '@/components/ui/copy-button';
 import type { KnownHostEntry } from '@/types';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
@@ -32,6 +31,7 @@ import {
   WorkbenchPage,
   WorkbenchPageContent,
   WorkbenchPageHeader,
+  WorkbenchPageScrollArea,
   WorkbenchPageToolbar,
   WorkbenchSearchInput,
 } from './workbench-page';
@@ -41,6 +41,7 @@ import {
   WORKBENCH_TABLE_COMPACT_ACTION_CELL_CLASS,
   WORKBENCH_TABLE_DESTRUCTIVE_ICON_BUTTON_CLASS,
   WORKBENCH_TABLE_HEAD_CLASS,
+  WORKBENCH_TABLE_HEADER_CLASS,
   WORKBENCH_TABLE_HEADER_ROW_CLASS,
   WORKBENCH_TABLE_ICON_BUTTON_CLASS,
   WORKBENCH_TABLE_ROW_CLASS,
@@ -171,7 +172,9 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
             <WorkbenchViewModeToggle value={viewMode} onChange={setViewMode} />
           </WorkbenchPageToolbar>
         )}
-        <ScrollArea className="min-h-0 flex-1">
+        <WorkbenchPageScrollArea
+          viewportClassName={viewMode === 'table' && filteredHosts.length > 0 ? 'scroll-pt-8' : undefined}
+        >
           <WorkbenchPageContent
             className={cn(
               viewMode === 'table' && filteredHosts.length > 0 && 'p-0',
@@ -209,8 +212,12 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
         )}
         {filteredHosts.length > 0 && viewMode === 'table' && (
           <WorkbenchTableFrame slot="known-hosts-table">
-            <Table aria-label={t('workbench.knownHosts.title')} className="table-fixed text-xs">
-              <TableHeader className="sticky top-0 z-10 bg-background">
+            <Table
+              aria-label={t('workbench.knownHosts.title')}
+              containerClassName="overflow-visible"
+              className="table-fixed text-xs"
+            >
+              <TableHeader className={WORKBENCH_TABLE_HEADER_CLASS}>
                 <TableRow className={WORKBENCH_TABLE_HEADER_ROW_CLASS}>
                   <WorkbenchSortableHead
                     column="host"
@@ -407,7 +414,7 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
           </ResponsiveCardGrid>
         )}
           </WorkbenchPageContent>
-        </ScrollArea>
+        </WorkbenchPageScrollArea>
       </WorkbenchPage>
       <ConfirmDeleteDialog
         open={!!removing}

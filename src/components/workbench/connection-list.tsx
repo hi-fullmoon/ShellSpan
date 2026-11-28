@@ -5,7 +5,6 @@ import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover';
@@ -36,6 +35,7 @@ import {
   WORKBENCH_TABLE_ACTION_GROUP_CLASS,
   WORKBENCH_TABLE_CELL_CLASS,
   WORKBENCH_TABLE_HEAD_CLASS,
+  WORKBENCH_TABLE_HEADER_CLASS,
   WORKBENCH_TABLE_HEADER_ROW_CLASS,
   WORKBENCH_TABLE_ICON_BUTTON_CLASS,
   WORKBENCH_TABLE_ROW_CLASS,
@@ -73,7 +73,7 @@ import {
   ShieldCheckIcon,
   ShieldQuestionMarkIcon,
 } from 'lucide-react';
-import { WorkbenchPage, WorkbenchPageContent, WorkbenchPageHeader, WorkbenchSearchInput, WorkbenchPageToolbar } from './workbench-page';
+import { WorkbenchPage, WorkbenchPageContent, WorkbenchPageHeader, WorkbenchPageScrollArea, WorkbenchSearchInput, WorkbenchPageToolbar } from './workbench-page';
 
 const CARD_ACTION_DEBOUNCE_MS = 500;
 const AUTH_METHOD_ICONS: Record<ConnectionProfile['authMethod'], React.ElementType> = {
@@ -328,7 +328,9 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
           </WorkbenchPageToolbar>
         )}
 
-        <ScrollArea className="min-h-0 flex-1">
+        <WorkbenchPageScrollArea
+          viewportClassName={viewMode === 'table' && filteredProfiles.length > 0 ? 'scroll-pt-8' : undefined}
+        >
           <WorkbenchPageContent
             className={cn(
               viewMode === 'table' && filteredProfiles.length > 0 && 'p-0',
@@ -385,7 +387,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
               </ConnectionCardGrid>
             )}
           </WorkbenchPageContent>
-        </ScrollArea>
+        </WorkbenchPageScrollArea>
       </WorkbenchPage>
       {!onOpenOverview && (
         <HostOverviewDialog profile={overviewProfile} onClose={() => setOverviewProfile(undefined)} />
@@ -861,8 +863,12 @@ const ConnectionTable: React.FC<ConnectionTableProps> = ({
 
   return (
     <WorkbenchTableFrame slot="connection-table">
-      <Table aria-label={t('workbench.connections.title')} className="table-fixed text-xs">
-        <TableHeader className="sticky top-0 z-10 bg-background">
+      <Table
+        aria-label={t('workbench.connections.title')}
+        containerClassName="overflow-visible"
+        className="table-fixed text-xs"
+      >
+        <TableHeader className={WORKBENCH_TABLE_HEADER_CLASS}>
           <TableRow className={WORKBENCH_TABLE_HEADER_ROW_CLASS}>
             <WorkbenchSortableHead
               column="name"
