@@ -1958,14 +1958,22 @@ export function useAiSessionController({
 
   useEffect(() => {
     let active = true;
+    let handledPendingId: string | null = null;
+    const inFlightOpenIds = new Set<string>();
     const openById = (sessionId: string): void => {
-      if (!sessionId) return;
+      if (!sessionId || inFlightOpenIds.has(sessionId)) return;
+      if (viewRef.current?.summary.id === sessionId) {
+        useAiPanelStore.getState().consumePendingOpenSession(sessionId);
+        return;
+      }
       const cached = sessionsRef.current.find((session) => session.id === sessionId);
-      if (cached && belongsToAiWorkspace(cached, scope, focusMode, sessionsRef.current)) {
+      if (cached) {
+        if (!belongsToAiWorkspace(cached, scope, focusMode, sessionsRef.current)) return;
         useAiPanelStore.getState().consumePendingOpenSession(sessionId);
         openSession(cached);
         return;
       }
+      inFlightOpenIds.add(sessionId);
       void adapter.open(sessionId).then((loaded) => {
         if (!active) return;
         const summary = loaded.summary;
@@ -1976,14 +1984,24 @@ export function useAiSessionController({
         useAiPanelStore.getState().consumePendingOpenSession(sessionId);
         setSessions(nextSessions);
         openSession(summary);
-      }).catch(() => undefined);
+      }).catch(() => {
+        useAiPanelStore.getState().consumePendingOpenSession(sessionId);
+      }).finally(() => {
+        inFlightOpenIds.delete(sessionId);
+      });
     };
     if (pendingOpenSessionId) {
+      handledPendingId = pendingOpenSessionId;
       openById(pendingOpenSessionId);
     }
     const onOpenAgentSession = (event: Event): void => {
       const sessionId = (event as CustomEvent<OpenAgentSessionEventDetail>).detail?.sessionId;
-      if (sessionId) openById(sessionId);
+      if (!sessionId) return;
+      if (sessionId === handledPendingId) {
+        handledPendingId = null;
+        return;
+      }
+      openById(sessionId);
     };
     window.addEventListener(OPEN_AGENT_SESSION_EVENT, onOpenAgentSession);
     const onPrefillPrompt = (event: Event): void => {

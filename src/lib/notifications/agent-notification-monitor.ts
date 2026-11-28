@@ -21,11 +21,13 @@ interface SessionMetadata {
   parentSessionId?: string;
   terminalSessionId?: string;
   activeTurnId?: string;
+  terminalNotifiedStatus?: 'completed' | 'failed';
   settledTurnIds: Set<string>;
 }
 
 const MAX_SEEN_KEYS = 512;
 const MAX_TRACKED_SESSIONS = 256;
+const MAX_SETTLED_TURNS_PER_SESSION = 64;
 
 export class AgentNotificationMonitor {
   private readonly sessions = new Map<string, SessionMetadata>();
@@ -70,6 +72,19 @@ export class AgentNotificationMonitor {
     }
     this.seenKeys.add(key);
     return true;
+  }
+
+  private recordSettledTurn(meta: SessionMetadata, turnKey: string): void {
+    if (meta.settledTurnIds.has(turnKey)) {
+      return;
+    }
+    if (meta.settledTurnIds.size >= MAX_SETTLED_TURNS_PER_SESSION) {
+      const oldest = meta.settledTurnIds.values().next().value;
+      if (oldest !== undefined) {
+        meta.settledTurnIds.delete(oldest);
+      }
+    }
+    meta.settledTurnIds.add(turnKey);
   }
 
   private buildAgentTarget(sessionId: string): DesktopNotificationTarget {
@@ -119,6 +134,7 @@ export class AgentNotificationMonitor {
       }
 
       case 'turn/start': {
+        meta.terminalNotifiedStatus = undefined;
         if (event.turnId) {
           meta.activeTurnId = event.turnId;
         }
@@ -213,14 +229,15 @@ export class AgentNotificationMonitor {
         const turnKey = event.turnId ?? meta.activeTurnId ?? `seq-${event.seq}`;
         if (event.data.reason !== 'completed') {
           if (event.data.reason === 'cancelled') {
-            meta.settledTurnIds.add(turnKey);
+            this.recordSettledTurn(meta, turnKey);
           }
           return null;
         }
         if (meta.settledTurnIds.has(turnKey)) {
           return null;
         }
-        meta.settledTurnIds.add(turnKey);
+        this.recordSettledTurn(meta, turnKey);
+        meta.terminalNotifiedStatus = 'completed';
         const dedupeKey = `turn-completed:${event.sessionId}:${turnKey}`;
         if (!this.claimKey(dedupeKey)) {
           return null;
@@ -244,11 +261,15 @@ export class AgentNotificationMonitor {
         if (status !== 'failed' && status !== 'completed') {
           return null;
         }
+        if (meta.terminalNotifiedStatus === status) {
+          return null;
+        }
         const turnKey = event.turnId ?? meta.activeTurnId ?? `seq-${event.seq}`;
         if (meta.settledTurnIds.has(turnKey)) {
           return null;
         }
-        meta.settledTurnIds.add(turnKey);
+        this.recordSettledTurn(meta, turnKey);
+        meta.terminalNotifiedStatus = status;
         const kind: AiNotificationKind = status === 'failed' ? 'failed' : 'completed';
         const dedupeKey = `turn-${kind}:${event.sessionId}:${turnKey}`;
         if (!this.claimKey(dedupeKey)) {

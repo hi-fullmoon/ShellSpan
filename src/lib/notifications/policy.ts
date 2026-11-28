@@ -33,8 +33,10 @@ export function isAppWindowFocused(): boolean {
 
 export function isTerminalSessionCurrentlyVisible(terminalSessionId: string): boolean {
   if (!isAppWindowFocused()) return false;
+  const app = useAppStore.getState();
+  if (app.settingsDialogOpen) return false;
   const focus = useFocusStore.getState();
-  return useAppStore.getState().activeSection === 'terminal'
+  return app.activeSection === 'terminal'
     && (!focus.enabled || focus.terminalOpen)
     && useTerminalStore.getState().activeSessionId === terminalSessionId;
 }
@@ -42,6 +44,7 @@ export function isTerminalSessionCurrentlyVisible(terminalSessionId: string): bo
 export function isAgentSessionCurrentlyVisible(agentSessionId: string): boolean {
   if (!isAppWindowFocused()) return false;
   const app = useAppStore.getState();
+  if (app.settingsDialogOpen) return false;
   const focus = useFocusStore.getState();
   const aiPanel = useAiPanelStore.getState();
 
@@ -66,11 +69,15 @@ export function isAgentSessionCurrentlyVisible(agentSessionId: string): boolean 
 
 export function sanitizeNotificationText(raw: string, maxLength = 240): string {
   const cleaned = raw
-    .replace(/[\u0000-\u001F\u007F]+/g, ' ')
+    .replace(/[\u0000-\u001F\u007F-\u009F]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   if (cleaned.length <= maxLength) {
     return cleaned;
   }
-  return `${cleaned.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…`;
+  const truncated = cleaned
+    .slice(0, Math.max(1, maxLength - 1))
+    .replace(/[\uD800-\uDBFF]$/, '')
+    .trimEnd();
+  return `${truncated}…`;
 }

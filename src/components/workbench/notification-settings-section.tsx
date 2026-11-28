@@ -19,8 +19,14 @@ import type {
   DesktopNotificationStatus,
   NotificationTriggerPolicy,
 } from '@/types';
+import { getPlatform } from '@/lib/platform';
 import { cn } from '@/lib/utils';
 import { SettingRow, SettingsGroup } from './settings-layout';
+
+function resolveFallbackPlatform(): DesktopNotificationStatus['platform'] {
+  const platform = getPlatform();
+  return platform === 'other' ? 'linux' : platform;
+}
 
 const PERMISSION_LABEL_KEYS: Record<DesktopNotificationPermission, LocaleKey> = {
   granted: 'settings.notifications.permission.granted',
@@ -63,6 +69,8 @@ export const NotificationSettingsSection: React.FC = () => {
   const [sendingTest, setSendingTest] = useState(false);
   const [openingSystemSettings, setOpeningSystemSettings] = useState(false);
   const mountedRef = useRef(true);
+  const inFlightRef = useRef(false);
+  const requestSeqRef = useRef(0);
   const tRef = useRef(t);
   tRef.current = t;
 
@@ -73,34 +81,40 @@ export const NotificationSettingsSection: React.FC = () => {
         permission: 'unknown',
         canRequestPermission: false,
         canOpenSystemSettings: false,
-        platform: 'windows',
+        platform: resolveFallbackPlatform(),
       });
       return;
     }
+    if (!requestPermission && inFlightRef.current) return;
+    const seq = ++requestSeqRef.current;
+    inFlightRef.current = true;
     setCheckingPermission(true);
     try {
       const next = requestPermission
         ? await invokeRequestDesktopNotificationPermission()
         : await invokeGetDesktopNotificationStatus();
-      if (mountedRef.current) {
+      if (mountedRef.current && requestSeqRef.current === seq) {
         setStatus(next);
       }
     } catch {
-      if (mountedRef.current) {
+      if (mountedRef.current && requestSeqRef.current === seq) {
         setStatus((current) => current ?? {
           supported: true,
           permission: 'unknown',
-          canRequestPermission: true,
+          canRequestPermission: false,
           canOpenSystemSettings: false,
-          platform: 'windows',
+          platform: resolveFallbackPlatform(),
         });
         if (requestPermission) {
           toast.error(tRef.current('settings.notifications.permissionCheckFailed'));
         }
       }
     } finally {
-      if (mountedRef.current) {
-        setCheckingPermission(false);
+      if (requestSeqRef.current === seq) {
+        inFlightRef.current = false;
+        if (mountedRef.current) {
+          setCheckingPermission(false);
+        }
       }
     }
   }, []);
@@ -108,8 +122,15 @@ export const NotificationSettingsSection: React.FC = () => {
   useEffect(() => {
     mountedRef.current = true;
     void refreshPermissionStatus(false);
+    const handleWindowFocus = (): void => {
+      if (isTauriRuntime()) {
+        void refreshPermissionStatus(false);
+      }
+    };
+    window.addEventListener('focus', handleWindowFocus);
     return () => {
       mountedRef.current = false;
+      window.removeEventListener('focus', handleWindowFocus);
     };
   }, [refreshPermissionStatus]);
 

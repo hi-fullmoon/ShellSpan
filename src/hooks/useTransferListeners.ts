@@ -60,7 +60,7 @@ export function useTransferListeners(): void {
         categoryEnabled: app.sftpCompletionNotification,
         policy: app.notificationTriggerPolicy,
         windowFocused,
-        targetVisible: windowFocused && app.activeSection === 'sftp',
+        targetVisible: windowFocused && !app.settingsDialogOpen && app.activeSection === 'sftp',
       })) return;
       const previouslyCompleted = new Set(previous.operations
         .filter((operation) => operation.status === 'completed')

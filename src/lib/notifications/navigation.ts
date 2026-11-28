@@ -42,6 +42,10 @@ export function navigateToNotificationTarget(target: DesktopNotificationTarget):
     }
 
     case 'terminalSession': {
+      const app = useAppStore.getState();
+      if (app.settingsDialogOpen) {
+        app.setSettingsDialogOpen(false);
+      }
       dispatchAppAction(
         { type: 'focusTerminal', terminalSessionId: target.terminalSessionId },
         { source: 'user', requiresFocus: true },

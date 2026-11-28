@@ -2,7 +2,12 @@ import { useEffect } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import { invokeSendDesktopNotification, isTauriRuntime, listenToTerminalCommandLifecycle } from '@/lib/ipc/tauri';
 import { createLogger } from '@/lib/logger';
-import { isAppWindowFocused, shouldDeliverDesktopNotification } from '@/lib/notifications/policy';
+import {
+  isAppWindowFocused,
+  isTerminalSessionCurrentlyVisible,
+  sanitizeNotificationText,
+  shouldDeliverDesktopNotification,
+} from '@/lib/notifications/policy';
 import { createTerminalCommandBlocks, jumpToTerminalCommand, shouldNotifyTerminalCommand,
   type TerminalCommandBlocks } from '@/lib/terminal/terminal-command-blocks';
 import { cleanTerminalTitle } from '@/lib/terminal/tab-title';
@@ -23,12 +28,6 @@ export function terminalCommandTracker(terminal: Terminal): TerminalCommandBlock
 export function subscribeTerminalCommandTrackers(listener: () => void): () => void {
   trackerListeners.add(listener);
   return () => trackerListeners.delete(listener);
-}
-
-function isActiveAndVisible(sessionId: string): boolean {
-  const focus = useFocusStore.getState();
-  return useAppStore.getState().activeSection === 'terminal' && (!focus.enabled || focus.terminalOpen)
-    && useTerminalStore.getState().activeSessionId === sessionId && document.hasFocus() && !document.hidden;
 }
 
 export function TerminalCommandActivity() {
@@ -65,7 +64,7 @@ export function TerminalCommandActivity() {
     };
     const markActiveRead = (): void => {
       const state = useTerminalStore.getState();
-      if (state.activeSessionId && isActiveAndVisible(state.activeSessionId)) {
+      if (state.activeSessionId && isTerminalSessionCurrentlyVisible(state.activeSessionId)) {
         state.setUnreadCommand(state.activeSessionId);
       }
     };
@@ -80,7 +79,8 @@ export function TerminalCommandActivity() {
       if (state.activeSessionId !== previous.activeSessionId) markActiveRead();
     });
     const unsubscribeSection = useAppStore.subscribe((state, previous) => {
-      if (state.activeSection !== previous.activeSection) markActiveRead();
+      if (state.activeSection !== previous.activeSection
+        || state.settingsDialogOpen !== previous.settingsDialogOpen) markActiveRead();
     });
     const unsubscribeFocus = useFocusStore.subscribe((state, previous) => {
       if (state.terminalOpen !== previous.terminalOpen) markActiveRead();
@@ -100,7 +100,7 @@ export function TerminalCommandActivity() {
       if (payload.phase !== 'completed' || !entry || entry.lastCompleted >= payload.commandId) return;
       entry.lastCompleted = payload.commandId;
       const app = useAppStore.getState();
-      const targetVisible = isActiveAndVisible(payload.sessionId);
+      const targetVisible = isTerminalSessionCurrentlyVisible(payload.sessionId);
       const meetsCommandCriteria = shouldNotifyTerminalCommand(
         payload,
         app.terminalCommandNotificationThresholdSec,
@@ -119,9 +119,18 @@ export function TerminalCommandActivity() {
         targetVisible,
       })) return;
       const target = cleanTerminalTitle(session.manualTitle ?? session.baseTitle ?? session.host, 128);
+      const title = sanitizeNotificationText(
+        t(failed ? 'terminal.commandBlock.failed' : 'terminal.commandBlock.completed'),
+        160,
+      );
+      if (!title) return;
+      const body = sanitizeNotificationText(
+        t('terminal.commandBlock.notification', { target, seconds: ((payload.durationMs ?? 0) / 1000).toFixed(1) }),
+        360,
+      );
       void invokeSendDesktopNotification({
-        title: t(failed ? 'terminal.commandBlock.failed' : 'terminal.commandBlock.completed'),
-        body: t('terminal.commandBlock.notification', { target, seconds: ((payload.durationMs ?? 0) / 1000).toFixed(1) }),
+        title,
+        body,
         target: { type: 'terminalSession', terminalSessionId: payload.sessionId },
         urgency: failed ? 'critical' : 'normal',
       }).catch((error) => logger.debug('Desktop notification unavailable', error));

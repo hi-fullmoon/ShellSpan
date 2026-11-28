@@ -4,6 +4,7 @@ import { AgentNotificationMonitor } from '@/lib/notifications/agent-notification
 import { navigateToNotificationTarget } from '@/lib/notifications/navigation';
 import {
   isAgentSessionCurrentlyVisible,
+  isTerminalSessionCurrentlyVisible,
   sanitizeNotificationText,
   shouldDeliverDesktopNotification,
 } from '@/lib/notifications/policy';
@@ -83,25 +84,36 @@ describe('desktop notification policy', () => {
     })).toBe(true);
   });
 
-  it('sanitizes control characters and truncates long strings', () => {
+  it('sanitizes C0/C1 control characters and avoids splitting surrogate pairs on truncation', () => {
     expect(sanitizeNotificationText('  hello\n\t\x07world  ')).toBe('hello world');
+    expect(sanitizeNotificationText('line\u0085break\u009B[31m')).toBe('line break [31m');
     expect(sanitizeNotificationText('abcdefghij', 6)).toBe('abcde…');
+    const truncatedEmoji = sanitizeNotificationText('ab😀cd', 4);
+    expect(truncatedEmoji).toBe('ab…');
+    expect(/[\uD800-\uDFFF]/.test(truncatedEmoji)).toBe(false);
   });
 
-  it('checks agent session visibility across normal panel and focus mode', () => {
+  it('checks terminal and agent session visibility across normal panel, focus mode, and settings dialog', () => {
     vi.spyOn(document, 'hasFocus').mockReturnValue(true);
     Object.defineProperty(document, 'hidden', { configurable: true, value: false });
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
 
-    useFocusStore.setState({ enabled: false, conversationSessionId: null });
-    useAppStore.setState({ activeSection: 'terminal' });
+    useFocusStore.setState({ enabled: false, terminalOpen: true, conversationSessionId: null });
+    useAppStore.setState({ activeSection: 'terminal', settingsDialogOpen: false });
+    useTerminalStore.setState({ activeSessionId: 'term-1' });
     useAiPanelStore.setState({
       panelOpenBySection: { workbench: false, terminal: true },
       activeSessionByScope: { workbench: null, terminal: 'agent-1', focus: null },
     });
 
+    expect(isTerminalSessionCurrentlyVisible('term-1')).toBe(true);
     expect(isAgentSessionCurrentlyVisible('agent-1')).toBe(true);
     expect(isAgentSessionCurrentlyVisible('agent-2')).toBe(false);
+
+    useAppStore.setState({ settingsDialogOpen: true });
+    expect(isTerminalSessionCurrentlyVisible('term-1')).toBe(false);
+    expect(isAgentSessionCurrentlyVisible('agent-1')).toBe(false);
+    useAppStore.setState({ settingsDialogOpen: false });
 
     useAiPanelStore.getState().setOpen(false, 'terminal');
     expect(isAgentSessionCurrentlyVisible('agent-1')).toBe(false);
@@ -302,6 +314,48 @@ describe('AgentNotificationMonitor', () => {
       data: { reason: 'completed' },
     })).toBeNull();
   });
+
+  it('deduplicates agent/status and session/ended failures when no turnId is present', () => {
+    const monitor = new AgentNotificationMonitor();
+    const withoutTurn = (seq: number) => ({
+      version: 5 as const,
+      seq,
+      timeUnixMs: 1_760_000_000_000,
+      sessionId: 'agent-restored',
+    });
+
+    const first = monitor.observeSessionEvent({
+      ...withoutTurn(10),
+      type: 'agent/status',
+      data: { status: 'failed', reason: 'Approval expired' },
+    });
+    expect(first).toMatchObject({
+      kind: 'failed',
+      sessionId: 'agent-restored',
+      detail: 'Approval expired',
+      urgency: 'critical',
+    });
+
+    expect(monitor.observeSessionEvent({
+      ...withoutTurn(11),
+      type: 'session/ended',
+      data: { status: 'failed', reason: 'Approval expired' },
+    })).toBeNull();
+
+    // Starting a new turn resets terminal notification suppression.
+    monitor.observeSessionEvent({
+      ...baseEvent({ seq: 12, sessionId: 'agent-restored', turnId: 'turn-retry' }),
+      type: 'turn/start',
+    });
+    expect(monitor.observeSessionEvent({
+      ...withoutTurn(13),
+      type: 'agent/status',
+      data: { status: 'failed', reason: 'Retry failed' },
+    })).toMatchObject({
+      kind: 'failed',
+      detail: 'Retry failed',
+    });
+  });
 });
 
 describe('navigateToNotificationTarget', () => {
@@ -394,6 +448,7 @@ describe('navigateToNotificationTarget', () => {
       type: 'terminalSession',
       terminalSessionId: 'term-1',
     });
+    expect(useAppStore.getState().settingsDialogOpen).toBe(false);
     expect(useAppStore.getState().activeSection).toBe('terminal');
     expect(useTerminalStore.getState().activeSessionId).toBe('term-1');
 

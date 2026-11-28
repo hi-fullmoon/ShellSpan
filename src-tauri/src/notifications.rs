@@ -2,18 +2,49 @@
 //! checks, system settings deep-opening, and click-to-focus / click-to-navigate
 //! routing.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
-#[cfg(not(target_os = "windows"))]
-use tauri_plugin_notification::NotificationExt;
-#[cfg(any(test, not(target_os = "windows")))]
-use tauri_plugin_notification::PermissionState;
 
 pub(crate) const DESKTOP_NOTIFICATION_CLICKED_EVENT: &str = "shellspan-notification-clicked";
 
 const MAX_TITLE_BYTES: usize = 512;
 const MAX_BODY_BYTES: usize = 4096;
 const MAX_ID_BYTES: usize = 128;
+const MAX_ACTIVE_RESPONSE_WAITERS: usize = 16;
+
+static ACTIVE_RESPONSE_WAITERS: AtomicUsize = AtomicUsize::new(0);
+
+struct ResponseWaiterGuard<'a> {
+    counter: &'a AtomicUsize,
+}
+
+impl<'a> ResponseWaiterGuard<'a> {
+    fn try_acquire(counter: &'a AtomicUsize, max: usize) -> Option<Self> {
+        let mut current = counter.load(Ordering::Relaxed);
+        loop {
+            if current >= max {
+                return None;
+            }
+            match counter.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Some(Self { counter }),
+                Err(actual) => current = actual,
+            }
+        }
+    }
+}
+
+impl Drop for ResponseWaiterGuard<'_> {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 const ALLOWED_APP_SECTIONS: &[&str] = &["workbench", "terminal", "sftp"];
 
@@ -73,9 +104,11 @@ pub(crate) struct DesktopNotificationClickedEvent {
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum DesktopNotificationPermission {
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     Granted,
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     Denied,
-    #[cfg_attr(target_os = "windows", allow(dead_code))]
+    #[allow(dead_code)]
     Prompt,
     #[cfg_attr(target_os = "windows", allow(dead_code))]
     Unknown,
@@ -179,17 +212,6 @@ fn validate_request(request: DesktopNotificationRequest) -> Result<ValidatedNoti
     })
 }
 
-#[cfg(any(test, not(target_os = "windows")))]
-fn map_permission_state(state: PermissionState) -> DesktopNotificationPermission {
-    match state {
-        PermissionState::Granted => DesktopNotificationPermission::Granted,
-        PermissionState::Denied => DesktopNotificationPermission::Denied,
-        PermissionState::Prompt | PermissionState::PromptWithRationale => {
-            DesktopNotificationPermission::Prompt
-        }
-    }
-}
-
 fn current_platform() -> &'static str {
     #[cfg(target_os = "macos")]
     {
@@ -213,10 +235,7 @@ fn build_status(permission: DesktopNotificationPermission) -> DesktopNotificatio
     DesktopNotificationStatus {
         supported: true,
         permission,
-        can_request_permission: matches!(
-            permission,
-            DesktopNotificationPermission::Prompt | DesktopNotificationPermission::Unknown
-        ),
+        can_request_permission: matches!(permission, DesktopNotificationPermission::Prompt),
         can_open_system_settings: can_open_system_notification_settings(),
         platform: current_platform(),
     }
@@ -226,6 +245,7 @@ fn build_status(permission: DesktopNotificationPermission) -> DesktopNotificatio
 mod windows_platform {
     use std::path::PathBuf;
     use std::ptr;
+    use std::sync::Once;
     use tauri::{AppHandle, Manager};
     use windows_sys::Win32::Foundation::ERROR_SUCCESS;
     use windows_sys::Win32::System::Registry::{
@@ -236,6 +256,7 @@ mod windows_platform {
 
     const NOTIFICATION_ICON_PNG: &[u8] = include_bytes!("../icons/128x128.png");
     const NOTIFICATION_ICON_FILENAME: &str = "notification-icon.png";
+    static AUMID_REGISTERED: Once = Once::new();
 
     fn wide_null(value: &str) -> Vec<u16> {
         value.encode_utf16().chain(std::iter::once(0)).collect()
@@ -313,9 +334,7 @@ mod windows_platform {
             return None;
         }
         let icon_path = dir.join(NOTIFICATION_ICON_FILENAME);
-        let needs_write = std::fs::metadata(&icon_path)
-            .map(|meta| meta.len() != NOTIFICATION_ICON_PNG.len() as u64)
-            .unwrap_or(true);
+        let needs_write = std::fs::read(&icon_path).ok().as_deref() != Some(NOTIFICATION_ICON_PNG);
         if needs_write && std::fs::write(&icon_path, NOTIFICATION_ICON_PNG).is_err() {
             return None;
         }
@@ -326,26 +345,28 @@ mod windows_platform {
     /// Windows displays native Toast notifications under ShellSpan's identity
     /// and icon in both development and installed builds.
     pub(super) fn ensure_aumid_registered(app: &AppHandle) {
-        let identifier = &app.config().identifier;
-        let display_name = app.config().product_name.as_deref().unwrap_or("ShellSpan");
+        AUMID_REGISTERED.call_once(|| {
+            let identifier = &app.config().identifier;
+            let display_name = app.config().product_name.as_deref().unwrap_or("ShellSpan");
 
-        let app_id_w = wide_null(identifier);
-        unsafe {
-            let _ = SetCurrentProcessExplicitAppUserModelID(app_id_w.as_ptr());
-        }
-
-        let subkey = format!("Software\\Classes\\AppUserModelId\\{identifier}");
-        if let Err(error) = set_hkcu_string(&subkey, "DisplayName", display_name) {
-            log::debug!("Failed to register Windows AUMID DisplayName: {error}");
-            return;
-        }
-        let _ = set_hkcu_string(&subkey, "IconBackgroundColor", "0");
-        if let Some(icon_path) = materialize_icon_file(app) {
-            let icon_uri = icon_path.display().to_string();
-            if let Err(error) = set_hkcu_string(&subkey, "IconUri", &icon_uri) {
-                log::debug!("Failed to register Windows AUMID IconUri: {error}");
+            let app_id_w = wide_null(identifier);
+            unsafe {
+                let _ = SetCurrentProcessExplicitAppUserModelID(app_id_w.as_ptr());
             }
-        }
+
+            let subkey = format!("Software\\Classes\\AppUserModelId\\{identifier}");
+            if let Err(error) = set_hkcu_string(&subkey, "DisplayName", display_name) {
+                log::debug!("Failed to register Windows AUMID DisplayName: {error}");
+                return;
+            }
+            let _ = set_hkcu_string(&subkey, "IconBackgroundColor", "0");
+            if let Some(icon_path) = materialize_icon_file(app) {
+                let icon_uri = icon_path.display().to_string();
+                if let Err(error) = set_hkcu_string(&subkey, "IconUri", &icon_uri) {
+                    log::debug!("Failed to register Windows AUMID IconUri: {error}");
+                }
+            }
+        });
     }
 
     /// Reads Windows global and per-app notification toggles from HKCU.
@@ -371,7 +392,19 @@ pub(crate) fn initialize_desktop_notifications(app: &AppHandle) {
     #[cfg(target_os = "windows")]
     windows_platform::ensure_aumid_registered(app);
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        let bundle_id = if tauri::is_dev() {
+            "com.apple.Terminal"
+        } else {
+            &app.config().identifier
+        };
+        if let Err(error) = notify_rust::set_application(bundle_id) {
+            log::debug!("Desktop notification application setup skipped: {error}");
+        }
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let _ = app;
 }
 
@@ -447,19 +480,39 @@ fn build_platform_notification(
 
     #[cfg(target_os = "macos")]
     {
-        let _ = validated.critical;
+        let _ = (identifier, validated.critical);
         if !validated.body.is_empty() {
             notification.body(&validated.body);
         }
         notification.auto_icon();
-        let _ = notify_rust::set_application(if tauri::is_dev() {
-            "com.apple.Terminal"
-        } else {
-            identifier
-        });
     }
 
     Ok(notification)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn spawn_response_waiter(wait: impl FnOnce() + Send + 'static) -> bool {
+    let Some(guard) =
+        ResponseWaiterGuard::try_acquire(&ACTIVE_RESPONSE_WAITERS, MAX_ACTIVE_RESPONSE_WAITERS)
+    else {
+        log::debug!(
+            "Skipping notification click waiter: active waiter limit ({MAX_ACTIVE_RESPONSE_WAITERS}) reached"
+        );
+        return false;
+    };
+
+    if let Err(error) = std::thread::Builder::new()
+        .name("shellspan-notif-wait".into())
+        .spawn(move || {
+            let _guard = guard;
+            wait();
+        })
+    {
+        log::warn!("Failed to spawn desktop notification waiter thread: {error}");
+        return false;
+    }
+
+    true
 }
 
 pub(crate) async fn dispatch_desktop_notification(
@@ -472,36 +525,60 @@ pub(crate) async fn dispatch_desktop_notification(
 
     #[cfg(target_os = "macos")]
     {
-        // On macOS NSUserNotificationCenter, `wait_for_response` delivers the
-        // notification and blocks until clicked or dismissed.
-        tauri::async_runtime::spawn_blocking(move || match notification.show() {
-            Ok(handle) => {
-                if let Err(error) =
-                    handle.wait_for_response(|response: &notify_rust::NotificationResponse| {
-                        handle_notification_response(&app, &target, response);
-                    })
-                {
-                    log::debug!("Desktop notification response wait ended: {error}");
-                }
+        // On macOS NSUserNotificationCenter, `show()` prepares a handle and
+        // `wait_for_response` delivers synchronously while observing clicks.
+        // Observe clicks on a bounded dedicated thread so we never exhaust
+        // Tokio's shared blocking pool or accumulate unbounded main-thread
+        // timers; when all waiter slots are busy, deliver asynchronously.
+        let handle = notification.show().map_err(|error| error.to_string())?;
+        if let Some(guard) =
+            ResponseWaiterGuard::try_acquire(&ACTIVE_RESPONSE_WAITERS, MAX_ACTIVE_RESPONSE_WAITERS)
+        {
+            let spawned = std::thread::Builder::new()
+                .name("shellspan-notif-wait".into())
+                .spawn(move || {
+                    let _guard = guard;
+                    if let Err(error) =
+                        handle.wait_for_response(|response: &notify_rust::NotificationResponse| {
+                            handle_notification_response(&app, &target, response);
+                        })
+                    {
+                        log::warn!("Desktop notification delivery or wait failed: {error}");
+                    }
+                });
+            if let Err(error) = spawned {
+                return Err(format!(
+                    "Failed to start macOS notification delivery: {error}"
+                ));
             }
-            Err(error) => {
-                log::warn!("Desktop notification delivery failed: {error}");
-            }
-        });
-        Ok(())
+            Ok(())
+        } else {
+            log::debug!(
+                "Active notification waiter limit ({MAX_ACTIVE_RESPONSE_WAITERS}) reached; delivering macOS notification without click waiter"
+            );
+            tauri::async_runtime::spawn_blocking(move || {
+                // Dropping the handle dispatches via `asynchronous: true` with a
+                // bounded delivery timeout and no repeating main-thread timer.
+                drop(handle);
+            })
+            .await
+            .map_err(|error| format!("notification delivery task failed: {error}"))?;
+            Ok(())
+        }
     }
 
     #[cfg(not(target_os = "macos"))]
     {
         // Deliver the native OS notification first and surface any failure
-        // directly to the caller, then observe activation clicks asynchronously.
+        // directly to the caller, then observe activation clicks on a bounded
+        // dedicated thread so Tokio's blocking pool cannot be exhausted.
         let handle = tauri::async_runtime::spawn_blocking(move || {
             notification.show().map_err(|error| error.to_string())
         })
         .await
         .map_err(|error| format!("notification delivery task failed: {error}"))??;
 
-        tauri::async_runtime::spawn_blocking(move || {
+        let _ = spawn_response_waiter(move || {
             if let Err(error) =
                 handle.wait_for_response(|response: &notify_rust::NotificationResponse| {
                     handle_notification_response(&app, &target, response);
@@ -535,14 +612,11 @@ pub(crate) fn get_desktop_notification_status(
 
     #[cfg(not(target_os = "windows"))]
     {
-        let permission = match app.notification().permission_state() {
-            Ok(state) => map_permission_state(state),
-            Err(error) => {
-                log::debug!("Desktop notification permission state unavailable: {error}");
-                DesktopNotificationPermission::Unknown
-            }
-        };
-        Ok(build_status(permission))
+        let _ = app;
+        // `tauri-plugin-notification` desktop stubs always return `Granted`
+        // without querying OS notification settings; report `Unknown` honestly
+        // until a native platform authorization query is wired.
+        Ok(build_status(DesktopNotificationPermission::Unknown))
     }
 }
 
@@ -559,34 +633,39 @@ pub(crate) fn request_desktop_notification_permission(
 
     #[cfg(not(target_os = "windows"))]
     {
-        let permission = match app.notification().request_permission() {
-            Ok(state) => map_permission_state(state),
-            Err(error) => {
-                log::warn!("Desktop notification permission request failed: {error}");
-                DesktopNotificationPermission::Unknown
-            }
-        };
-        Ok(build_status(permission))
+        let _ = app;
+        Ok(build_status(DesktopNotificationPermission::Unknown))
     }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn reap_child_process(mut child: std::process::Child) {
+    let _ = std::thread::Builder::new()
+        .name("shellspan-reap-child".into())
+        .spawn(move || {
+            let _ = child.wait();
+        });
 }
 
 #[tauri::command]
 pub(crate) fn open_system_notification_settings() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open")
+        let child = std::process::Command::new("open")
             .arg("x-apple.systempreferences:com.apple.Notifications-Settings.extension")
             .spawn()
             .map_err(|error| format!("Failed to open macOS notification settings: {error}"))?;
+        reap_child_process(child);
         Ok(())
     }
 
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("explorer.exe")
+        let child = std::process::Command::new("explorer.exe")
             .arg("ms-settings:notifications")
             .spawn()
             .map_err(|error| format!("Failed to open Windows notification settings: {error}"))?;
+        reap_child_process(child);
         Ok(())
     }
 
@@ -705,17 +784,39 @@ mod tests {
 
     #[test]
     fn maps_permission_states_to_status_metadata() {
-        let granted = build_status(map_permission_state(PermissionState::Granted));
+        let granted = build_status(DesktopNotificationPermission::Granted);
         assert_eq!(granted.permission, DesktopNotificationPermission::Granted);
         assert!(!granted.can_request_permission);
         assert!(granted.supported);
 
-        let prompt = build_status(map_permission_state(PermissionState::Prompt));
+        let prompt = build_status(DesktopNotificationPermission::Prompt);
         assert_eq!(prompt.permission, DesktopNotificationPermission::Prompt);
         assert!(prompt.can_request_permission);
 
-        let denied = build_status(map_permission_state(PermissionState::Denied));
+        let denied = build_status(DesktopNotificationPermission::Denied);
         assert_eq!(denied.permission, DesktopNotificationPermission::Denied);
         assert!(!denied.can_request_permission);
+
+        let unknown = build_status(DesktopNotificationPermission::Unknown);
+        assert_eq!(unknown.permission, DesktopNotificationPermission::Unknown);
+        assert!(!unknown.can_request_permission);
+    }
+
+    #[test]
+    fn response_waiter_guard_bounds_concurrency_and_releases_on_drop() {
+        let counter = AtomicUsize::new(0);
+        let first = ResponseWaiterGuard::try_acquire(&counter, 2).expect("first slot");
+        let second = ResponseWaiterGuard::try_acquire(&counter, 2).expect("second slot");
+        assert!(ResponseWaiterGuard::try_acquire(&counter, 2).is_none());
+        assert_eq!(counter.load(Ordering::SeqCst), 2);
+
+        drop(first);
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+        let third = ResponseWaiterGuard::try_acquire(&counter, 2).expect("slot freed after drop");
+        assert_eq!(counter.load(Ordering::SeqCst), 2);
+
+        drop(second);
+        drop(third);
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
     }
 }

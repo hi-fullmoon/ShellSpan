@@ -142,4 +142,31 @@ describe('NotificationSettingsSection', () => {
     });
     expect(await screen.findByText('settings.notifications.permission.granted')).toBeInTheDocument();
   });
+
+  it('refreshes permission status automatically when the window regains focus', async () => {
+    ipcMocks.getStatus
+      .mockResolvedValueOnce({
+        supported: true,
+        permission: 'denied',
+        canRequestPermission: false,
+        canOpenSystemSettings: true,
+        platform: 'windows',
+      })
+      .mockResolvedValueOnce({
+        supported: true,
+        permission: 'granted',
+        canRequestPermission: false,
+        canOpenSystemSettings: true,
+        platform: 'windows',
+      });
+
+    render(<NotificationSettingsSection />);
+
+    expect(await screen.findByText('settings.notifications.permission.denied')).toBeInTheDocument();
+
+    fireEvent.focus(window);
+
+    expect(await screen.findByText('settings.notifications.permission.granted')).toBeInTheDocument();
+    expect(ipcMocks.getStatus).toHaveBeenCalledTimes(2);
+  });
 });
