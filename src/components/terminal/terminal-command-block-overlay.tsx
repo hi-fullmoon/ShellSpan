@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { Terminal } from '@xterm/xterm';
+import { CheckIcon, CopyIcon, SparklesIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { CopyFeedbackLabel } from '@/components/ui/copy-button';
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover';
+import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import { writeClipboardText } from '@/lib/clipboard';
@@ -16,6 +19,7 @@ import { subscribeTerminalCommandTrackers, terminalCommandTracker } from './term
 
 const noSubscribe = () => () => {};
 const emptyRevision = () => 0;
+const SINGLE_ROW_MIN_WIDTH = 400;
 
 export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal: Terminal; sessionId: string }) {
   const { t } = useI18n();
@@ -30,6 +34,7 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const scheduleRef = useRef<(() => void) | null>(null);
   const [visible, setVisible] = useState<Array<{ block: TerminalCommandBlock; top: number }>>([]);
+  const [compact, setCompact] = useState(false);
   const [copiedBlockId, setCopiedBlockId] = useState<number | null>(null);
 
   useEffect(() => () => {
@@ -41,7 +46,7 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
     let cachedScreen: HTMLElement | null = null;
     let observedScreen: HTMLElement | null = null;
     let geometryDirty = true;
-    let cachedGeometry: { offset: number; rowHeight: number } | null = null;
+    let cachedGeometry: { offset: number; rowHeight: number; compact: boolean } | null = null;
 
     const invalidateGeometry = () => {
       geometryDirty = true;
@@ -49,7 +54,7 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
     };
     const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(invalidateGeometry) : null;
 
-    const measureGeometry = (overlay: HTMLElement): { offset: number; rowHeight: number } | null => {
+    const measureGeometry = (overlay: HTMLElement): { offset: number; rowHeight: number; compact: boolean } | null => {
       if (!cachedScreen || !cachedScreen.isConnected) {
         if (observedScreen && observer) observer.unobserve(observedScreen);
         cachedScreen = terminal.element?.querySelector<HTMLElement>('.xterm-screen') ?? null;
@@ -57,9 +62,15 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
         if (observedScreen && observer) observer.observe(observedScreen);
       }
       if (!cachedScreen || !cachedScreen.clientHeight || terminal.rows <= 0) return null;
+      const overlayRect = overlay.getBoundingClientRect();
+      const viewportSpace = typeof window !== 'undefined' && window.innerWidth > 0
+        ? Math.max(0, window.innerWidth - overlayRect.left)
+        : cachedScreen.clientWidth;
+      const availableWidth = Math.min(cachedScreen.clientWidth || viewportSpace, viewportSpace);
       return {
-        offset: cachedScreen.getBoundingClientRect().top - overlay.getBoundingClientRect().top,
+        offset: cachedScreen.getBoundingClientRect().top - overlayRect.top,
         rowHeight: cachedScreen.clientHeight / terminal.rows,
+        compact: availableWidth > 0 && availableWidth < SINGLE_ROW_MIN_WIDTH,
       };
     };
 
@@ -80,7 +91,8 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
         return;
       }
       const { viewportY } = buffer;
-      const { offset, rowHeight } = cachedGeometry;
+      const { offset, rowHeight, compact: nextCompact } = cachedGeometry;
+      setCompact((current) => (current === nextCompact ? current : nextCompact));
       const rows = new Map<number, TerminalCommandBlock>();
       for (const block of tracker.list()) {
         const line = block.prompt?.line;
@@ -128,14 +140,26 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
       const copied = copiedBlockId === block.id;
       return <div key={block.id} className="pointer-events-auto absolute left-0 -translate-y-1/2" style={{ top }}>
         <Popover>
-          <PopoverTrigger openOnHover delay={300} aria-label={label} className="grid h-4 w-2.5 cursor-pointer place-items-center rounded-sm focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring">
+          <PopoverTrigger openOnHover delay={300} aria-label={label} className="group/command-dot grid h-4 w-2.5 cursor-pointer place-items-center rounded-sm focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring">
             <span aria-hidden="true"
               style={running ? { backgroundColor: runningDotColor } : undefined}
-              className={cn('size-1.5 rounded-full ring-1 ring-black/15 dark:ring-white/20',
+              className={cn('size-1.5 rounded-full ring-1 ring-black/15 transition-transform duration-150 group-hover/command-dot:scale-125 group-data-[popup-open]/command-dot:scale-125 dark:ring-white/20',
                 running ? 'motion-safe:animate-pulse' : failed ? 'bg-destructive' : 'bg-app-success')} />
           </PopoverTrigger>
-          <PopoverContent side="right" align="start" sideOffset={6} className="w-auto max-w-[min(22rem,calc(100vw-2rem))] gap-2 p-2">
-            <PopoverTitle className={cn('flex items-center gap-1 px-0.5 text-xs leading-none tabular-nums', failed && 'text-destructive')}>
+          <PopoverContent
+            side="right"
+            align="center"
+            sideOffset={6}
+            collisionPadding={8}
+            className={cn(
+              'w-fit max-w-[min(28rem,calc(100vw-2rem))] gap-1 rounded-lg p-1 text-xs',
+              compact ? 'flex-col items-start' : 'flex-row flex-wrap items-center',
+            )}
+          >
+            <PopoverTitle className={cn(
+              'inline-flex h-6 items-center gap-1 whitespace-nowrap px-2 text-xs leading-none tabular-nums',
+              failed ? 'font-medium text-destructive' : 'font-normal text-muted-foreground',
+            )}>
               <span
                 aria-hidden="true"
                 style={running ? { backgroundColor: runningDotColor } : undefined}
@@ -146,8 +170,9 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
               />
               <span>{label}</span>
             </PopoverTitle>
-            {!running && <div className="flex flex-wrap items-center gap-1.5">
-              <Button size="xs" variant="outline" disabled={!block.end} onClick={() => {
+            {!running && !compact && <Separator orientation="vertical" className="h-3.5 data-vertical:self-center" />}
+            {!running && <div className="flex flex-wrap items-center gap-0.5">
+              <Button size="xs" variant="ghost" disabled={!block.end} onClick={() => {
                 const output = read(block);
                 if (output === null) return;
                 void writeClipboardText(output).then(() => {
@@ -159,9 +184,12 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
                   }, 1500);
                 }).catch(() => error(t('terminal.feedback.copyFailed')));
               }}>
-                {copied ? t('common.copied') : t('terminal.commandBlock.copy')}
+                {copied
+                  ? <CheckIcon data-icon="inline-start" aria-hidden="true" className="text-app-success" />
+                  : <CopyIcon data-icon="inline-start" aria-hidden="true" className="text-muted-foreground" />}
+                <CopyFeedbackLabel copied={copied} label={t('terminal.commandBlock.copy')} className="text-center" />
               </Button>
-              <Button size="xs" variant={failed ? 'default' : 'outline'} disabled={!block.end} onClick={() => {
+              <Button size="xs" variant={failed ? 'soft' : 'ghost'} disabled={!block.end} onClick={() => {
                 const output = read(block);
                 if (output === null) return;
                 const workspace = useFocusStore.getState().enabled ? 'focus' : 'terminal';
@@ -171,7 +199,10 @@ export function TerminalCommandBlockOverlay({ terminal, sessionId }: { terminal:
                   ...(output.length > 16_000 ? [t('terminal.commandBlock.truncated')] : []),
                 ].join('\n\n'));
                 useAiPanelStore.getState().setOpen(true, 'terminal');
-              }}>{t('terminal.commandBlock.diagnose')}</Button>
+              }}>
+                <SparklesIcon data-icon="inline-start" aria-hidden="true" className={cn(!failed && 'text-muted-foreground')} />
+                <span>{t('terminal.commandBlock.diagnose')}</span>
+              </Button>
             </div>}
           </PopoverContent>
         </Popover>
