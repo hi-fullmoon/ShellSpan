@@ -72,6 +72,22 @@ describe('ProviderModelCatalogEditor', () => {
     expect(screen.getByLabelText('settings.ai.modelIdNumber:1')).toHaveClass('h-8');
   });
 
+  it('places link catalog actions on the title row above the description without horizontal padding', () => {
+    render(<Editor />);
+
+    const resetButton = screen.getByRole('button', { name: 'settings.ai.resetModels' });
+    const loadButton = screen.getByRole('button', { name: 'settings.ai.loadModels' });
+    const title = screen.getByText('settings.ai.modelCatalog');
+    const description = screen.getByText('settings.ai.modelCatalogDescription');
+
+    expect(resetButton).toHaveAttribute('data-variant', 'link');
+    expect(loadButton).toHaveAttribute('data-variant', 'link');
+    expect(resetButton).toHaveClass('h-auto', 'px-0');
+    expect(loadButton).toHaveClass('h-auto', 'px-0');
+    expect(resetButton.closest('div')?.parentElement).toContainElement(title);
+    expect(resetButton.closest('div')?.parentElement).not.toContainElement(description);
+  });
+
   it('adds and edits a model row while naming duplicate model ids', async () => {
     const user = userEvent.setup();
     render(<Editor />);

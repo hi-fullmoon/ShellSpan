@@ -259,9 +259,9 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
 
   return (
     <section className="flex flex-col gap-3" aria-label={t('settings.ai.modelCatalog')}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <div className="flex items-center gap-2">
+      <div className="@container/catalog-header flex flex-col gap-1">
+        <div className="flex flex-col gap-y-1.5 @min-[28rem]/catalog-header:flex-row @min-[28rem]/catalog-header:items-center @min-[28rem]/catalog-header:justify-between @min-[28rem]/catalog-header:gap-x-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
             <span className="text-xs font-medium text-foreground">{t('settings.ai.modelCatalog')}</span>
             {hasProvider && (
               <span className="text-xs text-muted-foreground">
@@ -269,31 +269,39 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
               </span>
             )}
           </div>
-          <span className="text-xs text-muted-foreground">{t('settings.ai.modelCatalogDescription')}</span>
-        </div>
-        <div className="flex items-center gap-1">
-          {!inherited && canReset && (
-            <Button type="button" variant="ghost" size="xs" disabled={disabled} onClick={onReset}>
-              {t('settings.ai.resetModels')}
+          <div className="flex flex-wrap items-center gap-3 @min-[28rem]/catalog-header:shrink-0 @min-[28rem]/catalog-header:flex-row-reverse">
+            {!inherited && canReset && (
+              <Button
+                type="button"
+                variant="link"
+                size="xs"
+                className="h-auto px-0 text-muted-foreground hover:text-foreground"
+                disabled={disabled}
+                onClick={onReset}
+              >
+                {t('settings.ai.resetModels')}
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="link"
+              size="xs"
+              className="h-auto px-0"
+              disabled={disabled || discovering}
+              aria-busy={discovering || undefined}
+              onClick={() => void openPicker()}
+            >
+              <StableContent className="justify-items-start @min-[28rem]/catalog-header:justify-items-end" active={discovering ? 1 : 0} variants={[
+                <span>{t('settings.ai.loadModels')}</span>,
+                <span className="inline-flex items-center gap-1">
+                  <Spinner className={discovering ? undefined : 'animate-none'} data-icon="inline-start" aria-hidden="true" />
+                  {t('settings.ai.loadingModels')}
+                </span>,
+              ]} />
             </Button>
-          )}
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            disabled={disabled || discovering}
-            aria-busy={discovering || undefined}
-            onClick={() => void openPicker()}
-          >
-            <StableContent className="justify-items-center" active={discovering ? 1 : 0} variants={[
-              <span>{t('settings.ai.loadModels')}</span>,
-              <span className="inline-flex items-center gap-1">
-                <Spinner className={discovering ? undefined : 'animate-none'} data-icon="inline-start" aria-hidden="true" />
-                {t('settings.ai.loadingModels')}
-              </span>,
-            ]} />
-          </Button>
+          </div>
         </div>
+        <span className="text-xs text-muted-foreground">{t('settings.ai.modelCatalogDescription')}</span>
       </div>
 
       <Field>
