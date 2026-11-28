@@ -22,7 +22,6 @@ import { useAppStore } from '@/stores/appStore';
 import {
   ActivityIcon,
   CableIcon,
-  ChevronUpIcon,
   FileTextIcon,
   InfoIcon,
   KeyboardIcon,
@@ -194,7 +193,6 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
             <span className="max-w-full truncate text-sm font-medium text-foreground">{displayName}</span>
             <span className="max-w-full truncate text-[11px] text-muted-foreground">{t('workbench.userMenu.localProfile')}</span>
           </span>
-          <ChevronUpIcon data-icon="inline-end" className="text-muted-foreground" aria-hidden />
         </DropdownMenuTrigger>
 
         <DropdownMenuContent

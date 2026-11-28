@@ -141,6 +141,7 @@ describe('WorkbenchSidebar', () => {
     expect(trigger).toHaveTextContent('Me');
     expect(trigger).toHaveTextContent('Local profile');
     expect(trigger).toHaveClass('hover:bg-accent');
+    expect(trigger.querySelector('svg.lucide-chevron-up')).toBeNull();
 
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
