@@ -174,11 +174,36 @@ describe('appStore', () => {
 
     vi.useFakeTimers();
     await useAppStore.getState().setPetdexEnabled(false);
+    await useAppStore.getState().setPetdexCategory('ai', true);
+    await useAppStore.getState().setPetdexMessagePreference('petdexMessagesEnabled', true);
     await vi.advanceTimersByTimeAsync(500);
 
-    expect(mocks.savePreferences).not.toHaveBeenCalledWith(
-      expect.arrayContaining([['petdexEnabled', 'false']]),
+    expect(mocks.savePreferences).not.toHaveBeenCalled();
+  });
+
+  it('keeps message diagnostic reference stable when revision does not advance', () => {
+    const initial = {
+      revision: 2,
+      status: 'ready' as const,
+      acceptedCount: 1,
+      lastAcceptedAt: 1000,
+      usedSlotCount: 1,
+      errorReason: null,
+      unsupported: false,
+      cleanupOutcome: 'notNeeded' as const,
+    };
+    useAppStore.getState().receivePetdexMessageDiagnostic(initial);
+    const listener = vi.fn();
+    const unsubscribe = useAppStore.subscribe(
+      (state) => state.petdexMessageDiagnostic,
+      listener,
     );
+    useAppStore.getState().receivePetdexMessageDiagnostic({ ...initial, revision: 2 });
+    useAppStore.getState().receivePetdexMessageDiagnostic({ ...initial, revision: 1 });
+    expect(listener).not.toHaveBeenCalled();
+    useAppStore.getState().receivePetdexMessageDiagnostic({ ...initial, revision: 3 });
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubscribe();
   });
 
   it('opens settings without replacing the current workspace context', () => {

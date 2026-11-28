@@ -9,7 +9,6 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
 pub(super) struct MessageSnapshot {
-    pub action: super::types::StateCommand,
     pub slots: [Slot; 3],
     pub(super) cancellation: CancellationToken,
     pub(super) service_generation: u64,
@@ -18,7 +17,6 @@ pub(super) struct MessageSnapshot {
 }
 
 impl MessageSnapshot {
-    /// Only this finite safe content is eligible for the stage 9 wire boundary.
     pub(super) fn message(&self, slot: usize) -> Option<super::message_content::SafeMessage> {
         if !self.messages_enabled
             || self.cancellation.is_cancelled()
@@ -35,6 +33,7 @@ impl MessageSnapshot {
 }
 
 impl PetdexAdapter {
+    #[cfg(test)]
     pub(crate) fn set_message_preferences(
         &self,
         preferences: super::message_content::MessagePreferences,
@@ -58,7 +57,7 @@ impl PetdexAdapter {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         control.arbiter.slots.locale = locale;
-        let action = control.arbiter.target(now).command();
+        control.arbiter.project_slots(now);
         MessageSnapshot {
             message_cancellation: control.arbiter.message_cancellation.clone(),
             messages_enabled: self
@@ -66,7 +65,6 @@ impl PetdexAdapter {
                 .enabled
                 .load(std::sync::atomic::Ordering::Acquire)
                 && control.arbiter.message_preferences.petdex_messages_enabled,
-            action,
             slots: control.arbiter.slots.slots.clone(),
             cancellation: control.cancellation.clone(),
             service_generation,

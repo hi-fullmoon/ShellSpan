@@ -10,7 +10,7 @@
 
 ## 固定依据
 
-客户端重试调度：动作与气泡均在共享退避截止时间之后进入发送尝试，退避期间仍处理取消、配置变化和内容到期。进入尝试后保留1500ms总预算及发送前的节流复查；若手动请求或并发请求在已有失败退避期间超时，不增加共享失败计数，也不推迟已有恢复截止时间。
+客户端重试调度：后台动作与气泡均在共享退避截止时间之后进入发送尝试，退避期间仍处理取消、配置变化和内容到期。进入尝试后保留1500ms总预算及发送前的节流复查；手动测试（测试动作/发送测试文本）与关闭结算仅遵守最短写入间隔与429限流，不阻塞在后台失败退避上；若并发请求或手动测试在已有失败退避期间失败或超时，不增加共享失败计数，也不推迟已有恢复截止时间。
 
 - 官方tag `desktop-v0.8.0`，commit `f2ea48aac6f89fbaeedd6a639faf4e208864ae5d`。
 - [hook_server.zig](https://github.com/crafter-station/petdex/blob/f2ea48aac6f89fbaeedd6a639faf4e208864ae5d/packages/petdex-desktop-native/src/hook_server.zig)：完整route、Bubble、setBubbleWithMetadata、jsonString、bubbleSessionKey、mirrorBubble。

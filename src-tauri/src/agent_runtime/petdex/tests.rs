@@ -146,3 +146,95 @@ fn petdex_rejects_interrupted_truncated_cancelled_and_intermediate_replies() {
     ];
     assert!(completed_reply(&streaming, "turn").is_none());
 }
+
+#[test]
+fn petdex_current_tool_kind_prefers_native_name_and_maps_model_terminal_tools() {
+    use crate::agent_runtime::{AgentToolExecutionStatus, AgentToolResultStatus, RecordedToolCall};
+    use crate::petdex::message_content::ToolStage;
+
+    let tool_call = |seq: u64, turn: &str, call_id: &str, name: &str, native_name: Option<&str>| {
+        event(
+            seq,
+            turn,
+            Payload::ToolCall {
+                call: RecordedToolCall {
+                    call_id: call_id.into(),
+                    provider_call_id: None,
+                    name: name.into(),
+                    native_name: native_name.map(str::to_owned),
+                    arguments: serde_json::json!({}),
+                    title: None,
+                    effect: None,
+                    target: None,
+                },
+            },
+        )
+    };
+    let tool_exec = |seq: u64, turn: &str, call_id: &str| {
+        event(
+            seq,
+            turn,
+            Payload::ToolExecution {
+                call_id: call_id.into(),
+                status: AgentToolExecutionStatus::Dispatched,
+                idempotency: "yes".into(),
+            },
+        )
+    };
+    let tool_result = |seq: u64, turn: &str, call_id: &str, name: &str| {
+        event(
+            seq,
+            turn,
+            Payload::ToolResult {
+                call_id: call_id.into(),
+                name: name.into(),
+                status: AgentToolResultStatus::Completed,
+                summary: "ok".into(),
+                data: None,
+                duration_ms: None,
+                evidence_refs: Vec::new(),
+            },
+        )
+    };
+
+    let events = vec![
+        event(0, "prev", Payload::TurnStart),
+        tool_call(1, "prev", "c0", "read_file", None),
+        tool_exec(2, "prev", "c0"),
+        event(
+            3,
+            "prev",
+            Payload::TurnEnd {
+                reason: "completed".into(),
+            },
+        ),
+        event(4, "turn", Payload::TurnStart),
+        tool_call(5, "turn", "c1", "run_terminal_command", None),
+        tool_exec(6, "turn", "c1"),
+    ];
+    assert_eq!(
+        current_tool_kind(&events, "turn"),
+        ActivityKind::Tool(ToolStage::Command)
+    );
+
+    let mut events_with_native = events.clone();
+    events_with_native.push(tool_result(7, "turn", "c1", "run_terminal_command"));
+    events_with_native.push(tool_call(
+        8,
+        "turn",
+        "c2",
+        "write_process_input",
+        Some("write_stdin"),
+    ));
+    events_with_native.push(tool_exec(9, "turn", "c2"));
+    assert_eq!(
+        current_tool_kind(&events_with_native, "turn"),
+        ActivityKind::Tool(ToolStage::WriteTerminal)
+    );
+
+    events_with_native.push(tool_result(10, "turn", "c2", "write_process_input"));
+    assert_eq!(
+        current_tool_kind(&events_with_native, "turn"),
+        ActivityKind::Ai
+    );
+}

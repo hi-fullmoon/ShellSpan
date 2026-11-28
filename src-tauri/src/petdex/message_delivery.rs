@@ -45,7 +45,7 @@ impl CleanupProgress {
     }
 }
 
-#[derive(Clone, Copy, Default, Serialize)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MessageDiagnostic {
     pub revision: u64,
@@ -58,7 +58,7 @@ pub(crate) struct MessageDiagnostic {
     pub cleanup_outcome: CleanupOutcome,
 }
 
-#[derive(Clone, Copy, Default, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum MessageStatus {
     #[default]
@@ -88,10 +88,8 @@ pub(crate) enum MessageTestOutcome {
 #[cfg(test)]
 mod tests;
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-#[allow(dead_code)] // Backend contract; configuration IPC is migrated in stage 10.
 pub(crate) struct MessageConfigurationResult {
+    #[cfg(test)]
     pub effective: MessagePreferences,
     pub cleanup_outcome: CleanupOutcome,
 }
@@ -120,6 +118,7 @@ pub(super) struct MessageDelivery {
     pub usage: [Usage; 3],
     pub locale: MessageLocale,
     pub diagnostic: MessageDiagnostic,
+    last_snapshot: Option<MessageDiagnostic>,
     accepted: [Option<Fingerprint>; 3],
     pending: [Option<Pending>; 3],
     phases: [Option<ActivityPhase>; 3],
@@ -211,10 +210,13 @@ impl MessageDelivery {
             self.accepted[pending.slot] = Some(pending.fingerprint.clone());
             self.pending[pending.slot] = None;
             self.diagnostic.accepted_count += 1;
-            self.diagnostic.last_accepted_at = std::time::SystemTime::now()
+            let accepted_at = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .ok()
                 .and_then(|d| u64::try_from(d.as_millis()).ok());
+            self.diagnostic.last_accepted_at = accepted_at
+                .map(|time| time.max(self.diagnostic.last_accepted_at.unwrap_or(0)))
+                .or(self.diagnostic.last_accepted_at);
             self.failures = 0;
             self.retry_at = None;
             self.offline = false;
@@ -238,7 +240,6 @@ impl PetdexAdapter {
             .messages
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        messages.diagnostic.revision += 1;
         let status = if !self.inner.enabled.load(Ordering::Acquire)
             || !control.arbiter.message_preferences.petdex_messages_enabled
         {
@@ -252,11 +253,19 @@ impl PetdexAdapter {
         } else {
             MessageStatus::Ready
         };
-        MessageDiagnostic {
+        let candidate = MessageDiagnostic {
             status,
             used_slot_count: messages.usage.iter().filter(|u| u.used).count() as u8,
             ..messages.diagnostic
+        };
+        if messages.last_snapshot != Some(candidate) {
+            messages.diagnostic = MessageDiagnostic {
+                revision: messages.diagnostic.revision + 1,
+                ..candidate
+            };
+            messages.last_snapshot = Some(messages.diagnostic);
         }
+        messages.diagnostic
     }
 
     pub(crate) async fn test_message(&self) -> MessageTestResult {
@@ -291,6 +300,15 @@ impl PetdexAdapter {
                 .messages
                 .lock()
                 .unwrap_or_else(|p| p.into_inner());
+            if !messages.writer_ready {
+                return MessageTestResult {
+                    diagnostic: {
+                        drop(messages);
+                        self.message_diagnostic()
+                    },
+                    outcome: MessageTestOutcome::Failed,
+                };
+            }
             if messages.preview_slot.is_some() {
                 false
             } else {
@@ -329,7 +347,7 @@ impl PetdexAdapter {
             biased;
             _ = pending.snapshot.cancellation.cancelled() => Err(RequestFailure::Disabled),
             _ = pending.snapshot.message_cancellation.cancelled() => Err(RequestFailure::Disabled),
-            result = tokio::time::timeout_at(deadline, self.bubble_attempt(slot, &message, Some(&pending), &attempt)) => result.unwrap_or(Err(RequestFailure::Transport)),
+            result = tokio::time::timeout_at(deadline, self.bubble_attempt(slot, &message, Some(&pending), &attempt, false)) => result.unwrap_or(Err(RequestFailure::Transport)),
         };
         attempt.cancel();
         let result = RequestResult::from_result(result);
@@ -375,6 +393,8 @@ impl PetdexAdapter {
                 messages.diagnostic.unsupported = false;
             }
             messages.offline = false;
+            messages.failures = 0;
+            messages.retry_at = None;
         } else if result.should_retry() {
             messages.offline = true;
             control.arbiter.discard_message_results();
@@ -508,6 +528,7 @@ impl PetdexAdapter {
         message: &SafeMessage,
         pending: Option<&Pending>,
         cancellation: &CancellationToken,
+        respect_backoff: bool,
     ) -> Result<(), RequestFailure> {
         let _guard = self.inner.request_lock.lock().await;
         let validate = || {
@@ -520,7 +541,7 @@ impl PetdexAdapter {
             }
         };
         validate()?;
-        self.wait_write().await;
+        self.wait_write_gate(respect_backoff).await;
         validate()?;
         self.check_protocol_compatibility().await?;
         validate()?;
@@ -530,14 +551,14 @@ impl PetdexAdapter {
             .installation_attempt(slot, message.busy(), epoch, cancellation.clone())
             .await?;
         let body = message.encode(&key).ok_or(RequestFailure::Rejected)?;
-        self.wait_write().await;
+        self.wait_write_gate(respect_backoff).await;
         self.check_protocol_compatibility().await?;
         validate()?;
         let mut status = self.post_bytes("/bubble", body.clone(), &token).await?;
         if status == reqwest::StatusCode::UNAUTHORIZED {
             validate()?;
             let refreshed = self.refresh_token(&token).await?;
-            self.wait_write().await;
+            self.wait_write_gate(respect_backoff).await;
             self.check_protocol_compatibility().await?;
             validate()?;
             status = self.post_bytes("/bubble", body, &refreshed).await?;
@@ -571,7 +592,7 @@ impl PetdexAdapter {
             biased;
             _ = pending.snapshot.cancellation.cancelled() => Err(RequestFailure::Disabled),
             _ = pending.snapshot.message_cancellation.cancelled() => Err(RequestFailure::Disabled),
-            result = tokio::time::timeout(super::STATE_ATTEMPT_TIMEOUT, self.bubble_attempt(pending.slot, &pending.fingerprint.message, Some(&pending), &attempt)) => result.unwrap_or(Err(RequestFailure::Transport)),
+            result = tokio::time::timeout(super::STATE_ATTEMPT_TIMEOUT, self.bubble_attempt(pending.slot, &pending.fingerprint.message, Some(&pending), &attempt, true)) => result.unwrap_or(Err(RequestFailure::Transport)),
         };
         attempt.cancel();
         self.record_transport_result(RequestResult::from_result(result));
@@ -613,7 +634,13 @@ impl PetdexAdapter {
             for (slot, usage) in usage.iter().enumerate() {
                 if usage.used {
                     let result = self
-                        .bubble_attempt(slot, &SafeMessage::settled(locale), None, cancellation)
+                        .bubble_attempt(
+                            slot,
+                            &SafeMessage::settled(locale),
+                            None,
+                            cancellation,
+                            false,
+                        )
                         .await;
                     self.record_transport_result(RequestResult::from_result(result));
                     progress.record(RequestResult::from_result(result));
@@ -630,14 +657,14 @@ impl PetdexAdapter {
         result.unwrap_or(CleanupOutcome::Unconfirmed)
     }
 
-    #[allow(dead_code)] // Consumed by the stage 10 configuration IPC.
+    #[cfg(test)]
     pub(crate) async fn configure_messages(
         &self,
         preferences: MessagePreferences,
         locale: &str,
     ) -> MessageConfigurationResult {
         let deadline = tokio::time::Instant::now() + super::STATE_ATTEMPT_TIMEOUT;
-        self.configure_messages_until(preferences, locale, deadline)
+        self.configure_messages_until(preferences, locale, deadline, false)
             .await
     }
 
@@ -646,6 +673,7 @@ impl PetdexAdapter {
         preferences: MessagePreferences,
         locale: &str,
         deadline: tokio::time::Instant,
+        preserve_cleanup: bool,
     ) -> MessageConfigurationResult {
         let (epoch, cancellation, needs_cleanup) = {
             let mut control = self
@@ -702,17 +730,20 @@ impl PetdexAdapter {
             .unwrap_or_else(|p| p.into_inner());
         if control.configuration_epoch == epoch {
             control.cleanup_pending = false;
-            self.inner
-                .messages
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .diagnostic
-                .cleanup_outcome = outcome;
+            if !preserve_cleanup {
+                self.inner
+                    .messages
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .diagnostic
+                    .cleanup_outcome = outcome;
+            }
         }
         if let Some(sender) = &control.sender {
             let _ = sender.try_send(super::CoordinatorMessage::Wake);
         }
         MessageConfigurationResult {
+            #[cfg(test)]
             effective: control.arbiter.message_preferences,
             cleanup_outcome: outcome,
         }

@@ -9,7 +9,6 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: mocks.listen }));
 
 import {
-  configurePetdex,
   getPetdexStatus,
   listenToPetdexStatus,
   testPetdexConnection,
@@ -29,14 +28,6 @@ describe('Petdex IPC boundary', () => {
     expect(isPetdexDiagnostic('notDetected')).toBe(false);
     expect(isPetdexDiagnostic({ ...disabled, status: 'waiting' })).toBe(false);
     expect(isPetdexDiagnostic({ message: 'free text' })).toBe(false);
-  });
-
-  it('sends only an enabled boolean when configuring the adapter', async () => {
-    mocks.invoke.mockResolvedValue(disabled);
-
-    await expect(configurePetdex(true)).resolves.toEqual(disabled);
-
-    expect(mocks.invoke).toHaveBeenCalledWith('petdex_set_enabled', { enabled: true });
   });
 
   it('normalizes unexpected command payloads without exposing details', async () => {

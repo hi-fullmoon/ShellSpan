@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import resources from '@/locales/petdex-messages.json';
 import en from '@/locales/en-US';
 import zh from '@/locales/zh-CN';
-import { DEFAULT_PETDEX_MESSAGE_PREFERENCES, normalizePetdexMessagePreferences, petdexDetailsAllowed } from '../message-preferences';
+import { DEFAULT_PETDEX_MESSAGE_PREFERENCES, normalizePetdexMessagePreferences } from '../message-preferences';
 
 describe('Petdex shared content contract', () => {
   it('uses the exact same finite resources in both application locales', () => {
@@ -18,17 +18,13 @@ describe('Petdex shared content contract', () => {
     expect(zh['petdex.message.crossCopy']).not.toBe(zh['petdex.message.copy']);
   });
 
-  it('defaults both independent preferences off and requires all gates for details', () => {
+  it('defaults both independent preferences off when values are missing or malformed', () => {
     for (const value of [undefined, null, {}, true, { petdexMessagesEnabled: 'true', petdexMessageDetailsEnabled: 1 }]) {
       expect(normalizePetdexMessagePreferences(value)).toEqual(DEFAULT_PETDEX_MESSAGE_PREFERENCES);
     }
-    for (const enabled of [false, true]) {
-      for (const messages of [false, true]) {
-        for (const details of [false, true]) {
-          const preferences = normalizePetdexMessagePreferences({ petdexMessagesEnabled: messages, petdexMessageDetailsEnabled: details });
-          expect(petdexDetailsAllowed(enabled, preferences)).toBe(enabled && messages && details);
-        }
-      }
-    }
+    expect(normalizePetdexMessagePreferences({ petdexMessagesEnabled: true, petdexMessageDetailsEnabled: false }))
+      .toEqual({ petdexMessagesEnabled: true, petdexMessageDetailsEnabled: false });
+    expect(normalizePetdexMessagePreferences({ petdexMessagesEnabled: false, petdexMessageDetailsEnabled: true }))
+      .toEqual({ petdexMessagesEnabled: false, petdexMessageDetailsEnabled: true });
   });
 });

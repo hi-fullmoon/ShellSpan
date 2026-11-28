@@ -35,7 +35,6 @@ const petdexFeedbackMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/petdex/petdex', () => ({
-  configurePetdex: petdexMocks.configure,
   getPetdexStatus: petdexMocks.getStatus,
   listenToPetdexStatus: petdexMocks.listen,
   testPetdexConnection: petdexMocks.testConnection,

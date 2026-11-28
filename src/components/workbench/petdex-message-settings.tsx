@@ -7,8 +7,17 @@ import { useAppStore } from '@/stores/appStore';
 import { useI18n } from '@/hooks/useI18n';
 import { testPetdexMessage } from '@/lib/petdex/messages';
 import type { PetdexMessagePreferences } from '@/lib/petdex/message-preferences';
+import type { PetdexDiagnostic } from '@/types';
 
-export function PetdexMessageSettings() {
+interface PetdexMessageSettingsProps {
+  onPreferenceSync?: (diagnostic: PetdexDiagnostic) => void;
+  onRetrySubscription?: () => void;
+}
+
+export function PetdexMessageSettings({
+  onPreferenceSync,
+  onRetrySubscription,
+}: PetdexMessageSettingsProps = {}) {
   const { t } = useI18n();
   const enabled = useAppStore((s) => s.petdexEnabled);
   const messagesEnabled = useAppStore((s) => s.petdexRequestedMessages?.petdexMessagesEnabled ?? s.petdexMessagesEnabled);
@@ -17,41 +26,69 @@ export function PetdexMessageSettings() {
   const [testing, setTesting] = useState(false);
   const busy = useRef(false);
   const mounted = useRef(false);
+  const updateRevisionRef = useRef(0);
+  const testRevisionRef = useRef(0);
 
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
+    return () => {
+      mounted.current = false;
+      updateRevisionRef.current += 1;
+      testRevisionRef.current += 1;
+    };
   }, []);
 
+  useEffect(() => {
+    if (!enabled || !messagesEnabled) {
+      testRevisionRef.current += 1;
+      busy.current = false;
+      setTesting(false);
+    }
+  }, [enabled, messagesEnabled]);
+
   const update = async (key: keyof PetdexMessagePreferences, value: boolean) => {
+    const updateRevision = ++updateRevisionRef.current;
+    testRevisionRef.current += 1;
+    busy.current = false;
+    setTesting(false);
+    onRetrySubscription?.();
     try {
-      await useAppStore.getState().setPetdexMessagePreference(key, value);
-      if (mounted.current) {
+      const diagnostic = await useAppStore.getState().setPetdexMessagePreference(key, value);
+      if (mounted.current && updateRevision === updateRevisionRef.current) {
+        onPreferenceSync?.(diagnostic);
         toast.success(t('settings.experimental.petdex.messages.saved'), { id: 'petdex-preferences-saved' });
       }
     } catch {
-      if (mounted.current) toast.error(t('settings.experimental.petdex.messages.saveFailed'));
+      if (mounted.current && updateRevision === updateRevisionRef.current) {
+        toast.error(t('settings.experimental.petdex.messages.saveFailed'));
+      }
     }
   };
 
   const test = async () => {
     if (busy.current) return;
     busy.current = true;
+    const testRevision = ++testRevisionRef.current;
+    onRetrySubscription?.();
     setTesting(true);
     try {
       const result = await testPetdexMessage();
       useAppStore.getState().receivePetdexMessageDiagnostic(result.diagnostic);
-      if (mounted.current) {
+      if (mounted.current && testRevision === testRevisionRef.current) {
         const message = t(`settings.experimental.petdex.messages.test.${result.outcome}`);
         if (result.outcome === 'accepted') toast.success(message);
         else if (result.outcome === 'failed') toast.error(message);
         else toast.info(message);
       }
     } catch {
-      if (mounted.current) toast.error(t('settings.experimental.petdex.operationError'));
+      if (mounted.current && testRevision === testRevisionRef.current) {
+        toast.error(t('settings.experimental.petdex.operationError'));
+      }
     } finally {
-      busy.current = false;
-      if (mounted.current) setTesting(false);
+      if (mounted.current && testRevision === testRevisionRef.current) {
+        busy.current = false;
+        setTesting(false);
+      }
     }
   };
 

@@ -1,9 +1,8 @@
 import type { UnlistenFn } from '@tauri-apps/api/event';
-import type { PetdexCategories, PetdexDiagnostic, PetdexTestResult } from '@/types';
+import type { PetdexDiagnostic, PetdexTestResult } from '@/types';
 import {
   invokePetdexGetStatus,
   invokePetdexCheckHealth,
-  invokePetdexSetEnabled,
   invokePetdexTestConnection,
   listenPetdexStatus,
 } from '@/lib/ipc/tauri';
@@ -18,10 +17,6 @@ export async function checkPetdexHealth() {
 function validateDiagnostic(value: unknown): PetdexDiagnostic {
   if (!isPetdexDiagnostic(value)) throw new Error('petdex-invalid-diagnostic');
   return value;
-}
-
-export async function configurePetdex(enabled: boolean, categories?: PetdexCategories): Promise<PetdexDiagnostic> {
-  return validateDiagnostic(await invokePetdexSetEnabled(enabled, categories));
 }
 
 export async function getPetdexStatus(): Promise<PetdexDiagnostic> {

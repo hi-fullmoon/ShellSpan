@@ -113,6 +113,24 @@ fn shared_templates_and_overflow_counts_are_safe_in_both_languages() {
         assert_eq!(message.title, "ShellSpan");
         assert!(!message.text.contains("hidden"));
         assert!(message.encode("shellspan-test-slot-3").is_some());
+
+        let mut completed_slots = Slots::default();
+        completed_slots.locale = locale;
+        let completed_events = (1..=4)
+            .map(|run| {
+                let mut event =
+                    ActivityEvent::new(ActivitySource::Ssh, run, 1, ActivityPhase::Connected, now);
+                event.owner = Some(ActivityOwner::Ai(format!("done-{run}")));
+                (event, Some(now + SUCCESS_TTL))
+            })
+            .collect();
+        completed_slots.project(completed_events);
+        let idle_summary = completed_slots.slots[2].content.as_ref().unwrap();
+        assert_eq!(idle_summary.active_run_count, 0);
+        let idle_message = SafeMessage::from_content(idle_summary);
+        assert!(idle_message.text.contains('2'));
+        assert!(!idle_message.text.contains('0'));
+        assert!(idle_message.encode("shellspan-test-slot-3").is_some());
     }
 }
 
@@ -261,9 +279,11 @@ fn message_preference_migration_defaults_off_and_all_native_tools_are_specific()
         "trash_file",
         "exec_command",
         "terminal_execute",
+        "run_terminal_command",
         "probe_http",
         "read_terminal",
         "write_terminal_input",
+        "write_process_input",
         "wait_terminal",
         "write_stdin",
         "wait_process",

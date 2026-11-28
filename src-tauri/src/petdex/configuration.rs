@@ -80,6 +80,7 @@ pub(crate) async fn petdex_configure(
             },
             &configuration.locale,
             deadline,
+            closing,
         )
         .await;
     if configuration.enabled {
@@ -93,13 +94,6 @@ pub(crate) async fn petdex_configure(
     } else {
         messages.cleanup_outcome
     };
-    adapter
-        .inner
-        .messages
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .diagnostic
-        .cleanup_outcome = cleanup_outcome;
     let control = adapter
         .inner
         .coordinator

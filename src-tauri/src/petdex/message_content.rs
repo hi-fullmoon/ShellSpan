@@ -29,6 +29,10 @@ pub(crate) struct SafeDetails {
 }
 
 impl SafeDetails {
+    pub(crate) fn has_title(&self) -> bool {
+        self.title.is_some()
+    }
+
     pub(crate) fn title(&mut self, candidate: &str) {
         self.title = safe_text(candidate, TITLE_BYTES, false);
     }
@@ -260,9 +264,9 @@ impl ToolStage {
             "write_file" => Self::WriteFile,
             "edit_file" | "apply_patch" => Self::EditFile,
             "trash_file" => Self::TrashFile,
-            "exec_command" | "terminal_execute" => Self::Command,
+            "exec_command" | "terminal_execute" | "run_terminal_command" => Self::Command,
             "read_terminal" => Self::ReadTerminal,
-            "write_terminal_input" | "write_stdin" => Self::WriteTerminal,
+            "write_terminal_input" | "write_stdin" | "write_process_input" => Self::WriteTerminal,
             "wait_terminal" | "wait_process" => Self::WaitProcess,
             "kill_process" => Self::StopProcess,
             "inspect_host" | "inspect_service" => Self::Inspect,
@@ -311,9 +315,13 @@ impl SafeMessage {
         let locale = content.locale;
         let summary = content.owner_count > 1;
         let mut text = if summary {
-            template(locale, "summary")
-                .replace("{owners}", &count(content.owner_count))
-                .replace("{runs}", &count(content.active_run_count))
+            if content.active_run_count == 0 {
+                template(locale, "summaryOwners").replace("{owners}", &count(content.owner_count))
+            } else {
+                template(locale, "summary")
+                    .replace("{owners}", &count(content.owner_count))
+                    .replace("{runs}", &count(content.active_run_count))
+            }
         } else {
             template(locale, stage(content)).to_owned()
         };

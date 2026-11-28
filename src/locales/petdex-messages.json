@@ -32,6 +32,7 @@
     "petdex.message.failed": "Task failed",
     "petdex.message.cancelled": "Task cancelled",
     "petdex.message.summary": "{owners} other sessions or connections; {runs} active tasks",
+    "petdex.message.summaryOwners": "{owners} other sessions or connections",
     "petdex.message.activeCount": "{stage} · {runs} active tasks",
     "petdex.message.settled": "ShellSpan activity ended",
     "petdex.message.test": "Hello from ShellSpan"
@@ -69,6 +70,7 @@
     "petdex.message.failed": "任务失败",
     "petdex.message.cancelled": "任务已取消",
     "petdex.message.summary": "另有 {owners} 个会话或连接，{runs} 项任务进行中",
+    "petdex.message.summaryOwners": "另有 {owners} 个会话或连接",
     "petdex.message.activeCount": "{stage} · {runs} 项任务进行中",
     "petdex.message.settled": "ShellSpan 活动已结束",
     "petdex.message.test": "来自 ShellSpan 的测试消息"

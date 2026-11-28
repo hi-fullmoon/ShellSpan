@@ -1,4 +1,3 @@
-/** Content preferences only. Settings persistence and IPC are wired in stage 10. */
 export interface PetdexMessagePreferences {
   petdexMessagesEnabled: boolean;
   petdexMessageDetailsEnabled: boolean;
@@ -15,8 +14,4 @@ export function normalizePetdexMessagePreferences(value: unknown): PetdexMessage
     petdexMessagesEnabled: 'petdexMessagesEnabled' in input && input.petdexMessagesEnabled === true,
     petdexMessageDetailsEnabled: 'petdexMessageDetailsEnabled' in input && input.petdexMessageDetailsEnabled === true,
   };
-}
-
-export function petdexDetailsAllowed(enabled: boolean, preferences: PetdexMessagePreferences): boolean {
-  return enabled && preferences.petdexMessagesEnabled && preferences.petdexMessageDetailsEnabled;
 }

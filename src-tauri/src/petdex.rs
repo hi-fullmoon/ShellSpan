@@ -14,15 +14,10 @@ use tokio_util::sync::CancellationToken;
 mod arbiter;
 pub(crate) mod configuration;
 mod delivery;
-// Stage 9 consumes these persistence operations when /bubble is enabled.
-#[allow(dead_code)]
 mod installation;
-#[allow(dead_code)] // Safe wire content is consumed by stage 9, preferences by stage 10.
 pub(crate) mod message_content;
 mod message_delivery;
-#[allow(dead_code)] // Transport consumes the versioned handoff in stage 9.
 mod message_snapshot;
-#[allow(dead_code)] // Content/receipt consumers land in stages 8/9; projection runs now.
 mod slots;
 mod transport;
 pub(crate) mod types;
@@ -196,19 +191,6 @@ impl PetdexAdapter {
             .diagnostic
     }
 
-    async fn set_enabled(&self, app: &AppHandle, enabled: bool) -> PetdexDiagnostic {
-        if enabled {
-            let (epoch, _) = self.begin_message_configuration();
-            let _configuration = self.inner.configuration_lock.lock().await;
-            self.start_coordinator(app.clone(), epoch);
-        } else {
-            self.shutdown_messages().await;
-        }
-        let snapshot = self.status();
-        let _ = app.emit(PETDEX_STATUS_EVENT, snapshot);
-        snapshot
-    }
-
     fn set_categories(&self, categories: PetdexCategories) {
         let mut control = self
             .inner
@@ -232,7 +214,6 @@ impl PetdexAdapter {
         let Some((receiver, cancellation)) = self.prepare_coordinator_epoch(Some(epoch)) else {
             return;
         };
-        let _ = app.emit(PETDEX_STATUS_EVENT, self.status());
         let adapter = self.clone();
         tauri::async_runtime::spawn(async move {
             adapter.run_coordinator(app, receiver, cancellation).await;
@@ -556,12 +537,14 @@ impl PetdexAdapter {
                         continue;
                     }
                     delivery.reset_backoff();
-                    self.inner
-                        .messages
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner())
-                        .diagnostic
-                        .unsupported = false;
+                    {
+                        let mut messages = self
+                            .inner
+                            .messages
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner());
+                        messages.diagnostic.unsupported = false;
+                    }
                     if let Some(send_at) = delivery
                         .last_attempt_at
                         .map(|last_attempt| last_attempt + MIN_SEND_INTERVAL)
@@ -596,7 +579,7 @@ impl PetdexAdapter {
                             delivery.record(command, RequestResult::Expired, Instant::now());
                             continue;
                         },
-                        result = self.apply_state(command, cancellation.clone()) => result,
+                        result = self.apply_state_manual(command, cancellation.clone()) => result,
                     };
                     if cancellation.is_cancelled() || !self.inner.enabled.load(Ordering::Acquire) {
                         let _ = reply.send(self.test_result(
@@ -836,19 +819,6 @@ impl Drop for ActivityGuard {
         // cancellation must be explicitly published by the domain owner.
         self.transition(ActivityPhase::Failed);
     }
-}
-
-#[tauri::command]
-pub(crate) async fn petdex_set_enabled(
-    app: AppHandle,
-    adapter: State<'_, PetdexAdapter>,
-    enabled: bool,
-    categories: Option<PetdexCategories>,
-) -> Result<PetdexDiagnostic, &'static str> {
-    if let Some(categories) = categories {
-        adapter.set_categories(categories);
-    }
-    Ok(adapter.set_enabled(&app, enabled).await)
 }
 
 #[tauri::command]

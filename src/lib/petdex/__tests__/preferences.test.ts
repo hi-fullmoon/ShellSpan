@@ -1,22 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PETDEX_CATEGORIES, normalizePetdexCategories, resolvePetdexConfiguration } from '../preferences';
+import { DEFAULT_PETDEX_CATEGORIES, normalizePetdexCategories, resolvePetdexSettings } from '../preferences';
+import { DEFAULT_PETDEX_MESSAGE_PREFERENCES } from '../message-preferences';
 import zh from '@/locales/zh-CN';
 import en from '@/locales/en-US';
 
 describe('Petdex category preferences', () => {
   it('composes sparse updates against acknowledgements without losing other categories', () => {
-    const initial = { enabled: false, categories: DEFAULT_PETDEX_CATEGORIES };
-    const aiConfirmed = resolvePetdexConfiguration(initial, { categories: { ai: true } });
-    expect(aiConfirmed).toEqual({ enabled: false, categories: { ssh: true, sftp: true, ai: true } });
-    const sshRejected = resolvePetdexConfiguration(aiConfirmed, { categories: { ssh: false } });
+    const initial = {
+      enabled: false,
+      categories: DEFAULT_PETDEX_CATEGORIES,
+      ...DEFAULT_PETDEX_MESSAGE_PREFERENCES,
+      locale: 'zh-CN' as const,
+    };
+    const aiConfirmed = resolvePetdexSettings(initial, { categories: { ai: true } });
+    expect(aiConfirmed.categories).toEqual({ ssh: true, sftp: true, ai: true });
+    const sshRejected = resolvePetdexSettings(aiConfirmed, { categories: { ssh: false } });
     expect(sshRejected.categories.ssh).toBe(false);
     // A rejected request is not an acknowledgement. The next queued patch
     // resolves against aiConfirmed and preserves its successful AI choice.
-    const sftpConfirmed = resolvePetdexConfiguration(aiConfirmed, { categories: { sftp: false } });
-    expect(sftpConfirmed).toEqual({ enabled: false, categories: { ssh: true, sftp: false, ai: true } });
-    expect(resolvePetdexConfiguration(sftpConfirmed, { enabled: true }))
-      .toEqual({ enabled: true, categories: { ssh: true, sftp: false, ai: true } });
-    expect(initial).toEqual({ enabled: false, categories: { ssh: true, sftp: true, ai: false } });
+    const sftpConfirmed = resolvePetdexSettings(aiConfirmed, { categories: { sftp: false } });
+    expect(sftpConfirmed.categories).toEqual({ ssh: true, sftp: false, ai: true });
+    expect(resolvePetdexSettings(sftpConfirmed, { enabled: true }))
+      .toEqual({ ...sftpConfirmed, enabled: true });
+    expect(initial.categories).toEqual({ ssh: true, sftp: true, ai: false });
   });
   it('migrates missing and invalid categories without opting into AI', () => {
     for (const value of [undefined, null, false, {}, { ssh: 'false', ai: 1 }]) {

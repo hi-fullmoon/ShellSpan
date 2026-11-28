@@ -1,6 +1,6 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import type { NativePromptOriginObservation } from '@/lib/terminal/native-prompt-origin';
-import type { PetdexCategories, PetdexDiagnostic, PetdexTestResult, PetdexCheckResult } from '@/types';
+import type { PetdexDiagnostic, PetdexTestResult, PetdexCheckResult } from '@/types';
 import { createLogger } from '@/lib/logger';
 import { modelDefinitionOf } from '@/lib/ai/provider-contract';
 import type { AiLocalFileReference } from '@/lib/ai/file-reference';
@@ -159,8 +159,6 @@ export const invokePetdexMessageDiagnostic = () =>
 export const invokePetdexTestMessage = () =>
   invoke<import('@/lib/petdex/messages').PetdexMessageTestResult>('petdex_test_message');
 
-export const invokePetdexSetEnabled = (enabled: boolean, categories?: PetdexCategories): Promise<PetdexDiagnostic> =>
-  invoke<PetdexDiagnostic>('petdex_set_enabled', categories ? { enabled, categories } : { enabled });
 export const invokePetdexGetStatus = (): Promise<PetdexDiagnostic> =>
   invoke<PetdexDiagnostic>('petdex_get_status');
 export const invokePetdexCheckHealth = (): Promise<PetdexCheckResult> =>

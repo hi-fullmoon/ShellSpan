@@ -15,9 +15,13 @@ export function PetdexDiagnostics({ snapshot, status, health }: {
   health: PetdexHealth | null;
 }) {
   const { t, locale } = useI18n();
+  const petdexEnabled = useAppStore((s) => s.petdexEnabled);
+  const petdexMessagesEnabled = useAppStore((s) => s.petdexMessagesEnabled);
   const configurationFailed = useAppStore((s) => s.petdexConfigurationFailed);
   const messageDiagnostic = useAppStore((s) => s.petdexMessageDiagnostic);
+  const [open, setOpen] = useState(false);
   const [messageUnavailable, setMessageUnavailable] = useState(false);
+  const shouldPoll = open || (petdexEnabled && petdexMessagesEnabled);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,19 +37,24 @@ export function PetdexDiagnostics({ snapshot, status, health }: {
       }
     };
     void refresh();
+    if (!shouldPoll) {
+      return () => {
+        cancelled = true;
+      };
+    }
     const timer = setInterval(() => void refresh(), 2000);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, []);
+  }, [shouldPoll]);
 
   const messageStatusKey = `settings.experimental.petdex.messages.status.${messageUnavailable ? 'unavailable' : messageDiagnostic?.status ?? 'disabled'}` as const;
 
   return (
     <section data-slot="petdex-diagnostics" className="flex min-w-0 flex-col">
       <Card size="sm" radius="compact" variant="outline" className="gap-0 py-0">
-      <Collapsible className="flex min-w-0 flex-col">
+      <Collapsible open={open} onOpenChange={setOpen} className="flex min-w-0 flex-col">
         <CollapsibleTrigger
           type="button"
           className="flex w-full items-center justify-between gap-3 rounded-lg px-4 py-2.5 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50 [&[aria-expanded=true]_.petdex-chevron]:rotate-180"

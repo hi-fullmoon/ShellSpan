@@ -626,7 +626,6 @@ pub fn run() {
             agent_runtime::agent_runtime_resume_recovery,
             agent_runtime::agent_runtime_reconcile_recovery,
             agent_runtime::agent_runtime_abort_recovery,
-            petdex::petdex_set_enabled,
             petdex::configuration::petdex_configure,
             petdex::configuration::petdex_message_diagnostic,
             petdex::configuration::petdex_test_message,
@@ -871,6 +870,10 @@ pub fn run() {
             event,
             tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
         ) {
+            if let Some(adapter) = app.try_state::<petdex::PetdexAdapter>() {
+                let adapter = adapter.inner().clone();
+                tauri::async_runtime::block_on(adapter.shutdown_messages());
+            }
             if let (Some(runtime), Some(sessions)) = (
                 app.try_state::<agent_runtime::AgentRuntime>(),
                 app.try_state::<SessionManager>(),

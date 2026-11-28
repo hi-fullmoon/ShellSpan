@@ -886,7 +886,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       ))}
                     </div>
                   </IntegrationGroup>
-                  <PetdexMessageSettings />
+                  <PetdexMessageSettings
+                    onPreferenceSync={setPetdexStatus}
+                    onRetrySubscription={() => { void retryPetdexSubscriptionRef.current(); }}
+                  />
                 </div>
 
                 <PetdexDiagnostics snapshot={petdexView.snapshot} status={petdexStatus} health={petdexHealth} />

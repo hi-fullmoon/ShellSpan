@@ -19,13 +19,6 @@ export function resolvePetdexSettings(confirmed: import('./messages').PetdexSett
   return { ...confirmed, ...patch, categories: { ...confirmed.categories, ...patch.categories } };
 }
 
-export function resolvePetdexConfiguration(confirmed: PetdexConfiguration, patch: PetdexConfigurationPatch): PetdexConfiguration {
-  return {
-    enabled: patch.enabled ?? confirmed.enabled,
-    categories: { ...confirmed.categories, ...patch.categories },
-  };
-}
-
 export function normalizePetdexCategories(value: unknown): PetdexCategories {
   const categories = value && typeof value === 'object' ? value : {};
   return {

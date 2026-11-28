@@ -77,7 +77,7 @@ ShellSpan 的动作发送只向 `http://127.0.0.1:7777/state` 发出 JSON POST�
 
 ## ShellSpan 诊断 IPC（阶段 1）
 
-`petdex_set_enabled`、`petdex_get_status` 和 `petdex-status` 事件使用以下诊断结构；阶段 2 的 `petdex_test_connection` 将它放在返回值 `diagnostic` 中。字段名为 camelCase：
+`petdex_configure`（统一配置动作、分类与气泡）、`petdex_get_status` 和 `petdex-status` 事件使用以下诊断结构；阶段 2 的 `petdex_test_connection` 将它放在返回值 `diagnostic` 中。字段名为 camelCase：
 
 | 字段 | 语义 |
 | --- | --- |

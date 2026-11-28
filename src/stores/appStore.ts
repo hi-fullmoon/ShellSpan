@@ -210,7 +210,12 @@ interface AppState extends AppPreferences {
   resetShortcuts: () => void;
 }
 
-const PREFERENCE_KEYS: readonly (keyof AppPreferences)[] = [
+type PersistedAppPreferences = Omit<
+  AppPreferences,
+  'petdexEnabled' | 'petdexCategories' | 'petdexMessagesEnabled' | 'petdexMessageDetailsEnabled'
+>;
+
+const PREFERENCE_KEYS: readonly (keyof PersistedAppPreferences)[] = [
   'terminalTabTitleTemplate', 'terminalTabTitleOverrides',
   'terminalTabTitleCustom', 'terminalTabTitleCustomOverrides',
   'theme', 'locale', 'profileName', 'profileAvatar', 'startupUpdateCheck', 'showFocusMode', 'startupSection',
@@ -462,7 +467,7 @@ async function updatePetdexConfiguration(patch: PetdexConfigurationPatch): Promi
   }
 }
 
-function debouncedSaveToDb(state: AppPreferences) {
+function debouncedSaveToDb(state: PersistedAppPreferences) {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     const entries: [string, string][] = PREFERENCE_KEYS.map((key) => [
@@ -589,7 +594,10 @@ export const useAppStore = create<AppState>()(
     setPetdexEnabled: (enabled) => updatePetdexConfiguration({ enabled }),
     setPetdexCategory: (category, enabled) => updatePetdexConfiguration({ categories: { [category]: enabled } }),
     setPetdexMessagePreference: (key, enabled) => updatePetdexConfiguration({ [key]: enabled }),
-    receivePetdexMessageDiagnostic: (snapshot) => set((state) => ({ petdexMessageDiagnostic: newestMessageDiagnostic(state.petdexMessageDiagnostic, snapshot) })),
+    receivePetdexMessageDiagnostic: (snapshot) => set((state) => {
+      const next = newestMessageDiagnostic(state.petdexMessageDiagnostic, snapshot);
+      return next === state.petdexMessageDiagnostic ? state : { petdexMessageDiagnostic: next };
+    }),
     setStartupSection: (startupSection) => set({ startupSection }),
     setTerminalFontSize: (fontSize) => set({ terminalFontSize: normalizeTerminalFontSize(fontSize) }),
     setTerminalFontFamily: (terminalFontFamily) => set({ terminalFontFamily }),
@@ -652,17 +660,13 @@ export const useAppStore = create<AppState>()(
 // shallow equality ensure the comparison/save only runs when a persisted
 // preference key actually changes (not on activeSection/activeWorkbenchTab).
 useAppStore.subscribe(
-  (state): AppPreferences => ({
+  (state): PersistedAppPreferences => ({
     theme: state.theme,
     locale: state.locale,
     profileName: state.profileName,
     profileAvatar: state.profileAvatar,
     startupUpdateCheck: state.startupUpdateCheck,
     showFocusMode: state.showFocusMode,
-    petdexEnabled: state.petdexEnabled,
-    petdexCategories: state.petdexCategories,
-    petdexMessagesEnabled: state.petdexMessagesEnabled,
-    petdexMessageDetailsEnabled: state.petdexMessageDetailsEnabled,
     startupSection: state.startupSection,
     terminalFontSize: state.terminalFontSize,
     terminalFontFamily: state.terminalFontFamily,

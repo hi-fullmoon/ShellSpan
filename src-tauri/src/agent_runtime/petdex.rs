@@ -1,6 +1,6 @@
 //! Observe durable lifecycle boundaries under the Session store lock. A driver
 //! lease can end while a question/approval still owns the admitted turn.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::{
     derive_recovery_checkpoint, AgentRecoveryCheckpointKind, AgentSessionEvent,
@@ -199,11 +199,14 @@ impl PetdexActivities {
             return;
         }
         let kind = current_tool_kind(events, turn);
+        let renamed = committed
+            .iter()
+            .any(|e| matches!(e.payload, Payload::SessionRenamed { .. }));
         if let Some((current, guard)) = self.turns.get_mut(session) {
             if current.is_empty() || current == turn {
                 *current = turn.to_owned();
                 guard.transition_with_kind(phase, kind);
-                session_title(guard, events);
+                session_title(guard, events, renamed);
                 return;
             }
             guard.transition(ActivityPhase::Cancelled);
@@ -222,13 +225,16 @@ impl PetdexActivities {
             ),
         );
         if let Some((_, guard)) = self.turns.get(session) {
-            session_title(guard, events);
+            session_title(guard, events, true);
         }
     }
 }
 
-fn session_title(guard: &ActivityGuard, events: &[AgentSessionEvent]) {
+fn session_title(guard: &ActivityGuard, events: &[AgentSessionEvent], force_refresh: bool) {
     guard.details(|details| {
+        if !force_refresh && details.has_title() {
+            return;
+        }
         // The task goal and user messages are deliberately not title fallbacks.
         if let Some(title) = events.iter().rev().find_map(|event| match &event.payload {
             Payload::SessionRenamed { title, .. } => Some(title.as_str()),
@@ -241,35 +247,48 @@ fn session_title(guard: &ActivityGuard, events: &[AgentSessionEvent]) {
 
 fn current_tool_kind(events: &[AgentSessionEvent], turn: &str) -> ActivityKind {
     // Metadata only: never examine arguments, results, chunks or logs.
-    for event in events
-        .iter()
-        .rev()
-        .filter(|e| e.turn_id.as_deref() == Some(turn))
-    {
-        if let Payload::ToolExecution { call_id, .. } = &event.payload {
-            if events.iter().any(|e| {
-                e.seq > event.seq && e.turn_id.as_deref() == Some(turn)
-                    && e.step_id == event.step_id
-                    && matches!(&e.payload, Payload::ToolResult { call_id: completed, .. } if completed == call_id)
-            }) { continue; }
-            if let Some(name) = events.iter().rev().find_map(|e| {
-                if e.turn_id.as_deref() != Some(turn)
-                    || e.step_id != event.step_id
-                    || e.seq > event.seq
-                {
-                    return None;
-                }
-                match &e.payload {
-                    Payload::ToolCall { call } if call.call_id == *call_id => {
-                        Some(call.name.as_str())
-                    }
-                    _ => None,
-                }
-            }) {
-                return ActivityKind::Tool(crate::petdex::message_content::ToolStage::from_name(
-                    name,
-                ));
+    let mut completed: HashSet<(Option<&str>, &str)> = HashSet::new();
+    let mut pending: Vec<(Option<&str>, &str)> = Vec::new();
+    for event in events.iter().rev() {
+        if event.turn_id.as_deref() != Some(turn) {
+            continue;
+        }
+        match &event.payload {
+            Payload::ToolResult { call_id, .. } => {
+                completed.insert((event.step_id.as_deref(), call_id.as_str()));
             }
+            Payload::ToolExecution { call_id, .. } => {
+                let key = (event.step_id.as_deref(), call_id.as_str());
+                if !completed.contains(&key) && !pending.contains(&key) {
+                    pending.push(key);
+                }
+            }
+            Payload::ToolCall { call } => {
+                let key = (event.step_id.as_deref(), call.call_id.as_str());
+                if pending.first() == Some(&key) {
+                    let name = call.native_name.as_deref().unwrap_or(call.name.as_str());
+                    return ActivityKind::Tool(
+                        crate::petdex::message_content::ToolStage::from_name(name),
+                    );
+                }
+            }
+            Payload::TurnStart => break,
+            _ => {}
+        }
+    }
+    for (step_id, call_id) in pending.into_iter().skip(1) {
+        if let Some(name) = events.iter().rev().find_map(|event| {
+            if event.turn_id.as_deref() != Some(turn) || event.step_id.as_deref() != step_id {
+                return None;
+            }
+            match &event.payload {
+                Payload::ToolCall { call } if call.call_id == call_id => {
+                    Some(call.native_name.as_deref().unwrap_or(call.name.as_str()))
+                }
+                _ => None,
+            }
+        }) {
+            return ActivityKind::Tool(crate::petdex::message_content::ToolStage::from_name(name));
         }
     }
     ActivityKind::Ai

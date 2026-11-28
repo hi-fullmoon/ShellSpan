@@ -28,13 +28,15 @@ impl WritePolicy {
     pub fn pid_for_test(&self) -> u32 {
         self.pid.unwrap()
     }
-    pub fn deadline(&self, now: Instant) -> Instant {
+    pub fn pace_deadline(&self, now: Instant) -> Instant {
         self.last_write
             .map(|t| t + super::MIN_SEND_INTERVAL)
             .unwrap_or(now)
             .max(self.limited_until.unwrap_or(now))
-            .max(self.retry_at.unwrap_or(now))
             .max(now)
+    }
+    pub fn deadline(&self, now: Instant) -> Instant {
+        self.pace_deadline(now).max(self.retry_at.unwrap_or(now))
     }
     pub fn observe(&mut self, pid: u32) {
         if self.pid != Some(pid) {
@@ -151,6 +153,25 @@ impl PetdexAdapter {
         command: StateCommand,
         cancellation: CancellationToken,
     ) -> RequestResult {
+        self.apply_state_with_policy(command, cancellation, true)
+            .await
+    }
+
+    pub(super) async fn apply_state_manual(
+        &self,
+        command: StateCommand,
+        cancellation: CancellationToken,
+    ) -> RequestResult {
+        self.apply_state_with_policy(command, cancellation, false)
+            .await
+    }
+
+    async fn apply_state_with_policy(
+        &self,
+        command: StateCommand,
+        cancellation: CancellationToken,
+        respect_backoff: bool,
+    ) -> RequestResult {
         if !self.inner.enabled.load(Ordering::Acquire) {
             return RequestResult::Disabled;
         }
@@ -159,7 +180,7 @@ impl PetdexAdapter {
             biased;
             _ = cancellation.cancelled() => Err(RequestFailure::Disabled),
             result = tokio::time::timeout(super::STATE_ATTEMPT_TIMEOUT,
-                self.apply_state_serialized(command, cancellation.clone())) =>
+                self.apply_state_serialized(command, cancellation.clone(), respect_backoff)) =>
                 result.unwrap_or(Err(RequestFailure::Transport)),
         };
         let result = RequestResult::from_result(result);
@@ -171,6 +192,7 @@ impl PetdexAdapter {
         &self,
         command: StateCommand,
         cancellation: CancellationToken,
+        respect_backoff: bool,
     ) -> Result<(), RequestFailure> {
         let _request_guard = tokio::select! {
             biased;
@@ -181,7 +203,7 @@ impl PetdexAdapter {
             return Err(RequestFailure::Disabled);
         }
         command.remaining_duration(Instant::now())?;
-        self.wait_write().await;
+        self.wait_write_gate(respect_backoff).await;
         command.remaining_duration(Instant::now())?;
 
         // Preserve missing/unreadable-file diagnostics without reading a secret.
@@ -198,7 +220,10 @@ impl PetdexAdapter {
         if cancellation.is_cancelled() || !self.inner.enabled.load(Ordering::Acquire) {
             return Err(RequestFailure::Disabled);
         }
-        let first_status = match self.post_state(command, &first_token).await {
+        let first_status = match self
+            .post_state(command, &first_token, respect_backoff)
+            .await
+        {
             Ok(status) => status,
             Err(RequestFailure::Transport) => {
                 // The next coordinator attempt checks compatibility before
@@ -219,7 +244,10 @@ impl PetdexAdapter {
         if cancellation.is_cancelled() || !self.inner.enabled.load(Ordering::Acquire) {
             return Err(RequestFailure::Disabled);
         }
-        Self::classify_status(self.post_state(command, &refreshed_token).await?)
+        Self::classify_status(
+            self.post_state(command, &refreshed_token, respect_backoff)
+                .await?,
+        )
     }
 
     pub(super) async fn refresh_token(
@@ -333,11 +361,26 @@ impl PetdexAdapter {
             .deadline(now)
     }
 
+    pub(super) fn write_pace_deadline(&self, now: Instant) -> Instant {
+        self.inner
+            .write_policy
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .pace_deadline(now)
+    }
+
     // Caller holds request_lock. Recheck even after coordinator scheduling:
     // a manual request may have changed the shared clock in the meantime.
     // This final wait remains inside the caller's total attempt budget.
-    pub(super) async fn wait_write(&self) {
-        let deadline = self.write_deadline(Instant::now());
+    // Manual tests and bounded shutdown settlement obey pacing and 429 limits
+    // without blocking behind a 60s background recovery backoff.
+    pub(super) async fn wait_write_gate(&self, respect_backoff: bool) {
+        let now = Instant::now();
+        let deadline = if respect_backoff {
+            self.write_deadline(now)
+        } else {
+            self.write_pace_deadline(now)
+        };
         tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
     }
 
@@ -409,10 +452,11 @@ impl PetdexAdapter {
         &self,
         command: StateCommand,
         token: &SecretToken,
+        respect_backoff: bool,
     ) -> Result<StatusCode, RequestFailure> {
         // Repeat immediately before each authenticated attempt, including the
         // single token-rotation retry. Never attach a token to either probe.
-        self.wait_write().await;
+        self.wait_write_gate(respect_backoff).await;
         self.check_protocol_compatibility().await?;
         let duration = command.remaining_duration(Instant::now())?.map(|duration| {
             let millis = duration.as_millis().max(1);
@@ -497,11 +541,22 @@ mod protocol_tests {
     async fn both_channels_timing_out_in_backoff_leave_recovery_deadline_unchanged() {
         let root = tempfile::tempdir().unwrap();
         let adapter = PetdexAdapter::new(root.path().to_owned());
-        adapter.set_enabled_for_io_test(true);
+        adapter.initialize_messages(root.path());
+        let _ = adapter.prepare_coordinator().unwrap();
         adapter.set_message_preferences(super::super::message_content::MessagePreferences {
             petdex_messages_enabled: true,
             petdex_message_details_enabled: false,
         });
+        let _activity = super::super::ActivityGuard::owned(
+            Some(adapter.clone()),
+            super::super::ActivitySource::Sftp,
+            super::super::ActivityPhase::Running,
+            super::super::types::ActivityOwner::Connection(std::sync::Arc::new(
+                uuid::Uuid::new_v4(),
+            )),
+            super::super::types::ActivityKind::Upload,
+        );
+        let pending = adapter.next_message(Instant::now()).unwrap();
         let recovery_at = {
             let mut policy = adapter.inner.write_policy.lock().unwrap();
             let elapsed: std::time::Duration =
@@ -517,15 +572,11 @@ mod protocol_tests {
             state: super::super::types::PetdexState::Running,
             expires_at: None,
         };
-        let (action, message) = tokio::join!(
+        let (action, ()) = tokio::join!(
             adapter.apply_state(command, adapter.cancellation_token()),
-            adapter.test_message(),
+            adapter.deliver_message(pending),
         );
         assert_eq!(action, RequestResult::Transport);
-        assert_eq!(
-            message.outcome,
-            super::super::message_delivery::MessageTestOutcome::Failed
-        );
         let mut policy = adapter.inner.write_policy.lock().unwrap();
         assert_eq!(policy.deadline(Instant::now()), recovery_at);
         assert_eq!(policy.failures, 9);
@@ -533,6 +584,60 @@ mod protocol_tests {
         policy.result(RequestResult::Applied, recovery_at);
         assert_eq!(policy.failures, 0);
         assert!(policy.retry_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn manual_tests_bypass_background_backoff_without_extending_recovery_deadline() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let root = tempfile::tempdir().unwrap();
+        let token_path = root.path().join("update-token");
+        std::fs::write(&token_path, "a".repeat(64)).unwrap();
+        let adapter = PetdexAdapter::fixture(
+            reqwest::Url::parse(&format!("http://127.0.0.1:{port}/state")).unwrap(),
+            token_path,
+        );
+        adapter.initialize_messages(root.path());
+        let _ = adapter.prepare_coordinator().unwrap();
+        adapter.set_message_preferences(super::super::message_content::MessagePreferences {
+            petdex_messages_enabled: true,
+            petdex_message_details_enabled: false,
+        });
+        let recovery_at = {
+            let mut policy = adapter.inner.write_policy.lock().unwrap();
+            let elapsed: std::time::Duration =
+                (1..9).map(super::super::delivery::failure_backoff).sum();
+            let mut now = Instant::now() - elapsed;
+            for _ in 0..9 {
+                now = policy.deadline(now);
+                policy.result(RequestResult::Transport, now);
+            }
+            policy.deadline(now)
+        };
+        let started = Instant::now();
+        let action = adapter
+            .apply_state_manual(
+                StateCommand {
+                    state: super::super::types::PetdexState::Waving,
+                    expires_at: Some(Instant::now() + std::time::Duration::from_secs(2)),
+                },
+                adapter.cancellation_token(),
+            )
+            .await;
+        let message = adapter.test_message().await;
+        assert_eq!(action, RequestResult::Transport);
+        assert_eq!(
+            message.outcome,
+            super::super::message_delivery::MessageTestOutcome::Failed
+        );
+        assert!(
+            started.elapsed() < super::super::STATE_ATTEMPT_TIMEOUT,
+            "manual tests must fail fast instead of sleeping behind 60s background backoff"
+        );
+        let policy = adapter.inner.write_policy.lock().unwrap();
+        assert_eq!(policy.deadline(Instant::now()), recovery_at);
+        assert_eq!(policy.failures, 9);
     }
 
     #[test]

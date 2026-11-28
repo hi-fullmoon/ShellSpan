@@ -52,11 +52,65 @@ fn message_diagnostic_serialization_is_finite_and_monotonic() {
     let (_root, adapter) = adapter();
     let first = adapter.message_diagnostic();
     let second = adapter.message_diagnostic();
-    assert!(second.revision > first.revision);
-    let value = serde_json::to_value(second).unwrap();
+    assert_eq!(
+        second.revision, first.revision,
+        "unchanged diagnostic reads must not churn revision"
+    );
+    let _run = activity(&adapter);
+    let pending = adapter.next_message(Instant::now()).unwrap();
+    adapter.inner.messages.lock().unwrap().record(
+        &pending,
+        RequestResult::Applied,
+        true,
+        Instant::now(),
+    );
+    let third = adapter.message_diagnostic();
+    assert!(third.revision > second.revision);
+    let value = serde_json::to_value(third).unwrap();
     assert_eq!(value.as_object().unwrap().len(), 8);
     assert_eq!(value["status"], "ready");
+    assert_eq!(value["acceptedCount"], 1);
     assert_eq!(value["usedSlotCount"], 0);
+}
+
+#[tokio::test]
+async fn test_message_fails_fast_when_writer_is_unavailable_without_touching_backoff() {
+    let root = tempfile::tempdir().unwrap();
+    let adapter = PetdexAdapter::new(root.path().into());
+    let _ = adapter.prepare_coordinator().unwrap();
+    adapter.set_message_preferences(MessagePreferences {
+        petdex_messages_enabled: true,
+        petdex_message_details_enabled: false,
+    });
+    let _request_lock = adapter.inner.request_lock.lock().await;
+    let started = Instant::now();
+    let result = adapter.test_message().await;
+    assert_eq!(result.outcome, MessageTestOutcome::Failed);
+    assert_eq!(result.diagnostic.status, MessageStatus::Unavailable);
+    assert!(result.diagnostic.error_reason.is_none());
+    assert!(
+        started.elapsed() < Duration::from_millis(200),
+        "unavailable writer must not wait on request_lock or perform network I/O"
+    );
+    assert_eq!(
+        adapter.write_deadline(started),
+        started,
+        "unavailable writer must not pollute shared WritePolicy backoff"
+    );
+}
+
+#[test]
+fn last_accepted_at_is_monotonic_against_clock_rollback() {
+    let (_root, adapter) = adapter();
+    let _run = activity(&adapter);
+    let pending = adapter.next_message(Instant::now()).unwrap();
+    let future_timestamp = u64::MAX - 10;
+    {
+        let mut messages = adapter.inner.messages.lock().unwrap();
+        messages.diagnostic.last_accepted_at = Some(future_timestamp);
+        messages.record(&pending, RequestResult::Applied, true, Instant::now());
+        assert_eq!(messages.diagnostic.last_accepted_at, Some(future_timestamp));
+    }
 }
 
 #[tokio::test]
