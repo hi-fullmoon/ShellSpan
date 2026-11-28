@@ -111,7 +111,7 @@ export const WorkbenchViewModeToggle: React.FC<WorkbenchViewModeToggleProps> = (
         }
       }}
       className={cn(
-        'ml-auto h-6 shrink-0 rounded-md bg-muted/85 p-0.5 dark:bg-muted/50',
+        'ml-auto h-6 shrink-0 rounded-md',
         className,
       )}
     >
@@ -125,7 +125,7 @@ export const WorkbenchViewModeToggle: React.FC<WorkbenchViewModeToggleProps> = (
               <ToggleGroupItem
                 value={itemValue}
                 aria-label={label}
-                className="size-5 min-w-5 rounded-[4px] px-0 text-muted-foreground hover:text-foreground aria-pressed:bg-card aria-pressed:text-foreground aria-pressed:shadow-[0_1px_2px_rgba(0,0,0,0.08)] aria-pressed:ring-0 data-[state=on]:bg-card data-[state=on]:text-foreground data-[state=on]:shadow-[0_1px_2px_rgba(0,0,0,0.08)] data-[state=on]:ring-0 dark:aria-pressed:bg-secondary dark:aria-pressed:shadow-[0_1px_2px_rgba(0,0,0,0.35)] dark:data-[state=on]:bg-secondary dark:data-[state=on]:shadow-[0_1px_2px_rgba(0,0,0,0.35)] [&_svg:not([class*='size-'])]:size-3.5"
+                className="size-5 min-w-5 rounded-[4px] px-0 [&_svg:not([class*='size-'])]:size-3.5"
               />
             }
           >

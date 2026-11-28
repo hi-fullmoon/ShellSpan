@@ -735,7 +735,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       const nextTheme = values[0] as ThemeMode | undefined;
                       if (nextTheme) setTheme(nextTheme);
                     }}
-                    className="h-8 rounded-lg border border-border/60 bg-background p-0.5"
+                    className="h-8 rounded-lg"
                   >
                     {([
                       { value: 'system', icon: MonitorIcon, label: t('theme.system') },

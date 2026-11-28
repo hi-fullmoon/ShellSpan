@@ -108,6 +108,10 @@ describe('AiSkillsDialog', () => {
       expect(dialog.querySelector('[data-slot="skill-editor-layout"]')).toHaveClass('@min-[44rem]:grid-cols-[18.5rem_minmax(0,1fr)]');
       expect(dialog.querySelector('[data-slot="skill-editor-meta"]')).not.toBeNull();
       expect(dialog.querySelector('[data-slot="skill-editor-canvas"]')).not.toBeNull();
+      const editorModeGroup = dialog.querySelector('[data-slot="toggle-group"]');
+      expect(editorModeGroup).toHaveAttribute('data-variant', 'surface');
+      expect(editorModeGroup).toHaveClass('h-7', 'rounded-lg');
+      expect(editorModeGroup?.className).not.toContain('border');
       expect(screen.getByRole('switch', { name: /Manual \/name invocation only/i })).not.toBeChecked();
       expect(screen.getByRole('switch', { name: /Show in \/ completion menu/i })).toBeChecked();
       const footer = dialog.querySelector('[data-slot="dialog-footer"]');

@@ -15,7 +15,7 @@ const toggleVariants = cva(
         segmented:
           "bg-muted/60 text-foreground hover:bg-muted aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary/90 aria-pressed:hover:text-primary-foreground data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:hover:bg-primary/90",
         surface:
-          "rounded-md bg-transparent text-muted-foreground hover:text-foreground aria-pressed:bg-card aria-pressed:text-foreground aria-pressed:shadow-2xs aria-pressed:ring-1 aria-pressed:ring-foreground/10 data-[state=on]:bg-card data-[state=on]:text-foreground data-[state=on]:shadow-2xs data-[state=on]:ring-1 data-[state=on]:ring-foreground/10",
+          "rounded-md bg-transparent text-muted-foreground hover:text-foreground aria-pressed:bg-card aria-pressed:text-foreground aria-pressed:shadow-[0_1px_2px_rgba(0,0,0,0.08)] data-[state=on]:bg-card data-[state=on]:text-foreground data-[state=on]:shadow-[0_1px_2px_rgba(0,0,0,0.08)] dark:aria-pressed:bg-app-button dark:aria-pressed:shadow-[0_1px_2px_rgba(0,0,0,0.35)] dark:data-[state=on]:bg-app-button dark:data-[state=on]:shadow-[0_1px_2px_rgba(0,0,0,0.35)]",
         tag: "rounded-full bg-muted/60 text-muted-foreground hover:bg-muted aria-pressed:bg-primary/20 aria-pressed:text-foreground aria-pressed:hover:bg-primary/25 data-[state=on]:bg-primary/20 data-[state=on]:text-foreground data-[state=on]:hover:bg-primary/25",
       },
       size: {

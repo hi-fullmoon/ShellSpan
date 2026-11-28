@@ -511,7 +511,7 @@ export function AiSkillsDialog({
                           }}
                           spacing={0.5}
                           variant="surface"
-                          className="h-7 shrink-0 rounded-lg border border-border/60 bg-background p-0.5"
+                          className="h-7 shrink-0 rounded-lg"
                         >
                           <ToggleGroupItem value="edit" className="h-6 rounded-md px-2.5 text-xs">
                             {t('ai.workspace.skillProposal.tab.edit')}
