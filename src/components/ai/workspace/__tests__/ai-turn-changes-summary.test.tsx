@@ -1,15 +1,16 @@
 import { readFileSync } from 'node:fs';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AiToolNode, AiTurnProcessNode } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
-import { AiToolExpandedContent } from '../ai-tool-presentation';
+import { AiToolExpandedContent, buildTurnFileDiffPreview } from '../ai-tool-presentation';
 import {
   AiTurnChangesSummary,
   AiTurnFileBaselinesContext,
   AiTurnRollbackContext,
   buildConversationTurnBaselines,
+  shouldAutoExpandAllFiles,
   summarizeTurnFileChanges,
 } from '../ai-turn-changes-summary';
 
@@ -493,5 +494,117 @@ describe('AiTurnChangesSummary', () => {
     expect(second.get(turn1.key)).toBe(first.get(turn1.key));
     expect(second.get(turn2b.key)).toBe(first.get(turn2a.key));
     expect(second.get(turn2b.key)?.get('src/base.ts')).toBe('line-1\nline-2\n');
+  });
+
+  it('defaults large multi-file reviews to expanding only the selected file, supports expand/collapse all and jump menu', async () => {
+    const tools = Array.from({ length: 12 }, (_, idx) => makeTool({
+      key: `tool:file-${idx}`,
+      callId: `call-file-${idx}`,
+      input: {
+        path: `src/module-${idx}/file-${idx}.ts`,
+        old_string: `export const v${idx} = 1;\n`,
+        new_string: `export const v${idx} = 2;\n`,
+      },
+    }));
+    const process = makeProcess({
+      children: tools,
+      childKeys: tools.map((tool) => tool.key),
+    });
+
+    const summary = summarizeTurnFileChanges(process)!;
+    expect(shouldAutoExpandAllFiles(summary)).toBe(false);
+
+    const { container } = render(
+      <div className="ai-panel-shell relative">
+        <AiTurnChangesSummary process={process} />
+      </div>,
+    );
+
+    fireEvent.click(container.querySelector<HTMLButtonElement>('.ai-turn-changes-trigger')!);
+    fireEvent.click(screen.getByRole('button', { name: 'View changes in src/module-5/file-5.ts' }));
+
+    const dialog = screen.getByRole('dialog');
+    const triggers = Array.from(dialog.querySelectorAll<HTMLButtonElement>('.ai-turn-changes-review-trigger'));
+    expect(triggers).toHaveLength(12);
+
+    const expandedSections = dialog.querySelectorAll('.ai-turn-changes-review-trigger[aria-expanded="true"]');
+    expect(expandedSections).toHaveLength(1);
+    expect(
+      dialog.querySelector('[data-ai-turn-changes-review-file="src/module-5/file-5.ts"] .ai-turn-changes-review-trigger'),
+    ).toHaveAttribute('aria-expanded', 'true');
+    expect(dialog.querySelectorAll('[data-ai-turn-changes-file-body]')).toHaveLength(1);
+    expect(dialog.textContent).toContain('export const v5 = 2;');
+
+    // Clicking another collapsed file expands it immediately.
+    const file9Trigger = dialog.querySelector<HTMLButtonElement>(
+      '[data-ai-turn-changes-review-file="src/module-9/file-9.ts"] .ai-turn-changes-review-trigger',
+    )!;
+    fireEvent.click(file9Trigger);
+    expect(file9Trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(dialog.textContent).toContain('export const v9 = 2;');
+
+    // File jump popover filters and expands the selected file.
+    const jumpTrigger = screen.getByTestId('turn-changes-jump-trigger');
+    fireEvent.click(jumpTrigger);
+    const filterInput = screen.getByPlaceholderText('Filter by file name or path…');
+    fireEvent.change(filterInput, { target: { value: 'module-11' } });
+    fireEvent.keyDown(filterInput, { key: 'Enter' });
+    expect(
+      dialog.querySelector('[data-ai-turn-changes-review-file="src/module-11/file-11.ts"] .ai-turn-changes-review-trigger'),
+    ).toHaveAttribute('aria-expanded', 'true');
+    expect(dialog.textContent).toContain('export const v11 = 2;');
+
+    // Expand all -> Collapse all header toggle.
+    const toggleAll = screen.getByTestId('turn-changes-toggle-all');
+    expect(toggleAll).toHaveAttribute('aria-label', 'Expand all');
+    fireEvent.click(toggleAll);
+    expect(toggleAll).toHaveAttribute('aria-label', 'Collapse all');
+    await waitFor(() => {
+      expect(dialog.querySelectorAll('[data-ai-turn-changes-file-body]')).toHaveLength(12);
+    }, { timeout: 3000 });
+
+    fireEvent.click(toggleAll);
+    expect(dialog.querySelectorAll('.ai-turn-changes-review-trigger[aria-expanded="true"]')).toHaveLength(0);
+    expect(dialog.querySelectorAll('[data-ai-turn-changes-file-body]')).toHaveLength(0);
+  });
+
+  it('paginates very large new-file diffs in review mode and caches buildTurnFileDiffPreview across mounts', () => {
+    const largeContent = Array.from({ length: 450 }, (_, idx) => `export const line_${idx + 1} = ${idx + 1};`).join('\n');
+    const writeTool = makeTool({
+      key: 'tool:large-write',
+      callId: 'call-large-write',
+      name: 'write_file',
+      nativeName: 'write_file',
+      input: { path: 'src/large-generated.ts', content: largeContent },
+    });
+
+    const firstPreview = buildTurnFileDiffPreview('src/large-generated.ts', [writeTool], null);
+    const secondPreview = buildTurnFileDiffPreview('src/large-generated.ts', [writeTool], null);
+    expect(secondPreview).toBe(firstPreview);
+
+    const process = makeProcess({
+      children: [writeTool],
+      childKeys: [writeTool.key],
+    });
+    const { container } = render(
+      <div className="ai-panel-shell relative">
+        <AiTurnChangesSummary process={process} />
+      </div>,
+    );
+
+    fireEvent.click(container.querySelector<HTMLButtonElement>('.ai-turn-changes-trigger')!);
+    fireEvent.click(screen.getByRole('button', { name: 'View changes in src/large-generated.ts' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.querySelectorAll('[data-diff="added"]')).toHaveLength(200);
+    expect(dialog.querySelector('[data-diff-pagination] .ai-diff-fold-main')).toHaveTextContent('Show remaining 250 lines');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show 200 more lines' }));
+    expect(dialog.querySelectorAll('[data-diff="added"]')).toHaveLength(400);
+    expect(dialog.querySelector('[data-diff-pagination] .ai-diff-fold-main')).toHaveTextContent('Show remaining 50 lines');
+
+    fireEvent.click(dialog.querySelector<HTMLButtonElement>('[data-diff-pagination] .ai-diff-fold-main')!);
+    expect(dialog.querySelectorAll('[data-diff="added"]')).toHaveLength(450);
+    expect(dialog.querySelector('[data-diff-pagination]')).toBeNull();
   });
 });

@@ -1,8 +1,23 @@
-import { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeftIcon, ChevronDownIcon, ChevronRightIcon, FileCodeIcon, FileCogIcon, FileTextIcon, HistoryIcon, Trash2Icon } from 'lucide-react';
+import {
+  ArrowLeftIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  ChevronsDownUpIcon,
+  ChevronsUpDownIcon,
+  FileCodeIcon,
+  FileCogIcon,
+  FileTextIcon,
+  HistoryIcon,
+  LoaderCircleIcon,
+  SearchIcon,
+  Trash2Icon,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
@@ -33,6 +48,33 @@ export interface TurnFileChangesSummary {
 }
 
 const MAX_TRACKED_BASELINE_BYTES = 200_000;
+export const TURN_CHANGES_AUTO_EXPAND_MAX_FILES = 6;
+export const TURN_CHANGES_AUTO_EXPAND_MAX_LINES = 400;
+const TURN_CHANGES_JUMP_MENU_MIN_FILES = 8;
+const REVIEW_FILE_INITIAL_ROWS = 200;
+const REVIEW_BATCH_READY_PER_FRAME = 3;
+const ESTIMATED_DIFF_LINE_HEIGHT_PX = 18;
+const MIN_PLACEHOLDER_HEIGHT_PX = 48;
+const MAX_ESTIMATED_PLACEHOLDER_HEIGHT_PX = 420;
+
+export function shouldAutoExpandAllFiles(summary: TurnFileChangesSummary): boolean {
+  if (summary.files.length > TURN_CHANGES_AUTO_EXPAND_MAX_FILES) return false;
+  if (summary.totalAdded !== null && summary.totalRemoved !== null) {
+    return summary.totalAdded + summary.totalRemoved <= TURN_CHANGES_AUTO_EXPAND_MAX_LINES;
+  }
+  return true;
+}
+
+function estimateReviewBodyHeight(file: TurnChangedFileEntry): number {
+  if (file.kind === 'deleted') return 56;
+  const changedLines = (file.added ?? 0) + (file.removed ?? 0);
+  if (changedLines <= 0) return 80;
+  const visibleRows = Math.min(changedLines + 6, REVIEW_FILE_INITIAL_ROWS);
+  return Math.max(
+    MIN_PLACEHOLDER_HEIGHT_PX,
+    Math.min(MAX_ESTIMATED_PLACEHOLDER_HEIGHT_PX, visibleRows * ESTIMATED_DIFF_LINE_HEIGHT_PX + 12),
+  );
+}
 
 function normalizePathKey(raw: string): string {
   return raw.replace(/\\/g, '/').replace(/^\.\//, '');
@@ -335,7 +377,7 @@ function FileChangeIcon({ path, kind }: { readonly path: string; readonly kind: 
   return <FileTextIcon className="ai-turn-changes-file-icon size-3.5 shrink-0" aria-hidden="true" />;
 }
 
-function TurnChangedFileItem({
+const TurnChangedFileItem = memo(function TurnChangedFileItem({
   file,
   onSelect,
 }: {
@@ -376,22 +418,24 @@ function TurnChangedFileItem({
       </button>
     </li>
   );
-}
+});
 
-function TurnReviewFileSection({
+const TurnReviewFileBody = memo(function TurnReviewFileBody({
   file,
-  expanded,
-  autoScroll,
-  onExpandedChange,
+  placeholderHeight,
+  onMeasureHeight,
 }: {
   readonly file: TurnChangedFileEntry;
-  readonly expanded: boolean;
-  readonly autoScroll: boolean;
-  readonly onExpandedChange: (open: boolean) => void;
+  readonly placeholderHeight: number;
+  readonly onMeasureHeight: (
+    path: string,
+    height: number,
+    previousPlaceholderHeight: number,
+    anchorScroll: boolean,
+  ) => void;
 }) {
   const { t } = useI18n();
-  const sectionRef = useRef<HTMLElement>(null);
-  const { basename, directory } = useMemo(() => splitFilePath(file.path), [file.path]);
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   const fileDiff = useMemo(() => {
     if (file.kind === 'deleted') return null;
@@ -403,19 +447,94 @@ function TurnReviewFileSection({
     [file.kind, file.tool.output, fileDiff],
   );
 
-  useEffect(() => {
-    if (autoScroll && sectionRef.current && typeof sectionRef.current.scrollIntoView === 'function') {
-      sectionRef.current.scrollIntoView({ block: 'nearest' });
+  useLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const height = el.getBoundingClientRect().height;
+    if (height > 0) {
+      onMeasureHeight(file.path, height, placeholderHeight, true);
     }
-  }, [autoScroll]);
+    return () => {
+      const finalHeight = el.getBoundingClientRect().height;
+      if (finalHeight > 0) {
+        onMeasureHeight(file.path, finalHeight, placeholderHeight, false);
+      }
+    };
+  }, [file.path, fileDiff, onMeasureHeight, placeholderHeight]);
+
+  return (
+    <div
+      ref={bodyRef}
+      className="ai-turn-changes-review-body min-w-0 border-b border-app-border/40"
+      data-ai-turn-changes-file-body=""
+    >
+      {file.kind === 'deleted' ? (
+        <div className="px-4 py-3">
+          <AiTrashRecoveryNotice />
+        </div>
+      ) : fileDiff ? (
+        <AiToolExpandedContent
+          node={file.tool}
+          compact
+          showCopyActions={false}
+          showInput={false}
+          hideHeader
+          foldContext
+          scrollable={false}
+          maxInitialRows={REVIEW_FILE_INITIAL_ROWS}
+          diffModel={fileDiff}
+        />
+      ) : (
+        <div className="ai-turn-changes-saved-summary px-4 py-3 text-sm">
+          {savedLineCount !== null
+            ? t('ai.workspace.turnChanges.savedLines', { count: savedLineCount })
+            : t('ai.workspace.turnChanges.savedNoDiff')}
+        </div>
+      )}
+    </div>
+  );
+});
+
+const TurnReviewFileSection = memo(function TurnReviewFileSection({
+  file,
+  expanded,
+  renderContent,
+  preparing,
+  placeholderHeight,
+  registerSection,
+  onTogglePath,
+  onMeasureBodyHeight,
+}: {
+  readonly file: TurnChangedFileEntry;
+  readonly expanded: boolean;
+  readonly renderContent: boolean;
+  readonly preparing: boolean;
+  readonly placeholderHeight: number;
+  readonly registerSection: (path: string, element: HTMLElement | null) => void;
+  readonly onTogglePath: (path: string, open: boolean) => void;
+  readonly onMeasureBodyHeight: (
+    path: string,
+    height: number,
+    previousPlaceholderHeight: number,
+    anchorScroll: boolean,
+  ) => void;
+}) {
+  const { t } = useI18n();
+  const { basename, directory } = useMemo(() => splitFilePath(file.path), [file.path]);
+  const handleSectionRef = useCallback((node: HTMLElement | null) => {
+    registerSection(file.path, node);
+  }, [file.path, registerSection]);
+  const handleOpenChange = useCallback((open: boolean) => {
+    onTogglePath(file.path, open);
+  }, [file.path, onTogglePath]);
 
   return (
     <section
-      ref={sectionRef}
+      ref={handleSectionRef}
       className="ai-turn-changes-review-section min-w-0"
       data-ai-turn-changes-review-file={file.path}
     >
-      <Collapsible open={expanded} onOpenChange={onExpandedChange}>
+      <Collapsible open={expanded} onOpenChange={handleOpenChange}>
         <div className="ai-turn-changes-review-row sticky top-0 z-[12] flex h-9 min-w-0 items-center border-b border-app-border/40">
           <CollapsibleTrigger
             render={(
@@ -446,41 +565,178 @@ function TurnReviewFileSection({
                   <span data-diff-count="removed">-{file.removed}</span>
                 </span>
               ) : null}
-              <ChevronRightIcon
-                className={cn('ai-turn-changes-chevron size-3.5 shrink-0', expanded && 'rotate-90')}
-                aria-hidden="true"
-              />
+              {preparing ? (
+                <LoaderCircleIcon
+                  className="ai-turn-changes-chevron size-3.5 shrink-0 animate-spin"
+                  aria-label={t('ai.workspace.turnChanges.loadingDiff')}
+                  data-ai-turn-changes-loading=""
+                />
+              ) : (
+                <ChevronRightIcon
+                  className={cn('ai-turn-changes-chevron size-3.5 shrink-0', expanded && 'rotate-90')}
+                  aria-hidden="true"
+                />
+              )}
             </span>
           </CollapsibleTrigger>
         </div>
         <CollapsibleContent>
-          <div className="ai-turn-changes-review-body min-w-0 border-b border-app-border/40" data-ai-turn-changes-file-body="">
-            {file.kind === 'deleted' ? (
-              <div className="px-4 py-3">
-                <AiTrashRecoveryNotice />
-              </div>
-            ) : fileDiff ? (
-              <AiToolExpandedContent
-                node={file.tool}
-                compact
-                showCopyActions={false}
-                showInput={false}
-                hideHeader
-                foldContext
-                scrollable={false}
-                diffModel={fileDiff}
+          {expanded && (
+            renderContent ? (
+              <TurnReviewFileBody
+                file={file}
+                placeholderHeight={placeholderHeight}
+                onMeasureHeight={onMeasureBodyHeight}
               />
             ) : (
-              <div className="ai-turn-changes-saved-summary px-4 py-3 text-sm">
-                {savedLineCount !== null
-                  ? t('ai.workspace.turnChanges.savedLines', { count: savedLineCount })
-                  : t('ai.workspace.turnChanges.savedNoDiff')}
+              <div
+                className="ai-turn-changes-review-placeholder flex min-w-0 items-center gap-1 border-b border-app-border/40 px-4 py-3"
+                style={{ minHeight: `${placeholderHeight}px` }}
+                data-ai-turn-changes-placeholder=""
+              >
+                {preparing && (
+                  <>
+                    <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
+                    <span>{t('ai.workspace.turnChanges.loadingDiff')}</span>
+                  </>
+                )}
               </div>
-            )}
-          </div>
+            )
+          )}
         </CollapsibleContent>
       </Collapsible>
     </section>
+  );
+});
+
+function TurnReviewFileJumpMenu({
+  files,
+  onJumpToFile,
+}: {
+  readonly files: readonly TurnChangedFileEntry[];
+  readonly onJumpToFile: (path: string) => void;
+}) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const filteredFiles = useMemo(() => {
+    const trimmed = query.trim().toLowerCase();
+    if (!trimmed) return files;
+    return files.filter((file) => file.path.toLowerCase().includes(trimmed));
+  }, [files, query]);
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (!nextOpen) {
+      setQuery('');
+    }
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame(() => inputRef.current?.focus())
+      : null;
+    if (frame === null) {
+      inputRef.current?.focus();
+    }
+    return () => {
+      if (frame !== null && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(frame);
+      }
+    };
+  }, [open]);
+
+  const handleSelect = (path: string) => {
+    setOpen(false);
+    setQuery('');
+    onJumpToFile(path);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <Tooltip>
+        <TooltipTrigger
+          render={(
+            <PopoverTrigger
+              render={(
+                <AiHeaderIconButton
+                  type="button"
+                  aria-label={t('ai.workspace.turnChanges.jumpToFile')}
+                  data-testid="turn-changes-jump-trigger"
+                />
+              )}
+            />
+          )}
+        >
+          <SearchIcon aria-hidden="true" />
+        </TooltipTrigger>
+        <TooltipContent>{t('ai.workspace.turnChanges.jumpToFile')}</TooltipContent>
+      </Tooltip>
+      <PopoverContent align="end" className="w-80 gap-2 p-2">
+        <Input
+          ref={inputRef}
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && filteredFiles.length > 0) {
+              event.preventDefault();
+              handleSelect(filteredFiles[0].path);
+            }
+          }}
+          placeholder={t('ai.workspace.turnChanges.filterPlaceholder')}
+          aria-label={t('ai.workspace.turnChanges.filterPlaceholder')}
+          className="h-8 text-xs"
+        />
+        {filteredFiles.length === 0 ? (
+          <div className="px-2 py-3 text-center text-xs text-muted-foreground">
+            {t('ai.workspace.turnChanges.noMatchingFiles')}
+          </div>
+        ) : (
+          <ScrollArea
+            className="flex max-h-64 min-h-0 flex-col overflow-hidden"
+            viewportRender={<div className="max-h-64 min-h-0 flex-1" />}
+          >
+            <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+              {filteredFiles.map((file) => {
+                const { basename, directory } = splitFilePath(file.path);
+                return (
+                  <li key={file.path} className="min-w-0">
+                    <button
+                      type="button"
+                      className="ai-turn-changes-jump-item flex h-8 w-full min-w-0 items-center justify-between gap-2 px-2 text-left text-xs"
+                      title={file.path}
+                      onClick={() => handleSelect(file.path)}
+                    >
+                      <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                        <span className={cn('flex items-center gap-1', directory ? 'max-w-[65%] shrink-0' : 'min-w-0')}>
+                          <FileChangeIcon path={file.path} kind={file.kind} />
+                          <span className="ai-turn-changes-basename min-w-0 truncate">{basename}</span>
+                        </span>
+                        {directory && (
+                          <span className="ai-turn-changes-dir min-w-0 truncate">{directory}</span>
+                        )}
+                      </span>
+                      {file.kind === 'deleted' ? (
+                        <span className="ai-turn-changes-deleted shrink-0 text-[11px]">{t('ai.workspace.turnChanges.deleted')}</span>
+                      ) : file.added !== null && file.removed !== null ? (
+                        <span className="ai-turn-changes-counts inline-flex shrink-0 items-center gap-1 tabular-nums">
+                          <span data-diff-count="added">+{file.added}</span>
+                          <span data-diff-count="removed">-{file.removed}</span>
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </ScrollArea>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -494,7 +750,7 @@ function TurnChangedFilesOverlay({
 }: {
   readonly summary: TurnFileChangesSummary;
   readonly title: string;
-  readonly initialFilePath: string | null;
+  readonly initialFilePath: string;
   readonly portalContainer: HTMLElement | null;
   readonly onOpenRollback?: (paths: readonly string[]) => void;
   readonly onClose: () => void;
@@ -502,17 +758,203 @@ function TurnChangedFilesOverlay({
   const { t } = useI18n();
   const titleId = useId();
   const overlayRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
-  const filesRef = useRef(summary.files);
-  filesRef.current = summary.files;
-  const [expandedPaths, setExpandedPaths] = useState<ReadonlySet<string>>(() => new Set());
+
+  const autoExpandAll = useMemo(() => shouldAutoExpandAllFiles(summary), [summary]);
+  const lazyVirtualize = !autoExpandAll;
+  const hasIntersectionObserver = typeof IntersectionObserver !== 'undefined';
+
+  const sectionElementsRef = useRef<Map<string, HTMLElement>>(new Map());
+  const measuredHeightsRef = useRef<Map<string, number>>(new Map());
+  const observerRef = useRef<IntersectionObserver | null>(null);
+
+  const [expandedPaths, setExpandedPaths] = useState<ReadonlySet<string>>(() => (
+    autoExpandAll
+      ? new Set(summary.files.map((file) => file.path))
+      : new Set([initialFilePath])
+  ));
+  const [readyPaths, setReadyPaths] = useState<ReadonlySet<string>>(() => (
+    autoExpandAll
+      ? new Set(summary.files.map((file) => file.path))
+      : new Set([initialFilePath])
+  ));
+  const [nearViewportPaths, setNearViewportPaths] = useState<ReadonlySet<string>>(() => (
+    autoExpandAll || !hasIntersectionObserver
+      ? new Set(summary.files.map((file) => file.path))
+      : new Set([initialFilePath])
+  ));
+  const [scrollTarget, setScrollTarget] = useState<{ readonly path: string; readonly nonce: number } | null>(() => (
+    summary.files.length > 1 ? { path: initialFilePath, nonce: 0 } : null
+  ));
+
+  const registerSection = useCallback((path: string, element: HTMLElement | null) => {
+    const prev = sectionElementsRef.current.get(path);
+    if (prev && prev !== element) {
+      observerRef.current?.unobserve(prev);
+    }
+    if (element) {
+      sectionElementsRef.current.set(path, element);
+      observerRef.current?.observe(element);
+    } else {
+      sectionElementsRef.current.delete(path);
+    }
+  }, []);
 
   useEffect(() => {
-    if (!initialFilePath) return;
-    setExpandedPaths(new Set(filesRef.current.map((file) => file.path)));
+    if (!lazyVirtualize || !hasIntersectionObserver) return;
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        setNearViewportPaths((prev) => {
+          let changed = false;
+          const next = new Set(prev);
+          for (const entry of entries) {
+            const path = (entry.target as HTMLElement).dataset.aiTurnChangesReviewFile;
+            if (!path) continue;
+            if (entry.isIntersecting) {
+              if (!next.has(path)) {
+                next.add(path);
+                changed = true;
+              }
+            } else if (next.has(path)) {
+              next.delete(path);
+              changed = true;
+            }
+          }
+          return changed ? next : prev;
+        });
+      },
+      { root: viewport, rootMargin: '600px 0px' },
+    );
+    observerRef.current = observer;
+    for (const element of sectionElementsRef.current.values()) {
+      observer.observe(element);
+    }
+    return () => {
+      observer.disconnect();
+      if (observerRef.current === observer) {
+        observerRef.current = null;
+      }
+    };
+  }, [hasIntersectionObserver, lazyVirtualize]);
+
+  // Incrementally admit expanded near-viewport files into readyPaths across frames
+  // so clicking "Expand all" on 30+ files never freezes the main thread.
+  useEffect(() => {
+    const waiting: string[] = [];
+    for (const file of summary.files) {
+      if (!expandedPaths.has(file.path)) continue;
+      if (readyPaths.has(file.path)) continue;
+      if (lazyVirtualize && hasIntersectionObserver && !nearViewportPaths.has(file.path)) continue;
+      waiting.push(file.path);
+    }
+    if (waiting.length === 0) return;
+
+    const batch = waiting.slice(0, REVIEW_BATCH_READY_PER_FRAME);
+    const admit = () => {
+      setReadyPaths((prev) => {
+        let changed = false;
+        const next = new Set(prev);
+        for (const path of batch) {
+          if (!next.has(path)) {
+            next.add(path);
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    };
+
+    if (typeof requestAnimationFrame === 'function') {
+      const handle = requestAnimationFrame(admit);
+      return () => cancelAnimationFrame(handle);
+    }
+    const timer = globalThis.setTimeout(admit, 0);
+    return () => clearTimeout(timer);
+  }, [expandedPaths, hasIntersectionObserver, lazyVirtualize, nearViewportPaths, readyPaths, summary.files]);
+
+  const handleTogglePath = useCallback((path: string, nextOpen: boolean) => {
+    setExpandedPaths((prev) => {
+      const has = prev.has(path);
+      if (nextOpen === has) return prev;
+      const next = new Set(prev);
+      if (nextOpen) next.add(path);
+      else next.delete(path);
+      return next;
+    });
+    if (nextOpen) {
+      setReadyPaths((prev) => {
+        if (prev.has(path)) return prev;
+        const next = new Set(prev);
+        next.add(path);
+        return next;
+      });
+      setNearViewportPaths((prev) => {
+        if (prev.has(path)) return prev;
+        const next = new Set(prev);
+        next.add(path);
+        return next;
+      });
+    }
+  }, []);
+
+  const handleMeasureBodyHeight = useCallback((
+    path: string,
+    measuredHeight: number,
+    previousPlaceholderHeight: number,
+    anchorScroll: boolean,
+  ) => {
+    const previousHeight = measuredHeightsRef.current.get(path) ?? previousPlaceholderHeight;
+    measuredHeightsRef.current.set(path, measuredHeight);
+    if (!anchorScroll) return;
+    const viewport = viewportRef.current;
+    const section = sectionElementsRef.current.get(path);
+    if (!viewport || !section) return;
+    const delta = measuredHeight - previousHeight;
+    // Anchor scroll position when a section above the viewport changes height during lazy mount.
+    if (Math.abs(delta) > 1 && section.offsetTop + 36 < viewport.scrollTop) {
+      viewport.scrollTop += delta;
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!scrollTarget) return;
+    const section = sectionElementsRef.current.get(scrollTarget.path);
+    const viewport = viewportRef.current;
+    if (!section) return;
+    if (viewport && typeof section.offsetTop === 'number' && section.offsetTop > 0) {
+      viewport.scrollTop = section.offsetTop;
+    } else if (typeof section.scrollIntoView === 'function') {
+      section.scrollIntoView({ block: 'start' });
+    }
+  }, [scrollTarget]);
+
+  const handleJumpToFile = useCallback((path: string) => {
+    handleTogglePath(path, true);
+    setScrollTarget((prev) => ({ path, nonce: (prev?.nonce ?? 0) + 1 }));
+    const section = sectionElementsRef.current.get(path);
+    section?.querySelector<HTMLButtonElement>('.ai-turn-changes-review-trigger')?.focus();
+  }, [handleTogglePath]);
+
+  const allExpanded = useMemo(
+    () => summary.files.length > 0 && summary.files.every((file) => expandedPaths.has(file.path)),
+    [expandedPaths, summary.files],
+  );
+
+  const handleToggleAll = useCallback(() => {
+    if (allExpanded) {
+      setExpandedPaths(new Set());
+    } else {
+      setExpandedPaths(new Set(summary.files.map((file) => file.path)));
+    }
+  }, [allExpanded, summary.files]);
+
+  useEffect(() => {
     previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     closeButtonRef.current?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -529,6 +971,9 @@ function TurnChangedFilesOverlay({
         return;
       }
       if (event.key !== 'Tab') return;
+      const targetEl = event.target instanceof Element ? event.target : null;
+      const topDialog = targetEl?.closest('[role="dialog"], [role="alertdialog"], [data-slot="popover-content"]');
+      if (topDialog && topDialog !== overlay && !overlay.contains(topDialog)) return;
       const focusables = overlay.querySelectorAll<HTMLElement>(
         'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
       );
@@ -553,9 +998,7 @@ function TurnChangedFilesOverlay({
       previousFocusRef.current?.focus();
       previousFocusRef.current = null;
     };
-  }, [initialFilePath]);
-
-  if (!initialFilePath) return null;
+  }, []);
 
   const target = portalContainer ?? (typeof document !== 'undefined' ? document.body : null);
   if (!target) return null;
@@ -571,6 +1014,10 @@ function TurnChangedFilesOverlay({
       tabIndex={-1}
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
+          if (event.defaultPrevented) return;
+          const targetEl = event.target instanceof Element ? event.target : null;
+          const topDialog = targetEl?.closest('[role="dialog"], [role="alertdialog"], [data-slot="popover-content"]');
+          if (topDialog && topDialog !== overlayRef.current && !overlayRef.current?.contains(topDialog)) return;
           event.preventDefault();
           event.stopPropagation();
           onClose();
@@ -600,12 +1047,36 @@ function TurnChangedFilesOverlay({
           </Tooltip>
           <h2 id={titleId} className="ai-turn-changes-title m-0 min-w-0 truncate text-sm">{title}</h2>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5">
           {summary.totalAdded !== null && summary.totalRemoved !== null && (
             <span className="ai-turn-changes-counts inline-flex shrink-0 items-center gap-1 tabular-nums">
               <span data-diff-count="added">+{summary.totalAdded}</span>
               <span data-diff-count="removed">-{summary.totalRemoved}</span>
             </span>
+          )}
+          {summary.files.length >= TURN_CHANGES_JUMP_MENU_MIN_FILES && (
+            <TurnReviewFileJumpMenu files={summary.files} onJumpToFile={handleJumpToFile} />
+          )}
+          {summary.files.length > 1 && (
+            <Tooltip>
+              <TooltipTrigger
+                render={(
+                  <AiHeaderIconButton
+                    type="button"
+                    aria-label={t(allExpanded ? 'ai.workspace.turnChanges.collapseAll' : 'ai.workspace.turnChanges.expandAll')}
+                    data-testid="turn-changes-toggle-all"
+                    onClick={handleToggleAll}
+                  />
+                )}
+              >
+                {allExpanded
+                  ? <ChevronsDownUpIcon aria-hidden="true" />
+                  : <ChevronsUpDownIcon aria-hidden="true" />}
+              </TooltipTrigger>
+              <TooltipContent>
+                {t(allExpanded ? 'ai.workspace.turnChanges.collapseAll' : 'ai.workspace.turnChanges.expandAll')}
+              </TooltipContent>
+            </Tooltip>
           )}
           {onOpenRollback && (
             <Button
@@ -615,9 +1086,7 @@ function TurnChangedFilesOverlay({
               className="h-7 gap-1 px-2 text-xs"
               aria-label={t('ai.workspace.turnChanges.rollbackAria')}
               onClick={() => {
-                const paths = initialFilePath
-                  ? [initialFilePath, ...summary.files.map((file) => file.path)]
-                  : summary.files.map((file) => file.path);
+                const paths = [initialFilePath, ...summary.files.map((file) => file.path)];
                 onClose();
                 onOpenRollback(paths);
               }}
@@ -628,24 +1097,29 @@ function TurnChangedFilesOverlay({
           )}
         </div>
       </div>
-      <ScrollArea className="min-h-0 flex-1">
+      <ScrollArea className="min-h-0 flex-1" viewportRef={viewportRef}>
         <div className="flex min-w-0 flex-col">
-          {summary.files.map((file) => (
-            <TurnReviewFileSection
-              key={file.path}
-              file={file}
-              expanded={expandedPaths.has(file.path)}
-              autoScroll={summary.files.length > 1 && file.path === initialFilePath}
-              onExpandedChange={(nextOpen) => {
-                setExpandedPaths((prev) => {
-                  const next = new Set(prev);
-                  if (nextOpen) next.add(file.path);
-                  else next.delete(file.path);
-                  return next;
-                });
-              }}
-            />
-          ))}
+          {summary.files.map((file) => {
+            const expanded = expandedPaths.has(file.path);
+            const inViewport = !lazyVirtualize || !hasIntersectionObserver || nearViewportPaths.has(file.path);
+            const ready = readyPaths.has(file.path);
+            const renderContent = expanded && inViewport && ready;
+            const preparing = expanded && inViewport && !ready;
+            const placeholderHeight = measuredHeightsRef.current.get(file.path) ?? estimateReviewBodyHeight(file);
+            return (
+              <TurnReviewFileSection
+                key={file.path}
+                file={file}
+                expanded={expanded}
+                renderContent={renderContent}
+                preparing={preparing}
+                placeholderHeight={placeholderHeight}
+                registerSection={registerSection}
+                onTogglePath={handleTogglePath}
+                onMeasureBodyHeight={handleMeasureBodyHeight}
+              />
+            );
+          })}
         </div>
       </ScrollArea>
     </div>,
@@ -673,10 +1147,14 @@ export function AiTurnChangesSummary({
     ? t('ai.workspace.turnChanges.summarySingle')
     : t('ai.workspace.turnChanges.summary', { count: summary.files.length });
 
-  const handleSelectFile = (file: TurnChangedFileEntry) => {
+  const handleSelectFile = useCallback((file: TurnChangedFileEntry) => {
     setPortalContainer(rootRef.current?.closest<HTMLElement>('.ai-panel-shell') ?? null);
     setSelectedFilePath(file.path);
-  };
+  }, []);
+
+  const handleCloseOverlay = useCallback(() => {
+    setSelectedFilePath(null);
+  }, []);
 
   return (
     <>
@@ -739,14 +1217,16 @@ export function AiTurnChangesSummary({
           </CollapsibleContent>
         </div>
       </Collapsible>
-      <TurnChangedFilesOverlay
-        summary={summary}
-        title={title}
-        initialFilePath={selectedFilePath}
-        portalContainer={portalContainer}
-        onOpenRollback={onOpenRollback}
-        onClose={() => setSelectedFilePath(null)}
-      />
+      {selectedFilePath && (
+        <TurnChangedFilesOverlay
+          summary={summary}
+          title={title}
+          initialFilePath={selectedFilePath}
+          portalContainer={portalContainer}
+          onOpenRollback={onOpenRollback}
+          onClose={handleCloseOverlay}
+        />
+      )}
     </>
   );
 }

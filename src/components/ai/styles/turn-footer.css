@@ -255,6 +255,31 @@
   color: var(--ai-text-secondary);
 }
 
+.ai-turn-changes-review-body {
+  contain: layout style;
+}
+
+.ai-turn-changes-review-placeholder {
+  color: var(--ai-text-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.ai-turn-changes-jump-item {
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ai-text-secondary);
+  font: inherit;
+}
+
+.ai-turn-changes-jump-item:hover,
+.ai-turn-changes-jump-item:focus-visible {
+  background: var(--ai-action-hover);
+  color: var(--ai-text);
+  outline: none;
+}
+
 .ai-turn-stat-note {
   color: var(--ai-text-muted);
   font-size: 11px;
