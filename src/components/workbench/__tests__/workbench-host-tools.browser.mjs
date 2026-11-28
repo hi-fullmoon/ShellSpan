@@ -56,6 +56,7 @@ try {
     await page.evaluate(async () => {
       const { default: React } = await import('/@id/react');
       const { default: ReactDOM } = await import('/@id/react-dom/client');
+      const { ConnectionList } = await import('/src/components/workbench/connection-list.tsx');
       const { PortForwardPanel } = await import('/src/components/workbench/port-forward-panel.tsx');
       const { HostQuickActionsPanel } = await import('/src/components/workbench/host-quick-actions-panel.tsx');
       const { WorkbenchSidebar } = await import('/src/components/workbench/workbench-sidebar.tsx');
@@ -147,6 +148,7 @@ try {
       function Harness() {
         const activeTab = useAppStore((s) => s.activeWorkbenchTab);
         const setActiveTab = useAppStore((s) => s.setActiveWorkbenchTab);
+        const listProfiles = useProfileStore((s) => s.profiles);
         return React.createElement(
           'div',
           { className: 'flex h-full w-full' },
@@ -161,9 +163,23 @@ try {
           React.createElement(
             'div',
             { className: 'flex h-full min-w-0 flex-1 flex-col overflow-hidden' },
-            activeTab === 'portForwards'
-              ? React.createElement(PortForwardPanel)
-              : React.createElement(HostQuickActionsPanel),
+            activeTab === 'connections'
+              ? React.createElement(ConnectionList, {
+                  profiles: listProfiles,
+                  initialized: true,
+                  onAdd() {},
+                  onEdit() {},
+                  onDelete() {},
+                  onConnectTerminal() {},
+                  onConnectSftp() {},
+                  onDuplicate() {},
+                  onToggleFavorite() {},
+                  onImport() {},
+                  onExport() {},
+                })
+              : activeTab === 'portForwards'
+                ? React.createElement(PortForwardPanel)
+                : React.createElement(HostQuickActionsPanel),
           ),
         );
       }
@@ -173,6 +189,11 @@ try {
 
     for (const width of [1200, 640]) {
       await page.setViewportSize({ width, height: 760 });
+      if (width === 1200) {
+        await page.locator('nav').getByRole('button', { name: /^连接管理/ }).click();
+        await page.getByText('生产数据库').waitFor();
+        await page.screenshot({ path: path.join(output, 'connections-1200.png') });
+      }
       await page.locator('nav').getByRole('button', { name: /^端口转发/ }).click();
       await page.getByText('PostgreSQL 隧道').waitFor();
 
@@ -185,13 +206,13 @@ try {
       assert.ok(Math.abs(pfAllBox.height - pfHostBox.height) <= 1, `PF toolbar height mismatch at ${width}: ${pfAllBox.height} vs ${pfHostBox.height}`);
 
       const pfCardGap = await page.evaluate(() => {
-        const cards = [...document.querySelectorAll('[data-slot="card"]')];
-        if (cards.length < 2) return 12;
+        const cards = [...document.querySelectorAll('[data-slot="management-card"]')];
+        if (cards.length < 2) return 8;
         const a = cards[0].getBoundingClientRect();
         const b = cards[1].getBoundingClientRect();
         return Math.abs(a.y - b.y) < 4 ? Math.round(b.x - a.right) : Math.round(b.y - a.bottom);
       });
-      assert.equal(pfCardGap, 12, `PF card gap expected 12px at ${width}, got ${pfCardGap}`);
+      assert.equal(pfCardGap, 8, `PF card gap expected 8px at ${width}, got ${pfCardGap}`);
 
       if (width === 1200) {
         await page.screenshot({ path: path.join(output, 'port-forward-1200.png') });

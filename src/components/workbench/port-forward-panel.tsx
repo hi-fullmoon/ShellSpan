@@ -17,18 +17,9 @@ import {
   SquareIcon,
   Trash2Icon,
 } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import {
   Drawer,
   DrawerContent,
@@ -36,7 +27,7 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from '@/components/ui/drawer';
-import { PanelEmptyState } from '@/components/ui/empty-state';
+import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import {
   Field,
   FieldDescription,
@@ -58,7 +49,7 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { TooltipProvider } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import { getErrorMessage } from '@/lib/error';
 import { formatBytes, generateId } from '@/lib/utils';
@@ -71,6 +62,8 @@ import { useProfileStore } from '@/stores/profileStore';
 import { useToastStore } from '@/stores/toastStore';
 import { useWorkbenchToolsStore } from '@/stores/workbenchToolsStore';
 import type { ConnectionProfile, PortForwardKind, PortForwardRule } from '@/types';
+import { IconActionButton } from './icon-action-button';
+import { ManagementCard, ManagementCardIcon, ManagementCardText } from './management-card';
 import {
   WorkbenchPage,
   WorkbenchPageContent,
@@ -159,6 +152,7 @@ function ruleRouteSummary(rule: PortForwardRule): string {
 export const PortForwardPanel: React.FC = () => {
   const { t } = useI18n();
   const profiles = useProfileStore((state) => state.profiles);
+  const profilesInitialized = useProfileStore((state) => state.initialized);
   const allRuntimes = usePortForwardStore((state) => state.runtimes);
   const selectedProfileId = useWorkbenchToolsStore((state) => state.portForwardProfileId);
   const selectProfile = useWorkbenchToolsStore((state) => state.selectPortForwardProfile);
@@ -169,6 +163,12 @@ export const PortForwardPanel: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [draft, setDraft] = useState<RuleDraft>();
+  const [showValidation, setShowValidation] = useState(false);
+  const [deleting, setDeleting] = useState<{
+    profile: ConnectionProfile;
+    rule: PortForwardRule;
+    active: boolean;
+  }>();
   const [saving, setSaving] = useState(false);
 
   const effectiveProfileFilter = useMemo(() => {
@@ -204,6 +204,7 @@ export const PortForwardPanel: React.FC = () => {
         : String(pendingDraft.draft.remotePort ?? ''),
       autoStart: Boolean(pendingDraft.draft.autoStart),
     });
+    setShowValidation(false);
     setDrawerOpen(true);
     consumeDraft(pendingDraft.token);
   }, [consumeDraft, pendingDraft, profiles]);
@@ -288,27 +289,34 @@ export const PortForwardPanel: React.FC = () => {
     });
   }, [normalizedQuery, scopedEntries, statusFilter]);
 
-  const validationError = useMemo(() => {
-    if (!draft) return undefined;
+  const fieldErrors = useMemo(() => {
+    const errors: Partial<Record<'profileId' | 'name' | 'localPort' | 'remoteHost' | 'remotePort', string>> = {};
+    if (!draft) return errors;
     if (!draft.profileId || !profiles.some((profile) => profile.id === draft.profileId)) {
-      return t('portForward.validation.profile');
+      errors.profileId = t('portForward.validation.profile');
+    }
+    if (!draft.name.trim()) {
+      errors.name = t('portForward.validation.name');
     }
     const localPort = Number(draft.localPort);
-    const remotePort = Number(draft.remotePort);
-    if (!draft.name.trim()) return t('portForward.validation.name');
-    if (!Number.isInteger(localPort) || localPort < 1 || localPort > 65_535) {
-      return t('portForward.validation.port');
+    if (!draft.localPort.trim() || !Number.isInteger(localPort) || localPort < 1 || localPort > 65_535) {
+      errors.localPort = t('portForward.validation.port');
     }
-    if (draft.kind === 'dynamic') return undefined;
-    if (!draft.remoteHost.trim()) return t('portForward.validation.host');
-    if (!Number.isInteger(remotePort) || remotePort < 1 || remotePort > 65_535) {
-      return t('portForward.validation.port');
+    if (draft.kind !== 'dynamic') {
+      if (!draft.remoteHost.trim()) {
+        errors.remoteHost = t('portForward.validation.host');
+      } else if (draft.kind === 'remote' && !['127.0.0.1', 'localhost', '::1'].includes(draft.remoteHost.trim())) {
+        errors.remoteHost = t('portForward.validation.remoteLoopback');
+      }
+      const remotePort = Number(draft.remotePort);
+      if (!draft.remotePort.trim() || !Number.isInteger(remotePort) || remotePort < 1 || remotePort > 65_535) {
+        errors.remotePort = t('portForward.validation.port');
+      }
     }
-    if (draft.kind === 'remote' && !['127.0.0.1', 'localhost', '::1'].includes(draft.remoteHost.trim())) {
-      return t('portForward.validation.remoteLoopback');
-    }
-    return undefined;
+    return errors;
   }, [draft, profiles, t]);
+
+  const hasValidationErrors = Object.keys(fieldErrors).length > 0;
 
   const openCreate = (): void => {
     const defaultProfileId = effectiveProfileFilter !== 'all'
@@ -316,16 +324,35 @@ export const PortForwardPanel: React.FC = () => {
       : (profiles[0]?.id ?? '');
     if (!defaultProfileId) return;
     setDraft(createDraft(defaultProfileId));
+    setShowValidation(false);
     setDrawerOpen(true);
   };
 
   const closeDrawer = (): void => {
     if (saving) return;
+    setShowValidation(false);
     setDrawerOpen(false);
   };
 
   const saveDraft = async (): Promise<void> => {
-    if (!draft || validationError) return;
+    if (!draft) return;
+    if (hasValidationErrors) {
+      setShowValidation(true);
+      const firstKey = Object.keys(fieldErrors)[0] as keyof typeof fieldErrors | undefined;
+      if (firstKey) {
+        const controlIds: Record<keyof typeof fieldErrors, string> = {
+          profileId: 'port-forward-host',
+          name: 'port-forward-name',
+          localPort: 'port-forward-local-port',
+          remoteHost: 'port-forward-remote-host',
+          remotePort: 'port-forward-remote-port',
+        };
+        window.requestAnimationFrame(() => {
+          document.getElementById(controlIds[firstKey])?.focus();
+        });
+      }
+      return;
+    }
     const targetProfile = profiles.find((profile) => profile.id === draft.profileId);
     if (!targetProfile) return;
 
@@ -346,6 +373,7 @@ export const PortForwardPanel: React.FC = () => {
     setSaving(true);
     try {
       await useProfileStore.getState().updateProfile(targetProfile.id, { portForwards: nextRules });
+      setShowValidation(false);
       setDrawerOpen(false);
     } catch (error) {
       useToastStore.getState().addToast(getErrorMessage(error), 'error');
@@ -367,6 +395,10 @@ export const PortForwardPanel: React.FC = () => {
       await useProfileStore.getState().updateProfile(profile.id, {
         portForwards: existingRules.filter((item) => item.id !== rule.id),
       });
+      if (draft?.id === rule.id && draft.profileId === profile.id) {
+        setDrawerOpen(false);
+      }
+      setDeleting(undefined);
     } catch (error) {
       useToastStore.getState().addToast(getErrorMessage(error), 'error');
     }
@@ -485,7 +517,9 @@ export const PortForwardPanel: React.FC = () => {
 
         <ScrollArea className="min-h-0 flex-1">
           <WorkbenchPageContent>
-            {profiles.length === 0 ? (
+            {!profilesInitialized && profiles.length === 0 ? (
+              <PanelLoadingState />
+            ) : profiles.length === 0 ? (
               <PanelEmptyState
                 icon={<ServerIcon className="size-5" />}
                 title={t('portForward.noProfilesTitle')}
@@ -504,120 +538,156 @@ export const PortForwardPanel: React.FC = () => {
                 description={t('common.noSearchResults')}
               />
             ) : (
-              <div className="grid grid-cols-1 gap-3 @min-[46rem]:grid-cols-2">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))] gap-2">
                 {filteredEntries.map(({ profile, rule, runtime, active }) => (
-                  <Card key={`${profile.id}:${rule.id}`} size="sm" radius="compact" className="flex flex-col">
-                    <CardHeader>
-                      <CardTitle className="flex flex-wrap items-center gap-1.5">
-                        <span className="truncate">{rule.name}</span>
-                        <Badge variant="outline">{t(`portForward.kind.${rule.kind}`)}</Badge>
-                        <Badge variant={rule.autoStart ? 'secondary' : 'outline'}>
-                          {rule.autoStart ? t('portForward.mode.auto') : t('portForward.mode.manual')}
-                        </Badge>
-                      </CardTitle>
-                      <CardDescription className="truncate font-mono">
-                        {ruleRouteSummary(rule)}
-                      </CardDescription>
-                      <CardAction>
-                        <Badge variant={statusVariant(runtime?.status)}>
-                          {t(`portForward.status.${runtime?.status ?? 'idle'}`)}
-                        </Badge>
-                      </CardAction>
-                    </CardHeader>
-                    <CardContent className="flex flex-1 flex-col gap-3">
-                      <div className="flex items-center justify-between gap-2 rounded-lg bg-muted/45 px-2.5 py-1.5 text-xs">
-                        <span className="flex min-w-0 items-center gap-1 font-medium text-foreground">
-                          <ServerIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                          <span className="truncate">{profileDisplayName(profile)}</span>
-                        </span>
-                        <span className="shrink-0 font-mono text-muted-foreground">
-                          {profile.host}:{profile.port}
-                        </span>
+                  <ManagementCard key={`${profile.id}:${rule.id}`} className="gap-2">
+                    <div className="flex items-center gap-2">
+                      <ManagementCardIcon>
+                        <CableIcon aria-hidden />
+                      </ManagementCardIcon>
+                      <div className="flex min-w-0 flex-1 flex-col">
+                        <div className="flex min-w-0 items-center justify-between gap-2">
+                          <ManagementCardText
+                            text={rule.name}
+                            className="flex-1 text-sm font-medium text-app-text"
+                          />
+                          <Badge variant={statusVariant(runtime?.status)} size="sm" className="shrink-0">
+                            {t(`portForward.status.${runtime?.status ?? 'idle'}`)}
+                          </Badge>
+                        </div>
+                        <ManagementCardText
+                          text={ruleRouteSummary(rule)}
+                          className="font-mono text-xs text-muted-foreground"
+                        />
                       </div>
+                    </div>
 
-                      {runtime ? (
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                          <span>
-                            {t('portForward.started')}: {runtime.startedAt ? new Date(runtime.startedAt).toLocaleString() : '—'}
-                          </span>
-                          <span>
-                            {t('portForward.runMode')}: {t(`portForward.mode.${runtime.mode}`)}
-                          </span>
-                          <span className="flex items-center gap-1 font-mono tabular-nums">
-                            <ArrowUpIcon className="size-3.5 shrink-0" aria-hidden />
+                    <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                      <ServerIcon className="size-3.5 shrink-0" aria-hidden />
+                      <ManagementCardText
+                        text={`${profileDisplayName(profile)} · ${profile.host}:${profile.port}`}
+                        className="flex-1 text-xs text-muted-foreground"
+                      />
+                    </div>
+
+                    {runtime && (runtime.startedAt || runtime.bytesSent > 0 || runtime.bytesReceived > 0) ? (
+                      <div className="flex items-center justify-between gap-2 rounded-md border border-app-border/60 bg-muted/50 px-2 py-0.5 text-[11px] leading-4 text-muted-foreground">
+                        <div className="flex items-center gap-2.5 font-mono tabular-nums">
+                          <span className="flex items-center gap-1">
+                            <ArrowUpIcon className="size-3 shrink-0" aria-hidden />
                             {formatBytes(runtime.bytesSent)}
                           </span>
-                          <span className="flex items-center gap-1 font-mono tabular-nums">
-                            <ArrowDownIcon className="size-3.5 shrink-0" aria-hidden />
+                          <span className="flex items-center gap-1">
+                            <ArrowDownIcon className="size-3 shrink-0" aria-hidden />
                             {formatBytes(runtime.bytesReceived)}
                           </span>
                         </div>
-                      ) : null}
+                        {runtime.startedAt ? (
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <span className="truncate font-mono tabular-nums" tabIndex={0} />
+                              }
+                            >
+                              {new Date(runtime.startedAt).toLocaleTimeString()}
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {t('portForward.started')}: {new Date(runtime.startedAt).toLocaleString()} · {t('portForward.runMode')}: {t(`portForward.mode.${runtime.mode}`)}
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : null}
+                      </div>
+                    ) : null}
 
-                      {runtime?.lastError ? (
-                        <Alert variant="destructive">
-                          <AlertCircleIcon />
-                          <AlertTitle>
+                    {runtime?.lastError ? (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <div
+                              role="alert"
+                              tabIndex={0}
+                              className="flex min-w-0 items-center gap-1 rounded-md border border-destructive/30 bg-destructive/5 px-2 py-0.5 text-[11px] leading-4 text-destructive"
+                            />
+                          }
+                        >
+                          <AlertCircleIcon className="size-3 shrink-0" aria-hidden />
+                          <span className="shrink-0 font-medium">
                             {runtime.errorCategory === 'portInUse'
                               ? t('portForward.error.portInUseTitle')
                               : t('portForward.error.title')}
-                          </AlertTitle>
-                          <AlertDescription>{runtime.lastError}</AlertDescription>
-                        </Alert>
-                      ) : null}
-                    </CardContent>
-                    <CardFooter className="mt-auto flex-wrap justify-between gap-2">
-                      <div className="flex items-center gap-1">
-                        <Button
-                          size="xs"
-                          variant="outline"
+                          </span>
+                          <span aria-hidden className="shrink-0 opacity-60">·</span>
+                          <span className="min-w-0 flex-1 truncate text-destructive/85">
+                            {runtime.lastError}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-sm whitespace-pre-wrap break-words">
+                          <div className="font-medium">
+                            {runtime.errorCategory === 'portInUse'
+                              ? t('portForward.error.portInUseTitle')
+                              : t('portForward.error.title')}
+                          </div>
+                          <div>{runtime.lastError}</div>
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : null}
+
+                    <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                      <div className="flex min-w-0 flex-wrap items-center gap-1">
+                        <Badge variant="outline" size="sm">{t(`portForward.kind.${rule.kind}`)}</Badge>
+                        <Badge variant={rule.autoStart ? 'secondary' : 'outline'} size="sm">
+                          {rule.autoStart ? t('portForward.mode.auto') : t('portForward.mode.manual')}
+                        </Badge>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        {active && runtime ? (
+                          <IconActionButton
+                            disabled={runtime.status === 'stopping'}
+                            onClick={() => void usePortForwardStore.getState().stop(runtime.operationId)}
+                            aria-label={t('portForward.stop')}
+                            tooltip={t('portForward.stop')}
+                          >
+                            <SquareIcon data-icon="inline-start" className="text-destructive" />
+                          </IconActionButton>
+                        ) : runtime?.status === 'failed' ? (
+                          <IconActionButton
+                            onClick={() => void usePortForwardStore.getState().retry(runtime.operationId)}
+                            aria-label={t('portForward.retry')}
+                            tooltip={t('portForward.retry')}
+                          >
+                            <RotateCcwIcon data-icon="inline-start" className="text-app-primary" />
+                          </IconActionButton>
+                        ) : (
+                          <IconActionButton
+                            onClick={() => void usePortForwardStore.getState().startRule(profile, rule, 'manual')}
+                            aria-label={t('portForward.start')}
+                            tooltip={t('portForward.start')}
+                          >
+                            <PlayIcon data-icon="inline-start" />
+                          </IconActionButton>
+                        )}
+                        <IconActionButton
                           onClick={() => {
                             setDraft(createDraft(profile.id, rule));
+                            setShowValidation(false);
                             setDrawerOpen(true);
                           }}
                           disabled={active}
+                          aria-label={t('common.edit')}
+                          tooltip={t('common.edit')}
                         >
                           <PencilIcon data-icon="inline-start" />
-                          {t('common.edit')}
-                        </Button>
-                        <Button
-                          size="xs"
-                          variant="ghost"
-                          onClick={() => void removeRule(profile, rule)}
+                        </IconActionButton>
+                        <IconActionButton
+                          onClick={() => setDeleting({ profile, rule, active })}
+                          aria-label={t('common.delete')}
+                          tooltip={t('common.delete')}
                         >
-                          <Trash2Icon data-icon="inline-start" />
-                          {t('common.delete')}
-                        </Button>
+                          <Trash2Icon data-icon="inline-start" className="text-destructive" />
+                        </IconActionButton>
                       </div>
-                      {active && runtime ? (
-                        <Button
-                          size="xs"
-                          variant="destructive"
-                          disabled={runtime.status === 'stopping'}
-                          onClick={() => void usePortForwardStore.getState().stop(runtime.operationId)}
-                        >
-                          <SquareIcon data-icon="inline-start" />
-                          {t('portForward.stop')}
-                        </Button>
-                      ) : runtime?.status === 'failed' ? (
-                        <Button
-                          size="xs"
-                          onClick={() => void usePortForwardStore.getState().retry(runtime.operationId)}
-                        >
-                          <RotateCcwIcon data-icon="inline-start" />
-                          {t('portForward.retry')}
-                        </Button>
-                      ) : (
-                        <Button
-                          size="xs"
-                          onClick={() => void usePortForwardStore.getState().startRule(profile, rule, 'manual')}
-                        >
-                          <PlayIcon data-icon="inline-start" />
-                          {t('portForward.start')}
-                        </Button>
-                      )}
-                    </CardFooter>
-                  </Card>
+                    </div>
+                  </ManagementCard>
                 ))}
               </div>
             )}
@@ -636,7 +706,7 @@ export const PortForwardPanel: React.FC = () => {
             <>
               <ScrollArea className="min-h-0 flex-1">
                 <FieldGroup className="gap-4 px-4 py-4">
-                  <Field>
+                  <Field data-invalid={(showValidation && Boolean(fieldErrors.profileId)) || undefined}>
                     <FieldLabel htmlFor="port-forward-host">{t('portForward.form.host')}</FieldLabel>
                     <Select
                       items={formHostItems}
@@ -663,13 +733,15 @@ export const PortForwardPanel: React.FC = () => {
                         </SelectGroup>
                       </SelectContent>
                     </Select>
+                    <FieldError>{showValidation ? fieldErrors.profileId : undefined}</FieldError>
                   </Field>
 
-                  <Field>
+                  <Field data-invalid={(showValidation && Boolean(fieldErrors.name)) || undefined}>
                     <FieldLabel htmlFor="port-forward-name">{t('portForward.form.name')}</FieldLabel>
                     <Input
                       id="port-forward-name"
                       autoFocus
+                      aria-invalid={(showValidation && Boolean(fieldErrors.name)) || undefined}
                       placeholder={
                         draft.kind === 'dynamic'
                           ? t('portForward.form.namePlaceholderDynamic')
@@ -678,6 +750,7 @@ export const PortForwardPanel: React.FC = () => {
                       value={draft.name}
                       onChange={(event) => setDraft({ ...draft, name: event.target.value })}
                     />
+                    <FieldError>{showValidation ? fieldErrors.name : undefined}</FieldError>
                   </Field>
 
                   <Field>
@@ -704,22 +777,27 @@ export const PortForwardPanel: React.FC = () => {
                     <FieldDescription>{t(`portForward.kind.${draft.kind}Detail`)}</FieldDescription>
                   </Field>
 
-                  <Field>
+                  <Field data-invalid={(showValidation && Boolean(fieldErrors.localPort)) || undefined}>
                     <FieldLabel htmlFor="port-forward-local-port">
                       {draft.kind === 'remote' ? t('portForward.form.localTargetPort') : t('portForward.form.listenPort')}
                     </FieldLabel>
                     <Input
                       id="port-forward-local-port"
                       inputMode="numeric"
+                      aria-invalid={(showValidation && Boolean(fieldErrors.localPort)) || undefined}
                       placeholder={draft.kind === 'dynamic' ? '1080' : draft.kind === 'remote' ? '3000' : '8080'}
                       value={draft.localPort}
                       onChange={(event) => setDraft({ ...draft, localPort: event.target.value })}
                     />
+                    <FieldError>{showValidation ? fieldErrors.localPort : undefined}</FieldError>
                   </Field>
 
                   {draft.kind !== 'dynamic' && (
                     <div className="grid grid-cols-3 gap-2">
-                      <Field className="col-span-2">
+                      <Field
+                        className="col-span-2"
+                        data-invalid={(showValidation && Boolean(fieldErrors.remoteHost)) || undefined}
+                      >
                         <FieldLabel htmlFor="port-forward-remote-host">
                           {draft.kind === 'local'
                             ? t('portForward.form.remoteTargetHost')
@@ -728,12 +806,14 @@ export const PortForwardPanel: React.FC = () => {
                         <Input
                           id="port-forward-remote-host"
                           disabled={draft.kind === 'remote'}
+                          aria-invalid={(showValidation && Boolean(fieldErrors.remoteHost)) || undefined}
                           placeholder="127.0.0.1"
                           value={draft.remoteHost}
                           onChange={(event) => setDraft({ ...draft, remoteHost: event.target.value })}
                         />
+                        <FieldError>{showValidation ? fieldErrors.remoteHost : undefined}</FieldError>
                       </Field>
-                      <Field>
+                      <Field data-invalid={(showValidation && Boolean(fieldErrors.remotePort)) || undefined}>
                         <FieldLabel htmlFor="port-forward-remote-port">
                           {draft.kind === 'local'
                             ? t('portForward.form.remoteTargetPort')
@@ -742,10 +822,12 @@ export const PortForwardPanel: React.FC = () => {
                         <Input
                           id="port-forward-remote-port"
                           inputMode="numeric"
+                          aria-invalid={(showValidation && Boolean(fieldErrors.remotePort)) || undefined}
                           placeholder={draft.kind === 'remote' ? '8080' : '5432'}
                           value={draft.remotePort}
                           onChange={(event) => setDraft({ ...draft, remotePort: event.target.value })}
                         />
+                        <FieldError>{showValidation ? fieldErrors.remotePort : undefined}</FieldError>
                       </Field>
                     </div>
                   )}
@@ -764,25 +846,41 @@ export const PortForwardPanel: React.FC = () => {
                 </FieldGroup>
               </ScrollArea>
 
-              <DrawerFooter className="shrink-0 flex-col gap-2 px-4 pb-4 pt-2 sm:flex-col">
-                {validationError && <FieldError>{validationError}</FieldError>}
-                <div className="flex items-center justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={closeDrawer} disabled={saving}>
-                    {t('common.cancel')}
-                  </Button>
-                  <Button
-                    size="sm"
-                    disabled={Boolean(validationError) || saving}
-                    onClick={() => void saveDraft()}
-                  >
-                    {t('common.save')}
-                  </Button>
-                </div>
+              <DrawerFooter className="shrink-0 flex-row justify-end gap-2 px-4 pb-4 pt-2">
+                <Button variant="outline" size="sm" onClick={closeDrawer} disabled={saving}>
+                  {t('common.cancel')}
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={saving}
+                  onClick={() => void saveDraft()}
+                >
+                  {t('common.save')}
+                </Button>
               </DrawerFooter>
             </>
           )}
         </DrawerContent>
       </Drawer>
+
+      <ConfirmDeleteDialog
+        open={Boolean(deleting)}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(undefined);
+        }}
+        title={t('portForward.deleteTitle')}
+        description={
+          deleting
+            ? t(
+                deleting.active ? 'portForward.deleteConfirmActive' : 'portForward.deleteConfirm',
+                { name: deleting.rule.name },
+              )
+            : ''
+        }
+        onConfirm={() => {
+          if (deleting) void removeRule(deleting.profile, deleting.rule);
+        }}
+      />
     </TooltipProvider>
   );
 };

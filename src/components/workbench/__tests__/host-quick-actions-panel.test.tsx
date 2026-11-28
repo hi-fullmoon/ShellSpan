@@ -47,7 +47,7 @@ describe('HostQuickActionsPanel', () => {
     updateProfile.mockResolvedValue(undefined);
     await initI18n('en-US');
     useAppStore.setState({ locale: 'en-US' });
-    useProfileStore.setState({ profiles: [prodProfile], updateProfile });
+    useProfileStore.setState({ profiles: [prodProfile], initialized: true, updateProfile });
     useTerminalStore.setState({ sessions: [], activeSessionId: null });
     useWorkbenchToolsStore.setState({
       portForwardProfileId: 'all',
@@ -67,6 +67,21 @@ describe('HostQuickActionsPanel', () => {
     expect(drawer.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
     expect(screen.getByText(/never sends Enter/i)).toBeInTheDocument();
 
+    const labelInput = screen.getByLabelText('Label');
+    const pathInput = screen.getByLabelText('Remote path');
+    expect(labelInput).toHaveValue('');
+    expect(labelInput).toHaveAttribute('placeholder', 'e.g. App logs');
+    expect(pathInput).toHaveValue('');
+    expect(pathInput).toHaveAttribute('placeholder', '/var/log/nginx');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Command snippet' }));
+    expect(screen.getByLabelText('Label')).toHaveAttribute('placeholder', 'e.g. Check Nginx status');
+    expect(screen.getByLabelText('Command text')).toHaveAttribute('placeholder', 'systemctl status nginx');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Connection action' }));
+    expect(screen.getByLabelText('Label')).toHaveAttribute('placeholder', 'e.g. Open host overview');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Directory' }));
     fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'Releases' } });
     fireEvent.change(screen.getByLabelText('Remote path'), { target: { value: '/srv/releases' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -156,8 +171,38 @@ describe('HostQuickActionsPanel', () => {
     render(<HostQuickActionsPanel />);
 
     expect(screen.getByRole('button', { name: 'Insert only' })).toBeDisabled();
-    const card = screen.getByText('Check status').closest('[data-slot="card"]');
-    expect(card).toHaveAttribute('data-size', 'sm');
-    expect(card).toHaveAttribute('data-radius', 'compact');
+    const card = screen.getByText('Check status').closest('[data-slot="management-card"]');
+    expect(card).toHaveClass('rounded-lg', 'border', 'bg-app-surface', 'p-2.5');
+    expect(document.querySelector('[title]')).toBeNull();
+  });
+
+  it('requires confirmation before deleting a quick action', async () => {
+    useProfileStore.setState({ profiles: [stagingProfile], updateProfile });
+    render(<HostQuickActionsPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(updateProfile).not.toHaveBeenCalled();
+
+    const alertDialog = await screen.findByRole('alertdialog');
+    expect(alertDialog).toHaveTextContent('Delete quick action?');
+    expect(alertDialog).toHaveTextContent('Nginx Config');
+
+    const confirmButtons = screen.getAllByRole('button', { name: 'Delete' });
+    fireEvent.click(confirmButtons[confirmButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(updateProfile).toHaveBeenCalledWith(stagingProfile.id, {
+        quickActions: [],
+      });
+    });
+  });
+
+  it('shows a loading state while profiles are still hydrating', () => {
+    useProfileStore.setState({ profiles: [], initialized: false, updateProfile });
+    const { container } = render(<HostQuickActionsPanel />);
+
+    expect(container.querySelector('svg.animate-spin')).toBeInTheDocument();
+    expect(container.querySelector('[data-slot="panel-empty-state"]')).toBeNull();
+    expect(screen.queryByText('No hosts available')).not.toBeInTheDocument();
   });
 });

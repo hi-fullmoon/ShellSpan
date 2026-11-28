@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Select as SelectPrimitive } from '@base-ui/react/select';
 import {
+  ArrowUpRightIcon,
   CableIcon,
   ChevronDownIcon,
+  CornerDownRightIcon,
   FolderIcon,
   InfoIcon,
   PencilIcon,
@@ -16,14 +18,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardAction,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import {
   Drawer,
   DrawerContent,
@@ -31,7 +26,7 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from '@/components/ui/drawer';
-import { PanelEmptyState } from '@/components/ui/empty-state';
+import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import {
   Field,
   FieldDescription,
@@ -71,6 +66,8 @@ import type {
   HostConnectionAction,
   HostQuickAction,
 } from '@/types';
+import { IconActionButton } from './icon-action-button';
+import { ManagementCard, ManagementCardIcon, ManagementCardText } from './management-card';
 import {
   WorkbenchPage,
   WorkbenchPageContent,
@@ -149,6 +146,7 @@ export const HostQuickActionsPanel: React.FC = () => {
   const { t } = useI18n();
   const { error: showError, info, success } = useToast();
   const profiles = useProfileStore((state) => state.profiles);
+  const profilesInitialized = useProfileStore((state) => state.initialized);
   const updateProfile = useProfileStore((state) => state.updateProfile);
   const terminalSessions = useTerminalStore((state) => state.sessions);
   const selectedProfileId = useWorkbenchToolsStore((state) => state.quickActionsProfileId);
@@ -158,6 +156,10 @@ export const HostQuickActionsPanel: React.FC = () => {
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [draft, setDraft] = useState<QuickActionDraft>();
+  const [deleting, setDeleting] = useState<{
+    profile: ConnectionProfile;
+    action: HostQuickAction;
+  }>();
   const [validationError, setValidationError] = useState<HostQuickActionValidationError | 'profile' | 'limit'>();
   const [saving, setSaving] = useState(false);
 
@@ -338,6 +340,7 @@ export const HostQuickActionsPanel: React.FC = () => {
       if (draft?.id === actionId && draft.profileId === profile.id) {
         setDrawerOpen(false);
       }
+      setDeleting(undefined);
     } catch {
       // Preserve the current list on persistence failure.
     }
@@ -371,7 +374,7 @@ export const HostQuickActionsPanel: React.FC = () => {
       <WorkbenchPage>
         <WorkbenchPageHeader
           icon={ZapIcon}
-          title={t('hostQuickActions.title')}
+          title={t('workbench.quickActions.title')}
           titleMeta={(
             <Popover>
               <PopoverTrigger
@@ -464,7 +467,9 @@ export const HostQuickActionsPanel: React.FC = () => {
 
         <ScrollArea className="min-h-0 flex-1">
           <WorkbenchPageContent>
-            {profiles.length === 0 ? (
+            {!profilesInitialized && profiles.length === 0 ? (
+              <PanelLoadingState />
+            ) : profiles.length === 0 ? (
               <PanelEmptyState
                 icon={<ServerIcon className="size-5" />}
                 title={t('hostQuickActions.noProfilesTitle')}
@@ -483,7 +488,7 @@ export const HostQuickActionsPanel: React.FC = () => {
                 description={t('common.noSearchResults')}
               />
             ) : (
-              <div className="grid grid-cols-1 gap-3 @min-[46rem]:grid-cols-2">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))] gap-2">
                 {filteredEntries.map(({ profile, action }) => {
                   const Icon = actionIcon(action);
                   const commandDisabled = action.kind === 'command'
@@ -495,62 +500,70 @@ export const HostQuickActionsPanel: React.FC = () => {
                       : actionDescriptions[action.action];
 
                   return (
-                    <Card key={`${profile.id}:${action.id}`} size="sm" radius="compact" className="flex flex-col">
-                      <CardHeader>
-                        <CardTitle className="flex min-w-0 items-center gap-1">
-                          <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                          <span className="truncate">{action.label}</span>
-                        </CardTitle>
-                        <CardDescription className="truncate font-mono" title={detail}>
-                          {detail}
-                        </CardDescription>
-                        <CardAction className="flex items-center gap-1">
-                          <Button
-                            size="icon-xs"
-                            variant="ghost"
-                            aria-label={t('common.edit')}
-                            onClick={() => {
-                              setDraft(createDraft(profile.id, action));
-                              setValidationError(undefined);
-                              setDrawerOpen(true);
-                            }}
-                          >
-                            <PencilIcon />
-                          </Button>
-                          <Button
-                            size="icon-xs"
-                            variant="ghost"
-                            aria-label={t('common.delete')}
-                            onClick={() => void removeAction(profile, action.id)}
-                            disabled={saving}
-                          >
-                            <Trash2Icon />
-                          </Button>
-                        </CardAction>
-                      </CardHeader>
-                      <CardFooter className="mt-auto flex-wrap items-center justify-between gap-2">
-                        <div className="flex min-w-0 flex-wrap items-center gap-1">
-                          <Badge variant="secondary" className="max-w-44 gap-1">
-                            <ServerIcon className="size-3 shrink-0" aria-hidden />
-                            <span className="truncate">{profileDisplayName(profile)}</span>
-                          </Badge>
-                          <Badge variant="outline">
-                            {t(`hostQuickActions.kind.${action.kind}`)}
-                          </Badge>
+                    <ManagementCard key={`${profile.id}:${action.id}`} className="gap-2">
+                      <div className="flex items-center gap-2">
+                        <ManagementCardIcon>
+                          <Icon aria-hidden />
+                        </ManagementCardIcon>
+                        <div className="flex min-w-0 flex-1 flex-col">
+                          <div className="flex min-w-0 items-center justify-between gap-2">
+                            <ManagementCardText
+                              text={action.label}
+                              className="flex-1 text-sm font-medium text-app-text"
+                            />
+                            <Badge variant="secondary" size="sm" className="shrink-0">
+                              {t(`hostQuickActions.kind.${action.kind}`)}
+                            </Badge>
+                          </div>
+                          <ManagementCardText
+                            text={detail}
+                            className="font-mono text-xs text-muted-foreground"
+                          />
                         </div>
-                        <Button
-                          size="xs"
-                          variant="outline"
+                      </div>
+
+                      <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                        <ServerIcon className="size-3.5 shrink-0" aria-hidden />
+                        <ManagementCardText
+                          text={`${profileDisplayName(profile)} · ${profile.host}:${profile.port}`}
+                          className="flex-1 text-xs text-muted-foreground"
+                        />
+                      </div>
+
+                      <div className="mt-auto flex items-center justify-end gap-1 pt-0.5">
+                        <IconActionButton
+                          aria-label={action.kind === 'command' ? t('hostQuickActions.insert') : t('hostQuickActions.run')}
+                          tooltip={commandDisabled
+                            ? t('hostQuickActions.noTerminal')
+                            : (action.kind === 'command' ? t('hostQuickActions.insert') : t('hostQuickActions.run'))}
                           onClick={() => void runAction(profile, action)}
                           disabled={commandDisabled}
-                          title={commandDisabled ? t('hostQuickActions.noTerminal') : undefined}
                         >
                           {action.kind === 'command'
-                            ? t('hostQuickActions.insert')
-                            : t('hostQuickActions.run')}
-                        </Button>
-                      </CardFooter>
-                    </Card>
+                            ? <CornerDownRightIcon data-icon="inline-start" />
+                            : <ArrowUpRightIcon data-icon="inline-start" />}
+                        </IconActionButton>
+                        <IconActionButton
+                          aria-label={t('common.edit')}
+                          tooltip={t('common.edit')}
+                          onClick={() => {
+                            setDraft(createDraft(profile.id, action));
+                            setValidationError(undefined);
+                            setDrawerOpen(true);
+                          }}
+                        >
+                          <PencilIcon data-icon="inline-start" />
+                        </IconActionButton>
+                        <IconActionButton
+                          aria-label={t('common.delete')}
+                          tooltip={t('common.delete')}
+                          onClick={() => setDeleting({ profile, action })}
+                          disabled={saving}
+                        >
+                          <Trash2Icon data-icon="inline-start" className="text-destructive" />
+                        </IconActionButton>
+                      </div>
+                    </ManagementCard>
                   );
                 })}
               </div>
@@ -619,6 +632,7 @@ export const HostQuickActionsPanel: React.FC = () => {
                       id="host-quick-action-label"
                       autoFocus
                       aria-invalid={validationError === 'invalidLabel' || undefined}
+                      placeholder={t(`hostQuickActions.labelPlaceholder.${draft.kind}`)}
                       value={draft.label}
                       onChange={(event) => setDraft({ ...draft, label: event.target.value })}
                     />
@@ -656,6 +670,7 @@ export const HostQuickActionsPanel: React.FC = () => {
                         <Input
                           id="host-quick-action-path"
                           aria-invalid={validationError === 'invalidPath' || undefined}
+                          placeholder="/var/log/nginx"
                           value={draft.path}
                           onChange={(event) => setDraft({ ...draft, path: event.target.value })}
                         />
@@ -700,6 +715,7 @@ export const HostQuickActionsPanel: React.FC = () => {
                           || validationError === 'possibleSecret'
                           || undefined
                         }
+                        placeholder="systemctl status nginx"
                         value={draft.command}
                         onChange={(event) => setDraft({ ...draft, command: event.target.value })}
                       />
@@ -762,6 +778,22 @@ export const HostQuickActionsPanel: React.FC = () => {
           )}
         </DrawerContent>
       </Drawer>
+
+      <ConfirmDeleteDialog
+        open={Boolean(deleting)}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(undefined);
+        }}
+        title={t('hostQuickActions.deleteTitle')}
+        description={
+          deleting
+            ? t('hostQuickActions.deleteConfirm', { name: deleting.action.label })
+            : ''
+        }
+        onConfirm={() => {
+          if (deleting) void removeAction(deleting.profile, deleting.action.id);
+        }}
+      />
     </TooltipProvider>
   );
 };

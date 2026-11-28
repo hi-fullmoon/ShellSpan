@@ -139,12 +139,12 @@ describe('PortForwardPanel', () => {
     expect(screen.getByText('portForward.error.portInUseTitle')).toBeInTheDocument();
     expect(screen.getByText(/already in use/)).toBeInTheDocument();
 
-    const cards = document.querySelectorAll('[data-slot="card"]');
+    const cards = document.querySelectorAll('[data-slot="management-card"]');
     expect(cards).toHaveLength(3);
     cards.forEach((card) => {
-      expect(card).toHaveAttribute('data-size', 'sm');
-      expect(card).toHaveAttribute('data-radius', 'compact');
+      expect(card).toHaveClass('rounded-lg', 'border', 'bg-app-surface', 'p-2.5');
     });
+    expect(document.querySelector('[title]')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'portForward.stop' }));
     expect(stop).toHaveBeenCalledWith('op-running');
@@ -185,6 +185,11 @@ describe('PortForwardPanel', () => {
     expect(drawer).toHaveAttribute('data-slot', 'drawer-content');
     expect(drawer.querySelector('[data-slot="drawer-footer"]')).not.toHaveClass('border-t');
     expect(drawer.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
+    expect(screen.queryByText('portForward.validation.name')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    expect(screen.getByText('portForward.validation.name')).toBeInTheDocument();
+    expect(updateProfile).not.toHaveBeenCalled();
 
     expect(screen.getByLabelText('portForward.form.name')).toHaveAttribute(
       'placeholder',
@@ -242,5 +247,35 @@ describe('PortForwardPanel', () => {
     expect(await screen.findByDisplayValue('Proposed Web')).toBeInTheDocument();
     expect(screen.getByDisplayValue('8080')).toBeInTheDocument();
     expect(useWorkbenchToolsStore.getState().pendingPortForwardDraft).toBeNull();
+  });
+
+  it('requires confirmation before stopping and deleting a forwarding rule', async () => {
+    render(<PortForwardPanel />);
+
+    const deleteButtons = screen.getAllByRole('button', { name: 'common.delete' });
+    fireEvent.click(deleteButtons[0]);
+
+    expect(updateProfile).not.toHaveBeenCalled();
+    const alertDialog = await screen.findByRole('alertdialog');
+    expect(alertDialog).toHaveTextContent('portForward.deleteTitle');
+    expect(alertDialog).toHaveTextContent('portForward.deleteConfirmActive:{"name":"Database"}');
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.delete' }));
+
+    await waitFor(() => {
+      expect(stop).toHaveBeenCalledWith('op-running');
+      expect(updateProfile).toHaveBeenCalledWith(prodProfile.id, {
+        portForwards: [prodProfile.portForwards![1]],
+      });
+    });
+  });
+
+  it('shows a loading state while profiles are still hydrating', () => {
+    useProfileStore.setState({ profiles: [], initialized: false, updateProfile });
+    const { container } = render(<PortForwardPanel />);
+
+    expect(container.querySelector('svg.animate-spin')).toBeInTheDocument();
+    expect(container.querySelector('[data-slot="panel-empty-state"]')).toBeNull();
+    expect(screen.queryByText('portForward.noProfilesTitle')).not.toBeInTheDocument();
   });
 });
