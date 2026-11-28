@@ -31,7 +31,7 @@ import { Kbd } from '@/components/ui/kbd';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { BotIcon, CircleDotIcon, EllipsisIcon, Link2Icon, LockIcon, Minimize2Icon, PinIcon, RadioTowerIcon, ShieldCheckIcon, XIcon } from 'lucide-react';
+import { CircleDotIcon, EllipsisIcon, Link2Icon, LockIcon, Minimize2Icon, PinIcon, RadioTowerIcon, ShieldCheckIcon, XIcon } from 'lucide-react';
 import { useCloseTerminal } from '@/hooks/useCloseTerminal';
 import { cancelSshConnection } from '@/lib/terminal/ssh-connection-attempt';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
@@ -93,7 +93,67 @@ const sessionStatusDotClass = (status: SessionStatus): string => {
   }
 };
 
-// Icons replaced with lucide-react imports
+interface TerminalAgentActiveIndicatorProps {
+  label: string;
+  className?: string;
+}
+
+const TerminalAgentActiveIndicator: React.FC<TerminalAgentActiveIndicatorProps> = ({
+  label,
+  className,
+}) => {
+  const gradientId = React.useId();
+  return (
+    <span
+      role="img"
+      data-terminal-agent-active
+      aria-label={label}
+      title={label}
+      className={cn(
+        'flex size-4 shrink-0 items-center justify-center text-(--terminal-agent-glow)',
+        className,
+      )}
+    >
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 16 16"
+        fill="none"
+        className="size-3.5 shrink-0"
+      >
+        <defs>
+          <linearGradient id={gradientId} x1="2" y1="2" x2="14" y2="14" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="var(--terminal-agent-glow)" />
+            <stop offset="100%" stopColor="var(--terminal-agent-glow-secondary)" />
+          </linearGradient>
+        </defs>
+        <circle
+          cx="8"
+          cy="8"
+          r="6.25"
+          stroke="currentColor"
+          strokeOpacity="0.2"
+          strokeWidth="1.25"
+        />
+        <circle
+          cx="8"
+          cy="8"
+          r="6.25"
+          pathLength={100}
+          stroke={`url(#${gradientId})`}
+          strokeWidth="1.35"
+          strokeLinecap="round"
+          strokeDasharray="34 66"
+          className="terminal-agent-tab-orbit"
+        />
+        <path
+          d="M8 4.2C8.45 6.8 9.2 7.55 11.8 8C9.2 8.45 8.45 9.2 8 11.8C7.55 9.2 6.8 8.45 4.2 8C6.8 7.55 7.55 6.8 8 4.2Z"
+          fill={`url(#${gradientId})`}
+          className="terminal-agent-tab-spark"
+        />
+      </svg>
+    </span>
+  );
+};
 
 interface SessionTabProps {
   session: TerminalSession;
@@ -214,9 +274,9 @@ const SessionTab: React.FC<SessionTabProps> = ({
           <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full ring-1 ring-app-bg/60', sessionStatusDotClass(session.status))} />
         )}
         <span className="block flex-1 truncate text-left text-xs leading-none font-normal">{session.title}</span>
-        {agentActiveInBackground && (session.pinned || session.pendingConnection) && <span role="img" data-terminal-agent-active aria-label={t('terminal.agentLease.turnRunning')} title={t('terminal.agentLease.turnRunning')} className="flex size-4 shrink-0 items-center justify-center text-(--terminal-agent-glow) motion-safe:animate-pulse">
-          <BotIcon aria-hidden="true" className="size-3" />
-        </span>}
+        {agentActiveInBackground && (session.pinned || session.pendingConnection) && (
+          <TerminalAgentActiveIndicator label={t('terminal.agentLease.turnRunning')} />
+        )}
         {session.readOnly && <span title={t('terminal.inputLock.label')} data-terminal-input-lock className="inline-flex shrink-0 items-center">
           <LockIcon aria-hidden="true" className="size-3" />
         </span>}
@@ -260,9 +320,10 @@ const SessionTab: React.FC<SessionTabProps> = ({
           {canUnpin ? <PinIcon aria-hidden="true" className="size-3" strokeWidth={1.5} /> : (
             <>
               {agentActiveInBackground && !canCancel ? (
-                <span role="img" data-terminal-agent-active aria-label={t('terminal.agentLease.turnRunning')} title={t('terminal.agentLease.turnRunning')} className="flex size-4 items-center justify-center text-(--terminal-agent-glow) motion-safe:animate-pulse group-hover/close:hidden group-focus-visible/close:hidden">
-                  <BotIcon aria-hidden="true" className="size-3" />
-                </span>
+                <TerminalAgentActiveIndicator
+                  label={t('terminal.agentLease.turnRunning')}
+                  className="group-hover/close:hidden group-focus-visible/close:hidden"
+                />
               ) : agentTarget && !canCancel && (
                 <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} className="flex size-4 items-center justify-center text-app-success group-hover/close:hidden group-focus-visible/close:hidden">
                   <Link2Icon aria-hidden="true" className="size-3" />

@@ -96,3 +96,43 @@
 .session-tab-slot:has(+ .session-tab-slot [aria-selected='true']) > .session-tab::after {
   display: none;
 }
+
+@keyframes terminal-agent-tab-orbit {
+  from {
+    stroke-dashoffset: 0;
+  }
+
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+@keyframes terminal-agent-tab-spark {
+  0%,
+  100% {
+    opacity: 0.78;
+    transform: scale(0.9);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.terminal-agent-tab-orbit {
+  animation: terminal-agent-tab-orbit 1.5s linear infinite;
+}
+
+.terminal-agent-tab-spark {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: terminal-agent-tab-spark 2.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-agent-tab-orbit,
+  .terminal-agent-tab-spark {
+    animation: none;
+  }
+}

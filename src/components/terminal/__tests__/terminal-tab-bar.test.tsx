@@ -991,6 +991,9 @@ describe('TerminalTabBar', () => {
       expect(primaryAction).not.toHaveClass('invisible');
       expect(indicator).toHaveAttribute('data-terminal-agent-active');
       expect(indicator).toHaveClass('group-hover/close:hidden', 'group-focus-visible/close:hidden');
+      expect(indicator.querySelector('svg')).toHaveClass('size-3.5');
+      expect(indicator.querySelector('.terminal-agent-tab-orbit')).not.toBeNull();
+      expect(indicator.querySelector('.terminal-agent-tab-spark')).not.toBeNull();
       expect(closeIcon).toHaveClass('hidden', 'group-hover/close:block', 'group-focus-visible/close:block');
       expect(within(otherSlot).queryByRole('img', { name: 'terminal.agentLease.turnRunning' })).toBeNull();
 
@@ -999,6 +1002,14 @@ describe('TerminalTabBar', () => {
 
       act(() => useTerminalStore.getState().setActiveSession('s2'));
       expect(within(primaryAction).getByRole('img', { name: 'terminal.agentLease.turnRunning' })).toBeInTheDocument();
+
+      act(() => useTerminalStore.getState().togglePin('s1'));
+      const primaryTab = screen.getByRole('tab', { name: 'Primary' });
+      const inlineIndicator = within(primaryTab).getByRole('img', { name: 'terminal.agentLease.turnRunning' });
+      expect(inlineIndicator).toHaveAttribute('data-terminal-agent-active');
+      expect(inlineIndicator.querySelector('.terminal-agent-tab-orbit')).not.toBeNull();
+      expect(within(primarySlot).getByRole('button', { name: 'sessionTab.unpin' })).toBeInTheDocument();
+      act(() => useTerminalStore.getState().togglePin('s1'));
 
       act(() => {
         agentTerminalLeaseState.update('s1', 'op-1', (lease) => ({ ...lease, waitingForUserAction: true }));
