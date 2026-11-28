@@ -9,6 +9,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,10 +25,32 @@ import { ManagementCard, ManagementCardIcon } from './management-card';
 import { HostOverviewDialog } from './host-overview-dialog';
 import type { ConnectionProfile } from '@/types';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
+import {
+  nextConnectionTableSort,
+  sortConnectionsForTable,
+  type ConnectionTableSort,
+  type ConnectionTableSortColumn,
+} from '@/lib/connections/connection-view';
+import {
+  WORKBENCH_TABLE_ACTION_CELL_CLASS,
+  WORKBENCH_TABLE_ACTION_GROUP_CLASS,
+  WORKBENCH_TABLE_CELL_CLASS,
+  WORKBENCH_TABLE_HEAD_CLASS,
+  WORKBENCH_TABLE_HEADER_ROW_CLASS,
+  WORKBENCH_TABLE_ICON_BUTTON_CLASS,
+  WORKBENCH_TABLE_ROW_CLASS,
+  WORKBENCH_TABLE_TAG_CLASS,
+  WORKBENCH_VIEW_STORAGE_KEYS,
+  WorkbenchSortableHead,
+  WorkbenchTableFrame,
+  WorkbenchViewModeToggle,
+  useWorkbenchViewMode,
+} from './workbench-view-mode';
 import { cn } from '@/lib/utils';
 import {
   CopyIcon,
   ChevronDownIcon,
+  CornerDownRightIcon,
   DownloadIcon,
   EllipsisIcon,
   FolderIcon,
@@ -53,6 +76,12 @@ import {
 import { WorkbenchPage, WorkbenchPageContent, WorkbenchPageHeader, WorkbenchSearchInput, WorkbenchPageToolbar } from './workbench-page';
 
 const CARD_ACTION_DEBOUNCE_MS = 500;
+const AUTH_METHOD_ICONS: Record<ConnectionProfile['authMethod'], React.ElementType> = {
+  password: LockKeyholeIcon,
+  key: KeyRoundIcon,
+  agent: FingerprintIcon,
+  keyboardInteractive: ShieldQuestionMarkIcon,
+};
 const CONNECTION_TRANSFER_MENU_ITEM_CLASS =
   "[&_svg:not([class*='size-'])]:size-3.5 [&>svg]:translate-y-px [&>svg]:text-muted-foreground";
 // Keep column changes in the same layout pass as AI-panel resizing while scaling columns on wide screens.
@@ -100,13 +129,19 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   onImport,
   onExport,
 }) => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [query, setQuery] = useState('');
   const [activityFilter, setActivityFilter] = useState<'all' | 'favorites' | 'recent'>('all');
   const [groupFilter, setGroupFilter] = useState('all');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [viewMode, handleViewModeChange] = useWorkbenchViewMode(WORKBENCH_VIEW_STORAGE_KEYS.connections);
+  const [tableSort, setTableSort] = useState<ConnectionTableSort | null>(null);
   const [overviewProfile, setOverviewProfile] = useState<ConnectionProfile>();
   const recentIds = useRecentProfilesStore((state) => state.recentIds);
+
+  const handleTableSort = useCallback((column: ConnectionTableSortColumn): void => {
+    setTableSort((current) => nextConnectionTableSort(current, column));
+  }, []);
 
   const groups = useMemo(
     () =>
@@ -148,6 +183,13 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
       return true;
     });
   }, [profiles, normalizedQuery, activityFilter, groupFilter, recentIds, activeTags]);
+
+  const tableProfiles = useMemo(
+    () => (viewMode === 'table'
+      ? sortConnectionsForTable(filteredProfiles, tableSort, locale, (method) => t(`connection.form.auth.${method}`))
+      : filteredProfiles),
+    [filteredProfiles, locale, t, tableSort, viewMode],
+  );
 
   const handleOverview = useCallback((profile: ConnectionProfile): void => {
     if (onOpenOverview) {
@@ -282,11 +324,16 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
+            <WorkbenchViewModeToggle value={viewMode} onChange={handleViewModeChange} />
           </WorkbenchPageToolbar>
         )}
 
         <ScrollArea className="min-h-0 flex-1">
-          <WorkbenchPageContent>
+          <WorkbenchPageContent
+            className={cn(
+              viewMode === 'table' && filteredProfiles.length > 0 && 'p-0',
+            )}
+          >
             {!initialized && profiles.length === 0 ? (
               <PanelLoadingState />
             ) : profiles.length === 0 ? (
@@ -300,6 +347,22 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                 title={t('workbench.connections.filteredEmpty')}
                 description={t('common.noSearchResults')}
                 icon={<SearchXIcon className="size-5" />}
+              />
+            ) : viewMode === 'table' ? (
+              <ConnectionTable
+                profiles={tableProfiles}
+                sort={tableSort}
+                onSort={handleTableSort}
+                onEdit={onEdit}
+                onDelete={onDelete}
+                onConnectTerminal={onConnectTerminal}
+                onConnectSftp={onConnectSftp}
+                onOpenHealth={onOpenHealth}
+                onDuplicate={onDuplicate}
+                onToggleFavorite={onToggleFavorite}
+                onOverview={handleOverview}
+                onPortForward={onOpenPortForward}
+                onQuickActions={onOpenQuickActions}
               />
             ) : (
               <ConnectionCardGrid>
@@ -379,6 +442,133 @@ const ConnectionText: React.FC<{ text: string; className?: string; kind?: string
   );
 };
 
+interface ConnectionActionsProps extends ConnectionCardProps {
+  displayName: string;
+  menuAlign?: 'start' | 'end';
+  compact?: boolean;
+}
+
+const ConnectionActions = React.memo<ConnectionActionsProps>(
+  ({
+    profile,
+    displayName,
+    menuAlign = 'start',
+    compact = false,
+    onEdit,
+    onDelete,
+    onConnectTerminal,
+    onConnectSftp,
+    onOpenHealth,
+    onDuplicate,
+    onToggleFavorite,
+    onOverview,
+    onPortForward,
+    onQuickActions,
+  }) => {
+    const { t } = useI18n();
+    const handleConnectTerminal = useDebouncedCallback(() => onConnectTerminal(profile), CARD_ACTION_DEBOUNCE_MS);
+    const handleConnectSftp = useDebouncedCallback(() => onConnectSftp(profile), CARD_ACTION_DEBOUNCE_MS);
+    const handleOpenHealth = useDebouncedCallback(() => onOpenHealth(profile), CARD_ACTION_DEBOUNCE_MS);
+    const handleEdit = useDebouncedCallback(() => onEdit(profile), CARD_ACTION_DEBOUNCE_MS);
+    const handleDuplicate = useDebouncedCallback(() => onDuplicate(profile), CARD_ACTION_DEBOUNCE_MS);
+    const handleDelete = useDebouncedCallback(() => onDelete(profile), CARD_ACTION_DEBOUNCE_MS);
+    const handleToggleFavorite = useDebouncedCallback(() => onToggleFavorite(profile), CARD_ACTION_DEBOUNCE_MS);
+    const handleOverview = useDebouncedCallback(() => onOverview(profile), CARD_ACTION_DEBOUNCE_MS);
+    const handlePortForward = useDebouncedCallback(() => onPortForward(profile), CARD_ACTION_DEBOUNCE_MS);
+    const handleQuickActions = useDebouncedCallback(() => onQuickActions(profile), CARD_ACTION_DEBOUNCE_MS);
+    const actionButtonClass = compact ? WORKBENCH_TABLE_ICON_BUTTON_CLASS : 'size-8';
+
+    return (
+      <div className={compact ? WORKBENCH_TABLE_ACTION_GROUP_CLASS : 'flex shrink-0 items-center justify-end gap-1'}>
+        <div className={cn('flex items-center', compact ? 'flex-nowrap gap-0.5' : 'flex-wrap gap-1')}>
+          <IconActionButton
+            className={actionButtonClass}
+            onClick={handleConnectTerminal}
+            aria-label={t('workbench.connections.connectTerminal')}
+            tooltip={t('workbench.connections.connectTerminal')}
+          >
+            <TerminalIcon data-icon="inline-start" />
+          </IconActionButton>
+          <IconActionButton
+            className={actionButtonClass}
+            onClick={handleConnectSftp}
+            aria-label={t('workbench.connections.connectSftp')}
+            tooltip={t('workbench.connections.connectSftp')}
+          >
+            <FolderIcon data-icon="inline-start" />
+          </IconActionButton>
+        </div>
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={actionButtonClass}
+                      aria-label={t('workbench.connections.moreActions', { name: displayName })}
+                    />
+                  }
+                />
+              }
+            >
+              <EllipsisIcon data-icon="inline-start" />
+            </TooltipTrigger>
+            <TooltipContent>{t('workbench.connections.moreActions', { name: displayName })}</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent
+            align={menuAlign}
+            className="w-52 border border-app-border bg-app-surface p-1 text-app-text shadow-[var(--shadow-dialog)] ring-0"
+          >
+            <DropdownMenuGroup>
+              <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleToggleFavorite}>
+                <StarIcon className={profile.favorite ? 'fill-current text-app-warning' : undefined} />
+                <span className="relative top-px">{profile.favorite ? t('workbench.connections.unfavorite') : t('workbench.connections.favorite')}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleEdit}>
+                <PencilIcon />
+                <span className="relative top-px">{t('common.edit')}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleDuplicate}>
+                <CopyIcon />
+                <span className="relative top-px">{t('common.duplicate')}</span>
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator className="mx-0 my-1" />
+            <DropdownMenuGroup>
+              <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleOpenHealth}>
+                <HeartPulseIcon />
+                <span className="relative top-px">{t('remoteHealth.open')}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handlePortForward}>
+                <CableIcon />
+                <span className="relative top-px">{t('portForward.open')}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleQuickActions}>
+                <ZapIcon />
+                <span className="relative top-px">{t('hostQuickActions.open')}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleOverview}>
+                <InfoIcon />
+                <span className="relative top-px">{t('hostOverview.open')}</span>
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator className="mx-0 my-1" />
+            <DropdownMenuGroup>
+              <DropdownMenuItem variant="destructive" className={CONNECTION_MENU_DESTRUCTIVE_ITEM_CLASS} onClick={handleDelete}>
+                <Trash2Icon />
+                <span className="relative top-px">{t('common.delete')}</span>
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    );
+  },
+);
+
 const ConnectionCard = React.memo<ConnectionCardProps>(
   ({
     profile,
@@ -397,22 +587,7 @@ const ConnectionCard = React.memo<ConnectionCardProps>(
     const displayName = profile.name.trim() || profile.host;
     const tags = profile.tags ?? [];
     const authLabel = t(`connection.form.auth.${profile.authMethod}`);
-    const AuthIcon = {
-      password: LockKeyholeIcon,
-      key: KeyRoundIcon,
-      agent: FingerprintIcon,
-      keyboardInteractive: ShieldQuestionMarkIcon,
-    }[profile.authMethod];
-    const handleConnectTerminal = useDebouncedCallback(() => onConnectTerminal(profile), CARD_ACTION_DEBOUNCE_MS);
-    const handleConnectSftp = useDebouncedCallback(() => onConnectSftp(profile), CARD_ACTION_DEBOUNCE_MS);
-    const handleOpenHealth = useDebouncedCallback(() => onOpenHealth(profile), CARD_ACTION_DEBOUNCE_MS);
-    const handleEdit = useDebouncedCallback(() => onEdit(profile), CARD_ACTION_DEBOUNCE_MS);
-    const handleDuplicate = useDebouncedCallback(() => onDuplicate(profile), CARD_ACTION_DEBOUNCE_MS);
-    const handleDelete = useDebouncedCallback(() => onDelete(profile), CARD_ACTION_DEBOUNCE_MS);
-    const handleToggleFavorite = useDebouncedCallback(() => onToggleFavorite(profile), CARD_ACTION_DEBOUNCE_MS);
-    const handleOverview = useDebouncedCallback(() => onOverview(profile), CARD_ACTION_DEBOUNCE_MS);
-    const handlePortForward = useDebouncedCallback(() => onPortForward(profile), CARD_ACTION_DEBOUNCE_MS);
-    const handleQuickActions = useDebouncedCallback(() => onQuickActions(profile), CARD_ACTION_DEBOUNCE_MS);
+    const AuthIcon = AUTH_METHOD_ICONS[profile.authMethod];
 
     return (
       <ManagementCard className="@container/connection-card">
@@ -496,94 +671,253 @@ const ConnectionCard = React.memo<ConnectionCardProps>(
               </Badge>
             )}
           </div>
-          <div className="flex shrink-0 items-center justify-end gap-1">
-            <div className="flex flex-wrap items-center gap-1">
-              <IconActionButton
-                className="size-8"
-                onClick={handleConnectTerminal}
-                aria-label={t('workbench.connections.connectTerminal')}
-                tooltip={t('workbench.connections.connectTerminal')}
-              >
-                <TerminalIcon data-icon="inline-start" />
-              </IconActionButton>
-              <IconActionButton
-                className="size-8"
-                onClick={handleConnectSftp}
-                aria-label={t('workbench.connections.connectSftp')}
-                tooltip={t('workbench.connections.connectSftp')}
-              >
-                <FolderIcon data-icon="inline-start" />
-              </IconActionButton>
-            </div>
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <DropdownMenuTrigger
-                      render={
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-8"
-                          aria-label={t('workbench.connections.moreActions', { name: displayName })}
-                        />
-                      }
-                    />
-                  }
-                >
-                  <EllipsisIcon data-icon="inline-start" />
-                </TooltipTrigger>
-                <TooltipContent>{t('workbench.connections.moreActions', { name: displayName })}</TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent
-                align="start"
-                className="w-52 border border-app-border bg-app-surface p-1 text-app-text shadow-[var(--shadow-dialog)] ring-0"
-              >
-                <DropdownMenuGroup>
-                  <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleToggleFavorite}>
-                    <StarIcon className={profile.favorite ? 'fill-current text-app-warning' : undefined} />
-                    <span className="relative top-px">{profile.favorite ? t('workbench.connections.unfavorite') : t('workbench.connections.favorite')}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleEdit}>
-                    <PencilIcon />
-                    <span className="relative top-px">{t('common.edit')}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleDuplicate}>
-                    <CopyIcon />
-                    <span className="relative top-px">{t('common.duplicate')}</span>
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-                <DropdownMenuSeparator className="mx-0 my-1" />
-                <DropdownMenuGroup>
-                  <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleOpenHealth}>
-                    <HeartPulseIcon />
-                    <span className="relative top-px">{t('remoteHealth.open')}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handlePortForward}>
-                    <CableIcon />
-                    <span className="relative top-px">{t('portForward.open')}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleQuickActions}>
-                    <ZapIcon />
-                    <span className="relative top-px">{t('hostQuickActions.open')}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleOverview}>
-                    <InfoIcon />
-                    <span className="relative top-px">{t('hostOverview.open')}</span>
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-                <DropdownMenuSeparator className="mx-0 my-1" />
-                <DropdownMenuGroup>
-                  <DropdownMenuItem variant="destructive" className={CONNECTION_MENU_DESTRUCTIVE_ITEM_CLASS} onClick={handleDelete}>
-                    <Trash2Icon />
-                    <span className="relative top-px">{t('common.delete')}</span>
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          <ConnectionActions
+            profile={profile}
+            displayName={displayName}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onConnectTerminal={onConnectTerminal}
+            onConnectSftp={onConnectSftp}
+            onOpenHealth={onOpenHealth}
+            onDuplicate={onDuplicate}
+            onToggleFavorite={onToggleFavorite}
+            onOverview={onOverview}
+            onPortForward={onPortForward}
+            onQuickActions={onQuickActions}
+          />
         </div>
       </ManagementCard>
     );
   },
 );
+
+interface ConnectionTableProps extends Omit<ConnectionCardProps, 'profile'> {
+  profiles: ConnectionProfile[];
+  sort: ConnectionTableSort | null;
+  onSort: (column: ConnectionTableSortColumn) => void;
+}
+
+const ConnectionTableRow = React.memo<ConnectionCardProps>(
+  ({
+    profile,
+    onEdit,
+    onDelete,
+    onConnectTerminal,
+    onConnectSftp,
+    onOpenHealth,
+    onDuplicate,
+    onToggleFavorite,
+    onOverview,
+    onPortForward,
+    onQuickActions,
+  }) => {
+    const { t } = useI18n();
+    const displayName = profile.name.trim() || profile.host;
+    const address = `${profile.username}@${profile.host}:${profile.port}`;
+    const tags = profile.tags ?? [];
+    const authLabel = t(`connection.form.auth.${profile.authMethod}`);
+    const AuthIcon = AUTH_METHOD_ICONS[profile.authMethod];
+
+    return (
+      <TableRow data-slot="connection-table-row" className={WORKBENCH_TABLE_ROW_CLASS}>
+        <TableCell className={WORKBENCH_TABLE_CELL_CLASS}>
+          <div className="flex min-w-0 items-center gap-2">
+            <MonitorIcon
+              className="size-4 shrink-0 text-muted-foreground/75 transition-colors group-hover:text-foreground"
+              aria-hidden
+            />
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <div className="flex min-w-0 items-center gap-1">
+                <ConnectionText text={displayName} kind="name" className="text-[13px] font-medium text-foreground" />
+                {profile.favorite && (
+                  <StarIcon
+                    className="size-3.5 shrink-0 fill-current text-app-warning"
+                    aria-label={t('workbench.connections.filter.favorites')}
+                  />
+                )}
+                {profile.sandboxMode && (
+                  <Badge
+                    variant="secondary"
+                    size="sm"
+                    className={cn(WORKBENCH_TABLE_TAG_CLASS, 'max-w-24 shrink-0 gap-1 bg-muted/75 text-muted-foreground')}
+                    data-connection-sandbox-mode={profile.sandboxMode}
+                  >
+                    <ShieldCheckIcon aria-hidden="true" className="size-3 shrink-0" />
+                    <ConnectionText text={t(`connection.sandbox.badge.${profile.sandboxMode}`)} kind="sandbox" />
+                  </Badge>
+                )}
+              </div>
+              <span className="truncate font-mono text-[11px] tabular-nums text-muted-foreground @min-[36rem]:hidden">
+                {address}
+              </span>
+            </div>
+          </div>
+        </TableCell>
+        <TableCell className={cn(WORKBENCH_TABLE_CELL_CLASS, 'hidden @min-[36rem]:table-cell')}>
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <ConnectionText text={address} kind="address" className="font-mono text-xs tabular-nums text-foreground/85" />
+            {profile.jumpHost && (
+              <div className="flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground/80">
+                <CornerDownRightIcon className="size-3 shrink-0 opacity-65" aria-hidden />
+                <ConnectionText
+                  text={`${t('connection.form.jumpHost')}: ${profile.jumpHost.username}@${profile.jumpHost.host}:${profile.jumpHost.port}`}
+                  kind="jump-host"
+                  className="font-mono tabular-nums"
+                />
+              </div>
+            )}
+          </div>
+        </TableCell>
+        <TableCell className={cn(WORKBENCH_TABLE_CELL_CLASS, 'hidden @min-[52rem]:table-cell')}>
+          <span className="inline-flex min-w-0 max-w-full items-center gap-1 text-xs text-muted-foreground">
+            <AuthIcon className="size-3.5 shrink-0 opacity-75" aria-hidden />
+            <span className="truncate">{authLabel}</span>
+          </span>
+        </TableCell>
+        <TableCell className={cn(WORKBENCH_TABLE_CELL_CLASS, 'hidden @min-[44rem]:table-cell')}>
+          {profile.group || tags.length > 0 ? (
+            <div className="flex min-w-0 flex-nowrap items-center gap-1">
+              {profile.group && (
+                <Badge variant="secondary" className={cn(WORKBENCH_TABLE_TAG_CLASS, 'min-w-0 max-w-28 shrink-0 bg-muted/80 text-foreground/85')}>
+                  <ConnectionText text={profile.group} />
+                </Badge>
+              )}
+              {tags[0] && (
+                <Badge variant="outline" className={cn(WORKBENCH_TABLE_TAG_CLASS, 'min-w-0 max-w-24 shrink border-app-border/75 text-muted-foreground')}>
+                  <ConnectionText text={tags[0]} />
+                </Badge>
+              )}
+              {tags.length > 1 && (
+                <Popover>
+                  <PopoverTrigger
+                    aria-label={t('workbench.connections.moreTags', { count: tags.length })}
+                    render={<Badge variant="outline" className={cn(WORKBENCH_TABLE_TAG_CLASS, 'border-app-border/75 text-muted-foreground hover:text-foreground')} render={<button type="button" />} />}
+                  >
+                    <span>+{tags.length - 1}</span>
+                  </PopoverTrigger>
+                  <PopoverContent align="end">
+                    <PopoverTitle>{t('connection.form.tags')}</PopoverTitle>
+                    <div className="flex flex-wrap gap-1">
+                      {tags.map((tag) => (
+                        <Badge key={tag} variant="outline" className="min-w-0 max-w-24">
+                          <ConnectionText text={tag} />
+                        </Badge>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              )}
+            </div>
+          ) : (
+            <span className="text-muted-foreground/40" aria-hidden="true">—</span>
+          )}
+        </TableCell>
+        <TableCell className={cn(WORKBENCH_TABLE_CELL_CLASS, 'hidden @min-[62rem]:table-cell')} data-slot="connection-notes">
+          {profile.notes?.trim() ? (
+            <ConnectionText text={profile.notes} kind="notes" className="text-xs text-muted-foreground" />
+          ) : (
+            <span className="text-muted-foreground/40" aria-hidden="true">—</span>
+          )}
+        </TableCell>
+        <TableCell className={WORKBENCH_TABLE_ACTION_CELL_CLASS}>
+          <ConnectionActions
+            profile={profile}
+            displayName={displayName}
+            menuAlign="end"
+            compact
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onConnectTerminal={onConnectTerminal}
+            onConnectSftp={onConnectSftp}
+            onOpenHealth={onOpenHealth}
+            onDuplicate={onDuplicate}
+            onToggleFavorite={onToggleFavorite}
+            onOverview={onOverview}
+            onPortForward={onPortForward}
+            onQuickActions={onQuickActions}
+          />
+        </TableCell>
+      </TableRow>
+    );
+  },
+);
+
+const ConnectionTable: React.FC<ConnectionTableProps> = ({
+  profiles,
+  sort,
+  onSort,
+  onEdit,
+  onDelete,
+  onConnectTerminal,
+  onConnectSftp,
+  onOpenHealth,
+  onDuplicate,
+  onToggleFavorite,
+  onOverview,
+  onPortForward,
+  onQuickActions,
+}) => {
+  const { t } = useI18n();
+
+  return (
+    <WorkbenchTableFrame slot="connection-table">
+      <Table aria-label={t('workbench.connections.title')} className="table-fixed text-xs">
+        <TableHeader className="sticky top-0 z-10 bg-background">
+          <TableRow className={WORKBENCH_TABLE_HEADER_ROW_CLASS}>
+            <WorkbenchSortableHead
+              column="name"
+              label={t('workbench.connections.table.name')}
+              sort={sort}
+              onSort={onSort}
+            />
+            <WorkbenchSortableHead
+              column="address"
+              label={t('workbench.connections.table.address')}
+              sort={sort}
+              onSort={onSort}
+              className="hidden @min-[36rem]:table-cell @min-[36rem]:w-[38%] @min-[44rem]:w-[30%] @min-[52rem]:w-[25%] @min-[62rem]:w-[22%]"
+            />
+            <WorkbenchSortableHead
+              column="auth"
+              label={t('workbench.connections.table.auth')}
+              sort={sort}
+              onSort={onSort}
+              className="hidden w-28 @min-[52rem]:table-cell"
+            />
+            <WorkbenchSortableHead
+              column="group"
+              label={t('workbench.connections.table.organization')}
+              sort={sort}
+              onSort={onSort}
+              className="hidden @min-[44rem]:table-cell @min-[44rem]:w-[24%] @min-[52rem]:w-[21%] @min-[62rem]:w-[17%]"
+            />
+            <TableHead className={cn(WORKBENCH_TABLE_HEAD_CLASS, 'hidden @min-[62rem]:table-cell @min-[62rem]:w-[16%]')}>
+              {t('workbench.connections.table.notes')}
+            </TableHead>
+            <TableHead className={cn(WORKBENCH_TABLE_HEAD_CLASS, 'w-[7.25rem] text-right')}>
+              {t('workbench.connections.table.actions')}
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody className="[&_tr:last-child]:border-b">
+          {profiles.map((profile) => (
+            <ConnectionTableRow
+              key={profile.id}
+              profile={profile}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              onConnectTerminal={onConnectTerminal}
+              onConnectSftp={onConnectSftp}
+              onOpenHealth={onOpenHealth}
+              onDuplicate={onDuplicate}
+              onToggleFavorite={onToggleFavorite}
+              onOverview={onOverview}
+              onPortForward={onPortForward}
+              onQuickActions={onQuickActions}
+            />
+          ))}
+        </TableBody>
+      </Table>
+    </WorkbenchTableFrame>
+  );
+};

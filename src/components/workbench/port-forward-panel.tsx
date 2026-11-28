@@ -6,6 +6,7 @@ import {
   ArrowUpIcon,
   CableIcon,
   ChevronDownIcon,
+  Clock3Icon,
   EraserIcon,
   InfoIcon,
   PencilIcon,
@@ -48,11 +49,12 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import { getErrorMessage } from '@/lib/error';
-import { formatBytes, generateId } from '@/lib/utils';
+import { cn, formatBytes, generateId } from '@/lib/utils';
 import {
   isPortForwardActive,
   type ManagedPortForwardRuntime,
@@ -71,8 +73,26 @@ import {
   WorkbenchPageToolbar,
   WorkbenchSearchInput,
 } from './workbench-page';
+import {
+  WORKBENCH_TABLE_ACTION_CELL_CLASS,
+  WORKBENCH_TABLE_ACTION_GROUP_CLASS,
+  WORKBENCH_TABLE_CELL_CLASS,
+  WORKBENCH_TABLE_DESTRUCTIVE_ICON_BUTTON_CLASS,
+  WORKBENCH_TABLE_HEAD_CLASS,
+  WORKBENCH_TABLE_HEADER_ROW_CLASS,
+  WORKBENCH_TABLE_ICON_BUTTON_CLASS,
+  WORKBENCH_TABLE_ROW_CLASS,
+  WORKBENCH_VIEW_STORAGE_KEYS,
+  WorkbenchSortableHead,
+  WorkbenchTableFrame,
+  WorkbenchViewModeToggle,
+  nextWorkbenchTableSort,
+  useWorkbenchViewMode,
+  type WorkbenchTableSort,
+} from './workbench-view-mode';
 
 type StatusFilter = 'all' | 'active' | 'failed';
+type PortForwardSortColumn = 'name' | 'status' | 'host';
 
 interface RuleDraft {
   id?: string;
@@ -143,6 +163,13 @@ function statusVariant(
   return 'outline';
 }
 
+function statusDotClass(status: ManagedPortForwardRuntime['status'] | undefined): string {
+  if (status === 'running') return 'bg-app-success';
+  if (status === 'failed') return 'bg-destructive';
+  if (status === 'starting' || status === 'stopping') return 'bg-app-warning';
+  return 'bg-muted-foreground/40';
+}
+
 function ruleRouteSummary(rule: PortForwardRule): string {
   if (rule.kind === 'dynamic') return `SOCKS5 · 127.0.0.1:${rule.localPort}`;
   if (rule.kind === 'local') return `127.0.0.1:${rule.localPort} → ${rule.remoteHost}:${rule.remotePort}`;
@@ -150,7 +177,7 @@ function ruleRouteSummary(rule: PortForwardRule): string {
 }
 
 export const PortForwardPanel: React.FC = () => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const profiles = useProfileStore((state) => state.profiles);
   const profilesInitialized = useProfileStore((state) => state.initialized);
   const allRuntimes = usePortForwardStore((state) => state.runtimes);
@@ -161,6 +188,8 @@ export const PortForwardPanel: React.FC = () => {
 
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [viewMode, setViewMode] = useWorkbenchViewMode(WORKBENCH_VIEW_STORAGE_KEYS.portForwards);
+  const [tableSort, setTableSort] = useState<WorkbenchTableSort<PortForwardSortColumn> | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [draft, setDraft] = useState<RuleDraft>();
   const [showValidation, setShowValidation] = useState(false);
@@ -288,6 +317,25 @@ export const PortForwardPanel: React.FC = () => {
       return haystack.includes(normalizedQuery);
     });
   }, [normalizedQuery, scopedEntries, statusFilter]);
+
+  const tableEntries = useMemo(() => {
+    if (viewMode !== 'table' || !tableSort) return filteredEntries;
+    const collator = new Intl.Collator(locale || 'en-US', { numeric: true, sensitivity: 'base' });
+    const direction = tableSort.direction === 'asc' ? 1 : -1;
+    return [...filteredEntries].sort((left, right) => {
+      if (tableSort.column === 'name') {
+        return direction * collator.compare(left.rule.name, right.rule.name);
+      }
+      if (tableSort.column === 'status') {
+        const leftStatus = t(`portForward.status.${left.runtime?.status ?? 'idle'}`);
+        const rightStatus = t(`portForward.status.${right.runtime?.status ?? 'idle'}`);
+        return direction * collator.compare(leftStatus, rightStatus);
+      }
+      const hostCompare = collator.compare(profileDisplayName(left.profile), profileDisplayName(right.profile));
+      if (hostCompare !== 0) return direction * hostCompare;
+      return direction * collator.compare(left.profile.host, right.profile.host);
+    });
+  }, [filteredEntries, locale, t, tableSort, viewMode]);
 
   const fieldErrors = useMemo(() => {
     const errors: Partial<Record<'profileId' | 'name' | 'localPort' | 'remoteHost' | 'remotePort', string>> = {};
@@ -512,11 +560,16 @@ export const PortForwardPanel: React.FC = () => {
                 </SelectGroup>
               </SelectContent>
             </Select>
+            <WorkbenchViewModeToggle value={viewMode} onChange={setViewMode} />
           </WorkbenchPageToolbar>
         )}
 
         <ScrollArea className="min-h-0 flex-1">
-          <WorkbenchPageContent>
+          <WorkbenchPageContent
+            className={cn(
+              viewMode === 'table' && filteredEntries.length > 0 && 'p-0',
+            )}
+          >
             {!profilesInitialized && profiles.length === 0 ? (
               <PanelLoadingState />
             ) : profiles.length === 0 ? (
@@ -537,6 +590,250 @@ export const PortForwardPanel: React.FC = () => {
                 title={t('portForward.filteredEmpty')}
                 description={t('common.noSearchResults')}
               />
+            ) : viewMode === 'table' ? (
+              <WorkbenchTableFrame slot="port-forward-table">
+                <Table aria-label={t('workbench.portForwards.title')} className="table-fixed text-xs">
+                  <TableHeader className="sticky top-0 z-10 bg-background">
+                    <TableRow className={WORKBENCH_TABLE_HEADER_ROW_CLASS}>
+                      <WorkbenchSortableHead
+                        column="name"
+                        label={t('portForward.table.name')}
+                        sort={tableSort}
+                        onSort={(column) => setTableSort((current) => nextWorkbenchTableSort(current, column))}
+                      />
+                      <TableHead className={cn(WORKBENCH_TABLE_HEAD_CLASS, 'hidden @min-[44rem]:table-cell @min-[44rem]:w-[29%] @min-[62rem]:w-[25%]')}>
+                        {t('portForward.table.route')}
+                      </TableHead>
+                      <WorkbenchSortableHead
+                        column="host"
+                        label={t('portForward.table.host')}
+                        sort={tableSort}
+                        onSort={(column) => setTableSort((current) => nextWorkbenchTableSort(current, column))}
+                        className="hidden @min-[52rem]:table-cell @min-[52rem]:w-[20%] @min-[62rem]:w-[17%]"
+                      />
+                      <WorkbenchSortableHead
+                        column="status"
+                        label={t('portForward.table.status')}
+                        sort={tableSort}
+                        onSort={(column) => setTableSort((current) => nextWorkbenchTableSort(current, column))}
+                        className="hidden w-24 @min-[36rem]:table-cell"
+                      />
+                      <TableHead className={cn(WORKBENCH_TABLE_HEAD_CLASS, 'hidden @min-[62rem]:table-cell @min-[62rem]:w-[18%]')}>
+                        {t('portForward.table.traffic')}
+                      </TableHead>
+                      <TableHead className={cn(WORKBENCH_TABLE_HEAD_CLASS, 'w-[7.25rem] text-right')}>
+                        {t('portForward.table.actions')}
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody className="[&_tr:last-child]:border-b">
+                    {tableEntries.map(({ profile, rule, runtime, active }) => (
+                      <TableRow
+                        key={`${profile.id}:${rule.id}`}
+                        data-slot="port-forward-table-row"
+                        className={WORKBENCH_TABLE_ROW_CLASS}
+                      >
+                        <TableCell className={WORKBENCH_TABLE_CELL_CLASS}>
+                          <div className="flex min-w-0 items-center gap-2">
+                            <CableIcon
+                              className="size-4 shrink-0 text-muted-foreground/75 transition-colors group-hover:text-foreground"
+                              aria-hidden
+                            />
+                            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                              <div className="flex min-w-0 items-center gap-1.5">
+                                <ManagementCardText
+                                  text={rule.name}
+                                  className="text-[13px] font-medium text-foreground"
+                                />
+                                <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground @min-[36rem]:hidden">
+                                  <span className={cn('size-1.5 rounded-full', statusDotClass(runtime?.status))} aria-hidden />
+                                  {t(`portForward.status.${runtime?.status ?? 'idle'}`)}
+                                </span>
+                              </div>
+                              <span className="truncate font-mono text-[11px] tabular-nums text-muted-foreground @min-[44rem]:hidden">
+                                {ruleRouteSummary(rule)}
+                              </span>
+                              {runtime?.lastError ? (
+                                <Tooltip>
+                                  <TooltipTrigger
+                                    render={
+                                      <div
+                                        role="alert"
+                                        tabIndex={0}
+                                        className="flex min-w-0 items-center gap-1 text-[11px] leading-4 text-destructive"
+                                      />
+                                    }
+                                  >
+                                    <AlertCircleIcon className="size-3 shrink-0" aria-hidden />
+                                    <span className="min-w-0 truncate">
+                                      {runtime.errorCategory === 'portInUse'
+                                        ? t('portForward.error.portInUseTitle')
+                                        : runtime.lastError}
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent className="max-w-sm whitespace-pre-wrap break-words">
+                                    <div className="font-medium">
+                                      {runtime.errorCategory === 'portInUse'
+                                        ? t('portForward.error.portInUseTitle')
+                                        : t('portForward.error.title')}
+                                    </div>
+                                    <div>{runtime.lastError}</div>
+                                  </TooltipContent>
+                                </Tooltip>
+                              ) : null}
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell className={cn(WORKBENCH_TABLE_CELL_CLASS, 'hidden @min-[44rem]:table-cell')}>
+                          <div className="flex min-w-0 flex-col gap-0.5">
+                            <ManagementCardText
+                              text={ruleRouteSummary(rule)}
+                              className="font-mono text-xs tabular-nums text-foreground/85"
+                            />
+                            <span className="truncate text-[11px] text-muted-foreground/80">
+                              {t(`portForward.kind.${rule.kind}`)} · {rule.autoStart ? t('portForward.mode.auto') : t('portForward.mode.manual')}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className={cn(WORKBENCH_TABLE_CELL_CLASS, 'hidden @min-[52rem]:table-cell')}>
+                          <div className="flex min-w-0 flex-col gap-0.5">
+                            <ManagementCardText
+                              text={profileDisplayName(profile)}
+                              className="text-xs text-foreground/85"
+                            />
+                            <span className="truncate font-mono text-[11px] tabular-nums text-muted-foreground/80">
+                              {profile.host}:{profile.port}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className={cn(WORKBENCH_TABLE_CELL_CLASS, 'hidden @min-[36rem]:table-cell')}>
+                          <span
+                            className={cn(
+                              'inline-flex items-center gap-1.5 text-xs',
+                              runtime?.status === 'running'
+                                ? 'font-medium text-foreground'
+                                : runtime?.status === 'failed'
+                                  ? 'text-destructive'
+                                  : 'text-muted-foreground',
+                            )}
+                          >
+                            <span className={cn('size-1.5 shrink-0 rounded-full', statusDotClass(runtime?.status))} aria-hidden />
+                            <span className="truncate">{t(`portForward.status.${runtime?.status ?? 'idle'}`)}</span>
+                          </span>
+                        </TableCell>
+                        <TableCell className={cn(WORKBENCH_TABLE_CELL_CLASS, 'hidden @min-[62rem]:table-cell')}>
+                          {runtime && (runtime.startedAt || runtime.bytesSent > 0 || runtime.bytesReceived > 0) ? (
+                            <div data-slot="port-forward-metrics" className="flex min-w-0 flex-col gap-0.5 text-xs text-muted-foreground">
+                              <div className="flex min-w-0 items-center gap-2 font-mono tabular-nums">
+                                <Tooltip>
+                                  <TooltipTrigger
+                                    render={
+                                      <span
+                                        aria-label={`${t('portForward.sent')}: ${formatBytes(runtime.bytesSent)}`}
+                                        className="inline-flex items-center gap-1 rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        tabIndex={0}
+                                      />
+                                    }
+                                  >
+                                    <ArrowUpIcon className="size-3 shrink-0 text-muted-foreground/70" aria-hidden />
+                                    <span className={cn(active && 'font-medium text-foreground/90')}>
+                                      {formatBytes(runtime.bytesSent)}
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    {t('portForward.sent')}: {formatBytes(runtime.bytesSent)}
+                                  </TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger
+                                    render={
+                                      <span
+                                        aria-label={`${t('portForward.received')}: ${formatBytes(runtime.bytesReceived)}`}
+                                        className="inline-flex items-center gap-1 rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        tabIndex={0}
+                                      />
+                                    }
+                                  >
+                                    <ArrowDownIcon className="size-3 shrink-0 text-muted-foreground/70" aria-hidden />
+                                    <span className={cn(active && 'font-medium text-foreground/90')}>
+                                      {formatBytes(runtime.bytesReceived)}
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    {t('portForward.received')}: {formatBytes(runtime.bytesReceived)}
+                                  </TooltipContent>
+                                </Tooltip>
+                              </div>
+                              {runtime.startedAt ? (
+                                <span className="inline-flex items-center gap-1 truncate font-mono text-[11px] tabular-nums text-muted-foreground/75">
+                                  <Clock3Icon className="size-3 shrink-0 opacity-70" aria-hidden />
+                                  <span className="truncate">{new Date(runtime.startedAt).toLocaleTimeString()}</span>
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground/40" aria-hidden="true">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className={WORKBENCH_TABLE_ACTION_CELL_CLASS}>
+                          <div className={WORKBENCH_TABLE_ACTION_GROUP_CLASS}>
+                            {active && runtime ? (
+                              <IconActionButton
+                                className={WORKBENCH_TABLE_DESTRUCTIVE_ICON_BUTTON_CLASS}
+                                disabled={runtime.status === 'stopping'}
+                                onClick={() => void usePortForwardStore.getState().stop(runtime.operationId)}
+                                aria-label={t('portForward.stop')}
+                                tooltip={t('portForward.stop')}
+                              >
+                                <SquareIcon data-icon="inline-start" />
+                              </IconActionButton>
+                            ) : runtime?.status === 'failed' ? (
+                              <IconActionButton
+                                className={WORKBENCH_TABLE_ICON_BUTTON_CLASS}
+                                onClick={() => void usePortForwardStore.getState().retry(runtime.operationId)}
+                                aria-label={t('portForward.retry')}
+                                tooltip={t('portForward.retry')}
+                              >
+                                <RotateCcwIcon data-icon="inline-start" />
+                              </IconActionButton>
+                            ) : (
+                              <IconActionButton
+                                className={WORKBENCH_TABLE_ICON_BUTTON_CLASS}
+                                onClick={() => void usePortForwardStore.getState().startRule(profile, rule, 'manual')}
+                                aria-label={t('portForward.start')}
+                                tooltip={t('portForward.start')}
+                              >
+                                <PlayIcon data-icon="inline-start" />
+                              </IconActionButton>
+                            )}
+                            <IconActionButton
+                              className={WORKBENCH_TABLE_ICON_BUTTON_CLASS}
+                              onClick={() => {
+                                setDraft(createDraft(profile.id, rule));
+                                setShowValidation(false);
+                                setDrawerOpen(true);
+                              }}
+                              disabled={active}
+                              aria-label={t('common.edit')}
+                              tooltip={t('common.edit')}
+                            >
+                              <PencilIcon data-icon="inline-start" />
+                            </IconActionButton>
+                            <IconActionButton
+                              className={WORKBENCH_TABLE_DESTRUCTIVE_ICON_BUTTON_CLASS}
+                              onClick={() => setDeleting({ profile, rule, active })}
+                              aria-label={t('common.delete')}
+                              tooltip={t('common.delete')}
+                            >
+                              <Trash2Icon data-icon="inline-start" />
+                            </IconActionButton>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </WorkbenchTableFrame>
             ) : (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))] gap-2">
                 {filteredEntries.map(({ profile, rule, runtime, active }) => (
@@ -570,26 +867,65 @@ export const PortForwardPanel: React.FC = () => {
                       />
                     </div>
 
-                    {runtime && (runtime.startedAt || runtime.bytesSent > 0 || runtime.bytesReceived > 0) ? (
-                      <div className="flex items-center justify-between gap-2 rounded-md border border-app-border/60 bg-muted/50 px-2 py-0.5 text-[11px] leading-4 text-muted-foreground">
-                        <div className="flex items-center gap-2.5 font-mono tabular-nums">
-                          <span className="flex items-center gap-1">
-                            <ArrowUpIcon className="size-3 shrink-0" aria-hidden />
-                            {formatBytes(runtime.bytesSent)}
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <ArrowDownIcon className="size-3 shrink-0" aria-hidden />
-                            {formatBytes(runtime.bytesReceived)}
-                          </span>
+                    {runtime && (active || runtime.startedAt || runtime.bytesSent > 0 || runtime.bytesReceived > 0) ? (
+                      <div
+                        data-slot="port-forward-metrics"
+                        className="flex h-4 min-w-0 items-center justify-between gap-2 text-xs leading-4 text-muted-foreground"
+                      >
+                        <div className="flex min-w-0 items-center gap-2 font-mono tabular-nums">
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <span
+                                  aria-label={`${t('portForward.sent')}: ${formatBytes(runtime.bytesSent)}`}
+                                  className="inline-flex items-center gap-1 rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                  tabIndex={0}
+                                />
+                              }
+                            >
+                              <ArrowUpIcon className="size-3 shrink-0 text-muted-foreground/80" aria-hidden />
+                              <span className={cn(active && 'font-medium text-app-text')}>
+                                {formatBytes(runtime.bytesSent)}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {t('portForward.sent')}: {formatBytes(runtime.bytesSent)}
+                            </TooltipContent>
+                          </Tooltip>
+                          <span aria-hidden className="h-2.5 w-px shrink-0 bg-app-border/70" />
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <span
+                                  aria-label={`${t('portForward.received')}: ${formatBytes(runtime.bytesReceived)}`}
+                                  className="inline-flex items-center gap-1 rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                  tabIndex={0}
+                                />
+                              }
+                            >
+                              <ArrowDownIcon className="size-3 shrink-0 text-muted-foreground/80" aria-hidden />
+                              <span className={cn(active && 'font-medium text-app-text')}>
+                                {formatBytes(runtime.bytesReceived)}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {t('portForward.received')}: {formatBytes(runtime.bytesReceived)}
+                            </TooltipContent>
+                          </Tooltip>
                         </div>
                         {runtime.startedAt ? (
                           <Tooltip>
                             <TooltipTrigger
                               render={
-                                <span className="truncate font-mono tabular-nums" tabIndex={0} />
+                                <span
+                                  aria-label={`${t('portForward.started')}: ${new Date(runtime.startedAt).toLocaleTimeString()}`}
+                                  className="inline-flex min-w-0 items-center gap-1 rounded-sm font-mono tabular-nums outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                  tabIndex={0}
+                                />
                               }
                             >
-                              {new Date(runtime.startedAt).toLocaleTimeString()}
+                              <Clock3Icon className="size-3 shrink-0 text-muted-foreground/80" aria-hidden />
+                              <span className="truncate">{new Date(runtime.startedAt).toLocaleTimeString()}</span>
                             </TooltipTrigger>
                             <TooltipContent>
                               {t('portForward.started')}: {new Date(runtime.startedAt).toLocaleString()} · {t('portForward.runMode')}: {t(`portForward.mode.${runtime.mode}`)}
@@ -597,6 +933,8 @@ export const PortForwardPanel: React.FC = () => {
                           </Tooltip>
                         ) : null}
                       </div>
+                    ) : !runtime?.lastError ? (
+                      <div aria-hidden data-slot="port-forward-metrics-spacer" className="h-4 shrink-0" />
                     ) : null}
 
                     {runtime?.lastError ? (

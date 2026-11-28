@@ -1,6 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { KeychainPanel } from '../keychain-panel';
+import {
+  WORKBENCH_VIEW_STORAGE_KEYS,
+  readWorkbenchViewMode,
+  saveWorkbenchViewMode,
+} from '../workbench-view-mode';
 import { useKeychainStore } from '@/stores/keychainStore';
 import { useProfileStore } from '@/stores/profileStore';
 import type { ConnectionProfile } from '@/types';
@@ -26,6 +31,7 @@ describe('KeychainPanel', () => {
   const initialProfiles = useProfileStore.getState();
 
   beforeEach(() => {
+    saveWorkbenchViewMode(WORKBENCH_VIEW_STORAGE_KEYS.keychain, 'card');
     useKeychainStore.setState(initialKeychain, true);
     useProfileStore.setState(initialProfiles, true);
     useKeychainStore.setState({
@@ -230,5 +236,29 @@ describe('KeychainPanel', () => {
       expect(useProfileStore.getState().getProfile('profile-1')?.password).toBeUndefined();
     });
     expect(removeKey).toHaveBeenCalledWith('profile-1');
+  });
+
+  it('switches to table view, sorts credentials, and persists the preference locally', () => {
+    const { unmount } = render(<KeychainPanel />);
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'workbench.connections.view.table' }));
+    expect(readWorkbenchViewMode(WORKBENCH_VIEW_STORAGE_KEYS.keychain)).toBe('table');
+
+    const table = screen.getByRole('table', { name: 'workbench.keychain.title' });
+    expect(within(table).getAllByRole('row')).toHaveLength(3);
+    expect(within(table).getByText('Server key')).toBeInTheDocument();
+    expect(within(table).getByText('Server password')).toBeInTheDocument();
+
+    const sortButtons = within(table).getAllByRole('button', { name: 'workbench.connections.table.sortBy' });
+    fireEvent.click(sortButtons[0]);
+    const rows = () => within(table).getAllByRole('row').slice(1).map((row) => row.textContent ?? '');
+    expect(rows()[0]).toContain('Server key');
+    fireEvent.click(sortButtons[0]);
+    expect(rows()[0]).toContain('Server password');
+
+    unmount();
+    render(<KeychainPanel />);
+    expect(screen.getByRole('table', { name: 'workbench.keychain.title' })).toBeInTheDocument();
   });
 });

@@ -46,6 +46,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
@@ -57,7 +58,7 @@ import {
   validateHostQuickAction,
   type HostQuickActionValidationError,
 } from '@/lib/host/host-quick-actions';
-import { generateId } from '@/lib/utils';
+import { cn, generateId } from '@/lib/utils';
 import { useProfileStore } from '@/stores/profileStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useWorkbenchToolsStore } from '@/stores/workbenchToolsStore';
@@ -75,10 +76,29 @@ import {
   WorkbenchPageToolbar,
   WorkbenchSearchInput,
 } from './workbench-page';
+import {
+  WORKBENCH_TABLE_ACTION_CELL_CLASS,
+  WORKBENCH_TABLE_ACTION_GROUP_CLASS,
+  WORKBENCH_TABLE_CELL_CLASS,
+  WORKBENCH_TABLE_DESTRUCTIVE_ICON_BUTTON_CLASS,
+  WORKBENCH_TABLE_HEAD_CLASS,
+  WORKBENCH_TABLE_HEADER_ROW_CLASS,
+  WORKBENCH_TABLE_ICON_BUTTON_CLASS,
+  WORKBENCH_TABLE_ROW_CLASS,
+  WORKBENCH_TABLE_TAG_CLASS,
+  WORKBENCH_VIEW_STORAGE_KEYS,
+  WorkbenchSortableHead,
+  WorkbenchTableFrame,
+  WorkbenchViewModeToggle,
+  nextWorkbenchTableSort,
+  useWorkbenchViewMode,
+  type WorkbenchTableSort,
+} from './workbench-view-mode';
 
 const MAX_ACTIONS_PER_HOST = 24;
 
 type KindFilter = 'all' | HostQuickAction['kind'];
+type QuickActionSortColumn = 'name' | 'kind' | 'host';
 
 interface QuickActionDraft {
   id?: string;
@@ -143,7 +163,7 @@ function actionIcon(action: HostQuickAction): React.ElementType {
 }
 
 export const HostQuickActionsPanel: React.FC = () => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { error: showError, info, success } = useToast();
   const profiles = useProfileStore((state) => state.profiles);
   const profilesInitialized = useProfileStore((state) => state.initialized);
@@ -154,6 +174,8 @@ export const HostQuickActionsPanel: React.FC = () => {
 
   const [query, setQuery] = useState('');
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
+  const [viewMode, setViewMode] = useWorkbenchViewMode(WORKBENCH_VIEW_STORAGE_KEYS.quickActions);
+  const [tableSort, setTableSort] = useState<WorkbenchTableSort<QuickActionSortColumn> | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [draft, setDraft] = useState<QuickActionDraft>();
   const [deleting, setDeleting] = useState<{
@@ -255,6 +277,26 @@ export const HostQuickActionsPanel: React.FC = () => {
       return haystack.includes(normalizedQuery);
     });
   }, [actionDescriptions, kindFilter, normalizedQuery, scopedEntries]);
+
+  const tableEntries = useMemo(() => {
+    if (viewMode !== 'table' || !tableSort) return filteredEntries;
+    const collator = new Intl.Collator(locale || 'en-US', { numeric: true, sensitivity: 'base' });
+    const direction = tableSort.direction === 'asc' ? 1 : -1;
+    return [...filteredEntries].sort((left, right) => {
+      if (tableSort.column === 'name') {
+        return direction * collator.compare(left.action.label, right.action.label);
+      }
+      if (tableSort.column === 'kind') {
+        return direction * collator.compare(
+          t(`hostQuickActions.kind.${left.action.kind}`),
+          t(`hostQuickActions.kind.${right.action.kind}`),
+        );
+      }
+      const hostCompare = collator.compare(profileDisplayName(left.profile), profileDisplayName(right.profile));
+      if (hostCompare !== 0) return direction * hostCompare;
+      return direction * collator.compare(left.profile.host, right.profile.host);
+    });
+  }, [filteredEntries, locale, t, tableSort, viewMode]);
 
   const selectedProfile = effectiveProfileFilter === 'all'
     ? undefined
@@ -462,11 +504,16 @@ export const HostQuickActionsPanel: React.FC = () => {
                 </SelectGroup>
               </SelectContent>
             </Select>
+            <WorkbenchViewModeToggle value={viewMode} onChange={setViewMode} />
           </WorkbenchPageToolbar>
         )}
 
         <ScrollArea className="min-h-0 flex-1">
-          <WorkbenchPageContent>
+          <WorkbenchPageContent
+            className={cn(
+              viewMode === 'table' && filteredEntries.length > 0 && 'p-0',
+            )}
+          >
             {!profilesInitialized && profiles.length === 0 ? (
               <PanelLoadingState />
             ) : profiles.length === 0 ? (
@@ -487,6 +534,148 @@ export const HostQuickActionsPanel: React.FC = () => {
                 title={t('hostQuickActions.filteredEmpty')}
                 description={t('common.noSearchResults')}
               />
+            ) : viewMode === 'table' ? (
+              <WorkbenchTableFrame slot="quick-actions-table">
+                <Table aria-label={t('workbench.quickActions.title')} className="table-fixed text-xs">
+                  <TableHeader className="sticky top-0 z-10 bg-background">
+                    <TableRow className={WORKBENCH_TABLE_HEADER_ROW_CLASS}>
+                      <WorkbenchSortableHead
+                        column="name"
+                        label={t('hostQuickActions.table.name')}
+                        sort={tableSort}
+                        onSort={(column) => setTableSort((current) => nextWorkbenchTableSort(current, column))}
+                      />
+                      <WorkbenchSortableHead
+                        column="kind"
+                        label={t('hostQuickActions.table.kind')}
+                        sort={tableSort}
+                        onSort={(column) => setTableSort((current) => nextWorkbenchTableSort(current, column))}
+                        className="hidden w-28 @min-[44rem]:table-cell"
+                      />
+                      <TableHead className={cn(WORKBENCH_TABLE_HEAD_CLASS, 'hidden @min-[36rem]:table-cell @min-[36rem]:w-[42%] @min-[44rem]:w-[34%] @min-[56rem]:w-[30%]')}>
+                        {t('hostQuickActions.table.detail')}
+                      </TableHead>
+                      <WorkbenchSortableHead
+                        column="host"
+                        label={t('hostQuickActions.table.host')}
+                        sort={tableSort}
+                        onSort={(column) => setTableSort((current) => nextWorkbenchTableSort(current, column))}
+                        className="hidden @min-[56rem]:table-cell @min-[56rem]:w-[22%]"
+                      />
+                      <TableHead className={cn(WORKBENCH_TABLE_HEAD_CLASS, 'w-[7.25rem] text-right')}>
+                        {t('hostQuickActions.table.actions')}
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody className="[&_tr:last-child]:border-b">
+                    {tableEntries.map(({ profile, action }) => {
+                      const Icon = actionIcon(action);
+                      const commandDisabled = action.kind === 'command'
+                        && !connectedWritableProfileIds.has(profile.id);
+                      const detail = action.kind === 'directory'
+                        ? `${action.target === 'terminal' ? t('hostQuickActions.target.terminal') : t('hostQuickActions.target.sftp')} · ${action.path}`
+                        : action.kind === 'command'
+                          ? action.command
+                          : actionDescriptions[action.action];
+
+                      return (
+                        <TableRow
+                          key={`${profile.id}:${action.id}`}
+                          data-slot="quick-actions-table-row"
+                          className={WORKBENCH_TABLE_ROW_CLASS}
+                        >
+                          <TableCell className={WORKBENCH_TABLE_CELL_CLASS}>
+                            <div className="flex min-w-0 items-center gap-2">
+                              <Icon
+                                className="size-4 shrink-0 text-muted-foreground/75 transition-colors group-hover:text-foreground"
+                                aria-hidden
+                              />
+                              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                                <ManagementCardText
+                                  text={action.label}
+                                  className="text-[13px] font-medium text-foreground"
+                                />
+                                <span className="truncate font-mono text-[11px] text-muted-foreground @min-[36rem]:hidden">
+                                  {detail}
+                                </span>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className={cn(WORKBENCH_TABLE_CELL_CLASS, 'hidden @min-[44rem]:table-cell')}>
+                            <Badge variant="secondary" size="sm" className={cn(WORKBENCH_TABLE_TAG_CLASS, 'bg-muted/80 text-foreground/85')}>
+                              {t(`hostQuickActions.kind.${action.kind}`)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className={cn(WORKBENCH_TABLE_CELL_CLASS, 'hidden @min-[36rem]:table-cell')}>
+                            {action.kind === 'connection' ? (
+                              <ManagementCardText
+                                text={detail}
+                                className="text-xs text-muted-foreground"
+                              />
+                            ) : (
+                              <span className="inline-flex max-w-full rounded-md border border-app-border/45 bg-muted/45 px-1.5 py-0.5">
+                                <ManagementCardText
+                                  text={detail}
+                                  className="font-mono text-[11.5px] text-foreground/85"
+                                />
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className={cn(WORKBENCH_TABLE_CELL_CLASS, 'hidden @min-[56rem]:table-cell')}>
+                            <div className="flex min-w-0 flex-col gap-0.5">
+                              <ManagementCardText
+                                text={profileDisplayName(profile)}
+                                className="text-xs text-foreground/85"
+                              />
+                              <span className="truncate font-mono text-[11px] tabular-nums text-muted-foreground/80">
+                                {profile.host}:{profile.port}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell className={WORKBENCH_TABLE_ACTION_CELL_CLASS}>
+                            <div className={WORKBENCH_TABLE_ACTION_GROUP_CLASS}>
+                              <IconActionButton
+                                className={WORKBENCH_TABLE_ICON_BUTTON_CLASS}
+                                aria-label={action.kind === 'command' ? t('hostQuickActions.insert') : t('hostQuickActions.run')}
+                                tooltip={commandDisabled
+                                  ? t('hostQuickActions.noTerminal')
+                                  : (action.kind === 'command' ? t('hostQuickActions.insert') : t('hostQuickActions.run'))}
+                                onClick={() => void runAction(profile, action)}
+                                disabled={commandDisabled}
+                              >
+                                {action.kind === 'command'
+                                  ? <CornerDownRightIcon data-icon="inline-start" />
+                                  : <ArrowUpRightIcon data-icon="inline-start" />}
+                              </IconActionButton>
+                              <IconActionButton
+                                className={WORKBENCH_TABLE_ICON_BUTTON_CLASS}
+                                aria-label={t('common.edit')}
+                                tooltip={t('common.edit')}
+                                onClick={() => {
+                                  setDraft(createDraft(profile.id, action));
+                                  setValidationError(undefined);
+                                  setDrawerOpen(true);
+                                }}
+                              >
+                                <PencilIcon data-icon="inline-start" />
+                              </IconActionButton>
+                              <IconActionButton
+                                className={WORKBENCH_TABLE_DESTRUCTIVE_ICON_BUTTON_CLASS}
+                                aria-label={t('common.delete')}
+                                tooltip={t('common.delete')}
+                                onClick={() => setDeleting({ profile, action })}
+                                disabled={saving}
+                              >
+                                <Trash2Icon data-icon="inline-start" />
+                              </IconActionButton>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </WorkbenchTableFrame>
             ) : (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))] gap-2">
                 {filteredEntries.map(({ profile, action }) => {

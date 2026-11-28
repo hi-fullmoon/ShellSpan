@@ -1,6 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PortForwardPanel } from '../port-forward-panel';
+import {
+  WORKBENCH_VIEW_STORAGE_KEYS,
+  readWorkbenchViewMode,
+  saveWorkbenchViewMode,
+} from '../workbench-view-mode';
 import { usePortForwardStore } from '@/stores/portForwardStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useWorkbenchToolsStore } from '@/stores/workbenchToolsStore';
@@ -76,6 +81,7 @@ describe('PortForwardPanel', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    saveWorkbenchViewMode(WORKBENCH_VIEW_STORAGE_KEYS.portForwards, 'card');
     updateProfile.mockResolvedValue(undefined);
     useProfileStore.setState({
       profiles: [prodProfile, stagingProfile],
@@ -134,10 +140,20 @@ describe('PortForwardPanel', () => {
     expect(screen.getByText('Database')).toBeInTheDocument();
     expect(screen.getByText('Preview')).toBeInTheDocument();
     expect(screen.getByText('Internal Proxy')).toBeInTheDocument();
+    expect(screen.getByLabelText('portForward.sent: 2.0 KB')).toBeInTheDocument();
+    expect(screen.getByLabelText('portForward.received: 4.0 KB')).toBeInTheDocument();
     expect(screen.getByText('2.0 KB')).toBeInTheDocument();
     expect(screen.getByText('4.0 KB')).toBeInTheDocument();
     expect(screen.getByText('portForward.error.portInUseTitle')).toBeInTheDocument();
     expect(screen.getByText(/already in use/)).toBeInTheDocument();
+
+    const metrics = document.querySelector('[data-slot="port-forward-metrics"]');
+    expect(metrics).not.toBeNull();
+    expect(metrics).toHaveClass('flex', 'items-center', 'justify-between', 'leading-4');
+    expect(metrics).not.toHaveClass('border');
+    metrics?.querySelectorAll('[tabindex="0"]').forEach((item) => {
+      expect(item).toHaveClass('gap-1');
+    });
 
     const cards = document.querySelectorAll('[data-slot="management-card"]');
     expect(cards).toHaveLength(3);
@@ -270,6 +286,83 @@ describe('PortForwardPanel', () => {
     });
   });
 
+  it('keeps the single-line metrics slot stable across idle, starting, running, and stopped states', () => {
+    useProfileStore.setState({
+      profiles: [{ ...prodProfile, portForwards: [prodProfile.portForwards![0]] }],
+      initialized: true,
+      updateProfile,
+    });
+    usePortForwardStore.setState({ ...initialPortForwardState, runtimes: [] });
+
+    render(<PortForwardPanel />);
+    expect(document.querySelector('[data-slot="port-forward-metrics-spacer"]')).toHaveClass('h-4');
+    expect(document.querySelector('[data-slot="port-forward-metrics"]')).toBeNull();
+
+    act(() => {
+      usePortForwardStore.setState({
+        runtimes: [
+          {
+            operationId: 'op-starting',
+            profileId: prodProfile.id,
+            configId: 'running-rule',
+            name: 'Database',
+            kind: 'local',
+            mode: 'manual',
+            status: 'starting',
+            bytesSent: 0,
+            bytesReceived: 0,
+            ownerIds: [],
+          },
+        ],
+      });
+    });
+    expect(document.querySelector('[data-slot="port-forward-metrics"]')).toHaveClass('h-4');
+    expect(document.querySelector('[data-slot="port-forward-metrics-spacer"]')).toBeNull();
+
+    act(() => {
+      usePortForwardStore.setState({
+        runtimes: [
+          {
+            operationId: 'op-starting',
+            profileId: prodProfile.id,
+            configId: 'running-rule',
+            name: 'Database',
+            kind: 'local',
+            mode: 'manual',
+            status: 'running',
+            startedAt: 1_700_000_000_000,
+            bytesSent: 0,
+            bytesReceived: 0,
+            ownerIds: [],
+          },
+        ],
+      });
+    });
+    expect(document.querySelector('[data-slot="port-forward-metrics"]')).toHaveClass('h-4');
+
+    act(() => {
+      usePortForwardStore.setState({
+        runtimes: [
+          {
+            operationId: 'op-starting',
+            profileId: prodProfile.id,
+            configId: 'running-rule',
+            name: 'Database',
+            kind: 'local',
+            mode: 'manual',
+            status: 'stopped',
+            startedAt: 1_700_000_000_000,
+            stoppedAt: 1_700_000_005_000,
+            bytesSent: 0,
+            bytesReceived: 0,
+            ownerIds: [],
+          },
+        ],
+      });
+    });
+    expect(document.querySelector('[data-slot="port-forward-metrics"]')).toHaveClass('h-4');
+  });
+
   it('shows a loading state while profiles are still hydrating', () => {
     useProfileStore.setState({ profiles: [], initialized: false, updateProfile });
     const { container } = render(<PortForwardPanel />);
@@ -277,5 +370,37 @@ describe('PortForwardPanel', () => {
     expect(container.querySelector('svg.animate-spin')).toBeInTheDocument();
     expect(container.querySelector('[data-slot="panel-empty-state"]')).toBeNull();
     expect(screen.queryByText('portForward.noProfilesTitle')).not.toBeInTheDocument();
+  });
+
+  it('switches to table view, sorts by rule name, and persists the preference locally', () => {
+    const { unmount } = render(<PortForwardPanel />);
+
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'workbench.connections.view.table' }));
+
+    expect(readWorkbenchViewMode(WORKBENCH_VIEW_STORAGE_KEYS.portForwards)).toBe('table');
+    const table = screen.getByRole('table', { name: 'workbench.portForwards.title' });
+    expect(within(table).getAllByRole('row')).toHaveLength(4);
+    expect(within(table).getByText('Database')).toBeInTheDocument();
+    expect(within(table).getByText('Internal Proxy')).toBeInTheDocument();
+
+    const nameSort = within(table).getByRole('button', {
+      name: 'workbench.connections.table.sortBy:{"column":"portForward.table.name"}',
+    });
+    fireEvent.click(nameSort);
+    const orderedNames = () => within(table)
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => row.querySelector('td')?.textContent ?? '');
+    expect(orderedNames()[0]).toContain('Database');
+    expect(orderedNames()[1]).toContain('Internal Proxy');
+    expect(orderedNames()[2]).toContain('Preview');
+
+    fireEvent.click(nameSort);
+    expect(orderedNames()[0]).toContain('Preview');
+
+    unmount();
+    render(<PortForwardPanel />);
+    expect(screen.getByRole('table', { name: 'workbench.portForwards.title' })).toBeInTheDocument();
   });
 });

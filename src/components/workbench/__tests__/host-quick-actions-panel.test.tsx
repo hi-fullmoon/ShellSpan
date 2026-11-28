@@ -1,6 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HostQuickActionsPanel } from '../host-quick-actions-panel';
+import {
+  WORKBENCH_VIEW_STORAGE_KEYS,
+  readWorkbenchViewMode,
+  saveWorkbenchViewMode,
+} from '../workbench-view-mode';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { useProfileStore } from '@/stores/profileStore';
@@ -44,6 +49,7 @@ describe('HostQuickActionsPanel', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    saveWorkbenchViewMode(WORKBENCH_VIEW_STORAGE_KEYS.quickActions, 'card');
     updateProfile.mockResolvedValue(undefined);
     await initI18n('en-US');
     useAppStore.setState({ locale: 'en-US' });
@@ -204,5 +210,39 @@ describe('HostQuickActionsPanel', () => {
     expect(container.querySelector('svg.animate-spin')).toBeInTheDocument();
     expect(container.querySelector('[data-slot="panel-empty-state"]')).toBeNull();
     expect(screen.queryByText('No hosts available')).not.toBeInTheDocument();
+  });
+
+  it('switches to table view, sorts rows, and persists the preference locally', () => {
+    const withActions: ConnectionProfile = {
+      ...prodProfile,
+      quickActions: [
+        { id: 'cmd-1', kind: 'command', label: 'Zeta Status', command: 'uptime' },
+        { id: 'dir-2', kind: 'directory', label: 'Alpha Logs', path: '/var/log', target: 'terminal' },
+      ],
+    };
+    useProfileStore.setState({ profiles: [withActions, stagingProfile], initialized: true, updateProfile });
+
+    const { unmount } = render(<HostQuickActionsPanel />);
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Table view' }));
+    expect(readWorkbenchViewMode(WORKBENCH_VIEW_STORAGE_KEYS.quickActions)).toBe('table');
+
+    const table = screen.getByRole('table', { name: 'Quick actions' });
+    expect(within(table).getAllByRole('row')).toHaveLength(4);
+
+    const sortByName = within(table).getByRole('button', { name: 'Sort by Action' });
+    fireEvent.click(sortByName);
+    const names = () => within(table)
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => row.querySelector('td')?.textContent ?? '');
+    expect(names()[0]).toContain('Alpha Logs');
+    expect(names()[1]).toContain('Nginx Config');
+    expect(names()[2]).toContain('Zeta Status');
+
+    unmount();
+    render(<HostQuickActionsPanel />);
+    expect(screen.getByRole('table', { name: 'Quick actions' })).toBeInTheDocument();
   });
 });

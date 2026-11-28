@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { useToast } from '@/hooks/useToast';
 import { useKnownHostsStore } from '@/stores/knownHostsStore';
@@ -10,6 +10,7 @@ import { CopyButton } from '@/components/ui/copy-button';
 import type { KnownHostEntry } from '@/types';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -25,14 +26,35 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { IconActionButton } from './icon-action-button';
-import { ManagementCard, ManagementCardIcon } from './management-card';
+import { ManagementCard, ManagementCardIcon, ManagementCardText } from './management-card';
 import { MANAGEMENT_CARD_MIN_WIDTH } from './shared';
 import {
   WorkbenchPage,
   WorkbenchPageContent,
   WorkbenchPageHeader,
+  WorkbenchPageToolbar,
   WorkbenchSearchInput,
 } from './workbench-page';
+import {
+  WORKBENCH_TABLE_ACTION_GROUP_CLASS,
+  WORKBENCH_TABLE_CELL_CLASS,
+  WORKBENCH_TABLE_COMPACT_ACTION_CELL_CLASS,
+  WORKBENCH_TABLE_DESTRUCTIVE_ICON_BUTTON_CLASS,
+  WORKBENCH_TABLE_HEAD_CLASS,
+  WORKBENCH_TABLE_HEADER_ROW_CLASS,
+  WORKBENCH_TABLE_ICON_BUTTON_CLASS,
+  WORKBENCH_TABLE_ROW_CLASS,
+  WORKBENCH_TABLE_TAG_CLASS,
+  WORKBENCH_VIEW_STORAGE_KEYS,
+  WorkbenchSortableHead,
+  WorkbenchTableFrame,
+  WorkbenchViewModeToggle,
+  nextWorkbenchTableSort,
+  useWorkbenchViewMode,
+  type WorkbenchTableSort,
+} from './workbench-view-mode';
+
+type KnownHostSortColumn = 'host';
 
 export interface KnownHostsPanelProps {
   onCreateConnection?: (host: string, port: number) => void;
@@ -41,7 +63,7 @@ export interface KnownHostsPanelProps {
 export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
   onCreateConnection,
 }) => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { error: showError } = useToast();
   const { hosts, loading, error, loadHosts, removeHost } = useKnownHostsStore();
   const [removing, setRemoving] = React.useState<{
@@ -49,6 +71,8 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
     port: number;
   } | null>(null);
   const [query, setQuery] = useState('');
+  const [viewMode, setViewMode] = useWorkbenchViewMode(WORKBENCH_VIEW_STORAGE_KEYS.knownHosts);
+  const [tableSort, setTableSort] = useState<WorkbenchTableSort<KnownHostSortColumn> | null>(null);
 
   useEffect(() => {
     loadHosts();
@@ -83,6 +107,17 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
     if (group) group.keys.push(host);
     else groupedHosts.set(id, { host: host.host, port: host.port, keys: [host] });
   }
+  const groupedHostList = Array.from(groupedHosts.values());
+  const tableHosts = useMemo(() => {
+    if (viewMode !== 'table' || !tableSort) return groupedHostList;
+    const collator = new Intl.Collator(locale || 'en-US', { numeric: true, sensitivity: 'base' });
+    const direction = tableSort.direction === 'asc' ? 1 : -1;
+    return [...groupedHostList].sort((left, right) => {
+      const hostCompare = collator.compare(left.host, right.host);
+      if (hostCompare !== 0) return direction * hostCompare;
+      return direction * (left.port - right.port);
+    });
+  }, [groupedHostList, locale, tableSort, viewMode]);
 
   return (
     <TooltipProvider>
@@ -131,8 +166,17 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
             </>
           )}
         />
+        {hosts.length > 0 && (
+          <WorkbenchPageToolbar className="flex-row flex-wrap items-center gap-1.5">
+            <WorkbenchViewModeToggle value={viewMode} onChange={setViewMode} />
+          </WorkbenchPageToolbar>
+        )}
         <ScrollArea className="min-h-0 flex-1">
-          <WorkbenchPageContent>
+          <WorkbenchPageContent
+            className={cn(
+              viewMode === 'table' && filteredHosts.length > 0 && 'p-0',
+            )}
+          >
         {error && (
           <Alert variant="destructive">
             <CircleAlertIcon />
@@ -163,13 +207,138 @@ export const KnownHostsPanel: React.FC<KnownHostsPanelProps> = ({
             icon={<SearchXIcon className="size-5" />}
           />
         )}
-        {filteredHosts.length > 0 && (
+        {filteredHosts.length > 0 && viewMode === 'table' && (
+          <WorkbenchTableFrame slot="known-hosts-table">
+            <Table aria-label={t('workbench.knownHosts.title')} className="table-fixed text-xs">
+              <TableHeader className="sticky top-0 z-10 bg-background">
+                <TableRow className={WORKBENCH_TABLE_HEADER_ROW_CLASS}>
+                  <WorkbenchSortableHead
+                    column="host"
+                    label={t('workbench.knownHosts.table.host')}
+                    sort={tableSort}
+                    onSort={(column) => setTableSort((current) => nextWorkbenchTableSort(current, column))}
+                    className="@min-[40rem]:w-[30%] @min-[56rem]:w-[26%]"
+                  />
+                  <TableHead className={cn(WORKBENCH_TABLE_HEAD_CLASS, 'hidden @min-[40rem]:table-cell')}>
+                    {t('workbench.knownHosts.table.keys')}
+                  </TableHead>
+                  <TableHead className={cn(WORKBENCH_TABLE_HEAD_CLASS, 'w-[5.25rem] text-right')}>
+                    {t('workbench.knownHosts.table.actions')}
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody className="[&_tr:last-child]:border-b">
+                {tableHosts.map((host) => (
+                  <TableRow
+                    key={`${host.host}:${host.port}`}
+                    data-slot="known-hosts-table-row"
+                    className={WORKBENCH_TABLE_ROW_CLASS}
+                  >
+                    <TableCell className={cn(WORKBENCH_TABLE_CELL_CLASS, 'align-top')}>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <ShieldCheckIcon
+                          className="size-4 shrink-0 text-muted-foreground/75 transition-colors group-hover:text-foreground"
+                          aria-hidden
+                        />
+                        <div className="flex min-w-0 flex-1 flex-col gap-1">
+                          <ManagementCardText
+                            text={`${host.host}:${host.port}`}
+                            className="font-mono text-[13px] font-medium tabular-nums text-foreground"
+                          />
+                          <div className="flex flex-col gap-1 @min-[40rem]:hidden">
+                            {host.keys.map((key) => {
+                              const prefix = `${key.keyType} `;
+                              const fingerprint = key.fingerprint.startsWith(prefix)
+                                ? key.fingerprint.slice(prefix.length)
+                                : key.fingerprint;
+                              return (
+                                <div key={`${key.keyType}:${key.fingerprint}`} className="flex min-w-0 items-center gap-1">
+                                  <Badge variant="secondary" size="sm" className={cn(WORKBENCH_TABLE_TAG_CLASS, 'shrink-0 bg-muted/80 font-mono text-[10px] text-foreground/85')}>
+                                    {key.keyType}
+                                  </Badge>
+                                  <ManagementCardText
+                                    text={fingerprint}
+                                    className="flex-1 font-mono text-[11px] text-muted-foreground"
+                                  />
+                                  <CopyButton
+                                    text={fingerprint}
+                                    label={t('workbench.knownHosts.copyFingerprint', { keyType: key.keyType })}
+                                    errorLabel={t('workbench.knownHosts.copyFailed')}
+                                    iconOnly
+                                    size="icon-xs"
+                                    className="size-6! shrink-0 text-muted-foreground opacity-75 hover:text-foreground group-hover:opacity-100"
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell className={cn(WORKBENCH_TABLE_CELL_CLASS, 'hidden @min-[40rem]:table-cell')}>
+                      <div className="flex min-w-0 flex-col gap-1">
+                        {host.keys.map((key) => {
+                          const prefix = `${key.keyType} `;
+                          const fingerprint = key.fingerprint.startsWith(prefix)
+                            ? key.fingerprint.slice(prefix.length)
+                            : key.fingerprint;
+                          return (
+                            <div key={`${key.keyType}:${key.fingerprint}`} className="flex min-w-0 items-center gap-1.5">
+                              <Badge variant="secondary" size="sm" className={cn(WORKBENCH_TABLE_TAG_CLASS, 'shrink-0 bg-muted/80 font-mono text-[10px] text-foreground/85')}>
+                                {key.keyType}
+                              </Badge>
+                              <ManagementCardText
+                                text={fingerprint}
+                                className="flex-1 font-mono text-[11px] text-muted-foreground"
+                              />
+                              <CopyButton
+                                text={fingerprint}
+                                label={t('workbench.knownHosts.copyFingerprint', { keyType: key.keyType })}
+                                errorLabel={t('workbench.knownHosts.copyFailed')}
+                                iconOnly
+                                size="icon-xs"
+                                className="size-6! shrink-0 text-muted-foreground opacity-70 hover:text-foreground group-hover:opacity-100"
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </TableCell>
+                    <TableCell className={cn(WORKBENCH_TABLE_COMPACT_ACTION_CELL_CLASS, 'align-top')}>
+                      <div className={WORKBENCH_TABLE_ACTION_GROUP_CLASS}>
+                        {onCreateConnection && (
+                          <IconActionButton
+                            className={WORKBENCH_TABLE_ICON_BUTTON_CLASS}
+                            onClick={() => onCreateConnection(host.host, host.port)}
+                            aria-label={t('workbench.knownHosts.createConnection')}
+                            tooltip={t('workbench.knownHosts.createConnection')}
+                          >
+                            <PlusIcon data-icon="inline-start" />
+                          </IconActionButton>
+                        )}
+                        <IconActionButton
+                          className={WORKBENCH_TABLE_DESTRUCTIVE_ICON_BUTTON_CLASS}
+                          onClick={() => confirmRemove(host.host, host.port)}
+                          aria-label={t('common.delete')}
+                          tooltip={t('common.delete')}
+                        >
+                          <Trash2Icon data-icon="inline-start" />
+                        </IconActionButton>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </WorkbenchTableFrame>
+        )}
+        {filteredHosts.length > 0 && viewMode === 'card' && (
           <ResponsiveCardGrid
             columns={1}
             minColumnWidth={MANAGEMENT_CARD_MIN_WIDTH}
             gap="0.5rem"
           >
-            {Array.from(groupedHosts.values()).map((host) => (
+            {groupedHostList.map((host) => (
               <ManagementCard key={`${host.host}:${host.port}`}>
                 <div className="flex items-center gap-2.5">
                   <ManagementCardIcon>

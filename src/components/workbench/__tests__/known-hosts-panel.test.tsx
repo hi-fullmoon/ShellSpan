@@ -1,7 +1,12 @@
 import { fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import { useToastStore } from '@/stores/toastStore';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { KnownHostsPanel } from '../known-hosts-panel';
+import {
+  WORKBENCH_VIEW_STORAGE_KEYS,
+  readWorkbenchViewMode,
+  saveWorkbenchViewMode,
+} from '../workbench-view-mode';
 
 const { loadHosts, removeHost } = vi.hoisted(() => ({
   loadHosts: vi.fn().mockResolvedValue(undefined),
@@ -32,6 +37,10 @@ vi.mock('@/stores/knownHostsStore', () => ({
 }));
 
 describe('KnownHostsPanel', () => {
+  beforeEach(() => {
+    saveWorkbenchViewMode(WORKBENCH_VIEW_STORAGE_KEYS.knownHosts, 'card');
+  });
+
   it('confirms fingerprint copying on the button without a success toast', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
@@ -79,5 +88,22 @@ describe('KnownHostsPanel', () => {
     expect(
       screen.getByText('workbench.knownHosts.removeTitle'),
     ).toBeInTheDocument();
+  });
+
+  it('switches to table view, renders host fingerprints, and persists the preference locally', () => {
+    const { unmount } = render(<KnownHostsPanel />);
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'workbench.connections.view.table' }));
+    expect(readWorkbenchViewMode(WORKBENCH_VIEW_STORAGE_KEYS.knownHosts)).toBe('table');
+
+    const table = screen.getByRole('table', { name: 'workbench.knownHosts.title' });
+    expect(within(table).getAllByRole('row')).toHaveLength(2);
+    expect(within(table).getByText('prod.example.com:22')).toBeInTheDocument();
+    expect(within(table).getAllByText('SHA256:fingerprint').length).toBeGreaterThanOrEqual(1);
+
+    unmount();
+    render(<KnownHostsPanel />);
+    expect(screen.getByRole('table', { name: 'workbench.knownHosts.title' })).toBeInTheDocument();
   });
 });

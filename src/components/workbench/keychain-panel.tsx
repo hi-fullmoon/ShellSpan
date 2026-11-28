@@ -14,15 +14,36 @@ import { Textarea } from '@/components/ui/textarea';
 import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { ResponsiveCardGrid } from '@/components/ui/responsive-card-grid';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { ConfirmDeleteDialog } from '@/components/ui/confirm-delete-dialog';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from '@/components/ui/drawer';
 import { FieldGroup } from '@/components/ui/field';
 import { IconActionButton } from './icon-action-button';
-import { ManagementCard, ManagementCardIcon } from './management-card';
+import { ManagementCard, ManagementCardIcon, ManagementCardText } from './management-card';
 import { FormRow, MANAGEMENT_CARD_MIN_WIDTH } from './shared';
 import type { ConnectionProfile, KeychainKeyKind } from '@/types';
-import { WorkbenchPage, WorkbenchPageContent, WorkbenchPageHeader, WorkbenchSearchInput } from './workbench-page';
+import { WorkbenchPage, WorkbenchPageContent, WorkbenchPageHeader, WorkbenchPageToolbar, WorkbenchSearchInput } from './workbench-page';
+import {
+  WORKBENCH_TABLE_ACTION_GROUP_CLASS,
+  WORKBENCH_TABLE_CELL_CLASS,
+  WORKBENCH_TABLE_COMPACT_ACTION_CELL_CLASS,
+  WORKBENCH_TABLE_DESTRUCTIVE_ICON_BUTTON_CLASS,
+  WORKBENCH_TABLE_HEAD_CLASS,
+  WORKBENCH_TABLE_HEADER_ROW_CLASS,
+  WORKBENCH_TABLE_ICON_BUTTON_CLASS,
+  WORKBENCH_TABLE_ROW_CLASS,
+  WORKBENCH_TABLE_TAG_CLASS,
+  WORKBENCH_VIEW_STORAGE_KEYS,
+  WorkbenchSortableHead,
+  WorkbenchTableFrame,
+  WorkbenchViewModeToggle,
+  nextWorkbenchTableSort,
+  useWorkbenchViewMode,
+  type WorkbenchTableSort,
+} from './workbench-view-mode';
+
+type KeychainSortColumn = 'name' | 'type';
 
 interface KeyFormState {
   kind: KeychainKeyKind;
@@ -71,11 +92,13 @@ export function credentialSearchText(key: KeychainKeySummary, profiles: Connecti
 }
 
 export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionProfile) => void }> = ({ onEditConnection }) => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { success: showSuccess, error: showError } = useToast();
   const { keys, initialized, loadError, hydrate, addKey, updateKey, removeKey } = useKeychainStore();
   const profiles = useProfileStore((state) => state.profiles);
   const [query, setQuery] = useState('');
+  const [viewMode, setViewMode] = useWorkbenchViewMode(WORKBENCH_VIEW_STORAGE_KEYS.keychain);
+  const [tableSort, setTableSort] = useState<WorkbenchTableSort<KeychainSortColumn> | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<KeychainKeySummary | undefined>();
   const [replacing, setReplacing] = useState(false);
@@ -116,6 +139,18 @@ export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionPr
       return `${credentialSearchText(key, profiles)} ${typeLabel(key).toLowerCase()}`.includes(normalizedQuery);
     });
   }, [keys, normalizedQuery, profiles, t]);
+
+  const tableKeys = useMemo(() => {
+    if (viewMode !== 'table' || !tableSort) return filteredKeys;
+    const collator = new Intl.Collator(locale || 'en-US', { numeric: true, sensitivity: 'base' });
+    const direction = tableSort.direction === 'asc' ? 1 : -1;
+    return [...filteredKeys].sort((left, right) => {
+      if (tableSort.column === 'name') {
+        return direction * collator.compare(credentialLabel(left, profiles), credentialLabel(right, profiles));
+      }
+      return direction * collator.compare(typeLabel(left), typeLabel(right));
+    });
+  }, [filteredKeys, locale, profiles, t, tableSort, viewMode]);
 
   const clearSecret = (): void => {
     secretRequest.current += 1;
@@ -278,8 +313,18 @@ export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionPr
           }
         />
 
+        {keys.length > 0 && (
+          <WorkbenchPageToolbar className="flex-row flex-wrap items-center gap-1.5">
+            <WorkbenchViewModeToggle value={viewMode} onChange={setViewMode} />
+          </WorkbenchPageToolbar>
+        )}
+
         <ScrollArea className="min-h-0 flex-1">
-          <WorkbenchPageContent>
+          <WorkbenchPageContent
+            className={cn(
+              viewMode === 'table' && filteredKeys.length > 0 && 'p-0',
+            )}
+          >
             {!initialized && keys.length === 0 && <PanelLoadingState />}
             {initialized && keys.length === 0 && (
               <PanelEmptyState
@@ -295,7 +340,129 @@ export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionPr
                 icon={<SearchXIcon className="size-5" />}
               />
             )}
-            {filteredKeys.length > 0 && (
+            {filteredKeys.length > 0 && viewMode === 'table' && (
+              <WorkbenchTableFrame slot="keychain-table">
+                <Table aria-label={t('workbench.keychain.title')} className="table-fixed text-xs">
+                  <TableHeader className="sticky top-0 z-10 bg-background">
+                    <TableRow className={WORKBENCH_TABLE_HEADER_ROW_CLASS}>
+                      <WorkbenchSortableHead
+                        column="name"
+                        label={t('workbench.keychain.table.name')}
+                        sort={tableSort}
+                        onSort={(column) => setTableSort((current) => nextWorkbenchTableSort(current, column))}
+                      />
+                      <WorkbenchSortableHead
+                        column="type"
+                        label={t('workbench.keychain.table.type')}
+                        sort={tableSort}
+                        onSort={(column) => setTableSort((current) => nextWorkbenchTableSort(current, column))}
+                        className="hidden w-40 @min-[36rem]:table-cell"
+                      />
+                      <TableHead className={cn(WORKBENCH_TABLE_HEAD_CLASS, 'hidden @min-[44rem]:table-cell @min-[44rem]:w-[34%]')}>
+                        {t('workbench.keychain.table.connections')}
+                      </TableHead>
+                      <TableHead className={cn(WORKBENCH_TABLE_HEAD_CLASS, 'w-[5.25rem] text-right')}>
+                        {t('workbench.keychain.table.actions')}
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody className="[&_tr:last-child]:border-b">
+                    {tableKeys.map((key) => {
+                      const isProfilePassword = key.service === 'com.shellspan.profile-password';
+                      const linkedProfiles = credentialProfiles(key, profiles);
+                      const label = credentialLabel(key, profiles);
+                      return (
+                        <TableRow
+                          key={key.id}
+                          data-slot="keychain-table-row"
+                          className={WORKBENCH_TABLE_ROW_CLASS}
+                        >
+                          <TableCell className={WORKBENCH_TABLE_CELL_CLASS}>
+                            <div className="flex min-w-0 items-center gap-2">
+                              {key.kind === 'password' ? (
+                                <Lock
+                                  className="size-4 shrink-0 text-muted-foreground/75 transition-colors group-hover:text-foreground"
+                                  aria-hidden
+                                />
+                              ) : (
+                                <FileKey
+                                  className="size-4 shrink-0 text-muted-foreground/75 transition-colors group-hover:text-foreground"
+                                  aria-hidden
+                                />
+                              )}
+                              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                                <ManagementCardText
+                                  text={label}
+                                  className="text-[13px] font-medium text-foreground"
+                                />
+                                <span className="truncate text-[11px] text-muted-foreground @min-[36rem]:hidden">
+                                  {typeLabel(key)}
+                                </span>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className={cn(WORKBENCH_TABLE_CELL_CLASS, 'hidden @min-[36rem]:table-cell')}>
+                            <Badge variant="secondary" size="sm" className={cn(WORKBENCH_TABLE_TAG_CLASS, 'bg-muted/80 text-foreground/85')}>
+                              {typeLabel(key)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className={cn(WORKBENCH_TABLE_CELL_CLASS, 'hidden @min-[44rem]:table-cell')}>
+                            {linkedProfiles.length > 1 ? (
+                              <Popover>
+                                <PopoverTrigger render={<Button variant="link" size="xs" className="h-auto max-w-full justify-start px-0 text-xs" />}>
+                                  {t('workbench.keychain.linkedCount', { count: linkedProfiles.length })}
+                                </PopoverTrigger>
+                                <PopoverContent>
+                                  <PopoverTitle>{t('workbench.keychain.linkedConnections')}</PopoverTitle>
+                                  <ScrollArea className="max-h-64 [&_[data-slot=scroll-area-viewport]]:max-h-64">
+                                    <ul className="flex flex-col gap-2">
+                                      {linkedProfiles.map((profile) => (
+                                        <li key={profile.id} className="min-w-0 text-xs">
+                                          <p className="truncate">{profile.name}</p>
+                                          <p className="break-all text-muted-foreground">{credentialEndpoint(profile)}</p>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </ScrollArea>
+                                </PopoverContent>
+                              </Popover>
+                            ) : (
+                              <ManagementCardText
+                                text={associations(key)}
+                                className="text-xs text-muted-foreground"
+                              />
+                            )}
+                          </TableCell>
+                          <TableCell className={WORKBENCH_TABLE_COMPACT_ACTION_CELL_CLASS}>
+                            <div className={WORKBENCH_TABLE_ACTION_GROUP_CLASS}>
+                              {(!isProfilePassword || (onEditConnection && linkedProfiles.length > 0)) && (
+                                <IconActionButton
+                                  className={WORKBENCH_TABLE_ICON_BUTTON_CLASS}
+                                  onClick={() => isProfilePassword ? onEditConnection?.(linkedProfiles[0]) : openEdit(key)}
+                                  aria-label={t(isProfilePassword ? 'workbench.keychain.editConnection' : 'common.edit')}
+                                  tooltip={t(isProfilePassword ? 'workbench.keychain.editConnection' : 'common.edit')}
+                                >
+                                  <PencilIcon data-icon="inline-start" />
+                                </IconActionButton>
+                              )}
+                              <IconActionButton
+                                className={WORKBENCH_TABLE_DESTRUCTIVE_ICON_BUTTON_CLASS}
+                                onClick={() => setDeleting(key)}
+                                aria-label={t(isProfilePassword ? 'workbench.keychain.forgetPassword' : 'common.delete')}
+                                tooltip={t(isProfilePassword ? 'workbench.keychain.forgetPassword' : 'common.delete')}
+                              >
+                                <Trash2Icon data-icon="inline-start" />
+                              </IconActionButton>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </WorkbenchTableFrame>
+            )}
+            {filteredKeys.length > 0 && viewMode === 'card' && (
               <ResponsiveCardGrid columns={1} minColumnWidth={MANAGEMENT_CARD_MIN_WIDTH} gap="0.5rem">
                 {filteredKeys.map((key) => {
                   const isProfilePassword = key.service === 'com.shellspan.profile-password';

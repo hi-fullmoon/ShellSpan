@@ -5,6 +5,11 @@ import { ConnectionList } from '../connection-list';
 import type { ConnectionProfile } from '@/types';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import { saveConnectionSort } from '@/lib/connections/connection-sort';
+import {
+  readConnectionViewMode,
+  saveConnectionViewMode,
+} from '@/lib/connections/connection-view';
+import { saveLocalState } from '@/lib/preferences/local-state';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -31,6 +36,7 @@ const makeProfile = (overrides?: Partial<ConnectionProfile>): ConnectionProfile 
 describe('ConnectionList', () => {
   beforeEach(() => {
     saveConnectionSort('default');
+    saveConnectionViewMode('card');
     useRecentProfilesStore.setState({ recentIds: [], initialized: true });
   });
 
@@ -762,5 +768,201 @@ describe('ConnectionList', () => {
 
     expect(screen.getByLabelText('connection.form.auth.agent').querySelector('svg')).toBeInTheDocument();
     expect(screen.getByLabelText('connection.form.auth.keyboardInteractive').querySelector('svg')).toBeInTheDocument();
+  });
+
+  it('switches between card and table views and persists the selection locally', async () => {
+    const profiles = [
+      makeProfile({
+        id: 'p1',
+        name: 'Production API',
+        host: '10.0.0.10',
+        port: 2222,
+        username: 'deploy',
+        authMethod: 'key',
+        favorite: true,
+        group: 'Production',
+        tags: ['api', 'critical', 'eu-west'],
+        notes: 'Primary production gateway',
+        sandboxMode: 'workspaceWrite',
+        jumpHost: { host: 'bastion.example.com', username: 'jump', port: 22, authMethod: 'agent' },
+      }),
+      makeProfile({
+        id: 'p2',
+        name: 'Staging Box',
+        host: '10.0.0.2',
+        port: 22,
+        username: 'root',
+        authMethod: 'password',
+      }),
+    ];
+    const onConnectTerminal = vi.fn();
+    const onConnectSftp = vi.fn();
+    const onEdit = vi.fn();
+
+    const { unmount } = render(
+      <ConnectionList
+        profiles={profiles}
+        initialized
+        onAdd={() => {}}
+        onEdit={onEdit}
+        onDelete={() => {}}
+        onConnectTerminal={onConnectTerminal}
+        onConnectSftp={onConnectSftp}
+        onDuplicate={() => {}}
+        onToggleFavorite={() => {}}
+        onImport={() => {}}
+        onExport={() => {}}
+      />,
+    );
+
+    const viewGroup = screen.getByRole('group', { name: 'workbench.connections.viewMode' });
+    expect(viewGroup).toHaveClass('ml-auto', 'h-6');
+    const cardToggle = within(viewGroup).getByRole('button', { name: 'workbench.connections.view.card' });
+    const tableToggle = within(viewGroup).getByRole('button', { name: 'workbench.connections.view.table' });
+    expect(cardToggle).toHaveAttribute('aria-pressed', 'true');
+    expect(tableToggle).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+
+    await userEvent.click(tableToggle);
+
+    expect(readConnectionViewMode()).toBe('table');
+    expect(tableToggle).toHaveAttribute('aria-pressed', 'true');
+    const table = screen.getByRole('table', { name: 'workbench.connections.title' });
+    expect(table).toBeInTheDocument();
+    expect(table.closest('[data-slot="connection-table"]')).toHaveClass(
+      '[&_table]:border-separate',
+      '[&_table]:border-spacing-0',
+    );
+    const tableRows = within(table).getAllByRole('row');
+    expect(tableRows).toHaveLength(3);
+    expect(tableRows[0]).toHaveClass('bg-muted/75', 'dark:bg-muted/80');
+    expect(tableRows[0]).not.toHaveClass('bg-background');
+    expect(tableRows[1]).toHaveClass('bg-card', 'dark:bg-background');
+    const columnHeaders = within(tableRows[0]).getAllByRole('columnheader');
+    expect(columnHeaders[0]).toHaveClass('border-b', 'border-app-border', 'font-semibold', 'text-muted-foreground');
+    const firstRowCells = within(tableRows[1]).getAllByRole('cell');
+    expect(firstRowCells[0]).toHaveClass('border-b', 'border-app-border/45');
+    expect(firstRowCells[firstRowCells.length - 1]).toHaveClass('border-b', 'border-app-border/45');
+    expect(table.querySelector('[data-connection-text="address"]')).toHaveTextContent('deploy@10.0.0.10:2222');
+    const narrowAddressFallback = within(table).getAllByText('deploy@10.0.0.10:2222').find(
+      (element) => element.getAttribute('data-connection-text') !== 'address',
+    );
+    expect(narrowAddressFallback).toHaveClass('@min-[36rem]:hidden');
+    expect(within(table).getByText('connection.form.jumpHost: jump@bastion.example.com:22')).toBeInTheDocument();
+    expect(within(table).getByText('connection.form.auth.key')).toBeInTheDocument();
+    expect(within(table).getByText('Production')).toBeInTheDocument();
+    expect(within(table).getByText('Primary production gateway')).toBeInTheDocument();
+    expect(table.querySelector('[data-connection-sandbox-mode="workspaceWrite"]')).not.toBeNull();
+    expect(table.querySelector('[title]')).toBeNull();
+
+    // Overflow tags popover works in table view
+    const moreTags = within(table).getByRole('button', { name: 'workbench.connections.moreTags' });
+    expect(moreTags).toHaveTextContent('+2');
+    await userEvent.click(moreTags);
+    const tagPopover = await screen.findByRole('dialog', { name: 'connection.form.tags' });
+    expect(within(tagPopover).getByText('eu-west')).toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+
+    // Direct actions and dropdown menu work in table view
+    const firstRow = within(table).getAllByRole('row')[1];
+    fireEvent.click(within(firstRow).getByRole('button', { name: 'workbench.connections.connectTerminal' }));
+    fireEvent.click(within(firstRow).getByRole('button', { name: 'workbench.connections.connectSftp' }));
+    expect(onConnectTerminal).toHaveBeenCalledWith(profiles[0]);
+    expect(onConnectSftp).toHaveBeenCalledWith(profiles[0]);
+    fireEvent.click(within(firstRow).getByRole('button', { name: 'workbench.connections.moreActions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'common.edit' }));
+    expect(onEdit).toHaveBeenCalledWith(profiles[0]);
+
+    // Clicking the already-active toggle keeps table mode selected
+    await userEvent.click(tableToggle);
+    expect(readConnectionViewMode()).toBe('table');
+    expect(screen.getByRole('table', { name: 'workbench.connections.title' })).toBeInTheDocument();
+
+    // Remounting restores saved table preference from local state
+    unmount();
+    render(
+      <ConnectionList
+        profiles={profiles}
+        initialized
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onConnectTerminal={() => {}}
+        onConnectSftp={() => {}}
+        onDuplicate={() => {}}
+        onToggleFavorite={() => {}}
+        onImport={() => {}}
+        onExport={() => {}}
+      />,
+    );
+    expect(screen.getByRole('table', { name: 'workbench.connections.title' })).toBeInTheDocument();
+
+    // Switching back to card persists 'card'
+    await userEvent.click(screen.getByRole('button', { name: 'workbench.connections.view.card' }));
+    expect(readConnectionViewMode()).toBe('card');
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  it('sorts table rows by column in three-state cycles and keeps ungrouped rows last', async () => {
+    saveConnectionViewMode('table');
+    const profiles = [
+      makeProfile({ id: 's10', name: 'Server 10', host: '10.0.0.10', group: 'Staging', authMethod: 'password' }),
+      makeProfile({ id: 's2', name: 'Server 2', host: '10.0.0.2', authMethod: 'key' }),
+      makeProfile({ id: 'alpha', name: 'Alpha', host: '10.0.0.1', group: 'Production', authMethod: 'agent' }),
+    ];
+
+    const { container } = render(
+      <ConnectionList
+        profiles={profiles}
+        initialized
+        onAdd={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onConnectTerminal={() => {}}
+        onConnectSftp={() => {}}
+        onDuplicate={() => {}}
+        onToggleFavorite={() => {}}
+        onImport={() => {}}
+        onExport={() => {}}
+      />,
+    );
+
+    const rowNames = () =>
+      Array.from(container.querySelectorAll('[data-connection-text="name"]')).map((el) => el.textContent);
+
+    expect(rowNames()).toEqual(['Server 10', 'Server 2', 'Alpha']);
+
+    // Sort by name: asc -> desc -> none
+    const sortButtons = within(screen.getByRole('table')).getAllByRole('button', {
+      name: 'workbench.connections.table.sortBy',
+    });
+    const [nameSortBtn, addressSortBtn, , groupSortBtn] = sortButtons;
+
+    await userEvent.click(nameSortBtn);
+    expect(nameSortBtn.closest('th')).toHaveAttribute('aria-sort', 'ascending');
+    expect(rowNames()).toEqual(['Alpha', 'Server 2', 'Server 10']);
+
+    await userEvent.click(nameSortBtn);
+    expect(nameSortBtn.closest('th')).toHaveAttribute('aria-sort', 'descending');
+    expect(rowNames()).toEqual(['Server 10', 'Server 2', 'Alpha']);
+
+    await userEvent.click(nameSortBtn);
+    expect(nameSortBtn.closest('th')).toHaveAttribute('aria-sort', 'none');
+    expect(rowNames()).toEqual(['Server 10', 'Server 2', 'Alpha']);
+
+    // Sort by address uses natural numeric sorting
+    await userEvent.click(addressSortBtn);
+    expect(rowNames()).toEqual(['Alpha', 'Server 2', 'Server 10']);
+
+    // Sort by group keeps ungrouped rows at the bottom in both directions
+    await userEvent.click(groupSortBtn);
+    expect(rowNames()).toEqual(['Alpha', 'Server 10', 'Server 2']);
+    await userEvent.click(groupSortBtn);
+    expect(rowNames()).toEqual(['Server 10', 'Alpha', 'Server 2']);
+  });
+
+  it('falls back to card view when local view preference is invalid', () => {
+    saveLocalState('shellspan.connections.viewMode', 'invalid');
+    expect(readConnectionViewMode()).toBe('card');
   });
 });
