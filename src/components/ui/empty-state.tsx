@@ -64,7 +64,10 @@ export interface PanelLoadingStateProps {
 
 export const PanelLoadingState: React.FC<PanelLoadingStateProps> = ({ className, label }) => {
   return (
-    <div className={cn('flex h-full flex-col items-center justify-center gap-3', className)}>
+    <div
+      data-slot="panel-loading-state"
+      className={cn('flex min-h-0 flex-1 flex-col items-center justify-center gap-3', className)}
+    >
       <Spinner />
       {label && <span className="text-xs text-muted-foreground">{label}</span>}
     </div>
