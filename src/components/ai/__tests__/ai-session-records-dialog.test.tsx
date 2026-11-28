@@ -95,28 +95,32 @@ describe('AI conversation record management', () => {
     render(<AiSessionRecordsDialog onOpenChange={vi.fn()} />);
 
     const title = await screen.findByText('Old terminal conversation');
-    expect(screen.getByRole('dialog')).toHaveClass('border-app-border', 'bg-app-surface', 'sm:rounded-lg', 'overflow-hidden');
-    expect(screen.getByRole('dialog')).not.toHaveClass('border-app-border/70', 'bg-card', 'sm:rounded-xl');
+    expect(screen.getByRole('dialog')).toHaveClass('border-border/60', 'bg-card', 'sm:rounded-2xl', 'overflow-hidden');
     const search = screen.getByRole('searchbox');
-    expect(search).toHaveClass('h-8');
-    expect(search.parentElement?.parentElement).toHaveClass('py-2');
+    expect(search).toHaveClass('h-8', 'rounded-lg');
+    expect(search.parentElement?.parentElement).toHaveClass('py-2.5');
     expect(screen.getByRole('combobox')).toHaveAttribute('data-size', 'sm');
+    expect(screen.getByRole('combobox')).toHaveAttribute('data-variant', 'ghost');
     expect(screen.getByRole('button', { name: 'common.refresh' })).toHaveClass('size-8');
+    expect(screen.getByRole('button', { name: 'common.refresh' })).toHaveAttribute('data-variant', 'soft');
     expect(screen.getByRole('button', { name: 'settings.ai.records.deleteAll' })).toHaveClass('h-8');
+    expect(screen.getByRole('button', { name: 'settings.ai.records.deleteAll' })).toHaveAttribute('data-variant', 'destructiveSoft');
     expect(title).not.toHaveAttribute('title');
     expect(screen.getByText('Workbench conversation')).toBeInTheDocument();
     expect(mocks.list).toHaveBeenNthCalledWith(1, { limit: 256 });
     expect(mocks.list).toHaveBeenNthCalledWith(2, { limit: 256, cursor: 'workbench' });
 
-    const row = title.closest('.rounded-md')!;
-    expect(row).toHaveClass('px-2', 'py-1.5');
+    const row = title.closest('[data-slot="session-record-row"]')!;
+    expect(row).toHaveClass('px-3', 'py-2.5');
     fireEvent.click(within(row as HTMLElement).getByRole('button', { name: 'settings.ai.records.view' }));
 
     await waitFor(() => expect(mocks.open).toHaveBeenCalledWith('old-terminal'));
     expect(await screen.findByTestId('conversation-transcript')).toHaveTextContent('1 nodes');
     expect(screen.getByTestId('conversation-transcript').parentElement)
       .toHaveClass('ai-session-records-detail', 'flex', 'flex-col', 'min-h-0', 'flex-1');
-    fireEvent.click(screen.getByRole('button', { name: 'settings.ai.records.back' }));
+    const backButton = screen.getByRole('button', { name: 'settings.ai.records.back' });
+    expect(backButton.querySelector('svg')).toBeNull();
+    fireEvent.click(backButton);
     expect(mocks.dispose).toHaveBeenCalled();
     expect(screen.getByText('Workbench conversation')).toBeInTheDocument();
   });
@@ -134,7 +138,7 @@ describe('AI conversation record management', () => {
 
     render(<AiSessionRecordsDialog onOpenChange={vi.fn()} />);
     const title = await screen.findByText('Continued conversation');
-    fireEvent.click(within(title.closest('.rounded-md') as HTMLElement)
+    fireEvent.click(within(title.closest('[data-slot="session-record-row"]') as HTMLElement)
       .getByRole('button', { name: 'settings.ai.records.view' }));
     expect(await screen.findByTestId('conversation-transcript')).toHaveTextContent('2 nodes');
     expect(mocks.open).toHaveBeenCalledWith('old-terminal');

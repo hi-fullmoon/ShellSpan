@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDownIcon,
-  PlusIcon,
-  RefreshCwIcon,
   SearchIcon,
   Trash2Icon,
 } from 'lucide-react';
@@ -288,10 +286,7 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
             onClick={() => void openPicker()}
           >
             <StableContent className="justify-items-center" active={discovering ? 1 : 0} variants={[
-              <span className="inline-flex items-center gap-1">
-                <RefreshCwIcon data-icon="inline-start" aria-hidden="true" />
-                {t('settings.ai.loadModels')}
-              </span>,
+              <span>{t('settings.ai.loadModels')}</span>,
               <span className="inline-flex items-center gap-1">
                 <Spinner className={discovering ? undefined : 'animate-none'} data-icon="inline-start" aria-hidden="true" />
                 {t('settings.ai.loadingModels')}
@@ -312,7 +307,7 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
           >
             <SelectValue placeholder={t('settings.ai.chooseDefaultModel')} />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent align="start" alignItemWithTrigger={false}>
             <SelectGroup>
               {models.filter((model) => model.id.trim()).map((model) => (
                 <SelectItem key={model.id} value={model.id}>{model.id}</SelectItem>
@@ -338,7 +333,7 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
                 else next.delete(index);
                 return next;
               })}
-              className="@container/model-row rounded-lg border bg-background"
+              className="@container/model-row rounded-xl border-[0.5px] border-border/60 bg-muted/20"
             >
               <FieldGroup className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto] items-end gap-1 p-2">
                 <Field data-invalid={idInvalid || undefined}>
@@ -402,7 +397,7 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
                 </div>
               </FieldGroup>
               <CollapsibleContent>
-                <FieldGroup className="gap-3 border-t p-3 @min-[28rem]/model-row:grid @min-[28rem]/model-row:grid-cols-2">
+                <FieldGroup className="gap-3 border-t-[0.5px] border-border/50 p-3 @min-[28rem]/model-row:grid @min-[28rem]/model-row:grid-cols-2">
                   <Field data-invalid={definitionInvalid || undefined}>
                     <FieldLabel htmlFor={`ai-model-context-${index}`}>{t('settings.ai.contextWindow')}</FieldLabel>
                     <Input
@@ -458,7 +453,7 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
                       <FieldDescription>{t('settings.ai.modelUsesCatalog')}</FieldDescription>
                       <Button
                         type="button"
-                        variant="outline"
+                        variant="soft"
                         size="xs"
                         disabled={disabled || !model.id.trim()}
                         onClick={() => void onDeclare(index)}
@@ -476,23 +471,22 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
 
       <Button
         type="button"
-        variant="outline"
+        variant="soft"
         size="sm"
-        className="w-full border-dashed"
+        className="w-full"
         disabled={disabled}
         onClick={() => {
           pendingFocusIndex.current = models.length;
           onChange([...models, { id: '' }]);
         }}
       >
-        <PlusIcon data-icon="inline-start" />
         {t('settings.ai.addModel')}
       </Button>
       {hasProvider && <FieldError>{failureMessage(failure, t)}</FieldError>}
       {(pickerError ?? discoveryError) && <FieldError>{pickerError ?? discoveryError}</FieldError>}
 
       <Dialog open={candidates !== undefined} onOpenChange={(open) => { if (!open) closePicker(); }}>
-        <CompactDialogContent className="max-w-lg" showCloseButton={false}>
+        <CompactDialogContent className="max-w-lg border-border/60 bg-card sm:rounded-2xl" showCloseButton={false}>
           <CompactDialogHeader
             title={t('settings.ai.chooseModelsTitle')}
             description={t('settings.ai.chooseModelsDescription')}
@@ -535,7 +529,7 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
                 {visibleCandidates.map((model) => (
                   <Field
                     key={model.id}
-                    className="flex-row items-center rounded-md px-2 py-2 hover:bg-accent"
+                    className="flex-row items-center rounded-lg px-2.5 py-2 hover:bg-accent"
                   >
                     <Checkbox
                       id={`ai-model-candidate-${model.id}`}
@@ -561,10 +555,10 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
             )}
           </CompactDialogBody>
           <CompactDialogFooter>
-            <Button type="button" variant="outline" size="sm" onClick={closePicker}>
+            <Button type="button" variant="soft" size="sm" onClick={closePicker}>
               {t('common.cancel')}
             </Button>
-            <Button type="button" size="sm" disabled={selected.size === 0} onClick={adoptSelected}>
+            <Button type="button" size="sm" className="rounded-lg" disabled={selected.size === 0} onClick={adoptSelected}>
               {t('settings.ai.addSelectedModels')}
             </Button>
           </CompactDialogFooter>

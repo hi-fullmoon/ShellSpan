@@ -181,6 +181,10 @@ describe('ProviderSetupDialog', () => {
     expect(dialog).toHaveClass('[&_[data-slot=dialog-close]]:size-6');
     expect(screen.getByRole('button', { name: 'common.cancel' })).toHaveClass('h-8');
     expect(screen.getByRole('button', { name: 'common.save' })).toHaveClass('h-8');
+    expect(screen.getByRole('button', { name: 'settings.ai.addModel' }).querySelector('svg')).toBeNull();
+    const loadModelsButton = screen.getByRole('button', { name: 'settings.ai.loadModels' });
+    expect(loadModelsButton.querySelectorAll('svg:not([data-slot="spinner"])')).toHaveLength(0);
+    expect(loadModelsButton.querySelector(':scope > span > span:not([aria-hidden="true"]) svg')).toBeNull();
     expect(fieldGroups?.[0]).toHaveClass('gap-4');
     expect(fieldGroups?.[1]).toHaveClass('gap-3', '@min-[30rem]:grid', '@min-[30rem]:grid-cols-2');
     expect(providerControl).toHaveAttribute('data-slot', 'input-group-control');

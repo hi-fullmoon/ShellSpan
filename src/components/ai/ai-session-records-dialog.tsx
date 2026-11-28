@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeftIcon, EyeIcon, RefreshCwIcon, SearchIcon, Trash2Icon } from 'lucide-react';
+import { EyeIcon, RefreshCwIcon, SearchIcon, Trash2Icon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { CompactDialogHeader } from '@/components/ui/compact-dialog';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
@@ -56,10 +55,10 @@ export function AiSessionRecordRow({ item, locale, t, disabled, onView, onDelete
   const target = item.header.target;
   const scope = recordScope(item);
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-3 rounded-md border px-2 py-1.5">
+    <div data-slot="session-record-row" className="flex min-w-0 flex-wrap items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-accent">
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{title}</p>
-        <p className="mt-1 truncate text-xs text-muted-foreground">
+        <p className="truncate text-sm font-medium text-foreground">{title}</p>
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">
           {t(`settings.ai.records.filter.${scope}`)}
           {target?.label ? ` · ${target.label}` : ''}
           {' · '}{new Date(item.header.createdAtUnixMs).toLocaleString(locale)}
@@ -223,23 +222,27 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
     });
   }, [filter, locale, query, records]);
 
+  const filterItems = useMemo(
+    () => FILTERS.map((value) => ({ value, label: t(`settings.ai.records.filter.${value}`) })),
+    [t],
+  );
+
   return (
     <Dialog open onOpenChange={(open) => { if (!deletingAll) onOpenChange(open); }}>
-      <DialogContent className="flex h-[min(48rem,calc(100vh-2rem))] w-[min(64rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden border-app-border bg-app-surface p-0 [&_[data-slot=dialog-close]]:size-8">
-        <CompactDialogHeader
-          title={t('settings.ai.records.title')}
-          description={t('settings.ai.records.description')}
-        />
+      <DialogContent className="flex h-[min(48rem,calc(100vh-2rem))] w-[min(64rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden border-border/60 bg-card p-0 [&_[data-slot=dialog-close]]:size-8 sm:rounded-2xl">
+        <DialogHeader className="shrink-0 gap-1 border-b-[0.5px] border-border/50 px-5 py-3.5 pr-12 text-left">
+          <DialogTitle className="text-sm font-semibold text-foreground">{t('settings.ai.records.title')}</DialogTitle>
+          <DialogDescription className="text-xs leading-relaxed">{t('settings.ai.records.description')}</DialogDescription>
+        </DialogHeader>
 
         {selected ? (
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex min-w-0 shrink-0 items-center gap-2 border-b px-4 py-2">
+            <div className="flex min-w-0 shrink-0 items-center gap-2 border-b-[0.5px] border-border/50 px-5 py-2.5">
               <Button variant="ghost" size="sm" onClick={closeView} aria-label={t('settings.ai.records.back')}>
-                <ChevronLeftIcon data-icon="inline-start" />
                 {t('settings.ai.records.back')}
               </Button>
               <span className="min-w-0 flex-1 truncate text-sm font-medium">{view?.summary.title ?? recordTitle(selected)}</span>
-              <Button variant="destructiveOutline" size="sm" disabled={busyId !== null} onClick={() => setDeleteTarget(selected)}>
+              <Button variant="destructiveSoft" size="sm" disabled={busyId !== null} onClick={() => setDeleteTarget(selected)}>
                 {t('common.delete')}
               </Button>
             </div>
@@ -278,31 +281,31 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
           </div>
         ) : (
           <>
-            <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2">
+            <div className="flex shrink-0 flex-wrap items-center gap-2 border-b-[0.5px] border-border/50 px-5 py-2.5">
               <div className="relative min-w-44 flex-1">
                 <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
                 <Input
                   type="search"
-                  className="h-8 bg-transparent pl-8"
+                  className="h-8 rounded-lg border-transparent bg-muted/50 pl-8 focus-visible:border-border/60 focus-visible:bg-card"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder={t('settings.ai.records.search')}
                   aria-label={t('settings.ai.records.search')}
                 />
               </div>
-              <Select value={filter} onValueChange={(value) => setFilter(value as RecordFilter)}>
-                <SelectTrigger size="sm" aria-label={t('settings.ai.records.filter')} className="w-36">
-                  <SelectValue>{t(`settings.ai.records.filter.${filter}`)}</SelectValue>
+              <Select items={filterItems} value={filter} onValueChange={(value) => { if (value) setFilter(value as RecordFilter); }}>
+                <SelectTrigger variant="ghost" size="sm" aria-label={t('settings.ai.records.filter')}>
+                  <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent align="end" alignItemWithTrigger={false}>
                   <SelectGroup>
-                    {FILTERS.map((value) => (
-                      <SelectItem key={value} value={value}>{t(`settings.ai.records.filter.${value}`)}</SelectItem>
+                    {filterItems.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
                     ))}
                   </SelectGroup>
                 </SelectContent>
               </Select>
-              <Button variant="outline" size="icon-sm" onClick={() => void refresh()} disabled={loading || deletingAll || busyId !== null} aria-label={t('common.refresh')}>
+              <Button variant="soft" size="icon-sm" className="rounded-lg" onClick={() => void refresh()} disabled={loading || deletingAll || busyId !== null} aria-label={t('common.refresh')}>
                 {loading ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
               </Button>
               <AiSessionRecordsDeleteAll

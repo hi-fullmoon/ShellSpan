@@ -52,7 +52,7 @@ export function AiSessionRecordsDeleteAll({ records, disabled, t, onBusyChange, 
 
   return (
     <>
-      <Button variant="destructiveOutline" size="sm" disabled={disabled || records.length === 0 || progress !== null} onClick={() => setTargets([...records])}>
+      <Button variant="destructiveSoft" size="sm" disabled={disabled || records.length === 0 || progress !== null} onClick={() => setTargets([...records])}>
         {t('settings.ai.records.deleteAll')}
       </Button>
       <ConfirmationDialog

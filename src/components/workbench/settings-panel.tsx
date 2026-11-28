@@ -1400,17 +1400,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             if (!open) closeRecorder();
           }}
         >
-          <DialogContent className="max-w-sm" showCloseButton={false}>
-            <DialogHeader>
-              <DialogTitle>{t('settings.shortcuts.recordTitle')}</DialogTitle>
-              <DialogDescription>{editingAction ? shortcutLabels[editingAction] : ''}</DialogDescription>
+          <DialogContent className="max-w-sm gap-4 border-border/60 bg-card p-5 sm:rounded-2xl" showCloseButton={false}>
+            <DialogHeader className="gap-1">
+              <DialogTitle className="text-sm font-semibold text-foreground">{t('settings.shortcuts.recordTitle')}</DialogTitle>
+              <DialogDescription className="text-xs">{editingAction ? shortcutLabels[editingAction] : ''}</DialogDescription>
             </DialogHeader>
             <div
               role="button"
               tabIndex={0}
               autoFocus
               onKeyDown={handleShortcutCapture}
-              className="flex min-h-24 flex-col items-center justify-center gap-2.5 rounded-md border border-dashed bg-muted/40 px-4 text-center outline-none"
+              className="flex min-h-24 flex-col items-center justify-center gap-2.5 rounded-xl border border-dashed border-border/80 bg-muted/35 px-4 py-5 text-center outline-none"
             >
               <KeyboardIcon className="size-6 text-muted-foreground" />
               <p className="text-sm font-medium">{t('settings.shortcuts.recordPrompt')}</p>
@@ -1425,8 +1425,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 {t('settings.shortcuts.conflict', { action: shortcutLabels[conflictAction] })}
               </p>
             )}
-            <DialogFooter>
-              <Button type="button" variant="outline" size="sm" onClick={closeRecorder}>
+            <DialogFooter className="pt-0">
+              <Button type="button" variant="soft" size="sm" onClick={closeRecorder}>
                 {t('common.cancel')}
               </Button>
             </DialogFooter>

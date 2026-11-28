@@ -76,9 +76,14 @@ describe('AiSkillsDialog', () => {
     expect(screen.getByText('/system-status')).toBeVisible();
 
     const dialog = screen.getByRole('dialog');
-    expect(dialog).toHaveClass('flex', 'flex-col');
+    expect(dialog).toHaveClass('flex', 'flex-col', 'bg-card', 'sm:rounded-2xl');
     expect(dialog).toHaveTextContent('All skills');
-    expect(screen.getByRole('searchbox')).toHaveClass('h-8');
+    expect(screen.getByRole('searchbox')).toHaveClass('h-8', 'rounded-lg');
+    expect(screen.getByRole('combobox')).toHaveAttribute('data-variant', 'ghost');
+    expect(screen.getByRole('button', { name: 'Open folder' })).toHaveAttribute('data-variant', 'soft');
+    expect(screen.getByRole('button', { name: 'New skill' }).querySelector('svg')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Open folder' }).querySelector('svg')).toBeNull();
+    expect(screen.getByText('/deploy-orders').closest('[data-slot="managed-skill-row"]')).toBeInTheDocument();
 
     await user.type(screen.getByRole('searchbox'), 'orders');
     expect(screen.getByText('/deploy-orders')).toBeVisible();
@@ -98,12 +103,20 @@ describe('AiSkillsDialog', () => {
       await screen.findByText('/deploy-orders');
 
       await user.click(screen.getByRole('button', { name: 'New skill' }));
-      const footer = screen.getByRole('dialog').querySelector('[data-slot="dialog-footer"]');
+      const dialog = screen.getByRole('dialog');
+      expect(dialog.querySelectorAll('[data-slot="dialog-header"]')).toHaveLength(1);
+      expect(dialog.querySelector('[data-slot="skill-editor-layout"]')).toHaveClass('@min-[44rem]:grid-cols-[18.5rem_minmax(0,1fr)]');
+      expect(dialog.querySelector('[data-slot="skill-editor-meta"]')).not.toBeNull();
+      expect(dialog.querySelector('[data-slot="skill-editor-canvas"]')).not.toBeNull();
+      expect(screen.getByRole('switch', { name: /Manual \/name invocation only/i })).not.toBeChecked();
+      expect(screen.getByRole('switch', { name: /Show in \/ completion menu/i })).toBeChecked();
+      const footer = dialog.querySelector('[data-slot="dialog-footer"]');
       expect(footer).not.toBeNull();
       expect(footer).toHaveClass('shrink-0');
       expect(footer?.className).not.toContain('border-t');
 
       await user.type(screen.getByLabelText('Skill name'), 'restart-nginx');
+      expect(dialog.querySelector('[data-slot="dialog-title"]')).toHaveTextContent('/restart-nginx');
       await user.type(screen.getByLabelText('Trigger description'), 'Gracefully reload nginx');
       await user.type(screen.getByLabelText('Skill instructions (Markdown)'), 'Reload nginx safely');
       await user.click(screen.getByRole('button', { name: 'Save' }));
@@ -128,7 +141,16 @@ describe('AiSkillsDialog', () => {
     await screen.findByText('/deploy-orders');
 
     await user.click(screen.getByRole('button', { name: 'Edit skill /deploy-orders' }));
-    await user.click(screen.getByRole('button', { name: 'Save' }));
+    const footer = screen.getByRole('dialog').querySelector('[data-slot="dialog-footer"]');
+    const moveToTrashButton = screen.getByRole('button', { name: 'Move to trash' });
+    const saveButton = screen.getByRole('button', { name: 'Save' });
+    const backButton = screen.getByRole('button', { name: 'Back to list' });
+    expect(footer).toContainElement(moveToTrashButton);
+    expect(moveToTrashButton).toHaveAttribute('data-variant', 'destructiveSoft');
+    expect(moveToTrashButton.querySelector('svg')).toBeNull();
+    expect(saveButton.querySelector('svg')).toBeNull();
+    expect(backButton.querySelector('svg')).toBeNull();
+    await user.click(saveButton);
 
     expect(await screen.findByText('redactionRequired: remove secret')).toBeVisible();
     expect(useToastStore.getState().toasts).toHaveLength(0);

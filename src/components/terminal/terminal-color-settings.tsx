@@ -68,10 +68,10 @@ function ColorField({ colorKey, inherited, value, onChange }: {
           <span className="shrink-0 text-xs leading-5 text-muted-foreground">{t('settings.terminal.colors.inherit')}</span>
         )}
       </div>
-      <InputGroup className="h-9 min-w-0 rounded-md" aria-labelledby={`${id}-label`}>
+      <InputGroup className="h-8 min-w-0 rounded-lg" aria-labelledby={`${id}-label`}>
         <InputGroupInput
           id={id}
-          className={cn('h-full min-w-0 pt-1.5 pb-1 font-mono', !isModified && 'text-muted-foreground focus:text-foreground')}
+          className={cn('h-full min-w-0 font-mono text-xs', !isModified && 'text-muted-foreground focus:text-foreground')}
           value={text}
           placeholder={t('settings.terminal.colors.noBackground')}
           spellCheck={false}
@@ -180,8 +180,8 @@ function TerminalColorPreview({ colors }: { colors: Record<TerminalColorKey, str
   // xterm renders an opaque selection background at 30% opacity.
   const selectionColor = (color?: string) => color?.length === 7 ? `${color}4d` : color;
   return (
-    <Card size="sm" radius="compact" variant="outline" className="shrink-0 gap-0 overflow-hidden py-0" role="region" aria-label={t('settings.terminal.colors.preview')}>
-      <CardHeader className="flex min-w-0 flex-row items-center justify-between gap-3 border-b border-border/60 bg-muted/30 px-3 py-2">
+    <Card size="sm" radius="compact" variant="outline" className="shrink-0 gap-0 overflow-hidden rounded-xl border-[0.5px] border-border/60 py-0" role="region" aria-label={t('settings.terminal.colors.preview')}>
+      <CardHeader className="flex min-w-0 flex-row items-center justify-between gap-3 border-b-[0.5px] border-border/50 bg-muted/25 px-3.5 py-2">
         <CardTitle className="shrink-0">{t('settings.terminal.colors.previewTitle')}</CardTitle>
         <CardDescription className="min-w-0 truncate text-xs" title={presetLabel}>{presetLabel}</CardDescription>
       </CardHeader>
@@ -260,11 +260,11 @@ function TerminalColorEditor({ onClose }: { onClose: () => void }) {
   );
   return (
     <>
-      <DialogHeader className="shrink-0 px-4 pr-12">
-        <DialogTitle>{t('settings.terminal.colors.title')}</DialogTitle>
-        <DialogDescription>{t('settings.terminal.colors.description')}</DialogDescription>
+      <DialogHeader className="shrink-0 gap-1 border-b-[0.5px] border-border/50 px-5 py-3.5 pr-12 text-left">
+        <DialogTitle className="text-sm font-semibold text-foreground">{t('settings.terminal.colors.title')}</DialogTitle>
+        <DialogDescription className="text-xs leading-relaxed">{t('settings.terminal.colors.description')}</DialogDescription>
       </DialogHeader>
-      <div className="shrink-0 px-4">
+      <div className="shrink-0 px-5 pt-4">
         <TerminalColorPreview colors={inherited} />
       </div>
       <Tabs
@@ -272,26 +272,26 @@ function TerminalColorEditor({ onClose }: { onClose: () => void }) {
         onValueChange={value => {
           if (value === 'basic' || value === 'ansi' || value === 'search') setActiveTab(value);
         }}
-        className="flex min-h-0 flex-1 flex-col gap-3"
+        className="flex min-h-0 flex-1 flex-col gap-3 pt-3"
       >
-        <div className="shrink-0 px-4">
-          <TabsList className="w-full @min-[28rem]:w-fit">
-            <TabsTrigger value="basic" className="px-3">
+        <div className="shrink-0 px-5">
+          <TabsList className="h-8 w-full rounded-lg border border-border/60 bg-background p-0.5 @min-[28rem]:w-fit">
+            <TabsTrigger value="basic" className="rounded-md px-3 text-xs data-active:bg-card data-active:shadow-2xs data-active:ring-1 data-active:ring-foreground/10">
               {t('settings.terminal.colors.tabBasic')}
               {basicCount > 0 && <span className="ml-1 text-xs text-muted-foreground tabular-nums">{basicCount}</span>}
             </TabsTrigger>
-            <TabsTrigger value="ansi" className="px-3">
+            <TabsTrigger value="ansi" className="rounded-md px-3 text-xs data-active:bg-card data-active:shadow-2xs data-active:ring-1 data-active:ring-foreground/10">
               {t('settings.terminal.colors.tabAnsi')}
               {ansiCount > 0 && <span className="ml-1 text-xs text-muted-foreground tabular-nums">{ansiCount}</span>}
             </TabsTrigger>
-            <TabsTrigger value="search" className="px-3">
+            <TabsTrigger value="search" className="rounded-md px-3 text-xs data-active:bg-card data-active:shadow-2xs data-active:ring-1 data-active:ring-foreground/10">
               {t('settings.terminal.colors.tabSearch')}
               {searchCount > 0 && <span className="ml-1 text-xs text-muted-foreground tabular-nums">{searchCount}</span>}
             </TabsTrigger>
           </TabsList>
         </div>
         <ScrollArea className="min-h-0 flex-1">
-          <ScrollAreaContent className="px-4 pb-2">
+          <ScrollAreaContent className="px-5 pb-2">
             <TabsContent value="basic">
               <FieldGroup className="grid grid-cols-1 gap-3 @min-[28rem]:grid-cols-2">
                 {TERMINAL_BASIC_COLOR_KEYS.map(field)}
@@ -316,11 +316,11 @@ function TerminalColorEditor({ onClose }: { onClose: () => void }) {
           </ScrollAreaContent>
         </ScrollArea>
       </Tabs>
-      <DialogFooter className="shrink-0 flex-row justify-end px-4">
-        <Button variant="outline" onClick={() => { setOverrides({}); setResetVersion(version => version + 1); }}>
+      <DialogFooter className="shrink-0 flex-row justify-end gap-2 px-5 pb-4 pt-2">
+        <Button variant="soft" size="sm" onClick={() => { setOverrides({}); setResetVersion(version => version + 1); }}>
           {t('settings.terminal.colors.reset')}
         </Button>
-        <Button onClick={onClose}>{t('common.close')}</Button>
+        <Button size="sm" className="rounded-lg" onClick={onClose}>{t('common.close')}</Button>
       </DialogFooter>
     </>
   );
@@ -332,7 +332,7 @@ export function TerminalColorSettings() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <Button variant="soft" size="sm" onClick={() => setOpen(true)}>{t('settings.terminal.colors.customize')}</Button>
-      <DialogContent className="@container flex h-[min(48rem,calc(100dvh-2rem))] max-w-2xl flex-col gap-3 overflow-hidden px-0">
+      <DialogContent className="@container flex h-[min(48rem,calc(100dvh-2rem))] max-w-2xl flex-col gap-0 overflow-hidden border-border/60 bg-card p-0 [&_[data-slot=dialog-close]]:size-8 sm:rounded-2xl">
         {open && <TerminalColorEditor onClose={() => setOpen(false)} />}
       </DialogContent>
     </Dialog>

@@ -753,7 +753,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <CompactDialogContent className="h-[min(680px,calc(100vh-2rem))] max-w-xl [&_[data-slot=dialog-close]]:size-6">
+      <CompactDialogContent className="h-[min(680px,calc(100vh-2rem))] max-w-xl border-border/60 bg-card [&_[data-slot=dialog-close]]:size-6 [&_[data-slot=dialog-header]]:border-b-[0.5px] [&_[data-slot=dialog-header]]:border-border/50 [&_[data-slot=separator]]:border-t-[0.5px] [&_[data-slot=separator]]:border-border/50 sm:rounded-2xl">
         <CompactDialogHeader
           title={t(provider ? 'settings.ai.editProviderTitle' : 'settings.ai.addProviderTitle')}
           description={provider
@@ -1024,7 +1024,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
           <CompactDialogFooter className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1 sm:gap-2">
             <div className="flex min-w-0 flex-1 items-center gap-1 sm:gap-2">
               {onDelete && (
-                <Button type="button" variant="destructiveOutline" size="xs" className="min-w-0" onClick={onDelete}>
+                <Button type="button" variant="destructiveSoft" size="sm" className="min-w-0" onClick={onDelete}>
                   <span className="truncate">{t('settings.ai.deleteProvider')}</span>
                 </Button>
               )}
@@ -1063,13 +1063,13 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
               </div>
             )}
             </div>
-            <div className="flex shrink-0 justify-end gap-1 sm:gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={() => handleOpenChange(false)}>
+            <div className="flex shrink-0 justify-end gap-1.5 sm:gap-2">
+              <Button type="button" variant="soft" size="sm" onClick={() => handleOpenChange(false)}>
                 {t('common.cancel')}
               </Button>
               <Button
                 type="button"
-                variant="outline"
+                variant="soft"
                 size="sm"
                 title={t('settings.ai.testConnectionHint')}
                 disabled={!canTest || !defaultModelExists || Boolean(modelFailure) || busy || modelBusy || testing}
@@ -1079,7 +1079,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                 {testing && <Spinner data-icon="inline-start" />}
                 {t(testing ? 'settings.ai.testingConnection' : 'settings.ai.testConnection')}
               </Button>
-              <Button type="submit" size="sm" disabled={!canSave || busy}>
+              <Button type="submit" size="sm" className="rounded-lg" disabled={!canSave || busy}>
                 {t('common.save')}
               </Button>
             </div>

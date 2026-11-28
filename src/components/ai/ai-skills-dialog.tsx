@@ -1,12 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  CheckIcon,
-  ChevronLeftIcon,
   CopyPlusIcon,
   EyeIcon,
-  FolderOpenIcon,
   PenLineIcon,
-  PlusIcon,
   RefreshCwIcon,
   SearchIcon,
   Trash2Icon,
@@ -15,14 +11,15 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { CompactDialogHeader } from '@/components/ui/compact-dialog';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
-import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 import {
   Select,
   SelectContent,
@@ -32,6 +29,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
+import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -46,6 +44,7 @@ import {
 } from '@/lib/ipc/tauri';
 import type { ManagedSkillCatalog, ManagedSkillItem } from '@/types/agent-skill';
 import { MarkdownContent } from './assistant-message-content';
+import './styles/styles.css';
 
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -267,253 +266,354 @@ export function AiSkillsDialog({
   };
 
   const busy = saving || deletingName !== null;
+  const activeSkillName = editor
+    ? (editor.kind === 'create' ? editor.name.trim() : editor.item.name)
+    : '';
+  const instructionLineCount = editor && editor.kind !== 'viewBuiltin'
+    ? editor.instructions.split('\n').length
+    : 0;
 
   return (
     <>
       <Dialog open onOpenChange={(open) => { if (!busy) onOpenChange(open); }}>
         <DialogContent
           data-slot="ai-skills-dialog"
-          className="flex h-[min(46rem,calc(100vh-2rem))] w-[min(56rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden border-app-border bg-app-surface p-0 [&_[data-slot=dialog-close]]:size-8"
+          className="@container flex h-[min(46rem,calc(100vh-2rem))] w-[min(58rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden border-border/60 bg-card p-0 [&_[data-slot=dialog-close]]:size-8 sm:rounded-2xl"
         >
-          <CompactDialogHeader
-            title={t('settings.ai.skills.title')}
-            description={catalog?.userSkillsDir
-              ? t('settings.ai.skills.dialogDescriptionWithPath', { path: catalog.userSkillsDir })
-              : t('settings.ai.skills.description')}
-          />
-
           {editor ? (
             <div className="flex min-h-0 flex-1 flex-col">
-              <div className="flex min-w-0 shrink-0 items-center justify-between gap-2 px-4 py-2">
-                <div className="flex min-w-0 items-center gap-1">
+              <DialogHeader className="flex h-12 shrink-0 flex-row items-center justify-between gap-3 border-b-[0.5px] border-border/50 px-3 py-0 pr-12 text-left">
+                <div className="flex min-w-0 flex-1 items-center gap-2">
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
+                    className="shrink-0 rounded-lg text-muted-foreground hover:text-foreground"
                     onClick={() => {
                       setEditor(null);
                       setSaveError(null);
                     }}
                     disabled={busy}
                   >
-                    <ChevronLeftIcon className="size-4" aria-hidden="true" />
-                    <span>{t('settings.ai.skills.back')}</span>
+                    {t('settings.ai.skills.back')}
                   </Button>
-                  <span className="truncate text-sm font-medium">
-                    {editor.kind === 'create'
-                      ? editor.overridesBuiltin
-                        ? t('settings.ai.skills.customizeBuiltinTitle', { name: editor.name })
-                        : t('settings.ai.skills.newSkill')
-                      : `/${editor.item.name}`}
-                  </span>
+                  <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border/60" />
+                  <DialogTitle className="flex min-w-0 items-center gap-2 text-sm font-semibold text-foreground">
+                    {editor.kind === 'create' ? (
+                      <>
+                        <span className="truncate">
+                          {editor.overridesBuiltin
+                            ? t('settings.ai.skills.customizeBuiltinTitle', { name: editor.name })
+                            : t('settings.ai.skills.newSkill')}
+                        </span>
+                        {!editor.overridesBuiltin && activeSkillName && (
+                          <span className="hidden truncate font-mono text-xs font-normal text-muted-foreground @min-[34rem]:inline">
+                            /{activeSkillName}
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <span className="truncate font-mono">/{editor.item.name}</span>
+                        <Badge variant={editor.kind === 'edit' ? 'secondary' : 'outline'} className="shrink-0 text-xs font-normal">
+                          {editor.kind === 'edit'
+                            ? t('ai.workspace.skills.origin.user')
+                            : t('ai.workspace.skills.origin.builtin')}
+                        </Badge>
+                        {editor.kind === 'edit' && editor.item.overridesBuiltin && (
+                          <Badge variant="outline" className="hidden shrink-0 text-xs font-normal @min-[34rem]:inline-flex">
+                            {t('settings.ai.skills.overridesBuiltin')}
+                          </Badge>
+                        )}
+                      </>
+                    )}
+                  </DialogTitle>
+                  <DialogDescription className="sr-only">
+                    {catalog?.userSkillsDir
+                      ? t('settings.ai.skills.dialogDescriptionWithPath', { path: catalog.userSkillsDir })
+                      : t('settings.ai.skills.description')}
+                  </DialogDescription>
                 </div>
-                {editor.kind === 'viewBuiltin' ? (
+
+                {editor.kind === 'viewBuiltin' && (
                   <Button
                     type="button"
                     size="sm"
-                    variant="outline"
+                    variant="soft"
+                    className="shrink-0"
                     onClick={() => openCustomizeBuiltin(editor.item)}
                   >
-                    <CopyPlusIcon className="size-3.5" aria-hidden="true" />
-                    <span>{t('settings.ai.skills.customizeBuiltin')}</span>
+                    {t('settings.ai.skills.customizeBuiltin')}
                   </Button>
-                ) : editor.kind === 'edit' ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="destructiveOutline"
-                    disabled={busy}
-                    onClick={() => setDeleteTarget(editor.item)}
-                  >
-                    <Trash2Icon className="size-3.5" aria-hidden="true" />
-                    <span>{t('settings.ai.skills.moveToTrash')}</span>
-                  </Button>
-                ) : null}
-              </div>
+                )}
+              </DialogHeader>
 
-              <div className="min-h-0 flex-1">
-                <ScrollArea className="h-full">
-                  {editor.kind === 'viewBuiltin' ? (
-                    <div className="flex flex-col gap-3 px-4 pb-3">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <Badge variant="outline">{t('ai.workspace.skills.origin.builtin')}</Badge>
-                        <span className="text-xs text-muted-foreground">
-                          {localizedDescription(editor.item)}
-                        </span>
-                      </div>
-                      <div className="rounded-md border bg-muted/20 p-3 text-sm">
-                        <MarkdownContent
-                          copyLabel={t('common.copy')}
-                          copiedLabel={t('common.copied')}
-                          showCodeBlockActions={false}
-                        >
-                          {editor.item.instructions}
-                        </MarkdownContent>
-                      </div>
+              {editor.kind === 'viewBuiltin' ? (
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <div className="shrink-0 border-b-[0.5px] border-border/50 bg-muted/20 px-6 py-3">
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      {localizedDescription(editor.item)}
+                    </p>
+                  </div>
+                  <ScrollArea className="min-h-0 flex-1">
+                    <div className="ai-workspace-root ai-assistant-markdown mx-auto w-full max-w-3xl px-6 py-5 text-sm">
+                      <MarkdownContent
+                        copyLabel={t('common.copy')}
+                        copiedLabel={t('common.copied')}
+                        showCodeBlockActions={false}
+                      >
+                        {editor.item.instructions}
+                      </MarkdownContent>
                     </div>
-                  ) : (
-                    <div className="flex flex-col gap-3 px-4 pb-3">
-                      <div className="flex flex-col gap-1.5">
-                        <Label htmlFor="managed-skill-name">
-                          {t('ai.workspace.skillProposal.field.name')}
-                        </Label>
-                        <Input
-                          id="managed-skill-name"
-                          className="h-8 font-mono text-sm"
-                          value={editor.kind === 'create' ? editor.name : editor.item.name}
-                          disabled={editor.kind === 'edit' || editor.overridesBuiltin || saving}
-                          onChange={(event) => {
-                            if (editor.kind !== 'create') return;
-                            setEditor({ ...editor, name: event.target.value });
-                            setSaveError(null);
-                          }}
-                          aria-invalid={editorValidationError === 'invalidName' || undefined}
-                          placeholder="deploy-orders-api"
-                        />
-                        {editorValidationError === 'invalidName'
-                          && (editor.kind === 'create' ? editor.name.length > 0 : true) && (
-                            <p className="text-xs text-destructive">
-                              {t('ai.workspace.skillProposal.error.invalidName')}
+                  </ScrollArea>
+                </div>
+              ) : (
+                <>
+                  <div
+                    data-slot="skill-editor-layout"
+                    className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto @min-[44rem]:grid-cols-[18.5rem_minmax(0,1fr)] @min-[44rem]:overflow-hidden"
+                  >
+                    <aside
+                      data-slot="skill-editor-meta"
+                      className="flex min-h-0 flex-col border-b-[0.5px] border-border/50 @min-[44rem]:border-r-[0.5px] @min-[44rem]:border-b-0"
+                    >
+                      <ScrollArea className="min-h-0 flex-1">
+                        <div className="flex flex-col gap-5 px-5 py-5">
+                          <FieldGroup className="gap-4">
+                            <Field data-invalid={(editorValidationError === 'invalidName' && (editor.kind === 'create' ? editor.name.length > 0 : true)) || undefined}>
+                              <FieldLabel htmlFor="managed-skill-name" className="text-xs font-medium text-foreground">
+                                {t('ai.workspace.skillProposal.field.name')}
+                              </FieldLabel>
+                              <InputGroup className="h-8 rounded-lg bg-transparent">
+                                <InputGroupAddon align="inline-start" className="pr-0 font-mono text-xs text-muted-foreground">
+                                  /
+                                </InputGroupAddon>
+                                <InputGroupInput
+                                  id="managed-skill-name"
+                                  className="pl-0.5 font-mono text-sm"
+                                  value={editor.kind === 'create' ? editor.name : editor.item.name}
+                                  disabled={editor.kind === 'edit' || editor.overridesBuiltin || saving}
+                                  onChange={(event) => {
+                                    if (editor.kind !== 'create') return;
+                                    setEditor({ ...editor, name: event.target.value });
+                                    setSaveError(null);
+                                  }}
+                                  aria-invalid={editorValidationError === 'invalidName' || undefined}
+                                  placeholder="deploy-orders-api"
+                                />
+                              </InputGroup>
+                              {editorValidationError === 'invalidName'
+                                && (editor.kind === 'create' ? editor.name.length > 0 : true) && (
+                                  <FieldError>
+                                    {t('ai.workspace.skillProposal.error.invalidName')}
+                                  </FieldError>
+                                )}
+                            </Field>
+
+                            <Field>
+                              <div className="flex items-center justify-between gap-2">
+                                <FieldLabel htmlFor="managed-skill-description" className="text-xs font-medium text-foreground">
+                                  {t('ai.workspace.skillProposal.field.description')}
+                                </FieldLabel>
+                                <span className="text-[11px] text-muted-foreground tabular-nums">
+                                  {editor.description.trim().length}/500
+                                </span>
+                              </div>
+                              <Textarea
+                                id="managed-skill-description"
+                                rows={4}
+                                className="resize-none rounded-lg bg-transparent text-xs leading-relaxed"
+                                disabled={saving}
+                                value={editor.description}
+                                onChange={(event) => {
+                                  setEditor({ ...editor, description: event.target.value });
+                                  setSaveError(null);
+                                }}
+                              />
+                            </Field>
+                          </FieldGroup>
+
+                          <Separator className="border-t-[0.5px] border-border/50" />
+
+                          <div className="flex flex-col gap-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <Label
+                                htmlFor="managed-skill-manual-only"
+                                className="cursor-pointer text-xs leading-snug font-normal text-foreground"
+                              >
+                                {t('ai.workspace.skillProposal.field.manualOnly')}
+                              </Label>
+                              <Switch
+                                id="managed-skill-manual-only"
+                                size="sm"
+                                checked={editor.disableModelInvocation}
+                                disabled={saving}
+                                onCheckedChange={(checked) => setEditor({
+                                  ...editor,
+                                  disableModelInvocation: checked,
+                                })}
+                              />
+                            </div>
+                            <div className="flex items-start justify-between gap-3">
+                              <Label
+                                htmlFor="managed-skill-user-invocable"
+                                className="cursor-pointer text-xs leading-snug font-normal text-foreground"
+                              >
+                                {t('ai.workspace.skillProposal.field.userInvocable')}
+                              </Label>
+                              <Switch
+                                id="managed-skill-user-invocable"
+                                size="sm"
+                                checked={editor.userInvocable}
+                                disabled={saving}
+                                onCheckedChange={(checked) => setEditor({
+                                  ...editor,
+                                  userInvocable: checked,
+                                })}
+                              />
+                            </div>
+                          </div>
+
+                          {((editor.kind === 'create' && editor.overridesBuiltin)
+                            || (editor.kind === 'edit' && editor.item.overridesBuiltin)) && (
+                            <p className="rounded-lg bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+                              {t('ai.workspace.skillProposal.notice.overwritesBuiltin')}
                             </p>
                           )}
-                      </div>
 
-                      <div className="flex flex-col gap-1.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <Label htmlFor="managed-skill-description">
-                            {t('ai.workspace.skillProposal.field.description')}
+                          {catalog?.userSkillsDir && (
+                            <p className="rounded-lg bg-muted/35 px-2.5 py-2 break-all font-mono text-[11px] leading-relaxed text-muted-foreground">
+                              {catalog.userSkillsDir}/{activeSkillName || '<name>'}/SKILL.md
+                            </p>
+                          )}
+                        </div>
+                      </ScrollArea>
+                    </aside>
+
+                    <div
+                      data-slot="skill-editor-canvas"
+                      className="group/canvas flex min-h-72 min-w-0 flex-1 flex-col @min-[44rem]:min-h-0"
+                    >
+                      <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b-[0.5px] border-border/50 px-5 transition-colors group-focus-within/canvas:border-foreground/20">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <Label htmlFor="managed-skill-body" className="truncate text-xs font-medium text-foreground">
+                            {t('ai.workspace.skillProposal.field.instructions')}
                           </Label>
-                          <span className="text-xs text-muted-foreground">
-                            {editor.description.trim().length}/500
+                          <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+                            {instructionLineCount}L
                           </span>
                         </div>
-                        <Textarea
-                          id="managed-skill-description"
-                          rows={2}
-                          disabled={saving}
-                          value={editor.description}
-                          onChange={(event) => {
-                            setEditor({ ...editor, description: event.target.value });
-                            setSaveError(null);
-                          }}
-                        />
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-4">
-                        <label className="flex cursor-pointer items-center gap-1.5 text-sm">
-                          <Checkbox
-                            checked={editor.disableModelInvocation}
-                            disabled={saving}
-                            onCheckedChange={(checked) => setEditor({
-                              ...editor,
-                              disableModelInvocation: Boolean(checked),
-                            })}
-                          />
-                          <span>{t('ai.workspace.skillProposal.field.manualOnly')}</span>
-                        </label>
-                        <label className="flex cursor-pointer items-center gap-1.5 text-sm">
-                          <Checkbox
-                            checked={editor.userInvocable}
-                            disabled={saving}
-                            onCheckedChange={(checked) => setEditor({
-                              ...editor,
-                              userInvocable: Boolean(checked),
-                            })}
-                          />
-                          <span>{t('ai.workspace.skillProposal.field.userInvocable')}</span>
-                        </label>
-                      </div>
-
-                      {saveError && (
-                        <Alert variant="destructive" size="sm" role="alert">
-                          <TriangleAlertIcon aria-hidden="true" />
-                          <AlertDescription>{saveError}</AlertDescription>
-                        </Alert>
-                      )}
-
-                      <div className="flex items-center justify-between gap-2">
-                        <Label htmlFor="managed-skill-body">
-                          {t('ai.workspace.skillProposal.field.instructions')}
-                        </Label>
                         <ToggleGroup
                           value={[editorTab]}
                           onValueChange={(next) => {
                             const picked = next[0];
                             if (picked === 'edit' || picked === 'preview') setEditorTab(picked);
                           }}
-                          size="sm"
-                          variant="outline"
+                          spacing={0.5}
+                          variant="surface"
+                          className="h-7 shrink-0 rounded-lg border border-border/60 bg-background p-0.5"
                         >
-                          <ToggleGroupItem value="edit">
+                          <ToggleGroupItem value="edit" className="h-6 rounded-md px-2.5 text-xs">
                             {t('ai.workspace.skillProposal.tab.edit')}
                           </ToggleGroupItem>
-                          <ToggleGroupItem value="preview">
+                          <ToggleGroupItem value="preview" className="h-6 rounded-md px-2.5 text-xs">
                             {t('ai.workspace.skillProposal.tab.preview')}
                           </ToggleGroupItem>
                         </ToggleGroup>
                       </div>
 
-                      {editorTab === 'edit' ? (
-                        <Textarea
-                          id="managed-skill-body"
-                          rows={14}
-                          disabled={saving}
-                          className="font-mono text-xs"
-                          value={editor.instructions}
-                          onChange={(event) => {
-                            setEditor({ ...editor, instructions: event.target.value });
-                            setSaveError(null);
-                          }}
-                        />
-                      ) : (
-                        <div className="rounded-md border bg-muted/20 p-3 text-sm">
-                          <MarkdownContent
-                            copyLabel={t('common.copy')}
-                            copiedLabel={t('common.copied')}
-                            showCodeBlockActions={false}
-                          >
-                            {editor.instructions}
-                          </MarkdownContent>
+                      {saveError && (
+                        <div className="shrink-0 px-5 pt-3">
+                          <Alert variant="destructive" size="sm" role="alert">
+                            <TriangleAlertIcon aria-hidden="true" />
+                            <AlertDescription>{saveError}</AlertDescription>
+                          </Alert>
                         </div>
                       )}
-                    </div>
-                  )}
-                </ScrollArea>
-              </div>
 
-              {editor.kind !== 'viewBuiltin' && (
-                <DialogFooter className="shrink-0 px-4 py-3">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    disabled={saving}
-                    onClick={() => {
-                      setEditor(null);
-                      setSaveError(null);
-                    }}
-                  >
-                    {t('common.cancel')}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    disabled={saving || editorValidationError !== null}
-                    onClick={() => void handleSave()}
-                  >
-                    <CheckIcon className="size-3.5" aria-hidden="true" />
-                    <span>
-                      {saving
-                        ? t('ai.workspace.skillProposal.saving')
-                        : t('common.save')}
-                    </span>
-                  </Button>
-                </DialogFooter>
+                      {editorTab === 'edit' ? (
+                        <div className="flex min-h-0 flex-1 flex-col">
+                          <Textarea
+                            id="managed-skill-body"
+                            disabled={saving}
+                            className="h-full min-h-60 w-full flex-1 resize-none rounded-none border-0 bg-transparent px-5 py-4 font-mono text-[13px] leading-6 shadow-none focus-visible:ring-0 focus-visible:outline-none!"
+                            value={editor.instructions}
+                            onChange={(event) => {
+                              setEditor({ ...editor, instructions: event.target.value });
+                              setSaveError(null);
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <ScrollArea className="min-h-0 flex-1">
+                          <div className="ai-workspace-root ai-assistant-markdown px-6 py-5 text-sm">
+                            <MarkdownContent
+                              copyLabel={t('common.copy')}
+                              copiedLabel={t('common.copied')}
+                              showCodeBlockActions={false}
+                            >
+                              {editor.instructions}
+                            </MarkdownContent>
+                          </div>
+                        </ScrollArea>
+                      )}
+                    </div>
+                  </div>
+
+                  <DialogFooter className="shrink-0 flex-row items-center justify-between gap-2 px-5 pb-4 pt-2 sm:justify-between">
+                    <div className="flex items-center">
+                      {editor.kind === 'edit' && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructiveSoft"
+                          disabled={busy}
+                          onClick={() => setDeleteTarget(editor.item)}
+                        >
+                          {t('settings.ai.skills.moveToTrash')}
+                        </Button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="soft"
+                        disabled={saving}
+                        onClick={() => {
+                          setEditor(null);
+                          setSaveError(null);
+                        }}
+                      >
+                        {t('common.cancel')}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="rounded-lg"
+                        disabled={saving || editorValidationError !== null}
+                        onClick={() => void handleSave()}
+                      >
+                        {saving
+                          ? t('ai.workspace.skillProposal.saving')
+                          : t('common.save')}
+                      </Button>
+                    </div>
+                  </DialogFooter>
+                </>
               )}
             </div>
           ) : (
             <div className="flex min-h-0 flex-1 flex-col">
-              <div className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-2">
+              <DialogHeader className="shrink-0 gap-1 border-b-[0.5px] border-border/50 px-5 py-3.5 pr-12 text-left">
+                <DialogTitle className="text-sm font-semibold text-foreground">{t('settings.ai.skills.title')}</DialogTitle>
+                <DialogDescription className="text-xs leading-relaxed">
+                  {catalog?.userSkillsDir
+                    ? t('settings.ai.skills.dialogDescriptionWithPath', { path: catalog.userSkillsDir })
+                    : t('settings.ai.skills.description')}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex shrink-0 flex-wrap items-center gap-2 border-b-[0.5px] border-border/50 px-5 py-2.5">
                 <div className="relative min-w-40 flex-1">
                   <SearchIcon
                     className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
@@ -521,7 +621,7 @@ export function AiSkillsDialog({
                   />
                   <Input
                     type="search"
-                    className="h-8 bg-transparent pl-8"
+                    className="h-8 rounded-lg border-transparent bg-muted/50 pl-8 focus-visible:border-border/60 focus-visible:bg-card"
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
                     placeholder={t('settings.ai.skills.search')}
@@ -536,13 +636,13 @@ export function AiSkillsDialog({
                   }}
                 >
                   <SelectTrigger
+                    variant="ghost"
                     size="sm"
                     aria-label={t('settings.ai.skills.filter')}
-                    className="w-32"
                   >
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent align="end" alignItemWithTrigger={false}>
                     <SelectGroup>
                       {filterItems.map((item) => (
                         <SelectItem key={item.value} value={item.value}>
@@ -555,36 +655,36 @@ export function AiSkillsDialog({
                 <Button
                   type="button"
                   size="sm"
+                  className="rounded-lg"
                   onClick={openCreate}
                   disabled={busy}
                 >
-                  <PlusIcon className="size-3.5" aria-hidden="true" />
-                  <span>{t('settings.ai.skills.newSkill')}</span>
+                  {t('settings.ai.skills.newSkill')}
                 </Button>
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="soft"
                   size="sm"
                   onClick={() => void handleOpenFolder()}
                   disabled={busy}
                 >
-                  <FolderOpenIcon className="size-3.5" aria-hidden="true" />
-                  <span>{t('settings.ai.skills.openDir')}</span>
+                  {t('settings.ai.skills.openDir')}
                 </Button>
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="soft"
                   size="icon-sm"
+                  className="rounded-lg"
                   onClick={() => void refresh()}
                   disabled={loading || busy}
                   aria-label={t('common.refresh')}
                 >
-                  {loading ? <Spinner aria-hidden="true" /> : <RefreshCwIcon className="size-4" aria-hidden="true" />}
+                  {loading ? <Spinner aria-hidden="true" /> : <RefreshCwIcon aria-hidden="true" />}
                 </Button>
               </div>
 
               {loadError && (
-                <div className="shrink-0 px-4 pb-2">
+                <div className="shrink-0 px-5 pt-3">
                   <Alert variant="destructive" size="sm" role="alert">
                     <TriangleAlertIcon aria-hidden="true" />
                     <AlertDescription>{loadError}</AlertDescription>
@@ -593,7 +693,7 @@ export function AiSkillsDialog({
               )}
 
               {catalog && catalog.diagnostics.length > 0 && (
-                <div className="shrink-0 px-4 pb-2">
+                <div className="shrink-0 px-5 pt-3">
                   <Alert variant="warning" size="sm">
                     <TriangleAlertIcon aria-hidden="true" />
                     <AlertDescription>
@@ -623,118 +723,121 @@ export function AiSkillsDialog({
                   />
                 ) : (
                   <ScrollArea className="h-full">
-                    <div className="flex flex-col gap-2 px-4 pb-3">
-                      {visibleSkills.map((item) => (
-                        <div
-                          key={`${item.origin}:${item.name}`}
-                          className="flex min-w-0 items-center gap-3 rounded-md border px-3 py-2"
-                        >
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="font-mono text-sm font-medium">/{item.name}</span>
-                              <Badge
-                                variant={item.origin === 'user' ? 'secondary' : 'outline'}
-                                className="text-xs"
-                              >
-                                {item.origin === 'user'
-                                  ? t('ai.workspace.skills.origin.user')
-                                  : t('ai.workspace.skills.origin.builtin')}
-                              </Badge>
-                              {item.overridesBuiltin && (
-                                <Badge variant="outline" className="text-xs">
-                                  {t('settings.ai.skills.overridesBuiltin')}
+                    <div className="flex flex-col px-2 py-2">
+                      {visibleSkills.map((item, index) => (
+                        <React.Fragment key={`${item.origin}:${item.name}`}>
+                          {index > 0 && <Separator className="mx-3 border-t-[0.5px] border-border/50 data-horizontal:w-auto" />}
+                          <div
+                            data-slot="managed-skill-row"
+                            className="flex min-w-0 items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-accent"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="font-mono text-sm font-medium text-foreground">/{item.name}</span>
+                                <Badge
+                                  variant={item.origin === 'user' ? 'secondary' : 'outline'}
+                                  className="text-xs"
+                                >
+                                  {item.origin === 'user'
+                                    ? t('ai.workspace.skills.origin.user')
+                                    : t('ai.workspace.skills.origin.builtin')}
                                 </Badge>
-                              )}
-                              {item.disableModelInvocation && (
-                                <Badge variant="outline" className="text-xs">
-                                  {t('ai.workspace.skills.userOnly')}
-                                </Badge>
+                                {item.overridesBuiltin && (
+                                  <Badge variant="outline" className="text-xs">
+                                    {t('settings.ai.skills.overridesBuiltin')}
+                                  </Badge>
+                                )}
+                                {item.disableModelInvocation && (
+                                  <Badge variant="outline" className="text-xs">
+                                    {t('ai.workspace.skills.userOnly')}
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                                {localizedDescription(item)}
+                              </p>
+                            </div>
+
+                            <div className="flex shrink-0 items-center gap-1">
+                              {item.origin === 'user' ? (
+                                <>
+                                  <Tooltip>
+                                    <TooltipTrigger
+                                      render={
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="icon-sm"
+                                          disabled={busy}
+                                          onClick={() => openEdit(item)}
+                                          aria-label={t('settings.ai.skills.editNamed', { name: item.name })}
+                                        />
+                                      }
+                                    >
+                                      <PenLineIcon aria-hidden="true" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>{t('common.edit')}</TooltipContent>
+                                  </Tooltip>
+                                  <Tooltip>
+                                    <TooltipTrigger
+                                      render={
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          className="text-destructive hover:text-destructive"
+                                          size="icon-sm"
+                                          disabled={busy}
+                                          onClick={() => setDeleteTarget(item)}
+                                          aria-label={t('settings.ai.skills.deleteNamed', { name: item.name })}
+                                        />
+                                      }
+                                    >
+                                      <Trash2Icon aria-hidden="true" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>{t('settings.ai.skills.moveToTrash')}</TooltipContent>
+                                  </Tooltip>
+                                </>
+                              ) : (
+                                <>
+                                  <Tooltip>
+                                    <TooltipTrigger
+                                      render={
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="icon-sm"
+                                          disabled={busy}
+                                          onClick={() => setEditor({ kind: 'viewBuiltin', item })}
+                                          aria-label={t('settings.ai.skills.viewNamed', { name: item.name })}
+                                        />
+                                      }
+                                    >
+                                      <EyeIcon aria-hidden="true" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>{t('settings.ai.skills.view')}</TooltipContent>
+                                  </Tooltip>
+                                  <Tooltip>
+                                    <TooltipTrigger
+                                      render={
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="icon-sm"
+                                          disabled={busy}
+                                          onClick={() => openCustomizeBuiltin(item)}
+                                          aria-label={t('settings.ai.skills.customizeNamed', { name: item.name })}
+                                        />
+                                      }
+                                    >
+                                      <CopyPlusIcon aria-hidden="true" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>{t('settings.ai.skills.customizeBuiltin')}</TooltipContent>
+                                  </Tooltip>
+                                </>
                               )}
                             </div>
-                            <p className="mt-1 truncate text-xs text-muted-foreground">
-                              {localizedDescription(item)}
-                            </p>
                           </div>
-
-                          <div className="flex shrink-0 items-center gap-1">
-                            {item.origin === 'user' ? (
-                              <>
-                                <Tooltip>
-                                  <TooltipTrigger
-                                    render={
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        disabled={busy}
-                                        onClick={() => openEdit(item)}
-                                        aria-label={t('settings.ai.skills.editNamed', { name: item.name })}
-                                      />
-                                    }
-                                  >
-                                    <PenLineIcon className="size-4" aria-hidden="true" />
-                                  </TooltipTrigger>
-                                  <TooltipContent>{t('common.edit')}</TooltipContent>
-                                </Tooltip>
-                                <Tooltip>
-                                  <TooltipTrigger
-                                    render={
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        className="text-destructive hover:text-destructive"
-                                        size="icon-sm"
-                                        disabled={busy}
-                                        onClick={() => setDeleteTarget(item)}
-                                        aria-label={t('settings.ai.skills.deleteNamed', { name: item.name })}
-                                      />
-                                    }
-                                  >
-                                    <Trash2Icon className="size-4" aria-hidden="true" />
-                                  </TooltipTrigger>
-                                  <TooltipContent>{t('settings.ai.skills.moveToTrash')}</TooltipContent>
-                                </Tooltip>
-                              </>
-                            ) : (
-                              <>
-                                <Tooltip>
-                                  <TooltipTrigger
-                                    render={
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        disabled={busy}
-                                        onClick={() => setEditor({ kind: 'viewBuiltin', item })}
-                                        aria-label={t('settings.ai.skills.viewNamed', { name: item.name })}
-                                      />
-                                    }
-                                  >
-                                    <EyeIcon className="size-4" aria-hidden="true" />
-                                  </TooltipTrigger>
-                                  <TooltipContent>{t('settings.ai.skills.view')}</TooltipContent>
-                                </Tooltip>
-                                <Tooltip>
-                                  <TooltipTrigger
-                                    render={
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        disabled={busy}
-                                        onClick={() => openCustomizeBuiltin(item)}
-                                        aria-label={t('settings.ai.skills.customizeNamed', { name: item.name })}
-                                      />
-                                    }
-                                  >
-                                    <CopyPlusIcon className="size-4" aria-hidden="true" />
-                                  </TooltipTrigger>
-                                  <TooltipContent>{t('settings.ai.skills.customizeBuiltin')}</TooltipContent>
-                                </Tooltip>
-                              </>
-                            )}
-                          </div>
-                        </div>
+                        </React.Fragment>
                       ))}
                     </div>
                   </ScrollArea>
